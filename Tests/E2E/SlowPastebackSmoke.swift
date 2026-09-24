@@ -70,6 +70,8 @@ struct SlowPastebackSmoke {
             results.append(await runScenario(scenario))
         }
         results.append(await runTargetChangeConfirmationScenario())
+        results.append(await runLikelyPasteScenario())
+        results.append(await runFallbackThenNextPasteScenario())
         results.append(await runRetryWhileRestorePendingScenario())
         results.append(await runCancelPendingRestoreScenario())
 
@@ -248,6 +250,154 @@ struct SlowPastebackSmoke {
             autoEnterReadyMS: nil,
             detail: failures.isEmpty
                 ? "A post-dispatch clipboard read plus target change confirms delivery and restores the original clipboard"
+                : failures.joined(separator: "; ")
+        )
+    }
+
+    /// An Electron-style target: no Accessibility confirmation ever arrives, but
+    /// it reads the borrowed clipboard 30ms after Cmd+V and stays in front.
+    @MainActor
+    private static func runLikelyPasteScenario() async -> SmokeResult {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("TranscriptedSlowPasteback-likely-paste-\(UUID().uuidString)")
+        )
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
+        let freshDictation = "synthetic likely-paste dictation \(UUID().uuidString)"
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        // The timer block may be imported @Sendable, so it writes into a box
+        // instead of mutating a captured local.
+        let targetRead = SmokeReadBox()
+        let outcome = paster.paste(
+            freshDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                _ = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: false) { _ in
+                    targetRead.value = pasteboard.string(forType: .string)
+                }
+                return true
+            },
+            pasteConfirmed: { false },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: SmokeDelay.nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay).nanoseconds,
+            pasteConfirmationWait: TranscriptedConstants.clipboardPasteConfirmationWait
+        )
+
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = pasteboard.string(forType: .string)
+        let inserted = targetRead.value
+        var failures: [String] = []
+        // Auto Enter eligibility is pinned by the fast tests; this smoke only
+        // compiles the paster, so it checks the outcome itself.
+        if outcome != .likelyPasted {
+            failures.append("paste outcome was \(outcome.diagnosticName)")
+        }
+        if inserted != freshDictation {
+            failures.append("target inserted \(category(for: inserted, original: originalClipboard, fresh: freshDictation, userCopy: nil))")
+        }
+        if finalClipboard != originalClipboard {
+            failures.append("final clipboard was \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil))")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        return SmokeResult(
+            scenarioID: "unconfirmed-fast-read-likely-pasted-restores-original",
+            status: status,
+            readDelayMS: 30,
+            fallbackDelayMS: SmokeDelay.nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay).milliseconds,
+            insertedCategory: category(for: inserted, original: originalClipboard, fresh: freshDictation, userCopy: nil),
+            finalClipboardCategory: category(
+                for: finalClipboard,
+                original: originalClipboard,
+                fresh: freshDictation,
+                userCopy: nil
+            ),
+            autoEnterReadyMS: nil,
+            detail: failures.isEmpty
+                ? "A target that reads 30ms after Cmd+V with no AX signal counts as a likely paste and gets its clipboard back"
+                : failures.joined(separator: "; ")
+        )
+    }
+
+    /// A paste nobody reads falls back to a manual copy. The next paste must put
+    /// the user's clipboard from before that fallback back, not the old dictation.
+    @MainActor
+    private static func runFallbackThenNextPasteScenario() async -> SmokeResult {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("TranscriptedSlowPasteback-fallback-next-\(UUID().uuidString)")
+        )
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
+        let unreadDictation = "synthetic unread dictation \(UUID().uuidString)"
+        let nextDictation = "synthetic next dictation \(UUID().uuidString)"
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        let fallbackOutcome = paster.paste(
+            unreadDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: { true },
+            pasteConfirmed: { false },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: SmokeDelay.milliseconds(500).nanoseconds,
+            pasteConfirmationWait: 0.05
+        )
+        let clipboardAfterFallback = pasteboard.string(forType: .string)
+
+        var inserted: String?
+        let nextOutcome = paster.paste(
+            nextDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                inserted = pasteboard.string(forType: .string)
+                return true
+            },
+            pasteConfirmed: { inserted == nextDictation },
+            restoreDelay: SmokeDelay.milliseconds(20).nanoseconds,
+            fallbackRestoreDelay: SmokeDelay.milliseconds(500).nanoseconds,
+            pasteConfirmationWait: 0.2
+        )
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = pasteboard.string(forType: .string)
+
+        var failures: [String] = []
+        if fallbackOutcome != .copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed) {
+            failures.append("fallback outcome was \(fallbackOutcome.diagnosticName)")
+        }
+        if clipboardAfterFallback != unreadDictation {
+            failures.append("fallback did not leave the dictation copied")
+        }
+        if nextOutcome != .pasted {
+            failures.append("next paste outcome was \(nextOutcome.diagnosticName)")
+        }
+        if finalClipboard != originalClipboard {
+            failures.append("final clipboard was \(category(for: finalClipboard, original: originalClipboard, fresh: nextDictation, userCopy: unreadDictation))")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        return SmokeResult(
+            scenarioID: "fallback-copy-then-next-paste-restores-original",
+            status: status,
+            readDelayMS: nil,
+            fallbackDelayMS: 500,
+            insertedCategory: category(for: inserted, original: originalClipboard, fresh: nextDictation, userCopy: unreadDictation),
+            finalClipboardCategory: category(
+                for: finalClipboard,
+                original: originalClipboard,
+                fresh: nextDictation,
+                userCopy: unreadDictation
+            ),
+            autoEnterReadyMS: nil,
+            detail: failures.isEmpty
+                ? "After a manual-copy fallback, the next paste restores the clipboard from before the fallback"
                 : failures.joined(separator: "; ")
         )
     }
@@ -585,7 +735,7 @@ private struct SmokeScenario {
                 failures.append("copied fallback left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
             }
         case .unconfirmedFreshCopied:
-            if outcome != .copied("Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.", reason: .pasteConfirmationUnavailable) {
+            if outcome != .copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed) {
                 failures.append("paste outcome was \(outcome.diagnosticName)")
             }
             if inserted != freshDictation {
@@ -663,4 +813,9 @@ private struct SmokeDelay {
     static func nanoseconds(_ value: UInt64) -> SmokeDelay {
         SmokeDelay(nanoseconds: value)
     }
+}
+
+/// Holds a value written from a timer callback during a smoke scenario.
+private final class SmokeReadBox: @unchecked Sendable {
+    var value: String?
 }

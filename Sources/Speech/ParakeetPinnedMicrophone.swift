@@ -60,7 +60,7 @@ extension ParakeetEngine {
         guard PinnedMicrophoneCapturePreferences.isEnabled() else { return false }
         // Apple voice processing only exists on the AVAudioEngine path.
         let voiceProcessingRequested = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-            && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning
+            && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
         return !voiceProcessingRequested
     }
 
@@ -411,6 +411,20 @@ extension ParakeetEngine {
                 await self?.replacePinnedDictationMicrophone(recording, because: .deviceLost)
             }
         case .silentInput:
+            // Exact zeros also come from a mic muted on purpose. Only the
+            // closed MacBook's own mic is known dead; moving off a muted mic
+            // would record someone who chose not to be heard.
+            let deviceID = recording.capture.deviceID
+            let current = [cachedInputDeviceSelection?.selectedInput, recording.selection.selectedInput]
+                .compactMap { $0 }
+                .first { $0.id == deviceID }
+            guard let current,
+                  DictationInputDeviceSelectionPolicy.isLidMicrophone(current),
+                  MacLidState.isClosed() else {
+                AppLogger.transcription.info("PARAKEET | pinned microphone is silent; keeping it")
+                reportPinnedDictationSilentInput(selection: recording.selection, action: "kept")
+                return
+            }
             Task { @MainActor [weak self] in
                 await self?.replacePinnedDictationMicrophone(recording, because: .silentInput)
             }
@@ -429,20 +443,13 @@ extension ParakeetEngine {
     ) throws -> DictationInputDeviceSelection {
         // A closed MacBook's own mic is listed but hears nothing.
         let lidClosed = MacLidState.isClosed()
-        var automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+        // The excluded mic (the one that just died or went silent) is left
+        // out before ranking, so a Studio Display mic beats the AirPods default.
+        let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
             prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
-            lidClosed: lidClosed
+            lidClosed: lidClosed,
+            excludingDeviceID: excludingDeviceID
         )
-        if let excludingDeviceID, automatic.selectedInput.id == excludingDeviceID,
-           automatic.defaultInput.id != excludingDeviceID {
-            // The automatic pick is the mic that just died or went silent.
-            automatic = DictationInputDeviceSelection(
-                defaultInput: automatic.defaultInput,
-                selectedInput: automatic.defaultInput,
-                defaultOutput: automatic.defaultOutput,
-                reason: .noBuiltInFallbackAvailable
-            )
-        }
         guard PinnedDictationInputPolicy.mayReplace(automatic),
               var availableInputs = try? CoreAudioInputDeviceLookup.availableInputDevices() else {
             return automatic

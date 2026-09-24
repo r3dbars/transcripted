@@ -109,6 +109,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     /// quiet this long before the IOProc is rebuilt, so the burst costs one
     /// rebuild. A new notification restarts the wait.
     static let formatSettleSeconds: TimeInterval = 0.3
+    /// A device that keeps announcing changes still gets rebuilt this long
+    /// after the burst began, so it can never hold capture "settling" forever.
+    static let maxFormatSettleSeconds: TimeInterval = 3
     /// Rebuilds driven by fresh HAL notifications (the format is still
     /// moving) are free up to this many in a row without audio; after that
     /// they count toward `maxConsecutiveRestarts` so a device that never
@@ -181,6 +184,8 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     /// When the current format change was last seen moving (a notification,
     /// a poll mismatch, or a producer invalidation). Nil while settled.
     private var formatSettleSince: TimeInterval?
+    /// When the current format change was first seen.
+    private var formatSettleStartedAt: TimeInterval?
     /// A HAL notification or poll mismatch, not only a producer layout
     /// mismatch, is behind the pending rebuild.
     private var formatSettleIsHALDriven = false
@@ -195,9 +200,20 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private var gapCount = 0
     private var paddedSecondsTotal: TimeInterval = 0
     private var retiredDroppedCallbacks = 0
+    /// Owner-facing copies, so main-thread readers never wait on `queue`
+    /// while it is inside a slow HAL call. Written only from `queue`.
+    private let snapshotLock = NSLock()
+    private var snapshotDeviceID: AudioDeviceID
+    private var snapshotDiagnostics = PinnedMicrophoneCaptureDiagnostics(
+        restarts: 0,
+        gaps: 0,
+        paddedSeconds: 0,
+        droppedCallbacks: 0
+    )
 
     public init(deviceID: AudioDeviceID, configuration: Configuration = Configuration()) {
         pinnedDeviceID = deviceID
+        snapshotDeviceID = deviceID
         self.configuration = configuration
         hardwareHooks = nil
         clock = PinnedMicrophoneBufferRing.hostSecondsNow
@@ -211,6 +227,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         clock: @escaping () -> TimeInterval
     ) {
         pinnedDeviceID = deviceID
+        snapshotDeviceID = deviceID
         self.configuration = configuration
         self.hardwareHooks = hardwareHooks
         self.clock = clock
@@ -219,20 +236,27 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
 
     deinit { stop() }
 
-    public var deviceID: AudioDeviceID { serialized { pinnedDeviceID } }
+    public var deviceID: AudioDeviceID { snapshotLock.withLock { snapshotDeviceID } }
     public var recordingFormat: AVAudioFormat? { serialized { format } }
     public var isActive: Bool { serialized { active } }
     /// True after `.deviceLost` (or a failed `switchDevice(to:)`) until the
     /// owner switches to another device or stops. False after `.failed`.
     public var isWaitingForDevice: Bool { serialized { active && waitingForDevice && !hasFailed } }
-    public var diagnostics: PinnedMicrophoneCaptureDiagnostics {
-        serialized {
-            PinnedMicrophoneCaptureDiagnostics(
-                restarts: restartCount,
-                gaps: gapCount,
-                paddedSeconds: paddedSecondsTotal,
-                droppedCallbacks: retiredDroppedCallbacks + (ring?.dropped.load(ordering: .relaxed) ?? 0)
-            )
+    /// As of the last timer tick, device switch or stop.
+    public var diagnostics: PinnedMicrophoneCaptureDiagnostics { snapshotLock.withLock { snapshotDiagnostics } }
+
+    /// Runs on `queue`.
+    private func publishSnapshot() {
+        let diagnostics = PinnedMicrophoneCaptureDiagnostics(
+            restarts: restartCount,
+            gaps: gapCount,
+            paddedSeconds: paddedSecondsTotal,
+            droppedCallbacks: retiredDroppedCallbacks + (ring?.dropped.load(ordering: .relaxed) ?? 0)
+        )
+        let deviceID = pinnedDeviceID
+        snapshotLock.withLock {
+            snapshotDiagnostics = diagnostics
+            snapshotDeviceID = deviceID
         }
     }
 
@@ -299,6 +323,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             generation &+= 1
             destroyHardware()
             pinnedDeviceID = newDeviceID
+            defer { publishSnapshot() }
             waitingForDevice = false
             hasFailed = false
             consecutiveRestarts = 0
@@ -402,6 +427,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     }
 
     private func endSession() {
+        defer { publishSnapshot() }
         timer?.cancel(); timer = nil
         active = false
         waitingForDevice = false
@@ -530,6 +556,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private func resetFormatSettle() {
         observedHALNotifications = 0
         formatSettleSince = nil
+        formatSettleStartedAt = nil
         formatSettleIsHALDriven = false
     }
 
@@ -566,6 +593,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
 
     private func drainAndCheck() {
         guard active, !tearingDown else { return }
+        defer { publishSnapshot() }
         let tickGeneration = generation
         let now = clock()
         let deferred = recoveryDeferred(at: now)
@@ -610,10 +638,16 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         if invalidated, formatSettleSince == nil {
             formatSettleSince = now
         }
+        if formatSettleSince != nil, formatSettleStartedAt == nil {
+            formatSettleStartedAt = now
+        }
         if let since = formatSettleSince {
-            // Rebuild once, after the last notification of a burst. Sleep and
-            // the wake grace hold it off the same way they hold off a stall.
-            guard !deferred, now - since >= Self.formatSettleSeconds else { return }
+            // Rebuild once, after the last notification of a burst, or once
+            // the burst has run `maxFormatSettleSeconds`. Sleep and the wake
+            // grace hold it off the same way they hold off a stall.
+            let settled = now - since >= Self.formatSettleSeconds
+            let settleCapped = now - (formatSettleStartedAt ?? since) >= Self.maxFormatSettleSeconds
+            guard !deferred, settled || settleCapped else { return }
             handleFormatInvalidation()
             return
         }

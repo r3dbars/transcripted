@@ -148,7 +148,8 @@ extension TranscriptionTaskManagerMetadataTests {
         manager.startTranscription(
             micURL: micURL,
             systemURL: systemURL,
-            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            sessionLength: 1.4
         )
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "too-short live mic scratch audio should be cleaned up")
@@ -157,11 +158,241 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(manager.backgroundTaskCount, 0)
         XCTAssertTrue(manager.activeTasks.isEmpty)
         XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertNil(
+            manager.lastFailureDiagnosticMessage,
+            "a sub-2s live recording is an accidental start, not a failure"
+        )
+        XCTAssertEqual(manager.displayStatus, .discardedAccidentalStart)
+    }
+
+    func testShortLiveRecordingWithNoSpeechIsDiscardedAsAccidentalStart() async throws {
+        // Default stubs: the diarizer finds no speakers and STT returns no
+        // words, so the pipeline ends in "no speech". A 3s live recording
+        // like that is a mis-tap, not a meeting.
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("tap-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("tap-system.wav")
+        try writeMonoWAV(to: micURL, duration: 3)
+        try writeMonoWAV(to: systemURL, duration: 3)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            sessionLength: 3.4
+        )
+
+        try await waitUntil {
+            manager.activeCount == 0 && manager.displayStatus == .discardedAccidentalStart
+        }
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty, "a mis-tap must not leave a failed row on Home")
+        XCTAssertNil(manager.lastFailureDiagnosticMessage)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
+    func testShortFilesFromALongSessionStayRetryable() async throws {
+        // Capture broke a few seconds into a real meeting: the files are short
+        // but the person recorded for a minute. That must never look like a
+        // cancel, and the audio must be kept.
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("stalled-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("stalled-system.wav")
+        try writeMonoWAV(to: micURL, duration: 3)
+        try writeMonoWAV(to: systemURL, duration: 3)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            sessionLength: 60
+        )
+
+        try await waitUntil {
+            manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.isRetryable)
+        XCTAssertTrue(failed.audioFilesExist())
+    }
+
+    func testShortNoSpeechRecordingWithoutASessionLengthKeepsItsAudio() async throws {
+        // Hosts that do not say how long the session ran never get audio
+        // thrown away on a no-speech verdict.
+        let manager = makeManager(
+            retainedAudioDirectory: tempDirectory
+                .appendingPathComponent("transcripts", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true)
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("unknown-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("unknown-system.wav")
+        try writeMonoWAV(to: micURL, duration: 3)
+        try writeMonoWAV(to: systemURL, duration: 3)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        try await waitUntil {
+            manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+        XCTAssertNotEqual(manager.displayStatus, .discardedAccidentalStart)
+    }
+
+    func testSubTwoSecondFilesFromALongSessionStillReportAFailure() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("tiny-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("tiny-system.wav")
+        try writeMonoWAV(to: micURL, duration: 1.0)
+        try writeMonoWAV(to: systemURL, duration: 1.0)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            sessionLength: 45
+        )
+
         XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
         guard case .failed(let message) = manager.displayStatus else {
-            return XCTFail("Expected too-short live audio to publish a failed status")
+            return XCTFail("A long session that left under 2s of audio broke; it must not look like a cancel")
         }
-        XCTAssertEqual(message, "Recording too short")
+        XCTAssertEqual(message, TranscriptionTaskManager.recordingTooShortCaptureStoppedEarlyMessage)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "sub-2s scratch is still deleted, as on main")
+    }
+
+    func testSubTwoSecondFilesCountAsATapOnlyForAShortHealthySession() throws {
+        // (session length, health, expected discard)
+        let cases: [(TimeInterval?, RecordingHealthInfo?, Bool, String)] = [
+            (1.4, nil, true, "a quick tap"),
+            (1.4, .perfect, true, "a quick tap with a clean health report"),
+            (8, nil, false, "an 8s session that left under 2s of audio broke"),
+            (nil, nil, false, "an unknown session length keeps the visible failure"),
+            (1.4, RecordingHealthInfo.perfect.markingMicrophoneAudioUnusable(), false, "a broken track is not a tap"),
+        ]
+        for (index, (sessionLength, health, expectDiscard, label)) in cases.enumerated() {
+            let manager = makeManager()
+            // Scratch must sit in the managed audio folder, or cleanup refuses to delete it.
+            let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+            try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+            let micURL = scratchDirectory.appendingPathComponent("tap-\(index)-mic.wav")
+            let systemURL = scratchDirectory.appendingPathComponent("tap-\(index)-system_audio.wav")
+            try writeMonoWAV(to: micURL, duration: 1.0)
+            try writeMonoWAV(to: systemURL, duration: 1.0)
+
+            manager.startTranscription(
+                micURL: micURL,
+                systemURL: systemURL,
+                outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+                healthInfo: health,
+                sessionLength: sessionLength
+            )
+
+            if expectDiscard {
+                XCTAssertEqual(manager.displayStatus, .discardedAccidentalStart, label)
+                XCTAssertNil(manager.lastFailureDiagnosticMessage, label)
+            } else {
+                XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short", label)
+                guard case .failed(let message) = manager.displayStatus else {
+                    XCTFail("\(label): expected a visible failure")
+                    continue
+                }
+                XCTAssertEqual(
+                    message,
+                    sessionLength == nil
+                        ? "Recording too short"
+                        : TranscriptionTaskManager.recordingTooShortCaptureStoppedEarlyMessage,
+                    label
+                )
+            }
+            XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty, label)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), label)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), label)
+        }
+    }
+
+    func testLongerLiveRecordingWithNoSpeechStaysRetryable() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("quiet-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("quiet-system.wav")
+        let length = TranscriptionTaskManager.accidentalStartMaximumLength + 2
+        try writeMonoWAV(to: micURL, duration: length)
+        try writeMonoWAV(to: systemURL, duration: length)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            sessionLength: length
+        )
+
+        try await waitUntil(timeout: 5) {
+            manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.errorKind, .noSpeechDetected)
+        XCTAssertTrue(failed.isRetryable, "a real-length meeting judged silent must keep a Try again button")
+        XCTAssertTrue(failed.audioFilesExist(), "its audio must be kept so Try again has something to work on")
+    }
+
+    func testOnlyShortHealthyNoSpeechSessionsCountAsAccidentalStarts() {
+        let limit = TranscriptionTaskManager.accidentalStartMaximumLength
+        func check(
+            _ error: Error = PipelineError.noSpeechDetected,
+            files: TimeInterval? = 3,
+            session: TimeInterval? = 3,
+            health: RecordingHealthInfo? = nil
+        ) -> Bool {
+            TranscriptionTaskManager.isAccidentalStart(
+                error: error, recordingLength: files, sessionLength: session, healthInfo: health
+            )
+        }
+        XCTAssertTrue(check())
+        XCTAssertTrue(check(health: .perfect))
+        XCTAssertFalse(check(files: limit), "the limit itself is a real recording")
+        XCTAssertFalse(check(session: 60), "short files from a long session mean capture broke")
+        XCTAssertFalse(check(files: nil), "an unknown file length never throws audio away")
+        XCTAssertFalse(check(session: nil), "an unknown session length never throws audio away")
+        XCTAssertFalse(check(PipelineError.emptyAudioFile), "a short recording that failed for another reason keeps its audio")
+        XCTAssertFalse(check(CancellationError()))
+        XCTAssertFalse(
+            check(health: RecordingHealthInfo.perfect.markingMicrophoneAudioUnusable()),
+            "a recording with a broken track keeps its audio"
+        )
+    }
+
+    func testUnreadableShortTracksCountAsPossibleSpeech() throws {
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let steady = scratchDirectory.appendingPathComponent("steady.wav")
+        let unreadable = scratchDirectory.appendingPathComponent("unreadable.wav")
+        try writeMonoWAV(to: steady, duration: 3)
+        try Data("not-a-wav".utf8).write(to: unreadable)
+
+        XCTAssertFalse(TranscriptionTaskManager.tracksHaveSpeechLikeSignal([steady]))
+        XCTAssertTrue(
+            TranscriptionTaskManager.tracksHaveSpeechLikeSignal([steady, unreadable]),
+            "a file we cannot read is never judged silent"
+        )
     }
 
     func testMicOnlyTranscriptionRetainsMicAudioAndRemovesScratch() async throws {
@@ -442,8 +673,15 @@ extension TranscriptionTaskManagerMetadataTests {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
+        // A real mid-pipeline failure (STT throws), not "no speech": a short
+        // live recording with no speech is now discarded as an accidental
+        // start and never reaches the failed queue.
         let manager = makeManager(
-            speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored"),
+            speechToText: MetadataStubSpeechToTextEngine(
+                transcript: "ignored",
+                transcribeError: NSError(domain: "TranscriptionTaskManagerFailedQueueTests", code: 7)
+            ),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5)),
             retainedAudioDirectory: retainedAudioDirectory
         )
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")

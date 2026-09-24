@@ -48,6 +48,14 @@
 // and never enters the confirmer, so Spotify or YouTube cannot churn emissions.
 // Output uses a longer sustain than the mic because conferencing apps also play
 // short notification sounds (message dings, join chimes) that must not prompt.
+//
+// Browser output is collected separately and only while that same browser holds
+// the mic (`browserCallOutputBundleIDs`). It never prompts on its own; it is
+// corroboration that an unrecognized browser mic is a conversation, not web
+// dictation or a screen recorder. Scoping it to "this browser is also on the
+// mic" keeps music in another browser from ever entering it. It is per
+// process, so the same browser's other tabs (YouTube, a voice assistant
+// talking back) do count; that is why it only shortens the wait.
 
 import CoreAudio
 import Foundation
@@ -64,6 +72,11 @@ final class MicActivityMonitor: @unchecked Sendable {
     /// empty set is the explicit "inactive" edge. Assign before calling `start()`
     /// and do not mutate while running.
     var onOutputChange: ((Set<String>) -> Void)?
+    /// Delivered on the main actor with the browser processes playing audio
+    /// while their browser family also holds the mic. Corroboration for the
+    /// browser-call evidence rules only; never a prompt by itself. Assign
+    /// before calling `start()` and do not mutate while running.
+    var onBrowserOutputChange: ((Set<String>) -> Void)?
     /// Injected accessor for the shared `DefaultInputDeviceMonitor` facade
     /// (start/addObserver/removeObserver over the single
     /// `kAudioHardwarePropertyDefaultInputDevice` registration — see that
@@ -113,8 +126,10 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var sustainWorkItem: DispatchWorkItem?
     private var activeSince: [String: Date] = [:]
     private var outputActiveSince: [String: Date] = [:]
+    private var browserOutputActiveSince: [String: Date] = [:]
     private var lastEmitted: Set<String>?
     private var lastEmittedOutput: Set<String>?
+    private var lastEmittedBrowserOutput: Set<String>?
 
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
@@ -157,8 +172,10 @@ final class MicActivityMonitor: @unchecked Sendable {
             self.sustainWorkItem = nil
             self.activeSince = [:]
             self.outputActiveSince = [:]
+            self.browserOutputActiveSince = [:]
             self.lastEmitted = nil
             self.lastEmittedOutput = nil
+            self.lastEmittedBrowserOutput = nil
         }
     }
 
@@ -217,6 +234,24 @@ final class MicActivityMonitor: @unchecked Sendable {
         return nonSelfBundleIDs(Set(active), ownBundleID: ownBundleID)
     }
 
+    /// Browser processes playing audio output whose browser family also has a
+    /// process holding the mic right now. Empty whenever no browser is on the
+    /// mic, so ordinary browser playback never reaches the confirmer.
+    static func browserCallOutputBundleIDs(
+        from processes: [(bundleID: String?, isRunningOutput: Bool)],
+        micBundleIDs: Set<String>
+    ) -> Set<String> {
+        let micFamilies = Set(micBundleIDs.compactMap(MeetingPromptProvider.browserFamily(forBundleID:)))
+        guard !micFamilies.isEmpty else { return [] }
+        return Set(processes.compactMap { process -> String? in
+            guard process.isRunningOutput,
+                  let bundleID = process.bundleID,
+                  let family = MeetingPromptProvider.browserFamily(forBundleID: bundleID),
+                  micFamilies.contains(family) else { return nil }
+            return bundleID
+        })
+    }
+
     // MARK: - Scanning (on `queue`)
 
     private func scheduleDebouncedScan() {
@@ -254,10 +289,28 @@ final class MicActivityMonitor: @unchecked Sendable {
         )
         outputActiveSince = outputOutcome.activeSince
 
-        // Re-scan exactly when the next pending bundle (either side) would cross
+        // Keyed off the raw mic set so the corroboration is already confirmed
+        // by the time the mic itself clears its sustain gate.
+        let browserOutputRaw = Self.browserCallOutputBundleIDs(
+            from: processes.map { (bundleID: $0.bundleID, isRunningOutput: $0.isRunningOutput) },
+            micBundleIDs: micRaw
+        )
+        let browserOutputOutcome = SustainedActivityConfirmer.confirm(
+            raw: browserOutputRaw,
+            activeSince: browserOutputActiveSince,
+            now: now,
+            sustain: sustainInterval
+        )
+        browserOutputActiveSince = browserOutputOutcome.activeSince
+
+        // Re-scan exactly when the next pending bundle (any side) would cross
         // its sustain threshold, so a real call surfaces ~sustain after it starts
         // rather than waiting for the next backstop poll.
-        let nextDeadline = [micOutcome.nextDeadline, outputOutcome.nextDeadline].compactMap { $0 }.min()
+        let nextDeadline = [
+            micOutcome.nextDeadline,
+            outputOutcome.nextDeadline,
+            browserOutputOutcome.nextDeadline,
+        ].compactMap { $0 }.min()
         scheduleSustainScan(at: nextDeadline, now: now)
 
         if micOutcome.confirmed != lastEmitted {
@@ -271,6 +324,13 @@ final class MicActivityMonitor: @unchecked Sendable {
             lastEmittedOutput = outputOutcome.confirmed
             let callback = onOutputChange
             let users = outputOutcome.confirmed
+            DispatchQueue.main.async { callback?(users) }
+        }
+
+        if browserOutputOutcome.confirmed != lastEmittedBrowserOutput {
+            lastEmittedBrowserOutput = browserOutputOutcome.confirmed
+            let callback = onBrowserOutputChange
+            let users = browserOutputOutcome.confirmed
             DispatchQueue.main.async { callback?(users) }
         }
     }
@@ -425,19 +485,35 @@ final class MicActivityMonitor: @unchecked Sendable {
         deviceListener = nil
     }
 
-    // MARK: - CoreAudio reads (on `queue`; read-only, no stored-state mutation)
+    // MARK: - CoreAudio reads (on `queue`, or any background thread for the
+    // static one-shot; read-only, no stored-state mutation)
 
     private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
-        processObjectIDs().map { object in
+        Self.processObjectIDs().map { object in
             (
-                bundleID: bundleIDProperty(object),
-                isRunningInput: isRunningInputProperty(object),
-                isRunningOutput: isRunningOutputProperty(object)
+                bundleID: Self.bundleIDProperty(object),
+                isRunningInput: Self.isRunningInputProperty(object),
+                isRunningOutput: Self.isRunningOutputProperty(object)
             )
         }
     }
 
-    private func processObjectIDs() -> [AudioObjectID] {
+    /// One-shot read of which non-self processes hold the mic input right
+    /// now, with no sustain gate and no listeners. For a decision the user
+    /// just made (Boost Mic), not for call detection. Reads process metadata
+    /// only; call it off the main thread.
+    static func currentMicInputBundleIDs(
+        ownBundleID: String = Bundle.main.bundleIdentifier ?? ""
+    ) -> Set<String> {
+        micUsingBundleIDs(
+            from: processObjectIDs().map { object in
+                (bundleID: bundleIDProperty(object), isRunningInput: isRunningInputProperty(object))
+            },
+            ownBundleID: ownBundleID
+        )
+    }
+
+    private static func processObjectIDs() -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -457,7 +533,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr ? ids : []
     }
 
-    private func isRunningInputProperty(_ object: AudioObjectID) -> Bool {
+    private static func isRunningInputProperty(_ object: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningInput,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -469,7 +545,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr && value != 0
     }
 
-    private func isRunningOutputProperty(_ object: AudioObjectID) -> Bool {
+    private static func isRunningOutputProperty(_ object: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningOutput,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -481,7 +557,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         return status == noErr && value != 0
     }
 
-    private func bundleIDProperty(_ object: AudioObjectID) -> String? {
+    private static func bundleIDProperty(_ object: AudioObjectID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyBundleID,
             mScope: kAudioObjectPropertyScopeGlobal,

@@ -31,12 +31,21 @@ name: Swift CI
 # jobs, keep the umbrella's id as `build-and-test` or update branch protection's
 # required contexts to match.
 #
-# All jobs run on macos-26 because the compiled sources pull in macOS-only SDKs
+# All jobs run on macOS 26 because the compiled sources pull in macOS-only SDKs
 # (AppKit, ScreenCaptureKit, FoundationModels, etc.) and the app targets
-# arm64-apple-macos26.0, so the runner image must carry a toolchain/SDK that can
-# target macOS 26. If `macos-26` is not available as a hosted image (or a job
-# fails on SDK selection), switch `runs-on` to a self-hosted runner on a Mac
-# that already builds this repo.
+# arm64-apple-macos26.0, so the runner must carry a toolchain/SDK that can
+# target macOS 26.
+#
+# `checks` and `spm-tests` prefer the owner's Mac (a self-hosted runner labelled
+# transcripted-mac, in a fresh throwaway macOS VM per job) whenever it
+# reported free in the last 60s and has no job already queued or running, and
+# use hosted macos-26 otherwise. GitHub gives this account only 5 concurrent
+# hosted macOS jobs, so moving two of each PR's three jobs off hosted lets more
+# PRs run at once. `pick-runner` makes the choice (scripts/ci/pick-ci-runner.py);
+# fork PRs always stay hosted, and the Mac's job-started hook refuses them too.
+# `app-build` always stays hosted: its launch smoke is kept to hosted runners
+# (scripts/ops/native-smoke-isolation.py). Setup, pause, and removal:
+# docs/self-hosted-mac-runner.md.
 #
 # None of these jobs use continue-on-error, so a failure blocks merge instead of
 # leaving merge safety to local discipline alone.
@@ -71,6 +80,38 @@ env:
   TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
 
 jobs:
+  # Picks the runner for `checks` and `spm-tests`: the owner's Mac when its
+  # heartbeat says it is free and nothing is waiting for it, hosted macos-26
+  # otherwise. Linux, so it never takes one of the 5 hosted macOS slots.
+  # actions: read lets it count jobs already queued for the Mac. Runs stuck
+  # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
+  pick-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      runs-on: ${{ steps.pick.outputs.runs-on }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci
+
+      - name: Pick the owner's Mac or a hosted runner
+        id: pick
+        shell: bash
+        env:
+          HEARTBEAT: ${{ vars.MAC_RUNNER_HEARTBEAT }}
+          MODE: ${{ vars.MAC_RUNNER_MODE }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/pick-ci-runner.py
+
   # ---------------------------------------------------------------------------
   # Fast feedback: build-independent checks that compile against the system SDK
   # only and need NEITHER the prebuilt native deps NOR the full app build. Runs
@@ -89,7 +130,8 @@ jobs:
   # has the deps cache/build steps).
   # ---------------------------------------------------------------------------
   checks:
-    runs-on: macos-26
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs-on) }}
     timeout-minutes: 30
 
     steps:
@@ -134,10 +176,14 @@ jobs:
   # `swift test`, libDraftDeps.a for the integration smoke, plus deps-modules)
   # but NOT the built app bundle. Restores the shared deps cache and, on a miss,
   # self-heals by building deps here — so it never has to wait behind the app
-  # build. app-build is the canonical cache saver; this job restores only.
+  # build. On hosted runners app-build is the canonical cache saver and this job
+  # restores only. The owner's Mac (a fresh VM per job) never runs app-build,
+  # so it may restore hosted entries but only ever saves its own `deps-mac-`
+  # entries, and only from main so PR runs don't crowd the repo's cache.
   # ---------------------------------------------------------------------------
   spm-tests:
-    runs-on: macos-26
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs-on) }}
     timeout-minutes: 60
 
     steps:
@@ -154,6 +200,7 @@ jobs:
 
       - name: Restore prebuilt dependencies
         id: deps-cache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -167,11 +214,28 @@ jobs:
           restore-keys: |
             deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
+      - name: Restore prebuilt dependencies (owner's Mac)
+        id: deps-cache-mac
+        if: runner.environment == 'self-hosted'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Same toolchain only, as above. The exact hosted key is safe to read
+          # (hosted never reads deps-mac- entries).
+          restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+            deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
+
       - name: Build dependencies
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ] || [ "${{ steps.deps-cache-mac.outputs.cache-hit }}" = "true" ]; then
             # The cache key already hashes every staleness input, so a hit means
             # the artifacts match this tree. Refresh the mtime stamp so
             # build-deps.sh's mtime check agrees with the fresh checkout.
@@ -179,9 +243,30 @@ jobs:
           fi
           bash build-deps.sh
 
+      - name: Save prebuilt dependencies (owner's Mac, main only)
+        if: runner.environment == 'self-hosted' && github.event_name == 'push' && steps.deps-cache-mac.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: ${{ steps.deps-cache-mac.outputs.cache-primary-key }}
+
+      # XCTest's stall detector has aborted this step several times, always at
+      # a main-thread wait, with no stack to say what was stuck. The same
+      # freeze also hides in passing runs as one ~150s test. The watcher
+      # samples xctest when its output goes quiet; the step below prints those
+      # samples and any xctest crash report, pass or fail.
       - name: Core package tests
         shell: bash
-        run: swift test
+        run: bash scripts/dev/swift-test-stall-watch.sh swift test
+
+      - name: Print xctest stall diagnostics
+        if: always()
+        shell: bash
+        run: python3 scripts/dev/print-stall-diagnostics.py "$RUNNER_TEMP/xctest-stall-samples"
 
       - name: Integration smoke
         shell: bash
@@ -303,7 +388,7 @@ jobs:
   # and the step asserts every upstream job actually succeeded.
   # ---------------------------------------------------------------------------
   build-and-test:
-    needs: [checks, spm-tests, app-build]
+    needs: [pick-runner, checks, spm-tests, app-build]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -311,15 +396,19 @@ jobs:
     steps:
       - name: Require all Swift CI jobs to succeed
         shell: bash
+        env:
+          PICKED_RUNNER: ${{ needs.pick-runner.outputs.runs-on }}
         run: |
           set -euo pipefail
+          pick_result='${{ needs.pick-runner.result }}'
           checks_result='${{ needs.checks.result }}'
           spm_result='${{ needs.spm-tests.result }}'
           app_result='${{ needs.app-build.result }}'
-          echo "checks=$checks_result spm-tests=$spm_result app-build=$app_result"
-          for result in "$checks_result" "$spm_result" "$app_result"; do
+          echo "pick-runner=$pick_result checks=$checks_result spm-tests=$spm_result app-build=$app_result"
+          echo "checks + spm-tests ran on: ${PICKED_RUNNER:-unknown}"
+          for result in "$pick_result" "$checks_result" "$spm_result" "$app_result"; do
             if [ "$result" != "success" ]; then
-              echo "::error::A required Swift CI job did not succeed (checks=$checks_result, spm-tests=$spm_result, app-build=$app_result)."
+              echo "::error::A required Swift CI job did not succeed (pick-runner=$pick_result, checks=$checks_result, spm-tests=$spm_result, app-build=$app_result)."
               exit 1
             fi
           done

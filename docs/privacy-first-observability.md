@@ -342,7 +342,8 @@ Screen permission reflects the app's cached System Audio Recording grant.
 
 Failure, friction, and health events also carry `failure_kind` and `failure_stage`.
 Health snapshots always carry `quality_reason` and `capture_outcome`; cancelled
-captures have their own outcome. `none` means no failure; `unknown` means missing
+captures have their own outcome, and a "Record Just My Mic" meeting reports
+`mic_only_by_choice` rather than `complete`. `none` means no failure; `unknown` means missing
 measurement. Every allowlisted Sentry hard failure has a matching
 `reliability_failure_observed` PostHog record using the exact same correlation ID
 and taxonomy, even when the low-level failure has no product lifecycle event.

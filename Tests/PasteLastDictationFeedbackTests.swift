@@ -22,7 +22,7 @@ func testPasteLastDictationFeedback() {
         assertEqual(copied.title, "Copied instead", "copied title")
         assertEqual(copied.detail, "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", "copied detail")
         assertEqual(copied.tone, .caution, "copied tone")
-        assertEqual(failed.title, "Paste Last failed", "failed title")
+        assertEqual(failed.title, "Paste Last Dictation failed", "failed title uses the menu's own name")
         assertEqual(failed.detail, "Couldn't prepare the clipboard for automatic paste.", "failed detail")
         assertEqual(failed.tone, .caution, "failed tone")
         assertTrue(
@@ -31,18 +31,24 @@ func testPasteLastDictationFeedback() {
         )
     }
 
-    runSuite("PasteLastDictationFeedback maps unconfirmed dispatch to neutral paste-sent copy") {
-        let message = "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied."
+    runSuite("PasteLastDictationFeedback maps a likely paste to the same success copy as a confirmed one") {
+        let feedback = PasteLastDictationFeedback.presentation(for: .likelyPasted)
+
+        assertEqual(feedback, PasteLastDictationFeedback.presentation(for: .pasted), "a likely paste should not read as a problem")
+    }
+
+    runSuite("PasteLastDictationFeedback does not title a paste with no evidence as a failure") {
+        let message = ClipboardRestoringTextPaster.pasteNotConfirmedMessage
         let feedback = PasteLastDictationFeedback.presentation(
-            for: .copied(message, reason: .pasteConfirmationUnavailable)
+            for: .copied(message, reason: .pasteNotConfirmed)
         )
 
-        assertEqual(feedback.title, "Paste sent", "unconfirmed dispatch title")
-        assertEqual(feedback.detail, message, "unconfirmed dispatch detail")
-        assertEqual(feedback.tone, .caution, "unconfirmed dispatch should stay neutral instead of claiming success")
+        assertEqual(feedback.title, "Paste not confirmed", "a paste that may have landed should not say it was copied instead")
+        assertEqual(feedback.detail, message, "no-evidence paste detail")
+        assertEqual(feedback.tone, .caution, "no-evidence paste tone")
         assertTrue(
             feedback.dismissDelayNanoseconds >= 3_500_000_000,
-            "neutral recovery feedback should stay visible long enough to scan"
+            "recovery feedback should stay visible long enough to scan"
         )
     }
 
@@ -50,11 +56,11 @@ func testPasteLastDictationFeedback() {
         let feedback = PasteLastDictationFeedback.noSavedDictation
 
         assertEqual(feedback.title, "No saved dictation yet", "no saved title")
-        assertEqual(feedback.detail, "Dictate once, then use Paste Last.", "no saved detail")
+        assertEqual(feedback.detail, "Dictate once, then use Paste Last Dictation.", "no saved detail uses the menu's own name")
         assertEqual(feedback.tone, .caution, "no saved tone")
         assertEqual(
             feedback.accessibilityValue,
-            "No saved dictation yet. Dictate once, then use Paste Last.",
+            "No saved dictation yet. Dictate once, then use Paste Last Dictation.",
             "notice should expose complete VoiceOver copy"
         )
     }

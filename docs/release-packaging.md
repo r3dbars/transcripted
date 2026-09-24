@@ -53,6 +53,10 @@ crashes can be symbolicated in Sentry. Keep that dSYM beside the release build
 until Sentry registration has uploaded it.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
+Releases also ship Sparkle delta updates (`Transcripted<new>-<old>.delta`, about
+1-3 MB each instead of the ~510 MB DMG). Upload every file in the Release
+Candidate artifact's `build/sparkle-deltas/` to the GitHub release with the DMG
+before the appcast lands on main; see "Delta updates" in that doc.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
 plus the pinned Sentry framework, into `deps-frameworks/` and
 `deps-tools/sparkle/`.
@@ -191,6 +195,7 @@ Before you publish a user-facing release note, sanity-check the release state:
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
+- run `python3 scripts/release/mark-appcast-critical.py --check`: builds 1.1.22-1.1.62 only show an update window when the newest appcast item is marked critical for them (see `docs/sparkle-updates.md`, "Reaching people on old versions")
 - verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
 - run `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json` before publishing release notes or PR text that summarize QA, support, or observability work
 - if you want a clean starting point, use `docs/release-notes-template.md`

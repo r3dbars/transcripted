@@ -187,7 +187,7 @@ class ParakeetEngine: ObservableObject {
         case .downloading, .failed:
             return false
         case .notLoaded, .cached, .loading, .ready:
-            return (variant == modelVariant && prefetchedModelPath != nil)
+            return (variant == modelVariant && prefetchedModelPath != nil && !variant.isLocalInstallOnly)
                 || ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
                 || bundledParakeetModelPath(variant: variant) != nil
         }
@@ -612,12 +612,12 @@ class ParakeetEngine: ObservableObject {
         installAudioEngineConfigObserverIfNeeded()
 
         if microphoneSharingObserver == nil {
-            microphoneSharingObserver = ZoomMicrophoneSharingMonitor.shared.$isZoomRunning
+            microphoneSharingObserver = CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning
                 .removeDuplicates()
-                .sink { [weak self] isZoomRunning in
-                    guard isZoomRunning else { return }
+                .sink { [weak self] isCallAppRunning in
+                    guard isCallAppRunning else { return }
                     Task { @MainActor [weak self] in
-                        await self?.shareMicrophoneWithZoomIfNeeded()
+                        await self?.shareMicrophoneWithCallAppIfNeeded()
                     }
                 }
         }
@@ -1221,9 +1221,9 @@ class ParakeetEngine: ObservableObject {
         return currentAudioEngineQueueOwnerToken()
     }
 
-    private func shareMicrophoneWithZoomIfNeeded() async {
+    private func shareMicrophoneWithCallAppIfNeeded() async {
         guard !isShuttingDown,
-              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
               sharedMeetingMicClaim == nil,
               isRecording,
               !audioStartInProgress,
@@ -1235,13 +1235,13 @@ class ParakeetEngine: ObservableObject {
         guard usesVoiceProcessing,
               ownsAudioEngineQueue(owner),
               !isShuttingDown,
-              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
               sharedMeetingMicClaim == nil,
               isRecording,
               !audioStartInProgress,
               !audioStopInProgress else { return }
         // Reuse the owned recovery path so already-spoken audio survives the
-        // VPIO -> regular-input transition when Zoom opens during dictation.
+        // VPIO -> regular-input transition when a call app opens during dictation.
         await recoverForMicrophoneSharing()
     }
 
@@ -1964,10 +1964,10 @@ class ParakeetEngine: ObservableObject {
                 inputRate: snapshot.hwFormat.sampleRate,
                 outputRate: snapshot.outputFormat.sampleRate
             )
-            ZoomMicrophoneSharingMonitor.shared.refresh()
+            CallAppMicrophoneSharingMonitor.shared.refresh()
             let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
                 requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-                    && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+                    && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
                 selection: snapshot.selection
             )
             if voiceProcessingDecision == .deferredForSplitBluetoothOutput {
@@ -2211,11 +2211,11 @@ class ParakeetEngine: ObservableObject {
 
         isRecording = true
         markFormatReadyAndPublish()
-        // Zoom can launch while the worker is starting the graph. Recheck
+        // A call app can launch while the worker is starting the graph. Recheck
         // after start admission finishes; the launch observer cannot recover
         // a graph still owned by an in-flight start.
         Task { @MainActor [weak self] in
-            await self?.shareMicrophoneWithZoomIfNeeded()
+            await self?.shareMicrophoneWithCallAppIfNeeded()
         }
         AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 

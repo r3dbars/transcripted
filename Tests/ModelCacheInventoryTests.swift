@@ -29,6 +29,48 @@ func testModelCacheInventory() {
                   "symlinked compiled model directories must not satisfy completeness")
     }
 
+    runSuite("Parakeet Ultra resolves only from Transcripted's models folder, with its install marker") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheUltra-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        let local = root.appendingPathComponent("Transcripted/models", isDirectory: true)
+        let ultra = ParakeetModelVariant.ultra
+
+        // A complete stock v3 cache in FluidAudio's folder must never count as Ultra.
+        let stockV3 = fluid.appendingPathComponent(ParakeetModelVariant.v3.directoryName)
+        for name in ParakeetModelVariant.v3.requiredModelDirectoryNames {
+            writeTestFile(stockV3.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
+        }
+        for name in ParakeetModelVariant.v3.requiredFileNames {
+            writeTestFile(stockV3.appendingPathComponent(name), bytes: 1)
+        }
+        assertNotNil(ModelCacheInventory.activeParakeetModelDirectory(
+            variant: .v3, fluidAudioModelsDirectory: fluid, localModelsDirectory: local
+        ))
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(
+            variant: .ultra, fluidAudioModelsDirectory: fluid, localModelsDirectory: local
+        ), "stock v3 is not Ultra")
+
+        let installed = local.appendingPathComponent("parakeet-ultra/parakeet-tdt-0.6b-v3")
+        for name in ultra.requiredModelDirectoryNames {
+            writeTestFile(installed.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
+        }
+        for name in ParakeetModelVariant.v3.requiredFileNames {
+            writeTestFile(installed.appendingPathComponent(name), bytes: 1)
+        }
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(
+            variant: .ultra, fluidAudioModelsDirectory: fluid, localModelsDirectory: local
+        ), "a folder without the install marker (a FluidAudio re-download) is not Ultra")
+        writeTestFile(installed.appendingPathComponent(ParakeetModelVariant.localInstallMarkerFileName), bytes: 1)
+        assertEqual(ModelCacheInventory.activeParakeetModelDirectory(
+            variant: .ultra, fluidAudioModelsDirectory: fluid, localModelsDirectory: local
+        )?.lastPathComponent, "parakeet-tdt-0.6b-v3", "FluidAudio loads <parent>/parakeet-tdt-0.6b-v3")
+        assertEqual(ModelCacheInventory.activeParakeetModelDirectory(
+            variant: .ultra, fluidAudioModelsDirectory: fluid, localModelsDirectory: local
+        )?.deletingLastPathComponent().lastPathComponent, "parakeet-ultra")
+    }
+
     runSuite("ModelCacheInventory totals model cache directories") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)

@@ -138,6 +138,9 @@ class DictationSessionController: ObservableObject {
     private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    /// The shortcut that started this session, when a shortcut did. Read from
+    /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
+    private var currentDictationShortcutMode: DictationShortcutMode?
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
@@ -294,6 +297,7 @@ class DictationSessionController: ObservableObject {
         sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
+        currentDictationShortcutMode = shortcutMode
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
@@ -1283,6 +1287,7 @@ class DictationSessionController: ObservableObject {
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
                 let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
+                let isMisTap = emptyReason.isAccidentalStart(pressDuration: stopTiming.requestedAt - sessionStartTime)
                 appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                 EventReporter.shared.capture(
                     level: .warning,
@@ -1311,21 +1316,32 @@ class DictationSessionController: ObservableObject {
                 ProductFrictionTelemetry.track(
                     surface: .dictation,
                     stage: "dictation_transcribe",
-                    result: .giveUp,
+                    result: isMisTap ? .cancelled : .giveUp,
                     failureKind: emptyReason.frictionFailureKind,
                     elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
-                if emptyReason.shouldDiscardStoppedAudioRecovery {
+                if isMisTap {
+                    // A mis-tap: close the overlay the same way a cancel does,
+                    // with no "Recording ended too soon" error to dismiss.
+                    NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
+                    AppSoundPlayer.shared.play(.dictationCancelled)
+                    overlayController.hideWithCancelAnimation()
+                } else if emptyReason.shouldDiscardStoppedAudioRecovery {
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.noSpeech)
-                    overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
+                    overlayController.showNoSpeechAndDismiss(
+                        trigger: currentDictationTrigger.rawValue,
+                        reason: emptyReason,
+                        shortcutMode: currentDictationShortcutMode
+                    )
                 } else if let recovery = self.stoppedAudioRecovery {
                     overlayController.showError(
                         DictationNoSpeechPresentationPolicy.message(
                             trigger: currentDictationTrigger.rawValue,
-                            reason: emptyReason
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
                         ),
                         actionTitle: "Show Audio",
                         action: {
@@ -1343,7 +1359,8 @@ class DictationSessionController: ObservableObject {
                         overlayController.showError(
                             DictationNoSpeechPresentationPolicy.message(
                                 trigger: currentDictationTrigger.rawValue,
-                                reason: emptyReason
+                                reason: emptyReason,
+                                shortcutMode: currentDictationShortcutMode
                             )
                         )
                     }
@@ -1486,17 +1503,23 @@ class DictationSessionController: ObservableObject {
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if case .failed(let failure) = autoSendOutcome {
-                    overlayController.showError("Text pasted, but Auto Enter didn't run. \(failure.message)")
+                    overlayController.showError(failure.message)
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: .pasteConfirmationUnavailable):
+            case .likelyPasted:
+                // No Accessibility proof, but the target stayed in front and read
+                // the clipboard right after Cmd+V, so the text almost certainly
+                // landed and the user's clipboard is already being restored.
+                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
-                    overlayController.showError("\(message) \(saveFailureMessage)")
+                    overlayController.showError(saveFailureMessage)
+                } else if self.autoSendRequestDecision.expected {
+                    // Auto Enter only presses Return after a confirmed paste.
+                    overlayController.showClipboardNotice("Pasted. Press Return to send it.")
                 } else {
-                    overlayController.showClipboardNotice(message)
+                    overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
-                appState.logger.log("DICTATION | paste command sent without positive delivery proof; showing neutral clipboard notice: \(message)")
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -1635,14 +1658,16 @@ class DictationSessionController: ObservableObject {
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
         } else {
-            overlayController.showError(
+            // Hitting the 5-minute cap still saved the text: a notice, not
+            // an error with a warning triangle and a shake.
+            overlayController.showSavedNotice(
                 "Saved to Markdown. Paste it now, or use Paste Last Dictation later.",
                 actionTitle: "Paste It",
                 action: { [weak self] in
                     guard let self else { return }
                     let outcome = self.pasteWithClipboardRestore(text)
                     switch outcome {
-                    case .pasted:
+                    case .pasted, .likelyPasted:
                         overlayController.showSuccessAndDismiss(title: "Pasted")
                     case .copied(let message, reason: _), .failed(let message, reason: _):
                         overlayController.showError(message)
@@ -1682,8 +1707,10 @@ class DictationSessionController: ObservableObject {
         cancelActiveTasks(cancelRecording: true)
         if !preserveStoppedAudio {
             discardStoppedAudioRecovery(explicitDiscard: true)
+            // The "discarded" cue only when something was actually thrown away;
+            // a quit that keeps the audio for recovery stays silent.
+            AppSoundPlayer.shared.play(.dictationCancelled)
         }
-        AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "cancelled")
@@ -1834,6 +1861,7 @@ class DictationSessionController: ObservableObject {
             self.processActivityLabel = "stop finalization"
             self.isDictating = true
             overlayController.state = .listening
+            overlayController.markRetainedRecordingForEscape()
             self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
             if self.isDictating,
                self.stopFinalizationGate.admittedSessionID == sessionID {
@@ -2080,7 +2108,8 @@ class DictationSessionController: ObservableObject {
         shortcutMode: DictationShortcutMode?
     ) {
         cancelActiveTasks(cancelRecording: true)
-        AppSoundPlayer.shared.play(.dictationCancelled)
+        // No cancel cue here: an early release is often a quick modifier chord
+        // (Fn+arrow), and a sound on every one of those would be noise.
         let releasedWhileAppActive = NSApp.isActive
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
@@ -2264,6 +2293,7 @@ class DictationSessionController: ObservableObject {
                         self.processActivityLabel = "stop finalization"
                         self.isDictating = true
                         self.overlayController?.state = .listening
+                        self.overlayController?.markRetainedRecordingForEscape()
                         self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
                     }
                 } else {
@@ -2346,12 +2376,17 @@ class DictationSessionController: ObservableObject {
                 event: diagnostic.event,
                 message: diagnostic.event == "dictation_paste_confirmed"
                     ? "Paste delivery confirmed from privacy-safe target signals"
-                    : "Paste delivery could not be confirmed from privacy-safe target signals",
+                    : outcome == .likelyPasted
+                        ? "Paste most likely delivered: the target read the clipboard right after Cmd+V"
+                        : "Paste delivery could not be confirmed from privacy-safe target signals",
                 context: context
             )
         }
 
         let context = ["attempt": attempt]
+        if outcome == .likelyPasted {
+            appState?.logger.log("DICTATION | target read the clipboard right after paste; treating as pasted and restoring the clipboard")
+        }
         switch outcome.copyReason {
         case .accessibilityMissing:
             appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
@@ -2367,10 +2402,6 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
                 message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard", context: context)
             appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
-        case .pasteConfirmationUnavailable:
-            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Paste-back was dispatched but the target did not expose confirmation", context: context)
-            appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case nil:
             break
         }
@@ -2775,7 +2806,7 @@ private typealias DictationPasteOutcome = TextPasteOutcome
 private extension TextPasteOutcome {
     var delivery: DictationDelivery {
         switch self {
-        case .pasted:
+        case .pasted, .likelyPasted:
             return .pasted
         case .copied:
             return .copied
@@ -2786,9 +2817,7 @@ private extension TextPasteOutcome {
 
     var diagnosticLevel: EventLevel {
         switch self {
-        case .pasted:
-            return .info
-        case .copied(_, reason: let reason) where reason.isPasteConfirmationUnavailable:
+        case .pasted, .likelyPasted:
             return .info
         case .copied:
             return .warning
@@ -2799,15 +2828,6 @@ private extension TextPasteOutcome {
 }
 
 private extension TextPasteCopyReason {
-    var isPasteConfirmationUnavailable: Bool {
-        switch self {
-        case .pasteConfirmationUnavailable:
-            return true
-        case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
-            return false
-        }
-    }
-
     var diagnosticName: String {
         switch self {
         case .accessibilityMissing:
@@ -2818,8 +2838,6 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
-        case .pasteConfirmationUnavailable:
-            return "paste_confirmation_unavailable"
         }
     }
 }

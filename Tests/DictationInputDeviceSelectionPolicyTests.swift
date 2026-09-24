@@ -479,6 +479,35 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("A lost or silent pinned mic is re-picked without it, before the Bluetooth default") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let displayMic = DictationAudioDevice(id: 5, name: "Studio Display Microphone", transport: .usb, inputChannelCount: 1, uid: "display")
+
+        let remaining = PinnedDictationInputPolicy.candidates(
+            [airPodsInput, macMic, displayMic], excluding: macMic.id, defaultInputID: airPodsInput.id
+        )
+        assertEqual(remaining, [airPodsInput, displayMic], "the failed mic is left out of the ranking")
+        let repicked = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: remaining,
+            prefersBuiltInBluetoothInput: true
+        )
+        assertEqual(repicked.selectedInput, displayMic, "losing the MacBook mic moves to the display mic, not the AirPods")
+
+        assertEqual(
+            PinnedDictationInputPolicy.candidates([airPodsInput, macMic], excluding: airPodsInput.id, defaultInputID: airPodsInput.id),
+            [airPodsInput, macMic],
+            "the macOS default stays listed so the selection can still describe it"
+        )
+        assertEqual(
+            PinnedDictationInputPolicy.candidates([airPodsInput, macMic], excluding: nil, defaultInputID: airPodsInput.id),
+            [airPodsInput, macMic],
+            "nothing is left out on a normal start"
+        )
+    }
+
     runSuite("PinnedDictationInputPolicy only needs the recorder to skip a Bluetooth input") {
         let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")

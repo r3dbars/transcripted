@@ -220,6 +220,7 @@ extension ParakeetEngine {
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
         guard !isSharedMeetingMicClaimCurrent,
+              pinnedDictationRecording == nil,
               !audioStartInProgress,
               !audioStopInProgress,
               generationAtAdmission == audioConfigObservationGeneration else {
@@ -236,6 +237,7 @@ extension ParakeetEngine {
             )
             guard !Task.isCancelled, !isShuttingDown,
                   !isSharedMeetingMicClaimCurrent,
+                  pinnedDictationRecording == nil,
                   !audioStartInProgress, !audioStopInProgress,
                   generationAtAdmission == audioConfigObservationGeneration else { return }
         }
@@ -299,7 +301,7 @@ extension ParakeetEngine {
             observedRouteIdentity.map(stableIdentity.matchesGraphEndpoints) ?? false
         } ?? false
 
-        // Healthy local samples do not prove Zoom can still read its mic.
+        // Healthy local samples do not prove a call app can still read its mic.
         // A confirmed VPIO downgrade must run even when our stream is healthy.
         if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe(
             wasRecording: isRecording,

@@ -66,6 +66,18 @@ enum PinnedDictationInputPolicy {
             && DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
     }
 
+    /// Inputs to rank when re-picking after `excluded` died or went silent.
+    /// The macOS default stays listed so the selection can still describe it;
+    /// the caller rejects a pick that lands on the excluded id.
+    static func candidates(
+        _ availableInputs: [DictationAudioDevice],
+        excluding excluded: UInt32?,
+        defaultInputID: UInt32
+    ) -> [DictationAudioDevice] {
+        guard let excluded, excluded != defaultInputID else { return availableInputs }
+        return availableInputs.filter { $0.id != excluded }
+    }
+
     static func mayReplace(_ automatic: DictationInputDeviceSelection) -> Bool {
         automatic.reason == .preferredBuiltInForBluetoothHeadset
             || automatic.reason == .noBuiltInFallbackAvailable

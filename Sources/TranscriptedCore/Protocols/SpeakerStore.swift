@@ -52,6 +52,12 @@ public protocol SpeakerStore: Sendable {
     /// Remove weak/unnamed profiles with low confidence
     func pruneWeakProfiles()
 
+    /// Remove weak/unnamed profiles while keeping ones an open speaker review still references
+    func pruneWeakProfiles(protecting protectedIds: Set<UUID>)
+
+    /// The profile that now holds `profileId` after merges that were not undone, if any.
+    func mergeSurvivorId(of profileId: UUID) -> UUID?
+
     /// Record that a match suggestion was rejected by the user.
     func incrementDisputeCount(id: UUID)
 
@@ -89,6 +95,14 @@ public extension SpeakerStore {
         guard protectedIds.isEmpty else { return }
         mergeDuplicates()
     }
+
+    func pruneWeakProfiles(protecting protectedIds: Set<UUID>) {
+        guard protectedIds.isEmpty else { return }
+        pruneWeakProfiles()
+    }
+
+    /// Back-compat default: stores without a merge log cannot follow a merged profile.
+    func mergeSurvivorId(of profileId: UUID) -> UUID? { nil }
 
     /// Back-compat default: conformers that don't model an EMA blend weight (test doubles, simple
     /// stores) fall back to the standard write-back, ignoring `blendAlpha`. `SpeakerDatabase`

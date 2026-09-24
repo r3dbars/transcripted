@@ -201,6 +201,16 @@ extension Audio {
             }
         case .silentInput:
             AppLogger.audioMic.warning("Pinned microphone delivers only silence")
+            // Exact zeros also come from a mic muted on purpose. Only the
+            // closed MacBook's own mic is known dead; moving off a muted mic
+            // would record someone who chose not to be heard.
+            guard let selection = meetingInputSelectionSnapshot(),
+                  selection.selectedInput.id == capture.deviceID,
+                  MeetingInputDeviceSelectionPolicy.isLidMicrophone(selection.selectedInput),
+                  MacLidState.isClosed() else {
+                AppLogger.audioMic.info("Keeping the silent pinned microphone; it is not a closed lid's mic")
+                return
+            }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 self?.replacePinnedMeetingMicrophone(
                     capture,
@@ -254,6 +264,9 @@ extension Audio {
                 guard selection.selectedInput.id != failedDeviceID else {
                     throw PinnedMicrophoneReplacementUnavailable()
                 }
+                // When the only mic left is the macOS default, even a Bluetooth
+                // headset, the meeting moves to it on purpose: its call-mode
+                // audio beats a meeting that silently loses the user's voice.
                 guard sessionGeneration == recordingSessionGeneration else { return }
                 try withAudioGraphLock {
                     guard sessionGeneration == recordingSessionGeneration,

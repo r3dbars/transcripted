@@ -87,9 +87,11 @@ extension TranscriptSaver {
 
         // Add recording health metadata (Phase 3: Post-hoc transparency)
         if let health = healthInfo {
-            yaml += "\ncapture_quality: \(health.captureQuality.rawValue)"
-            yaml += "\naudio_gaps: \(health.audioGaps)"
-            yaml += "\ndevice_switches: \(health.deviceSwitches)"
+            if health.captureGradeUnmeasured != true {
+                yaml += "\ncapture_quality: \(health.captureQuality.rawValue)"
+                yaml += "\naudio_gaps: \(health.audioGaps)"
+                yaml += "\ndevice_switches: \(health.deviceSwitches)"
+            }
             if let verified = health.systemAudioSignalVerified {
                 yaml += "\nsystem_audio_signal_verified: \(verified)"
             }
@@ -112,6 +114,11 @@ extension TranscriptSaver {
             }
             if health.systemAudioMissing == true {
                 yaml += "\nsystem_audio_missing: true"
+            }
+            // "Record Just My Mic": only the user's side was recorded, on
+            // purpose. Uses the app's "Mic only" wording.
+            if health.systemAudioSkippedByChoice == true {
+                yaml += "\nmic_only: true"
             }
             if health.microphoneAudioUnusable == true {
                 yaml += "\nmicrophone_audio_unusable: true"

@@ -129,6 +129,19 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["mic_format_rebuilds"], "1")
     }
 
+    func testSilentPlaybackWatchFoldsIntoTheSilentTapKeys() {
+        var snapshot = makeSnapshot()
+        var tap = SystemAudioTapDiagnostics()
+        tap.silentAfterWakeReconnects = 1
+        tap.silentPlaybackReconnects = 1
+        tap.unheardPlayback = true
+        snapshot.systemTap = tap
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(context["system_silent_reconnects"], "2", "wake and playback watches share one count")
+        XCTAssertEqual(context["system_silent_unresolved"], "true", "a tap that never heard the playing call is unresolved")
+    }
+
     func testTapFailureMapsToCoarseCodes() {
         var snapshot = makeSnapshot()
         let failure = SystemAudioTapFailure(operation: "aggregate creation", status: -10877)

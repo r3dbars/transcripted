@@ -19,7 +19,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `CrashReporter.swift` — crash reporting setup
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
-- `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog
+- `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog (sends nothing when `AutomatedLaunchEnvironment` is active)
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`; also holds `AnalyticsEventForwardingPolicy`, the short table of local `EventReporter` events (today only the pinned dictation mic's `pinned_microphone_*` lifecycle) that `EventReporter.capture` also tracks in PostHog with bounded, rebuilt properties
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
@@ -35,10 +35,11 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` payload mechanics used by all three payload sanitizers (Sentry, Analytics, and the on-disk `LocalObservabilityPayloadSanitizer`) while each destination keeps its own length cap and sensitive-key list
-- `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
+- `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment (no DSN when `AutomatedLaunchEnvironment` is active)
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
-- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked
+- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked; also holds `UpdateAttentionPolicy` (when the orange update badge shows) and `BackgroundUpdateDeferralPolicy` (when Sparkle's background download waits: busy Mac, hotspot, Low Data Mode)
+- `UpdateInstallDetection.swift` — decides on launch whether this is the first launch of a newer version, for `update_installed` and its `install_kind` (`restart`, `quit`, `unattributed`)
 
 ## Current Notes
 
@@ -63,7 +64,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `LocalObservabilityPayloadSanitizer.measurementKeySuffixes` is the second local-only escape: a bare number (optionally signed decimal, no exponent, units, or grouping) under a `_ms`/`_s`/`_hz`/`_bytes`/`_count`-style key survives the substring blanking so dictation stage timings stay readable in `events.jsonl`. Anything non-numeric under those keys is still redacted. Sentry and Analytics sanitize `mergedContext` separately and are unaffected by either escape.
 - Crash reports carry `build_revision` and `build_channel` as searchable tags (via `SentryPayloadSanitizer.crashRuntimeTagKeys` and the runtime diagnostics context); release name and dist only carry the version number.
 - `dictation_started` carries `start_latency_bucket` (request to recording) and both dictation start events carry `first_since_launch`, so cold-start dictation speed is visible without raw timings.
-- 1.1.62 capture telemetry: meeting events carry the call-audio tap's upkeep (`system_*_reconnects_bucket`, `system_rebuild_retries_bucket`, `system_sleep_count_bucket`, `system_silent_unresolved`, `system_end_reason`) and `mic_format_rebuilds_bucket`, all built from `AudioPipelineDiagnosticsSnapshot` in `meetingCaptureAnalyticsProperties`. `meeting_recording_started` adds `mic_only_by_choice`, `system_permission_check` and `models_warm`; `meeting_system_audio_prompt_answered` records the pre-start system-audio prompt; `launch_models_warmed` fires once per launch.
+- 1.1.62 capture telemetry: meeting events carry the call-audio tap's upkeep (`system_*_reconnects_bucket`, `system_rebuild_retries_bucket`, `system_sleep_count_bucket`, `system_silent_unresolved`, `system_end_reason`) and `mic_format_rebuilds_bucket`, all built from `AudioPipelineDiagnosticsSnapshot` in `meetingCaptureAnalyticsProperties`. `meeting_recording_started` adds `mic_only_by_choice`, `system_permission_check` and `models_warm`; `meeting_system_audio_prompt_answered` records the pre-start system-audio prompt (its `outcome` splits "Turn It On" with no macOS answer, `turn_on_without_macos_answer`, from a mic-only pick before macOS answered, `mic_only_before_macos_answer`; in 1.1.62 both were `mic_only_before_macos_answer`); a mic-only-by-choice stop reports capture_outcome `mic_only_by_choice`, and its `system_file_present`/`system_stream_present` stay false because the silent stand-in track isn't captured audio; `launch_models_warmed` fires once per launch.
 - Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
 
 ## Verification
@@ -93,6 +94,8 @@ Relevant direct coverage:
 - `Tests/ReliabilityPacketRecorderTests.swift`
 - `Tests/RuntimeDiagnosticsStoreTests.swift`
 - `Tests/UpdateFailureKindTests.swift`
+- `Tests/UpdateActionSafetyPolicyTests.swift`
+- `Tests/UpdateInstallDetectionTests.swift`
 
 Useful files while testing:
 

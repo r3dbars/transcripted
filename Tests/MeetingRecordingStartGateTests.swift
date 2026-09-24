@@ -173,11 +173,16 @@ func testMeetingRecordingStartGate() async {
         let micOnly = MeetingSystemAudioAccessFlow.Outcome.recordMicOnly.startDecision
         assertTrue(micOnly.canStart, "mic-only is a real choice, not a block")
         assertTrue(micOnly.recordsMicOnlyByChoice, "mic-only by choice must silence the later unverified banner")
-        assertFalse(micOnly.mayRaiseSystemAudioPermissionPrompt, "after a denial the tap streams silence right away, so the normal start budget holds")
+        assertFalse(micOnly.capturesSystemAudio, "mic only records the mic alone, with no system-audio tap")
+        assertFalse(micOnly.mayRaiseSystemAudioPermissionPrompt, "with no tap nothing can raise the macOS box, so the normal start budget holds")
         assertEqual(MeetingSystemAudioAccessFlow.Outcome.recordMicOnlyRemembered.startDecision, micOnly, "a remembered choice records exactly like a fresh one")
-        let micOnlyEarly = MeetingSystemAudioAccessFlow.Outcome.recordMicOnlyBeforeMacOSAnswer.startDecision
-        assertTrue(micOnlyEarly.canStart && micOnlyEarly.recordsMicOnlyByChoice, "mic only before macOS answered still records, quietly")
-        assertTrue(micOnlyEarly.mayRaiseSystemAudioPermissionPrompt, "the tap can still bring up the macOS box, so the start must wait on the permission budget, not 12s")
+        assertEqual(MeetingSystemAudioAccessFlow.Outcome.recordMicOnlyBeforeMacOSAnswer.startDecision, micOnly,
+            "mic only before macOS answered skips the tap too, so macOS doesn't ask right after the user said just the mic")
+        let turnOnUnanswered = MeetingSystemAudioAccessFlow.Outcome.turnOnWithoutMacOSAnswer.startDecision
+        assertTrue(turnOnUnanswered.canStart && turnOnUnanswered.recordsMicOnlyByChoice, "Turn It On with no macOS answer still records, quietly")
+        assertTrue(turnOnUnanswered.capturesSystemAudio, "the user asked for both sides, so the tap still runs")
+        assertTrue(turnOnUnanswered.mayRaiseSystemAudioPermissionPrompt, "the tap can still bring up the macOS box, so the start must wait on the permission budget, not 12s")
+        assertTrue(MeetingSystemAudioAccessFlow.Outcome.recordBothSides.startDecision.capturesSystemAudio, "both sides runs the tap")
         assertEqual(MeetingSystemAudioAccessFlow.Outcome.recordBothSides.startDecision, .allowed, "an allowed answer starts normally")
         let opened = MeetingSystemAudioAccessFlow.Outcome.openedSettings.startDecision
         assertFalse(opened.canStart, "opening Settings waits for the user to come back")
@@ -204,7 +209,7 @@ func testMeetingRecordingStartGate() async {
         FlowCase(name: "never asked + Turn It On + Don't Allow", isUndetermined: true, answers: [.turnOn], macOSAnswer: false,
                  expected: .recordMicOnly, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
         FlowCase(name: "never asked + Turn It On + no macOS answer", isUndetermined: true, answers: [.turnOn], macOSAnswer: nil,
-                 expected: .recordMicOnlyBeforeMacOSAnswer, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
+                 expected: .turnOnWithoutMacOSAnswer, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
         FlowCase(name: "denied + Turn It On", isUndetermined: false, answers: [.turnOn], macOSAnswer: nil,
                  expected: .openedSettings, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 1),
         FlowCase(name: "denied + mic only", isUndetermined: false, answers: [.recordMicOnly], macOSAnswer: nil,
