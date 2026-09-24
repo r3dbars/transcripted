@@ -220,6 +220,7 @@ extension ParakeetEngine {
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
         guard !isSharedMeetingMicClaimCurrent,
+              pinnedDictationRecording == nil,
               !audioStartInProgress,
               !audioStopInProgress,
               generationAtAdmission == audioConfigObservationGeneration else {
@@ -236,6 +237,7 @@ extension ParakeetEngine {
             )
             guard !Task.isCancelled, !isShuttingDown,
                   !isSharedMeetingMicClaimCurrent,
+                  pinnedDictationRecording == nil,
                   !audioStartInProgress, !audioStopInProgress,
                   generationAtAdmission == audioConfigObservationGeneration else { return }
         }

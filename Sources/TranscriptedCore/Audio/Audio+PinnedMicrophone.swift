@@ -264,6 +264,9 @@ extension Audio {
                 guard selection.selectedInput.id != failedDeviceID else {
                     throw PinnedMicrophoneReplacementUnavailable()
                 }
+                // When the only mic left is the macOS default, even a Bluetooth
+                // headset, the meeting moves to it on purpose: its call-mode
+                // audio beats a meeting that silently loses the user's voice.
                 guard sessionGeneration == recordingSessionGeneration else { return }
                 try withAudioGraphLock {
                     guard sessionGeneration == recordingSessionGeneration,
