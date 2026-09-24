@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Mark one Sparkle appcast item as an important update for older versions.
+"""Mark the newest Sparkle appcast item as an important update for older versions.
 
-Why this exists: every Transcripted build through 1.1.62 answers Sparkle's
+Why this exists: builds 1.1.22 through 1.1.62 answer Sparkle's
 `standardUserDriverShouldHandleShowingScheduledUpdate` with
-`update.isCriticalUpdate` and ships without automatic downloads. So when a
-background check finds a normal update, Sparkle shows nothing, and the app's
-own "Install Update" action is the only way in. Those installs can't be
-changed after the fact. The appcast can: an item carrying
+`update.isCriticalUpdate` and ship without automatic downloads, and their own
+Install action does nothing while Sparkle's held reminder is open. So a
+background check that finds a normal update shows nothing useful. Those
+installs can't be changed after the fact. The appcast can: an item carrying
 `<sparkle:criticalUpdate sparkle:version="X"/>` is critical for every app whose
-CFBundleVersion is below X, and Sparkle then shows its own update window on the
-next scheduled check (no Skip or Remind Me Later buttons, but it can be closed).
+CFBundleVersion is below X, and Sparkle then shows its own update window.
+
+Sparkle only looks at the newest item, so this always marks the newest one and
+leaves older items alone (a marker there is inert). The default floor stops at 1.1.63, the
+first build that downloads updates on its own and whose Install action works,
+so marking later releases doesn't nag people who are already fine.
 
 This only edits the local `docs/appcast.xml`. Committing it to the branch that
 backs the live feed is publishing, and needs the owner's explicit go.
@@ -18,6 +22,7 @@ backs the live feed is publishing, and needs the owner's explicit go.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
 import tempfile
@@ -31,6 +36,9 @@ NAMESPACES = {"sparkle": SPARKLE_NS, "atom": ATOM_NS}
 CRITICAL_TAG = f"{{{SPARKLE_NS}}}criticalUpdate"
 VERSION_ATTR = f"{{{SPARKLE_NS}}}version"
 VERSION_PATTERN = re.compile(r"^\d+(\.\d+)*$")
+# First build with automatic downloads on and a working Install action (#1797).
+# Anything at or above this handles routine updates without the marker.
+FIRST_SELF_UPDATING_VERSION = "1.1.63"
 
 ET.register_namespace("sparkle", SPARKLE_NS)
 ET.register_namespace("atom", ATOM_NS)
@@ -59,36 +67,44 @@ def item_version(item: ET.Element) -> str:
     return version
 
 
-def find_item(channel: ET.Element, version: str | None) -> ET.Element:
-    items = channel.findall("item")
-    if not items:
-        raise ValueError("appcast has no items")
-    if version is None:
-        return items[0]
-    for item in items:
-        if item_version(item) == version:
-            return item
-    raise ValueError(f"appcast has no item for version {version}")
-
-
-def apply(tree: ET.ElementTree, version: str | None, below: str | None, remove: bool) -> str:
+def items_of(tree: ET.ElementTree) -> list[ET.Element]:
     channel = tree.getroot().find("channel")
     if channel is None:
         raise ValueError("appcast is missing a channel")
-    item = find_item(channel, version)
+    items = channel.findall("item")
+    if not items:
+        raise ValueError("appcast has no items")
+    return items
+
+
+def newest_item(items: list[ET.Element]) -> ET.Element:
+    # Sparkle offers the highest version it can install, not the first item.
+    return max(items, key=lambda item: parse_version(item_version(item)))
+
+
+def default_floor(target: str) -> str:
+    return min(target, FIRST_SELF_UPDATING_VERSION, key=parse_version)
+
+
+def apply(tree: ET.ElementTree, below: str | None, remove: bool) -> str:
+    items = items_of(tree)
+    item = newest_item(items)
     target = item_version(item)
 
+    # Only the newest item counts. Markers on older items (the feed still has
+    # bare ones on 1.1.22 and 1.1.23 from April) are inert, and leaving them
+    # keeps the published diff to the one item that matters.
     for existing in item.findall(CRITICAL_TAG):
         item.remove(existing)
 
     if remove:
-        return f"{target}: no longer marked critical"
+        return f"{target}: not marked critical"
 
-    floor = below or target
+    floor = default_floor(target) if below is None else below
     if parse_version(floor) > parse_version(target):
         raise ValueError(
-            f"--below {floor} is newer than the item ({target}); "
-            f"people already on {target} would be told to install it again"
+            f"--below {floor} is above the newest item ({target}); only apps older "
+            f"than {target} are offered it, so use {target} or lower"
         )
 
     marker = ET.SubElement(item, CRITICAL_TAG)
@@ -96,17 +112,54 @@ def apply(tree: ET.ElementTree, version: str | None, below: str | None, remove: 
     return f"{target}: critical for apps below {floor}"
 
 
-def write(tree: ET.ElementTree, path: Path) -> None:
+def check(tree: ET.ElementTree) -> str:
+    """Report the marker state; raise if the previous release is marked and the newest isn't.
+
+    That is the "forgot to carry it forward" case: generate-sparkle-appcast.sh
+    puts a new unmarked item on top and Sparkle stops showing the window.
+    """
+    items = sorted(items_of(tree), key=lambda item: parse_version(item_version(item)), reverse=True)
+    newest = items[0]
+    target = item_version(newest)
+    marker = newest.find(CRITICAL_TAG)
+    if marker is None:
+        if len(items) > 1 and items[1].find(CRITICAL_TAG) is not None:
+            previous = item_version(items[1])
+            raise ValueError(
+                f"{previous} is marked critical but the newest item ({target}) is not, so Sparkle "
+                "stops showing the window. Re-run this script, or leave it off on purpose"
+            )
+        return f"{target}: not marked critical"
+    floor = marker.get(VERSION_ATTR)
+    return f"{target}: critical for apps below {floor}" if floor else f"{target}: critical for every older app"
+
+
+def serialize(tree: ET.ElementTree) -> bytes:
     # Same writer settings as generate-sparkle-appcast.sh, so the rest of the
     # file stays byte-identical.
     if hasattr(ET, "indent"):
         ET.indent(tree, space="  ")
-    tree.write(path, encoding="utf-8", xml_declaration=True)
+    buffer = io.BytesIO()
+    tree.write(buffer, encoding="utf-8", xml_declaration=True)
+    return buffer.getvalue()
 
 
-def run(path: Path, version: str | None, below: str | None, remove: bool, dry_run: bool) -> str:
-    tree = ET.parse(path)
-    message = apply(tree, version, below, remove)
+def write(tree: ET.ElementTree, path: Path) -> None:
+    path.write_bytes(serialize(tree))
+
+
+def run(path: Path, below: str | None, remove: bool, dry_run: bool) -> str:
+    original = path.read_bytes()
+    # ElementTree drops comments and CDATA and can reflow text. Refuse to touch
+    # a feed that wouldn't survive a no-op rewrite, so the only change we ever
+    # publish is the marker line.
+    if serialize(ET.ElementTree(ET.fromstring(original))) != original:
+        raise ValueError(
+            f"{path} isn't in the form generate-sparkle-appcast.sh writes (a comment, CDATA or "
+            "spacing would change). Add the <sparkle:criticalUpdate> line by hand instead"
+        )
+    tree = ET.ElementTree(ET.fromstring(original))
+    message = apply(tree, below, remove)
     if not dry_run:
         write(tree, path)
     return message
@@ -136,7 +189,7 @@ SAMPLE_APPCAST = """<?xml version='1.0' encoding='utf-8'?>
 def self_test() -> int:
     failures: list[str] = []
 
-    def check(condition: bool, label: str) -> None:
+    def check_(condition: bool, label: str) -> None:
         if not condition:
             failures.append(label)
 
@@ -147,53 +200,93 @@ def self_test() -> int:
         path.write_text(SAMPLE_APPCAST)
         write(ET.parse(path), path)
         normalized = path.read_text()
-        run(path, None, None, remove=True, dry_run=False)
-        check(path.read_text() == normalized, "removing from an unmarked feed leaves it byte-identical")
+        run(path, None, remove=True, dry_run=False)
+        check_(path.read_text() == normalized, "removing from an unmarked feed leaves it byte-identical")
+        check_(check(ET.parse(path)) == "1.1.63: not marked critical", "check on an unmarked feed")
 
         # Default: newest item, critical for everything older than it.
-        message = run(path, None, None, remove=False, dry_run=False)
-        check(message == "1.1.63: critical for apps below 1.1.63", f"default message: {message}")
+        message = run(path, None, remove=False, dry_run=False)
+        check_(message == "1.1.63: critical for apps below 1.1.63", f"default message: {message}")
         text = path.read_text()
-        check(text.count("<sparkle:criticalUpdate") == 1, "exactly one marker")
-        check('<sparkle:criticalUpdate sparkle:version="1.1.63" />' in text, "marker carries sparkle:version")
+        check_(text.count("<sparkle:criticalUpdate") == 1, "exactly one marker")
+        check_('<sparkle:criticalUpdate sparkle:version="1.1.63" />' in text, "marker carries sparkle:version")
         newest, older = ET.parse(path).getroot().find("channel").findall("item")
-        check(newest.find(CRITICAL_TAG) is not None, "newest item is marked")
-        check(older.find(CRITICAL_TAG) is None, "older item is untouched")
+        check_(newest.find(CRITICAL_TAG) is not None, "newest item is marked")
+        check_(older.find(CRITICAL_TAG) is None, "older item is untouched")
+        check_(check(ET.parse(path)) == "1.1.63: critical for apps below 1.1.63", "check reads the marker")
 
         # Re-running replaces instead of stacking, and --below narrows it.
-        run(path, None, "1.1.60", remove=False, dry_run=False)
+        run(path, "1.1.60", remove=False, dry_run=False)
         text = path.read_text()
-        check(text.count("<sparkle:criticalUpdate") == 1, "re-run replaces the marker")
-        check('sparkle:version="1.1.60"' in text, "--below is honored")
-
-        # A specific older item can be marked.
-        run(path, "1.1.62", None, remove=False, dry_run=False)
-        older = ET.parse(path).getroot().find("channel").findall("item")[1]
-        check(older.find(CRITICAL_TAG).get(VERSION_ATTR) == "1.1.62", "--version picks that item")
+        check_(text.count("<sparkle:criticalUpdate") == 1, "re-run replaces the marker")
+        check_('sparkle:version="1.1.60"' in text, "--below is honored")
 
         # Dry run changes nothing.
         before = path.read_text()
-        run(path, None, "1.1.50", remove=False, dry_run=True)
-        check(path.read_text() == before, "dry run leaves the file alone")
+        run(path, "1.1.50", remove=False, dry_run=True)
+        check_(path.read_text() == before, "dry run leaves the file alone")
 
-        # --remove clears it, and the feed goes back to the normalized text.
-        run(path, None, None, remove=True, dry_run=False)
-        run(path, "1.1.62", None, remove=True, dry_run=False)
-        check(path.read_text() == normalized, "remove restores the original feed")
+        # --remove restores the normalized feed.
+        run(path, None, remove=True, dry_run=False)
+        check_(path.read_text() == normalized, "remove restores the original feed")
+
+        # A later release: the default floor stops at the first self-updating
+        # build, and a marker left on the old item is cleared.
+        tree = ET.parse(path)
+        apply(tree, None, remove=False)
+        channel = tree.getroot().find("channel")
+        later = ET.fromstring(
+            f'<item xmlns:sparkle="{SPARKLE_NS}"><title>1.1.64</title>'
+            "<sparkle:version>1.1.64</sparkle:version></item>"
+        )
+        channel.insert(list(channel).index(channel.find("item")), later)
+        try:
+            check(tree)
+            failures.append("check should flag a marker left only on an older item")
+        except ValueError:
+            pass
+        message = apply(tree, None, remove=False)
+        check_(message == "1.1.64: critical for apps below 1.1.63", f"later default floor: {message}")
+        check_(later.find(CRITICAL_TAG) is not None, "the new newest item is marked")
+        check_(check(tree) == "1.1.64: critical for apps below 1.1.63", "check passes once carried forward")
+        run_remove = apply(tree, None, remove=True)
+        check_(run_remove == "1.1.64: not marked critical", f"remove message: {run_remove}")
+        try:
+            check(tree)
+            failures.append("check should flag the previous release marked, newest not")
+        except ValueError:
+            pass
+
+        # Newest means highest version, not first in the file.
+        channel.remove(later)
+        channel.append(later)
+        check_(item_version(newest_item(channel.findall("item"))) == "1.1.64", "newest is by version")
 
         # Guard rails.
-        for label, args in (
-            ("floor newer than the item", (None, "1.1.64")),
-            ("unknown item", ("9.9.9", None)),
-            ("malformed floor", (None, "1.1.x")),
+        for label, below in (
+            ("floor above the item", "1.1.64"),
+            ("malformed floor", "1.1.x"),
+            ("empty floor", ""),
         ):
             try:
-                run(path, args[0], args[1], remove=False, dry_run=True)
+                run(path, below, remove=False, dry_run=True)
                 failures.append(f"{label} should fail")
             except ValueError:
                 pass
 
-        check(parse_version("1.1.10") > parse_version("1.1.9"), "versions compare numerically")
+        # A feed that wouldn't survive a no-op rewrite is refused untouched.
+        odd = Path(tmp) / "odd.xml"
+        odd.write_text(SAMPLE_APPCAST.replace("<channel>", "<channel>\n    <!-- keep me -->", 1))
+        odd_before = odd.read_bytes()
+        try:
+            run(odd, None, remove=False, dry_run=False)
+            failures.append("a feed with a comment should be refused")
+        except ValueError:
+            pass
+        check_(odd.read_bytes() == odd_before, "a refused feed is left untouched")
+
+        check_(parse_version("1.1.10") > parse_version("1.1.9"), "versions compare numerically")
+        check_(default_floor("1.1.62") == "1.1.62", "floor is the item itself before 1.1.63")
 
     # The live feed must round-trip through this writer unchanged, or marking
     # it would rewrite unrelated items.
@@ -203,7 +296,11 @@ def self_test() -> int:
             copy = Path(tmp) / "appcast.xml"
             copy.write_bytes(live.read_bytes())
             write(ET.parse(copy), copy)
-            check(copy.read_bytes() == live.read_bytes(), "docs/appcast.xml round-trips byte-identical")
+            check_(
+                copy.read_bytes() == live.read_bytes(),
+                "docs/appcast.xml no longer round-trips byte-identical; rewrite it with "
+                "generate-sparkle-appcast.sh's writer (ElementTree, indent 2) so the marker stays a one-line change",
+            )
 
     if failures:
         for failure in failures:
@@ -216,9 +313,12 @@ def self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--appcast", type=Path, default=repo_root() / "docs" / "appcast.xml")
-    parser.add_argument("--version", help="item to mark (default: the newest item)")
-    parser.add_argument("--below", help="apps below this CFBundleVersion treat it as critical (default: the item's own version)")
-    parser.add_argument("--remove", action="store_true", help="remove the marker instead")
+    parser.add_argument(
+        "--below",
+        help=f"apps below this CFBundleVersion get the window (default: the newest item's version, capped at {FIRST_SELF_UPDATING_VERSION})",
+    )
+    parser.add_argument("--remove", action="store_true", help="clear the marker from the newest item")
+    parser.add_argument("--check", action="store_true", help="print the marker state; fail if the previous release is marked and the newest is not")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -227,8 +327,11 @@ def main(argv: list[str]) -> int:
         return self_test()
 
     try:
-        message = run(args.appcast, args.version, args.below, args.remove, args.dry_run)
-    except (ValueError, ET.ParseError, FileNotFoundError) as error:
+        if args.check:
+            print(check(ET.parse(args.appcast)))
+            return 0
+        message = run(args.appcast, args.below, args.remove, args.dry_run)
+    except (ValueError, ET.ParseError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     print(("dry run, not written: " if args.dry_run else "") + message)

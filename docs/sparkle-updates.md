@@ -170,6 +170,11 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
    rewrites its enclosure URL to the matching GitHub release asset, aligns the
    minimum macOS version with `Info.plist`, and then writes the merged result
    back to `docs/appcast.xml`.
+6a. If the owner said yes to reaching old versions (see "Reaching people on old
+   versions" below), run `python3 scripts/release/mark-appcast-critical.py` and
+   check the only diff is one `<sparkle:criticalUpdate ... />` line in the new
+   item. Either way, run `python3 scripts/release/mark-appcast-critical.py --check`:
+   it fails if the previous release was marked and this one isn't.
 7. Upload the release archive to GitHub Releases.
 8. Verify the published update path:
 
@@ -200,29 +205,53 @@ Sparkle will then discover the new version from the appcast URL on the next app 
 
 ## Reaching people on old versions
 
-Every build through 1.1.62 answers `standardUserDriverShouldHandleShowingScheduledUpdate`
-with `update.isCriticalUpdate` and ships without automatic downloads. On those
-installs a background check that finds a normal update shows nothing, and the
-app's own Install action is the only way in (PostHog, 2026-09-24: 1.1.56 installs
-clicked Install Update 105 times on 14 devices in 21 days and almost none
-downloaded). Installed apps can't be patched, but the feed can mark the newest
-item critical for anything older:
+Builds 1.1.22 through 1.1.62 answer `standardUserDriverShouldHandleShowingScheduledUpdate`
+with `update.isCriticalUpdate`, ship without automatic downloads, and their own
+Install action does nothing while Sparkle's held reminder is open. On those
+installs a check that finds a normal update shows nothing useful (PostHog,
+2026-09-24: 1.1.56 installs clicked Install Update 105 times on 14 devices in 21
+days and almost none downloaded). Installed apps can't be patched, but the feed
+can mark the newest item critical for anything older:
 
 ```bash
-python3 scripts/release/mark-appcast-critical.py --dry-run            # newest item, critical below its own version
-python3 scripts/release/mark-appcast-critical.py [--below 1.1.60]     # writes docs/appcast.xml
-python3 scripts/release/mark-appcast-critical.py --remove             # undo
+python3 scripts/release/mark-appcast-critical.py --dry-run   # show what it would do
+python3 scripts/release/mark-appcast-critical.py             # write docs/appcast.xml
+python3 scripts/release/mark-appcast-critical.py --check     # state; fails if the previous release is marked and the newest isn't
+python3 scripts/release/mark-appcast-critical.py --remove    # undo
 ```
 
-It adds `<sparkle:criticalUpdate sparkle:version="X" />` to that item, so apps whose
-`CFBundleVersion` is below X get Sparkle's own update window on the next
-scheduled check (every 4 hours). That window has no Skip or Remind Me Later
-button, only Install Update, and closing it brings it back on the next check.
-Apps at X or newer are unaffected. Run it after step 6 of the release flow and
-commit it with the appcast. Only the newest item decides, so re-run it on each
-release while old versions are still around. Pushing it is publishing: it needs
-the owner's explicit go like the rest of the appcast.
+It adds `<sparkle:criticalUpdate sparkle:version="X" />` to the newest item, and
+refuses to write a feed that ElementTree wouldn't round-trip byte for byte (a
+comment or CDATA), so the published diff is always that one line. Apps
+whose `CFBundleVersion` is below X then get Sparkle's own update window: on the
+check at launch and on each scheduled check (every 4 hours on current builds),
+once the app is next brought to the front. The window has Install Update, the
+"Automatically download and install" checkbox, and no Skip or Remind Me Later
+button; closing it brings it back on the next check. People who turned automatic
+downloads on get a silent download and install on quit instead, and people who
+turned automatic checks off never see it.
 
+Who it reaches: 1.1.22 to 1.1.62. Builds 1.1.17 to 1.1.21 hard-code `false` in
+that delegate, so nothing in the feed can make them prompt. Builds up to 1.1.16
+have no such delegate and already show Sparkle's normal window.
+
+X defaults to the newest item's version, capped at 1.1.63. 1.1.63 is the first
+build with automatic downloads on and a working Install action, so later releases
+stay quiet for anyone already on 1.1.63 or newer. Don't raise `--below` past 1.1.63
+without a reason: those builds still hand critical updates to Sparkle's no-Skip
+window.
+
+Only the newest item counts, and `generate-sparkle-appcast.sh` adds each new item
+unmarked. So it is a numbered release step below (step 6a), repeated each release
+while builds older than 1.1.63 are still active. Markers left on older items are
+inert (the feed still has bare ones on 1.1.22 and 1.1.23 from April). Pushing the
+marked appcast is publishing and needs the owner's explicit go, like the rest of
+the appcast.
+
+Old builds don't guard Sparkle-driven installs during a recording. If someone
+opens the menu mid-meeting, the pending window can come up then, and Install
+starts the full download. Install and Relaunch still goes through the app's quit
+confirmation (Keep Recording is the default), so a recording isn't lost.
 
 ## Signing key
 
