@@ -132,6 +132,7 @@ allowlist.
 - `settings_toggle_changed`
 - `settings_permission_cta_clicked`
 - `settings_capture_library_changed`
+- `launch_models_warmed`
 - `dictation_start_requested`
 - `dictation_started`
 - `dictation_start_failed`
@@ -155,6 +156,7 @@ allowlist.
 - `dictation_pinned_microphone_silent_input`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
+- `meeting_system_audio_prompt_answered`
 - `meeting_detected_call_ended`
 - `meeting_prompt_shown`
 - `meeting_prompt_choice_made`

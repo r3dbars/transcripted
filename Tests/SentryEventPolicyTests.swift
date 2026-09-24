@@ -573,6 +573,42 @@ func testSentryEventPolicy() {
             "generic degraded-capture reporting must run only after timeout and no-audio terminals return"
         )
     }
+
+    runSuite("Meeting failures stay splittable by mic backend without raw pinned counts") {
+        let context = [
+            "mic_backend": "pinned_ioproc",
+            "pinned_mic_restart_bucket": "2_3",
+            "pinned_mic_gap_bucket": "4_9",
+            "pinned_mic_padded_bucket": "1_9s",
+            "pinned_mic_dropped_callback_bucket": "1",
+            "pinned_mic_restart_count": "3",
+            "pinned_mic_gap_count": "6",
+            "pinned_mic_padded_seconds": "4",
+            "pinned_mic_dropped_callback_count": "1",
+            "audio_device": "Jane's AirPods Pro",
+        ]
+        for event in ["meeting_start_failed", "recording_stop_timeout", "meeting_recording_missing_audio", "meeting_capture_stopped_under_controller"] {
+            let tags = SentryEventPolicy.diagnosticTags(forEngine: "meeting", event: event, context: context)
+            assertEqual(tags["mic_backend"], "pinned_ioproc", "\(event) should say which recorder captured the mic")
+            assertEqual(tags["pinned_mic_restart_bucket"], "2_3", "\(event) keeps bucketed restarts")
+            assertEqual(tags["pinned_mic_gap_bucket"], "4_9", "\(event) keeps bucketed gaps")
+            assertEqual(tags["pinned_mic_padded_bucket"], "1_9s", "\(event) keeps bucketed padding")
+            assertEqual(tags["pinned_mic_dropped_callback_bucket"], "1", "\(event) keeps bucketed dropped callbacks")
+            assertNil(tags["pinned_mic_restart_count"], "raw counts stay local")
+            assertNil(tags["pinned_mic_gap_count"], "raw counts stay local")
+            assertNil(tags["pinned_mic_padded_seconds"], "raw padding stays local")
+            assertNil(tags["pinned_mic_dropped_callback_count"], "raw counts stay local")
+            assertNil(tags["audio_device"], "device names stay out of Sentry tags")
+        }
+
+        // The tag allowlist alone must not create new Sentry issues: the
+        // meeting start and stop successes stay local.
+        assertEqual(
+            SentryEventPolicy.diagnosticTags(forEngine: "meeting", event: "meeting_recording_stopped", context: context),
+            [:],
+            "a successful stop is not a Sentry event"
+        )
+    }
 }
 
 private func sentrySourceSlice(_ source: String, from start: String, to end: String) -> String {

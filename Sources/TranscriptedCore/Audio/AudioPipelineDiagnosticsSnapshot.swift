@@ -117,13 +117,24 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     // scalar-drop detection stay correct when the meeting input policy
     // overrides a Bluetooth headset to the built-in mic.
     public let capturedInputVolumeDuring: String
+    // The last Core Audio tap step that refused and its OSStatus code
+    // (`SystemAudioTapFailure`). "none" when nothing failed or the backend
+    // is not the process tap. Defaulted so existing fixtures keep compiling.
+    public var systemTapFailedStep: String = "none"
+    public var systemTapFailedStatus: String = "none"
+    // What the tap did to keep call audio alive this recording. Raw counts
+    // here; the app buckets them before anything leaves the device.
+    public var systemTap: SystemAudioTapDiagnostics = .empty
+    // Mic graph rebuilds because the input format moved (AirPods call
+    // profile), start and recovery combined.
+    public var micFormatRebuildCount: Int = 0
     /// Which recorder captures the meeting mic: `pinnedMicBackend` while
     /// `PinnedMicrophoneCapture` owns it, `engineMicBackend` otherwise. Always
-    /// one of those two strings.
-    public let micBackend: String
+    /// one of those two strings. Defaulted so existing fixtures keep compiling.
+    public var micBackend: String = AudioPipelineDiagnosticsSnapshot.engineMicBackend
     /// The pinned recorder's own health counts. Nil on the `AVAudioEngine`
     /// path. Plain counters: no device identity rides along.
-    public let pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics?
+    public var pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics? = nil
 
     public static let pinnedMicBackend = PinnedMicrophoneCapture.diagnosticBackendName
     public static let engineMicBackend = "av_audio_engine"
@@ -146,6 +157,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "mic_processing": micProcessingLabel,
             "mic_processed_peak": micProcessedPeak,
             "mic_raw_peak": micRawPeak,
+            "mic_format_rebuilds": "\(micFormatRebuildCount)",
             "mic_recovering": boolString(micRecovering),
             "output_device_class": outputDeviceClass,
             "output_rate_hz": outputRateHz,
@@ -164,6 +176,16 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "system_output_rate_hz": systemOutputRateHz,
             "system_rate_hz": systemRateHz,
             "system_status": systemStatus,
+            "system_tap_status": systemTapFailedStatus,
+            "system_tap_step": systemTapFailedStep,
+            "system_end_reason": systemTap.endReason,
+            "system_format_reconnects": "\(systemTap.formatReconnects)",
+            "system_rebuild_retries": "\(systemTap.rebuildRetries)",
+            "system_silent_reconnects": "\(systemTap.silentAfterWakeReconnects)",
+            "system_silent_unresolved": boolString(systemTap.silentAfterWakeUnresolved),
+            "system_sleep_count": "\(systemTap.sleeps)",
+            "system_stall_reconnects": "\(systemTap.stallReconnects)",
+            "system_wake_reconnects": "\(systemTap.wakeReconnects)",
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
             "voice_processing_start_fallback": voiceProcessingStartFallback,
@@ -240,6 +262,9 @@ extension Audio {
         let signalSnapshot = signalDiagnosticsSnapshot
         let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
         let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
+        let tapCapture = systemAudioCapture as? CoreAudioSystemAudioCapture
+        let tapFailure = tapCapture?.lastHardwareFailure ?? .none
+        let tapDiagnostics = tapCapture?.diagnostics ?? .empty
         // Take the reference under the graph lock, then read the counters
         // (a hop onto the capture's own queue) after releasing it.
         let pinnedCapture = withAudioGraphLock { pinnedMicrophoneCapture }
@@ -283,6 +308,10 @@ extension Audio {
             defaultSystemOutputVolumeDuring: routeVolumeDuring.defaultSystemOutputVolume,
             capturedInputVolumeBefore: recordingStartCapturedInputVolume(matching: currentCapturedInputDevice),
             capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice),
+            systemTapFailedStep: tapFailure.step,
+            systemTapFailedStatus: tapFailure.status,
+            systemTap: tapDiagnostics,
+            micFormatRebuildCount: micFormatRebuildCount,
             micBackend: pinnedCapture == nil
                 ? AudioPipelineDiagnosticsSnapshot.engineMicBackend
                 : AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
@@ -301,16 +330,14 @@ extension Audio {
 
     private func currentInputFormatSnapshot() -> AudioRecordingFormatSnapshot? {
         withAudioGraphLock {
-            guard let inputNode else {
-                return pinnedMicrophoneCapture?.recordingFormat.flatMap(AudioRecordingFormatPolicy.snapshot)
-            }
+            guard let inputNode else { return nil }
             return AudioRecordingFormatPolicy.snapshot(recordingFormat(for: inputNode))
         }
     }
 
     private func currentInputDeviceID() -> AudioDeviceID? {
         withAudioGraphLock {
-            guard let inputNode else { return pinnedMicrophoneCapture?.deviceID }
+            guard let inputNode else { return nil }
             let deviceID = inputNode.auAudioUnit.deviceID
             return deviceID.isValid ? deviceID : nil
         }

@@ -4,18 +4,27 @@ import CoreAudio
 import Synchronization
 
 /// What a pinned microphone capture reports to its owner. Delivered on the
-/// capture's serial queue, in order with the audio buffers.
+/// capture's serial queue. `.gap` and `.silentInput` are in order with the
+/// audio buffers; the state events (`.restarted`, `.deviceLost`, `.failed`)
+/// are reported as soon as they happen.
 public enum PinnedMicrophoneCaptureEvent: Equatable, Sendable {
     /// Audio resumed after a hole: a restart, a dropped callback, a device
-    /// switch, or a wake. `paddedSeconds` of silence were delivered just
-    /// before the next real buffer so the timeline stays continuous (zero
-    /// when padding is off or the hole was too long to pad in full).
+    /// switch, or a wake. `paddedSeconds` of silence follow this event, ahead
+    /// of the next real buffer, so the timeline stays continuous (zero when
+    /// padding is off; less than `seconds` when the hole was longer than
+    /// `maxSilencePadSeconds`). Long pads are paced across timer ticks so the
+    /// owner's writer never takes them in one burst.
     case gap(seconds: TimeInterval, paddedSeconds: TimeInterval)
     /// The IOProc was rebuilt on the same pinned device.
     case restarted(PinnedMicrophoneRestartTrigger)
     /// The pinned device went away. Nothing is captured until the owner calls
-    /// `switchDevice(to:)` or stops.
+    /// `switchDevice(to:)` or stops. `isWaitingForDevice` stays true until then.
     case deviceLost
+    /// The device has delivered `silentInputDetectionSeconds` of samples that
+    /// are all exactly 0.0 (a closed MacBook lid, a digitally muted input).
+    /// Reported once per device; `switchDevice(to:)` re-arms it. Capture keeps
+    /// running; the owner decides whether to move to another input.
+    case silentInput
     /// Capture cannot continue on its own. The owner should stop.
     case failed(String)
 }
@@ -74,15 +83,56 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         var stop: () -> Void
         var currentFormat: (AudioDeviceID) throws -> AVAudioFormat
         var isAlive: (AudioDeviceID) -> Bool
+        /// The device's IO buffer size, which sizes the ring. Nil means the
+        /// same 512-frame guess the HAL path uses when the read fails.
+        var bufferFrameSize: (AudioDeviceID) -> UInt32? = { _ in nil }
+    }
+
+    /// Why a queued item waits: silence padding is paced, and real buffers and
+    /// in-order events queued behind it must not overtake it.
+    private enum PendingOutput {
+        case audio(AVAudioPCMBuffer)
+        case silence(frames: Int)
+        case event(PinnedMicrophoneCaptureEvent)
     }
 
     public static let diagnosticBackendName = "pinned_ioproc"
     static let stallTimeoutSeconds: TimeInterval = 3
+    /// Counted rebuilds (stalls, layout mismatches, rebuilds past
+    /// `maxFormatSettleRebuilds`) allowed before audio flows again.
     static let maxConsecutiveRestarts = 5
     static let gapThresholdSeconds: TimeInterval = 0.05
     static let formatCheckIntervalSeconds: TimeInterval = 0.25
     static let sleepPendingAwakeLimitSeconds: TimeInterval = 30
     static let silenceChunkFrames: AVAudioFrameCount = 4096
+    /// A HAL notification burst (the AirPods call-mode switch, wake) must be
+    /// quiet this long before the IOProc is rebuilt, so the burst costs one
+    /// rebuild. A new notification restarts the wait.
+    static let formatSettleSeconds: TimeInterval = 0.3
+    /// Rebuilds driven by fresh HAL notifications (the format is still
+    /// moving) are free up to this many in a row without audio; after that
+    /// they count toward `maxConsecutiveRestarts` so a device that never
+    /// settles still fails instead of rebuilding forever.
+    static let maxFormatSettleRebuilds = 20
+    /// Waits before retrying a rebuild that failed on a device that is still
+    /// alive. When the last retry fails too, the capture reports `.failed`.
+    static let rebuildRetryDelays: [TimeInterval] = [1, 2, 4, 8]
+    /// After wake a mic that may still be running is left alone this long:
+    /// no stall restart, no format poll, no notification-driven rebuild.
+    static let postWakeGraceSeconds: TimeInterval = 3
+    /// Silence padding delivered per timer tick is the smaller of these two.
+    /// The owner's mic writer admits at most 8 MB in flight and ends the
+    /// meeting past that, so a 120 s hole (23 MB of mono 48 kHz) must not
+    /// arrive in one burst.
+    static let maxPadSecondsPerTick: TimeInterval = 1
+    static let maxPadBytesPerTick = 1 * 1_024 * 1_024
+    /// `finishAndDrain` cannot pace: it delivers at most this much of a
+    /// pending pad synchronously, then the tail audio behind it.
+    static let maxPadBytesAtFinish = 4 * 1_024 * 1_024
+    /// A run of real (not padded) audio this long in which every sample is
+    /// exactly 0.0 reports `.silentInput`. Live mics never hold digital zero
+    /// that long; a closed lid or a hardware mute does.
+    static let silentInputDetectionSeconds: TimeInterval = 1.5
 
     private let queue = DispatchQueue(label: "Transcripted.PinnedMicrophoneCapture", qos: .userInitiated)
     private let queueKey = DispatchSpecificKey<Bool>()
@@ -116,12 +166,31 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private var active = false
     private var tearingDown = false
     private var waitingForDevice = false
+    /// Set by `fail`: waiting for nothing, the owner should stop.
+    private var hasFailed = false
     private var generation: UInt64 = 0
     private var lastBufferClock: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
     private var expectedNextHostSeconds: TimeInterval?
     private var consecutiveRestarts = 0
+    private var consecutiveFormatSettleRebuilds = 0
     private var sleepPendingSince: TimeInterval?
+    private var wakeGraceUntil: TimeInterval?
+    /// `ring.halNotifications` as last seen by the consumer.
+    private var observedHALNotifications = 0
+    /// When the current format change was last seen moving (a notification,
+    /// a poll mismatch, or a producer invalidation). Nil while settled.
+    private var formatSettleSince: TimeInterval?
+    /// A HAL notification or poll mismatch, not only a producer layout
+    /// mismatch, is behind the pending rebuild.
+    private var formatSettleIsHALDriven = false
+    /// Hardware is down between failed rebuild attempts on a live device.
+    private var rebuildRetryAt: TimeInterval?
+    private var rebuildRetryAttempt = 0
+    private var rebuildRetryTrigger: PinnedMicrophoneRestartTrigger = .formatChange
+    private var pendingOutput: [PendingOutput] = []
+    private var silentInputRunSeconds: TimeInterval = 0
+    private var silentInputReported = false
     private var restartCount = 0
     private var gapCount = 0
     private var paddedSecondsTotal: TimeInterval = 0
@@ -153,6 +222,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     public var deviceID: AudioDeviceID { serialized { pinnedDeviceID } }
     public var recordingFormat: AVAudioFormat? { serialized { format } }
     public var isActive: Bool { serialized { active } }
+    /// True after `.deviceLost` (or a failed `switchDevice(to:)`) until the
+    /// owner switches to another device or stops. False after `.failed`.
+    public var isWaitingForDevice: Bool { serialized { active && waitingForDevice && !hasFailed } }
     public var diagnostics: PinnedMicrophoneCaptureDiagnostics {
         serialized {
             PinnedMicrophoneCaptureDiagnostics(
@@ -204,10 +276,18 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             self.eventHandler = eventHandler
             active = true
             waitingForDevice = false
+            hasFailed = false
             consecutiveRestarts = 0
+            consecutiveFormatSettleRebuilds = 0
             expectedNextHostSeconds = nil
             sleepPendingSince = nil
+            wakeGraceUntil = nil
+            rebuildRetryAt = nil
+            rebuildRetryAttempt = 0
+            pendingOutput.removeAll()
+            resetSilentInputDetection()
             do { try startHardware() } catch { destroyHardware(); endSession(); throw error }
+            startTimerIfNeeded()
         }
     }
 
@@ -220,7 +300,12 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             destroyHardware()
             pinnedDeviceID = newDeviceID
             waitingForDevice = false
+            hasFailed = false
             consecutiveRestarts = 0
+            consecutiveFormatSettleRebuilds = 0
+            rebuildRetryAt = nil
+            rebuildRetryAttempt = 0
+            resetSilentInputDetection()
             do {
                 try createHardware(on: newDeviceID)
                 try startHardware()
@@ -233,8 +318,10 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     }
 
     /// Stops the device and delivers every buffer it already captured, so
-    /// the words said just before Stop reach the owner. No callback runs
-    /// after this returns.
+    /// the words said just before Stop reach the owner. A pad still pending
+    /// is delivered up to `maxPadBytesAtFinish`, and the rest of it is
+    /// dropped rather than burst into the owner. No callback runs after this
+    /// returns.
     public func finishAndDrain() {
         serialized {
             guard !tearingDown else { return }
@@ -247,10 +334,18 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             let tail = ring
             let tailFormat = deviceFormat
             destroyHardware()
-            if active, let tail, let tailFormat {
-                for _ in 0..<tail.capacity {
-                    guard generation == finishGeneration, let popped = tail.pop(format: tailFormat) else { break }
-                    deliver(popped.buffer, hostSeconds: popped.hostSeconds)
+            if active {
+                if let tail, let tailFormat {
+                    for _ in 0..<tail.capacity {
+                        guard generation == finishGeneration, let popped = tail.pop(format: tailFormat) else { break }
+                        deliver(popped.buffer, hostSeconds: popped.hostSeconds)
+                    }
+                }
+                if generation == finishGeneration, let recording = format {
+                    flushPendingOutput(
+                        padFrameBudget: Self.padFrameBudget(format: recording, seconds: nil, bytes: Self.maxPadBytesAtFinish),
+                        dropsSilenceOverBudget: true
+                    )
                 }
             }
             endSession()
@@ -266,6 +361,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         }
     }
 
+    /// While sleep is pending, a stall, a format poll, a HAL notification or
+    /// a rebuild retry starts no rebuild: buffers and notifications stop and
+    /// fire as the Mac goes down without the mic being broken.
     public func prepareForSystemSleep() {
         queue.async { [weak self] in
             guard let self, self.active else { return }
@@ -275,12 +373,15 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
 
     /// Gives a mic that is still running a grace period after wake instead of
     /// rebuilding it. If it really stopped, the stall check restarts it on the
-    /// same device a few seconds later.
+    /// same device a few seconds later; a format change seen meanwhile is
+    /// rebuilt once, when the grace ends.
     public func recoverAfterSystemWake() {
         queue.async { [weak self] in
             guard let self, self.active else { return }
+            let now = self.clock()
             self.sleepPendingSince = nil
-            self.lastBufferClock = self.clock()
+            self.lastBufferClock = now
+            self.wakeGraceUntil = now + Self.postWakeGraceSeconds
         }
     }
 
@@ -289,16 +390,22 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     /// timeout, so a flowing mic is never rebuilt.
     public func restartIfStalled() {
         queue.async { [weak self] in
-            guard let self, self.active, self.running, self.sleepPendingSince == nil else { return }
-            if self.clock() - self.lastBufferClock > Self.stallTimeoutSeconds {
-                self.restartInPlace(.stall)
+            guard let self, self.active, self.running else { return }
+            let now = self.clock()
+            // A format rebuild is already on its way once the change settles.
+            guard !self.recoveryDeferred(at: now), self.formatSettleSince == nil,
+                  self.ring?.formatInvalidated.load(ordering: .acquiring) != true else { return }
+            if now - self.lastBufferClock > Self.stallTimeoutSeconds {
+                self.restartInPlace(.stall, counted: true)
             }
         }
     }
 
     private func endSession() {
+        timer?.cancel(); timer = nil
         active = false
         waitingForDevice = false
+        hasFailed = false
         callback = nil
         eventHandler = nil
         format = nil
@@ -306,25 +413,46 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         converter = nil
         expectedNextHostSeconds = nil
         sleepPendingSince = nil
+        wakeGraceUntil = nil
+        rebuildRetryAt = nil
+        rebuildRetryAttempt = 0
+        pendingOutput.removeAll()
+        resetSilentInputDetection()
+    }
+
+    /// True while the Mac is falling asleep or just woke. A sleep that never
+    /// reaches a wake must not switch recovery off for the rest of the
+    /// recording, so sleep-pending expires after `sleepPendingAwakeLimitSeconds`.
+    private func recoveryDeferred(at now: TimeInterval) -> Bool {
+        if let since = sleepPendingSince {
+            if now - since > Self.sleepPendingAwakeLimitSeconds {
+                sleepPendingSince = nil
+            } else {
+                return true
+            }
+        }
+        if let until = wakeGraceUntil {
+            if now < until { return true }
+            wakeGraceUntil = nil
+        }
+        return false
     }
 
     // MARK: - Hardware
 
     private func createHardware(on deviceID: AudioDeviceID) throws {
+        resetFormatSettle()
         if let hardwareHooks {
             let current = try hardwareHooks.prepare(deviceID)
+            let fakeRing = try Self.makeRing(format: current, deviceFrameSize: hardwareHooks.bufferFrameSize(deviceID))
             try acceptFormat(current)
-            ring = PinnedMicrophoneBufferRing(format: current)
+            ring = fakeRing
             hardwareDeviceID = deviceID
             return
         }
         let current = try Self.inputFormat(of: deviceID)
+        let ring = try Self.makeRing(format: current, deviceFrameSize: Self.bufferFrameSize(of: deviceID))
         try acceptFormat(current)
-        let frameSize = Int(Self.bufferFrameSize(of: deviceID) ?? 512)
-        let ring = PinnedMicrophoneBufferRing(
-            format: current,
-            maximumFrames: max(4096, min(32768, frameSize * 2))
-        )
         self.ring = ring
         hardwareDeviceID = deviceID
         installListeners(on: deviceID, ring: ring)
@@ -343,6 +471,17 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         ioContext = context
     }
 
+    /// The ring's storage is capped (`PinnedMicrophoneBufferRing.storageByteLimit`).
+    /// A device too wide to fit a sane ring under it is refused, so owners
+    /// fall back to the audio engine instead of reserving hundreds of MB.
+    static func makeRing(format: AVAudioFormat, deviceFrameSize: UInt32?) throws -> PinnedMicrophoneBufferRing {
+        let frameSize = Int(deviceFrameSize ?? 512)
+        guard let layout = PinnedMicrophoneBufferRing.layout(format: format, deviceFrameSize: frameSize) else {
+            throw error(-6, "The microphone has too many channels or too large an IO buffer for the pinned recorder.")
+        }
+        return PinnedMicrophoneBufferRing(format: format, capacity: layout.capacity, maximumFrames: layout.maximumFrames)
+    }
+
     private func startHardware() throws {
         let startGeneration = generation
         if let hardwareHooks { try hardwareHooks.start(hardwareDeviceID) }
@@ -354,7 +493,13 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         running = true
         lastBufferClock = clock()
         lastFormatCheck = lastBufferClock
-        guard hardwareHooks == nil else { return }
+    }
+
+    /// One timer per session, not per IOProc: it keeps ticking while the
+    /// hardware is down (rebuild retries, a lost device) so retries fire and
+    /// paced padding keeps flowing. `endSession` cancels it.
+    private func startTimerIfNeeded() {
+        guard hardwareHooks == nil, timer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(10), leeway: .milliseconds(2))
         timer.setEventHandler { [weak self] in self?.drainAndCheck() }
@@ -363,7 +508,6 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     }
 
     private func destroyHardware() {
-        timer?.cancel(); timer = nil
         running = false
         if ring != nil { hardwareHooks?.stop() }
         if let proc, hardwareDeviceID != kAudioObjectUnknown {
@@ -380,6 +524,13 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         if let ring { retiredDroppedCallbacks += ring.dropped.load(ordering: .relaxed) }
         ring = nil
         hardwareDeviceID = kAudioObjectUnknown
+        resetFormatSettle()
+    }
+
+    private func resetFormatSettle() {
+        observedHALNotifications = 0
+        formatSettleSince = nil
+        formatSettleIsHALDriven = false
     }
 
     /// HAL notifications only flag the ring; the consumer decides what they
@@ -394,7 +545,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         for address in addresses {
             var mutableAddress = address
             let block: AudioObjectPropertyListenerBlock = { [weak ring] _, _ in
-                ring?.formatInvalidated.store(true, ordering: .releasing)
+                ring?.noteHALNotification()
             }
             if AudioObjectAddPropertyListenerBlock(deviceID, &mutableAddress, listenerQueue, block) == noErr {
                 listeners.append((address: address, block: block))
@@ -414,78 +565,149 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     // MARK: - Consumer
 
     private func drainAndCheck() {
-        guard running, let ring, let deviceFormat else { return }
-        let drainGeneration = generation
+        guard active, !tearingDown else { return }
+        let tickGeneration = generation
         let now = clock()
-        // Bound work per tick even if a slow owner lets the producer refill.
-        for _ in 0..<ring.capacity {
-            guard let popped = ring.pop(format: deviceFormat) else { break }
-            lastBufferClock = now
-            consecutiveRestarts = 0
-            deliver(popped.buffer, hostSeconds: popped.hostSeconds)
-            guard running, generation == drainGeneration else { return }
+        let deferred = recoveryDeferred(at: now)
+        if running, let drainRing = ring, let drainFormat = deviceFormat {
+            // Bound work per tick even if a slow owner lets the producer refill.
+            for _ in 0..<drainRing.capacity {
+                guard let popped = drainRing.pop(format: drainFormat) else { break }
+                lastBufferClock = now
+                consecutiveRestarts = 0
+                consecutiveFormatSettleRebuilds = 0
+                deliver(popped.buffer, hostSeconds: popped.hostSeconds)
+                guard running, generation == tickGeneration else { return }
+            }
         }
-        if ring.formatInvalidated.load(ordering: .acquiring) {
+        // Paced padding, then whatever real audio and events wait behind it.
+        // Runs while the hardware is down too, so a lost device or a retry
+        // wait never strands audio that was already captured.
+        if !pendingOutput.isEmpty, let recording = format {
+            flushPendingOutput(
+                padFrameBudget: Self.padFrameBudget(format: recording, seconds: Self.maxPadSecondsPerTick, bytes: Self.maxPadBytesPerTick),
+                dropsSilenceOverBudget: false
+            )
+            guard active, generation == tickGeneration else { return }
+        }
+        if let retryAt = rebuildRetryAt {
+            // Retries wait out a pending sleep but not the wake grace: the
+            // hardware is already down, so waiting only loses audio.
+            if sleepPendingSince == nil, now >= retryAt {
+                rebuildRetryAt = nil
+                attemptRebuild(rebuildRetryTrigger)
+            }
+            return
+        }
+        guard running, let liveRing = ring, let liveFormat = deviceFormat else { return }
+        let invalidated = liveRing.formatInvalidated.load(ordering: .acquiring)
+        let notifications = liveRing.halNotifications.load(ordering: .relaxed)
+        if notifications != observedHALNotifications {
+            observedHALNotifications = notifications
+            formatSettleSince = now
+            formatSettleIsHALDriven = true
+        }
+        if invalidated, formatSettleSince == nil {
+            formatSettleSince = now
+        }
+        if let since = formatSettleSince {
+            // Rebuild once, after the last notification of a burst. Sleep and
+            // the wake grace hold it off the same way they hold off a stall.
+            guard !deferred, now - since >= Self.formatSettleSeconds else { return }
             handleFormatInvalidation()
             return
         }
+        // Buffers stop while the Mac falls asleep and may pause just after
+        // wake. That is not a stall, and the format poll waits too.
+        guard !deferred else { return }
         if now - lastFormatCheck >= Self.formatCheckIntervalSeconds {
             lastFormatCheck = now
             guard isAlive(pinnedDeviceID) else { handleDeviceLost(); return }
-            guard let current = try? currentFormat(of: pinnedDeviceID), current.isEqual(deviceFormat) else {
-                restartInPlace(.formatChange)
+            let current = try? currentFormat(of: pinnedDeviceID)
+            if current?.isEqual(liveFormat) != true {
+                // Same path as a HAL notification: stop taking audio in the
+                // old layout and rebuild once the change settles.
+                liveRing.formatInvalidated.store(true, ordering: .releasing)
+                formatSettleSince = now
+                formatSettleIsHALDriven = true
                 return
             }
         }
-        // Buffers stop while the Mac falls asleep. That is not a stall, but a
-        // sleep that never reaches a wake must not switch stall checks off for
-        // the rest of the recording.
-        if let since = sleepPendingSince, now - since > Self.sleepPendingAwakeLimitSeconds {
-            sleepPendingSince = nil
-        }
-        if now - lastBufferClock > Self.stallTimeoutSeconds, sleepPendingSince == nil {
-            restartInPlace(.stall)
+        if now - lastBufferClock > Self.stallTimeoutSeconds {
+            restartInPlace(.stall, counted: true)
         }
     }
 
-    /// A listener fired (liveness, rate or channel layout) or a callback's
-    /// layout stopped matching. These are rare, and rebuilding the IOProc on
-    /// the same device is cheap and touches nothing else, so always rebuild.
-    /// Callbacks dropped meanwhile come back as a padded gap.
+    /// A listener fired (liveness, rate or channel layout), the poll saw a
+    /// new format, or a callback's layout stopped matching, and nothing new
+    /// arrived for `formatSettleSeconds`. Rebuilding the IOProc on the same
+    /// device is cheap and touches nothing else. Callbacks dropped meanwhile
+    /// come back as a padded gap.
     private func handleFormatInvalidation() {
         guard isAlive(pinnedDeviceID) else { handleDeviceLost(); return }
-        restartInPlace(.formatChange)
+        restartInPlace(.formatChange, counted: !formatSettleIsHALDriven)
     }
 
-    private func restartInPlace(_ trigger: PinnedMicrophoneRestartTrigger) {
+    /// `counted` rebuilds spend `maxConsecutiveRestarts`. A rebuild while the
+    /// HAL is still announcing changes does not, up to `maxFormatSettleRebuilds`
+    /// in a row: a notification burst must not use up the budget before audio
+    /// flows. Audio refills both.
+    private func restartInPlace(_ trigger: PinnedMicrophoneRestartTrigger, counted: Bool) {
         guard active, !tearingDown else { return }
-        consecutiveRestarts += 1
-        guard consecutiveRestarts <= Self.maxConsecutiveRestarts else {
-            fail("The microphone stopped delivering audio and could not be restarted.")
-            return
+        if counted || consecutiveFormatSettleRebuilds >= Self.maxFormatSettleRebuilds {
+            consecutiveRestarts += 1
+            guard consecutiveRestarts <= Self.maxConsecutiveRestarts else {
+                fail("The microphone stopped delivering audio and could not be restarted.")
+                return
+            }
+        } else {
+            consecutiveFormatSettleRebuilds += 1
         }
+        rebuildRetryAttempt = 0
+        rebuildRetryAt = nil
+        attemptRebuild(trigger)
+    }
+
+    /// One rebuild attempt. If it throws while the device is still alive, the
+    /// hardware stays down and the attempt is retried after the next
+    /// `rebuildRetryDelays` wait; only when those run out does the capture
+    /// fail. A device that is gone is reported lost instead.
+    private func attemptRebuild(_ trigger: PinnedMicrophoneRestartTrigger) {
+        guard active, !tearingDown else { return }
         let restartGeneration = generation
         destroyHardware()
         do {
             try createHardware(on: pinnedDeviceID)
             guard generation == restartGeneration else { destroyHardware(); return }
             try startHardware()
+            rebuildRetryAttempt = 0
+            rebuildRetryAt = nil
             restartCount += 1
             emit(.restarted(trigger))
         } catch {
             destroyHardware()
             guard generation == restartGeneration else { return }
-            if !isAlive(pinnedDeviceID) {
+            guard isAlive(pinnedDeviceID) else {
+                rebuildRetryAt = nil
+                rebuildRetryAttempt = 0
                 handleDeviceLost()
-            } else {
-                fail("The microphone could not be restarted.")
+                return
             }
+            guard rebuildRetryAttempt < Self.rebuildRetryDelays.count else {
+                fail("The microphone could not be restarted.")
+                return
+            }
+            rebuildRetryAt = clock() + Self.rebuildRetryDelays[rebuildRetryAttempt]
+            rebuildRetryAttempt += 1
+            rebuildRetryTrigger = trigger
         }
     }
 
     private func handleDeviceLost() {
         guard active, !waitingForDevice else { return }
         destroyHardware()
+        rebuildRetryAt = nil
+        rebuildRetryAttempt = 0
         waitingForDevice = true
         emit(.deviceLost)
     }
@@ -493,7 +715,10 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private func fail(_ message: String) {
         let failureGeneration = generation
         destroyHardware()
+        rebuildRetryAt = nil
+        rebuildRetryAttempt = 0
         waitingForDevice = true
+        hasFailed = true
         guard generation == failureGeneration else { return }
         emit(.failed(message))
     }
@@ -502,13 +727,31 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         eventHandler?(event)
     }
 
+    /// Hands `item` to the owner now when nothing waits ahead of it, else
+    /// queues it behind the pending pad so order is kept. Silence is always
+    /// queued: it is only ever delivered by `flushPendingOutput`, paced.
+    private func deliverInOrder(_ item: PendingOutput) {
+        guard pendingOutput.isEmpty else {
+            pendingOutput.append(item)
+            return
+        }
+        switch item {
+        case let .audio(buffer):
+            callback?(buffer)
+        case let .event(event):
+            emit(event)
+        case .silence:
+            pendingOutput.append(item)
+        }
+    }
+
     private func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval) {
         let deliveryGeneration = generation
         if hostSeconds > 0 {
             if let expected = expectedNextHostSeconds {
                 let hole = hostSeconds - expected
                 if hole > Self.gapThresholdSeconds {
-                    reportGap(seconds: hole)
+                    scheduleGap(seconds: hole)
                     guard generation == deliveryGeneration, callback != nil else { return }
                 }
             }
@@ -518,31 +761,141 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
             // No timestamp: never measure the next hole from a stale one.
             expectedNextHostSeconds = nil
         }
-        if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+        if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted)) }
+        guard generation == deliveryGeneration else { return }
+        trackSilentInput(buffer)
     }
 
-    private func reportGap(seconds: TimeInterval) {
+    /// Reports the hole and queues its silence. The silence goes out paced by
+    /// `flushPendingOutput`, always ahead of the buffer that revealed the hole.
+    private func scheduleGap(seconds: TimeInterval) {
         let gapGeneration = generation
-        var padded: TimeInterval = 0
-        if configuration.padsGapsWithSilence, let format {
+        var paddedFrames = 0
+        var paddedSeconds: TimeInterval = 0
+        if configuration.padsGapsWithSilence, let format, format.sampleRate > 0 {
             let target = min(seconds, configuration.maxSilencePadSeconds)
-            var remaining = AVAudioFrameCount((target * format.sampleRate).rounded())
-            while remaining > 0 {
-                let chunk = min(remaining, Self.silenceChunkFrames)
-                guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { break }
-                silence.frameLength = chunk
-                for item in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
-                    if let data = item.mData { memset(data, 0, Int(item.mDataByteSize)) }
-                }
-                callback?(silence)
-                guard generation == gapGeneration else { return }
-                remaining -= chunk
-                padded += Double(chunk) / format.sampleRate
+            if target.isFinite, target > 0 {
+                paddedFrames = Int((target * format.sampleRate).rounded())
+                paddedSeconds = Double(paddedFrames) / format.sampleRate
             }
         }
         gapCount += 1
-        paddedSecondsTotal += padded
-        emit(.gap(seconds: seconds, paddedSeconds: padded))
+        deliverInOrder(.event(.gap(seconds: seconds, paddedSeconds: paddedSeconds)))
+        guard generation == gapGeneration, paddedFrames > 0 else { return }
+        pendingOutput.append(.silence(frames: paddedFrames))
+    }
+
+    /// Delivers queued output in order. Silence is limited to
+    /// `padFrameBudget` frames per call; when the budget runs out mid-pad the
+    /// rest waits for the next tick, or is dropped when
+    /// `dropsSilenceOverBudget` (finishing: keep the tail audio, not the pad).
+    private func flushPendingOutput(padFrameBudget: Int, dropsSilenceOverBudget: Bool) {
+        let flushGeneration = generation
+        var budget = padFrameBudget
+        while let item = pendingOutput.first {
+            switch item {
+            case let .audio(buffer):
+                pendingOutput.removeFirst()
+                callback?(buffer)
+            case let .event(event):
+                pendingOutput.removeFirst()
+                emit(event)
+            case let .silence(frames):
+                let wanted = min(frames, max(0, budget))
+                let delivered = wanted > 0 ? deliverSilence(frames: wanted) : 0
+                // The owner stopped the capture from inside a callback.
+                guard !pendingOutput.isEmpty else { return }
+                let stillCurrent = generation == flushGeneration
+                budget -= delivered
+                if delivered == frames || (stillCurrent && (delivered < wanted || dropsSilenceOverBudget)) {
+                    // Done; or silence could not be allocated; or finishing.
+                    pendingOutput.removeFirst()
+                } else {
+                    // Out of budget (or the owner switched devices from a
+                    // callback): the rest goes out on a later tick.
+                    pendingOutput[0] = .silence(frames: frames - delivered)
+                    return
+                }
+            }
+            guard generation == flushGeneration else { return }
+        }
+    }
+
+    /// Returns the frames handed to the owner (fewer than asked only when a
+    /// buffer cannot be allocated or the owner stopped the capture).
+    private func deliverSilence(frames: Int) -> Int {
+        guard let format, format.sampleRate > 0 else { return 0 }
+        let silenceGeneration = generation
+        var delivered = 0
+        while delivered < frames {
+            let chunk = min(frames - delivered, Int(Self.silenceChunkFrames))
+            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(chunk)) else { break }
+            silence.frameLength = AVAudioFrameCount(chunk)
+            for item in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
+                if let data = item.mData { memset(data, 0, Int(item.mDataByteSize)) }
+            }
+            callback?(silence)
+            delivered += chunk
+            paddedSecondsTotal += Double(chunk) / format.sampleRate
+            guard generation == silenceGeneration else { break }
+        }
+        return delivered
+    }
+
+    /// Frames of padding one delivery may carry: `seconds` of the recording
+    /// format (no time cap when nil) and never more than `bytes`.
+    static func padFrameBudget(format: AVAudioFormat, seconds: TimeInterval?, bytes: Int) -> Int {
+        let frameBytes = max(1, Int(format.channelCount)) * MemoryLayout<Float>.size
+        var frames = max(1, bytes / frameBytes)
+        if let seconds, seconds.isFinite, format.sampleRate > 0 {
+            let bySeconds = seconds * format.sampleRate
+            if bySeconds < Double(frames) { frames = max(1, Int(bySeconds.rounded(.down))) }
+        }
+        return frames
+    }
+
+    // MARK: - Silent input
+
+    /// Runs on the serial queue on each real buffer, in the device format,
+    /// before conversion. Padding never counts. Stops looking once reported.
+    private func trackSilentInput(_ buffer: AVAudioPCMBuffer) {
+        guard !silentInputReported, !tearingDown, buffer.frameLength > 0 else { return }
+        let rate = buffer.format.sampleRate
+        guard rate > 0 else { return }
+        guard Self.isDigitalSilence(buffer) else {
+            silentInputRunSeconds = 0
+            return
+        }
+        silentInputRunSeconds += Double(buffer.frameLength) / rate
+        // A hair of tolerance so 1.5 s summed from buffer lengths counts.
+        guard silentInputRunSeconds + 1e-9 >= Self.silentInputDetectionSeconds else { return }
+        silentInputReported = true
+        deliverInOrder(.event(.silentInput))
+    }
+
+    private func resetSilentInputDetection() {
+        silentInputRunSeconds = 0
+        silentInputReported = false
+    }
+
+    /// Every sample is exactly 0.0 (negative zero included). Exits at the
+    /// first non-zero sample, which for a live mic is almost always the first.
+    static func isDigitalSilence(_ buffer: AVAudioPCMBuffer) -> Bool {
+        guard buffer.format.commonFormat == .pcmFormatFloat32,
+              let channels = buffer.floatChannelData else { return false }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return false }
+        let channelCount = Int(buffer.format.channelCount)
+        let interleaved = buffer.format.isInterleaved
+        let pointerCount = interleaved ? 1 : channelCount
+        let samplesPerPointer = interleaved ? frames * channelCount : frames
+        for index in 0..<pointerCount {
+            let data = channels[index]
+            for sample in 0..<samplesPerPointer where data[sample] != 0 {
+                return false
+            }
+        }
+        return true
     }
 
     // MARK: - Format
@@ -710,7 +1063,10 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         serialized { ring?.push(buffer.audioBufferList, hostSeconds: hostSeconds) }
     }
     func drainForTesting() { serialized { drainAndCheck() } }
+    /// Same as a HAL property listener firing.
     func invalidateFormatForTesting() {
-        serialized { ring?.formatInvalidated.store(true, ordering: .releasing) }
+        serialized { ring?.noteHALNotification() }
     }
+    var ringStorageBytesForTesting: Int? { serialized { ring?.storageByteCount } }
+    var ringCapacityForTesting: Int? { serialized { ring?.capacity } }
 }
