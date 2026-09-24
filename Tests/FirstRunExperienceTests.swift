@@ -375,7 +375,7 @@ func testFirstRunExperience() {
         let failed = FirstRunExperience.onboardingDoneModelPresentation(for: .failed("boom"))
         assertTrue(failed.isFailed, "a failed load should be marked as failed")
         assertEqual(failed.headline, "Almost set.", "a failed model should not read as done")
-        assertTrue(failed.detail?.contains("Settings → Transcription") == true, "a failed load should say where to retry")
+        assertTrue(failed.detail?.contains("Transcription section in Settings") == true, "a failed load should say where to retry")
         assertFalse(failed.detail?.contains("boom") == true, "raw engine errors should not reach setup")
     }
 }

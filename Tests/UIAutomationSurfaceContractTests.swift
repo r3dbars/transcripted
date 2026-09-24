@@ -869,6 +869,7 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .permissions:\n            return !hasRequiredPermissions")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .done:\n            return !canFinishSetup")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("hasRequiredPermissions || skippedMicrophone")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
             "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
         )

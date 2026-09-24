@@ -177,6 +177,7 @@ struct PermissionsOnboardingView: View {
                     pendingSystemSettingsHandoff = true
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 },
+                functionKeyWarning: Self.functionKeyWarning,
                 dictationShortcutDisplay: Self.dictationShortcutDisplay,
                 meetingShortcutDisplay: Self.meetingShortcutDisplay,
                 shortcutsNeedAccessibility: !accessibilityGranted,
@@ -197,6 +198,16 @@ struct PermissionsOnboardingView: View {
         guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
         return PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        )
+    }
+
+    /// Fn is the default push-to-talk key, and on a Mac where the macOS Fn
+    /// setting was never changed it also opens emoji or switches input. Say
+    /// so here, so the menu bar's warning isn't the first people hear of it.
+    private static var functionKeyWarning: String? {
+        guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
+        return PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
     }
 
@@ -789,6 +800,7 @@ private struct DoneStage: View {
     /// Setup was skipped after a Don't Allow on the microphone.
     let microphoneMissing: Bool
     let onOpenMicrophoneSettings: () -> Void
+    let functionKeyWarning: String?
     let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
     /// Every global shortcut rides an event tap that needs Accessibility, so
@@ -817,6 +829,9 @@ private struct DoneStage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     shortcutList
+                    if let functionKeyWarning {
+                        functionKeyNotice(functionKeyWarning)
+                    }
                 }
 
                 if modelPresentation.statusLine != nil {
@@ -849,6 +864,25 @@ private struct DoneStage: View {
             Button("Open Microphone Settings", action: onOpenMicrophoneSettings)
                 .buttonStyle(QuietPermissionButtonStyle())
                 .accessibilityIdentifier("transcripted.onboarding.done.open-microphone-settings")
+        }
+    }
+
+    private func functionKeyNotice(_ warning: String) -> some View {
+        VStack(spacing: 6) {
+            Text(warning)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Keyboard Settings") {
+                PhysicalDictationTriggerPreferences.openKeyboardSettings()
+            }
+            .buttonStyle(.plain)
+            .font(LibraryTokens.meta)
+            .foregroundStyle(LibraryTokens.accent)
+            .accessibilityIdentifier("transcripted.onboarding.done.open-keyboard-settings")
         }
     }
 

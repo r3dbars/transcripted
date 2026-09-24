@@ -245,6 +245,19 @@ enum FirstRunExperience {
         isLocallyInstalled: Bool = true
     ) -> OnboardingDoneModelPresentation {
         let card = modelCard(for: modelState, model: model, isLocallyInstalled: isLocallyInstalled)
+        // A script-installed model is already on this Mac and loads on
+        // demand, so there's nothing to wait for.
+        if model.parakeetVariant?.isLocalInstallOnly == true,
+           isLocallyInstalled,
+           case .notLoaded = modelState {
+            return OnboardingDoneModelPresentation(
+                headline: "You're set.",
+                statusLine: nil,
+                detail: nil,
+                progress: nil,
+                isFailed: false
+            )
+        }
         switch card.tone {
         case .ready:
             return OnboardingDoneModelPresentation(
@@ -260,7 +273,7 @@ enum FirstRunExperience {
                 statusLine: card.title,
                 detail: model.parakeetVariant?.isLocalInstallOnly == true
                     ? card.detail
-                    : "Try again from Settings → Transcription. Dictation and meetings need it.",
+                    : "Try again from the Transcription section in Settings. Dictation and meetings need it.",
                 progress: nil,
                 isFailed: true
             )

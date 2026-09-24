@@ -50,7 +50,7 @@ enum LaunchAtLoginPreferences {
 /// breaks meeting detection.
 enum LaunchAtLoginNoticePolicy {
     static let needsApprovalText =
-        "macOS is waiting for you to allow Transcripted in Login Items. Until then it won't open at login or catch your meetings."
+        "Transcripted is off in System Settings > Login Items, so it won't open at login. Turn it on there, or switch this off."
 
     static func notice(needsApproval: Bool, failureMessage: String?) -> String? {
         if let failureMessage, !failureMessage.isEmpty {

@@ -20,6 +20,11 @@ enum LaunchAtLoginController {
         SMAppService.mainApp.status == .requiresApproval
     }
 
+    /// macOS can't find the app to register (a DMG, Downloads, or a dev build).
+    static var isUnavailable: Bool {
+        SMAppService.mainApp.status == .notFound
+    }
+
     static func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }

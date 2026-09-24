@@ -2212,6 +2212,7 @@ struct TranscriptedSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         Button("Open Keyboard Settings") {
+                            trackSettingsAction("open_keyboard_settings", page: .general)
                             PhysicalDictationTriggerPreferences.openKeyboardSettings()
                         }
                         .buttonStyle(.link)
@@ -3146,7 +3147,9 @@ struct TranscriptedSettingsView: View {
             // Shown inline under the switch (it used to live only in the
             // tooltip); the raw error is captured to telemetry below.
             launchAtLoginStatus = SettingsActionFailureCopy.launchAtLogin
-            launchAtLoginFailureMessage = SettingsActionFailureCopy.launchAtLogin
+            launchAtLoginFailureMessage = LaunchAtLoginController.isUnavailable
+                ? SettingsActionFailureCopy.launchAtLoginUnavailable
+                : SettingsActionFailureCopy.launchAtLogin
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "app",
