@@ -243,8 +243,9 @@ final class MeetingSessionController: ObservableObject {
     /// clear it, so a Boost that never applied before Stop is saved as
     /// `shown`, not `accepted`.
     private var micBoostArmPendingIdentity: UUID?
-    /// Recording time the current "can't hear the call" stretch began.
-    private var unheardPlaybackWarningStartedAt: TimeInterval?
+    /// When the current "can't hear the call" stretch began. Wall clock, not
+    /// `recordingDuration`, which reads 0 once an unexpected stop reset it.
+    private var unheardPlaybackWarningStartedAt: Date?
     private var activeRecordingSuggestedTitle: String?
     /// The user chose "Record Just My Mic" for this recording, so a silent
     /// system track is expected and must not raise the unverified banner.
@@ -2567,6 +2568,7 @@ final class MeetingSessionController: ObservableObject {
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
+        let snapshotTakenAt = Date()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
@@ -2618,7 +2620,11 @@ final class MeetingSessionController: ObservableObject {
                     health: captureHealthFacts(from: recordingSnapshot.healthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: "internal_stop",
-                    durationSeconds: recordingSnapshot.durationSeconds,
+                    durationSeconds: MeetingCaptureHealthTelemetry.unexpectedStopDurationSeconds(
+                        mirroredDuration: recordingSnapshot.durationSeconds,
+                        recordingStartedAt: recordingSnapshot.recordingStartedAt,
+                        now: snapshotTakenAt
+                    ),
                     systemStreamPresent: files.systemURL != nil,
                     stopTimedOut: stopResult.didTimeOut,
                     captureOutcome: failureOutcome.rawValue
@@ -3852,7 +3858,7 @@ final class MeetingSessionController: ObservableObject {
                 && systemAudioDegradationWarning?.phase != .recovered
             if isUnheard, !wasUnheard {
                 // The report comes after about a minute of hearing nothing.
-                unheardPlaybackWarningStartedAt = max(0, recordingDuration - MeetingCaptureBridge.systemAudioUnheardReportSeconds)
+                unheardPlaybackWarningStartedAt = Date().addingTimeInterval(-MeetingCaptureBridge.systemAudioUnheardReportSeconds)
                 recordUnheardPlaybackWarning()
             } else if !isUnheard {
                 unheardPlaybackWarningStartedAt = nil
@@ -3905,7 +3911,7 @@ final class MeetingSessionController: ObservableObject {
         if MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
             systemAudioDegradationWarning,
             didLosePlayback: capture.systemAudioDidLosePlayback,
-            unheardSeconds: unheardPlaybackWarningStartedAt.map { max(0, durationSeconds - $0) } ?? 0
+            unheardSeconds: unheardPlaybackWarningStartedAt.map { max(0, Date().timeIntervalSince($0)) } ?? 0
         ) {
             healthInfo = baseHealthInfo.markingSystemAudioDegraded()
         } else {
