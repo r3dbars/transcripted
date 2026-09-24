@@ -3054,21 +3054,21 @@ struct TranscriptedSettingsView: View {
 
     private func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
-            diagnosticsActionStatus = "Sentry is not configured in this build yet."
+            diagnosticsActionStatus = "Diagnostics aren't available in this build. Click Email Support and tell us what happened instead."
             return
         }
 
         guard crashReportingEnabled else {
-            diagnosticsActionStatus = "Turn on crash and error reports first."
+            diagnosticsActionStatus = "Turn on \"Crash reports\" in the Privacy section above first, then try again."
             return
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Diagnostic event could not be queued."
+            diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
             return
         }
 
-        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
+        diagnosticsActionStatus = SupportDiagnosticsStatusCopy.sent(eventID: eventID)
     }
 
     private var captureLibraryChoicePromptBinding: Binding<Bool> {

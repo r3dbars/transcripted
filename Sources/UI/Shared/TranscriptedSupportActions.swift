@@ -9,18 +9,27 @@ enum TranscriptedSupportActions {
         SupportEmailDispatcher.open(feedbackEmailURL(appState: appState))
     }
 
+    /// The last diagnostic event sent this session. Email Support includes
+    /// it so the email and the event can be matched up.
+    private(set) static var lastDiagnosticReportID: String?
+
     static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {
         let snapshot = diagnosticsSnapshot(appState: appState)
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)
 
         AnalyticsReporter.track("support_diagnostic_event_sent")
-        return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        let eventID = CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        if let eventID {
+            lastDiagnosticReportID = eventID
+        }
+        return eventID
     }
 
     static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {
         FeedbackIssueBuilder.emailURL(
             rawLogLines: [],
-            diagnostics: diagnosticsText(appState: appState)
+            diagnostics: diagnosticsText(appState: appState),
+            diagnosticReportID: lastDiagnosticReportID
         )
     }
 
