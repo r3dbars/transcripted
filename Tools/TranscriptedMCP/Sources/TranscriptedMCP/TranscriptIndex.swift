@@ -161,10 +161,13 @@ final class TranscriptIndex: @unchecked Sendable {
         // loser fails with "UNIQUE constraint failed: meeting_summary_documents.filename",
         // which used to abort its whole pass. Holding the lock, the second process
         // re-reads the indexed mtimes after the first commits and skips that work.
+        // The lock is taken before `queue`, not inside it: waiting on another
+        // process's pass must not block this server's own read tools, which share
+        // `queue` and can read the WAL database while the other process writes.
         var failedFileCount = 0
         var firstFailure: Error?
-        try queue.sync {
-            try Self.withExclusiveLock(at: reconcileLockPath) {
+        try Self.withExclusiveLock(at: reconcileLockPath) {
+            try queue.sync {
                 var seenPaths: Set<String> = []
                 var diskMap: [String: ContextArtifactFile] = [:]
 
@@ -211,15 +214,18 @@ final class TranscriptIndex: @unchecked Sendable {
                 }
             }
         }
-        if let firstFailure {
-            log("Reconcile skipped files that failed to index (count_bucket=\(MCPLogPrivacy.countBucket(failedFileCount)))")
-            throw firstFailure
-        }
 
         // Best-effort: embed any newly indexed rows. Never fails the reconcile —
-        // lexical search must keep working even if embedding hits a snag.
+        // lexical search must keep working even if embedding hits a snag. Runs
+        // even when some files failed, so the files that did index still get
+        // vectors instead of waiting for the bad file to be fixed.
         if updateEmbeddings {
             reconcileEmbeddings()
+        }
+
+        if let firstFailure {
+            log("Reconcile skipped files that failed to index (count_bucket=\(MCPLogPrivacy.countBucket(failedFileCount)))")
+            throw MCPReconcileFileFailures(failedFileCount: failedFileCount, firstFailure: firstFailure)
         }
     }
 
@@ -247,17 +253,19 @@ final class TranscriptIndex: @unchecked Sendable {
         return result
     }
 
-    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextArtifactKind) throws {
+    /// Returns false when the file couldn't be parsed, so nothing was written.
+    @discardableResult
+    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextArtifactKind) throws -> Bool {
         switch kind {
         case .meeting:
-            try indexMeeting(file: url, filename: filename, modDate: modDate)
+            return try indexMeeting(file: url, filename: filename, modDate: modDate)
         case .dictationDay:
-            try indexDictationDay(file: url, filename: filename, modDate: modDate)
+            return try indexDictationDay(file: url, filename: filename, modDate: modDate)
         }
     }
 
-    private func indexMeeting(file url: URL, filename: String, modDate: TimeInterval) throws {
-        guard let transcript = TranscriptLoader.loadMeeting(url) else { return }
+    private func indexMeeting(file url: URL, filename: String, modDate: TimeInterval) throws -> Bool {
+        guard let transcript = TranscriptLoader.loadMeeting(url) else { return false }
         let speakers = TranscriptLoader.speakerLookup(from: transcript)
 
         let dateOnly = String(transcript.recording.date.prefix(10))
@@ -309,6 +317,7 @@ final class TranscriptIndex: @unchecked Sendable {
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
+        return true
     }
 
     /// Parse the meeting's structured summary (inline transcript summary, then a
@@ -359,8 +368,8 @@ final class TranscriptIndex: @unchecked Sendable {
         )
     }
 
-    private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws {
-        guard let day = TranscriptLoader.loadDictationDay(url) else { return }
+    private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws -> Bool {
+        guard let day = TranscriptLoader.loadDictationDay(url) else { return false }
 
         let latestEntryDate = day.entries.last?.createdAt ?? "\(day.date)T00:00:00+0000"
 
@@ -403,13 +412,19 @@ final class TranscriptIndex: @unchecked Sendable {
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed dictation day (entry_count_bucket=\(MCPLogPrivacy.countBucket(day.entries.count)))")
+        return true
     }
 
+    /// `indexOne` clears the file's old rows inside its own transaction, so a
+    /// failed reindex rolls back to the old rows instead of dropping the file
+    /// from the index. Only a file that no longer parses is removed.
     private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {
-        try removeFromIndex(filename: filename)
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate?.timeIntervalSince1970) ?? Date().timeIntervalSince1970
-        try indexOne(file: url, filename: filename, modDate: modDate, kind: kind)
+        let indexed = try indexOne(file: url, filename: filename, modDate: modDate, kind: kind)
+        if !indexed {
+            try removeFromIndex(filename: filename)
+        }
     }
 
     private func removeFromIndex(filename: String) throws {
@@ -1767,11 +1782,17 @@ enum MCPStartupIndexing {
         dictationDirs: [URL]
     ) throws {
         index.embeddingStore?.deferSemanticSearchUntilReconciled()
-        try index.reconcile(
-            meetingDirs: meetingDirs,
-            dictationDirs: dictationDirs,
-            updateEmbeddings: false
-        )
+        do {
+            try index.reconcile(
+                meetingDirs: meetingDirs,
+                dictationDirs: dictationDirs,
+                updateEmbeddings: false
+            )
+        } catch is MCPReconcileFileFailures {
+            // Some files failed but the rest are indexed and the index is usable.
+            // reconcile already logged the count; the watcher retries on change.
+            // Pre-pass errors (lock, database) still stop startup.
+        }
     }
 
     static func completeAfterAttach(index: TranscriptIndex) {
