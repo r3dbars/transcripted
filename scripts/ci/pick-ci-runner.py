@@ -176,7 +176,10 @@ def reroute(api: str, repo: str, token: str, run: int) -> None:
                 break
             if attempt == 11:
                 # build-and-test runs even after a cancel (if: always()).
-                _post(f"{api}/repos/{repo}/actions/runs/{run}/force-cancel", token)
+                try:
+                    _post(f"{api}/repos/{repo}/actions/runs/{run}/force-cancel", token)
+                except Exception:  # noqa: BLE001 - e.g. 409 once it already stopped
+                    pass
             time.sleep(5)
         for attempt in range(3):
             try:

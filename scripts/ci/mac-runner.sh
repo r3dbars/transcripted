@@ -331,7 +331,9 @@ waiting_mac_jobs() {
     out="$(gh api "repos/$REPO/actions/runs/$run/jobs?filter=latest&per_page=100" --jq \
       "[.jobs[] | select(.name == \"checks\" or .name == \"spm-tests\")] as \$ours
        | [\$ours[] | select(.status == \"queued\" and ((.labels // []) | any(. == \"$LABEL\")))] as \$waiting
-       | if (\$ours | length) >= 2 and (\$waiting | length) == 0 then \"settled\"
+       | ([.jobs[] | select(.name == \"pick-runner\" and .status == \"completed\")] | length > 0) as \$picked
+       | if \$picked and (\$ours | length) >= 2 and ([\$ours[] | select((.labels // []) | length > 0)] | length) >= 2
+            and (\$waiting | length) == 0 then \"settled\"
          else (\$waiting[] | \"$run \\(now - (.created_at | fromdateiso8601) | floor)\") end")" \
       || return 1
     if [ "$out" = "settled" ]; then
@@ -363,6 +365,7 @@ reroute_run() {
   for i in $(seq 1 30); do
     status="$(gh api "repos/$REPO/actions/runs/$run" --jq .status 2>/dev/null || echo unknown)"
     [ "$status" = "completed" ] && break
+    [ "$LAST_BEAT" = "none" ] || set_heartbeat "$LAST_BEAT"
     # build-and-test runs even after a cancel (if: always()); don't wait on it.
     [ "$i" -ne 12 ] || gh api -X POST "repos/$REPO/actions/runs/$run/force-cancel" >/dev/null 2>&1 || true
     sleep 5
@@ -620,49 +623,74 @@ PROBE
 #!/bin/bash
 set -euo pipefail
 user="$1"
+realpath_of() { /usr/bin/python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+# True when the job user can write, or owns (and so could chmod), the path
+# or any folder above it, following symlinks too.
 user_can_change() {
   local p
-  for p in "$1" "$(/usr/bin/python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")"; do
+  for p in "$1" "$(realpath_of "$1")"; do
     while [ -n "$p" ] && [ "$p" != "/" ]; do
-      if sudo -u "$user" test -w "$p"; then return 0; fi
+      if sudo -u "$user" test -w "$p" || sudo -u "$user" test -O "$p"; then return 0; fi
       p="$(dirname "$p")"
     done
   done
   return 1
 }
 buddy=/usr/libexec/PlistBuddy
-mkdir -p /Library/TranscriptedCI/daemons
-chown root:wheel /Library/TranscriptedCI /Library/TranscriptedCI/daemons
-chmod 755 /Library/TranscriptedCI /Library/TranscriptedCI/daemons
+safe_dir=/Library/TranscriptedCI/daemons
+mkdir -p "$safe_dir"
+chown root:wheel /Library/TranscriptedCI "$safe_dir"
+chmod 755 /Library/TranscriptedCI "$safe_dir"
 bad=0
+flag() { echo "$*"; bad=1; }
+check_libs() {
+  local lib
+  for lib in $(otool -L "$1" 2>/dev/null | awk 'NR > 1 {print $1}'); do
+    case "$lib" in /*) ;; *) continue ;; esac
+    [ ! -e "$lib" ] || ! user_can_change "$lib" || flag "$1 loads $lib, which the job user can change"
+  done
+}
 for plist in /Library/LaunchDaemons/*.plist; do
   [ -f "$plist" ] || continue
-  if user_can_change "$plist"; then echo "the job user can edit $plist"; bad=1; continue; fi
-  key=":Program"
-  prog="$("$buddy" -c "Print $key" "$plist" 2>/dev/null || true)"
-  if [ -z "$prog" ]; then
-    key=":ProgramArguments:0"
-    prog="$("$buddy" -c "Print $key" "$plist" 2>/dev/null || true)"
+  if user_can_change "$plist"; then flag "the job user can edit $plist"; continue; fi
+  prog="$("$buddy" -c "Print :Program" "$plist" 2>/dev/null || true)"
+  arg0="$("$buddy" -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || true)"
+  exe="${prog:-$arg0}"
+  if [ -n "$exe" ] && [ "${exe#/}" != "$exe" ] && [ -f "$exe" ] && user_can_change "$exe"; then
+    safe="$safe_dir/$(basename "$exe")-$(printf '%s' "$exe" | shasum | cut -c1-8)"
+    install -o root -g wheel -m 755 "$(realpath_of "$exe")" "$safe"
+    [ "$prog" != "$exe" ] || "$buddy" -c "Set :Program $safe" "$plist"
+    [ "$arg0" != "$exe" ] || "$buddy" -c "Set :ProgramArguments:0 $safe" "$plist"
+    echo "moved $exe to $safe for $plist"
+    check_libs "$safe"
   fi
-  if [ -n "$prog" ] && [ "${prog#/}" != "$prog" ] && [ -f "$prog" ] && user_can_change "$prog"; then
-    safe="/Library/TranscriptedCI/daemons/$(basename "$prog")"
-    install -o root -g wheel -m 755 "$(/usr/bin/python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$prog")" "$safe"
-    "$buddy" -c "Set $key $safe" "$plist"
-    echo "moved $prog to $safe for $plist"
-  fi
-  # Every other file the daemon is started with must be out of reach too.
+  # Every file the daemon is started with must be out of reach too.
   i=0
   while arg="$("$buddy" -c "Print :ProgramArguments:$i" "$plist" 2>/dev/null)"; do
     if [ "${arg#/}" != "$arg" ] && [ -e "$arg" ] && user_can_change "$arg"; then
-      echo "$plist starts with $arg, which the job user can change"; bad=1
+      flag "$plist starts with $arg, which the job user can change"
     fi
     i=$((i + 1))
   done
   prog="$("$buddy" -c "Print :Program" "$plist" 2>/dev/null || true)"
   if [ -n "$prog" ] && [ -e "$prog" ] && user_can_change "$prog"; then
-    echo "$plist runs $prog, which the job user can change"; bad=1
+    flag "$plist runs $prog, which the job user can change"
   fi
+  env="$("$buddy" -c "Print :EnvironmentVariables" "$plist" 2>/dev/null || true)"
+  if printf '%s\n' "$env" | grep -q "DYLD_"; then flag "$plist sets DYLD_ variables"; fi
+  for dir in $(printf '%s\n' "$env" | sed -n 's/^ *PATH = //p' | tr ':' ' '); do
+    [ ! -e "$dir" ] || ! user_can_change "$dir" || flag "$plist puts $dir, which the job user can change, on PATH"
+  done
 done
+# Other ways macOS runs things as root.
+for hook in LoginHook LogoutHook; do
+  path="$(defaults read com.apple.loginwindow "$hook" 2>/dev/null || true)"
+  [ -z "$path" ] || ! user_can_change "$path" || flag "the $hook $path is within the job user's reach"
+done
+for dir in /etc/periodic /usr/local/etc/periodic /etc/periodic.conf.local; do
+  [ ! -e "$dir" ] || ! user_can_change "$dir" || flag "$dir is within the job user's reach"
+done
+if crontab -l -u root 2>/dev/null | grep -q .; then flag "root has a crontab; check it by hand"; fi
 [ "$bad" = 0 ] || exit 1
 echo lock-daemons-ok
 LOCK
@@ -999,6 +1027,8 @@ run_one_job() {
         elif [ $((now - minted_at)) -gt "$BOOT_TIMEOUT" ]; then
           log "runner $name never showed up on GitHub"
           break
+        else
+          set_heartbeat busy
         fi
         ;;
       offline|error)
@@ -1045,10 +1075,22 @@ serve() {
     # stop it. A job that shows up meanwhile goes back to GitHub.
     if [ -f "$STATE/STOP" ]; then
       set_heartbeat paused
-      [ -f "$STATE/STOPPED" ] || { echo "$$" > "$STATE/STOPPED"; log "parked for install/rebuild"; }
-      if waiting="$(waiting_mac_jobs)" && [ -n "$waiting" ]; then
-        for run in $(printf '%s\n' "$waiting" | awk '$2 > 60 {print $1}' | sort -u); do reroute_run "$run"; done
+      # Send anything already waiting back to GitHub first, and only say
+      # "stopped" once a pass finds nothing left, so the installer can't
+      # stop this service halfway through a cancel and re-run.
+      if ! waiting="$(waiting_mac_jobs)"; then
+        sleep "$INTERVAL"
+        continue
       fi
+      if [ -n "$waiting" ]; then
+        rm -f "$STATE/STOPPED"
+        for run in $(printf '%s\n' "$waiting" | awk '{print $1}' | sort -u); do
+          reroute_run "$run"
+          set_heartbeat paused
+        done
+        continue
+      fi
+      [ -f "$STATE/STOPPED" ] || { echo "$$" > "$STATE/STOPPED"; log "parked for install/rebuild"; }
       sleep "$INTERVAL"
       continue
     fi
@@ -1159,8 +1201,8 @@ stop_service_between_jobs() {
 # stopping the service, start it again on the old image.
 restart_on_failure() {
   local status=$?
-  [ "$status" -ne 0 ] || return 0
   rm -f "$STATE/STOP" "$STATE/STOPPED"
+  [ "$status" -ne 0 ] || return 0
   if [ -f "$HOME/Library/LaunchAgents/$AGENT.plist" ] && ! service_loaded; then
     launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$AGENT.plist" 2>/dev/null \
       && echo "mac-runner: restarted the CI service on the old image" >&2
@@ -1219,8 +1261,8 @@ install() {
 
   # Re-running install updates a live setup: wait for the running job, stop
   # the service, then carry on. A pause the owner set stays set.
-  stop_service_between_jobs
   trap restart_on_failure EXIT
+  stop_service_between_jobs
 
   if [ "$here/mac-runner.sh" != "$STATE/mac-runner.sh" ]; then
     cp "$here/mac-runner.sh" "$STATE/mac-runner.sh.new"
@@ -1276,8 +1318,8 @@ rebuild() {
   require_host
   require_gh_admin
   [ -x "$TART" ] || die "not installed; run install first"
-  stop_service_between_jobs
   trap restart_on_failure EXIT
+  stop_service_between_jobs
   build_golden || log "rebuild failed; the old image is still in place"
   start_service
   trap - EXIT
@@ -1290,6 +1332,9 @@ status() {
   echo "heartbeat: $(gh variable get "$HEARTBEAT_VAR" --repo "$REPO" 2>/dev/null || echo unset) (now $(date +%s))"
   echo "jobs waiting for this Mac: $(waiting_mac_jobs 2>/dev/null | grep -c . || true)"
   if [ "$(is_paused)" = "1" ]; then echo "paused: yes"; else echo "paused: no"; fi
+  if [ -f "$STATE/STOP" ]; then
+    echo "parked for install/rebuild: yes (if no install is running, run resume)"
+  fi
   if service_loaded; then echo "CI service: loaded"; else echo "CI service: not loaded"; fi
   if [ -x "$TART" ]; then
     echo "CI VMs: $(vm_names | tr '\n' ' ')"
@@ -1309,7 +1354,7 @@ pause() {
 }
 
 resume() {
-  rm -f "$STATE/PAUSED"
+  rm -f "$STATE/PAUSED" "$STATE/STOP" "$STATE/STOPPED"
   log "resumed"
 }
 
