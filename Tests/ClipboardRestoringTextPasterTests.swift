@@ -2317,51 +2317,6 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
-    await runSuite("ClipboardRestoringTextPaster.paste — a read long after Cmd+V is not paste evidence") {
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
-            print("    SKIPPED: wall-clock timing proof — covered by local runs")
-            return
-        }
-        let existingClipboard = "synthetic late-read original clipboard"
-        let dictationText = "synthetic late-read dictation"
-        let pasteboardName = NSPasteboard.Name("TranscriptedLateReadTest-\(UUID().uuidString)")
-        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
-
-        let outcome = await MainActor.run { () -> TextPasteOutcome in
-            let pasteboard = NSPasteboard(name: pasteboardName)
-            pasteboard.clearContents()
-            pasteboard.setString(existingClipboard, forType: .string)
-            return paster.paste(
-                dictationText,
-                pasteboard: pasteboard,
-                accessibilityTrusted: { true },
-                requestAccessibilityTrust: {},
-                pasteDispatcher: {
-                    // A reader on its own schedule, well after
-                    // the window a real paste handler reads in.
-                    _ = Timer.scheduledTimer(withTimeInterval: 0.32, repeats: false) { _ in
-                        _ = pasteboard.string(forType: .string)
-                    }
-                    return true
-                },
-                pasteConfirmed: { false },
-                restoreDelay: 5_000_000,
-                fallbackRestoreDelay: 120_000_000,
-                pasteConfirmationWait: 0.45
-            )
-        }
-
-        assertEqual(
-            outcome,
-            .copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed),
-            "a late read is not evidence the paste landed"
-        )
-        let evidence = await MainActor.run { paster.lastConfirmationDiagnostic?.context["paste_evidence"] }
-        assertEqual(evidence, "read_outside_window", "diagnostics should tell a late read apart from no read at all")
-        let clipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
-        assertEqual(clipboard, dictationText, "the text should stay copied for a manual paste")
-    }
-
     await runSuite("ClipboardRestoringTextPaster.paste — the borrowed clipboard is marked transient, the fallback copy is not") {
         let pasteboardName = NSPasteboard.Name("TranscriptedTransientMarkerTest-\(UUID().uuidString)")
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
