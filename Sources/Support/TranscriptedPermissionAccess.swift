@@ -100,6 +100,42 @@ enum TranscriptedPermissionAccess {
         AVCaptureDevice.authorizationStatus(for: .audio)
     }
 
+    /// macOS will not show the microphone prompt again; only System Settings can change it.
+    static func microphoneAccessBlocked() -> Bool {
+        switch microphoneAuthorizationStatus() {
+        case .denied, .restricted:
+            return true
+        case .authorized, .notDetermined:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    /// macOS will not show the calendar prompt again; only System Settings can change it.
+    static func calendarAccessBlocked() -> Bool {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .denied, .restricted, .writeOnly:
+            return true
+        case .fullAccess, .authorized, .notDetermined:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private static let accessibilityPromptShownKey = "accessibilityPermissionPromptShown"
+
+    static func hasShownAccessibilityPrompt(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: accessibilityPromptShownKey)
+    }
+
+    static func showAccessibilityPrompt(userDefaults: UserDefaults = .standard) {
+        userDefaults.set(true, forKey: accessibilityPromptShownKey)
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
     @MainActor
     static func requestMicrophoneAccessIfNeeded(
         statusProvider: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .audio) },
@@ -147,6 +183,9 @@ enum TranscriptedPermissionAccess {
         requestMicrophone: @MainActor () async -> Bool = { await requestMicrophoneAccessIfNeeded() },
         requestCalendar: @MainActor () async -> Bool = { await requestCalendarAccessIfNeeded() },
         activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
+        isAccessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
+        hasShownAccessibilityPrompt: () -> Bool = { TranscriptedPermissionAccess.hasShownAccessibilityPrompt() },
+        promptForAccessibility: () -> Void = { TranscriptedPermissionAccess.showAccessibilityPrompt() },
         openSystemSettings: @MainActor (String) -> Void = { TranscriptedPermissionAccess.openSystemSettings($0) }
     ) async -> Bool {
         switch kind {
@@ -156,11 +195,11 @@ enum TranscriptedPermissionAccess {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                 return true
             case .notDetermined:
+                // A fresh Don't Allow stays in Transcripted: the row flips to
+                // "Open Settings" and says macOS won't ask again. Opening
+                // Settings on top of the answer they just gave felt like a trap.
                 let granted = await requestMicrophone()
                 notifyPermissionsDidChange(kind: .microphone)
-                if !granted {
-                    openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-                }
                 return granted
             case .denied, .restricted:
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
@@ -170,13 +209,20 @@ enum TranscriptedPermissionAccess {
                 return false
             }
         case .accessibility:
-            if !AXIsProcessTrusted() {
-                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                _ = AXIsProcessTrustedWithOptions(options)
+            // The first Grant shows only the macOS prompt, which has its own
+            // Open System Settings button. Opening Settings as well stacked
+            // two windows on top of each other. Later clicks (Review, or the
+            // prompt was dismissed) go straight to the Accessibility pane.
+            let trusted = isAccessibilityTrusted()
+            let firstAsk = !trusted && !hasShownAccessibilityPrompt()
+            if !trusted {
+                promptForAccessibility()
             }
-            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            if !firstAsk {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            }
             notifyPermissionsDidChange(kind: .accessibility)
-            return AXIsProcessTrusted()
+            return isAccessibilityTrusted()
         case .systemAudioRecording:
             let wasGranted = systemAudioRecordingGranted()
             let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)
@@ -197,10 +243,13 @@ enum TranscriptedPermissionAccess {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
                 return true
             }
+            let wasUndetermined = status == .notDetermined
             activateForPrompt()
             let granted = await requestCalendar()
             notifyPermissionsDidChange(kind: .calendar)
-            if !granted {
+            // Blocked access has no prompt, so Settings is the only way on.
+            // A fresh Don't Allow stays in the app, like the microphone.
+            if !granted && !wasUndetermined {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
             }
             return granted
