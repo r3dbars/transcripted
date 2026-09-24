@@ -270,6 +270,11 @@ struct DictionaryPastMeetingBackupStore: Sendable {
     /// that no longer exist (deleted, or renamed so Undo couldn't find them),
     /// so a deleted meeting never lingers here. Called at launch.
     func prune(meetingsDirectory: URL, now: Date = Date(), fileManager: FileManager = .default) {
+        // A library on a drive that isn't mounted looks like every meeting is
+        // gone. Wait until it's back instead of dropping every backup.
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: meetingsDirectory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return }
         Self.lock.lock()
         defer { Self.lock.unlock() }
         for (folder, stored) in storedReceipts(fileManager: fileManager) {
@@ -330,7 +335,20 @@ struct DictionaryPastMeetingBackupStore: Sendable {
         decoder.dateDecodingStrategy = .secondsSince1970
         return folders.map { folder in
             let data = try? Data(contentsOf: folder.appendingPathComponent(Self.receiptFilename))
-            return (folder, data.flatMap { try? decoder.decode(DictionaryPastMeetingFixReceipt.self, from: $0) })
+            let receipt = data.flatMap { try? decoder.decode(DictionaryPastMeetingFixReceipt.self, from: $0) }
+            return (folder, receipt.flatMap { Self.isWellFormed($0, in: folder) ? $0 : nil })
+        }
+    }
+
+    /// Cleanup deletes paths built from a receipt, so only trust one whose id
+    /// is its own folder's UUID name and whose backups are plain `N.md` files.
+    private static func isWellFormed(_ receipt: DictionaryPastMeetingFixReceipt, in folder: URL) -> Bool {
+        guard UUID(uuidString: receipt.id) != nil, receipt.id == folder.lastPathComponent else { return false }
+        return receipt.changes.allSatisfy { change in
+            let name = change.backupFilename
+            guard name.hasSuffix(".md") else { return false }
+            let index = name.dropLast(3)
+            return !index.isEmpty && index.allSatisfy(\.isASCII) && index.allSatisfy(\.isNumber)
         }
     }
 

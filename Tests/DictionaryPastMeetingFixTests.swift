@@ -260,7 +260,7 @@ func testDictionaryPastMeetingFix() {
         withTemporaryPastMeetingDirectory { root in
             let backups = DictionaryPastMeetingBackupStore(root: root)
             let old = DictionaryPastMeetingFixReceipt(
-                id: "old",
+                id: UUID().uuidString,
                 createdAt: Date(timeIntervalSinceNow: -DictionaryPastMeetingBackupStore.retention - 60),
                 spoken: "cloud",
                 replacement: "Claude",
@@ -272,6 +272,31 @@ func testDictionaryPastMeetingFix() {
             assertTrue(backups.recentReceipts(meetingsDirectory: root).isEmpty, "an expired fix is not offered")
             backups.prune(meetingsDirectory: root)
             assertFalse(FileManager.default.fileExists(atPath: backups.folder(for: old.id).path), "an expired backup is deleted")
+        }
+    }
+
+    runSuite("DictionaryPastMeetingBackupStore is careful about what it deletes") {
+        withTemporaryPastMeetingDirectory { root in
+            let meetings = root.appendingPathComponent("meetings", isDirectory: true)
+            try FileManager.default.createDirectory(at: meetings, withIntermediateDirectories: true)
+            let backups = DictionaryPastMeetingBackupStore(root: root.appendingPathComponent("backups", isDirectory: true))
+            let url = meetings.appendingPathComponent("meeting.md")
+            try pastMeeting("[00:01] [Mic/You] The cloud is up.").write(to: url, atomically: true, encoding: .utf8)
+            let receipt = DictionaryPastMeetingFix.fix(cloud, allEntries: [cloud], meetingsAt: [url], backups: backups)
+
+            let unmounted = root.appendingPathComponent("unmounted", isDirectory: true)
+            backups.prune(meetingsDirectory: unmounted)
+            assertTrue(FileManager.default.fileExists(atPath: backups.folder(for: receipt.id).path), "a missing meetings folder never wipes the backups")
+
+            // A receipt that names another folder is never trusted.
+            var tampered = receipt
+            tampered.changes = [DictionaryPastMeetingFileChange(path: url.path, backupFilename: "../../meetings/meeting.md", updatedSHA256: "")]
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            try encoder.encode(tampered).write(to: backups.folder(for: receipt.id).appendingPathComponent("receipt.json"))
+            assertTrue(backups.recentReceipts(meetingsDirectory: meetings).isEmpty, "a malformed receipt isn't offered")
+            backups.removeBackups(forMeetingsAt: [url])
+            assertTrue(FileManager.default.fileExists(atPath: url.path), "cleanup never follows a path out of the backup folder")
         }
     }
 
