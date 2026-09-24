@@ -7,8 +7,9 @@ Mac costs real minutes, and most knobs here are close to separable.
 
 Guards against fooling ourselves:
   - candidates are judged on the dev split only;
-  - a win needs a CI-backed improvement above the objective's min_effect,
-    with no guardrail regression and no new hard-gate failure;
+  - a win needs a significant paired improvement (sign-flip p < 0.05) above
+    the objective's min_effect, proven non-inferiority on every guardrail,
+    and no new hard-gate failure;
   - the final config is checked once on the locked holdout, and holdout
     checks are counted per objective and suite version, with a hard budget.
 """
@@ -17,9 +18,18 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
-from hc_engine import Evaluator, Ledger, Trial, config_hash, decide, diff_from
+from hc_engine import (
+    DEV_ALPHA,
+    HOLDOUT_ALPHA,
+    Evaluator,
+    Ledger,
+    Trial,
+    config_hash,
+    decide,
+    diff_from,
+)
 from hc_registry import Knob, Objective, Registry
 from hc_splits import DEV, HOLDOUT
 
@@ -31,6 +41,44 @@ class ClimbResult:
     trials_used: int
     accepted_moves: list[dict[str, Any]] = field(default_factory=list)
     stopped_because: str = ""
+    # Where the climb stands right now; checkpointed after every decision so a
+    # crash or Ctrl-C can resume instead of starting over.
+    incumbent: dict[str, Any] = field(default_factory=dict)
+    scale: float = 1.0
+    tried: set[str] = field(default_factory=set)
+
+
+def replay_decisions(start: Mapping[str, Any], decisions: Sequence[Mapping[str, Any]]) -> ClimbResult:
+    """Rebuild a climb's state from its decisions.jsonl, for --resume."""
+    incumbent = dict(start)
+    result = ClimbResult(start=dict(start), best=dict(start), trials_used=0, incumbent=dict(start))
+    result.tried.add(config_hash(incumbent))
+    for row in decisions:
+        kind = row.get("kind")
+        if kind == "remeasure":
+            result.trials_used += 1
+            continue
+        if kind != "decision":
+            continue
+        candidate = {**incumbent, row["knob"]: row["to"]}
+        result.tried.add(config_hash(candidate))
+        result.trials_used += 1
+        result.scale = float(row.get("scale", result.scale))
+        if row.get("accept"):
+            result.accepted_moves.append(
+                {
+                    "move": len(result.accepted_moves) + 1,
+                    "knob": row["knob"],
+                    "from": row["from"],
+                    "to": row["to"],
+                    "primary": row["primary"],
+                    "trial": row["candidate_trial"],
+                }
+            )
+            incumbent = candidate
+    result.incumbent = incumbent
+    result.best = dict(incumbent)
+    return result
 
 
 def climb(
@@ -44,19 +92,33 @@ def climb(
     seed: int = 0,
     min_scale: float = 0.25,
     only_knobs: list[str] | None = None,
+    resume: ClimbResult | None = None,
+    on_progress: Callable[[ClimbResult], None] | None = None,
 ) -> ClimbResult:
     knobs: list[Knob] = registry.searchable_knobs(objective)
     if only_knobs:
         knobs = [k for k in knobs if k.id in only_knobs]
     if not knobs:
         raise ValueError(f"objective {objective.id} has no searchable knobs")
-    incumbent = dict(start) if start else registry.defaults([k.id for k in knobs])
-    start_config = dict(incumbent)
+    if resume is not None:
+        result = resume
+        incumbent = dict(resume.incumbent)
+        # Resuming continues from wherever the pass stood, with fresh shuffles.
+        seed = seed + 7919 * (resume.trials_used + 1)
+    else:
+        incumbent = dict(start) if start else registry.defaults([k.id for k in knobs])
+        result = ClimbResult(start=dict(incumbent), best=dict(incumbent), trials_used=0, incumbent=dict(incumbent))
+        result.tried.add(config_hash(incumbent))
     rng = random.Random(seed)
-    tried: set[str] = {config_hash(incumbent)}
-    result = ClimbResult(start=start_config, best=dict(incumbent), trials_used=0)
-    scale = 1.0
-    move = 0
+    tried = result.tried
+    scale = result.scale
+
+    def checkpoint() -> None:
+        result.incumbent = dict(incumbent)
+        result.best = dict(incumbent)
+        result.scale = scale
+        if on_progress is not None:
+            on_progress(result)
 
     while True:
         order = list(knobs)
@@ -69,29 +131,36 @@ def climb(
                 if key in tried:
                     continue
                 if result.trials_used >= budget:
-                    result.best = incumbent
                     result.stopped_because = "budget spent"
+                    checkpoint()
                     return result
                 tried.add(key)
                 inc_trial, cand_trial = evaluator.evaluate_pair(incumbent, candidate, DEV)
                 result.trials_used += 1
-                verdict = decide(objective, inc_trial, cand_trial, seed=seed + result.trials_used)
+                verdict = decide(
+                    objective, inc_trial, cand_trial,
+                    seed=seed + result.trials_used, clusters=evaluator.clusters, alpha=DEV_ALPHA,
+                )
                 if verdict.inconclusive and objective.interleave and result.trials_used < budget:
-                    # One re-measure with double the repetitions, counted
-                    # against the budget. Deterministic benches would just
-                    # repeat themselves, so only timing benches get this.
+                    # One more batch of repetitions, pooled with the first.
+                    # This is a second look at exactly the near-misses, so it
+                    # is judged at half the significance level (Bonferroni over
+                    # the two looks). Deterministic benches would just repeat
+                    # themselves, so only timing benches get this.
                     _log(ledger, "remeasure", inc_trial, cand_trial, knob, incumbent[knob.id], value, scale, verdict)
-                    inc_trial, cand_trial = evaluator.evaluate_pair(
-                        incumbent, candidate, DEV, repetitions=evaluator.repetitions * 2
-                    )
+                    more_inc, more_cand = evaluator.evaluate_pair(incumbent, candidate, DEV)
+                    inc_trial = Trial.pooled(inc_trial, more_inc)
+                    cand_trial = Trial.pooled(cand_trial, more_cand)
                     result.trials_used += 1
-                    verdict = decide(objective, inc_trial, cand_trial, seed=seed + result.trials_used)
+                    verdict = decide(
+                        objective, inc_trial, cand_trial,
+                        seed=seed + result.trials_used, clusters=evaluator.clusters, alpha=DEV_ALPHA / 2,
+                    )
                 _log(ledger, "decision", inc_trial, cand_trial, knob, incumbent[knob.id], value, scale, verdict)
                 if verdict.accept:
-                    move += 1
                     result.accepted_moves.append(
                         {
-                            "move": move,
+                            "move": len(result.accepted_moves) + 1,
                             "knob": knob.id,
                             "from": incumbent[knob.id],
                             "to": value,
@@ -101,13 +170,15 @@ def climb(
                     )
                     incumbent = candidate
                     improved = True
+                checkpoint()
+                if verdict.accept:
                     break
         if not improved:
             if scale / 2 >= min_scale and any(k.type in ("int", "float") for k in knobs):
                 scale /= 2
                 continue
-            result.best = incumbent
             result.stopped_because = "no neighbor beats the incumbent"
+            checkpoint()
             return result
 
 
@@ -150,7 +221,9 @@ def confirm_on_holdout(
     """Shipped defaults vs the candidate, once, on the locked holdout."""
     baseline = registry.defaults(list(candidate))
     base_trial, cand_trial = evaluator.evaluate_pair(baseline, candidate, HOLDOUT)
-    verdict = decide(objective, base_trial, cand_trial, seed=seed)
+    verdict = decide(
+        objective, base_trial, cand_trial, seed=seed, clusters=evaluator.clusters, alpha=HOLDOUT_ALPHA
+    )
     ledger.append(
         "decisions",
         {
@@ -183,7 +256,7 @@ def calibrate(
         evaluator.evaluate(config, DEV),
         evaluator._finish(_rerun(evaluator, config)),
     )
-    verdict = decide(objective, first, second, seed=seed)
+    verdict = decide(objective, first, second, seed=seed, clusters=evaluator.clusters)
     noise = abs(verdict.primary["ci_low"]), abs(verdict.primary["ci_high"])
     return {
         "false_win": verdict.accept,

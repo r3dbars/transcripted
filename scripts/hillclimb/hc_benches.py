@@ -30,6 +30,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from hc_proc import run_group
+
 REQUEST_SCHEMA = "transcripted.hillclimb.request.v1"
 RESULT_SCHEMA = "transcripted.hillclimb.result.v1"
 BENCH_KINDS = ("command", "synthetic")
@@ -39,14 +41,22 @@ class BenchError(RuntimeError):
     pass
 
 
-def validate_result(result: Mapping[str, Any], expected_ids: Sequence[str]) -> list[str]:
-    """Return protocol problems; an empty list means the result is usable."""
+def validate_result(result: Any, expected_ids: Sequence[str]) -> list[str]:
+    """Return protocol problems; an empty list means the result is usable.
+
+    Never raises on a malformed result: a bench that writes a list, or
+    metrics that aren't an object, becomes item errors, not a dead climb.
+    """
     problems = []
+    if not isinstance(result, dict):
+        return [f"result must be a JSON object, got {type(result).__name__}"]
     if result.get("schema") != RESULT_SCHEMA:
         problems.append(f"schema must be {RESULT_SCHEMA}, got {result.get('schema')!r}")
     items = result.get("items")
     if not isinstance(items, list):
         return problems + ["items must be a list"]
+    if result.get("environment") is not None and not isinstance(result.get("environment"), dict):
+        problems.append("environment must be an object")
     seen = set()
     for item in items:
         item_id = item.get("id") if isinstance(item, dict) else None
@@ -56,6 +66,13 @@ def validate_result(result: Mapping[str, Any], expected_ids: Sequence[str]) -> l
         if item_id in seen:
             problems.append(f"duplicate result item {item_id}")
         seen.add(item_id)
+        for key in ("metrics", "gates"):
+            if item.get(key) is not None and not isinstance(item.get(key), dict):
+                problems.append(f"item {item_id} {key} must be an object")
+        if item.get("error") is not None and not isinstance(item.get("error"), str):
+            problems.append(f"item {item_id} error must be null or text")
+        if any(p.startswith(f"item {item_id} ") for p in problems):
+            continue
         for name, value in (item.get("metrics") or {}).items():
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 problems.append(f"item {item_id} metric {name} is not a finite number")
@@ -98,8 +115,11 @@ class CommandBench(Bench):
         self.work_root = work_root
 
     def run(self, request: Mapping[str, Any]) -> dict:
-        self.work_root.mkdir(parents=True, exist_ok=True)
-        work = Path(tempfile.mkdtemp(prefix=f"{request['trial_id']}-r{request['repetition']}-", dir=self.work_root))
+        # Holdout runs keep their raw per-item output apart, in a folder the
+        # climbing agent is told never to read (docs/hill-climb-lab.md).
+        root = self.work_root / "holdout-sealed" if request.get("split") == "holdout" else self.work_root
+        root.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=f"{request['trial_id']}-r{request['repetition']}-", dir=root))
         request_path = work / "request.json"
         result_path = work / "result.json"
         payload = dict(request)
@@ -123,16 +143,13 @@ class CommandBench(Bench):
         env["TRANSCRIPTED_HILLCLIMB_RESULT"] = str(result_path)
         started = time.monotonic()
         try:
-            completed = subprocess.run(
-                argv,
-                cwd=self.repo_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-            )
+            # A new process group, killed whole on timeout, so the app or CLI
+            # the bench started can't keep running into the next trial.
+            completed = run_group(argv, cwd=self.repo_root, env=env, timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired as error:
             raise BenchError(f"bench {self.id} timed out after {self.timeout_seconds}s") from error
+        except UnicodeDecodeError as error:
+            raise BenchError(f"bench {self.id} printed output that is not valid text") from error
         except OSError as error:
             raise BenchError(f"bench {self.id} could not start: {error}") from error
         (work / "stdout.log").write_text(completed.stdout[-200_000:])
@@ -146,7 +163,10 @@ class CommandBench(Bench):
             result = json.loads(result_path.read_text())
         except json.JSONDecodeError as error:
             raise BenchError(f"bench {self.id} wrote invalid JSON: {error}") from error
-        result.setdefault("environment", {})
+        if not isinstance(result, dict):
+            raise BenchError(f"bench {self.id} wrote a {type(result).__name__}, not a result object")
+        if not isinstance(result.get("environment"), dict):
+            result["environment"] = {}
         result["environment"].setdefault("bench_wall_seconds", round(time.monotonic() - started, 3))
         result["work_dir"] = str(work)
         return result

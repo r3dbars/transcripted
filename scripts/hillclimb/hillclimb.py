@@ -6,7 +6,9 @@
     python3 scripts/hillclimb/hillclimb.py split SUITE
     python3 scripts/hillclimb/hillclimb.py calibrate OBJECTIVE
     python3 scripts/hillclimb/hillclimb.py climb OBJECTIVE --budget 40 [--confirm]
+    python3 scripts/hillclimb/hillclimb.py climb OBJECTIVE --resume DIR
     python3 scripts/hillclimb/hillclimb.py confirm --campaign DIR
+    python3 scripts/hillclimb/hillclimb.py simulate-null OBJECTIVE [--sd 0.1]
     python3 scripts/hillclimb/hillclimb.py leaderboard [--json]
     python3 scripts/hillclimb/hillclimb.py --self-test
 
@@ -33,6 +35,10 @@ sys.path.insert(0, str(HERE))
 
 from hc_benches import BenchError, CommandBench, SyntheticBench, load_benches  # noqa: E402
 from hc_engine import (  # noqa: E402
+    DEV_ALPHA,
+    GUARDRAIL_MIN_COVERAGE,
+    HOLDOUT_ALPHA,
+    MIN_UNITS,
     Evaluator,
     Ledger,
     config_hash,
@@ -40,9 +46,10 @@ from hc_engine import (  # noqa: E402
     holdout_peeks,
     record_holdout_peek,
 )
-from hc_registry import Registry, RegistryError, load_registry  # noqa: E402
-from hc_search import calibrate, climb, confirm_on_holdout  # noqa: E402
-from hc_splits import SPLITS, Suite, check_split_health  # noqa: E402
+from hc_registry import Objective, Registry, RegistryError, load_registry  # noqa: E402
+from hc_search import ClimbResult, calibrate, climb, confirm_on_holdout, replay_decisions  # noqa: E402
+from hc_splits import DEV, HOLDOUT, SPLITS, Suite, check_split_health, item_ids  # noqa: E402
+from hc_stats import null_accept_rate  # noqa: E402
 
 REPO_ROOT = HERE.parents[1]
 DEFAULT_CONFIG_DIR = REPO_ROOT / "config" / "hillclimb"
@@ -104,8 +111,14 @@ class Lab:
             work_root=work_root,
         )
 
-    def validate(self) -> list[str]:
-        problems = []
+    def validate(self) -> tuple[list[str], list[str]]:
+        """(config problems, objectives that can't run yet and why).
+
+        Problems are broken config and fail validation. Blocked objectives are
+        well-formed but their suite is too small or can't feed a guardrail; the
+        lab refuses to climb them, and says so, until the suite grows.
+        """
+        problems, blocked = [], []
         for objective in self.registry.objectives.values():
             if objective.bench not in self.benches:
                 problems.append(f"objective {objective.id}: unknown bench {objective.bench}")
@@ -117,10 +130,35 @@ class Lab:
             if raw.get("items_file"):
                 continue  # items live on the Mac; checked when the suite loads there
             try:
-                problems += check_split_health(self.suite(objective.suite))
+                suite = self.suite(objective.suite)
             except (RegistryError, ValueError) as error:
                 problems.append(str(error))
-        return problems
+                continue
+            problems += check_split_health(suite)
+            blocked += [f"objective {objective.id}: {p}" for p in readiness_problems(objective, suite)]
+        return problems, unique_rows(blocked)
+
+
+def unique_rows(rows: list[str]) -> list[str]:
+    return list(dict.fromkeys(rows))
+
+
+def readiness_problems(objective: Objective, suite: Suite) -> list[str]:
+    """Why this suite can't honestly climb or confirm this objective yet."""
+    problems = check_split_health(suite, minimum_units=MIN_UNITS)
+    for spec in objective.metrics():
+        field = spec.requires_item_field
+        if not field:
+            continue
+        for split in SPLITS:
+            items = suite.items_in(split)
+            have = sum(1 for item in items if item.get(field) not in (None, ""))
+            if items and have < GUARDRAIL_MIN_COVERAGE * len(items):
+                problems.append(
+                    f"metric {spec.id} needs item field {field!r}, but only {have} of {len(items)} "
+                    f"{split} items have it; add it or the lab would tune with no {spec.id} check"
+                )
+    return problems
 
 
 def new_campaign_dir(lab: Lab, objective_id: str, seed: int, kind: str = "climb") -> Path:
@@ -149,9 +187,11 @@ def git_revision() -> str:
 
 
 def cmd_validate(lab: Lab, args) -> int:
-    problems = lab.validate()
+    problems, blocked = lab.validate()
     for problem in problems:
         print(f"FAIL {problem}")
+    for row in blocked:
+        print(f"BLOCKED {row}")
     counts = {}
     for knob in lab.registry.knobs.values():
         counts[knob.status] = counts.get(knob.status, 0) + 1
@@ -181,9 +221,13 @@ def cmd_knobs(lab: Lab, args) -> int:
 def cmd_split(lab: Lab, args) -> int:
     suite = lab.suite(args.suite)
     print(f"suite {suite.id} fingerprint {suite.fingerprint()} salt {suite.salt!r}")
+    units = suite.units()
     for split in SPLITS:
         ids = [str(i["id"]) for i in suite.items_in(split)]
-        print(f"{split:8} {len(ids):4}  {', '.join(ids[:12])}{' ...' if len(ids) > 12 else ''}")
+        print(
+            f"{split:8} {len(ids):4} items {units[split]:4} units (need {MIN_UNITS[split]})  "
+            f"{', '.join(ids[:12])}{' ...' if len(ids) > 12 else ''}"
+        )
     return 0
 
 
@@ -192,9 +236,9 @@ def _setup(lab: Lab, objective_id: str, campaign: Path, repetitions: int | None)
         raise RegistryError(f"unknown objective {objective_id}")
     objective = lab.registry.objectives[objective_id]
     suite = lab.suite(objective.suite)
-    problems = check_split_health(suite)
+    problems = readiness_problems(objective, suite)
     if problems:
-        raise RegistryError("; ".join(problems))
+        raise RegistryError(f"{objective_id} can't run on this suite yet: " + "; ".join(problems))
     ledger = Ledger(campaign)
     bench = lab.bench(objective.bench, campaign / "work")
     evaluator = Evaluator(lab.registry, objective, suite, bench, ledger, repetitions=repetitions)
@@ -214,27 +258,36 @@ def cmd_calibrate(lab: Lab, args) -> int:
 
 
 def _confirm(lab: Lab, objective, suite, ledger, evaluator, best: dict, args, campaign: Path) -> int:
-    peeks = holdout_peeks(lab.state_dir, objective.id, suite.fingerprint())
-    if len(peeks) >= objective.holdout_peek_budget and not args.force_holdout:
-        print(
-            f"Holdout budget spent: {len(peeks)} of {objective.holdout_peek_budget} checks already used "
-            f"for {objective.id} on suite {suite.fingerprint()}. Grow the suite (new items change the "
-            f"fingerprint) instead of peeking again."
-        )
-        return 3
+    holdout_ids = item_ids(suite.items_in(HOLDOUT))
+    peeks = holdout_peeks(lab.state_dir, objective.id, holdout_ids, suite.fingerprint())
+    forced = False
+    if len(peeks) >= objective.holdout_peek_budget:
+        if not args.force_holdout:
+            print(
+                f"Holdout budget spent: {len(peeks)} of {objective.holdout_peek_budget} checks already used "
+                f"for {objective.id} on mostly these holdout items. Adding a few items does not reset it: "
+                f"the new holdout must share at most half its items with the old one."
+            )
+            return 3
+        forced = True
     defaults = lab.registry.defaults(list(best))
     if config_hash(defaults) == config_hash(best):
         print("Nothing to confirm: the best config is the shipped defaults.")
         return 0
     confirmation = confirm_on_holdout(lab.registry, objective, evaluator, ledger, best, seed=args.seed)
+    units = confirmation.verdict["primary"]["n"]
     record_holdout_peek(
         lab.state_dir,
         {
             "objective": objective.id,
+            "suite": suite.id,
             "suite_fingerprint": suite.fingerprint(),
+            "holdout_items": sorted(holdout_ids),
             "campaign": str(campaign),
             "config_hash": config_hash(best),
             "confirmed": confirmation.confirmed,
+            "forced": forced,
+            "peek_number": len(peeks) + 1,
         },
     )
     payload = {
@@ -246,6 +299,14 @@ def _confirm(lab: Lab, objective, suite, ledger, evaluator, best: dict, args, ca
         "verdict": confirmation.verdict,
         "baseline_trial": confirmation.baseline_trial.trial_id,
         "candidate_trial": confirmation.candidate_trial.trial_id,
+        "holdout": {
+            "items": len(holdout_ids),
+            "units": units,
+            "alpha": HOLDOUT_ALPHA,
+            "peek_number": len(peeks) + 1,
+            "peek_budget": objective.holdout_peek_budget,
+            "forced": forced,
+        },
         "apply": {
             knob_id: {
                 "source": lab.registry.knobs[knob_id].source,
@@ -255,32 +316,70 @@ def _confirm(lab: Lab, objective, suite, ledger, evaluator, best: dict, args, ca
             for knob_id, change in confirmation.changes.items()
         },
     }
+    if objective.post_confirm_checks:
+        payload["required_before_shipping"] = [dict(c) for c in objective.post_confirm_checks]
     ledger.write_json("confirmation.json", payload)
     if confirmation.confirmed:
         ledger.write_json("recommendation.json", payload)
-        print("CONFIRMED on holdout. Recommendation written to", campaign / "recommendation.json")
+        print(f"CONFIRMED on holdout ({units} units, p < {HOLDOUT_ALPHA}). Recommendation written to", campaign / "recommendation.json")
+        for check in objective.post_confirm_checks:
+            print(f"  before shipping, also run: {check['command']}  ({check['why']})")
     else:
         print("NOT confirmed on holdout:", "; ".join(confirmation.reasons))
     return 0
 
 
+def _climb_result_payload(result: ClimbResult, status: str) -> dict[str, Any]:
+    return {
+        "status": status,
+        "start": result.start,
+        "best": result.best,
+        "changes": diff_from(result.start, result.best),
+        "trials_used": result.trials_used,
+        "accepted_moves": result.accepted_moves,
+        "stopped_because": result.stopped_because,
+        "scale": result.scale,
+    }
+
+
 def cmd_climb(lab: Lab, args) -> int:
-    campaign = new_campaign_dir(lab, args.objective, args.seed)
-    objective, suite, ledger, evaluator = _setup(lab, args.objective, campaign, args.repetitions)
-    ledger.write_json(
-        "campaign.json",
-        {
-            "objective": objective.id,
-            "suite": suite.id,
-            "suite_fingerprint": suite.fingerprint(),
-            "bench": objective.bench,
-            "budget": args.budget,
-            "seed": args.seed,
-            "git_revision": git_revision(),
-            "repetitions": evaluator.repetitions,
-            "only_knobs": args.knobs or [],
-        },
-    )
+    resume_state = None
+    if args.resume:
+        campaign = Path(args.resume).expanduser()
+        meta = json.loads((campaign / "campaign.json").read_text())
+        if meta["objective"] != args.objective:
+            raise RegistryError(f"campaign {campaign} is for {meta['objective']}, not {args.objective}")
+        args.seed = meta["seed"]
+        args.knobs = args.knobs or meta.get("only_knobs") or None
+        objective, suite, ledger, evaluator = _setup(lab, args.objective, campaign, meta.get("repetitions"))
+        if suite.fingerprint() != meta["suite_fingerprint"]:
+            print("Suite changed since this campaign started; start a new climb instead of resuming.")
+            return 2
+        checkpoint = json.loads((campaign / "climb-result.json").read_text()) if (campaign / "climb-result.json").exists() else {}
+        start = checkpoint.get("start") or lab.registry.defaults(
+            [k.id for k in lab.registry.searchable_knobs(objective) if not args.knobs or k.id in args.knobs]
+        )
+        resume_state = replay_decisions(start, ledger.read("decisions"))
+        print(f"resuming {campaign}: {resume_state.trials_used} trials already used, {len(resume_state.accepted_moves)} moves")
+    else:
+        campaign = new_campaign_dir(lab, args.objective, args.seed)
+        objective, suite, ledger, evaluator = _setup(lab, args.objective, campaign, args.repetitions)
+        ledger.write_json(
+            "campaign.json",
+            {
+                "objective": objective.id,
+                "suite": suite.id,
+                "suite_fingerprint": suite.fingerprint(),
+                "bench": objective.bench,
+                "budget": args.budget,
+                "seed": args.seed,
+                "git_revision": git_revision(),
+                "repetitions": evaluator.repetitions,
+                "only_knobs": args.knobs or [],
+                "units": suite.units(),
+                "alpha": {"dev": DEV_ALPHA, "holdout": HOLDOUT_ALPHA},
+            },
+        )
     result = climb(
         lab.registry,
         objective,
@@ -289,28 +388,56 @@ def cmd_climb(lab: Lab, args) -> int:
         budget=args.budget,
         seed=args.seed,
         only_knobs=args.knobs,
+        resume=resume_state,
+        on_progress=lambda r: ledger.write_json("climb-result.json", _climb_result_payload(r, "running")),
     )
+    ledger.write_json("climb-result.json", _climb_result_payload(result, "finished"))
     changes = diff_from(result.start, result.best)
-    ledger.write_json(
-        "climb-result.json",
-        {
-            "start": result.start,
-            "best": result.best,
-            "changes": changes,
-            "trials_used": result.trials_used,
-            "accepted_moves": result.accepted_moves,
-            "stopped_because": result.stopped_because,
-        },
-    )
     print(f"campaign {campaign}")
     print(f"{result.trials_used} candidate trials, stopped: {result.stopped_because}")
     for move in result.accepted_moves:
         p = move["primary"]
-        print(f"  move {move['move']}: {move['knob']} {move['from']} -> {move['to']}  {p['mean']:+.4f} (CI {p['ci_low']:+.4f}..{p['ci_high']:+.4f})")
+        print(
+            f"  move {move['move']}: {move['knob']} {move['from']} -> {move['to']}  {p['mean']:+.4f} "
+            f"(CI {p['ci_low']:+.4f}..{p['ci_high']:+.4f}, p={p.get('p_value', float('nan')):.4f})"
+        )
     if not changes:
         print("No change beat the shipped defaults on dev.")
     if args.confirm and changes:
         return _confirm(lab, objective, suite, ledger, evaluator, result.best, args, campaign)
+    return 0
+
+
+def cmd_simulate_null(lab: Lab, args) -> int:
+    """How often pure noise would get through, at this objective's real sizes."""
+    if args.objective not in lab.registry.objectives:
+        raise RegistryError(f"unknown objective {args.objective}")
+    objective = lab.registry.objectives[args.objective]
+    units = lab.suite(objective.suite).units()
+    spec = objective.primary
+    dev_rate = null_accept_rate(
+        units[DEV], sd=args.sd, min_effect=spec.min_effect, alpha=DEV_ALPHA, trials=args.trials, seed=args.seed
+    )
+    hold_rate = null_accept_rate(
+        units[HOLDOUT], sd=args.sd, min_effect=spec.min_effect, alpha=HOLDOUT_ALPHA, trials=args.trials, seed=args.seed + 1
+    )
+    peeks = objective.holdout_peek_budget
+    report = {
+        "objective": objective.id,
+        "per_unit_noise_sd": args.sd,
+        "min_effect": spec.min_effect,
+        "dev_units": units[DEV],
+        "holdout_units": units[HOLDOUT],
+        "false_move_per_candidate": round(dev_rate, 4),
+        f"false_move_in_{args.budget}_candidates": round(1 - (1 - dev_rate) ** args.budget, 4),
+        "false_confirm_per_holdout_check": round(hold_rate, 4),
+        f"false_confirm_over_{peeks}_checks": round(1 - (1 - hold_rate) ** peeks, 4),
+        "note": (
+            "Noise only (true effect 0). A false dev move costs trials; only a false holdout confirm "
+            "ships. Real per-unit noise comes from `calibrate`; pass it with --sd."
+        ),
+    }
+    print(json.dumps(report, indent=2))
     return 0
 
 
@@ -342,6 +469,7 @@ def collect_leaderboard(state_dir: Path) -> list[dict[str, Any]]:
             {
                 "objective": meta["objective"],
                 "campaign": campaign.name,
+                "status": result.get("status", "finished"),
                 "git_revision": meta.get("git_revision"),
                 "trials": result["trials_used"],
                 "changes": result["changes"],
@@ -363,14 +491,14 @@ def cmd_leaderboard(lab: Lab, args) -> int:
         print(f"No campaigns yet under {lab.state_dir}")
         return 0
     lines = [
-        "| objective | campaign | holdout | holdout gain | dev gain | trials | changes |",
-        "|---|---|---|---:|---:|---:|---|",
+        "| objective | campaign | status | holdout | holdout gain | dev gain | trials | changes |",
+        "|---|---|---|---|---:|---:|---:|---|",
     ]
     for r in rows:
         changes = ", ".join(f"{k}: {v[0]}→{v[1]}" for k, v in r["changes"].items()) or "none"
         gain = "" if r["holdout_gain"] is None else f"{r['holdout_gain']:+.4f}"
         lines.append(
-            f"| {r['objective']} | {r['campaign']} | {r['holdout'] or 'not run'} | {gain} | "
+            f"| {r['objective']} | {r['campaign']} | {r['status']} | {r['holdout'] or 'not run'} | {gain} | "
             f"{r['dev_gain']:+.4f} | {r['trials']} | {changes} |"
         )
     text = "\n".join(lines)
@@ -405,13 +533,23 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--budget", type=int, default=30, help="max candidate trials")
             p.add_argument("--knobs", nargs="*", help="only search these knob ids")
             p.add_argument("--confirm", action="store_true", help="check the winner on holdout right away")
-            p.add_argument("--force-holdout", action="store_true", help="ignore the holdout peek budget (logged)")
+            p.add_argument(
+                "--force-holdout", action="store_true", help="ignore the holdout peek budget (recorded as forced)"
+            )
+            p.add_argument("--resume", help="continue an interrupted climb from its campaign folder")
 
     confirm = sub.add_parser("confirm", help="check a finished climb's winner on the locked holdout")
     confirm.add_argument("--campaign", required=True)
     confirm.add_argument("--seed", type=int, default=0)
     confirm.add_argument("--repetitions", type=int, default=None)
-    confirm.add_argument("--force-holdout", action="store_true")
+    confirm.add_argument("--force-holdout", action="store_true", help="ignore the holdout peek budget (recorded as forced)")
+
+    null = sub.add_parser("simulate-null", help="false-accept rates at an objective's real suite sizes")
+    null.add_argument("objective")
+    null.add_argument("--sd", type=float, default=0.10, help="per-unit noise of the primary improvement")
+    null.add_argument("--budget", type=int, default=30)
+    null.add_argument("--trials", type=int, default=2000)
+    null.add_argument("--seed", type=int, default=0)
 
     board = sub.add_parser("leaderboard", help="every campaign, best first")
     board.add_argument("--json", action="store_true")
@@ -448,6 +586,7 @@ def main(argv: list[str] | None = None) -> int:
             "climb": cmd_climb,
             "confirm": cmd_confirm,
             "leaderboard": cmd_leaderboard,
+            "simulate-null": cmd_simulate_null,
         }[args.command]
         return handler(lab, args)
     except (RegistryError, BenchError, ValueError, FileNotFoundError) as error:

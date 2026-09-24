@@ -105,19 +105,23 @@ def bootstrap_mean_ci(
 @dataclass
 class PairedComparison:
     metric: str
-    n: int
+    n: int  # independent units (clusters) actually tested
     mean: float
     ci_low: float
     ci_high: float
     missing_items: list[str] = field(default_factory=list)
+    items: int = 0  # paired items before clustering
+    p_value: float = 1.0  # one-sided sign-flip p for the hypothesis tested
 
     def as_dict(self) -> dict:
         return {
             "metric": self.metric,
             "n": self.n,
+            "items": self.items,
             "mean": round(self.mean, 6),
             "ci_low": round(self.ci_low, 6),
             "ci_high": round(self.ci_high, 6),
+            "p_value": round(self.p_value, 6),
             "missing_items": list(self.missing_items),
         }
 
@@ -131,22 +135,29 @@ def paired_compare(
     compare: str,
     seed: int = 0,
     iterations: int = 2000,
+    clusters: Mapping[str, str] | None = None,
+    null_shift: float = 0.0,
 ) -> PairedComparison:
     """Compare two per-item metric maps on the items both measured.
 
     Items one side lacks are reported, never silently dropped: a candidate that
     stops producing a value for an item is a failure the caller must see.
+    Items sharing a cluster are averaged into one unit before testing. The
+    p-value tests H0: mean improvement <= null_shift (0 for "is it better",
+    -margin for "is it no worse than the margin").
     """
     shared = sorted(set(baseline) & set(candidate))
     missing = sorted(set(baseline) ^ set(candidate))
     if not shared:
         return PairedComparison(metric, 0, 0.0, -math.inf, math.inf, missing)
-    deltas = [
-        improvement(baseline[item], candidate[item], direction, compare)
+    per_item = {
+        item: improvement(baseline[item], candidate[item], direction, compare)
         for item in shared
-    ]
-    low, high = bootstrap_mean_ci(deltas, iterations=iterations, seed=seed)
-    return PairedComparison(metric, len(deltas), sum(deltas) / len(deltas), low, high, missing)
+    }
+    units = cluster_means(per_item, clusters)
+    low, high = bootstrap_mean_ci(units, iterations=iterations, seed=seed)
+    p = sign_flip_pvalue(units, shift=null_shift, seed=seed)
+    return PairedComparison(metric, len(units), sum(units) / len(units), low, high, missing, len(shared), p)
 
 
 def spread(samples: Iterable[float]) -> float:
@@ -156,3 +167,93 @@ def spread(samples: Iterable[float]) -> float:
         return 0.0
     mean = sum(values) / len(values)
     return math.sqrt(sum((v - mean) ** 2 for v in values) / (len(values) - 1))
+
+
+# Exact enumeration up to this many units; Monte Carlo above it.
+_EXACT_SIGN_FLIP_MAX = 16
+# Monte Carlo draws whole blocks of signs at once from precomputed tables.
+_SIGN_TABLE_BITS = 12
+
+
+def _signed_sums(values: Sequence[float]) -> list[float]:
+    """Sum of every +/- sign pattern over `values` (2**len entries)."""
+    sums = [0.0]
+    for value in values:
+        sums = [s + value for s in sums] + [s - value for s in sums]
+    return sums
+
+
+def sign_flip_pvalue(
+    deltas: Sequence[float],
+    *,
+    shift: float = 0.0,
+    iterations: int = 20000,
+    seed: int = 0,
+) -> float:
+    """One-sided paired sign-flip permutation test.
+
+    H0: the mean of `deltas` is <= `shift`. Returns P(mean of randomly
+    sign-flipped (delta - shift) >= observed). Exact for small n, which is
+    where the percentile bootstrap is badly anti-conservative. With n units the
+    smallest possible p-value is 1 / 2**n, so 4 or fewer units can never reach
+    p < 0.05: a tiny suite cannot produce a "significant" win at all.
+    """
+    centered = [d - shift for d in deltas]
+    n = len(centered)
+    if n == 0:
+        return 1.0
+    observed = sum(centered)
+    tolerance = 1e-12 * max(1.0, sum(abs(v) for v in centered))
+    if n <= _EXACT_SIGN_FLIP_MAX:
+        sums = _signed_sums(centered)
+        return sum(1 for s in sums if s >= observed - tolerance) / len(sums)
+    blocks = [centered[i : i + _SIGN_TABLE_BITS] for i in range(0, n, _SIGN_TABLE_BITS)]
+    tables = [(len(block), _signed_sums(block)) for block in blocks]
+    rng = random.Random(seed)
+    hits = 1  # count the observed labelling itself
+    for _ in range(iterations):
+        s = 0.0
+        for bits, table in tables:
+            s += table[rng.getrandbits(bits)]
+        if s >= observed - tolerance:
+            hits += 1
+    return hits / (iterations + 1)
+
+
+def cluster_means(deltas: Mapping[str, float], clusters: Mapping[str, str] | None) -> list[float]:
+    """Average per-item deltas within a cluster so correlated items count once."""
+    if not clusters:
+        return [deltas[k] for k in sorted(deltas)]
+    grouped: dict[str, list[float]] = {}
+    for item_id in sorted(deltas):
+        grouped.setdefault(clusters.get(item_id, item_id), []).append(deltas[item_id])
+    return [sum(v) / len(v) for _, v in sorted(grouped.items())]
+
+
+def null_accept_rate(
+    n_units: int,
+    *,
+    sd: float,
+    min_effect: float,
+    alpha: float,
+    trials: int = 2000,
+    seed: int = 0,
+) -> float:
+    """How often pure noise passes the primary rule at this many units.
+
+    Draws per-unit improvements from N(0, sd) (no real effect) and counts how
+    often both the sign-flip test (p < alpha) and the min_effect bar pass.
+    This is the per-candidate false-accept rate; a climb multiplies it by
+    roughly the number of candidates it tries.
+    """
+    if n_units <= 0:
+        return 0.0
+    rng = random.Random(seed)
+    hits = 0
+    for trial in range(trials):
+        deltas = [rng.gauss(0.0, sd) for _ in range(n_units)]
+        if sum(deltas) / n_units < min_effect:
+            continue
+        if sign_flip_pvalue(deltas, seed=seed + trial, iterations=2000) < alpha:
+            hits += 1
+    return hits / trials

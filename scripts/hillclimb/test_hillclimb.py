@@ -17,11 +17,18 @@ sys.path.insert(0, str(HERE))
 
 import hillclimb  # noqa: E402
 from hc_benches import RESULT_SCHEMA, CommandBench, validate_result  # noqa: E402
-from hc_engine import Evaluator, Ledger, Trial, decide  # noqa: E402
+from hc_engine import Evaluator, Ledger, Trial, decide, holdout_peeks  # noqa: E402
 from hc_registry import Knob, Objective, RegistryError, load_registry  # noqa: E402
-from hc_search import calibrate, climb  # noqa: E402
-from hc_splits import DEV, HOLDOUT, Suite  # noqa: E402
-from hc_stats import bootstrap_mean_ci, improvement, paired_compare, percentile  # noqa: E402
+from hc_search import calibrate, climb, replay_decisions  # noqa: E402
+from hc_splits import DEV, HOLDOUT, Suite, check_split_health  # noqa: E402
+from hc_stats import (  # noqa: E402
+    bootstrap_mean_ci,
+    improvement,
+    null_accept_rate,
+    paired_compare,
+    percentile,
+    sign_flip_pvalue,
+)
 
 DEMO = HERE / "fixtures" / "demo"
 REAL = HERE.parents[1] / "config" / "hillclimb"
@@ -253,6 +260,282 @@ class ProtocolTests(unittest.TestCase):
             result = bench.run(request)
             self.assertEqual(validate_result(result, ["a", "b"]), [])
             self.assertEqual(result["items"][0]["metrics"]["lat"], 0.5)
+
+
+class SmallSampleTests(unittest.TestCase):
+    """Review S4/S5/S7: small or correlated samples must not look like wins."""
+
+    def test_sign_flip_is_exact_for_small_n(self):
+        self.assertEqual(sign_flip_pvalue([1.0] * 4), 1 / 16)
+        self.assertEqual(sign_flip_pvalue([1.0] * 5), 1 / 32)
+        self.assertEqual(sign_flip_pvalue([0.0, 0.0, 0.0]), 1.0)
+        # Shifting the null turns "is it better" into "is it no worse than -m".
+        self.assertLess(sign_flip_pvalue([0.0] * 8, shift=-0.01), 0.01)
+
+    def test_sign_flip_holds_its_level_under_the_null(self):
+        import random
+
+        rng = random.Random(3)
+        hits = sum(
+            sign_flip_pvalue([rng.gauss(0, 1) for _ in range(12)], seed=k) < 0.05 for k in range(400)
+        )
+        self.assertLess(hits / 400, 0.08)
+
+    def test_four_items_can_never_win(self):
+        items = {f"i{k}": 1.0 for k in range(4)}
+        acc = {k: 0.9 for k in items}
+        verdict = decide(objective(), trial(items, acc=acc), trial({k: 0.5 for k in items}, acc=acc))
+        self.assertFalse(verdict.accept)
+        self.assertIn("not significant", " ".join(verdict.reasons))
+
+    def test_one_item_can_never_win(self):
+        verdict = decide(objective(), trial({"a": 1.0}, acc={"a": 0.9}), trial({"a": 0.5}, acc={"a": 0.9}))
+        self.assertFalse(verdict.accept)
+
+    def test_clusters_count_once(self):
+        items = {f"i{k}": 1.0 for k in range(20)}
+        acc = {k: 0.9 for k in items}
+        fast = {k: 0.8 for k in items}
+        clusters = {k: f"c{int(k[1:]) % 3}" for k in items}  # 20 items, 3 real units
+        verdict = decide(objective(), trial(items, acc=acc), trial(fast, acc=acc), clusters=clusters)
+        self.assertFalse(verdict.accept)
+        self.assertEqual(verdict.primary["n"], 3)
+        self.assertEqual(verdict.primary["items"], 20)
+
+    def test_guardrail_with_no_data_rejects(self):
+        items = {f"i{k}": 1.0 + k * 0.1 for k in range(20)}
+        verdict = decide(objective(), trial(items), trial({k: v * 0.8 for k, v in items.items()}))
+        self.assertFalse(verdict.accept)
+        self.assertFalse(verdict.inconclusive)
+        self.assertIn("guardrail acc: measured on 0 units", " ".join(verdict.reasons))
+
+    def test_guardrail_on_a_few_items_rejects(self):
+        items = {f"i{k}": 1.0 + k * 0.1 for k in range(20)}
+        some = {k: 0.9 for k in list(items)[:6]}
+        inc = trial(items, acc={k: 0.9 for k in items})
+        cand = trial({k: v * 0.8 for k, v in items.items()}, acc={k: 0.9 for k in items})
+        # Both sides measured the guardrail on only 6 of 20 items.
+        for t in (inc, cand):
+            for row in t.repetitions[0]["items"]:
+                if row["id"] not in some:
+                    row["metrics"].pop("acc")
+        verdict = decide(objective(), inc, cand)
+        self.assertFalse(verdict.accept)
+        self.assertIn("need at least 10", " ".join(verdict.reasons))
+
+    def test_guardrail_margin_must_be_positive(self):
+        with self.assertRaises(RegistryError):
+            objective(guardrails=[{"id": "acc", "direction": "higher", "compare": "difference", "max_regression": 0}])
+
+    def test_rebuild_between_repetitions_is_not_comparable(self):
+        items = {f"i{k}": 1.0 + k * 0.1 for k in range(20)}
+        acc = {k: 0.9 for k in items}
+        inc = trial(items, acc=acc)
+        cand = trial({k: v * 0.8 for k, v in items.items()}, acc=acc)
+        for t, rev in ((inc, "b"), (cand, "a")):
+            second = json.loads(json.dumps(t.repetitions[0]))
+            second["environment"] = {"app_revision": rev}
+            t.repetitions.append(second)
+        verdict = decide(objective(), inc, cand)
+        self.assertFalse(verdict.accept)
+        self.assertIn("changed between repetitions", " ".join(verdict.reasons))
+
+    def test_null_accept_rate_is_small_at_real_sizes(self):
+        self.assertEqual(null_accept_rate(3, sd=0.1, min_effect=0.05, alpha=0.05, trials=200), 0.0)
+        self.assertLessEqual(null_accept_rate(12, sd=0.1, min_effect=0.05, alpha=0.05, trials=300), 0.06)
+
+    def test_suite_below_minimum_units_refuses_to_climb(self):
+        with tempfile.TemporaryDirectory() as state:
+            config = Path(state) / "cfg"
+            config.mkdir()
+            for name in ("knobs.json", "objectives.json", "benches.json"):
+                (config / name).write_text((DEMO / name).read_text())
+            (config / "suites").mkdir()
+            raw = json.loads((DEMO / "suites" / "demo-clips.json").read_text())
+            raw["items"] = raw["items"][:14]  # 13 dev, 1 holdout
+            (config / "suites" / "demo-clips.json").write_text(json.dumps(raw))
+            err = io.StringIO()
+            from contextlib import redirect_stderr
+
+            with redirect_stdout(io.StringIO()) as out, redirect_stderr(err):
+                code = hillclimb.main(["--config-dir", str(config), "--state-dir", state, "climb", "demo-latency"])
+                vcode = hillclimb.main(["--config-dir", str(config), "--state-dir", state, "validate"])
+            self.assertEqual(code, 2)
+            self.assertIn("independent units", err.getvalue())
+            self.assertEqual(vcode, 0)  # well-formed config, just blocked
+            self.assertIn("BLOCKED", out.getvalue())
+
+    def test_guardrail_item_field_missing_blocks(self):
+        obj = objective(
+            guardrails=[
+                {"id": "acc", "direction": "higher", "compare": "difference", "max_regression": 0.01,
+                 "requires_item_field": "truth"}
+            ]
+        )
+        suite = Suite.from_dict(
+            {"id": "s", "salt": "x", "holdout_fraction": 0.3, "items": [{"id": f"m{k}"} for k in range(40)]}
+        )
+        problems = hillclimb.readiness_problems(obj, suite)
+        self.assertTrue(any("needs item field 'truth'" in p for p in problems), problems)
+
+    def test_real_speaker_suite_is_blocked_by_clusters(self):
+        lab = hillclimb.Lab(REAL, Path(tempfile.mkdtemp()))
+        objective_ = lab.registry.objectives["speaker-naming-across-calls"]
+        problems = hillclimb.readiness_problems(objective_, lab.suite(objective_.suite))
+        self.assertTrue(any("independent units" in p for p in problems), problems)
+        self.assertTrue(objective_.post_confirm_checks)
+
+    def test_clusters_never_straddle_the_holdout(self):
+        items = [{"id": f"a{k}", "cluster": f"c{k // 4}"} for k in range(80)]
+        suite = Suite.from_dict({"id": "s", "salt": "x", "holdout_fraction": 0.3, "items": items})
+        self.assertEqual(check_split_health(suite), [])
+        pinned = [{"id": "a", "cluster": "c", "split": DEV}, {"id": "b", "cluster": "c", "split": HOLDOUT}]
+        bad = Suite.from_dict({"id": "s", "salt": "x", "holdout_fraction": 0.3, "items": pinned})
+        self.assertTrue(any("both sides" in p for p in check_split_health(bad)))
+
+
+class HoldoutHygieneTests(unittest.TestCase):
+    """Review S6/M4: the holdout budget can't be reset by adding an item."""
+
+    def _demo_copy(self, root: Path) -> Path:
+        config = root / "cfg"
+        (config / "suites").mkdir(parents=True)
+        for name in ("knobs.json", "objectives.json", "benches.json"):
+            (config / name).write_text((DEMO / name).read_text())
+        (config / "suites" / "demo-clips.json").write_text((DEMO / "suites" / "demo-clips.json").read_text())
+        return config
+
+    def test_adding_one_item_does_not_reset_the_budget(self):
+        with tempfile.TemporaryDirectory() as state:
+            config = self._demo_copy(Path(state))
+            args = ["--config-dir", str(config), "--state-dir", state]
+            with redirect_stdout(io.StringIO()):
+                codes = [hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm", "--seed", str(s)]) for s in range(2)]
+            self.assertEqual(codes, [0, 0])
+            suite_path = config / "suites" / "demo-clips.json"
+            raw = json.loads(suite_path.read_text())
+            raw["items"].append({"id": "clip-new", "synthetic_base": 1.0})
+            suite_path.write_text(json.dumps(raw))
+            with redirect_stdout(io.StringIO()) as out:
+                code = hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm", "--seed", "9"])
+            self.assertEqual(code, 3, out.getvalue())
+
+    def test_forced_peek_is_recorded(self):
+        with tempfile.TemporaryDirectory() as state:
+            args = ["--config-dir", str(DEMO), "--state-dir", state]
+            with redirect_stdout(io.StringIO()):
+                for s in range(3):
+                    hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm", "--force-holdout", "--seed", str(s)])
+            rows = [json.loads(line) for line in (Path(state) / "holdout-peeks.jsonl").read_text().splitlines()]
+            self.assertEqual([r["forced"] for r in rows], [False, False, True])
+            self.assertTrue(all(r["holdout_items"] for r in rows))
+
+    def test_holdout_per_item_values_stay_out_of_the_ledger(self):
+        with tempfile.TemporaryDirectory() as state:
+            args = ["--config-dir", str(DEMO), "--state-dir", state]
+            with redirect_stdout(io.StringIO()):
+                hillclimb.main(args + ["climb", "demo-naming", "--budget", "20", "--confirm"])
+            trials = [
+                json.loads(line)
+                for path in Path(state).glob("demo-naming/*/trials.jsonl")
+                for line in path.read_text().splitlines()
+            ]
+            holdout = [t for t in trials if t["split"] == HOLDOUT]
+            self.assertTrue(holdout)
+            self.assertTrue(all(t["per_item"] == "sealed" for t in holdout))
+            self.assertTrue(all(isinstance(t["per_item"], dict) for t in trials if t["split"] == DEV))
+            rec = json.loads(next(Path(state).glob("demo-naming/*/confirmation.json")).read_text())
+            self.assertGreaterEqual(rec["holdout"]["units"], 8)
+
+    def test_legacy_peek_rows_count_by_fingerprint(self):
+        with tempfile.TemporaryDirectory() as state:
+            (Path(state) / "holdout-peeks.jsonl").write_text(
+                json.dumps({"objective": "o", "suite_fingerprint": "f"}) + "\n"
+            )
+            self.assertEqual(len(holdout_peeks(Path(state), "o", ["a"], "f")), 1)
+            self.assertEqual(len(holdout_peeks(Path(state), "o", ["a"], "g")), 0)
+
+
+class ResumeTests(unittest.TestCase):
+    """Review M1/M3: checkpoints, resume, and pooled re-measures."""
+
+    def test_replay_rebuilds_incumbent_and_budget(self):
+        decisions = [
+            {"kind": "decision", "knob": "k", "from": 1, "to": 2, "scale": 1.0, "accept": False, "primary": {}, "candidate_trial": "t2"},
+            {"kind": "remeasure", "knob": "k", "from": 1, "to": 0, "scale": 1.0},
+            {"kind": "decision", "knob": "k", "from": 1, "to": 0, "scale": 1.0, "accept": True, "primary": {"mean": 0.1}, "candidate_trial": "t6"},
+            {"kind": "decision", "knob": "j", "from": "a", "to": "b", "scale": 0.5, "accept": False, "primary": {}, "candidate_trial": "t8"},
+        ]
+        state = replay_decisions({"k": 1, "j": "a"}, decisions)
+        self.assertEqual(state.incumbent, {"k": 0, "j": "a"})
+        self.assertEqual(state.trials_used, 4)
+        self.assertEqual(state.scale, 0.5)
+        self.assertEqual(len(state.accepted_moves), 1)
+        self.assertEqual(len(state.tried), 4)
+
+    def test_interrupted_climb_resumes(self):
+        with tempfile.TemporaryDirectory() as state:
+            args = ["--config-dir", str(DEMO), "--state-dir", state]
+            with redirect_stdout(io.StringIO()):
+                hillclimb.main(args + ["climb", "demo-latency", "--budget", "4"])
+            campaign = next(Path(state).glob("demo-latency/*-climb-*"))
+            first = json.loads((campaign / "climb-result.json").read_text())
+            self.assertEqual(first["status"], "finished")
+            with redirect_stdout(io.StringIO()) as out:
+                code = hillclimb.main(args + ["climb", "demo-latency", "--budget", "40", "--resume", str(campaign)])
+            self.assertEqual(code, 0, out.getvalue())
+            self.assertIn("resuming", out.getvalue())
+            final = json.loads((campaign / "climb-result.json").read_text())
+            self.assertGreater(final["trials_used"], first["trials_used"])
+            self.assertEqual(final["best"]["demo.encoder"], "all")
+
+    def test_pooled_trial_keeps_every_repetition(self):
+        a, b = trial({"x": 1.0}), trial({"x": 2.0})
+        pooled = Trial.pooled(a, b)
+        self.assertEqual(len(pooled.repetitions), 2)
+        self.assertEqual(pooled.per_item("lat", "median"), {"x": 1.5})
+
+
+class MalformedResultTests(unittest.TestCase):
+    def test_non_object_results_become_problems_not_crashes(self):
+        self.assertTrue(validate_result([1, 2], ["a"]))
+        bad = {"schema": RESULT_SCHEMA, "items": [{"id": "a", "metrics": [1], "gates": "x", "error": 3}]}
+        problems = validate_result(bad, ["a"])
+        self.assertTrue(any("metrics must be an object" in p for p in problems), problems)
+        self.assertTrue(any("gates must be an object" in p for p in problems), problems)
+
+    def test_holdout_runs_write_to_the_sealed_folder(self):
+        script = textwrap.dedent(
+            """
+            import json, sys
+            req = json.load(open(sys.argv[1]))
+            out = {"schema": "%s", "bench": "fake", "environment": {"app_revision": "r"},
+                   "items": [{"id": i["id"], "metrics": {"lat": 1.0}, "gates": {}, "error": None} for i in req["items"]]}
+            json.dump(out, open(req["result_path"], "w"))
+            """ % RESULT_SCHEMA
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bench.py"
+            path.write_text(script)
+            bench = CommandBench(
+                "fake", [sys.executable, str(path), "{request}"], repo_root=Path(tmp), timeout_seconds=30,
+                env_for=lambda knobs: {}, work_root=Path(tmp) / "w",
+            )
+            result = bench.run({"trial_id": "t1", "repetition": 0, "split": HOLDOUT, "knobs": {}, "items": [{"id": "a"}]})
+            self.assertIn("holdout-sealed", result["work_dir"])
+
+    def test_bench_that_writes_a_list_is_a_bench_error(self):
+        from hc_benches import BenchError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bench.py"
+            path.write_text("import json,sys\nreq=json.load(open(sys.argv[1]))\njson.dump([1], open(req['result_path'],'w'))\n")
+            bench = CommandBench(
+                "fake", [sys.executable, str(path), "{request}"], repo_root=Path(tmp), timeout_seconds=30,
+                env_for=lambda knobs: {}, work_root=Path(tmp) / "w",
+            )
+            with self.assertRaises(BenchError):
+                bench.run({"trial_id": "t1", "repetition": 0, "split": DEV, "knobs": {}, "items": [{"id": "a"}]})
 
 
 if __name__ == "__main__":

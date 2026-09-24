@@ -29,7 +29,14 @@ def split_of(item: Mapping[str, Any], salt: str, holdout_fraction: float) -> str
         if pinned not in SPLITS:
             raise ValueError(f"item {item.get('id')!r} pins unknown split {pinned!r}")
         return pinned
-    return HOLDOUT if unit_hash(salt, str(item["id"])) < holdout_fraction else DEV
+    # Items that share a cluster (same people, same meeting) land on the same
+    # side, so correlated copies never straddle the holdout line.
+    key = str(item.get("cluster", item["id"]))
+    return HOLDOUT if unit_hash(salt, key) < holdout_fraction else DEV
+
+
+def cluster_of(item: Mapping[str, Any]) -> str:
+    return str(item.get("cluster", item["id"]))
 
 
 @dataclass(frozen=True)
@@ -83,8 +90,21 @@ class Suite:
     def counts(self) -> dict[str, int]:
         return {split: len(self.items_in(split)) for split in SPLITS}
 
+    def clusters(self) -> dict[str, str]:
+        """item id -> the independent unit it belongs to (itself by default)."""
+        return {str(item["id"]): cluster_of(item) for item in self.items}
 
-def check_split_health(suite: Suite, *, minimum_per_split: int = 1) -> list[str]:
+    def units(self) -> dict[str, int]:
+        """Independent units per split: what the statistics actually count."""
+        return {split: len({cluster_of(i) for i in self.items_in(split)}) for split in SPLITS}
+
+
+def check_split_health(
+    suite: Suite,
+    *,
+    minimum_per_split: int = 1,
+    minimum_units: Mapping[str, int] | None = None,
+) -> list[str]:
     """Problems that make a suite unusable for honest tuning."""
     problems = []
     counts = suite.counts()
@@ -93,6 +113,20 @@ def check_split_health(suite: Suite, *, minimum_per_split: int = 1) -> list[str]
             problems.append(
                 f"suite {suite.id}: {split} split has {counts[split]} items, needs >= {minimum_per_split}"
             )
+    sides: dict[str, set[str]] = {}
+    for item in suite.items:
+        sides.setdefault(cluster_of(item), set()).add(split_of(item, suite.salt, suite.holdout_fraction))
+    straddling = sorted(c for c, s in sides.items() if len(s) > 1)
+    if straddling:
+        problems.append(f"suite {suite.id}: clusters on both sides of the holdout line: {straddling[:5]}")
+    if minimum_units:
+        units = suite.units()
+        for split, needed in minimum_units.items():
+            if units.get(split, 0) < needed:
+                problems.append(
+                    f"suite {suite.id}: {split} split has {units.get(split, 0)} independent units "
+                    f"({counts.get(split, 0)} items), needs >= {needed} to tell a real win from luck"
+                )
     return problems
 
 

@@ -11,16 +11,29 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from hc_benches import REQUEST_SCHEMA, Bench, BenchError, validate_result
 from hc_registry import Objective, Registry
-from hc_splits import HOLDOUT, Suite, item_ids
+from hc_splits import DEV, HOLDOUT, Suite, item_ids
 from hc_stats import aggregate, paired_compare
 
 ITEM_ERROR_GATE = "item_error"
+
+# Significance level for moves on the dev split. The holdout check is the gate
+# that produces a recommendation, so it is stricter.
+DEV_ALPHA = 0.05
+HOLDOUT_ALPHA = 0.01
+# Fewest independent units (items, or clusters of correlated items) a split
+# needs before the lab will climb or confirm on it. Below this the tests have
+# almost no power and a lucky draw looks like a win.
+MIN_UNITS = {DEV: 10, HOLDOUT: 8}
+# A guardrail measured on fewer units than this share of the primary's units
+# is treated as missing, and a missing guardrail rejects the candidate.
+GUARDRAIL_MIN_COVERAGE = 0.5
 
 
 def utc_now() -> str:
@@ -49,12 +62,46 @@ class Trial:
     def config_hash(self) -> str:
         return config_hash(self.config)
 
+    def environments(self) -> list[dict[str, Any]]:
+        """Distinct build/host/OS fingerprints seen across repetitions.
+
+        Repetitions that failed before reporting an environment are skipped;
+        their items already count as item errors.
+        """
+        seen: list[dict[str, Any]] = []
+        for rep in self.repetitions:
+            env = rep.get("environment") or {}
+            fields = {k: env.get(k) for k in ("app_revision", "host", "os") if k in env}
+            if fields and fields not in seen:
+                seen.append(fields)
+        return seen
+
     def environment(self) -> dict[str, Any]:
-        """Fields that must match for two trials to be comparable."""
-        if not self.repetitions:
+        """Fields that must match for two trials to be comparable.
+
+        Every repetition must agree: a rebuild halfway through a trial means
+        later repetitions measured a different binary.
+        """
+        seen = self.environments()
+        if not seen:
             return {}
-        env = self.repetitions[0].get("environment", {})
-        return {k: env.get(k) for k in ("app_revision", "host", "os") if k in env}
+        if len(seen) > 1:
+            return {"inconsistent": seen}
+        return seen[0]
+
+    @classmethod
+    def pooled(cls, first: "Trial", second: "Trial") -> "Trial":
+        """One trial holding both trials' repetitions (same config and split)."""
+        if first.config != second.config or first.split != second.split:
+            raise ValueError("can only pool trials of the same config and split")
+        return cls(
+            f"{first.trial_id}+{second.trial_id}",
+            dict(first.config),
+            first.split,
+            [*first.repetitions, *second.repetitions],
+            first.started_at,
+            second.finished_at,
+        )
 
     def per_item(self, metric: str, how: str) -> dict[str, float]:
         """Aggregate each item's repetitions into one value per item."""
@@ -92,6 +139,14 @@ class Trial:
         return out
 
     def as_record(self, objective: Objective) -> dict[str, Any]:
+        # Holdout per-item values never go into the shared ledger: a later
+        # climb could read them and tune toward the holdout. Only aggregates
+        # and the verdict are kept.
+        per_item: Any = (
+            "sealed"
+            if split_is_holdout(self.split)
+            else {spec.id: self.per_item(spec.id, spec.aggregate) for spec in objective.metrics()}
+        )
         return {
             "kind": "trial",
             "trial_id": self.trial_id,
@@ -104,9 +159,7 @@ class Trial:
             "gates": self.gate_totals(),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            "per_item": {
-                spec.id: self.per_item(spec.id, spec.aggregate) for spec in objective.metrics()
-            },
+            "per_item": per_item,
         }
 
 
@@ -134,24 +187,41 @@ class Verdict:
         }
 
 
-def decide(objective: Objective, incumbent: Trial, candidate: Trial, *, seed: int = 0) -> Verdict:
+def decide(
+    objective: Objective,
+    incumbent: Trial,
+    candidate: Trial,
+    *,
+    seed: int = 0,
+    clusters: Mapping[str, str] | None = None,
+    alpha: float = DEV_ALPHA,
+) -> Verdict:
     """Accept only a clear, safe win.
 
     Rules, in order. Any failure rejects:
-      1. Both trials ran under the same app build, host and OS.
+      1. Every repetition of both trials ran under the same app build, host
+         and OS.
       2. No hard gate (or item error) fires more often than for the incumbent.
       3. The candidate measured every item the incumbent measured.
-      4. Primary metric: the bootstrap CI lower bound on improvement is above
-         zero and the point estimate clears min_effect.
-      5. Guardrails: the CI lower bound never shows a regression larger than
-         the guardrail's max_regression.
+      4. Primary metric: a one-sided paired sign-flip test on per-unit
+         improvement gives p < alpha, and the mean clears min_effect.
+      5. Guardrails (non-inferiority): each one is measured on at least half
+         as many units as the primary, lost no items, and the sign-flip test
+         rejects "worse than max_regression" at p < alpha. A guardrail with
+         no data rejects; it is never skipped.
+
+    Items sharing a `clusters` value are averaged into one unit first, so
+    correlated items (same people, same meeting) count once.
     """
     reasons: list[str] = []
     ok = True
     # Failures that more data could flip. Anything else is a firm rejection.
     noise_only = True
     inc_env, cand_env = incumbent.environment(), candidate.environment()
-    if inc_env != cand_env:
+    if "inconsistent" in inc_env or "inconsistent" in cand_env:
+        ok = noise_only = False
+        reasons.append("not comparable: the build, host or OS changed between repetitions")
+    elif inc_env != cand_env:
         ok = noise_only = False
         reasons.append(f"not comparable: environment differs {inc_env} vs {cand_env}")
 
@@ -165,26 +235,29 @@ def decide(objective: Objective, incumbent: Trial, candidate: Trial, *, seed: in
             reasons.append(f"hard gate {gate}: {before} -> {after}")
 
     spec = objective.primary
+    inc_primary = incumbent.per_item(spec.id, spec.aggregate)
     primary = paired_compare(
         spec.id,
-        incumbent.per_item(spec.id, spec.aggregate),
+        inc_primary,
         candidate.per_item(spec.id, spec.aggregate),
         direction=spec.direction,
         compare=spec.compare,
         seed=seed,
+        clusters=clusters,
     )
-    lost = [i for i in primary.missing_items if i in incumbent.per_item(spec.id, spec.aggregate)]
+    lost = [i for i in primary.missing_items if i in inc_primary]
     if lost:
         ok = noise_only = False
         reasons.append(f"candidate lost items: {lost}")
     if primary.n == 0:
         ok = noise_only = False
         reasons.append("no paired items to compare")
-    elif primary.ci_low <= 0:
+    elif primary.p_value >= alpha:
         ok = False
         noise_only = noise_only and primary.mean >= spec.min_effect
         reasons.append(
-            f"{spec.id}: improvement {primary.mean:+.4f} not significant (CI low {primary.ci_low:+.4f})"
+            f"{spec.id}: improvement {primary.mean:+.4f} not significant "
+            f"(p={primary.p_value:.4f} over {primary.n} units, need < {alpha})"
         )
     elif primary.mean < spec.min_effect:
         ok = noise_only = False
@@ -192,25 +265,43 @@ def decide(objective: Objective, incumbent: Trial, candidate: Trial, *, seed: in
 
     guard_rows = []
     for guard in objective.guardrails:
+        inc_guard = incumbent.per_item(guard.id, guard.aggregate)
         comparison = paired_compare(
             guard.id,
-            incumbent.per_item(guard.id, guard.aggregate),
+            inc_guard,
             candidate.per_item(guard.id, guard.aggregate),
             direction=guard.direction,
             compare=guard.compare,
             seed=seed + 1,
+            clusters=clusters,
+            null_shift=-guard.max_regression,
         )
         row = comparison.as_dict()
         row["max_regression"] = guard.max_regression
         guard_rows.append(row)
-        if comparison.n and comparison.ci_low < -guard.max_regression:
+        guard_lost = [i for i in comparison.missing_items if i in inc_guard]
+        needed = max(1, math.ceil(GUARDRAIL_MIN_COVERAGE * primary.n))
+        if guard_lost:
+            ok = noise_only = False
+            reasons.append(f"guardrail {guard.id}: candidate lost items {guard_lost}")
+        elif comparison.n < needed:
+            ok = noise_only = False
+            reasons.append(
+                f"guardrail {guard.id}: measured on {comparison.n} units, need at least {needed} "
+                f"(half the primary's {primary.n}); a speed win with no quality check is not shipped"
+            )
+        elif comparison.p_value >= alpha:
             ok = False
             noise_only = noise_only and comparison.mean >= -guard.max_regression
             reasons.append(
-                f"guardrail {guard.id}: could regress {comparison.ci_low:+.4f} (limit -{guard.max_regression})"
+                f"guardrail {guard.id}: cannot rule out a regression worse than -{guard.max_regression} "
+                f"(mean {comparison.mean:+.4f}, CI low {comparison.ci_low:+.4f}, p={comparison.p_value:.4f})"
             )
     if ok:
-        reasons.append(f"{spec.id}: {primary.mean:+.4f} (CI {primary.ci_low:+.4f}..{primary.ci_high:+.4f})")
+        reasons.append(
+            f"{spec.id}: {primary.mean:+.4f} (CI {primary.ci_low:+.4f}..{primary.ci_high:+.4f}, "
+            f"p={primary.p_value:.4f}, {primary.n} units)"
+        )
     return Verdict(ok, reasons, primary.as_dict(), guard_rows, gate_view, inconclusive=(not ok) and noise_only)
 
 
@@ -259,6 +350,7 @@ class Evaluator:
         self.repetitions = repetitions or objective.repetitions
         self._cache: dict[tuple[str, str], Trial] = {}
         self._counter = len(ledger.read("trials"))
+        self.clusters = suite.clusters()
 
     def _next_id(self) -> str:
         self._counter += 1
@@ -292,7 +384,7 @@ class Evaluator:
             problems = validate_result(result, ids)
             if problems:
                 result = {
-                    "environment": result.get("environment", {}),
+                    "environment": _environment_of(result),
                     "items": [
                         {"id": i, "metrics": {}, "gates": {}, "error": "protocol: " + "; ".join(problems)}
                         for i in ids
@@ -350,13 +442,47 @@ class Evaluator:
         return self._finish(inc), self._finish(cand)
 
 
-def holdout_peeks(state_root: Path, objective_id: str, suite_fingerprint: str) -> list[dict]:
-    """Every holdout evaluation ever run for this objective and suite version."""
+# A new holdout that shares more than this share of its items with an earlier
+# one is the same holdout for budget purposes.
+HOLDOUT_OVERLAP_LIMIT = 0.5
+
+
+def _environment_of(result: Any) -> dict[str, Any]:
+    env = result.get("environment") if isinstance(result, dict) else None
+    return env if isinstance(env, dict) else {}
+
+
+def holdout_peeks(
+    state_root: Path,
+    objective_id: str,
+    holdout_ids: Iterable[str],
+    suite_fingerprint: str | None = None,
+) -> list[dict]:
+    """Earlier holdout checks for this objective that saw mostly these items.
+
+    Counted by item overlap, not by suite version: adding a few items changes
+    the fingerprint but leaves the old holdout items in holdout, so a
+    fingerprint-keyed budget would reset while the agent keeps peeking at the
+    same clips. Rows written before item ids were recorded fall back to the
+    fingerprint.
+    """
     path = state_root / "holdout-peeks.jsonl"
     if not path.exists():
         return []
+    current = set(holdout_ids)
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return [r for r in rows if r.get("objective") == objective_id and r.get("suite_fingerprint") == suite_fingerprint]
+    out = []
+    for row in rows:
+        if row.get("objective") != objective_id:
+            continue
+        seen = row.get("holdout_items")
+        if seen is None:
+            if suite_fingerprint is not None and row.get("suite_fingerprint") == suite_fingerprint:
+                out.append(row)
+            continue
+        if current and len(current & set(seen)) > HOLDOUT_OVERLAP_LIMIT * len(current):
+            out.append(row)
+    return out
 
 
 def record_holdout_peek(state_root: Path, row: Mapping[str, Any]) -> None:

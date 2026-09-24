@@ -168,6 +168,9 @@ class MetricSpec:
     # Guardrail: largest regression tolerated before a candidate is rejected.
     max_regression: float = 0.0
     unit: str = ""
+    # Suite item field this metric can't be measured without (for example
+    # word_recall needs a `truth` transcript). Checked before a climb starts.
+    requires_item_field: str = ""
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any], where: str) -> "MetricSpec":
@@ -188,6 +191,7 @@ class MetricSpec:
             min_effect=float(raw.get("min_effect", 0.0)),
             max_regression=float(raw.get("max_regression", 0.0)),
             unit=str(raw.get("unit", "")),
+            requires_item_field=str(raw.get("requires_item_field", "")),
         )
 
 
@@ -206,6 +210,10 @@ class Objective:
     holdout_peek_budget: int
     bench_options: Mapping[str, Any] = field(default_factory=dict)
     notes: str = ""
+    # Checks a person must run before shipping a confirmed winner, copied into
+    # recommendation.json (for example a per-bucket no-regression contract the
+    # bench's own gates don't cover).
+    post_confirm_checks: tuple[Mapping[str, str], ...] = ()
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "Objective":
@@ -223,15 +231,24 @@ class Objective:
         primary = MetricSpec.from_dict(raw["primary"], f"{where} primary")
         if primary.min_effect <= 0:
             raise RegistryError(f"{where}: primary min_effect must be > 0 so noise never ships")
+        guardrails = tuple(MetricSpec.from_dict(g, f"{where} guardrail") for g in raw.get("guardrails", ()))
+        for guard in guardrails:
+            if guard.max_regression <= 0:
+                raise RegistryError(
+                    f"{where} guardrail {guard.id}: max_regression must be > 0 "
+                    "(non-inferiority needs a margin; with 0 even an exact tie fails)"
+                )
+        checks = tuple(dict(c) for c in raw.get("post_confirm_checks", ()))
+        for check in checks:
+            if not check.get("command") or not check.get("why"):
+                raise RegistryError(f"{where}: every post_confirm_check needs a command and a why")
         return cls(
             id=objective_id,
             title=str(raw.get("title", objective_id)),
             bench=str(raw["bench"]),
             suite=str(raw["suite"]),
             primary=primary,
-            guardrails=tuple(
-                MetricSpec.from_dict(g, f"{where} guardrail") for g in raw.get("guardrails", ())
-            ),
+            guardrails=guardrails,
             hard_gates=tuple(raw.get("hard_gates", ())),
             knobs=tuple(raw["knobs"]),
             repetitions=repetitions,
@@ -239,6 +256,7 @@ class Objective:
             holdout_peek_budget=budget,
             bench_options=dict(raw.get("bench_options", {})),
             notes=str(raw.get("notes", "")),
+            post_confirm_checks=checks,
         )
 
     def metrics(self) -> list[MetricSpec]:

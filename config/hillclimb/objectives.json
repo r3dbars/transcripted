@@ -20,7 +20,8 @@
           "direction": "lower",
           "compare": "difference",
           "aggregate": "mean",
-          "max_regression": 0.01
+          "max_regression": 0.01,
+          "requires_item_field": "text"
         },
         {
           "id": "stop_to_delivery_s",
@@ -69,14 +70,16 @@
           "direction": "higher",
           "compare": "difference",
           "aggregate": "mean",
-          "max_regression": 0.01
+          "max_regression": 0.01,
+          "requires_item_field": "truth"
         },
         {
           "id": "speaker_count_error",
           "direction": "lower",
           "compare": "difference",
           "aggregate": "mean",
-          "max_regression": 0.25
+          "max_regression": 0.25,
+          "requires_item_field": "speakers"
         }
       ],
       "hard_gates": [
@@ -158,7 +161,13 @@
         "manifest": "data/eval/qmatrix-manifest.sha256",
         "input_root": "data/eval/qmatrix"
       },
-      "notes": "Replays real voice fingerprints through the app's naming policy in SpeakerEvalHarness autoeval. Deterministic, so one repetition. Any new false automatic name vetoes a candidate."
+      "notes": "Replays real voice fingerprints through the app's naming policy in SpeakerEvalHarness autoeval. Deterministic, so one repetition. Any new false automatic name vetoes a candidate.",
+      "post_confirm_checks": [
+        {
+          "command": "python3 scripts/run_speaker_autoresearch.py",
+          "why": "The climber's gates only see per-corpus safety totals. This runs the per-condition-bucket no-regression contract (scripts/speaker_autoresearch_contract.py) that a winner must also pass before any constant changes in the app."
+        }
+      ]
     },
     {
       "id": "speech-model-accuracy",
@@ -170,7 +179,8 @@
         "direction": "lower",
         "compare": "difference",
         "aggregate": "mean",
-        "min_effect": 0.01
+        "min_effect": 0.01,
+        "requires_item_field": "truth"
       },
       "guardrails": [
         {
