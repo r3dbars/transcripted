@@ -88,6 +88,26 @@ func testFirstRunExperience() {
         assertEqual(recording.subtitle, "", "recording row should stay quiet — the red tone and timer carry the state")
     }
 
+    runSuite("FirstRunExperience.meetingAction — says Saving and disables Stop after Stop") {
+        let saving = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: true,
+            isSaving: true
+        )
+        assertEqual(saving.title, "Saving Meeting…", "the row should say the audio is being saved instead of offering Stop again")
+        assertFalse(saving.isEnabled, "a second click while saving would do nothing, so the row should be disabled")
+        assertEqual(saving.subtitle, "", "the saving row should stay quiet")
+
+        let notRecording = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: false,
+            isSaving: true
+        )
+        assertEqual(notRecording.title, "Record Meeting", "isSaving alone should not change the idle row")
+    }
+
     runSuite("FirstRunExperience.meetingAction — exposes retry copy after meeting tool failure") {
         let failed = FirstRunExperience.meetingAction(
             dictationReady: true,

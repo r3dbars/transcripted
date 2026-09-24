@@ -60,6 +60,7 @@ final class MenuBarPanelController: NSViewController {
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
+        content.headerView.onWarningAction = { [weak self] action in self?.handleShortcutWarningAction(action) }
         content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.general) }
@@ -84,12 +85,14 @@ final class MenuBarPanelController: NSViewController {
 
         let warmupStatus = appState.meetingSession.warmupStatus
         let isMeetingRecording = appState.meetingSession.isCaptureSessionActive
+        let capturePhase = MenuBarMeetingCapturePhase.resolve(appState.meetingSession.state)
         let modelState = appState.sttRouter.modelDownloadState
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus,
-            isRecording: isMeetingRecording
+            isRecording: isMeetingRecording,
+            isSaving: capturePhase == .saving
         )
         let updatePresentation = menuUpdatePresentation(
             for: appState.sparkleUpdater.updateStatus,
@@ -99,9 +102,12 @@ final class MenuBarPanelController: NSViewController {
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            hotkeyError: HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil,
+            // Shown even with dictation shortcuts off: the meeting and
+            // paste shortcuts need the same event tap.
+            shortcutWarning: shortcutWarningPresentation(),
             isMeetingRecording: isMeetingRecording,
-            transcribingStatus: meetingTranscribingStatus()
+            transcribingStatus: meetingTranscribingStatus(),
+            capturePhase: capturePhase
         )
 
         // While a meeting records, the row's trailing slot shows the live
@@ -278,6 +284,34 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+    }
+
+    private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
+        let systemAction = PhysicalDictationTriggerPreferences.functionKeySystemAction()
+        return MenuBarShortcutWarningPresentation.resolve(
+            hotkeyError: appState.contextCapture.hotkeyError,
+            accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
+            functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),
+                systemAction: systemAction
+            ),
+            functionKeySystemActionTitle: systemAction.title
+        )
+    }
+
+    private func handleShortcutWarningAction(_ action: MenuBarShortcutWarningPresentation.Action) {
+        trackMenuAction(action == .openAccessibilitySettings
+            ? "shortcut_warning_open_accessibility"
+            : "shortcut_warning_open_keyboard")
+        dismissPopover()
+        switch action {
+        case .openAccessibilitySettings:
+            TranscriptedPermissionAccess.openSettings(for: .accessibility)
+        case .openKeyboardSettings:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     /// "Transcribing 42%" while a meeting transcript is being made, else nil.

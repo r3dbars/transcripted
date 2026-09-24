@@ -1209,7 +1209,7 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    /// Used by the quit-confirmation "Stop and Transcribe" choice: `state ==
+    /// Used by the quit-confirmation "Stop Recording" choice: `state ==
     /// .recording` is `stopRecording()`'s own entry guard, so a start still
     /// engaging the mic (`.startingRecording`) would make a bare
     /// `stopRecording()` call silently no-op — and the pending start would
@@ -2463,7 +2463,7 @@ final class MeetingSessionController: ObservableObject {
     /// Bounded wait for an in-flight `startRecording()` call to resolve —
     /// used both by `prepareForTermination()` (join before deciding what to
     /// save) and `stopRecordingJoiningPendingStart(reason:)` (join before
-    /// stopping, so an explicit "Stop and Transcribe" during the mic-engage
+    /// stopping, so an explicit "Stop Recording" during the mic-engage
     /// window can't be silently dropped). The bridge start deadline is 12s
     /// after a known grant, or 120s while a first-run permission prompt may
     /// still be up. Either way it is shorter than this outer bound.
