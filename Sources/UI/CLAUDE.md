@@ -90,6 +90,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
+- `Settings/RetainedDataSourceComboBox.swift` — `NSComboBox` subclass that owns its data source (AppKit only holds `dataSource` unretained), used by both speaker name boxes so a freed source can't crash the box mid-keystroke (Sentry APPLE-MACOS-2H)
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete

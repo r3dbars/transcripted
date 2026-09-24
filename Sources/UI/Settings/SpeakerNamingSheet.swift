@@ -534,7 +534,7 @@ final class SpeakerNamingContentView: NSView {
 // MARK: - Name field
 
 @available(macOS 14.0, *)
-private final class SpeakerNameComboBox: NSComboBox {
+private final class SpeakerNameComboBox: RetainedDataSourceComboBox {
     var onTextAreaClick: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
@@ -658,8 +658,9 @@ final class SpeakerRowView: NSView {
         addSubview(sampleField)
 
         nameField.isEditable = true
-        nameField.usesDataSource = true
-        nameField.dataSource = self
+        // The box owns a small forwarding source that only weakly points back
+        // at this row, so AppKit's unretained data source pointer never dangles.
+        nameField.setRetainedDataSource(SpeakerRowNameDataSource(row: self))
         nameField.delegate = self
         nameField.completes = true
         nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
@@ -926,7 +927,17 @@ final class SpeakerRowView: NSView {
         }
     }
 
-    private func visibleKnownPeopleLabels() -> [String] {
+    fileprivate func completedKnownPersonLabel(for string: String) -> String? {
+        SpeakerNameSelectionPolicy.completedLabel(
+            for: string,
+            labels: knownPeopleLabels,
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName },
+            callCount: { $0.callCount }
+        )
+    }
+
+    fileprivate func visibleKnownPeopleLabels() -> [String] {
         let query = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return knownPeopleLabels }
         return SpeakerNameSelectionPolicy.sortedLabels(
@@ -1024,32 +1035,38 @@ final class SpeakerRowView: NSView {
     }
 }
 
+/// Name-box data source for one review row. The box keeps this alive; it only
+/// weakly points back at the row, so a row that is gone answers with no items.
 @available(macOS 14.0, *)
-extension SpeakerRowView: NSComboBoxDataSource, NSComboBoxDelegate {
+@MainActor
+private final class SpeakerRowNameDataSource: NSObject, NSComboBoxDataSource {
+    private weak var row: SpeakerRowView?
+
+    init(row: SpeakerRowView) {
+        self.row = row
+    }
+
     func numberOfItems(in comboBox: NSComboBox) -> Int {
-        visibleKnownPeopleLabels().count
+        row?.visibleKnownPeopleLabels().count ?? 0
     }
 
     func comboBox(_ comboBox: NSComboBox, objectValueForItemAt index: Int) -> Any? {
-        let labels = visibleKnownPeopleLabels()
-        guard labels.indices.contains(index) else { return nil }
+        guard let labels = row?.visibleKnownPeopleLabels(),
+              labels.indices.contains(index) else { return nil }
         return labels[index]
     }
 
     func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
-        SpeakerNameSelectionPolicy.completedLabel(
-            for: string,
-            labels: knownPeopleLabels,
-            optionsByLabel: knownPeopleByLabel,
-            displayName: { $0.displayName },
-            callCount: { $0.callCount }
-        )
+        row?.completedKnownPersonLabel(for: string)
     }
 
     func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
-        visibleKnownPeopleLabels().firstIndex(of: string) ?? NSNotFound
+        row?.visibleKnownPeopleLabels().firstIndex(of: string) ?? NSNotFound
     }
+}
 
+@available(macOS 14.0, *)
+extension SpeakerRowView: NSComboBoxDelegate {
     func controlTextDidBeginEditing(_ obj: Notification) {
         guard obj.object as AnyObject? === nameField else { return }
         openNameTray()
