@@ -137,4 +137,52 @@ func testAppleSpeechLocalePolicy() {
         assertEqual(codes, ["en", "es", "fr", "pt", "zh", "yue", "no"])
         assertTrue(AppleSpeechLocalePolicy.supportedLanguageCodes(supportedIdentifiers: []).isEmpty)
     }
+
+    runSuite("Apple Speech reservations — nothing is released under the limit or for a reserved language") {
+        assertNil(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "es_ES"], limit: 3, wantedIdentifier: "fr_FR",
+            keepLanguages: [], lastUsed: [:]
+        ))
+        assertNil(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "es_MX"], limit: 2, wantedIdentifier: "es_ES",
+            keepLanguages: [], lastUsed: [:]
+        ), "Apple may report a variant; Spanish is already reserved")
+        assertNil(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US"], limit: 0, wantedIdentifier: "fr_FR",
+            keepLanguages: [], lastUsed: [:]
+        ), "an unknown limit never releases anything")
+    }
+
+    runSuite("Apple Speech reservations — the least recently used language not in use goes first") {
+        let now = Date()
+        let lastUsed = ["de": now.addingTimeInterval(-60), "it": now.addingTimeInterval(-3600), "ja": now]
+        assertEqual(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "de_DE", "it_IT", "ja_JP"], limit: 4, wantedIdentifier: "fr_FR",
+            keepLanguages: ["en"], lastUsed: lastUsed
+        ), 2, "Italian was used longest ago; English is dictation's and stays")
+        assertEqual(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "de_DE", "ko_KR"], limit: 3, wantedIdentifier: "fr_FR",
+            keepLanguages: ["en"], lastUsed: ["de": now]
+        ), 2, "never used this session counts as oldest")
+        assertEqual(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "de_DE", "ko_KR"], limit: 3, wantedIdentifier: "fr_FR",
+            keepLanguages: ["EN"], lastUsed: [:]
+        ), 1, "ties keep Apple's order, and kept languages compare case-insensitively")
+        assertNil(AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: ["en_US", "es_ES"], limit: 2, wantedIdentifier: "fr_FR",
+            keepLanguages: ["en", "es"], lastUsed: [:]
+        ), "when every reservation is in use, nothing is released and Apple's error surfaces")
+    }
+
+    runSuite("Apple Speech language download — Settings line") {
+        let downloading = AppleSpeechLanguageDownload(languageCode: "es", phase: .downloading(progress: 0.404))
+        assertEqual(downloading.caption(languageName: "Spanish"), "Downloading Spanish from Apple… 40%")
+        let overflow = AppleSpeechLanguageDownload(languageCode: "es", phase: .downloading(progress: 1.7))
+        assertEqual(overflow.caption(languageName: "Spanish"), "Downloading Spanish from Apple… 100%")
+        let unknown = AppleSpeechLanguageDownload(languageCode: "es", phase: .downloading(progress: .nan))
+        assertEqual(unknown.caption(languageName: "Spanish"), "Downloading Spanish from Apple… 0%")
+        let failed = AppleSpeechLanguageDownload(languageCode: "es", phase: .failed("NSURLErrorDomain -1009"))
+        assertFalse(failed.caption(languageName: "Spanish").contains("NSURLErrorDomain"), "raw errors stay out of Settings")
+        assertTrue(failed.caption(languageName: "Spanish").contains("Couldn't download Spanish"))
+    }
 }

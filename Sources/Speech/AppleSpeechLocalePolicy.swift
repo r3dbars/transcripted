@@ -73,6 +73,38 @@ enum AppleSpeechLocalePolicy {
         }?.uppercased()
     }
 
+    /// Which of Apple's reserved locales to give back before reserving
+    /// `wantedIdentifier`, as an index into `reservedIdentifiers`, or nil when
+    /// nothing needs to go (under the limit, or the language is already
+    /// reserved) or everything reserved is still needed.
+    ///
+    /// Apple may report a variant of the locale it was given, so languages are
+    /// compared, not identifiers. `keepLanguages` are languages still in use
+    /// (dictation's, the saved meeting language, installs in flight). Among
+    /// the rest, the least recently used goes first; never-used counts as
+    /// oldest, and ties keep Apple's order.
+    static func reservationToRelease(
+        reservedIdentifiers: [String],
+        limit: Int,
+        wantedIdentifier: String,
+        keepLanguages: Set<String>,
+        lastUsed: [String: Date]
+    ) -> Int? {
+        guard limit > 0, reservedIdentifiers.count >= limit else { return nil }
+        let wanted = languageCode(ofIdentifier: wantedIdentifier)
+        let reservedLanguages = reservedIdentifiers.map(languageCode(ofIdentifier:))
+        guard !reservedLanguages.contains(wanted) else { return nil }
+
+        let keep = Set(keepLanguages.map(normalizedLanguageCode)).union([wanted])
+        return reservedLanguages.indices
+            .filter { !keep.contains(reservedLanguages[$0]) }
+            .min { lhs, rhs in
+                let left = lastUsed[reservedLanguages[lhs]] ?? .distantPast
+                let right = lastUsed[reservedLanguages[rhs]] ?? .distantPast
+                return left == right ? lhs < rhs : left < right
+            }
+    }
+
     /// Chinese, Japanese, Cantonese and Thai don't put spaces between words,
     /// so Apple's result pieces join without a separator.
     static func writesWithoutSpaces(localeIdentifier: String) -> Bool {
@@ -134,4 +166,29 @@ enum AppleSpeechLocalePolicy {
         "yue": "CN",
         "zh": "CN",
     ]
+}
+
+/// One language's download from Apple, for Settings to show. Kept apart from
+/// the engine's model state so a meeting language downloading after setup
+/// never makes the whole engine look unloaded.
+struct AppleSpeechLanguageDownload: Equatable {
+    enum Phase: Equatable {
+        case downloading(progress: Double)
+        case failed(String)
+    }
+
+    let languageCode: String
+    let phase: Phase
+
+    /// The Meeting language row's line for this download. The failure text
+    /// stays plain: Apple's raw error isn't something a person can act on.
+    func caption(languageName: String) -> String {
+        switch phase {
+        case .downloading(let progress):
+            let fraction = progress.isFinite ? min(max(progress, 0), 1) : 0
+            return "Downloading \(languageName) from Apple… \(Int((fraction * 100).rounded()))%"
+        case .failed:
+            return "Couldn't download \(languageName) from Apple. Check your internet connection. It'll try again when a meeting needs it."
+        }
+    }
 }

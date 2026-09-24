@@ -30,19 +30,6 @@ enum AppleSpeechEngineError: LocalizedError, Equatable {
     }
 }
 
-/// One language's download from Apple, for Settings to show. Kept apart from
-/// `modelDownloadState` so a meeting language downloading after setup never
-/// makes the whole engine look unloaded.
-struct AppleSpeechLanguageDownload: Equatable {
-    enum Phase: Equatable {
-        case downloading(progress: Double)
-        case failed(String)
-    }
-
-    let languageCode: String
-    let phase: Phase
-}
-
 @MainActor
 final class AppleSpeechEngine: ObservableObject {
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
@@ -364,37 +351,35 @@ final class AppleSpeechEngine: ObservableObject {
     private func makeRoomForReservation(of locale: Locale) async {
         let reserved = await AssetInventory.reservedLocales
         let limit = AssetInventory.maximumReservedLocales
-        guard limit > 0, reserved.count >= limit else { return }
 
-        // Apple may report a variant of the locale it was given, so compare
-        // by language.
-        let wanted = AppleSpeechLocalePolicy.languageCode(ofIdentifier: locale.identifier)
-        let reservedLanguages = reserved.map { AppleSpeechLocalePolicy.languageCode(ofIdentifier: $0.identifier) }
-        guard !reservedLanguages.contains(wanted) else { return }
-
-        var keep: Set<String> = [wanted, AppleSpeechLocalePolicy.normalizedLanguageCode(Self.macLanguageCode)]
+        var keep: Set<String> = [Self.macLanguageCode]
         if let meetingLanguage = explicitMeetingLanguageCode() {
-            keep.insert(AppleSpeechLocalePolicy.normalizedLanguageCode(meetingLanguage))
+            keep.insert(meetingLanguage)
         }
         for key in localeInstallTasks.keys {
             keep.insert(AppleSpeechLocalePolicy.languageCode(ofIdentifier: key))
         }
 
-        let candidates = zip(reserved, reservedLanguages).filter { !keep.contains($0.1) }
-        guard let victim = candidates.min(by: {
-            (languageLastUsed[$0.1] ?? .distantPast) < (languageLastUsed[$1.1] ?? .distantPast)
-        }) else { return }
+        guard let index = AppleSpeechLocalePolicy.reservationToRelease(
+            reservedIdentifiers: reserved.map(\.identifier),
+            limit: limit,
+            wantedIdentifier: locale.identifier,
+            keepLanguages: keep,
+            lastUsed: languageLastUsed
+        ) else { return }
 
-        await AssetInventory.release(reservedLocale: victim.0)
+        let victim = reserved[index]
+        let victimLanguage = AppleSpeechLocalePolicy.languageCode(ofIdentifier: victim.identifier)
+        await AssetInventory.release(reservedLocale: victim)
         installedLocaleIdentifiers = installedLocaleIdentifiers.filter {
-            AppleSpeechLocalePolicy.languageCode(ofIdentifier: $0) != victim.1
+            AppleSpeechLocalePolicy.languageCode(ofIdentifier: $0) != victimLanguage
         }
         EventReporter.shared.capture(
             level: .info,
             engine: Self.engineName,
             event: "locale_reservation_released",
             message: "Released an Apple Speech language to make room for another",
-            context: ["released_locale": victim.0.identifier, "locale": locale.identifier, "limit": "\(limit)"]
+            context: ["released_locale": victim.identifier, "locale": locale.identifier, "limit": "\(limit)"]
         )
     }
 

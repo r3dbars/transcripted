@@ -102,14 +102,7 @@ struct MeetingLanguageSettingRow: View {
             if appleSupportedLanguageCodes?.isEmpty == true {
                 lines.append("Apple Speech isn't available on this Mac. Choose another model.")
             } else if let download = appleLanguageDownload {
-                let name = AppleSpeechEngine.languageDisplayName(for: download.languageCode)
-                switch download.phase {
-                case .downloading(let progress):
-                    let percent = Int((min(max(progress, 0), 1) * 100).rounded())
-                    lines.append("Downloading \(name) from Apple… \(percent)%")
-                case .failed:
-                    lines.append("Couldn't download \(name) from Apple. Check your internet connection. It'll try again when a meeting needs it.")
-                }
+                lines.append(download.caption(languageName: AppleSpeechEngine.languageDisplayName(for: download.languageCode)))
             } else {
                 lines.append("macOS downloads each language from Apple the first time you use it.")
             }
