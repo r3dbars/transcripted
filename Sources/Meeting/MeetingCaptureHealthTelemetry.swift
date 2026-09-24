@@ -23,6 +23,32 @@ enum MeetingCaptureHealthTelemetry {
         return max(mirroredDuration, now.timeIntervalSince(recordingStartedAt))
     }
 
+    /// System-audio status for a stop snapshot. When capture stopped
+    /// underneath the controller, it has already reset the live status to
+    /// `unknown`, which would hide a real failure; use what the controller
+    /// saw at the moment capture stopped instead.
+    static func stopSnapshotSystemAudioStatus<Status: Equatable>(
+        live: Status,
+        atCaptureStop: Status?,
+        unknown: Status
+    ) -> Status {
+        guard live == unknown, let atCaptureStop else { return live }
+        return atCaptureStop
+    }
+
+    /// Degradation warning for a stop snapshot. The controller clears its
+    /// warning the moment capture stops, so an unexpected stop falls back to
+    /// the warning it held at that moment. A degrading warning from that
+    /// moment wins: the status reset that follows can raise a fresh
+    /// "unverified" warning that would otherwise hide a real interruption.
+    static func stopSnapshotDegradationWarning(
+        live: MeetingSystemAudioDegradationWarning?,
+        atCaptureStop: MeetingSystemAudioDegradationWarning?
+    ) -> MeetingSystemAudioDegradationWarning? {
+        if let atCaptureStop, atCaptureStop.degradesSavedCapture { return atCaptureStop }
+        return live ?? atCaptureStop
+    }
+
     struct HealthFacts {
         let captureQuality: String
         let audioGaps: Int

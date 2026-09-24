@@ -19,6 +19,18 @@ final class TranscriptedSettingsNavigationModel {
         homeFindFocusToken += 1
     }
 
+    /// Bumped by the meeting pill's Open (and Home's own Open on a just-saved
+    /// transcript). Home expands the meeting at `homeRevealMeetingURL` once
+    /// it appears in the list, using the same mount-safe `.task(id:)` pattern
+    /// as the find token.
+    var homeRevealMeetingToken = 0
+    private(set) var homeRevealMeetingURL: URL?
+
+    func requestHomeRevealMeeting(transcriptURL: URL) {
+        homeRevealMeetingURL = transcriptURL
+        homeRevealMeetingToken += 1
+    }
+
     init(selectedPage: TranscriptedSettingsPage = .home) {
         self.selectedPage = selectedPage
         self.presentedPage = selectedPage

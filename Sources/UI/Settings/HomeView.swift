@@ -1013,9 +1013,6 @@ struct HomeFailedMeetingInlineRow: View {
             .help(item.detail)
 
             actions
-                .opacity(isHovering ? 1 : 0)
-                .allowsHitTesting(isHovering)
-                .animation(.easeOut(duration: 0.12), value: isHovering)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -1027,7 +1024,28 @@ struct HomeFailedMeetingInlineRow: View {
         .onHover { isHovering = $0 }
     }
 
+    /// Try again stays visible: it is the one thing this row is for. The
+    /// rest (play, show audio, delete) reveal on hover like other rows.
     private var actions: some View {
+        HStack(spacing: 6) {
+            hoverActions
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+
+            if inlinePresentation.canShowRetryAction {
+                HomeAttentionActionButton(
+                    title: item.isRetrying ? "Retrying" : "Try again",
+                    isDisabled: retryDisabled,
+                    automationIdentifier: "transcripted.home.failed-meeting.retry",
+                    action: onRetry
+                )
+                .help(retryHelp)
+            }
+        }
+    }
+
+    private var hoverActions: some View {
         HStack(spacing: 6) {
             if let audioAttachment {
                 Button {
@@ -1056,16 +1074,6 @@ struct HomeFailedMeetingInlineRow: View {
                 .accessibilityIdentifier("transcripted.home.failed-meeting.show-audio")
             }
 
-            if inlinePresentation.canShowRetryAction {
-                HomeAttentionActionButton(
-                    title: item.isRetrying ? "Retrying" : "Try again",
-                    isDisabled: retryDisabled,
-                    automationIdentifier: "transcripted.home.failed-meeting.retry",
-                    action: onRetry
-                )
-                .help(retryHelp)
-            }
-
             HomeRowMoreMenuButton(items: [
                 HomeRowMenuItem(
                     title: "Delete failed meeting",
@@ -1085,24 +1093,28 @@ struct HomeFailedMeetingInlineRow: View {
             isRetrying: item.isRetrying,
             hasAudioFiles: item.hasAudioFiles,
             detail: item.detail,
-            usableAudio: item.usableAudio
+            usableAudio: item.usableAudio,
+            failureKind: item.failureKind
         )
     }
 
     private func statusLine(presentation: HomeFailedMeetingInlinePresentation) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // Red is for rows that can't be retried; a retry-ready row is
+        // recoverable, so its chip stays neutral.
+        let chipTint = presentation.canShowRetryAction ? Color.secondary : Color.red
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(presentation.statusText)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Color.red)
+                .foregroundStyle(chipTint)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Color.red.opacity(0.12))
+                        .fill(chipTint.opacity(0.12))
                 )
                 .overlay(
                     Capsule(style: .continuous)
-                        .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                        .stroke(chipTint.opacity(0.18), lineWidth: 1)
                 )
                 .accessibilityLabel(presentation.statusText)
 
@@ -1110,8 +1122,9 @@ struct HomeFailedMeetingInlineRow: View {
                 Text(detail)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

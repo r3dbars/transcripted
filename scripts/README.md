@@ -75,6 +75,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
+- `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release

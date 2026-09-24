@@ -274,6 +274,7 @@ func testRuntimeDiagnosticsStore() {
     runSuite("RuntimeDiagnosticsStore suppresses idle terminal session events") {
         for lastEvent in [
             "dictation_microphone_start_timeout",
+            "meeting_accidental_start",
             "meeting_empty_audio",
             "meeting_no_speech_detected",
             "meeting_recording_too_short",

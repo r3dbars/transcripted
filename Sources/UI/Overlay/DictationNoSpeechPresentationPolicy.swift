@@ -6,7 +6,9 @@ enum DictationNoSpeechPresentationPolicy {
         reason: DictationEmptyTranscriptionReason = .noSpeech
     ) -> String {
         if reason == .recordingTooShort {
-            return "Recording ended too soon. Try again and speak for at least a second."
+            // A quick tap closes like a cancel before reaching this copy, so the
+            // press was long enough and the mic delivered too little audio.
+            return "Only a moment of audio came through. Try again, and if it keeps happening, check your microphone."
         }
         if reason == .modelFailure {
             return "The local speech model failed. Try again, or switch transcription models in Settings."

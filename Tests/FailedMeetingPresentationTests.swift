@@ -105,20 +105,19 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
 
-    runSuite("FailedMeetingPresentation no-speech failures do not promise a retry") {
+    runSuite("FailedMeetingPresentation no-speech failures point at Try again on Home") {
         let copy = MeetingFailureCopy.make(
             forMessage: "No speech detected",
             shortErrorMessage: "No speech detected",
-            isRetryable: false
+            isRetryable: true
         )
 
         assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
         assertEqual(
             copy.detail,
-            "Transcripted found audio, but not enough spoken words to write a transcript. The audio was kept. Try recording again with clearer voices.",
-            "no-speech outcomes should keep the audio and ask for a clearer recording, not a Home retry"
+            "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open Home and choose Try again.",
+            "saved no-speech rows offer Try again unless their audio is silent, so the copy points there conditionally"
         )
-        assertFalse(copy.detail.lowercased().contains("retry"), "no-speech copy must not promise a retry")
     }
 
     runSuite("FailedMeetingPresentation mid-meeting device loss gets device-loss copy, not start-failure copy") {
@@ -205,6 +204,56 @@ func testFailedMeetingPresentation() {
             "retryable rows should make saved audio preservation visible"
         )
         assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation says why a retryable meeting failed") {
+        let permission = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "ignored",
+            failureKind: .systemAudioPermission
+        )
+        assertEqual(permission.statusText, "Retry ready")
+        assertEqual(
+            permission.inlineDetail,
+            "Turn on System Audio Recording in System Settings first, then try again.",
+            "the fix-first step should be visible inline, not only in a tooltip"
+        )
+        assertTrue(permission.canShowRetryAction)
+
+        let unknownKind = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "ignored",
+            failureKind: .transcriptionInferenceFailed
+        )
+        assertEqual(
+            unknownKind.inlineDetail,
+            "Saved audio is still here. Try again will transcribe it.",
+            "kinds where Try again is the whole answer keep the saved-audio line"
+        )
+
+        for kind in [
+            MeetingFailureKind.systemAudioPermission,
+            .systemAudioPermissionCheckInconclusive,
+            .microphonePermission,
+            .languageNeedsWhisperModel,
+            .modelDownloadFailed,
+            .modelNotLoaded,
+            .microphoneAudioUnusable,
+            .audioDeviceUnavailable,
+            .stopTimeout,
+            .savedBeforeQuit,
+            .speakerNameFinalizationFailed,
+            .speakerFinalizationFailed,
+            .saveFailed
+        ] {
+            let reason = HomeFailedMeetingInlinePresentation.retryReason(for: kind) ?? ""
+            assertFalse(reason.isEmpty, "\(kind.rawValue) should explain itself on Home")
+            assertFalse(reason.contains("Home"), "Home copy should not tell people to open Home (\(kind.rawValue))")
+        }
     }
 
     runSuite("HomeFailedMeetingInlinePresentation stop-timeout retained audio appears retry-ready in Home") {
