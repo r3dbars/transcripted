@@ -19,8 +19,9 @@ final class MenuBarHeaderView: NSView {
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let warningIconView = NSImageView()
     private let warningLabel = NSTextField(wrappingLabelWithString: "")
-    // Clear button over the warning row, so the warning is clickable and
-    // reachable by keyboard and VoiceOver when it has a fix to open.
+    // Clear button over the warning row, so the warning is clickable (and
+    // one VoiceOver element) when it has a fix to open. It is not in the
+    // popover's Tab loop, which FocusOrderContract keeps to the action rows.
     private let warningButton = NSButton(title: "", target: nil, action: nil)
 
     /// Runs the warning's fix (open Accessibility or Keyboard settings).
@@ -128,6 +129,8 @@ final class MenuBarHeaderView: NSView {
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         warningButton.isHidden = !(hasWarning && currentWarningAction != nil)
+        // The button carries the same text, so VoiceOver reads it once.
+        warningLabel.setAccessibilityElement(warningButton.isHidden)
         if hasWarning {
             let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)

@@ -725,7 +725,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 if #available(macOS 14.0, *) {
                     // stopRecording() alone only accepts .recording — if the
                     // meeting is still engaging the mic (.startingRecording)
-                    // when this explicit "Stop and Transcribe" choice lands,
+                    // when this explicit "Stop Recording" choice lands,
                     // a bare stopRecording() call would silently no-op and
                     // the pending start would go on to leave the meeting
                     // recording, contradicting what the user just chose.
@@ -787,7 +787,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .saveAudioAndQuit
         }
 
-        guard activeCapture else {
+        // Once Stop has been pressed the audio is only being saved: "still
+        // recording", Keep Recording, and Stop Recording would all be wrong,
+        // so that phase gets the Keep Open / Save Audio & Quit dialog.
+        let isSavingAfterStop: Bool
+        if case .stoppingRecording = appState.meetingSession.state {
+            isSavingAfterStop = true
+        } else {
+            isSavingAfterStop = false
+        }
+        guard activeCapture, !isSavingAfterStop else {
             return confirmQuitDuringBackgroundMeetingWork()
         }
 
