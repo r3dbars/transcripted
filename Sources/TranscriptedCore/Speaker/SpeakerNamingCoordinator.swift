@@ -503,10 +503,15 @@ extension TranscriptionTaskManager {
 
             if didFinalizeTranscript {
                 speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
-                    for: plannedChanges.resolvedUpdates.filter {
-                        !plannedChanges.transcriptOnlySpeakerKeys.contains(
-                            $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
-                        )
+                    for: plannedChanges.resolvedUpdates.filter { update in
+                        let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+                        guard plannedChanges.transcriptOnlySpeakerKeys.contains(key) else { return true }
+                        // A correction's verdict belongs to the wrongly suggested person,
+                        // who still exists even when no new person was created for the row.
+                        if case .corrected = update.action {
+                            return clipsBySpeakerId[key]?.matchedProfileSnapshot != nil
+                        }
+                        return false
                     },
                     clipsBySpeakerId: clipsBySpeakerId,
                     transcriptId: transcriptId
