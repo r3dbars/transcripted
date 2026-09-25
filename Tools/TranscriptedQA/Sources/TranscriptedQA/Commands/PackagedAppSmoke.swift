@@ -244,6 +244,7 @@ final class PackagedAppSmokeRunner {
         checks.append(validateBundledFramework(relativePath: "Contents/Frameworks/Sparkle.framework", check: "sparkle-framework"))
         checks.append(validateBundledHelper(relativePath: "Contents/Helpers/transcripted-mcp", check: "mcp-helper"))
         checks.append(contentsOf: validateBundledLlamaServer())
+        checks.append(contentsOf: validateBundledKeyboard())
         checks.append(contentsOf: validateBundledCLI())
         checks.append(validateCodeSignature())
         checks.append(validateDSYM(binaryURL: executableURL))
@@ -504,6 +505,28 @@ final class PackagedAppSmokeRunner {
             return [helperCheck, .pass("llama-server-signature", target: relativePath, detail: "codesign --verify --strict passed for the bundled llama-server.")]
         }
         return [helperCheck, .fail("llama-server-signature", target: relativePath, detail: result.combinedOutput.trimmedForReport)]
+    }
+
+    /// Writing's IMKit keyboard, built by bundle-input-method.sh into
+    /// Contents/Library/Input Methods. Never launched here: macOS starts input
+    /// methods itself once they are installed and selected.
+    private func validateBundledKeyboard() -> [PackagedAppSmokeCheck] {
+        let relativePath = "Contents/Library/Input Methods/Transcripted Keyboard.app"
+        let executablePath = relativePath + "/Contents/MacOS/TranscriptedKeyboard"
+        let executable = appBundleURL.appendingPathComponent(executablePath, isDirectory: false)
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            return [.fail("keyboard-bundle", target: relativePath, detail: "The Writing keyboard bundle or its executable is missing.")]
+        }
+        let bundleCheck = PackagedAppSmokeCheck.pass("keyboard-bundle", target: relativePath, detail: "Writing keyboard bundle exists and its executable is present.")
+        guard verifyCodeSignature else {
+            return [bundleCheck, .warn("keyboard-signature", target: relativePath, detail: "Code signature verification was skipped by request.")]
+        }
+        let url = appBundleURL.appendingPathComponent(relativePath, isDirectory: true)
+        let result = commandRunner.run("/usr/bin/codesign", ["--verify", "--strict", url.path])
+        if result.exitCode == 0 {
+            return [bundleCheck, .pass("keyboard-signature", target: relativePath, detail: "codesign --verify --strict passed for the Writing keyboard.")]
+        }
+        return [bundleCheck, .fail("keyboard-signature", target: relativePath, detail: result.combinedOutput.trimmedForReport)]
     }
 
     /// The build scripts run `build-info` before signing. This is the only check

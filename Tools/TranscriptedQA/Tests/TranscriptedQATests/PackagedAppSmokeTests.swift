@@ -49,6 +49,8 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "llama-server-signature" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-bundle" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-signature" && $0.status == .pass })
         XCTAssertEqual(report.status, .warn)
         XCTAssertEqual(report.exitCode, 3)
     }
@@ -62,6 +64,26 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .fail })
         XCTAssertFalse(report.checks.contains { $0.id == "llama-server-signature" })
         XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testMissingKeyboardBundleFails() throws {
+        let fixture = try makeFixture()
+        try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/Library/Input Methods/Transcripted Keyboard.app"))
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-bundle" && $0.status == .fail })
+        XCTAssertFalse(report.checks.contains { $0.id == "keyboard-signature" })
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testUnsignedKeyboardBundleFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(codesignExitCode: 1)
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-signature" && $0.status == .fail })
     }
 
     func testUnsignedLlamaServerHelperFails() throws {
@@ -289,6 +311,12 @@ final class PackagedAppSmokeTests: XCTestCase {
         let executable = macOS.appendingPathComponent("Transcripted", isDirectory: false)
         try "binary".write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+        let keyboardMacOS = contents.appendingPathComponent("Library/Input Methods/Transcripted Keyboard.app/Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: keyboardMacOS, withIntermediateDirectories: true)
+        let keyboardExecutable = keyboardMacOS.appendingPathComponent("TranscriptedKeyboard", isDirectory: false)
+        try "keyboard".write(to: keyboardExecutable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: keyboardExecutable.path)
 
         for name in ["transcripted-mcp", "transcripted-cli", "llama-server"] {
             let helper = helpers.appendingPathComponent(name, isDirectory: false)
