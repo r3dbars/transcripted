@@ -69,3 +69,16 @@ enum SettingsDashboardRefreshPolicy {
         return now.timeIntervalSince(lastStartedAt) >= minimumInterval
     }
 }
+
+/// Opening a meeting from Today (or the pill) expands it on Meetings once it
+/// is in the loaded list. An older meeting isn't in the first page, so the
+/// list pages until it shows up, while that reveal is still wanted.
+enum HomeMeetingRevealPagingPolicy {
+    static func shouldLoadNextPage(
+        pendingKey: String?,
+        requestedKey: String,
+        canLoadMoreMeetings: Bool
+    ) -> Bool {
+        pendingKey == requestedKey && canLoadMoreMeetings
+    }
+}

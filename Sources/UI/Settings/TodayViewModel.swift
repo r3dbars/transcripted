@@ -23,8 +23,16 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var hasLoaded = false
 
     private var refreshTask: Task<Void, Never>?
+    private var trailingRefreshTask: Task<Void, Never>?
     private var refreshGeneration = SupersessionEpoch()
     private var captureRefreshObserver: HomeCaptureRefreshObserver?
+    private var lastRefreshStartedAt: Date?
+    /// Only the shown page reacts to library changes; the settings view
+    /// refreshes it again when it comes back.
+    private var isShown = false
+    /// The last meeting scan, so the next one only re-reads files that changed
+    /// instead of decoding the whole metadata cache (see `loadSearchIndex`).
+    private var previousMeetingIndex: [String: RecentMeetingIndexEntry] = [:]
 
     /// How many Recent context rows to show; Load more adds a page.
     private(set) var recentLimit = TodayRecentActivity.pageSize
@@ -32,47 +40,108 @@ final class TodayViewModel: ObservableObject {
     static let maxRecentLimit = 500
     /// Upper bound on dictations read to fill the week's tape.
     static let maxTapeDictations = 1_000
+    /// App activation, saves and window opens can each ask for a refresh; a
+    /// whole-library scan runs at most this often, with one trailing run so the
+    /// last change still shows.
+    static let minimumRefreshInterval = SettingsDashboardRefreshPolicy.passiveRefreshMinimumInterval
 
     init() {
         captureRefreshObserver = HomeCaptureRefreshObserver { _ in
             Task { @MainActor [weak self] in
-                self?.refresh()
+                guard let self, self.isShown else { return }
+                self.refresh()
             }
         }
+    }
+
+    func setShown(_ shown: Bool) {
+        isShown = shown
     }
 
     func loadMoreRecent() {
         guard snapshot.canLoadMoreRecent else { return }
         recentLimit = min(Self.maxRecentLimit, recentLimit + TodayRecentActivity.pageSize)
-        refresh()
+        refresh(force: true)
     }
 
-    func refresh() {
-        refreshTask?.cancel()
-        let generation = refreshGeneration.begin()
-        let limit = recentLimit
-        refreshTask = Task { @MainActor in
-            let snapshot = await Task.detached(priority: .utility) {
-                Self.loadSnapshot(now: Date(), recentLimit: limit)
-            }.value
-            guard !Task.isCancelled,
-                  let snapshot,
-                  self.refreshGeneration.finishIfCurrent(generation) else { return }
-            self.snapshot = snapshot
-            self.hasLoaded = true
+    /// `force` skips the throttle, for an explicit action like Load more.
+    func refresh(force: Bool = false) {
+        let now = Date()
+        if !force, let delay = passiveRefreshDelay(now: now) {
+            scheduleTrailingRefresh(after: delay)
+            return
         }
+        startRefresh(now: now)
     }
 
     func cancel() {
         refreshTask?.cancel()
         refreshTask = nil
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = nil
         refreshGeneration.invalidate()
+        isShown = false
+        // Like Meetings, a fresh visit starts from the first page again.
+        recentLimit = TodayRecentActivity.pageSize
     }
 
-    nonisolated private static func loadSnapshot(now: Date, recentLimit: Int) -> TodaySnapshot? {
+    private func passiveRefreshDelay(now: Date) -> TimeInterval? {
+        if refreshTask != nil { return Self.minimumRefreshInterval }
+        guard let lastRefreshStartedAt else { return nil }
+        let wait = Self.minimumRefreshInterval - now.timeIntervalSince(lastRefreshStartedAt)
+        return wait > 0 ? wait : nil
+    }
+
+    private func scheduleTrailingRefresh(after delay: TimeInterval) {
+        guard trailingRefreshTask == nil else { return }
+        trailingRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.trailingRefreshTask = nil
+            self.refresh()
+        }
+    }
+
+    private func startRefresh(now: Date) {
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = nil
+        refreshTask?.cancel()
+        lastRefreshStartedAt = now
+        let generation = refreshGeneration.begin()
+        let limit = recentLimit
+        let previous = previousMeetingIndex
+        refreshTask = Task { @MainActor in
+            let work = Task.detached(priority: .utility) {
+                Self.loadSnapshot(now: Date(), recentLimit: limit, previousMeetingIndex: previous)
+            }
+            // A detached task doesn't inherit cancellation; forward it so the
+            // `Task.isCancelled` checks in the scan actually stop stale work.
+            let loaded = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
+            guard self.refreshGeneration.finishIfCurrent(generation) else { return }
+            self.refreshTask = nil
+            guard !Task.isCancelled, let loaded else { return }
+            self.previousMeetingIndex = loaded.meetingIndex
+            self.snapshot = loaded.snapshot
+            self.hasLoaded = true
+        }
+    }
+
+    nonisolated private static func loadSnapshot(
+        now: Date,
+        recentLimit: Int,
+        previousMeetingIndex: [String: RecentMeetingIndexEntry]
+    ) -> (snapshot: TodaySnapshot, meetingIndex: [String: RecentMeetingIndexEntry])? {
         let calendar = Calendar.current
-        guard let meetingIndex = RecentMeetingsScanner.loadSearchIndex() else { return nil }
+        guard let meetingIndex = RecentMeetingsScanner.loadSearchIndex(previous: previousMeetingIndex) else { return nil }
         if Task.isCancelled { return nil }
+        let meetingIndexByPath = Dictionary(
+            meetingIndex.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let meetings = meetingIndex.map(\.item).sorted { $0.date > $1.date }
 
         let meetingFacts = meetings.map { item in
@@ -140,13 +209,15 @@ final class TodayViewModel: ObservableObject {
             limit: recentLimit + 1
         )
 
-        return TodaySnapshot(
+        let snapshot = TodaySnapshot(
             stats: stats,
             tapeDays: tapeDays,
             recent: Array(merged.prefix(recentLimit)),
-            canLoadMoreRecent: merged.count > recentLimit,
+            // At the cap there's nothing more Load more may add.
+            canLoadMoreRecent: merged.count > recentLimit && recentLimit < maxRecentLimit,
             builtAt: now
         )
+        return (snapshot, meetingIndexByPath)
     }
 
     nonisolated private static func durationSeconds(of item: RecentMeetingItem) -> Int? {

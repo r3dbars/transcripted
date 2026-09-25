@@ -265,30 +265,18 @@ enum TodayCopy {
     }
 
     static func words(_ value: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let number = formatter.string(from: NSNumber(value: max(0, value))) ?? "\(value)"
+        let number = TodayFormatterCache.decimalString(max(0, value))
         return "\(number) \(value == 1 ? "word" : "words")"
     }
 
     /// "Thursday, September 24".
     static func dateLine(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
-        return formatter.string(from: date)
+        TodayFormatterCache.string(from: date, template: "EEEEMMMMd", locale: locale, calendar: calendar)
     }
 
     /// "Thu".
     static func weekdayShort(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("EEE")
-        return formatter.string(from: date)
+        TodayFormatterCache.string(from: date, template: "EEE", locale: locale, calendar: calendar)
     }
 
     /// "24".
@@ -303,24 +291,63 @@ enum TodayCopy {
         locale: Locale = .current,
         calendar: Calendar = .current
     ) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
         let today = calendar.startOfDay(for: now)
         let day = calendar.startOfDay(for: date)
+        let template: String
         if day == today {
-            formatter.setLocalizedDateFormatFromTemplate("jmm")
-            return formatter.string(from: date)
-        }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), day == yesterday {
+            template = "jmm"
+        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), day == yesterday {
             return "Yesterday"
-        }
-        if let daysAgo = calendar.dateComponents([.day], from: day, to: today).day, daysAgo < 7 {
-            formatter.setLocalizedDateFormatFromTemplate("EEEE")
+        } else if let daysAgo = calendar.dateComponents([.day], from: day, to: today).day, daysAgo < 7 {
+            template = "EEEE"
         } else {
-            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+            template = "MMMd"
         }
+        return TodayFormatterCache.string(from: date, template: template, locale: locale, calendar: calendar)
+    }
+}
+
+/// Today's copy runs per Recent row and twice per tape mark on every render
+/// (hover re-renders the tape), so building a DateFormatter per call adds up
+/// on a busy day. Formatters are reused per template, locale, calendar and
+/// time zone. Foundation formatters are safe to share for reads; the lock
+/// only guards the dictionary.
+enum TodayFormatterCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var dateFormatters: [String: DateFormatter] = [:]
+    nonisolated(unsafe) private static var decimalFormatters: [String: NumberFormatter] = [:]
+
+    static func string(from date: Date, template: String, locale: Locale, calendar: Calendar) -> String {
+        let key = [template, locale.identifier, "\(calendar.identifier)", calendar.timeZone.identifier]
+            .joined(separator: "|")
+        lock.lock()
+        let formatter: DateFormatter
+        if let cached = dateFormatters[key] {
+            formatter = cached
+        } else {
+            formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.setLocalizedDateFormatFromTemplate(template)
+            dateFormatters[key] = formatter
+        }
+        lock.unlock()
         return formatter.string(from: date)
+    }
+
+    static func decimalString(_ value: Int, locale: Locale = .current) -> String {
+        lock.lock()
+        let formatter: NumberFormatter
+        if let cached = decimalFormatters[locale.identifier] {
+            formatter = cached
+        } else {
+            formatter = NumberFormatter()
+            formatter.locale = locale
+            formatter.numberStyle = .decimal
+            decimalFormatters[locale.identifier] = formatter
+        }
+        lock.unlock()
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }

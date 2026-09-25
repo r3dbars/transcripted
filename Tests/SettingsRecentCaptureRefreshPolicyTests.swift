@@ -11,6 +11,41 @@ func testSettingsRecentCaptureRefreshPolicy() {
         }
     }
 
+    runSuite("HomeMeetingRevealPagingPolicy pages Meetings until an older meeting from Today shows up") {
+        assertTrue(
+            HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                pendingKey: "/m/old.md",
+                requestedKey: "/m/old.md",
+                canLoadMoreMeetings: true
+            ),
+            "a meeting past the first 10 should load the next page"
+        )
+        assertFalse(
+            HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                pendingKey: "/m/old.md",
+                requestedKey: "/m/old.md",
+                canLoadMoreMeetings: false
+            ),
+            "the end of the list stops paging"
+        )
+        assertFalse(
+            HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                pendingKey: nil,
+                requestedKey: "/m/old.md",
+                canLoadMoreMeetings: true
+            ),
+            "a reveal that timed out or already expanded stops paging"
+        )
+        assertFalse(
+            HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                pendingKey: "/m/newer.md",
+                requestedKey: "/m/old.md",
+                canLoadMoreMeetings: true
+            ),
+            "a newer reveal request replaces the old one's paging"
+        )
+    }
+
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
         for page in [TranscriptedSettingsPage.today, .general, .people, .connectAgent] {
             assertEqual(

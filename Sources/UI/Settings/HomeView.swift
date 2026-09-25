@@ -317,28 +317,48 @@ final class HomeViewModel: ObservableObject {
         dictations: [SavedDictationEntry],
         meetings: [RecentMeetingItem]
     ) {
-        guard !didTrackActivationReturnProxy else { return }
-
         let dictationCandidates = dictations.map { entry in
             (kind: ActivationTelemetry.ArtifactKind.dictation, date: entry.createdAt)
         }
         let meetingCandidates = meetings.map { item in
             (kind: ActivationTelemetry.ArtifactKind.meeting, date: item.date)
         }
-        guard let latest = (dictationCandidates + meetingCandidates).max(by: { $0.date < $1.date }) else {
+        trackActivationReturnProxyIfNeeded(candidates: dictationCandidates + meetingCandidates, surface: .home)
+    }
+
+    /// Today is the page the window opens on, so it reports the return signal
+    /// through the same once-per-window latch as Meetings.
+    func trackActivationReturnProxyIfNeeded(todayRecent: [TodayRecentItem]) {
+        let candidates = todayRecent.map { item in
+            (
+                kind: item.kind == .meeting
+                    ? ActivationTelemetry.ArtifactKind.meeting
+                    : ActivationTelemetry.ArtifactKind.dictation,
+                date: item.date
+            )
+        }
+        trackActivationReturnProxyIfNeeded(candidates: candidates, surface: .today)
+    }
+
+    private func trackActivationReturnProxyIfNeeded(
+        candidates: [(kind: ActivationTelemetry.ArtifactKind, date: Date)],
+        surface: ActivationTelemetry.Surface
+    ) {
+        guard !didTrackActivationReturnProxy else { return }
+        guard let latest = candidates.max(by: { $0.date < $1.date }) else {
             return
         }
 
         didTrackActivationReturnProxy = ActivationTelemetry.trackReturnProxyIfEligible(
             priorArtifactKind: latest.kind,
             priorArtifactDate: latest.date,
-            surface: .home
+            surface: surface
         )
         if didTrackActivationReturnProxy {
-            let artifactCount = dictations.count + meetings.count
+            let artifactCount = candidates.count
             ActivationTelemetry.trackHabitLoopAction(
                 actionKind: artifactCount >= 2 ? .returnAfterSecondArtifact : .returnAfterFirstArtifact,
-                surface: .home,
+                surface: surface,
                 artifactKind: latest.kind,
                 artifactDate: latest.date,
                 artifactCount: artifactCount

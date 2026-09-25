@@ -519,8 +519,17 @@ struct TranscriptedSettingsView: View {
                 actions.startDictation()
             }
         )
+        .onAppear {
+            todayViewModel.setShown(true)
+        }
         .onDisappear {
             todayViewModel.cancel()
+        }
+        .onReceive(todayViewModel.$snapshot) { snapshot in
+            // The window opens on Today now, so the return signal Meetings
+            // used to send on open comes from Today's list. Home owns the
+            // once-per-window latch, so visiting Meetings after doesn't count twice.
+            homeViewModel.trackActivationReturnProxyIfNeeded(todayRecent: snapshot.recent)
         }
     }
 
@@ -694,7 +703,22 @@ struct TranscriptedSettingsView: View {
         guard let key = homePendingRevealMeetingKey else { return }
         guard let item = sections.lazy
             .flatMap(\.items)
-            .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else { return }
+            .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else {
+            // Today can open any meeting from the past week, not only the 10
+            // newest. Page the list until it shows up; each page publishes
+            // new sections and lands back here. Deferred, and decided inside
+            // the Task, because sections publish before the load sets
+            // canLoadMoreMeetings and clears its in-flight flag.
+            Task { @MainActor in
+                guard HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                    pendingKey: homePendingRevealMeetingKey,
+                    requestedKey: key,
+                    canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings
+                ) else { return }
+                homeViewModel.loadMoreMeetings()
+            }
+            return
+        }
         homePendingRevealMeetingKey = nil
         // A search that hides the row would expand something off-screen.
         if !homeMeetingSearchQuery.isEmpty {
@@ -3255,7 +3279,7 @@ struct TranscriptedSettingsView: View {
 
     private func refreshRecentCaptures(force: Bool = false) {
         if navigation.selectedPage == .today {
-            todayViewModel.refresh()
+            todayViewModel.refresh(force: force)
         }
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
