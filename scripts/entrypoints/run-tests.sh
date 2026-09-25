@@ -498,6 +498,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFormatOptions.swift"
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
+    "Sources/Support/MeetingInviteeSuggestionPolicy.swift"
     "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
     "Sources/UI/Shared/SupportEmailDispatcher.swift"
