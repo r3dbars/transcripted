@@ -101,6 +101,10 @@ final class MenuBarPanelController: NSViewController {
             for: appState.sparkleUpdater.updateStatus,
             presentationDetail: updatePresentation.detail
         )
+        // While the update waits on a recording, drop the "Restart" button
+        // label: the row can't be pressed yet, and its detail says why.
+        let updateIsWaiting = !updateActionEnabled && updateDetail != updatePresentation.detail
+        let updateTrailing = updateIsWaiting ? nil : updatePresentation.trailingText
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -128,7 +132,7 @@ final class MenuBarPanelController: NSViewController {
             symbolName: updatePresentation.symbolName,
             title: updatePresentation.title,
             detail: updateDetail,
-            trailingText: updatePresentation.trailingText,
+            trailingText: updateTrailing,
             tone: updatePresentation.tone,
             isVisible: updatePresentation.isProminent,
             isEnabled: updateActionEnabled
@@ -139,7 +143,7 @@ final class MenuBarPanelController: NSViewController {
             updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
             updateDetail: updateDetail,
-            updateVersion: updatePresentation.trailingText,
+            updateVersion: updateTrailing,
             updateTone: updatePresentation.tone,
             updateEnabled: updateActionEnabled,
             showUpdateRow: !updatePresentation.isProminent

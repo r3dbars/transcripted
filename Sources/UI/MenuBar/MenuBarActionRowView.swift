@@ -151,10 +151,13 @@ final class MenuBarActionRowView: NSControl {
         let trailingColor: NSColor
 
         if !isEnabled {
+            // A disabled row often says what it is waiting on ("Restart to
+            // Update / After this recording finishes"), so it stays readable:
+            // secondary text, no extra fade on top.
             backgroundColor = MenuTokens.flatRowDisabledNS
             iconTint = MenuTokens.textMutedNS
-            titleColor = MenuTokens.textMutedNS
-            detailColor = MenuTokens.textMutedNS
+            titleColor = MenuTokens.textSecondaryNS
+            detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textMutedNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
@@ -185,7 +188,6 @@ final class MenuBarActionRowView: NSControl {
         titleLabel.textColor = titleColor
         detailLabel.textColor = detailColor
         trailingLabel.textColor = trailingColor
-        alphaValue = isEnabled ? 1.0 : 0.55
     }
 
     private func toneColors() -> (normal: NSColor, pressed: NSColor) {
