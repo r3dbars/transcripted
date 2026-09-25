@@ -177,7 +177,9 @@ final class MenuBarPanelController: NSViewController {
                 ),
                 updateCallout: MenuBarActionRowSmokeSnapshot(
                     title: "",
+                    displayTitle: "",
                     detail: "",
+                    toolTip: "",
                     trailingText: "",
                     automationIdentifier: "",
                     isVisible: false,

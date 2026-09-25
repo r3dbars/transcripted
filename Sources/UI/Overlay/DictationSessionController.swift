@@ -1767,9 +1767,13 @@ class DictationSessionController: ObservableObject {
             overlayController.showError(saveFailureMessage)
         } else {
             // Hitting the 5-minute cap still saved the text: a notice, not
-            // an error with a warning triangle and a shake.
+            // an error with a warning triangle and a shake. The menu has no
+            // Paste Last row, so name the shortcut that reaches it.
+            let pasteLastShortcut = PhysicalDictationTriggerPreferences.displayString(
+                for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
+            )
             overlayController.showSavedNotice(
-                "Saved to Markdown. Paste it now, or use Paste Last Dictation later.",
+                "Saved to Markdown. Paste it now, or press \(pasteLastShortcut) later.",
                 actionTitle: "Paste It",
                 action: { [weak self] in
                     guard let self else { return }

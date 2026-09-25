@@ -116,7 +116,7 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(title)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(visibleTitle)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),

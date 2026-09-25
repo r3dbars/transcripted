@@ -3,7 +3,11 @@ import QuartzCore
 
 struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
     let title: String
+    /// What the row shows on screen; a `.button` shows a shorter title.
+    let displayTitle: String
     let detail: String
+    /// A button's setup or failure detail, shown on hover.
+    let toolTip: String
     let trailingText: String
     let automationIdentifier: String
     let isVisible: Bool
@@ -67,7 +71,8 @@ final class MenuBarActionRowView: NSControl {
     }
 
     /// `displayTitle` is the shorter text a `.button` shows; `title` stays
-    /// the accessibility label and the smoke snapshot title.
+    /// the smoke snapshot title. Voice Control matches the words on screen,
+    /// so the accessibility label is whatever the row shows.
     func update(
         symbolName: String,
         title: String,
@@ -82,11 +87,12 @@ final class MenuBarActionRowView: NSControl {
         rowSize = size
         rowTitle = title
         self.isEnabled = isEnabled
-        setAccessibilityLabel(title)
+        let visibleTitle = displayTitle ?? title
+        setAccessibilityLabel(visibleTitle)
         setAccessibilityHelp(detail.isEmpty ? nil : detail)
         toolTip = size == .button && !detail.isEmpty ? detail : nil
 
-        titleLabel.stringValue = displayTitle ?? title
+        titleLabel.stringValue = visibleTitle
         // A button has no room for a second line; its detail is the tooltip.
         detailLabel.stringValue = size == .button ? "" : detail
         detailLabel.isHidden = detailLabel.stringValue.isEmpty
@@ -402,7 +408,9 @@ final class MenuBarActionRowView: NSControl {
     var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
         MenuBarActionRowSmokeSnapshot(
             title: rowTitle,
+            displayTitle: titleLabel.stringValue,
             detail: detailLabel.stringValue,
+            toolTip: toolTip ?? "",
             trailingText: trailingLabel.stringValue,
             automationIdentifier: accessibilityIdentifier(),
             isVisible: !isHidden,

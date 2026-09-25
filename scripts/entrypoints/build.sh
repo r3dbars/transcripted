@@ -295,6 +295,11 @@ for key in ("startDictation", "startMeeting"):
     row = actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
+# The two buttons show short titles; check what is on screen too.
+for key, expected_display in {"startMeeting": "Record", "startDictation": "Dictate"}.items():
+    row = actions.get(key) or {}
+    if row.get("displayTitle") != expected_display:
+        errors.append(f"{key} shows {row.get('displayTitle')!r}, expected {expected_display!r}")
 
 utility_actions = report.get("content", {}).get("utilityActions", {})
 for key, expected in {

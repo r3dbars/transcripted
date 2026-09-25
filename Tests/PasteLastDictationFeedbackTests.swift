@@ -22,7 +22,7 @@ func testPasteLastDictationFeedback() {
         assertEqual(copied.title, "Copied instead", "copied title")
         assertEqual(copied.detail, "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", "copied detail")
         assertEqual(copied.tone, .caution, "copied tone")
-        assertEqual(failed.title, "Paste Last Dictation failed", "failed title uses the menu's own name")
+        assertEqual(failed.title, "Paste Last Dictation failed", "failed title uses the feature's name")
         assertEqual(failed.detail, "Couldn't prepare the clipboard for automatic paste.", "failed detail")
         assertEqual(failed.tone, .caution, "failed tone")
         assertTrue(
@@ -56,7 +56,7 @@ func testPasteLastDictationFeedback() {
         let feedback = PasteLastDictationFeedback.noSavedDictation
 
         assertEqual(feedback.title, "No saved dictation yet", "no saved title")
-        assertEqual(feedback.detail, "Dictate once, then use Paste Last Dictation.", "no saved detail uses the menu's own name")
+        assertEqual(feedback.detail, "Dictate once, then use Paste Last Dictation.", "no saved detail uses the feature's name")
         assertEqual(feedback.tone, .caution, "no saved tone")
         assertEqual(
             feedback.accessibilityValue,
