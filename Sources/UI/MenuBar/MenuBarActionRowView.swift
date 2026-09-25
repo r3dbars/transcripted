@@ -32,6 +32,13 @@ final class MenuBarActionRowView: NSControl {
     }
 
     var onPress: (() -> Void)?
+    /// Fires when the pointer lands on an enabled row (the hover tick).
+    var onHoverStart: (() -> Void)?
+    /// Fires on mouse-down of an enabled row (the press click).
+    var onPressStart: (() -> Void)?
+    /// Keeps a button's quiet fill at rest on a full-width row, so the
+    /// "Restart to Update" callout reads as a button like Record and Dictate.
+    var restsFilled = false { didSet { updateAppearance() } }
 
     private let symbolWellView = NSView()
     private let symbolView = NSImageView()
@@ -151,10 +158,13 @@ final class MenuBarActionRowView: NSControl {
         let trailingColor: NSColor
 
         if !isEnabled {
+            // A disabled row often says what it is waiting on ("Restart to
+            // Update / After this recording finishes"), so it stays readable:
+            // secondary text, no extra fade on top.
             backgroundColor = MenuTokens.flatRowDisabledNS
             iconTint = MenuTokens.textMutedNS
-            titleColor = MenuTokens.textMutedNS
-            detailColor = MenuTokens.textMutedNS
+            titleColor = MenuTokens.textSecondaryNS
+            detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textMutedNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
@@ -165,14 +175,14 @@ final class MenuBarActionRowView: NSControl {
         } else if isHovering {
             // A button's resting fill is already hover-strength, so its hover
             // steps up to the pressed fill.
-            backgroundColor = rowSize == .button ? MenuTokens.flatRowPressedNS : MenuTokens.flatRowHoverNS
+            backgroundColor = isFilledButton ? MenuTokens.flatRowPressedNS : MenuTokens.flatRowHoverNS
             iconTint = toneColors().pressed
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textSecondaryNS
         } else {
             // Buttons keep a quiet fill at rest so they read as buttons.
-            backgroundColor = rowSize == .button ? MenuTokens.buttonBackgroundNS : .clear
+            backgroundColor = isFilledButton ? MenuTokens.buttonBackgroundNS : .clear
             iconTint = toneColors().normal
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS
@@ -185,8 +195,9 @@ final class MenuBarActionRowView: NSControl {
         titleLabel.textColor = titleColor
         detailLabel.textColor = detailColor
         trailingLabel.textColor = trailingColor
-        alphaValue = isEnabled ? 1.0 : 0.55
     }
+
+    private var isFilledButton: Bool { rowSize == .button || restsFilled }
 
     private func toneColors() -> (normal: NSColor, pressed: NSColor) {
         switch rowTone {
@@ -351,6 +362,7 @@ final class MenuBarActionRowView: NSControl {
     override func mouseEntered(with event: NSEvent) {
         guard isEnabled else { return }
         isHovering = true
+        onHoverStart?()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -361,6 +373,7 @@ final class MenuBarActionRowView: NSControl {
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         isPressing = true
+        onPressStart?()
     }
 
     override func mouseUp(with event: NSEvent) {

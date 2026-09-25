@@ -3,6 +3,9 @@
 
 import AppKit
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 extension Notification.Name {
     static let dictationTranscriptDidSave = Notification.Name("Transcripted.DictationTranscriptDidSave")
@@ -253,7 +256,7 @@ enum DictationTranscriptStore {
             } else {
                 let header = headerPreface(in: content)
                 let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
                 return .rewrote(url: url, originalContent: content, newContent: rebuilt)
             }
@@ -277,13 +280,13 @@ enum DictationTranscriptStore {
             try DictationTranscriptMutationLock.withLock {
                 let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
                 if current == newContent || current.isEmpty {
-                    try originalContent.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(originalContent, to: url)
                 } else {
                     let removedSections = missingSections(from: originalContent, comparedTo: newContent)
                     guard !removedSections.isEmpty else { return }
                     let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
                         + "\n\n" + removedSections.joined(separator: "\n\n") + "\n"
-                    try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(rebuilt, to: url)
                 }
                 FileManager.default.restrictFileToOwnerOnly(at: url)
             }
@@ -306,7 +309,7 @@ enum DictationTranscriptStore {
                     guard !oldSections.isEmpty else { return }
                     let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
                         + "\n\n" + oldSections.joined(separator: "\n\n") + "\n"
-                    try rebuilt.write(to: originalURL, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(rebuilt, to: originalURL)
                     try? FileManager.default.removeItem(at: trashedURL)
                 } else {
                     try FileManager.default.moveItem(at: trashedURL, to: originalURL)
@@ -357,7 +360,7 @@ enum DictationTranscriptStore {
             } else {
                 let header = headerPreface(in: content)
                 let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
             }
         }

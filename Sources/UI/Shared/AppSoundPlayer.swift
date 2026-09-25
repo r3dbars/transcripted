@@ -3,10 +3,19 @@ import Foundation
 
 enum UISoundPreferences {
     private static let enabledKey = "enableUISounds"
+    /// macOS Settings > Sound > "Play user interface sound effects".
+    private static let systemInterfaceSoundsKey = "com.apple.sound.uiaudio.enabled"
 
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
         guard userDefaults.object(forKey: enabledKey) != nil else { return true }
         return userDefaults.bool(forKey: enabledKey)
+    }
+
+    /// Unset means on, like macOS. UserDefaults.standard also reads the
+    /// global domain, where macOS keeps this switch.
+    static func systemInterfaceSoundsEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        guard let value = userDefaults.object(forKey: systemInterfaceSoundsKey) as? NSNumber else { return true }
+        return value.boolValue
     }
 
     static func setEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
@@ -23,6 +32,14 @@ final class AppSoundPlayer {
         case dictationCancelled
         case noSpeech
         case meetingTranscriptComplete
+        /// The menu bar menu's hover tick. Interface chrome, so it also
+        /// follows the Mac's own interface-sounds switch.
+        case menuHover
+        /// A softer, lower tick for the rows under the buttons (Open
+        /// Transcripted, Check for Updates, Quit).
+        case menuRowHover
+        /// A short, soft click when a menu bar button or row is pressed.
+        case menuPress
 
         var bundledFileName: String? {
             switch self {
@@ -35,6 +52,12 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
+            case .menuHover:
+                return "menu-hover.wav"
+            case .menuRowHover:
+                return "menu-row-hover.wav"
+            case .menuPress:
+                return "menu-press.wav"
             }
         }
 
@@ -44,8 +67,27 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.dictationClickCueVolumeMultiplier
             case .noSpeech:
                 return TranscriptedConstants.noSpeechCueVolumeMultiplier
+            case .menuHover:
+                // Barely there: 7% output, well under the 35% dictation clicks.
+                return 0.1
+            case .menuRowHover:
+                // Quieter still (about 5%), so the rows sit a tier below the buttons.
+                return 0.07
+            case .menuPress:
+                // A touch firmer than the hover ticks (about 10%), still well
+                // under the 35% dictation clicks.
+                return 0.15
             case .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0
+            }
+        }
+
+        var followsSystemInterfaceSounds: Bool {
+            switch self {
+            case .menuHover, .menuRowHover, .menuPress:
+                return true
+            case .dictationStart, .dictationStop, .dictationCancelled, .noSpeech, .meetingTranscriptComplete:
+                return false
             }
         }
     }
@@ -75,6 +117,7 @@ final class AppSoundPlayer {
 
     func play(_ cue: Cue, respectingPreferences: Bool = true) {
         guard !respectingPreferences || UISoundPreferences.isEnabled() else { return }
+        guard !cue.followsSystemInterfaceSounds || UISoundPreferences.systemInterfaceSoundsEnabled() else { return }
         let requestedAt = ProcessInfo.processInfo.systemUptime
         queue.async { [weak self] in
             guard let self else { return }

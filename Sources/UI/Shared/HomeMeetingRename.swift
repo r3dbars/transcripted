@@ -140,7 +140,7 @@ enum HomeMeetingSpeakerRename {
                 }
 
                 do {
-                    try rewritten.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(rewritten, to: url)
                     fileManager.restrictFileToOwnerOnly(at: url)
                 } catch {
                     throw HomeMeetingSpeakerRenameError.writeFailed
@@ -392,7 +392,7 @@ enum HomeMeetingRename {
         let rewritten = rewriteTitle(in: raw, to: normalizedTitle)
         if rewritten != raw {
             do {
-                try rewritten.write(to: url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rewritten, to: url)
                 fileManager.restrictFileToOwnerOnly(at: url)
             } catch {
                 throw HomeMeetingRenameError.writeFailed
@@ -424,7 +424,7 @@ enum HomeMeetingRename {
         } catch let artifactError as MeetingArtifactRenameError {
             if rewritten != raw {
                 do {
-                    try raw.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(raw, to: url)
                     fileManager.restrictFileToOwnerOnly(at: url)
                 } catch {
                     throw HomeMeetingRenameError.writeFailed
@@ -437,7 +437,7 @@ enum HomeMeetingRename {
         } catch {
             if rewritten != raw {
                 do {
-                    try raw.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(raw, to: url)
                     fileManager.restrictFileToOwnerOnly(at: url)
                 } catch {
                     throw HomeMeetingRenameError.writeFailed

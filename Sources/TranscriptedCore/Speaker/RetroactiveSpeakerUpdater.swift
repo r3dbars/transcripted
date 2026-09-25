@@ -136,7 +136,7 @@ extension TranscriptSaver {
                     return false
                 }
                 do {
-                    try staged.updated.write(to: staged.url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(staged.updated, to: staged.url)
                     restrictTranscriptToOwnerOnly(staged.url)
                     written.append((url: staged.url, original: staged.original))
                 } catch {
@@ -227,7 +227,7 @@ extension TranscriptSaver {
                     ])
                     continue
                 }
-                try content.write(to: fileURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: fileURL)
                 restrictTranscriptToOwnerOnly(fileURL)
                 updatedCount += 1
             } catch {
@@ -303,7 +303,7 @@ extension TranscriptSaver {
         _ update: (url: URL, original: String)
     ) -> Bool {
         do {
-            try update.original.write(to: update.url, atomically: true, encoding: .utf8)
+            try TranscriptFileRewrite.write(update.original, to: update.url)
             restrictTranscriptToOwnerOnly(update.url)
             return true
         } catch {
@@ -353,7 +353,7 @@ extension TranscriptSaver {
             )
 
             do {
-                try content.write(to: fileURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: fileURL)
                 restrictTranscriptToOwnerOnly(fileURL)
                 updatedCount += 1
             } catch {
@@ -501,7 +501,7 @@ extension TranscriptSaver {
             }
 
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: transcriptURL)
                 restrictTranscriptToOwnerOnly(transcriptURL)
             } catch {
                 AppLogger.pipeline.error("Failed to write deferred speaker review metadata", ["error": error.localizedDescription])
@@ -620,7 +620,7 @@ extension TranscriptSaver {
 
             // Atomic write back
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: transcriptURL)
                 restrictTranscriptToOwnerOnly(transcriptURL)
             } catch {
                 AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
@@ -705,7 +705,7 @@ extension TranscriptSaver {
             }
 
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: transcriptURL)
                 restrictTranscriptToOwnerOnly(transcriptURL)
             } catch {
                 AppLogger.pipeline.error("Failed to write collapsed transcript", ["error": error.localizedDescription])
@@ -741,7 +741,7 @@ extension TranscriptSaver {
             }
 
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(content, to: transcriptURL)
                 restrictTranscriptToOwnerOnly(transcriptURL)
             } catch {
                 AppLogger.pipeline.error("Failed to write discarded speaker metadata", ["error": error.localizedDescription])

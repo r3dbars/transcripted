@@ -63,7 +63,7 @@ into a taller loading or error state.
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup; "Starting…"/"Saving…" around it)
-- `MenuBar/MenuBarHeaderView.swift` — popover header with no title: hidden entirely when idle and ready; shows a status line for warmup, a transcript being made, and the red "Recording" state, plus hotkey warnings (clickable when they have a fix to open)
+- `MenuBar/MenuBarHeaderView.swift` — popover header with no title: hidden entirely when idle and ready; shows a status line for warmup, a transcript being made, and starting/saving a meeting (a steady recording has no line: the red Stop button with its timer says it), plus hotkey warnings (clickable when they have a fix to open)
 - `MenuBar/MenuBarMeetingCapturePhase.swift` — Foundation-pure starting/recording/saving phase of a live meeting capture, used by the popover header, the meeting row, and the status item's right-click menu
 - `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access); the macOS Fn key conflict is kept out of the menu and shown in Settings > Shortcuts instead
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut

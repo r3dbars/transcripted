@@ -491,8 +491,9 @@ class DictationSessionController: ObservableObject {
                 extra: [
                     "trigger": trigger.rawValue,
                     "start_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: requestToRecordingMs),
+                    "start_latency_ms": MachineClassTelemetry.roundedMilliseconds(requestToRecordingMs),
                     "first_since_launch": currentRequestIsFirstSinceLaunch ? "true" : "false",
-                ]
+                ].merging(dictationSpeedContext(appState: appState)) { current, _ in current }
             )
         )
     }
@@ -519,6 +520,7 @@ class DictationSessionController: ObservableObject {
         properties["model_state"] = ProductFrictionTelemetry.modelState(
             isReady: appState.sttRouter.isModelLoaded
         )
+        properties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_start_requested",
@@ -1841,6 +1843,57 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    /// This session's id while it is dictating, for a caller that needs to
+    /// act on this exact session later.
+    var activeDictationSessionID: UUID? {
+        isDictating ? currentDictationSessionID : nil
+    }
+
+    /// A hands-free modifier press started this session, then another key went
+    /// down while it was held: it was a combo (Option+M, or typing é), not a
+    /// dictation tap. Drop the start with no sound, error, or saved audio.
+    /// With no session id the press only queued a start behind a take that
+    /// was still finishing, so that queued start is dropped instead.
+    func abandonDictationStartForModifierCombo(sessionID: UUID?) {
+        guard let (appState, overlayController) = readyState() else { return }
+        guard let sessionID else {
+            dropQueuedDictationStart(showMessage: false)
+            return
+        }
+        guard isDictating, currentDictationSessionID == sessionID else { return }
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
+        let stage = pendingStartStage
+        cancelActiveTasks(cancelRecording: true)
+        discardStoppedAudioRecovery(explicitDiscard: true)
+        overlayController.hideWithCancelAnimation()
+        isDictating = false
+        enterPendingStartStage(Self.idleStartStage)
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "modifier_combo")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_start_dropped_for_modifier_combo",
+            message: "A hands-free key press became a key combo, so its dictation start was dropped",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "pending_stage": stage
+                ]
+            )
+        )
+        // Closes the attempt `dictation_start_requested` opened, so the start
+        // funnel doesn't read a dropped combo as a lost start.
+        AnalyticsReporter.track(
+            "dictation_start_dropped_for_modifier_combo",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
+        )
+    }
+
     /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
@@ -2976,6 +3029,9 @@ class DictationSessionController: ObservableObject {
         for (key, value) in measurements {
             localContext[key] = "\(value)"
         }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            localContext["press_to_first_sound_ms"] = "\(firstSoundMs)"
+        }
 
         DiagnosticsTrail.record(
             logger: appState.logger,
@@ -3026,6 +3082,21 @@ class DictationSessionController: ObservableObject {
             guard let milliseconds = measurements[timingBucket.metric] else { continue }
             analyticsProperties[timingBucket.bucket] = AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
         }
+        // Exact (10 ms) timings next to the buckets, so PostHog can compute
+        // real percentiles per model and per kind of Mac.
+        let exactTimings: [(metric: String, key: String)] = [
+            ("decode_ms", "decode_latency_ms"),
+            ("stop_to_paste_ms", "stop_to_paste_latency_ms"),
+        ]
+        for exactTiming in exactTimings {
+            guard let milliseconds = measurements[exactTiming.metric] else { continue }
+            analyticsProperties[exactTiming.key] = MachineClassTelemetry.roundedMilliseconds(milliseconds)
+        }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            analyticsProperties["first_sound_latency_bucket"] = AnalyticsReporter.latencyBucket(milliseconds: firstSoundMs)
+            analyticsProperties["first_sound_latency_ms"] = MachineClassTelemetry.roundedMilliseconds(firstSoundMs)
+        }
+        analyticsProperties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_stop_latency_measured",
@@ -3051,6 +3122,30 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+
+    /// Model and coarse Mac class, so dictation speed can be compared across
+    /// models and machines. No device or user identifiers.
+    private func dictationSpeedContext(appState: TranscriptedAppState) -> [String: String] {
+        var context = MachineClassTelemetry.current
+        // The lease is the model this recording actually uses, even if the
+        // setting changes mid-dictation.
+        let model = appState.sttRouter.recordingModelLease?.model ?? appState.sttRouter.selectedModel
+        context["stt_model"] = model.rawValue
+        return context
+    }
+
+    /// Key press to the first real audio buffer of this dictation. Nil when
+    /// the audio didn't come through the dictation engine (for example the
+    /// shared meeting mic) or the stamp belongs to another session.
+    private func pressToFirstSoundMilliseconds(
+        appState: TranscriptedAppState,
+        stopRequestedAt: CFAbsoluteTime
+    ) -> Int? {
+        guard let firstSampleAt = appState.sttRouter.parakeetEngine.firstAudioSampleTime(),
+              firstSampleAt >= sessionStartTime,
+              firstSampleAt <= stopRequestedAt else { return nil }
+        return Int(((firstSampleAt - sessionStartTime) * 1_000).rounded())
     }
 
     private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {

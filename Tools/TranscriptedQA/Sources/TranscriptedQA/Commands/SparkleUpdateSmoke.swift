@@ -304,7 +304,7 @@ enum SparkleUpdateSmokeEvaluator {
             checks.append(checkEqual(
                 id: "downloading-utility-detail",
                 actual: launchReport.content.utilityActions.checkUpdates.detail,
-                expected: "Transcripted will ask you to restart when \(version) is ready"
+                expected: "Downloading \(version)"
             ))
             checks.append(checkTrue(
                 id: "downloading-utility-visible",

@@ -87,6 +87,11 @@ final class MenuBarPrimaryActionsView: NSView {
         actionRows
     }
 
+    /// Record/Stop Meeting, for the press click (Dictate has its own sounds).
+    var meetingButton: MenuBarActionRowView {
+        meetingRow
+    }
+
     private var actionRows: [MenuBarActionRowView] {
         // Meeting leads: record/stop is the popover's headline action.
         [meetingRow, dictationRow]

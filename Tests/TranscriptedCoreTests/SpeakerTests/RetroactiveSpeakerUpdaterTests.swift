@@ -752,6 +752,41 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(updated.contains("[System/Alicia]"))
     }
 
+    func testRetroactiveMergeAndRenameKeepSavedMeetingCreationDate() throws {
+        // A user saw old meetings jump to "created today" after a speaker merge,
+        // with their text intact. Rewrites must keep the original creation date.
+        let sourceId = UUID()
+        let targetId = UUID()
+        let meetingDate = Date(timeIntervalSince1970: 1_767_225_600) // 2026-01-01
+        let transcriptURL = temporaryDirectory.appendingPathComponent("old-meeting.md")
+        try markdown(
+            speakerId: sourceId,
+            speakerName: "Alex Old"
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.creationDate: meetingDate, .modificationDate: meetingDate],
+            ofItemAtPath: transcriptURL.path
+        )
+
+        TranscriptSaver.retroactivelyMergeSpeaker(
+            sourceDbId: sourceId,
+            targetDbId: targetId,
+            targetName: "Alex",
+            in: temporaryDirectory
+        )
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: targetId,
+            newName: "Alicia",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains("[System/Alicia]"))
+        let attributes = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)
+        let created = try XCTUnwrap(attributes[.creationDate] as? Date)
+        XCTAssertEqual(created.timeIntervalSince1970, meetingDate.timeIntervalSince1970, accuracy: 1)
+    }
+
     func testRetroactivelyMergeSpeakerIgnoresDbIdMentionedOnlyInBodyText() throws {
         // db_id references only ever live in the YAML frontmatter speakers block,
         // so a literal mention in spoken transcript text is not a profile link and
