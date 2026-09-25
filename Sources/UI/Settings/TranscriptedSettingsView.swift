@@ -14,6 +14,7 @@ struct TranscriptedSettingsView: View {
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogSink
+    private let writingController: WritingController
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
@@ -115,6 +116,7 @@ struct TranscriptedSettingsView: View {
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
         self.appLogger = appState.logger
+        self.writingController = appState.writingController
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
@@ -2906,7 +2908,14 @@ struct TranscriptedSettingsView: View {
     }
 
     private var writingPage: some View {
-        WritingSettingsPage()
+        WritingSettingsPage(
+            controller: writingController,
+            isCaptureBusy: {
+                sttRouter.isRecording
+                    || meetingSession.isCaptureSessionActive
+                    || meetingSession.hasRuntimeDiagnosticsWork
+            }
+        )
     }
 
     private var aboutPage: some View {
