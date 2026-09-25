@@ -54,6 +54,21 @@ func testDictationSounds() {
         assertTrue(UISoundPreferences.isEnabled(), "explicit true should enable sounds")
     }
 
+    runSuite("UISoundPreferences reads the Mac's interface-sounds switch") {
+        let suiteName = "DictationSoundsTests.systemInterfaceSounds"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "test defaults suite should open")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(0, forKey: "com.apple.sound.uiaudio.enabled")
+        assertFalse(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "0 turns interface sounds off")
+
+        defaults.set(1, forKey: "com.apple.sound.uiaudio.enabled")
+        assertTrue(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "1 keeps interface sounds on")
+    }
+
     runSuite("AppSoundPlayer uses expected bundled files only") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.caf", "start cue file")
         assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.caf", "stop cue file")
@@ -64,6 +79,19 @@ func testDictationSounds() {
         assertEqual(AppSoundPlayer.Cue.dictationStop.volumeMultiplier, TranscriptedConstants.dictationClickCueVolumeMultiplier, "stop cue volume matches start")
         assertEqual(TranscriptedConstants.overlayCueVolume * TranscriptedConstants.dictationClickCueVolumeMultiplier, 0.35, "clicks play at 35%")
         assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.noSpeechCueVolumeMultiplier, "no speech cue volume")
+        assertEqual(AppSoundPlayer.Cue.menuHover.bundledFileName, "menu-hover.wav", "menu hover tick file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuHover.volumeMultiplier < TranscriptedConstants.dictationClickCueVolumeMultiplier,
+            "the hover tick stays quieter than the dictation clicks"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuHover.followsSystemInterfaceSounds, "hover tick follows the Mac's interface-sounds switch")
+        assertEqual(AppSoundPlayer.Cue.menuRowHover.bundledFileName, "menu-row-hover.wav", "menu row hover tick file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuRowHover.volumeMultiplier < AppSoundPlayer.Cue.menuHover.volumeMultiplier,
+            "the rows tick softer than the buttons"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuRowHover.followsSystemInterfaceSounds, "row tick follows the Mac's interface-sounds switch")
+        assertFalse(AppSoundPlayer.Cue.dictationStart.followsSystemInterfaceSounds, "dictation clicks keep the app's own sound switch only")
     }
 
     runSuite("AppSoundPlayer drops cues that are a second stale") {
@@ -92,6 +120,8 @@ func testDictationSounds() {
                 "dictation-start.caf",
                 "dictation-stop.caf",
                 "meeting-transcript-complete.mp3",
+                "menu-hover.wav",
+                "menu-row-hover.wav",
             ],
             "Resources/Sounds is copied wholesale, so unused surprise cues should not ship"
         )

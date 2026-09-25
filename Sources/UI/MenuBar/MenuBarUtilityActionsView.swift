@@ -7,6 +7,14 @@ final class MenuBarUtilityActionsView: NSView {
 
     var onOpenTranscripted: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
+    /// The softer hover tick for these rows.
+    var onRowHoverStart: (() -> Void)? {
+        didSet {
+            for row in allRows {
+                row.onHoverStart = { [weak self] in self?.onRowHoverStart?() }
+            }
+        }
+    }
 
     private let updatesRow = MenuBarActionRowView()
     private let openTranscriptedRow = MenuBarActionRowView()

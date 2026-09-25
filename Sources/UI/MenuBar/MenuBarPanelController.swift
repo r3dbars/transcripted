@@ -53,6 +53,11 @@ final class MenuBarPanelController: NSViewController {
         scheduledRefreshTask?.cancel()
     }
 
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        contentView?.menuWillAppear()
+    }
+
     override func loadView() {
         let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
         content.appState = appState
@@ -460,7 +465,7 @@ final class MenuBarPanelController: NSViewController {
                 return (
                     "arrow.down.circle",
                     "Preparing Update",
-                    "Transcripted will ask you to restart when \(version) is ready",
+                    "Downloading \(version)",
                     nil,
                     .standard,
                     false
@@ -472,14 +477,14 @@ final class MenuBarPanelController: NSViewController {
                 "Update available: \(version)",
                 "A new version is ready to install",
                 "Install",
-                .warning,
+                .standard,
                 true
             )
         case .downloading(let version):
             return (
                 "arrow.down.circle",
                 "Preparing Update",
-                "Transcripted will ask you to restart when \(version) is ready",
+                "Downloading \(version)",
                 nil,
                 .standard,
                 false
@@ -490,7 +495,7 @@ final class MenuBarPanelController: NSViewController {
                 "Restart to Update",
                 "Version \(version) downloaded",
                 "Restart",
-                .warning,
+                .standard,
                 true
             )
         }

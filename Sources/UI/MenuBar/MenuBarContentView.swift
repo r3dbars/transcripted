@@ -60,6 +60,11 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(sectionDivider)
 
         updateCalloutRow.isHidden = true
+        updateCalloutRow.restsFilled = true
+        for row in primaryActionsView.keyboardFocusableRows + [updateCalloutRow] {
+            row.onHoverStart = { [weak self] in self?.playHoverTick(.menuHover) }
+        }
+        utilityActionsView.onRowHoverStart = { [weak self] in self?.playHoverTick(.menuRowHover) }
         [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
 
         applyLayerColors()
@@ -137,6 +142,23 @@ final class MenuBarContentView: NSView {
         }
 
         window?.initialFirstResponder = chain.first
+    }
+
+    /// A pointer already resting on a button when the menu opens shouldn't tick.
+    func menuWillAppear() {
+        hoverTickQuietUntil = ProcessInfo.processInfo.systemUptime + 0.35
+    }
+
+    // A very quiet tick when the pointer lands on Record, Dictate, or
+    // Restart to Update, and a softer, lower one on the rows below. Sweeping
+    // down the menu ticks once per row, never a buzz.
+    private var hoverTickQuietUntil: TimeInterval = 0
+
+    private func playHoverTick(_ cue: AppSoundPlayer.Cue) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now >= hoverTickQuietUntil else { return }
+        hoverTickQuietUntil = now + 0.08
+        AppSoundPlayer.shared.play(cue)
     }
 
     func scrollToTop() {
