@@ -361,11 +361,10 @@ Rules:
 
 **Fidelity.** Tilde's history is an insertion log. It doesn't see pastes or mouse edits, and it breaks segments on every deletion. For v1, the keyboard also reports backspaces inside its own typed buffer, so saved text drops what you deleted. Known gaps are pastes, mouse edits, and host autocorrect. (Open question 1.)
 
-**App-owned state** in `~/Library/Application Support/Transcripted/writing/`:
+**App-owned state** in `~/Library/Application Support/Transcripted/writing/` (the diagnostics log is at `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`):
 - `ghost.sock` and `runtime.lock`
 - `outcome-ledger/` (text-free)
 - `personal/` (predictor state)
-- `diagnostics.log`
 
 **Models** in `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`, excluded from backup.
 - If `~/Library/Application Support/Tilde/Models/<id>/model.gguf` exists and its SHA-256 matches the pin, clone it (APFS `clonefile`) instead of downloading 3.4 to 5.6 GB again.
