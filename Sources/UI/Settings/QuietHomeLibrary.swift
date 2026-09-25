@@ -81,7 +81,7 @@ struct QuietHomeHeader: View {
                     Button(action: onAttention) {
                         Text(attentionTitle)
                             .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.accent)
+                            .foregroundStyle(LibraryTokens.attention)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("transcripted.home.attention.link")

@@ -1928,15 +1928,15 @@ struct TranscriptedSettingsView: View {
         }
 
         if !meetingSession.failedMeetings.isEmpty {
-            let count = meetingSession.failedMeetings.count
+            let summary = HomeFailedMeetingInlinePresentation.attentionSummary(
+                failureKinds: meetingSession.failedMeetings.map(\.failureKind)
+            )
             issues.append(
                 HomeAttentionIssue(
                     id: "failed-meetings",
-                    title: count == 1 ? "1 meeting failed" : "\(count) meetings failed",
-                    detail: count == 1
-                        ? "Saved audio is waiting for review or retry."
-                        : "\(count) saved recordings are waiting for review or retry.",
-                    tone: .failure,
+                    title: summary.title,
+                    detail: summary.detail,
+                    tone: summary.onlySpeakerNamesMissing ? .warning : .failure,
                     destination: .failedMeetings
                 )
             )

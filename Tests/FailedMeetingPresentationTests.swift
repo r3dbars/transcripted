@@ -256,6 +256,27 @@ func testFailedMeetingPresentation() {
         }
     }
 
+    runSuite("HomeFailedMeetingInlinePresentation does not call saved transcripts failed meetings") {
+        let namesOnly = HomeFailedMeetingInlinePresentation.attentionSummary(
+            failureKinds: [.speakerNameFinalizationFailed, .speakerFinalizationFailed, .speakerNameFinalizationFailed]
+        )
+        assertEqual(namesOnly.title, "3 meetings need speaker names")
+        assertTrue(namesOnly.onlySpeakerNamesMissing, "a pile of speaker-name failures keeps its transcripts")
+        assertFalse(namesOnly.title.contains("failed"), "saved transcripts should not read as failed meetings")
+
+        let single = HomeFailedMeetingInlinePresentation.attentionSummary(failureKinds: [.speakerFinalizationFailed])
+        assertEqual(single.title, "1 meeting needs speaker names")
+
+        let mixed = HomeFailedMeetingInlinePresentation.attentionSummary(
+            failureKinds: [.speakerNameFinalizationFailed, .saveFailed]
+        )
+        assertEqual(mixed.title, "2 meetings failed", "any real failure keeps the failed wording")
+        assertFalse(mixed.onlySpeakerNamesMissing)
+
+        let names = HomeFailedMeetingInlinePresentation.retryReason(for: .speakerNameFinalizationFailed) ?? ""
+        assertTrue(names.contains("transcript is saved"), "the row should say the transcript survived")
+    }
+
     runSuite("HomeFailedMeetingInlinePresentation stop-timeout retained audio appears retry-ready in Home") {
         let directory = makeFailedMeetingPresentationTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
