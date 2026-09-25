@@ -347,6 +347,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.settings.sidebar.today",
             "transcripted.settings.sidebar.home",
             "transcripted.settings.sidebar.dictations",
+            "transcripted.settings.sidebar.writing",
             "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
             "transcripted.settings.sidebar.settings-toggle",
@@ -388,6 +389,12 @@ final class UIAutomationSmokeRunner {
                 title: "Dictations settings surface is visible",
                 triggerID: "transcripted.settings.sidebar.dictations",
                 requiredIDs: ["transcripted.settings.page.dictations"]
+            ),
+            (
+                id: "settings-writing",
+                title: "Writing settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.writing",
+                requiredIDs: ["transcripted.settings.page.writing"]
             ),
             (
                 id: "settings-speakers",

@@ -448,6 +448,8 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
+        case .writing:
+            writingPage
         case .general:
             settingsPage
         case .people:
@@ -2903,6 +2905,10 @@ struct TranscriptedSettingsView: View {
         AgentConnectionSettingsPage()
     }
 
+    private var writingPage: some View {
+        WritingSettingsPage()
+    }
+
     private var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
@@ -3189,6 +3195,10 @@ struct TranscriptedSettingsView: View {
             return .speakerReview
         case .connectAgent:
             return .agentSetup
+        case .writing:
+            // No discovery area for Writing yet; its page views still
+            // arrive as `settings_page_viewed` with page_id `writing`.
+            return nil
         case .general:
             // The combined settings page spans capture-library, update, and
             // permission surfaces; no single discovery area fits it.
