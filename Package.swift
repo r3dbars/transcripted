@@ -174,12 +174,16 @@ let package = Package(
                 .linkedFramework("Vision"),
             ]
         ),
-        // Tilde's TildeCoreTests, ported per docs/writing-port-ledger.md.
-        // Swift Testing (`import Testing`), not XCTest; dependency-free like
-        // its target, so no deps flags.
+        // Tilde's TildeCoreTests (Core/) and TildeAppTests (Runtime/), ported
+        // per docs/writing-port-ledger.md. Swift Testing (`import Testing`),
+        // not XCTest; dependency-free like its targets, so no deps flags.
         .testTarget(
             name: "TranscriptedWritingTests",
-            dependencies: ["TranscriptedWritingCore"],
+            dependencies: [
+                "TranscriptedWritingCore",
+                "TranscriptedWritingRuntime",
+                "TranscriptedKeyboard",
+            ],
             path: "Tests/TranscriptedWritingTests"
         ),
         // Writing's IMKit keyboard, ported from Tilde's InlineGhostIME. The

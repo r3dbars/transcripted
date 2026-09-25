@@ -198,46 +198,46 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeCoreTests/TextFreeCandidateSourceTests.swift` | `Tests/TranscriptedWritingTests/Core/TextFreeCandidateSourceTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/TildeConfigurationTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeConfigurationTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/TildeProductProfileTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeProductProfileTests.swift` | ported | 1 | Trimmed: `resolvesExplicitPreviewProfile` and `modelPreviewChoicesHaveStableOwnerFacingLabels` (only tested dropped profiles / `PreviewModelChoice`), plus the 26B and Model Preview assertions in the other tests. |
-| `Tests/TildeAppTests/GhostBrainServerHostPersonalGuardTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostPersonalGuardTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/GhostBrainServerHostStreamingGateTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostStreamingGateTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/GhostInputControllerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostInputControllerTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/GhostKeyboardInstallerHostTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostKeyboardInstallerHostTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/GhostStatsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostStatsTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/GhostBrainServerHostPersonalGuardTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostPersonalGuardTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/GhostBrainServerHostStreamingGateTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostStreamingGateTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/GhostInputControllerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostInputControllerTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/GhostKeyboardInstallerHostTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostKeyboardInstallerHostTests.swift` | ported | 2 | Trimmed the `TildeLaunchModeTests` suite (`productionMode`, `releaseProofMode`, `rejectsUnknownArguments`, `personalBrainStatusInvocation`, `replayEvalInvocation`): `TildeLaunchMode`/`TildeInvocation` live in the replaced AppDelegate. Installed bundle is `Transcripted Keyboard.app`. |
+| `Tests/TildeAppTests/GhostStatsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostStatsTests.swift` | ported | 2 |  |
 | `Tests/TildeAppTests/H01HarnessWiringTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/IgnoreApplicationMenuItemTests.swift` | `Tests/TranscriptedWritingTests/Runtime/IgnoreApplicationMenuItemTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/IntentFuturesPromptIntegrationTests.swift` | `Tests/TranscriptedWritingTests/Runtime/IntentFuturesPromptIntegrationTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/LlamaCompletionStreamCutTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaCompletionStreamCutTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/LlamaCompletionStreamingTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaCompletionStreamingTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/LlamaRestartPolicyTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaRestartPolicyTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/IgnoreApplicationMenuItemTests.swift` | — | not-ported | 2 | Tests `IgnoreApplicationMenuItem` in `StatusMenuHost` (not-ported, decision 12). |
+| `Tests/TildeAppTests/IntentFuturesPromptIntegrationTests.swift` | `Tests/TranscriptedWritingTests/Runtime/IntentFuturesPromptIntegrationTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/LlamaCompletionStreamCutTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaCompletionStreamCutTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/LlamaCompletionStreamingTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaCompletionStreamingTests.swift` | ported | 2 | Test base URLs use port 17891. |
+| `Tests/TildeAppTests/LlamaRestartPolicyTests.swift` | `Tests/TranscriptedWritingTests/Runtime/LlamaRestartPolicyTests.swift` | ported | 2 |  |
 | `Tests/TildeAppTests/LocalOCREvaluationStoreTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/ModelManagerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ModelManagerTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/OutcomeLedgerSummaryTests.swift` | `Tests/TranscriptedWritingTests/Runtime/OutcomeLedgerSummaryTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/ModelManagerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ModelManagerTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/OutcomeLedgerSummaryTests.swift` | `Tests/TranscriptedWritingTests/Runtime/OutcomeLedgerSummaryTests.swift` | ported | 2 | Trimmed `menuPresentation` (renders through `StatusMenuHost.Presentation`, not-ported). |
 | `Tests/TildeAppTests/PersonalBrainStatusTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/PersonalHistoryCaptureTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryCaptureTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/PersonalHistoryControllerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryControllerTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/PersonalHistoryStoreTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryStoreTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/PersonalTrainedModelStoreTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalTrainedModelStoreTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/PreparedContextStreamingTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PreparedContextStreamingTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/PersonalHistoryCaptureTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryCaptureTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/PersonalHistoryControllerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryControllerTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/PersonalHistoryStoreTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalHistoryStoreTests.swift` | ported | 2 | Sealed fixtures authenticate with the profile value `com.justinbetker.draft.personal-history.v1`. |
+| `Tests/TildeAppTests/PersonalTrainedModelStoreTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalTrainedModelStoreTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/PreparedContextStreamingTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PreparedContextStreamingTests.swift` | ported | 2 | `experimentDefaults: nil` dropped (H01 strip); port 17891. |
 | `Tests/TildeAppTests/PreviewModelSelectionTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/ProfileDisplayFilterTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ProfileDisplayFilterTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/ProfileSceneOptionsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ProfileSceneOptionsTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/ProfileDisplayFilterTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ProfileDisplayFilterTests.swift` | ported | 2 | Trimmed `.preview26B`/`.modelPreview` from the two shipping-profile loops (profiles not ported); `experimentDefaults: nil` dropped; port 17891. |
+| `Tests/TildeAppTests/ProfileSceneOptionsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ProfileSceneOptionsTests.swift` | ported | 2 | Trimmed `.preview26B`/`.modelPreview` from the production loop (profiles not ported). |
 | `Tests/TildeAppTests/ReplayEvalCommandTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
 | `Tests/TildeAppTests/ReplayEvalOwnershipTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/RuntimeBoundaryTests.swift` | `Tests/TranscriptedWritingTests/Runtime/RuntimeBoundaryTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/ScaffoldPrewarmerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScaffoldPrewarmerTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/RuntimeBoundaryTests.swift` | `Tests/TranscriptedWritingTests/Runtime/RuntimeBoundaryTests.swift` | ported | 2 | Redirect URL uses port 17891. |
+| `Tests/TildeAppTests/ScaffoldPrewarmerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScaffoldPrewarmerTests.swift` | ported | 2 | Port 17891. |
 | `Tests/TildeAppTests/ScreenMemory/GLiNERRedactionHelperHostTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/ScreenMemory/RedactionServiceTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/RedactionServiceTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/ScreenMemory/ScreenCaptureServiceTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/ScreenCaptureServiceTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/ScreenMemory/RedactionServiceTests.swift` | — | not-ported | 2 | Tests `RedactionService` (not-ported; eval and proof paths only). |
+| `Tests/TildeAppTests/ScreenMemory/ScreenCaptureServiceTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/ScreenCaptureServiceTests.swift` | ported | 2 | Trimmed the paired OCR evaluation tests (`pairedEvaluationGatesAndFilters`, `pairedEvaluationRechecksSafety`, `pairedEvaluationSuppressesConcurrentReferencePasses`, `pairedEvaluationReferenceFailure`) with their `evaluationBlock`, `EvaluationRecordBox` and `AsyncTestGate` helpers: the OCR evaluation store and its init params are stripped. |
 | `Tests/TildeAppTests/ScreenMemory/ScreenMemoryProofStimulusTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/ScreenMemory/WindowAttributionTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/WindowAttributionTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/SecureLocalStorageTests.swift` | `Tests/TranscriptedWritingTests/Runtime/SecureLocalStorageTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/StatusMenuPresentationTests.swift` | `Tests/TranscriptedWritingTests/Runtime/StatusMenuPresentationTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeApplicationStateTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeApplicationStateTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeInstallationLocationTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeInstallationLocationTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeLocalOutcomeStoresTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeLocalOutcomeStoresTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeProgressTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeProgressTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeSettingsPresentationTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSettingsPresentationTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeSettingsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSettingsTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeSettingsViewModelTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSettingsViewModelTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeSetupStateTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSetupStateTests.swift` | todo | 2 | |
-| `Tests/TildeAppTests/TildeStatsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeStatsTests.swift` | todo | 2 | |
+| `Tests/TildeAppTests/ScreenMemory/WindowAttributionTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/WindowAttributionTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/SecureLocalStorageTests.swift` | `Tests/TranscriptedWritingTests/Runtime/SecureLocalStorageTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/StatusMenuPresentationTests.swift` | — | not-ported | 2 | Tests `StatusMenuHost.Presentation` (not-ported, decision 12). |
+| `Tests/TildeAppTests/TildeApplicationStateTests.swift` | — | replaced | 2 | Tests `TildeApplicationState`, replaced by `WritingController`. |
+| `Tests/TildeAppTests/TildeInstallationLocationTests.swift` | — | not-ported | 2 | Tests `TildeInstallationLocation` (not-ported). |
+| `Tests/TildeAppTests/TildeLocalOutcomeStoresTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeLocalOutcomeStoresTests.swift` | ported | 2 | Path assertion checks `Transcripted/writing` instead of `Tilde`. |
+| `Tests/TildeAppTests/TildeProgressTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeProgressTests.swift` | ported | 2 | Trimmed `milestoneCopy` (`TildeProgressPresentation` lives in the replaced YourTildeView). |
+| `Tests/TildeAppTests/TildeSettingsPresentationTests.swift` | — | replaced | 2 | Tests `TildeSettingsPresentation` in the replaced TildeSettingsViewModel. |
+| `Tests/TildeAppTests/TildeSettingsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSettingsTests.swift` | ported | 2 | Trimmed `localOCREvaluationPreference`, `incrementalOCRToggle`, `incrementalOCRExplicitOffPersists` and the incremental-OCR default assertion in `absentKeysUseProductDefaults` (keys stripped), plus `modelPresentation` (`TildeModelPresentation` lives in the replaced view model). |
+| `Tests/TildeAppTests/TildeSettingsViewModelTests.swift` | — | replaced | 2 | Tests the replaced TildeSettingsViewModel. |
+| `Tests/TildeAppTests/TildeSetupStateTests.swift` | — | replaced | 2 | Tests the replaced TildeSetupState. |
+| `Tests/TildeAppTests/TildeStatsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeStatsTests.swift` | ported | 2 |  |
