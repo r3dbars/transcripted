@@ -296,7 +296,9 @@ final class WritingController {
             screenCaptureService: ScreenCaptureService(
                 enabled: {
                     let settings = Self.settings()
+                    // Pause stops screen reading too, not just suggestions.
                     return settings.screenMemoryEnabled && settings.suggestionsEnabled
+                        && settings.pausedUntil == nil
                 },
                 excludedApps: { Self.settings().personalHistoryExcludedApps }
             ),

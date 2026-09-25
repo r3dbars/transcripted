@@ -161,8 +161,12 @@ final class WritingSettingsModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshKeyboard()
-                self?.refreshLive()
+                // Only while the page is showing: refreshKeyboard validates code
+                // signatures on the main thread, and the Settings window can
+                // close without onDisappear.
+                guard let self, self.isOnScreen else { return }
+                self.refreshKeyboard()
+                self.refreshLive()
             }
         })
         // Input Sources changes from the menu bar or System Settings.
@@ -276,6 +280,13 @@ final class WritingSettingsModel: ObservableObject {
     }
 
     /// "Set up writing": a fresh draft with both features on and all apps.
+    /// "Not now" on the intro: Writing stays off and the sidebar's "New"
+    /// badge goes away (plan: it stays until setup finishes or the intro is
+    /// dismissed).
+    func dismissNewBadge() {
+        UserDefaults.standard.set(true, forKey: WritingSidebarNewBadge.dismissedDefaultsKey)
+    }
+
     func beginSetup() {
         isEditingSetup = false
         draft = Presentation.Draft(model: controller.selectedModel)
@@ -337,6 +348,7 @@ final class WritingSettingsModel: ObservableObject {
             controller.setSaveMyWriting(choices.saveMyWriting)
         }
         controller.setAutocomplete(choices.autocomplete)
+        let isFirstSetup = !controller.setupCompleted
         WritingSetupState.markCompleted(defaults: WritingController.appDefaults())
 
         let keyboardSelected = controller.turnOnKeyboard(openSettingsOnFailure: false)
@@ -345,12 +357,15 @@ final class WritingSettingsModel: ObservableObject {
             controller.requestScreenRecording()
         }
 
-        WritingAnalytics.trackSetupCompleted(WritingAnalytics.Setup(
-            saveEnabled: choices.saveMyWriting,
-            autocompleteEnabled: choices.autocomplete,
-            appScope: choices.scope == .all ? .all : .picked,
-            model: controller.selectedModel
-        ))
+        // First setup only; Edit setup saves without re-counting the funnel.
+        if isFirstSetup {
+            WritingAnalytics.trackSetupCompleted(WritingAnalytics.Setup(
+                saveEnabled: choices.saveMyWriting,
+                autocompleteEnabled: choices.autocomplete,
+                appScope: choices.scope == .all ? .all : .picked,
+                model: controller.selectedModel
+            ))
+        }
         UserDefaults.standard.set(true, forKey: WritingSidebarNewBadge.dismissedDefaultsKey)
 
         isEditingSetup = false

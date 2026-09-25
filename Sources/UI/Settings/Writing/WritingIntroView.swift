@@ -9,6 +9,8 @@ struct WritingIntroView: View {
     let onNext: () -> Void
     let onBack: () -> Void
     let onSetUp: () -> Void
+    /// Leaves Writing off and clears the sidebar's "New" badge.
+    let onNotNow: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -134,6 +136,11 @@ struct WritingIntroView: View {
         HStack(spacing: 12) {
             WritingPageDots(count: Copy.introPageCount, current: page)
             Spacer()
+            Button(Copy.notNow, action: onNotNow)
+                .buttonStyle(.plain)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .accessibilityIdentifier("transcripted.settings.writing.intro.not-now")
             if page == 1 {
                 WritingPrimaryButton(
                     title: Copy.IntroPage1.next,

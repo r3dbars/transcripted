@@ -177,7 +177,10 @@ Shaped like the Dictations page:
 - Today's saved writing, newest first, in the same row style as dictations.
 - "N suggestions accepted today".
 - Actions: **Edit setup**, **Pause for 1 hour**, **Delete all writing**, a
-  storage meter, and the model switch.
+  storage meter, and the model switch. Pause stops suggestions, saving and
+  screen reading for the hour (Tilde's pause only stopped suggestions).
+- The intro has a quiet **Not now** that leaves Writing off and clears the
+  sidebar's `New` badge.
 
 ## Permissions
 
