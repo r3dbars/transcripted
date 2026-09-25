@@ -145,6 +145,17 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/ScreenMemory/ScreenTextRecognizer.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenTextRecognizer.swift` | ported | 2 |  |
 | `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | ported | 2 |  |
 
+## Deviations from Tilde (recorded after the phase 2 review)
+
+- **Keyboard summon:** the keyboard doesn't reopen Transcripted when it's already running (`GhostInputController.summonBrainIfNeeded`). A running app means the model or helper is still loading, and a reopen event would show the window.
+- **Owner seal check:** `KeyboardInstaller` validates the app's own code seal once per launch (about 0.2 s over the whole bundle). Keyboard bundles are still checked every time.
+- **Quiet-quit:** set only when the user quits. Logout, restart and shutdown carry a system quit reason and leave it clear, so the keyboard can wake Transcripted after a reboot (`WritingController.noteTerminationRequest`).
+- **Model switch:** `ModelManager.cancel()` stops a superseded download. Tilde relaunched instead. `waitUntilSettled` returns when cancelled.
+- **Diagnostics:** `DiagnosticsLog` never writes under tests or with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`.
+- **Integer keyboard build:** the keyboard's `CFBundleVersion` is an integer derived from the app version (1.1.66 → 1001066), which the installer's upgrade check requires.
+- **Word diary:** the keyboard persists only text-free kept/edited results. Accepted text is saved only through Save my writing.
+- **Socket path:** it's about 9 bytes longer than Tilde's. Usernames over about 28 characters would exceed `sun_path` (104 bytes), and Writing then stays off with a log line. Rare; revisit if it's ever reported.
+
 ## Follow-ups
 
 - Phase 4: user-visible runtime strings still say "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.

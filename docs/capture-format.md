@@ -1,12 +1,14 @@
 # Capture Markdown format
 
 This is the authoritative spec for the Markdown files Transcripted saves under
-the capture library (`<capture-library>/meetings/` and
-`<capture-library>/dictations/`). Agents and standalone tools parse these
-files, so treat this document as the contract. Writers live in
+the capture library (`<capture-library>/meetings/`,
+`<capture-library>/dictations/`, and `<capture-library>/writing/`). Agents and
+standalone tools parse these files, so treat this document as the contract.
+Writers live in
 `Sources/TranscriptedCore/Storage/TranscriptFormatter.swift`,
 `Sources/Meeting/MeetingTranscriptStyler.swift`,
-`Sources/Dictation/DictationTranscriptWriter.swift`. Readers include the app's
+`Sources/Dictation/DictationTranscriptWriter.swift`, and the main app's Writing
+day-file writer (never the keyboard). Readers include the app's
 Home scanner (`TranscriptFrontmatter`), `Tools/TranscriptedCaptureKit` (used by
 the CLI and MCP tools), and `Tools/TranscriptedQA`. If you change the written
 format, update this doc, the CaptureKit parsers, and their tests in the same
@@ -26,8 +28,8 @@ Two flat frontmatter keys carry the contract:
   file predates the key: sniff the body heading instead (`## Full Transcript`
   → raw, `## Transcript` → styled).
 
-Dictation day files carry `format_version` but no `transcript_style` (they have
-a single body grammar).
+Dictation and writing day files carry `format_version` but no
+`transcript_style` (they have a single body grammar).
 
 ## Stability rules
 
@@ -75,7 +77,7 @@ Written at initial save (all flat unless noted):
 | Key | Example | Notes |
 |-----|---------|-------|
 | `capture_id` | `"5E9A…"` | UUID, quoted. Same value as `transcript_id`. |
-| `capture_type` | `meeting` | Discriminator; dictation day files use `dictation_day`. |
+| `capture_type` | `meeting` | Discriminator; dictation day files use `dictation_day`, writing day files `writing_day`. |
 | `format_version` | `1` | See Versioning. Absent = pre-versioning. |
 | `transcript_style` | `raw` / `styled` | See Versioning and lifecycle. |
 | `transcript_id` | `"5E9A…"` | UUID, quoted. |
@@ -310,11 +312,73 @@ Details:
 - The dictated text follows after a blank line and runs to the next `## `
   heading or end of file.
 
+## Writing day files
+
+The main Transcripted app (never the keyboard) appends settled typed text into
+one file per local day:
+`<capture-library>/writing/Writing_<YYYY-MM-dd>.md`, in a `writing/` folder
+beside `meetings/` and `dictations/`. The shape extends dictation day files and
+follows the same stability rules.
+
+```markdown
+---
+title: "Writing for September 25, 2026"
+date: 2026-09-25
+capture_type: writing_day
+format_version: 1
+---
+
+# Writing for September 25, 2026
+
+## 10:42 AM - Pushing the launch to Thursday so QA
+
+Entry ID: `writing-20260925-104211-387-4f2a9c1e`
+Captured: 2026-09-25T15:42:11.387Z
+Source app: Slack
+Bundle ID: `com.tinyspeck.slackmacgap`
+Words: 14
+Characters: 71
+Accepted words: 3
+
+Pushing the launch to Thursday so QA can finish the AirPods pass.
+
+## 11:05 AM - …
+```
+
+Details:
+
+- The day header is written once, when the file is created; later saves append
+  sections only, same as dictations. Header keys are flat.
+- Section heading: `## <h:mm a> - <title>` where the title is the first ~7
+  words of the text (or `Writing <MMM d> at <h:mm a>` for very short text).
+- Metadata lines, in order:
+  - `Entry ID:` (backticked, `writing-<yyyyMMdd>-<HHmmss>-<SSS>-<8 hex>`)
+  - `Captured:` (ISO 8601 UTC with milliseconds; the entry's first keystroke)
+  - `Source app:` (display name)
+  - optional `Bundle ID:` (backticked, omitted when unknown)
+  - `Words:`
+  - `Characters:`
+  - `Accepted words:` (words that came from accepted suggestions)
+- There is no `Delivery:` line; nothing is pasted.
+- The text follows after one blank line and runs to the next `## ` heading or
+  end of file. It is the settled text: characters removed with Backspace inside
+  the keyboard's own buffer aren't saved. Pastes, mouse edits, and the host
+  app's autocorrect aren't seen (a known v1 limit).
+- An entry is one app's continuous writing. A new entry starts on an app
+  switch, after 2 minutes idle, or on a caret jump or segment break the
+  keyboard reports. Entries under 2 characters after trimming aren't saved.
+- Nothing is written for secure input, excluded apps (password managers
+  always), apps outside the user's scope, or while Save my writing is off.
+- Files are created 0600 and the `writing/` folder 0700.
+
 ## Parser guidance
 
 - Detect meetings via `capture_type: meeting`; fall back to the transcript
   headings for pre-`capture_type` files. Detect dictation day files via
   `capture_type: dictation_day` or the `Dictations_` filename prefix.
+- Detect writing day files via `capture_type: writing_day` or the `Writing_`
+  filename prefix. Check for them before falling back to "any other Markdown
+  file with frontmatter is a meeting", or they get read as meetings.
 - Choose the meeting body grammar by `transcript_style` when present, else by
   heading: `## Full Transcript` (raw) vs `## Transcript` (styled). Robust
   parsers accept both grammars in either file (see

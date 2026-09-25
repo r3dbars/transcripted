@@ -450,8 +450,25 @@ final class ModelManager: @unchecked Sendable {
     /// useful to lifecycle owners and makes deterministic tests straightforward.
     func waitUntilSettled() async {
         while stateQueue.sync(execute: { activeTask != nil }) {
+            // Transcripted: a cancelled waiter returns instead of spinning
+            // until a superseded download finishes.
+            if Task.isCancelled { return }
             try? await Task.sleep(for: .milliseconds(5))
         }
+    }
+
+    /// Transcripted deviation: stops an in-flight check or download without
+    /// deleting anything. Tilde never needed it because it relaunched on a
+    /// model switch; Transcripted swaps managers in place instead. A resumable
+    /// `.partial` stays on disk for a later switch back.
+    func cancel() {
+        let task = stateQueue.sync { () -> Task<Void, Never>? in
+            activeGeneration &+= 1
+            let oldTask = activeTask
+            activeTask = nil
+            return oldTask
+        }
+        task?.cancel()
     }
 
     /// Cancels an in-flight operation and removes both the verified model and
