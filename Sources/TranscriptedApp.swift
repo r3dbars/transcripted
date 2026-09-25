@@ -249,6 +249,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         guard acquireSingleInstanceLock() else { return }
+        // Read before anything else runs: the launch Apple event is only
+        // current while this delegate call is handling it.
+        let launchedAsLoginItem = Self.wasLaunchedAsLoginItem()
 
         // Crash reporting
         CrashReporter.setup()
@@ -656,6 +659,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         workspaceObservers.append(wakeRecoveryObserver)
 
         presentInitialOnboardingIfNeeded()
+        if LaunchWindowPolicy.shouldOpenMainWindow(
+            launchedAsLoginItem: launchedAsLoginItem,
+            secondsSinceLogin: Self.secondsSinceConsoleLogin(),
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
+            isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
+        ) {
+            showSettingsWindow(page: .today, source: "app_launch")
+        }
 
         // Initialize engines
         Task { @MainActor in
@@ -663,6 +674,37 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
+    }
+
+    /// macOS tags a login-item start on the open-application event.
+    private static func wasLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
+    }
+
+    /// How long ago this user's current console login happened, from utmpx.
+    private static func secondsSinceConsoleLogin(now: Date = Date()) -> TimeInterval? {
+        let user = NSUserName()
+        var latestLogin: Date?
+        setutxent()
+        defer { endutxent() }
+        while let entry = getutxent() {
+            guard Int(entry.pointee.ut_type) == Int(USER_PROCESS) else { continue }
+            let line = withUnsafeBytes(of: entry.pointee.ut_line) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            let entryUser = withUnsafeBytes(of: entry.pointee.ut_user) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            guard line == "console", entryUser == user else { continue }
+            let loginTime = Date(timeIntervalSince1970: TimeInterval(entry.pointee.ut_tv.tv_sec))
+            if latestLogin.map({ loginTime > $0 }) ?? true {
+                latestLogin = loginTime
+            }
+        }
+        return latestLogin.map { now.timeIntervalSince($0) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
