@@ -97,53 +97,53 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/InlineGhostIME/PersonalHistoryCapture.swift` | `Sources/TranscriptedKeyboard/PersonalHistoryCapture.swift` | ported | 1 | Straight port in phase 1 (queue label renamed); Backspace tracking lands in phase 3. |
 | `Sources/InlineGhostIME/main.swift` | `Sources/TranscriptedKeyboard/main.swift` | ported | 1 | No dev flags exist at `f36f6562`; no drift. |
 | `Sources/TildeApp/App/AppDelegate.swift` | `Sources/Writing/WritingController.swift` | replaced | 2 | Lifecycle wiring only; no dev flags, no relaunches mid-meeting. |
-| `Sources/TildeApp/App/GhostBrainServerHost.swift` | `Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift` | todo | 2 | Fable porter. Socket under Transcripted app support; peer auth with Transcripted identities; strip H01; app-scope gate on suggestions (Tilde bug fix). |
-| `Sources/TildeApp/App/GhostKeyboardInstallerHost.swift` | `Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift` | todo | 2 | Add TISEnableInputSource. |
-| `Sources/TildeApp/App/OutcomeLedgerSummary.swift` | `Sources/TranscriptedWriting/Runtime/Stats/OutcomeLedgerSummary.swift` | todo | 2 |  |
-| `Sources/TildeApp/App/PersonalSuggestionStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/PersonalSuggestionStats.swift` | todo | 2 |  |
+| `Sources/TildeApp/App/GhostBrainServerHost.swift` | `Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift` | ported | 2 | Fable porter. Socket under Transcripted app support; peer auth with Transcripted identities; H01 and preview strips. `start()` reports a duplicate instance as `false`; nothing terminates. The app-scope suggestion gate (Tilde bug fix) is phase 3, through `suggestionsGate`. |
+| `Sources/TildeApp/App/GhostKeyboardInstallerHost.swift` | `Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift` | ported | 2 | Type name kept (`GhostKeyboardInstallerHost`). Bundled path is `Contents/Library/Input Methods/<profile.inputMethodInstalledBundleName>`. TISEnableInputSource: P2-B. |
+| `Sources/TildeApp/App/OutcomeLedgerSummary.swift` | `Sources/TranscriptedWriting/Runtime/Stats/OutcomeLedgerSummary.swift` | ported | 2 |  |
+| `Sources/TildeApp/App/PersonalSuggestionStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/PersonalSuggestionStats.swift` | ported | 2 |  |
 | `Sources/TildeApp/App/StatusMenuHost.swift` | `—` | not-ported | 4 | Decision 12: no menu bar row. Status moves to the Writing tab. |
 | `Sources/TildeApp/App/TildeApplicationState.swift` | `Sources/Writing/WritingController.swift` | replaced | 2 |  |
 | `Sources/TildeApp/App/TildeInstallationLocation.swift` | `—` | not-ported | 2 | Transcripted handles its own install location. |
-| `Sources/TildeApp/App/TildeLocalOutcomeStores.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingLocalOutcomeStores.swift` | todo | 2 |  |
-| `Sources/TildeApp/App/TildeProgress.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingProgress.swift` | todo | 2 |  |
-| `Sources/TildeApp/App/TildeSettings.swift` | `Sources/Writing/WritingPreferences.swift` | replaced | 2 | Strip H01, OCR eval and incremental-OCR keys. |
+| `Sources/TildeApp/App/TildeLocalOutcomeStores.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingLocalOutcomeStores.swift` | ported | 2 | Type name kept (`TildeLocalOutcomeStores`). |
+| `Sources/TildeApp/App/TildeProgress.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingProgress.swift` | ported | 2 | Type name kept (`TildeProgress`). |
+| `Sources/TildeApp/App/TildeSettings.swift` | `Sources/TranscriptedWriting/Runtime/TildeSettings.swift` | ported | 2 | Straight port, type name kept; the H01, local-OCR-evaluation and incremental-OCR keys are stripped. The bridge's `WritingPreferences` (P2-B) wraps it. |
 | `Sources/TildeApp/App/TildeSettingsSupportingViews.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 |  |
 | `Sources/TildeApp/App/TildeSettingsViewModel.swift` | `Sources/Writing/WritingSettingsModel.swift` | replaced | 4 |  |
 | `Sources/TildeApp/App/TildeSettingsWindowController.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Writing tab settings section. |
 | `Sources/TildeApp/App/TildeSetupState.swift` | `Sources/Writing/WritingSetupState.swift` | replaced | 4 | Approved three-step setup. |
 | `Sources/TildeApp/App/TildeSetupWindowController.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Intro pages and setup steps. |
-| `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | todo | 2 |  |
+| `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | ported | 2 | Type name kept (`TildeStats`). |
 | `Sources/TildeApp/App/YourTildeView.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Everyday view stats. |
 | `Sources/TildeApp/App/main.swift` | `—` | not-ported | 2 | Dev flags only. |
-| `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | todo | 2 | Write under Transcripted's logs. |
-| `Sources/TildeApp/Mac/SecureLocalStorage.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/SecureLocalStorage.swift` | todo | 3 | Keychain service renamed. |
+| `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | ported | 2 | Writes `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`. |
+| `Sources/TildeApp/Mac/SecureLocalStorage.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/SecureLocalStorage.swift` | ported | 2 | Straight port; moved from phase 3. |
 | `Sources/TildeApp/PersonalHistory/PersonalBrainStatus.swift` | `—` | not-ported | 3 | Only used by a dev JSON flag. |
-| `Sources/TildeApp/PersonalHistory/PersonalHistoryController.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryController.swift` | todo | 3 | Gate on Save my writing and app scope. |
-| `Sources/TildeApp/PersonalHistory/PersonalHistoryStore.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryStore.swift` | todo | 3 | Predictor state stays app-owned; user-facing text goes to Markdown day files (decision 6). |
+| `Sources/TildeApp/PersonalHistory/PersonalHistoryController.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryController.swift` | ported | 2 | Straight port; moved from phase 3. Phase 3 gates it on Save my writing and the app scope. |
+| `Sources/TildeApp/PersonalHistory/PersonalHistoryStore.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryStore.swift` | ported | 2 | Straight port; moved from phase 3 (Keychain service renamed). Phase 3: predictor state stays app-owned; user-facing text goes to Markdown day files (decision 6). |
 | `Sources/TildeApp/PersonalHistory/ReplayEvalCommand.swift` | `—` | not-ported | 3 | Dev-only. |
 | `Sources/TildeApp/PersonalHistory/ReplayEvalOwnership.swift` | `—` | not-ported | 3 | Dev-only. |
-| `Sources/TildeApp/Runtime/LlamaCompletionEngine.swift` | `Sources/TranscriptedWriting/Runtime/LlamaCompletionEngine.swift` | todo | 2 | Strip H01 and preview paths. |
-| `Sources/TildeApp/Runtime/LlamaCompletionStreamTransport.swift` | `Sources/TranscriptedWriting/Runtime/LlamaCompletionStreamTransport.swift` | todo | 2 |  |
-| `Sources/TildeApp/Runtime/LlamaRestartPolicy.swift` | `Sources/TranscriptedWriting/Runtime/LlamaRestartPolicy.swift` | todo | 2 |  |
-| `Sources/TildeApp/Runtime/LlamaServerProcessHost.swift` | `Sources/TranscriptedWriting/Runtime/LlamaServerProcessHost.swift` | todo | 2 | Fable porter. New port, not 17872. |
-| `Sources/TildeApp/Runtime/LocalhostURLSession.swift` | `Sources/TranscriptedWriting/Runtime/LocalhostURLSession.swift` | todo | 2 |  |
-| `Sources/TildeApp/Runtime/ModelManager.swift` | `Sources/TranscriptedWriting/Runtime/ModelManager.swift` | todo | 2 | Transcripted paths; adopt a verified Tilde model; no relaunch on switch; strip preview asset. |
+| `Sources/TildeApp/Runtime/LlamaCompletionEngine.swift` | `Sources/TranscriptedWriting/Runtime/LlamaCompletionEngine.swift` | ported | 2 | H01 stripped: no `experimentDefaults`, `visibleCleaner` or `experimentArm`. |
+| `Sources/TildeApp/Runtime/LlamaCompletionStreamTransport.swift` | `Sources/TranscriptedWriting/Runtime/LlamaCompletionStreamTransport.swift` | ported | 2 |  |
+| `Sources/TildeApp/Runtime/LlamaRestartPolicy.swift` | `Sources/TranscriptedWriting/Runtime/LlamaRestartPolicy.swift` | ported | 2 |  |
+| `Sources/TildeApp/Runtime/LlamaServerProcessHost.swift` | `Sources/TranscriptedWriting/Runtime/LlamaServerProcessHost.swift` | ported | 2 | Fable porter. Port is injected (the profile's 17891). `TILDE_DEV_*` overrides and the dev model provider stripped; the default provider is `{ nil }`. |
+| `Sources/TildeApp/Runtime/LocalhostURLSession.swift` | `Sources/TranscriptedWriting/Runtime/LocalhostURLSession.swift` | ported | 2 |  |
+| `Sources/TildeApp/Runtime/ModelManager.swift` | `Sources/TranscriptedWriting/Runtime/ModelManager.swift` | ported | 2 | Preview descriptors and `TILDE_MODEL_DIRECTORY` stripped. Default root is still `<support dir>/Models`; the bridge injects `rootDirectory:` (`Transcripted/models/writing`), Tilde-model adoption and the no-relaunch switch (P2-B). |
 | `Sources/TildeApp/Runtime/PreviewModelSelection.swift` | `—` | not-ported | 2 | Preview builds only. Strip call sites. |
-| `Sources/TildeApp/Runtime/ScaffoldPrewarmer.swift` | `Sources/TranscriptedWriting/Runtime/ScaffoldPrewarmer.swift` | todo | 2 |  |
-| `Sources/TildeApp/Runtime/TildeModelSelection.swift` | `Sources/TranscriptedWriting/Runtime/WritingModelSelection.swift` | todo | 2 | Qwen greyed out under 16 GB. |
-| `Sources/TildeApp/ScreenMemory/AXWindowTextReader.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AXWindowTextReader.swift` | todo | 2 | Fable porter. |
-| `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AccessibilityPermission.swift` | todo | 2 | No launch-time prompt; Transcripted already holds Accessibility. |
+| `Sources/TildeApp/Runtime/ScaffoldPrewarmer.swift` | `Sources/TranscriptedWriting/Runtime/ScaffoldPrewarmer.swift` | ported | 2 |  |
+| `Sources/TildeApp/Runtime/TildeModelSelection.swift` | `Sources/TranscriptedWriting/Runtime/WritingModelSelection.swift` | ported | 2 | Type name kept (`TildeModelSelection`). Release-proof and `PreviewModelSelection` paths stripped. Qwen greyed out under 16 GB: P2-B. |
+| `Sources/TildeApp/ScreenMemory/AXWindowTextReader.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AXWindowTextReader.swift` | ported | 2 | Fable porter. |
+| `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AccessibilityPermission.swift` | ported | 2 | No launch-time prompt; Transcripted already holds Accessibility. `request()` stays; callers decide. |
 | `Sources/TildeApp/ScreenMemory/GLiNERRedactionHelperHost.swift` | `—` | not-ported | 2 | Dev-only GLiNER. |
 | `Sources/TildeApp/ScreenMemory/LocalOCREvaluationStore.swift` | `—` | not-ported | 2 | Dev-only. Strip call sites. |
-| `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/LuminanceGridSampler.swift` | todo | 2 |  |
+| `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/LuminanceGridSampler.swift` | ported | 2 | Unreferenced once the incremental-OCR flag is gone; kept as a ported unit. |
 | `Sources/TildeApp/ScreenMemory/RedactionEvalCommand.swift` | `—` | not-ported | 2 | Dev-only. |
 | `Sources/TildeApp/ScreenMemory/RedactionService.swift` | `—` | not-ported | 2 | Only used by eval and proof paths. |
-| `Sources/TildeApp/ScreenMemory/ScreenCaptureService.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift` | todo | 2 | Fable porter. Strip OCR evaluation store and incremental-OCR flag. |
-| `Sources/TildeApp/ScreenMemory/ScreenLockObserver.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenLockObserver.swift` | todo | 2 |  |
+| `Sources/TildeApp/ScreenMemory/ScreenCaptureService.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift` | ported | 2 | Fable porter. OCR evaluation store and incremental-OCR flag stripped, so every Vision pass is a full OCR (the flag's default). |
+| `Sources/TildeApp/ScreenMemory/ScreenLockObserver.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenLockObserver.swift` | ported | 2 |  |
 | `Sources/TildeApp/ScreenMemory/ScreenMemoryProofStimulus.swift` | `—` | not-ported | 2 | Release-proof only. |
-| `Sources/TildeApp/ScreenMemory/ScreenRecordingPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenRecordingPermission.swift` | todo | 2 | Not in the global permission enum (plan: Permissions changes). |
-| `Sources/TildeApp/ScreenMemory/ScreenTextRecognizer.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenTextRecognizer.swift` | todo | 2 |  |
-| `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | todo | 2 |  |
+| `Sources/TildeApp/ScreenMemory/ScreenRecordingPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenRecordingPermission.swift` | ported | 2 | Not in the global permission enum (plan: Permissions changes). `request()` stays; callers decide. |
+| `Sources/TildeApp/ScreenMemory/ScreenTextRecognizer.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenTextRecognizer.swift` | ported | 2 |  |
+| `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | ported | 2 |  |
 
 ## Tests
 

@@ -152,6 +152,28 @@ let package = Package(
             name: "TranscriptedWritingCore",
             path: "Sources/TranscriptedWriting/Core"
         ),
+        // Writing's app runtime, ported from Tilde's TildeApp minus its UI and
+        // lifecycle (docs/writing-plan.md, "Where the code goes"): the socket
+        // server and peer auth, the llama-server host, the model manager,
+        // Screen Memory, personal history, the outcome-ledger readers and the
+        // keyboard installer. build.sh compiles these files straight into the
+        // app module too, so their Core import is guarded with
+        // `#if canImport(TranscriptedWritingCore)`. Nothing starts it yet; the
+        // bridge in Sources/Writing/ will.
+        .target(
+            name: "TranscriptedWritingRuntime",
+            dependencies: ["TranscriptedWritingCore"],
+            path: "Sources/TranscriptedWriting/Runtime",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("Carbon"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ScreenCaptureKit"),
+                .linkedFramework("Security"),
+                .linkedFramework("Vision"),
+            ]
+        ),
         // Tilde's TildeCoreTests, ported per docs/writing-port-ledger.md.
         // Swift Testing (`import Testing`), not XCTest; dependency-free like
         // its target, so no deps flags.
