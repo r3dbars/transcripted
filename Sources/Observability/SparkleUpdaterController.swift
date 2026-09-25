@@ -137,6 +137,12 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     /// An Install click that landed while Sparkle was still reading the feed.
     /// It is honored once Sparkle either holds the update or ends the cycle.
     private var hasPendingUserUpdateAction = false
+    /// Answers a parked click if Sparkle hasn't within this long. Replays can
+    /// park the click again (a probe or background check can start right as a
+    /// cycle ends), so without a deadline it could wait for Sparkle's next
+    /// scheduled check, hours away (#1830). A feed read takes seconds.
+    private var pendingUserUpdateActionTimeout: Task<Void, Never>?
+    private static let pendingUserUpdateActionTimeoutNanoseconds: UInt64 = 20_000_000_000
     /// The kind of Sparkle check running now, recorded when Sparkle asks
     /// permission to start it. Tells a probe (no download follows) apart from
     /// a background check that downloads on its own.
@@ -305,7 +311,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
     /// Every route opens Sparkle's window, installs, or explains why it
     /// can't (#1830). See `UpdateClickRoutingPolicy`.
-    private func runUserUpdateAction() {
+    private func runUserUpdateAction(allowsWaiting: Bool = true) {
         // Never start Sparkle for a build without a valid feed.
         let updater = hasConfiguredFeedURL ? updaterController.updater : nil
         let route = UpdateClickRoutingPolicy.route(
@@ -314,8 +320,15 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             hasImmediateInstallHandler: pendingImmediateInstallHandler != nil,
             sessionInProgress: updater?.sessionInProgress ?? false,
             isSparkleHoldingUpdate: isSparkleHoldingUpdate,
-            canCheckForUpdates: updater?.canCheckForUpdates ?? false
+            canCheckForUpdates: updater?.canCheckForUpdates ?? false,
+            allowsWaiting: allowsWaiting
         )
+        if route != .waitForFeedRead {
+            // This answers any earlier parked click too, so a later cycle end
+            // or held-update callback must not replay it and reopen the window.
+            hasPendingUserUpdateAction = false
+            cancelPendingUserUpdateActionTimeout()
+        }
 
         switch route {
         case .installImmediately:
@@ -333,8 +346,9 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         case .waitForFeedRead:
             // Sparkle is still reading the feed (a probe, or the start of a
             // background check) and would ignore the click. Keep it until
-            // Sparkle holds the update or ends the session.
+            // Sparkle holds the update or ends the session, or the deadline.
             hasPendingUserUpdateAction = true
+            schedulePendingUserUpdateActionTimeout()
         case .explain(let problem):
             presentUpdateClickProblem(problem)
         }
@@ -362,11 +376,48 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
     }
 
-    private func performPendingUserUpdateAction() {
+    private func performPendingUserUpdateAction(allowsWaiting: Bool = true) {
         // Only an update that still needs a click. A download that finished
         // meanwhile shows "Restart to Update" and waits for its own click.
-        guard case .updateAvailable = updateStatus.state else { return }
-        runUserUpdateAction()
+        guard case .updateAvailable = updateStatus.state,
+              canReplayParkedUserUpdateAction() else {
+            hasPendingUserUpdateAction = false
+            cancelPendingUserUpdateActionTimeout()
+            return
+        }
+        runUserUpdateAction(allowsWaiting: allowsWaiting)
+    }
+
+    /// A parked click runs later, when something else may have started. The
+    /// menu row is disabled while the Mac is recording, dictating or
+    /// transcribing, so a replay must not pull the app forward (or open an
+    /// alert) then either. The row keeps saying what it waits on, so the
+    /// person can click again once that finishes.
+    private func canReplayParkedUserUpdateAction() -> Bool {
+        !shouldDeferBackgroundUpdateCheck()
+    }
+
+    private func schedulePendingUserUpdateActionTimeout() {
+        // A replay that parks again keeps the first click's deadline.
+        guard pendingUserUpdateActionTimeout == nil else { return }
+        pendingUserUpdateActionTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.pendingUserUpdateActionTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.expirePendingUserUpdateAction()
+        }
+    }
+
+    private func cancelPendingUserUpdateActionTimeout() {
+        pendingUserUpdateActionTimeout?.cancel()
+        pendingUserUpdateActionTimeout = nil
+    }
+
+    private func expirePendingUserUpdateAction() {
+        pendingUserUpdateActionTimeout = nil
+        guard hasPendingUserUpdateAction else { return }
+        hasPendingUserUpdateAction = false
+        // Open Sparkle's window if it's free now; otherwise say it's busy.
+        performPendingUserUpdateAction(allowsWaiting: false)
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
@@ -409,8 +460,20 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         ) { [weak self] updater, _ in
             Task { @MainActor [weak self] in
                 self?.syncReadiness(from: updater)
+                self?.answerPendingUserUpdateActionIfUpdaterReady(updater)
             }
         }
+    }
+
+    /// Sparkle turns `canCheckForUpdates` back on when a session ends or its
+    /// driver shows an update. Either way a parked click can run now instead
+    /// of waiting out the 20 s backstop. The cycle-end and held-update
+    /// callbacks may get there first; whichever runs clears the flag, so the
+    /// click runs once.
+    private func answerPendingUserUpdateActionIfUpdaterReady(_ updater: SPUUpdater) {
+        guard hasPendingUserUpdateAction, updater.canCheckForUpdates else { return }
+        hasPendingUserUpdateAction = false
+        performPendingUserUpdateAction()
     }
 
     private func observeUpdaterSettings() {
@@ -847,6 +910,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         // The download itself answers an Install click made during the
         // feed read; the menu now shows it preparing.
         hasPendingUserUpdateAction = false
+        cancelPendingUserUpdateActionTimeout()
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
         trackUpdateLifecycleEvent("update_download_started", state: state, version: version)
     }
@@ -1083,7 +1147,8 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
             self.isSparkleHoldingUpdate = true
             if self.hasPendingUserUpdateAction {
                 self.hasPendingUserUpdateAction = false
-                if !handleShowingUpdate {
+                self.cancelPendingUserUpdateActionTimeout()
+                if !handleShowingUpdate, self.canReplayParkedUserUpdateAction() {
                     // A quiet reminder: bring it forward for the Install
                     // click that arrived during the feed read.
                     self.activateForUpdateWindow()

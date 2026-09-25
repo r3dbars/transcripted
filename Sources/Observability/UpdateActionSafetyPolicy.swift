@@ -52,7 +52,8 @@ enum UpdateClickRoutingPolicy {
         hasImmediateInstallHandler: Bool,
         sessionInProgress: Bool,
         isSparkleHoldingUpdate: Bool,
-        canCheckForUpdates: Bool
+        canCheckForUpdates: Bool,
+        allowsWaiting: Bool = true
     ) -> UpdateClickRoute {
         guard hasConfiguredFeed else { return .explain(.updaterNotConfigured) }
 
@@ -62,7 +63,11 @@ enum UpdateClickRoutingPolicy {
 
         if sessionInProgress {
             if isSparkleHoldingUpdate || canCheckForUpdates { return .showHeldUpdate }
-            if state == .updateAvailable { return .waitForFeedRead }
+            // A click that already waited its turn (see
+            // `SparkleUpdaterController.pendingUserUpdateActionTimeoutNanoseconds`)
+            // explains instead of waiting again, so it can't sit unanswered
+            // until Sparkle's next scheduled check hours later.
+            if state == .updateAvailable, allowsWaiting { return .waitForFeedRead }
             return .explain(.updaterBusy)
         }
 
