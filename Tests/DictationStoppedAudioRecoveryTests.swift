@@ -126,39 +126,34 @@ func testDictationStoppedAudioRecovery() {
         }
     }
 
-    runSuite("Dictation stopped audio recovery drops only recordings with no speech") {
-        let directory = makeRecoveryTestDirectory("silent")
+    runSuite("Closing a saved recording's prompt stops the launch reminder but keeps the audio") {
+        let directory = makeRecoveryTestDirectory("dismissed")
         defer { try? FileManager.default.removeItem(at: directory) }
         do {
-            let silent = try DictationStoppedAudioRecoveryStore.persist(
-                samples16k: [0, 0, 0], sessionID: UUID(), directory: directory
+            let closed = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0, 0, 0], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 2), directory: directory
             )!
-            let spoken = try DictationStoppedAudioRecoveryStore.persist(
-                samples16k: [0.1, -0.1, 0.1], sessionID: UUID(), directory: directory
+            let other = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0.1, -0.1, 0.1], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 1), directory: directory
             )!
-            var checked: [URL] = []
-            let kept = DictationStoppedAudioRecoveryStore.discardSilent(
-                [silent, spoken],
-                mayContainSpeech: { url in
-                    checked.append(url)
-                    return url == spoken.url
-                }
-            )
-            assertEqual(kept, [spoken], "a recording that may hold speech is kept and still offered")
-            assertEqual(checked, [silent.url, spoken.url], "every leftover is checked")
-            assertFalse(FileManager.default.fileExists(atPath: silent.url.path), "the empty recording is deleted")
-            assertTrue(FileManager.default.fileExists(atPath: spoken.url.path), "the spoken recording stays on disk")
+            assertTrue(DictationStoppedAudioRecoveryStore.markDismissed(audioURL: closed.url), "an existing recording can be marked")
             assertEqual(
-                DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).map(\.url),
-                [spoken.url],
-                "the empty recording's metadata is removed too, so launch stops asking about it"
+                DictationStoppedAudioRecoveryStore.pendingRecoveries(excludingDismissed: true, directory: directory).map(\.url),
+                [other.url],
+                "the launch reminder skips the closed recording and still offers the other one"
             )
+            assertEqual(
+                Set(DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).map(\.url)),
+                Set([closed.url, other.url]),
+                "importers still find the closed recording, so Transcribe It can clean it up later"
+            )
+            assertTrue(FileManager.default.fileExists(atPath: closed.url.path), "closing the prompt never deletes audio")
             assertFalse(
-                DictationStoppedAudioRecoveryStore.discardSilent(at: silent.url, mayContainSpeech: { _ in false }),
-                "a recording that is already gone reports nothing deleted"
+                DictationStoppedAudioRecoveryStore.markDismissed(audioURL: directory.appendingPathComponent("missing.wav")),
+                "a recording without metadata reports nothing marked"
             )
         } catch {
-            assertTrue(false, "silent recovery discard should succeed: \(error)")
+            assertTrue(false, "marking a recovery dismissed should succeed: \(error)")
         }
     }
 

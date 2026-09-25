@@ -4,7 +4,6 @@
 import AppKit
 import AVFoundation
 import Combine
-import TranscriptedCore
 
 @MainActor
 class DictationSessionController: ObservableObject {
@@ -99,11 +98,12 @@ class DictationSessionController: ObservableObject {
     var overlayController: FloatingOverlayController? {
         didSet {
             oldValue?.onActionableMessageDiscarded = nil
+            oldValue?.onActionableMessageClosedByUser = nil
             textPaster.discardPasteRetry()
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self else { return }
                 guard self.isDictating else {
-                    self.overlayController?.dismissError()
+                    self.overlayController?.dismissErrorClosedByUser()
                     return
                 }
                 self.cancelDictation()
@@ -114,7 +114,12 @@ class DictationSessionController: ObservableObject {
             }
             overlayController?.onActionableMessageDiscarded = { [weak self] in
                 self?.textPaster.discardPasteRetry()
-                self?.discardSavedAudioPromptRecordingIfSilent()
+                // Replaced or timed out: the user didn't say no, so launch
+                // may still remind them.
+                self?.savedAudioPromptURL = nil
+            }
+            overlayController?.onActionableMessageClosedByUser = { [weak self] in
+                self?.stopRemindingAboutSavedAudioPrompt()
             }
             // Any Esc, including the first of "press again to discard",
             // takes back a start that is waiting on this take.
@@ -156,12 +161,9 @@ class DictationSessionController: ObservableObject {
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
     /// The saved recording the overlay is currently offering to transcribe.
-    /// Closing that message with X throws the recording away when it holds no
-    /// speech, so an empty take doesn't come back on every launch.
+    /// If the user closes that message (X or Esc), the recording is marked so
+    /// launch stops asking about it. The file itself is never deleted here.
     private var savedAudioPromptURL: URL?
-    /// Leftover recordings from earlier runs are checked for speech once,
-    /// on the first (launch) scan.
-    private var didDiscardSilentLeftoverRecordings = false
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
     /// A start-shortcut press that landed while the last take was still
@@ -212,28 +214,9 @@ class DictationSessionController: ObservableObject {
     }
 
     func presentPendingStoppedAudioRecoveryIfNeeded() {
-        guard didDiscardSilentLeftoverRecordings else {
-            didDiscardSilentLeftoverRecordings = true
-            // A take stopped before anything was said can still be kept as a
-            // recording. Asking about it on every launch is only a nag, so
-            // leftovers from earlier runs that hold no speech are dropped
-            // first. Reading the audio stays off the main actor.
-            let launchedAt = Date()
-            Task { @MainActor [weak self] in
-                _ = await Task.detached(priority: .utility) {
-                    DictationStoppedAudioRecoveryStore.discardSilent(
-                        DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 50)
-                            .filter { $0.createdAt < launchedAt },
-                        mayContainSpeech: FailedRecordingSignalProbe.mayContainSpeech(url:)
-                    )
-                }.value
-                self?.presentPendingStoppedAudioRecoveryIfNeeded()
-            }
-            return
-        }
         guard !isDictating,
               let overlayController,
-              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
+              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1, excludingDismissed: true).first else { return }
         let savedAudioAction = savedDictationAudioAction(for: recovery.url)
         overlayController.showError(
             "A saved dictation recording never became text. Transcribe it now, and it shows up in Meetings.",
@@ -243,19 +226,14 @@ class DictationSessionController: ObservableObject {
         savedAudioPromptURL = recovery.url
     }
 
-    /// Called when a message with a button goes away without its button being
-    /// pressed (X, Esc, or a newer message). If it was offering a saved
-    /// recording that holds no speech, the recording is deleted: transcribing
-    /// it could only fail with "no audio".
-    private func discardSavedAudioPromptRecordingIfSilent() {
+    /// The user closed a "Transcribe It" message (X or Esc) without pressing
+    /// it. Launch stops asking about that recording, so an empty take doesn't
+    /// come back every time. Nothing is deleted.
+    private func stopRemindingAboutSavedAudioPrompt() {
         guard let url = savedAudioPromptURL else { return }
         savedAudioPromptURL = nil
-        Task.detached(priority: .utility) {
-            _ = DictationStoppedAudioRecoveryStore.discardSilent(
-                at: url,
-                mayContainSpeech: FailedRecordingSignalProbe.mayContainSpeech(url:)
-            )
-        }
+        let marked = DictationStoppedAudioRecoveryStore.markDismissed(audioURL: url)
+        appState?.logger.log("DICTATION | saved recording prompt closed; launch reminder \(marked ? "off" : "unchanged"), audio kept")
     }
 
     /// The button on a message about a saved dictation recording. The
@@ -265,7 +243,10 @@ class DictationSessionController: ObservableObject {
     /// recording up once its transcript is saved.
     private func savedDictationAudioAction(for url: URL) -> (title: String, action: () -> Void) {
         guard let onTranscribeSavedAudio else {
-            return ("Show Audio", { NSWorkspace.shared.activateFileViewerSelecting([url]) })
+            return ("Show Audio", { [weak self] in
+                self?.savedAudioPromptURL = nil
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            })
         }
         return (DictationSavedAudioActionCopy.transcribeTitle, { [weak self] in
             self?.savedAudioPromptURL = nil
@@ -1353,7 +1334,6 @@ class DictationSessionController: ObservableObject {
                             actionTitle: savedAudioAction.title,
                             action: savedAudioAction.action
                         )
-                        self.savedAudioPromptURL = recovery.url
                     } else {
                         overlayController.showError(
                             DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
@@ -1502,7 +1482,11 @@ class DictationSessionController: ObservableObject {
                         actionTitle: savedAudioAction.title,
                         action: savedAudioAction.action
                     )
-                    self.savedAudioPromptURL = recovery.url
+                    // Only for audio the model heard nothing in. A model
+                    // failure keeps its launch reminder even if closed.
+                    if emptyReason == .audioNeedsRecovery {
+                        self.savedAudioPromptURL = recovery.url
+                    }
                 } else {
                     if emptyReason == .audioNeedsRecovery {
                         // The captured audio has no durable WAV. If native RAM
