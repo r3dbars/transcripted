@@ -183,7 +183,7 @@ enum MeetingTranscriptStyler {
 
         if renameOutcome.shouldPersistStyling, updated != raw {
             do {
-                try updated.write(to: finalURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(updated, to: finalURL)
                 FileManager.default.restrictFileToOwnerOnly(at: finalURL)
             } catch {
                 logFailure(
