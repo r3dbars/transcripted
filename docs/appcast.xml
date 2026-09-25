@@ -7,6 +7,22 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>1.1.66</title>
+      <pubDate>Fri, 25 Sep 2026 18:46:32 +0000</pubDate>
+      <sparkle:version>1.1.66</sparkle:version>
+      <sparkle:shortVersionString>1.1.66</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.66/Transcripted-1.1.66.dmg" length="515454528" type="application/octet-stream" sparkle:edSignature="Q5BhGbuQMOBcGe6n2xWeEnWZAZrg2UvGqFPSSVyNY2z/5INrBPwXHVM9Dwb4X2YmjcjVtGke6sI1v2nSTVL6DQ==" />
+      <sparkle:deltas>
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.66/Transcripted1.1.66-1.1.65.delta" sparkle:deltaFrom="1.1.65" length="1884978" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="uZAuHXJppSp0jo4XqxQk1iPk+lLbv3JUrp46N7DOHPEIFzbb8aFLtS+t2uPB47p9A88tm1JHvRcRvZlEwx3jDw==" />
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.66/Transcripted1.1.66-1.1.64.delta" sparkle:deltaFrom="1.1.64" length="3309322" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="CZpJYi9UI05PPD8mh+zgFfG5I04ZOagQdG1n6KotcaVQyo92hwuHAr/pC3DOsfAoml+4IESqbsY0xONWH6RLCg==" />
+      </sparkle:deltas>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.66</link>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.66</sparkle:releaseNotesLink>
+      <sparkle:criticalUpdate sparkle:version="1.1.63" />
+    </item>
+    <item>
       <title>1.1.65</title>
       <pubDate>Fri, 25 Sep 2026 12:46:04 +0000</pubDate>
       <sparkle:version>1.1.65</sparkle:version>
