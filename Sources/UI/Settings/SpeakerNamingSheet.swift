@@ -10,6 +10,9 @@
 // transcript generic and preserves local review state for the Speakers page.
 // A review that arrives while a meeting records waits until that recording
 // stops (`SpeakerReviewPresentationGate`), so it never lands mid-call.
+// When a calendar invite overlaps the meeting, its invitees show up as
+// one-click name buttons on each row (`MeetingInviteeSuggestionPolicy`).
+// They are suggestions only and never name anyone on their own.
 
 import AppKit
 import Combine
@@ -21,6 +24,8 @@ enum SpeakerNamingHitTargets {
     static let rowSpacing: CGFloat = 12
     static let sectionHeaderHeight: CGFloat = 40
     static let sectionHeaderGap: CGFloat = 10
+    /// Extra row height for the invitee name buttons: one 40pt line plus a gap.
+    static let inviteeLineHeight: CGFloat = 48
 }
 
 @available(macOS 14.0, *)
@@ -86,6 +91,7 @@ final class SpeakerNamingSheet {
         }
         currentWindowController = controller
         resolveMeetingTitle(for: request, in: controller)
+        resolveInvitees(for: request, in: controller)
         controller.window?.center()
         if NSApp.isActive {
             controller.window?.makeKeyAndOrderFront(nil)
@@ -115,6 +121,39 @@ final class SpeakerNamingSheet {
             }.value
             guard let controller, controller.requestID == requestID else { return }
             controller.showMeetingTitle(title)
+        }
+    }
+
+    /// Looks up who was invited to the calendar event that overlaps this
+    /// meeting and offers them as names. Imported recordings are skipped:
+    /// their saved time is when the file was made, not a calendar slot.
+    private func resolveInvitees(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
+        let requestID = request.id
+        let url = request.transcriptURL
+        let transcriptID = request.transcriptId
+        Task { [weak controller] in
+            let window = await Task.detached(priority: .utility) { () -> (start: Date, duration: TimeInterval)? in
+                var transcriptURL: URL? = url
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    transcriptURL = TranscriptSaver.existingTranscriptURL(
+                        in: url.deletingLastPathComponent(),
+                        transcriptId: transcriptID
+                    )
+                }
+                guard let transcriptURL,
+                      let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+                      values["imported_at"] == nil,
+                      let start = TranscriptFrontmatter.recordedAt(values: values) else { return nil }
+                let duration = TranscriptFrontmatter.durationSeconds(from: values["duration"]) ?? 0
+                return (start, TimeInterval(duration))
+            }.value
+            guard let window else { return }
+            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(
+                recordingStart: window.start,
+                recordingDuration: window.duration
+            )
+            guard !names.isEmpty, let controller, controller.requestID == requestID else { return }
+            controller.showInvitees(names)
         }
     }
 
@@ -189,6 +228,10 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         contentView.showMeetingTitle(meetingTitle)
     }
 
+    func showInvitees(_ inviteeNames: [String]) {
+        contentView.showInvitees(inviteeNames)
+    }
+
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
@@ -240,6 +283,22 @@ final class SpeakerNamingContentView: NSView {
 
     func showMeetingTitle(_ meetingTitle: String?) {
         titleLabel.stringValue = SpeakerReviewPresentationCopy.title(meetingTitle: meetingTitle)
+    }
+
+    /// Adds the calendar invitees to every row. In a 1:1 with a single
+    /// unnamed remote voice, that voice gets the other invitee's name filled
+    /// in; the user still presses Save.
+    func showInvitees(_ inviteeNames: [String]) {
+        guard !inviteeNames.isEmpty else { return }
+        let prefill = MeetingInviteeSuggestionPolicy.oneOnOnePrefill(
+            inviteeNames: inviteeNames,
+            remoteVoiceCount: systemRows.count,
+            remoteVoiceHasSuggestion: systemRows.first?.hasSuggestedName ?? false
+        )
+        for row in micRows + systemRows {
+            row.showInvitees(inviteeNames, prefillName: systemRows.first === row ? prefill : nil)
+        }
+        needsLayout = true
     }
 
     private func setupViews() {
@@ -409,18 +468,16 @@ final class SpeakerNamingContentView: NSView {
         let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight
         let headerGap = SpeakerNamingHitTargets.sectionHeaderGap
 
-        let micCount = micRows.count
-        let systemCount = systemRows.count
         var docHeight: CGFloat = 0
         if hasMicSection {
             docHeight += headerHeight + headerGap
-            docHeight += CGFloat(micCount) * (rowHeight + rowSpacing)
+            docHeight += micRows.reduce(CGFloat(0)) { $0 + rowHeight + $1.extraHeight + rowSpacing }
         }
         if hasSystemSection {
             if hasMicSection {
                 docHeight += headerHeight + headerGap
             }
-            docHeight += CGFloat(systemCount) * (rowHeight + rowSpacing)
+            docHeight += systemRows.reduce(CGFloat(0)) { $0 + rowHeight + $1.extraHeight + rowSpacing }
         }
         docHeight = max(scrollView.frame.height, docHeight)
 
@@ -453,8 +510,8 @@ final class SpeakerNamingContentView: NSView {
             y -= headerGap
 
             for row in micRows {
-                y -= rowHeight
-                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight)
+                y -= rowHeight + row.extraHeight
+                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight + row.extraHeight)
                 y -= rowSpacing
             }
         }
@@ -467,8 +524,8 @@ final class SpeakerNamingContentView: NSView {
                 y -= headerGap
             }
             for row in systemRows {
-                y -= rowHeight
-                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight)
+                y -= rowHeight + row.extraHeight
+                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight + row.extraHeight)
                 y -= rowSpacing
             }
         }
@@ -636,7 +693,7 @@ final class SpeakerRowView: NSView {
 
     private let entry: SpeakerNamingEntry
     private let knownPeopleByLabel: [String: SpeakerIdentityOption]
-    private let knownPeopleLabels: [String]
+    private var knownPeopleLabels: [String]
     private let labelField = NSTextField(labelWithString: "")
     private let evidenceField = NSTextField(labelWithString: "")
     private let sampleField = NSTextField(wrappingLabelWithString: "")
@@ -644,6 +701,10 @@ final class SpeakerRowView: NSView {
     private let playButton = NSButton(title: "Play sample", target: nil, action: nil)
     private let confirmButton = NSButton(title: "Confirm Match", target: nil, action: nil)
     private let discardButton = NSButton(title: "Discard Voice", target: nil, action: nil)
+    private let inviteeLabel = NSTextField(labelWithString: "Invited:")
+    private var inviteeButtons: [NSButton] = []
+    private var inviteeLabels: [String] = []
+    private var prefilledFromInvite = false
 
     private var userConfirmed: Bool = false
     private var isDiscarded: Bool = false
@@ -677,6 +738,63 @@ final class SpeakerRowView: NSView {
             NotificationCenter.default.removeObserver(playbackObserver)
         }
         playbackTimer?.invalidate()
+    }
+
+    /// Height this row needs beyond `SpeakerNamingHitTargets.rowHeight`.
+    var extraHeight: CGFloat {
+        inviteeButtons.isEmpty ? 0 : SpeakerNamingHitTargets.inviteeLineHeight
+    }
+
+    var hasSuggestedName: Bool { currentName != nil }
+
+    /// Shows the calendar invitees as one-click name buttons, moves them to
+    /// the top of the name list, and fills in `prefillName` when the row is
+    /// still untouched.
+    func showInvitees(_ inviteeNames: [String], prefillName: String?) {
+        inviteeLabels = MeetingInviteeSuggestionPolicy.suggestionLabels(
+            inviteeNames: inviteeNames,
+            labels: knownPeopleLabels,
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName }
+        )
+        knownPeopleLabels = MeetingInviteeSuggestionPolicy.labelsWithInviteesFirst(
+            labels: knownPeopleLabels,
+            inviteeLabels: inviteeLabels
+        )
+        nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
+        nameField.reloadData()
+
+        inviteeButtons.forEach { $0.removeFromSuperview() }
+        inviteeButtons = inviteeLabels.enumerated().map { index, label in
+            let button = NSButton(title: label, target: self, action: #selector(handleInviteePick(_:)))
+            button.bezelStyle = .inline
+            button.tag = index
+            button.toolTip = "Use \(label) for this voice. They were on the calendar invite."
+            assignAutomationIdentifier("transcripted.speaker-review.row.invitee.\(index)", to: button)
+            addSubview(button)
+            return button
+        }
+        if inviteeLabel.superview == nil, !inviteeButtons.isEmpty {
+            inviteeLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+            inviteeLabel.textColor = NSColor.secondaryLabelColor
+            Self.disableExpansionFrame(for: inviteeLabel)
+            addSubview(inviteeLabel)
+        }
+
+        if let prefillName,
+           nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !userConfirmed, !isDiscarded, !isCollapsedToMe {
+            let label = MeetingInviteeSuggestionPolicy.suggestionLabels(
+                inviteeNames: [prefillName],
+                labels: knownPeopleLabels,
+                optionsByLabel: knownPeopleByLabel,
+                displayName: { $0.displayName }
+            ).first ?? prefillName
+            nameField.stringValue = label
+            prefilledFromInvite = true
+            evidenceField.stringValue = evidenceDescription()
+        }
+        updateStatePresentation()
     }
 
     /// Apply or lift the "Keep as You" visual state. Called by the content view when
@@ -869,12 +987,53 @@ final class SpeakerRowView: NSView {
             width: nameField.frame.width,
             height: fieldH
         )
+        layoutInviteeButtons(y: nameField.frame.maxY + 8, height: fieldH)
+    }
+
+    /// One line of invitee name buttons above the name box. Buttons that
+    /// don't fit are left off; the names are still first in the name list.
+    private func layoutInviteeButtons(y: CGFloat, height: CGFloat) {
+        guard !inviteeButtons.isEmpty else { return }
+        let pad: CGFloat = 12
+        let labelWidth = inviteeLabel.fittingSize.width
+        inviteeLabel.frame = NSRect(x: pad, y: y + (height - 16) / 2, width: labelWidth, height: 16)
+        var x = inviteeLabel.frame.maxX + 6
+        for button in inviteeButtons {
+            let width = min(button.fittingSize.width + 12, 180)
+            let fits = x + width <= bounds.width - pad
+            button.isHidden = !fits
+            if fits {
+                button.frame = NSRect(x: x, y: y, width: width, height: height)
+                x += width + 6
+            }
+        }
     }
 
     @objc private func handlePlaySample() {
         SpeakerClipPlayback.play(entry.clipURL)
         syncPlayButtonState()
         updatePlaybackPolling()
+    }
+
+    @objc private func handleInviteePick(_ sender: NSButton) {
+        guard inviteeLabels.indices.contains(sender.tag),
+              !isDiscarded, !isCollapsedToMe else { return }
+        let label = inviteeLabels[sender.tag]
+        nameField.stringValue = label
+        // A picked name wins over an earlier Confirm Match, same as typing.
+        if userConfirmed, SpeakerNameSelectionPolicy.normalizedSearchText(label)
+            != SpeakerNameSelectionPolicy.normalizedSearchText(currentName ?? "") {
+            userConfirmed = false
+            confirmButton.title = "Confirm Match"
+        }
+        prefilledFromInvite = false
+        evidenceField.stringValue = evidenceDescription()
+    }
+
+    fileprivate func clearInvitePrefillNote() {
+        guard prefilledFromInvite else { return }
+        prefilledFromInvite = false
+        evidenceField.stringValue = evidenceDescription()
     }
 
     @objc private func handleConfirm() {
@@ -954,6 +1113,7 @@ final class SpeakerRowView: NSView {
         }
 
         confirmButton.isEnabled = !locked
+        inviteeButtons.forEach { $0.isEnabled = !locked }
         discardButton.isEnabled = !isCollapsedToMe
         discardButton.title = isDiscarded ? "Undo Discard" : "Discard Voice"
         alphaValue = locked ? 0.62 : 1.0
@@ -1060,6 +1220,9 @@ final class SpeakerRowView: NSView {
     }
 
     private func evidenceDescription() -> String {
+        if prefilledFromInvite {
+            return "Filled in from your calendar invite. Check it, then save."
+        }
         var parts: [String] = []
         if let similarity = entry.matchSimilarity {
             parts.append("\(Int((similarity * 100).rounded()))% match")
@@ -1147,6 +1310,7 @@ extension SpeakerRowView: NSComboBoxDelegate {
     func controlTextDidChange(_ obj: Notification) {
         guard obj.object as AnyObject? === nameField else { return }
         nameField.reloadData()
+        clearInvitePrefillNote()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
