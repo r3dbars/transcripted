@@ -474,6 +474,59 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(days[0].entryCount, 2)
     }
 
+    func testReadToolsKeepAnsweringWhileReconcileWaitsOnAnotherProcess() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        // Stand in for another server mid-pass: hold the reconcile lock on a
+        // separate open file description (flock locks conflict across those).
+        let lockPath = tempDir.appendingPathComponent("mcp_index.reconcile.lock").path
+        let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        XCTAssertGreaterThanOrEqual(lockFD, 0)
+        XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
+        var released = false
+        defer {
+            if !released {
+                flock(lockFD, LOCK_UN)
+            }
+            close(lockFD)
+        }
+
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-30T10:00:00-0500"),
+            filename: "Call_2026-03-30_10-00-00",
+            to: tempDir
+        )
+        let index = self.index!
+        let dir = tempDir!
+        let reconcileDone = expectation(description: "reconcile finished after the lock was released")
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? index.reconcile(meetingsDir: dir, dictationsDir: dir)
+            reconcileDone.fulfill()
+        }
+        // Give the background reconcile time to reach the lock.
+        Thread.sleep(forTimeInterval: 0.3)
+
+        // The lock is taken before the index queue, so reads don't wait on it.
+        let readDone = DispatchSemaphore(value: 0)
+        let readCount = ReadCountBox()
+        DispatchQueue.global(qos: .userInitiated).async {
+            readCount.value = (try? index.listRecentMeetings(count: 10).count) ?? -1
+            readDone.signal()
+        }
+        XCTAssertEqual(
+            readDone.wait(timeout: .now() + 2),
+            .success,
+            "a read tool must not block while reconcile waits on another process's lock"
+        )
+        XCTAssertEqual(readCount.value, 1, "the waiting pass hasn't indexed the new meeting yet")
+
+        flock(lockFD, LOCK_UN)
+        released = true
+        wait(for: [reconcileDone], timeout: 10)
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 2)
+    }
+
     func testStartupKeepsGoingWhenOneFileFailsToIndex() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try writeFixture(makeFixtureJSON(date: "2026-03-30T10:00:00-0500"), filename: "Call_2026-03-30_10-00-00", to: tempDir)
@@ -543,4 +596,9 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertTrue(json?.contains("\"total_items_matched\" : 1") == true)
         XCTAssertTrue(json?.contains("\"truncated\" : false") == true)
     }
+}
+
+/// Written once on a background queue, read after the semaphore signals.
+private final class ReadCountBox: @unchecked Sendable {
+    var value = -1
 }

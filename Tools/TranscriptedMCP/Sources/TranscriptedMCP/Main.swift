@@ -145,7 +145,13 @@ struct TranscriptedMCP {
 
         try withLogsSuppressed {
             let index = try TranscriptIndex(indexDir: directories.indexDir)
-            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            do {
+                try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            } catch is MCPReconcileFileFailures {
+                // The index opened and every other file indexed; the server
+                // would start fine. One bad meeting file must not fail the
+                // self-test that "Connect Claude Desktop" runs.
+            }
         }
 
         let result = TranscriptedMCPSelfTestResult(
