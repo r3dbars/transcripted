@@ -207,6 +207,22 @@ func testExistingInstallModelPrefetchPolicy() {
         )
     }
 
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — writing day files count") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("writing", isDirectory: true)
+                .appendingPathComponent("Writing_2026-09-25.md", isDirectory: false)
+        )
+
+        assertTrue(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "a saved writing day file should count as existing content"
+        )
+    }
+
     runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores nested archive files") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)

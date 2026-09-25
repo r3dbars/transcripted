@@ -59,7 +59,11 @@ enum ExistingInstallModelPrefetchPolicy {
         at captureLibraryURL: URL,
         fileManager: FileManager = .default
     ) -> Bool {
-        ["dictations", "meetings"].contains { subdirectory in
+        [
+            FileManager.dictationsDirectoryName,
+            FileManager.meetingsDirectoryName,
+            FileManager.writingDirectoryName,
+        ].contains { subdirectory in
             let directory = captureLibraryURL.appendingPathComponent(subdirectory, isDirectory: true)
             return directoryContainsDirectRegularFile(directory, fileManager: fileManager)
         }

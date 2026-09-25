@@ -3,5 +3,6 @@
   "dictationsDirectory" : "/Users/fixture-user/Library/Application Support/Transcripted/captures/dictations",
   "meetingsDirectory" : "/Users/fixture-user/Library/Application Support/Transcripted/captures/meetings",
   "updatedAt" : "1970-01-01T00:00:00Z",
-  "version" : 1
+  "version" : 1,
+  "writingDirectory" : "/Users/fixture-user/Library/Application Support/Transcripted/captures/writing"
 }
