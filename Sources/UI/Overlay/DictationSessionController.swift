@@ -1843,6 +1843,57 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    /// This session's id while it is dictating, for a caller that needs to
+    /// act on this exact session later.
+    var activeDictationSessionID: UUID? {
+        isDictating ? currentDictationSessionID : nil
+    }
+
+    /// A hands-free modifier press started this session, then another key went
+    /// down while it was held: it was a combo (Option+M, or typing é), not a
+    /// dictation tap. Drop the start with no sound, error, or saved audio.
+    /// With no session id the press only queued a start behind a take that
+    /// was still finishing, so that queued start is dropped instead.
+    func abandonDictationStartForModifierCombo(sessionID: UUID?) {
+        guard let (appState, overlayController) = readyState() else { return }
+        guard let sessionID else {
+            dropQueuedDictationStart(showMessage: false)
+            return
+        }
+        guard isDictating, currentDictationSessionID == sessionID else { return }
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
+        let stage = pendingStartStage
+        cancelActiveTasks(cancelRecording: true)
+        discardStoppedAudioRecovery(explicitDiscard: true)
+        overlayController.hideWithCancelAnimation()
+        isDictating = false
+        enterPendingStartStage(Self.idleStartStage)
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "modifier_combo")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_start_dropped_for_modifier_combo",
+            message: "A hands-free key press became a key combo, so its dictation start was dropped",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "pending_stage": stage
+                ]
+            )
+        )
+        // Closes the attempt `dictation_start_requested` opened, so the start
+        // funnel doesn't read a dropped combo as a lost start.
+        AnalyticsReporter.track(
+            "dictation_start_dropped_for_modifier_combo",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
+        )
+    }
+
     /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }

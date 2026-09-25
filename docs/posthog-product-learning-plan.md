@@ -150,6 +150,7 @@ Dictation events also allow coarse route fields: `default_input_class`,
 | --- | --- |
 | `dictation_started` | `first_since_launch`, `mac_chip`, `memory_gb_bucket`, `start_latency_bucket`, `start_latency_ms`, `stt_model`, `trigger` |
 | `dictation_start_failed` | `failure_kind`, `start_attempt_bucket`, `trigger` |
+| `dictation_start_dropped_for_modifier_combo` | `duration_bucket`, `trigger` |
 | `dictation_completed` | `auto_send`, `auto_send_expected`, `auto_send_key`, `auto_send_block_reason`, `target_confirmation_mode`, `delivery`, `duration_bucket`, `trigger`, `word_count_bucket` |
 | `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_stop_latency_measured` | `auto_enter_bucket`, `auto_send`, `auto_send_expected`, `auto_send_key`, `auto_send_block_reason`, `target_confirmation_mode`, `cleanup_bucket`, `cleanup_changed`, `cleanup_enabled`, `copy_reason`, `decode_bucket`, `decode_latency_ms`, `delivery`, `first_sound_latency_bucket`, `first_sound_latency_ms`, `mac_chip`, `memory_gb_bucket`, `mic_stop_bucket`, `model_wait_bucket`, `outcome`, `paste_bucket`, `save_bucket`, `save_outcome`, `stop_to_done_bucket`, `stop_to_paste_bucket`, `stop_to_paste_latency_ms`, `stt_model`, `trigger`, `word_count_bucket` |

@@ -137,6 +137,7 @@ allowlist.
 - `dictation_start_requested`
 - `dictation_started`
 - `dictation_start_failed`
+- `dictation_start_dropped_for_modifier_combo`
 - `dictation_completed`
 - `dictation_paste_retry_completed`
 - `dictation_artifact_saved`

@@ -898,6 +898,15 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy closes a dictation start dropped for a key combo") {
+        let dropped = AnalyticsEventPolicy.policy(forEvent: "dictation_start_dropped_for_modifier_combo")
+        assertEqual(
+            (dropped?.allowedProperties ?? Set<String>()).sorted(),
+            ["duration_bucket", "trigger"],
+            "a start dropped because right Option became a combo needs its own terminal event, with only coarse fields"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy keeps the dictation attempt denominator whole") {
         let requested = AnalyticsEventPolicy.policy(forEvent: "dictation_start_requested")
         let started = AnalyticsEventPolicy.policy(forEvent: "dictation_started")
