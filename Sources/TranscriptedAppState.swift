@@ -131,9 +131,10 @@ class TranscriptedAppState: ObservableObject {
         if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
         }
-        // Phase 2 debug default; phase 4 replaces it with the Writing tab's setup state.
-        if !Self.isLaunchSmokeMode, UserDefaults.standard.bool(forKey: WritingController.debugEnabledKey) {
-            writingController.start { [weak self] message in self?.logger.log(message) }
+        // Writing runs once its setup is done and a feature is on (or behind
+        // the debug default); the Writing tab starts and stops it after that.
+        if !Self.isLaunchSmokeMode {
+            writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
