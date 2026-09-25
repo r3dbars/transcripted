@@ -212,4 +212,35 @@ final class WritingDayParserTests: XCTestCase {
         try "# Notes".write(to: notes, atomically: true, encoding: .utf8)
         XCTAssertNil(CaptureMarkdown.captureKind(of: notes))
     }
+
+    func testEscapedHeadingLineInBodyStaysInsideTheEntry() {
+        let content = """
+        ---
+        title: "Writing for September 25, 2026"
+        date: 2026-09-25
+        capture_type: writing_day
+        format_version: 1
+        ---
+
+        # Writing for September 25, 2026
+
+        ## 9:00 AM - Notes
+
+        Entry ID: `writing-20260925-090000-000-00000001`
+        Captured: 2026-09-25T14:00:00.000Z
+        Source app: Notes
+        Words: 4
+        Characters: 22
+        Accepted words: 0
+
+        Agenda
+        \\## Not a new entry
+        """
+        let parsed = CaptureMarkdownParser.parseWritingDay(
+            from: content,
+            markdownURL: URL(fileURLWithPath: "/tmp/Writing_2026-09-25.md")
+        )
+        XCTAssertEqual(parsed?.entries.count, 1)
+        XCTAssertEqual(parsed?.entries.first?.text, "Agenda\n## Not a new entry")
+    }
 }

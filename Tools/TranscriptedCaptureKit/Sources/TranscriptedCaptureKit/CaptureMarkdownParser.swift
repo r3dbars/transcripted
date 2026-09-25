@@ -705,17 +705,26 @@ public enum CaptureMarkdownParser {
 
     // MARK: - Writing entries
 
+    /// The app's `WritingDayFileFormatter` writes a body line that starts with
+    /// `## ` as `\## ` so it can't open a new section. Undo that on read.
+    static func unescapeWritingBody(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.hasPrefix("\\## ") ? String($0.dropFirst()) : String($0) }
+            .joined(separator: "\n")
+    }
+
     private static func parseWritingEntries(from body: String) -> [ParsedWritingDayCapture.Entry] {
         parseDayFileSections(from: body, flavor: .writing).map { section in
-            ParsedWritingDayCapture.Entry(
+            let text = unescapeWritingBody(section.text)
+            return ParsedWritingDayCapture.Entry(
                 id: section.entryId.isEmpty ? "writing-\(UUID().uuidString)" : section.entryId,
                 createdAt: section.createdAt.isEmpty ? "1970-01-01T00:00:00Z" : section.createdAt,
                 title: section.title.isEmpty ? section.headingText : section.title,
-                text: section.text,
+                text: text,
                 sourceAppName: section.sourceAppName ?? "Unknown",
                 sourceAppBundleId: section.sourceAppBundleId,
-                wordCount: section.wordCount == 0 ? section.text.split(whereSeparator: \.isWhitespace).count : section.wordCount,
-                characterCount: section.characterCount == 0 ? section.text.count : section.characterCount,
+                wordCount: section.wordCount == 0 ? text.split(whereSeparator: \.isWhitespace).count : section.wordCount,
+                characterCount: section.characterCount == 0 ? text.count : section.characterCount,
                 acceptedWordCount: max(0, section.acceptedWordCount)
             )
         }

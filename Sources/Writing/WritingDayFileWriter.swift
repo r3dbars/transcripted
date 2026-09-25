@@ -17,11 +17,11 @@ final class WritingDayFileWriter {
     /// How often an entry idle for 2 minutes is looked for.
     private static let idleSweepInterval: TimeInterval = 15
 
-    /// `<capture-library>/writing`. The storage-path helper that will own
-    /// this lands separately; until then it's the dictations folder's sibling.
+    /// `<capture-library>/writing`, from the storage-path helper that owns the
+    /// capture-library folder names. The pure form doesn't create the folder;
+    /// `WritingDayFileStore` creates it 0700 on first write.
     nonisolated static let defaultDirectory: @Sendable () -> URL = {
-        FileManager.default.transcriptedCaptureLibraryDir
-            .appendingPathComponent(WritingDayFileStore.folderName, isDirectory: true)
+        FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
     }
 
     let recorder: WritingDayFileRecorder

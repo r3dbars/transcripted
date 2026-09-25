@@ -89,7 +89,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeCore/Text/DiagnosticsMetadataRedactor.swift` | `Sources/TranscriptedWriting/Core/Text/DiagnosticsMetadataRedactor.swift` | ported | 1 |  |
 | `Sources/TildeCore/Text/SecretRules.swift` | `Sources/TranscriptedWriting/Core/Text/SecretRules.swift` | ported | 1 |  |
 | `Sources/InlineGhostIME/GhostBrainClient.swift` | `Sources/TranscriptedKeyboard/GhostBrainClient.swift` | ported | 1 | Fable porter. Peer auth expects the Transcripted app identity through `TildeProductProfile`; no drift. |
-| `Sources/InlineGhostIME/GhostInputController.swift` | `Sources/TranscriptedKeyboard/GhostInputController.swift` | ported | 1 | Fable porter. H01 stripped (`experimentArm` sent as nil, `variant` left to the ledger's default). No accept-key help text lives in this file; the keyCode-50 comment already says "backtick/tilde key". |
+| `Sources/InlineGhostIME/GhostInputController.swift` | `Sources/TranscriptedKeyboard/GhostInputController.swift` | ported | 1 | Fable porter. H01 stripped (`experimentArm` sent as nil, `variant` left to the ledger's default). No accept-key help text lives in this file; the keyCode-50 comment already says "backtick/tilde key". Phase 3: Backspace inside the keyboard's own typed text is reported as a text-free deletion event (segments still break as in Tilde); out-of-scope and excluded apps behave as if suggestions were off (the Tilde ignored-apps bug fix). |
 | `Sources/InlineGhostIME/GhostOutcomeLedger.swift` | `Sources/TranscriptedKeyboard/GhostOutcomeLedger.swift` | ported | 1 | Plaintext word diary dropped: `append(event:)` writes only text-free v3 events; kept/edited checks still run from in-memory accepted text. Queue label renamed. |
 | `Sources/InlineGhostIME/GhostProvenance.swift` | `Sources/TranscriptedKeyboard/GhostProvenance.swift` | ported | 1 | No drift. |
 | `Sources/InlineGhostIME/GhostStats.swift` | `Sources/TranscriptedKeyboard/GhostStats.swift` | ported | 1 | Queue label renamed. |
@@ -97,7 +97,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/InlineGhostIME/PersonalHistoryCapture.swift` | `Sources/TranscriptedKeyboard/PersonalHistoryCapture.swift` | ported | 1 | Queue label renamed. Phase 3 deviations: `recordDeletion` queues a text-free Backspace count (consecutive ones coalesce), and the permit and the send-time recheck apply the Writing app scope (`WritingAppScopeReader`). |
 | `Sources/InlineGhostIME/main.swift` | `Sources/TranscriptedKeyboard/main.swift` | ported | 1 | No dev flags exist at `f36f6562`; no drift. |
 | `Sources/TildeApp/App/AppDelegate.swift` | `Sources/Writing/WritingController.swift` | replaced | 2 | Lifecycle wiring only; no dev flags, no relaunches mid-meeting. |
-| `Sources/TildeApp/App/GhostBrainServerHost.swift` | `Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift` | ported | 2 | Fable porter. Socket under Transcripted app support; peer auth with Transcripted identities; H01 and preview strips. `start()` reports a duplicate instance as `false`; nothing terminates. The app-scope suggestion gate (Tilde bug fix) is phase 3, through `suggestionsGate`. |
+| `Sources/TildeApp/App/GhostBrainServerHost.swift` | `Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift` | ported | 2 | Fable porter. Socket under Transcripted app support; peer auth with Transcripted identities; H01 and preview strips. `start()` reports a duplicate instance as `false`; nothing terminates. The app-scope suggestion gate (Tilde bug fix) is phase 3, through `suggestionsGate`. Phase 3: the suggestions gate takes the request's app, so the app scope also blocks suggestions. |
 | `Sources/TildeApp/App/GhostKeyboardInstallerHost.swift` | `Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift` | ported | 2 | Type name kept (`GhostKeyboardInstallerHost`). Bundled path is `Contents/Library/Input Methods/<profile.inputMethodInstalledBundleName>`. TISEnableInputSource: P2-B. |
 | `Sources/TildeApp/App/OutcomeLedgerSummary.swift` | `Sources/TranscriptedWriting/Runtime/Stats/OutcomeLedgerSummary.swift` | ported | 2 |  |
 | `Sources/TildeApp/App/PersonalSuggestionStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/PersonalSuggestionStats.swift` | ported | 2 |  |
@@ -158,6 +158,9 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 
 ## Follow-ups
 
+- Check with real files: Return, Tab, arrows and shortcuts break segments, so each Slack message or Notes paragraph becomes its own writing entry. Decide at the phase 3 checkpoint whether consecutive segments in one app should merge.
+- Narrowing the app scope doesn't retroactively remove already-stored encrypted personal history; replay filters by the exclusion list only.
+- Downgrade edge: an older app rejects version-2 (deletion) history events, and the keyboard keeps retrying that batch.
 - Phase 6: `AgentConnectionGuide`'s file-fallback prompt lists the meetings and dictations folders only. Add the writing folder there (four places) and in its pinned tests.
 - Phase 4: user-visible runtime strings still say "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
 - Phase 2 cleanup: collapse `.preview9B` into a Qwen completion profile once nothing reads its preview identities.
