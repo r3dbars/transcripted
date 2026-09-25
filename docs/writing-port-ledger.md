@@ -37,57 +37,57 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 
 | Tilde | Transcripted | Status | Phase | Notes |
 | --- | --- | --- | --- | --- |
-| `Sources/TildeCore/Engine/CompletionOutputCleaner.swift` | `Sources/TranscriptedWriting/Core/Engine/CompletionOutputCleaner.swift` | todo | 1 |  |
-| `Sources/TildeCore/Engine/GhostBrainWire.swift` | `Sources/TranscriptedWriting/Core/Engine/GhostBrainWire.swift` | todo | 1 |  |
-| `Sources/TildeCore/Engine/IntentPromptHint.swift` | `Sources/TranscriptedWriting/Core/Engine/IntentPromptHint.swift` | todo | 1 |  |
-| `Sources/TildeCore/Engine/PreparedCompletionContext.swift` | `Sources/TranscriptedWriting/Core/Engine/PreparedCompletionContext.swift` | todo | 1 |  |
+| `Sources/TildeCore/Engine/CompletionOutputCleaner.swift` | `Sources/TranscriptedWriting/Core/Engine/CompletionOutputCleaner.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/GhostBrainWire.swift` | `Sources/TranscriptedWriting/Core/Engine/GhostBrainWire.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/IntentPromptHint.swift` | `Sources/TranscriptedWriting/Core/Engine/IntentPromptHint.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/PreparedCompletionContext.swift` | `Sources/TranscriptedWriting/Core/Engine/PreparedCompletionContext.swift` | ported | 1 |  |
 | `Sources/TildeCore/Engine/PreviewModelAsset.swift` | `—` | not-ported | 1 | 26B preview only. Strip call sites in ModelManager. |
-| `Sources/TildeCore/Engine/ProductionModelAsset.swift` | `Sources/TranscriptedWriting/Core/Engine/ProductionModelAsset.swift` | todo | 1 |  |
-| `Sources/TildeCore/Engine/Qwen9BModelAsset.swift` | `Sources/TranscriptedWriting/Core/Engine/Qwen9BModelAsset.swift` | todo | 1 |  |
-| `Sources/TildeCore/Engine/RawContinuationPrompt.swift` | `Sources/TranscriptedWriting/Core/Engine/RawContinuationPrompt.swift` | todo | 1 |  |
-| `Sources/TildeCore/Geometry/InlineGhostFontPolicy.swift` | `Sources/TranscriptedWriting/Core/Geometry/InlineGhostFontPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Geometry/InlineGhostLegibility.swift` | `Sources/TranscriptedWriting/Core/Geometry/InlineGhostLegibility.swift` | todo | 1 |  |
-| `Sources/TildeCore/PersonalHistory/PersonalHistoryEvent.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalHistoryEvent.swift` | todo | 1 |  |
-| `Sources/TildeCore/PersonalHistory/PersonalSuggestionPolicy.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalSuggestionPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/PersonalHistory/PersonalVocabularyShadow.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalVocabularyShadow.swift` | todo | 1 |  |
+| `Sources/TildeCore/Engine/ProductionModelAsset.swift` | `Sources/TranscriptedWriting/Core/Engine/ProductionModelAsset.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/Qwen9BModelAsset.swift` | `Sources/TranscriptedWriting/Core/Engine/Qwen9BModelAsset.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/RawContinuationPrompt.swift` | `Sources/TranscriptedWriting/Core/Engine/RawContinuationPrompt.swift` | ported | 1 |  |
+| `Sources/TildeCore/Geometry/InlineGhostFontPolicy.swift` | `Sources/TranscriptedWriting/Core/Geometry/InlineGhostFontPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Geometry/InlineGhostLegibility.swift` | `Sources/TranscriptedWriting/Core/Geometry/InlineGhostLegibility.swift` | ported | 1 |  |
+| `Sources/TildeCore/PersonalHistory/PersonalHistoryEvent.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalHistoryEvent.swift` | ported | 1 |  |
+| `Sources/TildeCore/PersonalHistory/PersonalSuggestionPolicy.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalSuggestionPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/PersonalHistory/PersonalVocabularyShadow.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/PersonalVocabularyShadow.swift` | ported | 1 |  |
 | `Sources/TildeCore/PersonalHistory/PsychicReplay.swift` | `—` | not-ported | 1 | Dev-only replay eval. |
 | `Sources/TildeCore/PersonalHistory/ReplayEval.swift` | `—` | not-ported | 1 | Dev-only replay eval. |
-| `Sources/TildeCore/PersonalHistory/SuggestionArbiter.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/SuggestionArbiter.swift` | todo | 1 |  |
-| `Sources/TildeCore/PersonalHistory/SuggestionCandidateSet.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/SuggestionCandidateSet.swift` | todo | 1 |  |
+| `Sources/TildeCore/PersonalHistory/SuggestionArbiter.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/SuggestionArbiter.swift` | ported | 1 | Inlined `PersonalReplayEval.normalizeWord` as a private helper (ReplayEval not ported). |
+| `Sources/TildeCore/PersonalHistory/SuggestionCandidateSet.swift` | `Sources/TranscriptedWriting/Core/PersonalHistory/SuggestionCandidateSet.swift` | ported | 1 |  |
 | `Sources/TildeCore/Policy/H01BlockRandomization.swift` | `—` | not-ported | 1 | Dev-only H01 randomization. Strip call sites in the keyboard, server, engine and settings. |
-| `Sources/TildeCore/Policy/LiveOnlineOpportunity.swift` | `Sources/TranscriptedWriting/Core/Policy/LiveOnlineOpportunity.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/LocalOutcomeDiary.swift` | `Sources/TranscriptedWriting/Core/Policy/LocalOutcomeDiary.swift` | todo | 1 | No shipping users at f36f6562. Port only if a ported file needs it. |
-| `Sources/TildeCore/Policy/OpportunityCharacterMeter.swift` | `Sources/TranscriptedWriting/Core/Policy/OpportunityCharacterMeter.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/RetainedCharacterObservation.swift` | `Sources/TranscriptedWriting/Core/Policy/RetainedCharacterObservation.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/SuggestionActivationPolicy.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionActivationPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/SuggestionDecisionReason.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionDecisionReason.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/SuggestionRevealDelayPolicy.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionRevealDelayPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Policy/TextFreeOnlineEvent.swift` | `Sources/TranscriptedWriting/Core/Policy/TextFreeOnlineEvent.swift` | todo | 1 |  |
+| `Sources/TildeCore/Policy/LiveOnlineOpportunity.swift` | `Sources/TranscriptedWriting/Core/Policy/LiveOnlineOpportunity.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/LocalOutcomeDiary.swift` | `Sources/TranscriptedWriting/Core/Policy/LocalOutcomeDiary.swift` | ported | 1 | No shipping users at f36f6562. Port only if a ported file needs it. Ported as-is per work order W1a: no ported Core file needs it, `RetainedSpanWatchTests` does. |
+| `Sources/TildeCore/Policy/OpportunityCharacterMeter.swift` | `Sources/TranscriptedWriting/Core/Policy/OpportunityCharacterMeter.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/RetainedCharacterObservation.swift` | `Sources/TranscriptedWriting/Core/Policy/RetainedCharacterObservation.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/SuggestionActivationPolicy.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionActivationPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/SuggestionDecisionReason.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionDecisionReason.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/SuggestionRevealDelayPolicy.swift` | `Sources/TranscriptedWriting/Core/Policy/SuggestionRevealDelayPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Policy/TextFreeOnlineEvent.swift` | `Sources/TranscriptedWriting/Core/Policy/TextFreeOnlineEvent.swift` | ported | 1 |  |
 | `Sources/TildeCore/Runtime/PreviewModelChoice.swift` | `—` | not-ported | 1 | Preview builds only. Strip call sites. |
-| `Sources/TildeCore/Runtime/ProcessPeerIdentityCache.swift` | `Sources/TranscriptedWriting/Core/Runtime/ProcessPeerIdentityCache.swift` | todo | 1 |  |
-| `Sources/TildeCore/Runtime/TildeConfiguration.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeConfiguration.swift` | todo | 1 | Rename Tilde-branded types only if the plan's rename table says so. |
-| `Sources/TildeCore/Runtime/TildeModelChoice.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift` | todo | 1 |  |
-| `Sources/TildeCore/Runtime/TildeProductProfile.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift` | todo | 1 | Keep the production and Qwen profiles; drop preview-build profiles. |
-| `Sources/TildeCore/Scene/IntentFutureFusion.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutureFusion.swift` | todo | 1 |  |
-| `Sources/TildeCore/Scene/IntentFutures.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutures.swift` | todo | 1 |  |
-| `Sources/TildeCore/Scene/SceneSuggestionPolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SceneSuggestionPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Scene/ScreenScene.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenScene.swift` | todo | 1 |  |
-| `Sources/TildeCore/Scene/ScreenSceneSnapshotBridge.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenSceneSnapshotBridge.swift` | todo | 1 |  |
-| `Sources/TildeCore/Scene/SensitiveScenePolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SensitiveScenePolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/CaptureChangeDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureChangeDetector.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/CaptureKindPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureKindPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/CaptureTriggerPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureTriggerPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/ContextResetDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ContextResetDetector.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/DefaultExcludedApps.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/DefaultExcludedApps.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/ScreenMemoryStatus.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ScreenMemoryStatus.swift` | todo | 1 |  |
-| `Sources/TildeCore/ScreenMemory/ScreenSnapshot.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ScreenSnapshot.swift` | todo | 1 |  |
-| `Sources/TildeCore/Suggestions/CompletionSuggestion.swift` | `Sources/TranscriptedWriting/Core/Suggestions/CompletionSuggestion.swift` | todo | 1 |  |
-| `Sources/TildeCore/Suggestions/FactualGroundingPolicy.swift` | `Sources/TranscriptedWriting/Core/Suggestions/FactualGroundingPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Suggestions/InlineSuggestionState.swift` | `Sources/TranscriptedWriting/Core/Suggestions/InlineSuggestionState.swift` | todo | 1 |  |
-| `Sources/TildeCore/Suggestions/SceneEchoPolicy.swift` | `Sources/TranscriptedWriting/Core/Suggestions/SceneEchoPolicy.swift` | todo | 1 |  |
-| `Sources/TildeCore/Suggestions/StableStreamPrefix.swift` | `Sources/TranscriptedWriting/Core/Suggestions/StableStreamPrefix.swift` | todo | 1 |  |
-| `Sources/TildeCore/Text/DiagnosticsMetadataRedactor.swift` | `Sources/TranscriptedWriting/Core/Text/DiagnosticsMetadataRedactor.swift` | todo | 1 |  |
-| `Sources/TildeCore/Text/SecretRules.swift` | `Sources/TranscriptedWriting/Core/Text/SecretRules.swift` | todo | 1 |  |
+| `Sources/TildeCore/Runtime/ProcessPeerIdentityCache.swift` | `Sources/TranscriptedWriting/Core/Runtime/ProcessPeerIdentityCache.swift` | ported | 1 |  |
+| `Sources/TildeCore/Runtime/TildeConfiguration.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeConfiguration.swift` | ported | 1 | Rename Tilde-branded types only if the plan's rename table says so. |
+| `Sources/TildeCore/Runtime/TildeModelChoice.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift` | ported | 1 |  |
+| `Sources/TildeCore/Runtime/TildeProductProfile.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift` | ported | 1 | Keep the production and Qwen profiles; drop preview-build profiles. |
+| `Sources/TildeCore/Scene/IntentFutureFusion.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutureFusion.swift` | ported | 1 |  |
+| `Sources/TildeCore/Scene/IntentFutures.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutures.swift` | ported | 1 |  |
+| `Sources/TildeCore/Scene/SceneSuggestionPolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SceneSuggestionPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Scene/ScreenScene.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenScene.swift` | ported | 1 |  |
+| `Sources/TildeCore/Scene/ScreenSceneSnapshotBridge.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenSceneSnapshotBridge.swift` | ported | 1 |  |
+| `Sources/TildeCore/Scene/SensitiveScenePolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SensitiveScenePolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/CaptureChangeDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureChangeDetector.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/CaptureKindPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureKindPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/CaptureTriggerPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureTriggerPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/ContextResetDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ContextResetDetector.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/DefaultExcludedApps.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/DefaultExcludedApps.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/ScreenMemoryStatus.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ScreenMemoryStatus.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/ScreenSnapshot.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ScreenSnapshot.swift` | ported | 1 |  |
+| `Sources/TildeCore/Suggestions/CompletionSuggestion.swift` | `Sources/TranscriptedWriting/Core/Suggestions/CompletionSuggestion.swift` | ported | 1 |  |
+| `Sources/TildeCore/Suggestions/FactualGroundingPolicy.swift` | `Sources/TranscriptedWriting/Core/Suggestions/FactualGroundingPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Suggestions/InlineSuggestionState.swift` | `Sources/TranscriptedWriting/Core/Suggestions/InlineSuggestionState.swift` | ported | 1 |  |
+| `Sources/TildeCore/Suggestions/SceneEchoPolicy.swift` | `Sources/TranscriptedWriting/Core/Suggestions/SceneEchoPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/Suggestions/StableStreamPrefix.swift` | `Sources/TranscriptedWriting/Core/Suggestions/StableStreamPrefix.swift` | ported | 1 |  |
+| `Sources/TildeCore/Text/DiagnosticsMetadataRedactor.swift` | `Sources/TranscriptedWriting/Core/Text/DiagnosticsMetadataRedactor.swift` | ported | 1 |  |
+| `Sources/TildeCore/Text/SecretRules.swift` | `Sources/TranscriptedWriting/Core/Text/SecretRules.swift` | ported | 1 |  |
 | `Sources/InlineGhostIME/GhostBrainClient.swift` | `Sources/TranscriptedKeyboard/GhostBrainClient.swift` | todo | 1 | Fable porter. Peer auth: expect the Transcripted app identity. |
 | `Sources/InlineGhostIME/GhostInputController.swift` | `Sources/TranscriptedKeyboard/GhostInputController.swift` | todo | 1 | Fable porter. Strip H01. Help text: fix the ISO key name. |
 | `Sources/InlineGhostIME/GhostOutcomeLedger.swift` | `Sources/TranscriptedKeyboard/GhostOutcomeLedger.swift` | todo | 1 | Drop the plaintext word diary; keep text-free kept/edited results. |

@@ -143,5 +143,14 @@ let package = Package(
                 .linkedFramework("ScreenCaptureKit"),
             ]
         ),
+        // Writing's pure policy layer, ported from Tilde's TildeCore
+        // (docs/writing-plan.md). Foundation-only and dependency-free, so it
+        // takes none of the deps flags above. build.sh compiles these same
+        // files straight into the app module; this target exists so the
+        // ported Tilde tests can run under `swift test`.
+        .target(
+            name: "TranscriptedWritingCore",
+            path: "Sources/TranscriptedWriting/Core"
+        ),
     ] + coreTestTargets
 )
