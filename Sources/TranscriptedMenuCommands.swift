@@ -62,15 +62,20 @@ struct TranscriptedMenuCommands: Commands {
             }
             .keyboardShortcut("3", modifiers: .command)
 
+            Button("Writing") {
+                appDelegate.menuOpenPage(.writing)
+            }
+            .keyboardShortcut("4", modifiers: .command)
+
             Button("Speakers") {
                 appDelegate.menuOpenPage(.people)
             }
-            .keyboardShortcut("4", modifiers: .command)
+            .keyboardShortcut("5", modifiers: .command)
 
             Button("Agent") {
                 appDelegate.menuOpenPage(.connectAgent)
             }
-            .keyboardShortcut("5", modifiers: .command)
+            .keyboardShortcut("6", modifiers: .command)
 
             Divider()
 

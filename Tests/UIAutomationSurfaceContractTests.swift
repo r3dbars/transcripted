@@ -228,12 +228,15 @@ func testUIAutomationSurfaceContract() {
             "Button(\"Dictations\")",
             "appDelegate.menuOpenPage(.dictations)",
             ".keyboardShortcut(\"3\", modifiers: .command)",
+            "Button(\"Writing\")",
+            "appDelegate.menuOpenPage(.writing)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
             "Button(\"Speakers\")",
             "appDelegate.menuOpenPage(.people)",
-            ".keyboardShortcut(\"4\", modifiers: .command)",
+            ".keyboardShortcut(\"5\", modifiers: .command)",
             "Button(\"Agent\")",
             "appDelegate.menuOpenPage(.connectAgent)",
-            ".keyboardShortcut(\"5\", modifiers: .command)",
+            ".keyboardShortcut(\"6\", modifiers: .command)",
             "Button(\"Find Speaker",
             "appDelegate.menuFindSpeaker()",
             ".keyboardShortcut(\"f\", modifiers: .command)",
@@ -245,8 +248,9 @@ func testUIAutomationSurfaceContract() {
             "case .today: return \"1\"",
             "case .home: return \"2\"",
             "case .dictations: return \"3\"",
-            "case .people: return \"4\"",
-            "case .connectAgent: return \"5\"",
+            "case .writing: return \"4\"",
+            "case .people: return \"5\"",
+            "case .connectAgent: return \"6\"",
             "return \"\\(title)  ⌘\\(key)\"",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
@@ -296,6 +300,7 @@ func testUIAutomationSurfaceContract() {
             "case today",
             "case home",
             "case dictations",
+            "case writing",
             "case general",
             "case people",
             "case connectAgent",
@@ -314,6 +319,7 @@ func testUIAutomationSurfaceContract() {
             ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
             ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
             ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            ("WritingSettingsPage", "Sources/UI/Settings/Pages/WritingSettingsPage.swift"),
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("\(typeName)(")
