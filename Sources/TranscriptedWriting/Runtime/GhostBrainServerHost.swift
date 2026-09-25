@@ -51,7 +51,9 @@ final class GhostBrainServerHost: @unchecked Sendable {
     /// toggle flipped mid-session takes effect on the very next completion,
     /// and a permission granted mid-session resumes suggestions on the next
     /// completion too — no restart, no cached state to go stale.
-    private let suggestionsGate: (@Sendable () -> Bool)?
+    /// Transcripted: takes the request's app, so the Writing app scope and
+    /// the exclusion list silence suggestions too (a Tilde bug fix).
+    private let suggestionsGate: (@Sendable (String?) -> Bool)?
     /// "Personal suggestions (experimental)" (`docs/plans/road-to-paid.md`
     /// Phase 3). Read fresh on every completion request, same shape and
     /// contract as `suggestionsGate`: `nil` means "always off" (release-
@@ -87,7 +89,7 @@ final class GhostBrainServerHost: @unchecked Sendable {
         targetProvider: (@Sendable (String?, String?) -> TypingTargetIdentity?)? = nil,
         onCompletionActivity: (@Sendable () -> Void)? = nil,
         onScreenMemoryEvent: (@Sendable (ScreenMemoryInputEvent) -> Void)? = nil,
-        suggestionsGate: (@Sendable () -> Bool)? = nil,
+        suggestionsGate: (@Sendable (String?) -> Bool)? = nil,
         personalSuggestionsGate: (@Sendable () -> Bool)? = nil,
         personalNextWordProvider: (@Sendable ([String], String?) async -> PersonalNextWordPrediction?)? = nil,
         configuration: TildeEffectiveConfiguration? = nil,
@@ -289,7 +291,7 @@ final class GhostBrainServerHost: @unchecked Sendable {
             // "nothing to show this time" outcome an ordinary empty
             // completion already produces, so the IME does nothing special
             // and nothing gets logged as a failure.
-            guard self.suggestionsGate?() ?? true else {
+            guard self.suggestionsGate?(completionRequest.app) ?? true else {
                 _ = self.writeStamped(.silence(reason: .suggestionsPaused, opportunityID: opportunityID), to: connection)
                 return
             }

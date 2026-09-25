@@ -18,6 +18,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.justinbetker.draft.inputmethod.personal-history", qos: .utility)
     private let defaults: UserDefaults
     private let policy = PersonalHistoryCapturePolicy()
+    private let appScope: WritingAppScopeReader
     private let now: @Sendable () -> Date
     private let sender: @Sendable ([PersonalHistoryEvent]) async -> GhostBrainResponse
     private let maximumBufferedEvents: Int
@@ -66,6 +67,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         }
     ) {
         self.defaults = defaults
+        self.appScope = WritingAppScopeReader(defaults: defaults)
         self.now = now
         self.maximumBufferedEvents = max(1, maximumBufferedEvents)
         self.sender = sender
@@ -94,7 +96,8 @@ final class PersonalHistoryCapture: @unchecked Sendable {
                 appBundleIdentifier: appBundleIdentifier,
                 excludedApps: Set(defaults.stringArray(
                     forKey: PersonalHistorySettingsContract.excludedAppsKey
-                ) ?? [])
+                ) ?? []),
+                appScope: appScope.current()
               ) else { return nil }
         return Permit(
             appBundleIdentifier: app,
@@ -121,6 +124,27 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         }
     }
 
+    /// Transcripted: Backspace removed `characters` of the keyboard's own
+    /// text at the end of this segment chain. Text-free; queued like typing.
+    func recordDeletion(
+        characters: Int,
+        sessionIdentifier: String,
+        permit: Permit
+    ) {
+        queue.async { [self] in
+            guard let event = PersonalHistoryEvent(
+                deletionID: UUID().uuidString,
+                timestampMilliseconds: permit.timestampMilliseconds,
+                historyIdentifier: permit.historyIdentifier,
+                consentIdentifier: permit.consentIdentifier,
+                sessionIdentifier: sessionIdentifier,
+                appBundleIdentifier: permit.appBundleIdentifier,
+                deletedCharacters: characters
+            ) else { return }
+            recordEventOnQueue(event)
+        }
+    }
+
     private func recordOnQueue(_ envelope: CaptureEnvelope) {
         guard let event = PersonalHistoryEvent(
             id: UUID().uuidString,
@@ -137,10 +161,12 @@ final class PersonalHistoryCapture: @unchecked Sendable {
 
     private func recordEventOnQueue(_ event: PersonalHistoryEvent) {
         guard !discardedStreams.contains(StreamIdentity(event)) else { return }
-        if event.source == .typed,
+        if event.source == .typed || event.source == .deletion,
            let lastIndex = pending.indices.last,
            !attemptedEventIDs.contains(pending[lastIndex].id),
-           let combined = pending[lastIndex].coalescing(with: event) {
+           let combined = event.source == .deletion
+               ? pending[lastIndex].coalescingDeletion(with: event)
+               : pending[lastIndex].coalescing(with: event) {
             pending[lastIndex] = combined
         } else {
             pending.append(event)
@@ -213,10 +239,12 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         let excluded = Set(defaults.stringArray(
             forKey: PersonalHistorySettingsContract.excludedAppsKey
         ) ?? [])
+        let scope = appScope.current()
         pending.removeAll {
             $0.historyIdentifier != historyIdentifier
                 || $0.consentIdentifier != consentIdentifier
                 || excluded.contains($0.appBundleIdentifier)
+                || !scope.includes($0.appBundleIdentifier)
         }
         retainAttemptedIDsStillPending()
         guard !pending.isEmpty else { return }

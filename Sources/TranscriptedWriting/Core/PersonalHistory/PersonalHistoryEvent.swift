@@ -16,6 +16,10 @@ public enum PersonalHistorySettingsContract {
 public enum PersonalHistoryEventSource: String, Codable, Equatable, Sendable {
     case typed
     case acceptedSuggestion = "accepted_suggestion"
+    /// Transcripted: Backspace removed characters the keyboard itself had
+    /// just sent for this writing segment. Text-free: the event carries only
+    /// `deletedCharacters` and travels as version 2.
+    case deletion
 }
 
 /// One bounded insertion produced while Tilde is the active input method.
@@ -25,6 +29,10 @@ public enum PersonalHistoryEventSource: String, Codable, Equatable, Sendable {
 /// at-least-once local socket retry.
 public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
     public static let version = 1
+    /// Transcripted: a `.deletion` event's version. Typed and accepted events
+    /// stay version 1, byte for byte.
+    public static let deletionVersion = 2
+    public static let maximumDeletedCharacters = maximumTextCharacters
     public static let maximumTextCharacters = 512
     public static let maximumTextUTF8Bytes = 2_048
     public static let maximumIdentifierCharacters = 64
@@ -43,6 +51,9 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
     public let appBundleIdentifier: String
     public let source: PersonalHistoryEventSource
     public let text: String
+    /// Transcripted: how many characters a `.deletion` removed from the end
+    /// of its segment chain; `nil` for typed and accepted text.
+    public let deletedCharacters: Int?
 
     public init?(
         id: String,
@@ -61,6 +72,7 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
               Self.validIdentifier(consentIdentifier),
               Self.validIdentifier(sessionIdentifier),
               Self.validBundleIdentifier(appBundleIdentifier),
+              source != .deletion,
               !text.isEmpty,
               text.count <= Self.maximumTextCharacters,
               text.utf8.count <= Self.maximumTextUTF8Bytes else {
@@ -75,6 +87,7 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
         self.appBundleIdentifier = appBundleIdentifier
         self.source = source
         self.text = text
+        self.deletedCharacters = nil
     }
 
     public static func validBatch(_ events: [Self]) -> Bool {
@@ -82,7 +95,7 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
             && events.count <= maximumBatchEvents
             && events.reduce(0) { $0 + $1.text.count } <= maximumBatchTextCharacters
             && events.reduce(0) { $0 + $1.text.utf8.count } <= maximumBatchTextUTF8Bytes
-            && events.allSatisfy { $0.v == version }
+            && events.allSatisfy(\.hasCurrentVersion)
     }
 
     public static func boundedBatchPrefix(_ events: [Self]) -> [Self] {
@@ -145,11 +158,32 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case v, id, timestampMilliseconds, historyIdentifier, consentIdentifier, sessionIdentifier
         case appBundleIdentifier, source, text
+        case deletedCharacters
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decode(Int.self, forKey: .v)
+        if version == Self.deletionVersion {
+            // Transcripted: a text-free Backspace count (Save my writing).
+            guard try values.decode(PersonalHistoryEventSource.self, forKey: .source) == .deletion,
+                  try values.decodeIfPresent(String.self, forKey: .text)?.isEmpty ?? true,
+                  let event = Self(
+                    deletionID: try values.decode(String.self, forKey: .id),
+                    timestampMilliseconds: try values.decode(Int64.self, forKey: .timestampMilliseconds),
+                    historyIdentifier: try values.decode(String.self, forKey: .historyIdentifier),
+                    consentIdentifier: try values.decodeIfPresent(String.self, forKey: .consentIdentifier),
+                    sessionIdentifier: try values.decode(String.self, forKey: .sessionIdentifier),
+                    appBundleIdentifier: try values.decode(String.self, forKey: .appBundleIdentifier),
+                    deletedCharacters: try values.decode(Int.self, forKey: .deletedCharacters)
+                  ) else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: decoder.codingPath, debugDescription: "Invalid Personal History deletion")
+                )
+            }
+            self = event
+            return
+        }
         guard version == Self.version,
               let event = Self(
                 id: try values.decode(String.self, forKey: .id),
@@ -183,6 +217,8 @@ public struct PersonalHistoryCapturePolicy: Equatable, Sendable {
         case secureInput
         case missingOrInvalidApp
         case excludedApp
+        /// Transcripted: outside the apps the user picked for Writing.
+        case outsideAppScope
     }
 
     public init() {}
@@ -191,7 +227,8 @@ public struct PersonalHistoryCapturePolicy: Equatable, Sendable {
         enabled: Bool,
         secureInput: Bool,
         appBundleIdentifier: String?,
-        excludedApps: Set<String>
+        excludedApps: Set<String>,
+        appScope: WritingAppScope = .all
     ) -> Decision {
         guard enabled else { return .blocked(.disabled) }
         guard !secureInput else { return .blocked(.secureInput) }
@@ -209,6 +246,7 @@ public struct PersonalHistoryCapturePolicy: Equatable, Sendable {
         guard !DefaultExcludedApps.isExcluded(appBundleIdentifier, configuredExcludedApps: excludedApps) else {
             return .blocked(.excludedApp)
         }
+        guard appScope.includes(appBundleIdentifier) else { return .blocked(.outsideAppScope) }
         return .allowed(appBundleIdentifier: appBundleIdentifier)
     }
 

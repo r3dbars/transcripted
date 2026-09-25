@@ -831,7 +831,9 @@ public struct PersonalNextWordShadow: Sendable {
     }
 
     public mutating func consume(_ events: [PersonalHistoryEvent], scoring: Bool = true) {
-        for event in events {
+        // Transcripted: Backspace counts feed Save my writing only; Tilde's
+        // learning never saw a deletion.
+        for event in events where event.source != .deletion {
             let key = StreamKey(
                 history: event.historyIdentifier,
                 consent: event.consentIdentifier,
