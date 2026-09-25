@@ -440,7 +440,7 @@ public enum SpeakerIdentityMutationService {
         var written: [PlannedRewrite] = []
         for plan in plans {
             do {
-                try plan.rewrittenContent.write(to: plan.url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(plan.rewrittenContent, to: plan.url)
                 FileManager.default.restrictToOwnerOnly(atPath: plan.url.path)
                 written.append(plan)
             } catch {
@@ -484,7 +484,7 @@ public enum SpeakerIdentityMutationService {
 
     private static func attemptRestore(_ plan: PlannedRewrite) -> Bool {
         do {
-            try plan.originalContent.write(to: plan.url, atomically: true, encoding: .utf8)
+            try TranscriptFileRewrite.write(plan.originalContent, to: plan.url)
             FileManager.default.restrictToOwnerOnly(atPath: plan.url.path)
             return true
         } catch {
