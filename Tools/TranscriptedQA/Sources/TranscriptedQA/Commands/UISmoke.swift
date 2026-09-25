@@ -261,10 +261,8 @@ final class UIAutomationSmokeRunner {
         let menuRequiredIDs = [
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
-            "transcripted.menubar.primary.paste-last-dictation",
-            "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.settings",
+            "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.quit",
         ]
         let menuMaxDepth = 12
@@ -287,7 +285,7 @@ final class UIAutomationSmokeRunner {
 
         let menuObserved = observedElements(for: menuRequiredIDs, inspector: appInspector, maxDepth: menuMaxDepth)
         let disabledMenuIDs = menuObserved
-            .filter { ["transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.open-transcripted", "transcripted.menubar.utility.settings", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
+            .filter { ["transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.open-transcripted", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
             .filter { $0.isEnabled != true }
             .compactMap(\.identifier)
         if !disabledMenuIDs.isEmpty {
@@ -825,20 +823,11 @@ struct MenuBarAuditRow: Equatable {
             minimumHitSize: 40
         ),
         MenuBarAuditRow(
-            rowNumber: 29,
-            title: "Audit row 29: Paste Last Dictation menu action is visible and 40pt",
-            targets: [
-                MenuBarAuditTarget("transcripted.menubar.primary.paste-last-dictation", requiresEnabled: nil),
-            ],
-            minimumHitSize: 40
-        ),
-        MenuBarAuditRow(
             rowNumber: 31,
             title: "Audit row 31: menu utility actions are visible, enabled, and 40pt",
             targets: [
-                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
                 MenuBarAuditTarget("transcripted.menubar.utility.open-transcripted"),
-                MenuBarAuditTarget("transcripted.menubar.utility.settings"),
+                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
                 MenuBarAuditTarget("transcripted.menubar.utility.quit"),
             ],
             minimumHitSize: 40

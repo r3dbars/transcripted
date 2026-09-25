@@ -192,12 +192,10 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     required_primary = {
         "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
         "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
-        "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
     }
     required_utility = {
         "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
         "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
-        "settings": ("Settings…", "transcripted.menubar.utility.settings"),
         "quit": ("Quit", "transcripted.menubar.utility.quit"),
     }
 
@@ -213,6 +211,10 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     for key in ("startDictation", "startMeeting"):
         if not (primary.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
+    # The two buttons show short titles; check what is on screen too.
+    for key, expected_display in {"startMeeting": "Record", "startDictation": "Dictate"}.items():
+        if (primary.get(key) or {}).get("displayTitle") != expected_display:
+            errors.append(f"{key} display title mismatch")
 
     for key, expected in required_utility.items():
         title, identifier = expected
@@ -223,7 +225,7 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{key} automation identifier mismatch")
         if not row.get("isVisible"):
             errors.append(f"{key} row hidden")
-    for key in ("openTranscripted", "settings", "quit"):
+    for key in ("openTranscripted", "quit"):
         if not (utility.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
 
@@ -666,9 +668,15 @@ def self_test() -> int:
                 if not validate_launch_report(broken):
                     print(f"menu fixture accepted {mutation} required row {key}", file=sys.stderr)
                     return 1
+    for key in ("startDictation", "startMeeting"):
+        broken = json.loads(json.dumps(launch))
+        broken["content"]["primaryActions"][key]["displayTitle"] = broken["content"]["primaryActions"][key]["title"]
+        if not validate_launch_report(broken):
+            print(f"menu fixture accepted the full title on screen for {key}", file=sys.stderr)
+            return 1
     for group, keys in (
         ("primaryActions", ("startDictation", "startMeeting")),
-        ("utilityActions", ("openTranscripted", "settings", "quit")),
+        ("utilityActions", ("openTranscripted", "quit")),
     ):
         for key in keys:
             broken = json.loads(json.dumps(launch))

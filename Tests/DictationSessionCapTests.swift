@@ -109,7 +109,8 @@ func testDictationSessionCap() {
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
         assertTrue(
-            finalizeBody.contains("\"Saved to Markdown. Paste it now, or use Paste Last Dictation later.\"")
+            finalizeBody.contains("\"Saved to Markdown. Paste it now, or press \\(pasteLastShortcut) later.\"")
+                && finalizeBody.contains("PhysicalDictationTriggerPreferences.pasteLastDictationBinding()")
                 && finalizeBody.contains("actionTitle: \"Paste It\"")
                 && finalizeBody.contains("pasteWithClipboardRestore(text)"),
             "the cap save-only path should keep a visible Paste It recovery action"

@@ -282,7 +282,6 @@ actions = report.get("content", {}).get("primaryActions", {})
 for key, expected in {
     "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
     "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
-    "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
 }.items():
     expected_title, expected_identifier = expected
     row = actions.get(key) or {}
@@ -296,12 +295,16 @@ for key in ("startDictation", "startMeeting"):
     row = actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
+# The two buttons show short titles; check what is on screen too.
+for key, expected_display in {"startMeeting": "Record", "startDictation": "Dictate"}.items():
+    row = actions.get(key) or {}
+    if row.get("displayTitle") != expected_display:
+        errors.append(f"{key} shows {row.get('displayTitle')!r}, expected {expected_display!r}")
 
 utility_actions = report.get("content", {}).get("utilityActions", {})
 for key, expected in {
     "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
     "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
-    "settings": ("Settings…", "transcripted.menubar.utility.settings"),
     "quit": ("Quit", "transcripted.menubar.utility.quit"),
 }.items():
     expected_title, expected_identifier = expected
@@ -312,7 +315,7 @@ for key, expected in {
         errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
     if not row.get("isVisible"):
         errors.append(f"{key} row was hidden")
-for key in ("openTranscripted", "settings", "quit"):
+for key in ("openTranscripted", "quit"):
     row = utility_actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")

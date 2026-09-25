@@ -116,7 +116,7 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(title)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(visibleTitle)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),
@@ -135,7 +135,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
-            "transcripted.menubar.primary.paste-last-dictation",
         ] {
             assertTrue(
                 contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
@@ -147,7 +146,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ] {
             assertTrue(
@@ -1044,18 +1042,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             tokens.contains("enum Font")
                 && tokens.contains("static let rowTitlePrimary")
-                && tokens.contains("static let headerTitle"),
+                && tokens.contains("static let headerStatus"),
             "MenuTokens should own the menubar's type roles so views never reach for a raw NSFont literal"
         )
         assertTrue(
             actionRow.contains("MenuTokens.Font.rowTitlePrimary")
                 && actionRow.contains("MenuTokens.Font.rowTitleUtility")
-                && header.contains("MenuTokens.Font.headerTitle"),
+                && header.contains("MenuTokens.Font.headerStatus"),
             "menubar rows and header should read their fonts from MenuTokens.Font"
         )
         assertFalse(
             actionRow.contains("NSFont.systemFont(ofSize: 12.5")
-                || header.contains("NSFont.systemFont(ofSize: 15.5"),
+                || header.contains("NSFont.systemFont(ofSize: 11.5"),
             "menubar labels should not re-inline raw NSFont sizes now that MenuTokens.Font owns them"
         )
         assertTrue(
