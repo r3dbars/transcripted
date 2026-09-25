@@ -152,5 +152,13 @@ let package = Package(
             name: "TranscriptedWritingCore",
             path: "Sources/TranscriptedWriting/Core"
         ),
+        // Tilde's TildeCoreTests, ported per docs/writing-port-ledger.md.
+        // Swift Testing (`import Testing`), not XCTest; dependency-free like
+        // its target, so no deps flags.
+        .testTarget(
+            name: "TranscriptedWritingTests",
+            dependencies: ["TranscriptedWritingCore"],
+            path: "Tests/TranscriptedWritingTests"
+        ),
     ] + coreTestTargets
 )

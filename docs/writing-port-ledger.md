@@ -149,55 +149,55 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 
 | Tilde | Transcripted | Status | Phase | Notes |
 | --- | --- | --- | --- | --- |
-| `Tests/TildeCoreTests/CompletionCleanSettlementTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionCleanSettlementTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/CompletionOutputCleanerTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionOutputCleanerTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/CompletionSuggestionTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionSuggestionTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/DiagnosticsMetadataRedactorTests.swift` | `Tests/TranscriptedWritingTests/Core/DiagnosticsMetadataRedactorTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/FactualGroundingPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/FactualGroundingPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/GhostBrainWireTests.swift` | `Tests/TranscriptedWritingTests/Core/GhostBrainWireTests.swift` | todo | 1 | |
+| `Tests/TildeCoreTests/CompletionCleanSettlementTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionCleanSettlementTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/CompletionOutputCleanerTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionOutputCleanerTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/CompletionSuggestionTests.swift` | `Tests/TranscriptedWritingTests/Core/CompletionSuggestionTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/DiagnosticsMetadataRedactorTests.swift` | `Tests/TranscriptedWritingTests/Core/DiagnosticsMetadataRedactorTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/FactualGroundingPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/FactualGroundingPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/GhostBrainWireTests.swift` | `Tests/TranscriptedWritingTests/Core/GhostBrainWireTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/H01BlockRandomizationTests.swift` | — | not-ported | 1 | Tests a dev-only path. |
-| `Tests/TildeCoreTests/InlineGhostFontPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineGhostFontPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/InlineGhostLegibilityPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineGhostLegibilityPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/InlineSuggestionStateTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineSuggestionStateTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/IntentFutureFusionTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFutureFusionTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/IntentFuturesTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFuturesTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/IntentPromptHintTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentPromptHintTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/OpportunityCharacterMeterTests.swift` | `Tests/TranscriptedWritingTests/Core/OpportunityCharacterMeterTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PersonalHistoryEventTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalHistoryEventTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PersonalStreamGatePolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalStreamGatePolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PersonalSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalSuggestionPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PersonalTrainedModelTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalTrainedModelTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PersonalVocabularyShadowTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalVocabularyShadowTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PreparedCompletionContextGoldens.swift` | `Tests/TranscriptedWritingTests/Core/PreparedCompletionContextGoldens.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/PreparedCompletionContextTests.swift` | `Tests/TranscriptedWritingTests/Core/PreparedCompletionContextTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ProcessPeerIdentityCacheTests.swift` | `Tests/TranscriptedWritingTests/Core/ProcessPeerIdentityCacheTests.swift` | todo | 1 | |
+| `Tests/TildeCoreTests/InlineGhostFontPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineGhostFontPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/InlineGhostLegibilityPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineGhostLegibilityPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/InlineSuggestionStateTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineSuggestionStateTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/IntentFutureFusionTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFutureFusionTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/IntentFuturesTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFuturesTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/IntentPromptHintTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentPromptHintTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/OpportunityCharacterMeterTests.swift` | `Tests/TranscriptedWritingTests/Core/OpportunityCharacterMeterTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PersonalHistoryEventTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalHistoryEventTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PersonalStreamGatePolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalStreamGatePolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PersonalSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalSuggestionPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PersonalTrainedModelTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalTrainedModelTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PersonalVocabularyShadowTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalVocabularyShadowTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PreparedCompletionContextGoldens.swift` | `Tests/TranscriptedWritingTests/Core/PreparedCompletionContextGoldens.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/PreparedCompletionContextTests.swift` | `Tests/TranscriptedWritingTests/Core/PreparedCompletionContextTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ProcessPeerIdentityCacheTests.swift` | `Tests/TranscriptedWritingTests/Core/ProcessPeerIdentityCacheTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/PsychicReplayTests.swift` | — | not-ported | 1 | Tests a dev-only path. |
-| `Tests/TildeCoreTests/RawContinuationPromptTests.swift` | `Tests/TranscriptedWritingTests/Core/RawContinuationPromptTests.swift` | todo | 1 | |
+| `Tests/TildeCoreTests/RawContinuationPromptTests.swift` | `Tests/TranscriptedWritingTests/Core/RawContinuationPromptTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ReplayEvalTests.swift` | — | not-ported | 1 | Tests a dev-only path. |
-| `Tests/TildeCoreTests/RetainedCharacterObservationTests.swift` | `Tests/TranscriptedWritingTests/Core/RetainedCharacterObservationTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/RetainedSpanWatchTests.swift` | `Tests/TranscriptedWritingTests/Core/RetainedSpanWatchTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SceneEchoPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneEchoPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SceneSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneSuggestionPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/CaptureChangeDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureChangeDetectorTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/CaptureKindPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureKindPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/CaptureTriggerPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureTriggerPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/ContextResetDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ContextResetDetectorTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/DefaultExcludedAppsTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/DefaultExcludedAppsTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/RedactionCorpusSanityTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/RedactionCorpusSanityTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/ScreenMemoryStatusTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ScreenMemoryStatusTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenSceneSnapshotBridgeTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneSnapshotBridgeTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/ScreenSceneTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SecretRulesTests.swift` | `Tests/TranscriptedWritingTests/Core/SecretRulesTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SensitiveScenePolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SensitiveScenePolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/StableStreamPrefixTests.swift` | `Tests/TranscriptedWritingTests/Core/StableStreamPrefixTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SuggestionActivationPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionActivationPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SuggestionArbiterTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionArbiterTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SuggestionCandidateSetTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionCandidateSetTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SuggestionDecisionReasonTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionDecisionReasonTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/SuggestionRevealDelayPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionRevealDelayPolicyTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/TextFreeCandidateSourceTests.swift` | `Tests/TranscriptedWritingTests/Core/TextFreeCandidateSourceTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/TildeConfigurationTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeConfigurationTests.swift` | todo | 1 | |
-| `Tests/TildeCoreTests/TildeProductProfileTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeProductProfileTests.swift` | todo | 1 | |
+| `Tests/TildeCoreTests/RetainedCharacterObservationTests.swift` | `Tests/TranscriptedWritingTests/Core/RetainedCharacterObservationTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/RetainedSpanWatchTests.swift` | `Tests/TranscriptedWritingTests/Core/RetainedSpanWatchTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SceneEchoPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneEchoPolicyTests.swift` | ported | 1 | Trimmed `.preview26B`/`.modelPreview` from the shipping-profiles loop (profiles not ported). |
+| `Tests/TildeCoreTests/SceneSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneSuggestionPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/CaptureChangeDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureChangeDetectorTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/CaptureKindPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureKindPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/CaptureTriggerPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureTriggerPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/ContextResetDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ContextResetDetectorTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/DefaultExcludedAppsTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/DefaultExcludedAppsTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/RedactionCorpusSanityTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/RedactionCorpusSanityTests.swift` | todo | 1 | Blocked: reads `script/testdata/redaction_eval_corpus.jsonl`, which is not in the f36f6562 export. |
+| `Tests/TildeCoreTests/ScreenMemory/ScreenMemoryStatusTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ScreenMemoryStatusTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenSceneSnapshotBridgeTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneSnapshotBridgeTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenSceneTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SecretRulesTests.swift` | `Tests/TranscriptedWritingTests/Core/SecretRulesTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SensitiveScenePolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SensitiveScenePolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/StableStreamPrefixTests.swift` | `Tests/TranscriptedWritingTests/Core/StableStreamPrefixTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SuggestionActivationPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionActivationPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SuggestionArbiterTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionArbiterTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SuggestionCandidateSetTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionCandidateSetTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SuggestionDecisionReasonTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionDecisionReasonTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/SuggestionRevealDelayPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SuggestionRevealDelayPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/TextFreeCandidateSourceTests.swift` | `Tests/TranscriptedWritingTests/Core/TextFreeCandidateSourceTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/TildeConfigurationTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeConfigurationTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/TildeProductProfileTests.swift` | `Tests/TranscriptedWritingTests/Core/TildeProductProfileTests.swift` | ported | 1 | Trimmed: `resolvesExplicitPreviewProfile` and `modelPreviewChoicesHaveStableOwnerFacingLabels` (only tested dropped profiles / `PreviewModelChoice`), plus the 26B and Model Preview assertions in the other tests. |
 | `Tests/TildeAppTests/GhostBrainServerHostPersonalGuardTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostPersonalGuardTests.swift` | todo | 2 | |
 | `Tests/TildeAppTests/GhostBrainServerHostStreamingGateTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostBrainServerHostStreamingGateTests.swift` | todo | 2 | |
 | `Tests/TildeAppTests/GhostInputControllerTests.swift` | `Tests/TranscriptedWritingTests/Runtime/GhostInputControllerTests.swift` | todo | 2 | |
