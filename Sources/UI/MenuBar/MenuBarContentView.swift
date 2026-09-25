@@ -151,12 +151,20 @@ final class MenuBarContentView: NSView {
 
     // A very quiet tick when the pointer lands on Record, Dictate, or
     // Restart to Update, and a softer, lower one on the rows below. Sweeping
-    // down the menu ticks once per row, never a buzz.
+    // down the menu ticks once per row, never a buzz. Silent while recording.
     private var hoverTickQuietUntil: TimeInterval = 0
 
     private func playHoverTick(_ cue: AppSoundPlayer.Cue) {
         let now = ProcessInfo.processInfo.systemUptime
         guard now >= hoverTickQuietUntil else { return }
+        // The room mic could catch a tick mid-meeting or mid-dictation, so
+        // stay silent while anything is recording.
+        if let appState,
+           appState.meetingSession.isRecording
+            || appState.meetingSession.isCaptureSessionActive
+            || appState.sttRouter.isRecording {
+            return
+        }
         hoverTickQuietUntil = now + 0.08
         AppSoundPlayer.shared.play(cue)
     }
