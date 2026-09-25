@@ -150,8 +150,8 @@ settings-side agent connection flow.
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
   `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`,
   `StorageSettingsPage.swift`, `TodaySettingsPage.swift`, and
-  `WritingSettingsPage.swift`, a placeholder until the Writing intro, setup,
-  and everyday views land). Model, shortcut, and privacy editors are
+  `WritingSettingsPage.swift`, which hosts the Writing intro, setup, and
+  everyday views from `Sources/UI/Settings/Writing/`). Model, shortcut, and privacy editors are
   injected into General's cards as closures. New settings pages should land here as
   their own file instead of growing the shell. `HomeSettingsPage.swift` owns
   the header, scan-warning/activity rows, search field, and day-grouped

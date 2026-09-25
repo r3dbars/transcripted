@@ -70,6 +70,13 @@ struct WritingEverydayView: View {
                 }
             }
 
+            if model.saveMyWriting && model.saveProblem {
+                Text(Copy.saveProblemLine)
+                    .font(LibraryTokens.meta.weight(.semibold))
+                    .foregroundStyle(LibraryTokens.attention)
+                    .accessibilityIdentifier("transcripted.settings.writing.save-problem")
+            }
+
             if let pausedUntil = model.pausedUntil {
                 Text(Copy.pausedLine(until: pausedUntil, timeFormatter: Self.timeFormatter))
                     .font(LibraryTokens.meta.weight(.semibold))

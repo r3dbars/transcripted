@@ -68,6 +68,10 @@ final class WritingSettingsModel: ObservableObject {
     @Published private(set) var screenRecordingRequested = false
     @Published private(set) var captureBusy = false
     @Published private(set) var pausedUntil: Date?
+    /// Save my writing couldn't write its day file (for example a NAS
+    /// library that refuses owner-only permissions). Cleared by the next
+    /// successful write.
+    @Published private(set) var saveProblem = false
     @Published private(set) var today = WritingDayFileReader.Day.empty
     @Published private(set) var ledger = OutcomeLedgerSummary.empty
     @Published private(set) var keyboardAcceptedToday = 0
@@ -196,6 +200,7 @@ final class WritingSettingsModel: ObservableObject {
         update(\.screenRecordingGranted, controller.screenRecordingGranted)
         update(\.screenRecordingRequested, controller.screenRecordingRequested)
         update(\.pausedUntil, controller.pausedUntil)
+        update(\.saveProblem, controller.saveMyWritingProblem != nil)
         update(\.captureBusy, isCaptureBusy())
     }
 

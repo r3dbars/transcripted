@@ -381,6 +381,8 @@ enum WritingSetupPresentation {
     static let personalizedNeedsSave = "Needs Save my writing."
     static let storageTitle = "Storage"
 
+    static let saveProblemLine = "Writing couldn't be saved to this folder. Check that the capture folder is on this Mac and writable."
+
     static func pausedLine(until: Date, timeFormatter: DateFormatter) -> String {
         "Paused until \(timeFormatter.string(from: until))"
     }
