@@ -762,6 +762,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WritingController.noteTerminationRequest()
         if duplicateInstanceShouldTerminateImmediately {
             return .terminateNow
         }

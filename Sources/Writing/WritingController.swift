@@ -39,6 +39,21 @@ final class WritingController {
     /// Keyboard-suite flag: when set, the keyboard stops opening the app
     /// after a failed request. Tilde's name, which the keyboard reads.
     nonisolated static let quietQuitKey = "GhostBrainQuietQuit"
+
+    /// Set by `noteTerminationRequest()` when macOS itself is quitting the
+    /// app (logout, restart, shutdown). Only a quit the user chose sets the
+    /// keyboard's quiet-quit flag.
+    private(set) static var terminationIsSystemInitiated = false
+
+    /// Call first thing in `applicationShouldTerminate`. The system attaches
+    /// a quit reason to the quit Apple event it sends at logout, restart and
+    /// shutdown; ⌘Q, the menu Quit items and Sparkle's relaunch don't.
+    static func noteTerminationRequest() {
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let hasSystemQuitReason = event?.eventID == AEEventID(kAEQuitApplication)
+            && event?.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason)) != nil
+        terminationIsSystemInitiated = hasSystemQuitReason
+    }
     /// App-suite flag: the keyboard was enabled and selected once. Later
     /// starts leave Input Sources to the user.
     nonisolated static let keyboardFirstSetupKey = "KeyboardEnabledAndSelectedOnce"
@@ -248,10 +263,12 @@ final class WritingController {
         hasStopped = true
         let wasRunning = isRunning
         isRunning = false
-        if wasRunning {
+        if wasRunning && !Self.terminationIsSystemInitiated {
             // Tilde's Quit sets this before terminating. Written before the
             // socket closes, so a request that fails from here on already
-            // finds it and doesn't reopen the app on its way out.
+            // finds it and doesn't reopen the app on its way out. Logout,
+            // restart and shutdown don't set it: after a reboot without
+            // launch at login, the keyboard must still be able to wake us.
             UserDefaults(suiteName: TildeSettings.keyboardSuiteName)?.set(true, forKey: Self.quietQuitKey)
         }
         // Deaths must leave a trace: flush, or the exit races the log queue.
@@ -450,6 +467,8 @@ final class WritingController {
     /// helper being down, which it is for the whole switch anyway.
     fileprivate func rebuildRuntime(for model: TildeModelChoice) {
         guard let runtime else { return }
+        // The superseded manager's download would otherwise keep running.
+        runtime.models.manager.cancel()
         runtime.models.manager = makeModelManager(for: model)
         activeModel = model
         ghostBrainServerHost?.stop()
