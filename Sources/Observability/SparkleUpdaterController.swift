@@ -324,6 +324,9 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             allowsWaiting: allowsWaiting
         )
         if route != .waitForFeedRead {
+            // This answers any earlier parked click too, so a later cycle end
+            // or held-update callback must not replay it and reopen the window.
+            hasPendingUserUpdateAction = false
             cancelPendingUserUpdateActionTimeout()
         }
 
@@ -378,6 +381,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         // meanwhile shows "Restart to Update" and waits for its own click.
         guard case .updateAvailable = updateStatus.state,
               canReplayParkedUserUpdateAction() else {
+            hasPendingUserUpdateAction = false
             cancelPendingUserUpdateActionTimeout()
             return
         }
@@ -456,8 +460,20 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         ) { [weak self] updater, _ in
             Task { @MainActor [weak self] in
                 self?.syncReadiness(from: updater)
+                self?.answerPendingUserUpdateActionIfUpdaterReady(updater)
             }
         }
+    }
+
+    /// Sparkle turns `canCheckForUpdates` back on when a session ends or its
+    /// driver shows an update. Either way a parked click can run now instead
+    /// of waiting out the 20 s backstop. The cycle-end and held-update
+    /// callbacks may get there first; whichever runs clears the flag, so the
+    /// click runs once.
+    private func answerPendingUserUpdateActionIfUpdaterReady(_ updater: SPUUpdater) {
+        guard hasPendingUserUpdateAction, updater.canCheckForUpdates else { return }
+        hasPendingUserUpdateAction = false
+        performPendingUserUpdateAction()
     }
 
     private func observeUpdaterSettings() {
