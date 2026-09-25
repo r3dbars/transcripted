@@ -213,16 +213,27 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         let model = activeJobModel ?? preparedModel ?? router.selectedModel
         let layout = SpeechSegmentPacking.layout(segments)
         let start = ProcessInfo.processInfo.systemUptime
-        guard let tokens = try await router.transcribePackedTokens(
-            samples: layout.samples,
-            model: model,
-            language: language
-        ) else { return nil }
-        MeetingPipelineTimings.current?.addSpeechToTextCall(
-            seconds: ProcessInfo.processInfo.systemUptime - start,
-            inputSeconds: Double(layout.samples.count) / 16_000,
-            model: model.rawValue
-        )
+        let recordCall = {
+            MeetingPipelineTimings.current?.addSpeechToTextCall(
+                seconds: ProcessInfo.processInfo.systemUptime - start,
+                inputSeconds: Double(layout.samples.count) / 16_000,
+                model: model.rawValue
+            )
+        }
+        let packedTokens: [TimedTranscriptToken]?
+        do {
+            packedTokens = try await router.transcribePackedTokens(
+                samples: layout.samples,
+                model: model,
+                language: language
+            )
+        } catch {
+            // A packed call that throws still spent its time before the fallback.
+            recordCall()
+            throw error
+        }
+        guard let tokens = packedTokens else { return nil }
+        recordCall()
         return SpeechSegmentPacking.split(tokens: tokens, ranges: layout.ranges)
             .map { $0.isEmpty ? $0 : CustomDictionaryTextProcessor.apply(to: $0) }
     }
