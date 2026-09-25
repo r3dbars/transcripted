@@ -154,14 +154,6 @@ struct QuietMeetingRow: View {
             .allowsHitTesting(isHovering)
             .accessibilityHidden(!isHovering)
 
-            if let modelName = item.transcriptionModelName {
-                Text(modelName)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .lineLimit(1)
-                    .help("Transcribed with \(modelName)")
-            }
-
             if let durationString {
                 Text(durationString)
                     .font(LibraryTokens.meta)
