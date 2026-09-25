@@ -88,14 +88,14 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeCore/Suggestions/StableStreamPrefix.swift` | `Sources/TranscriptedWriting/Core/Suggestions/StableStreamPrefix.swift` | ported | 1 |  |
 | `Sources/TildeCore/Text/DiagnosticsMetadataRedactor.swift` | `Sources/TranscriptedWriting/Core/Text/DiagnosticsMetadataRedactor.swift` | ported | 1 |  |
 | `Sources/TildeCore/Text/SecretRules.swift` | `Sources/TranscriptedWriting/Core/Text/SecretRules.swift` | ported | 1 |  |
-| `Sources/InlineGhostIME/GhostBrainClient.swift` | `Sources/TranscriptedKeyboard/GhostBrainClient.swift` | todo | 1 | Fable porter. Peer auth: expect the Transcripted app identity. |
-| `Sources/InlineGhostIME/GhostInputController.swift` | `Sources/TranscriptedKeyboard/GhostInputController.swift` | todo | 1 | Fable porter. Strip H01. Help text: fix the ISO key name. |
-| `Sources/InlineGhostIME/GhostOutcomeLedger.swift` | `Sources/TranscriptedKeyboard/GhostOutcomeLedger.swift` | todo | 1 | Drop the plaintext word diary; keep text-free kept/edited results. |
-| `Sources/InlineGhostIME/GhostProvenance.swift` | `Sources/TranscriptedKeyboard/GhostProvenance.swift` | todo | 1 |  |
-| `Sources/InlineGhostIME/GhostStats.swift` | `Sources/TranscriptedKeyboard/GhostStats.swift` | todo | 1 |  |
-| `Sources/InlineGhostIME/Info.plist` | `Sources/TranscriptedKeyboard/Info.plist` | todo | 1 | Identity renames per plan. |
-| `Sources/InlineGhostIME/PersonalHistoryCapture.swift` | `Sources/TranscriptedKeyboard/PersonalHistoryCapture.swift` | todo | 1 | Straight port in phase 1; Backspace tracking lands in phase 3. |
-| `Sources/InlineGhostIME/main.swift` | `Sources/TranscriptedKeyboard/main.swift` | todo | 1 | Strip dev flags. |
+| `Sources/InlineGhostIME/GhostBrainClient.swift` | `Sources/TranscriptedKeyboard/GhostBrainClient.swift` | ported | 1 | Fable porter. Peer auth expects the Transcripted app identity through `TildeProductProfile`; no drift. |
+| `Sources/InlineGhostIME/GhostInputController.swift` | `Sources/TranscriptedKeyboard/GhostInputController.swift` | ported | 1 | Fable porter. H01 stripped (`experimentArm` sent as nil, `variant` left to the ledger's default). No accept-key help text lives in this file; the keyCode-50 comment already says "backtick/tilde key". |
+| `Sources/InlineGhostIME/GhostOutcomeLedger.swift` | `Sources/TranscriptedKeyboard/GhostOutcomeLedger.swift` | ported | 1 | Plaintext word diary dropped: `append(event:)` writes only text-free v3 events; kept/edited checks still run from in-memory accepted text. Queue label renamed. |
+| `Sources/InlineGhostIME/GhostProvenance.swift` | `Sources/TranscriptedKeyboard/GhostProvenance.swift` | ported | 1 | No drift. |
+| `Sources/InlineGhostIME/GhostStats.swift` | `Sources/TranscriptedKeyboard/GhostStats.swift` | ported | 1 | Queue label renamed. |
+| `Sources/InlineGhostIME/Info.plist` | `Sources/TranscriptedKeyboard/Info.plist` | ported | 1 | Identity renames per plan; version keys are placeholders stamped by `scripts/entrypoints/lib/bundle-input-method.sh`. |
+| `Sources/InlineGhostIME/PersonalHistoryCapture.swift` | `Sources/TranscriptedKeyboard/PersonalHistoryCapture.swift` | ported | 1 | Straight port in phase 1 (queue label renamed); Backspace tracking lands in phase 3. |
+| `Sources/InlineGhostIME/main.swift` | `Sources/TranscriptedKeyboard/main.swift` | ported | 1 | No dev flags exist at `f36f6562`; no drift. |
 | `Sources/TildeApp/App/AppDelegate.swift` | `Sources/Writing/WritingController.swift` | replaced | 2 | Lifecycle wiring only; no dev flags, no relaunches mid-meeting. |
 | `Sources/TildeApp/App/GhostBrainServerHost.swift` | `Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift` | todo | 2 | Fable porter. Socket under Transcripted app support; peer auth with Transcripted identities; strip H01; app-scope gate on suggestions (Tilde bug fix). |
 | `Sources/TildeApp/App/GhostKeyboardInstallerHost.swift` | `Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift` | todo | 2 | Add TISEnableInputSource. |

@@ -13,8 +13,9 @@
 #   APP_SWIFTC_LINK_ARGS — frameworks, libraries, and prebuilt-deps flags
 #   APP_SOURCE_FILES     — app sources (Sources/TranscriptedCore excluded;
 #                          Core links in via libDraftDeps.a, never directly.
-#                          Sources/TranscriptedKeyboard excluded too; it is the
-#                          separate input-method bundle, never the app binary)
+#                          Sources/TranscriptedKeyboard excluded too: the
+#                          Writing keyboard is its own IMKit executable, built
+#                          by lib/bundle-input-method.sh into Contents/Library)
 #   APP_SWIFTC_TAIL_ARGS — parse/target/rpath flags placed after the sources
 
 build_app_swiftc_args() {
