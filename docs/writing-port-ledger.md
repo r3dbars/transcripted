@@ -183,7 +183,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeCoreTests/ScreenMemory/CaptureTriggerPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureTriggerPolicyTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/ContextResetDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ContextResetDetectorTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/DefaultExcludedAppsTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/DefaultExcludedAppsTests.swift` | ported | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/RedactionCorpusSanityTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/RedactionCorpusSanityTests.swift` | todo | 1 | Blocked: reads `script/testdata/redaction_eval_corpus.jsonl`, which is not in the f36f6562 export. |
+| `Tests/TildeCoreTests/ScreenMemory/RedactionCorpusSanityTests.swift` | — | not-ported | 1 | Reads the dev-only redaction eval corpus (`script/testdata/`), which isn't part of the shipping product. |
 | `Tests/TildeCoreTests/ScreenMemory/ScreenMemoryStatusTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ScreenMemoryStatusTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenSceneSnapshotBridgeTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneSnapshotBridgeTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenSceneTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenSceneTests.swift` | ported | 1 | |
