@@ -82,6 +82,8 @@ enum AgentConnectionGuide {
         "read_meeting",
         "list_dictations",
         "read_dictation",
+        "list_writing",
+        "read_writing",
         "search",
         "who_is",
         "recap",

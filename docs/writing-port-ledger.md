@@ -158,6 +158,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 
 ## Follow-ups
 
+- Phase 6: `AgentConnectionGuide`'s file-fallback prompt lists the meetings and dictations folders only. Add the writing folder there (four places) and in its pinned tests.
 - Phase 4: user-visible runtime strings still say "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
 - Phase 2 cleanup: collapse `.preview9B` into a Qwen completion profile once nothing reads its preview identities.
 - Before rollout: the `llama-server` pin depends on `codesign --remove-signature` output staying byte-stable across toolchains (it fails closed). Revisit with the reproducible build recipe (plan decision 9).
