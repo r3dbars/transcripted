@@ -207,7 +207,7 @@ func testExistingInstallModelPrefetchPolicy() {
         )
     }
 
-    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — writing day files count") {
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — writing day files alone do not count") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -217,9 +217,9 @@ func testExistingInstallModelPrefetchPolicy() {
                 .appendingPathComponent("Writing_2026-09-25.md", isDirectory: false)
         )
 
-        assertTrue(
+        assertFalse(
             ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
-            "a saved writing day file should count as existing content"
+            "Writing doesn't use the speech model, so writing day files alone must not trigger its prefetch"
         )
     }
 
