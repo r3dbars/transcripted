@@ -172,11 +172,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         cancelPendingAudioImports: { [weak self] in self?.cancelPendingAudioImports() },
         sendFeedback: { [weak self] in
             guard let self else { return }
-            TranscriptedSupportActions.sendFeedback(appState: self.appState)
+            let appState = self.appState
+            Task { @MainActor in
+                await TranscriptedSupportActions.sendFeedback(appState: appState)
+            }
         },
         sendDiagnosticEvent: { [weak self] in
             guard let self else { return nil }
-            return TranscriptedSupportActions.sendDiagnosticEvent(appState: self.appState)
+            return await TranscriptedSupportActions.sendDiagnosticEvent(appState: self.appState)
         }
     )
     private lazy var settingsWindowController = TranscriptedSettingsWindowController(

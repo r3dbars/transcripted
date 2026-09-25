@@ -56,6 +56,7 @@ struct TranscriptedSettingsView: View {
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var diagnosticsActionStatus: String?
+    @State private var diagnosticEventSendInFlight = false
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var permissionRevalidationTask: Task<Void, Never>?
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
@@ -3519,12 +3520,17 @@ struct TranscriptedSettingsView: View {
             return
         }
 
-        guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
-            return
-        }
+        guard !diagnosticEventSendInFlight else { return }
+        diagnosticEventSendInFlight = true
+        Task { @MainActor in
+            defer { diagnosticEventSendInFlight = false }
+            guard let eventID = await actions.sendDiagnosticEvent() else {
+                diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
+                return
+            }
 
-        diagnosticsActionStatus = SupportDiagnosticsStatusCopy.sent(eventID: eventID)
+            diagnosticsActionStatus = SupportDiagnosticsStatusCopy.sent(eventID: eventID)
+        }
     }
 
     private var captureLibraryChoicePromptBinding: Binding<Bool> {

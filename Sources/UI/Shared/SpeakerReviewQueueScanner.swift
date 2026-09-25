@@ -61,6 +61,39 @@ struct SpeakerPendingVoiceGroup: Identifiable, Sendable {
 enum SpeakerReviewQueueScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
     private static let reviewPreviewByteLimit = 256 * 1024
+    private static let noPendingSpeakersCache = NoPendingSpeakersCache()
+
+    /// Remembers transcripts that had no pending speakers the last time they
+    /// were read, keyed by path plus modification date and size. The Speakers
+    /// page rescans after every rename, merge, and meeting save; without this
+    /// each rescan re-read up to 256 KB of every saved meeting.
+    final class NoPendingSpeakersCache: @unchecked Sendable {
+        struct Fingerprint: Equatable {
+            let modifiedAt: Date?
+            let size: Int?
+        }
+
+        private static let maxEntries = 20_000
+        private let lock = NSLock()
+        private var entries: [String: Fingerprint] = [:]
+
+        func contains(_ url: URL, fingerprint: Fingerprint) -> Bool {
+            guard fingerprint.modifiedAt != nil else { return false }
+            lock.lock()
+            defer { lock.unlock() }
+            return entries[url.standardizedFileURL.path] == fingerprint
+        }
+
+        func insert(_ url: URL, fingerprint: Fingerprint) {
+            guard fingerprint.modifiedAt != nil else { return }
+            lock.lock()
+            defer { lock.unlock() }
+            if entries.count >= Self.maxEntries {
+                entries.removeAll(keepingCapacity: true)
+            }
+            entries[url.standardizedFileURL.path] = fingerprint
+        }
+    }
 
     static func loadPendingItems(
         transcriptsDirectory: URL = MeetingStoragePaths.transcriptsFolder,
@@ -71,7 +104,7 @@ enum SpeakerReviewQueueScanner {
         guard fileManager.fileExists(atPath: transcriptsDirectory.path),
               let urls = try? fileManager.contentsOfDirectory(
                 at: transcriptsDirectory,
-                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey],
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey, .fileSizeKey],
                 options: [.skipsHiddenFiles]
               ) else {
             return []
@@ -80,12 +113,32 @@ enum SpeakerReviewQueueScanner {
         let profilesById = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
 
         let items = urls.flatMap { url -> [SpeakerPendingReviewItem] in
-            guard isMarkdownCandidate(url, fileManager: fileManager),
-                  let markdown = readMarkdownPreview(from: url) else {
+            guard isMarkdownCandidate(url, fileManager: fileManager) else {
                 return []
             }
 
-            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
+            let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .creationDateKey, .fileSizeKey]
+            )
+            let fingerprint = values.map {
+                NoPendingSpeakersCache.Fingerprint(
+                    modifiedAt: $0.contentModificationDate,
+                    size: $0.fileSize
+                )
+            }
+            // Most saved meetings have no unnamed voices. Skip re-reading
+            // those until the file changes (naming a speaker rewrites it).
+            if let fingerprint, noPendingSpeakersCache.contains(url, fingerprint: fingerprint) {
+                return []
+            }
+            guard let markdown = readMarkdownPreview(from: url) else {
+                return []
+            }
+            if let fingerprint, !hasPendingSpeakers(in: markdown) {
+                noPendingSpeakersCache.insert(url, fingerprint: fingerprint)
+                return []
+            }
+
             let fileDate = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
             return pendingItems(
                 in: markdown,
@@ -105,6 +158,13 @@ enum SpeakerReviewQueueScanner {
             }
             return lhs.speakerLabel.localizedCaseInsensitiveCompare(rhs.speakerLabel) == .orderedAscending
         }
+    }
+
+    /// True when the transcript lists any `db_pending` speaker. Without one,
+    /// `pendingItems` is empty whatever the current profiles are.
+    static func hasPendingSpeakers(in markdown: String) -> Bool {
+        guard let document = TranscriptFrontmatter.document(in: markdown) else { return false }
+        return frontmatterSpeakers(from: document.lines).contains { $0.source == "db_pending" }
     }
 
     static func pendingItems(
