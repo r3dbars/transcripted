@@ -66,6 +66,9 @@ class ParakeetEngine: ObservableObject {
     let pendingSamplesLock = NSLock()
     var pendingSamples = RecordedAudioTimeline()
     var lastAudioSampleAt: CFAbsoluteTime = 0
+    /// When the first audio buffer of this dictation arrived. Guarded by
+    /// `pendingSamplesLock`; a recovery restart keeps the original value.
+    var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
     nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
@@ -159,6 +162,11 @@ class ParakeetEngine: ObservableObject {
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
     var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
+    /// Arrival time of this dictation's first audio buffer, for the
+    /// press-to-first-sound timing. Nil until audio arrives.
+    func firstAudioSampleTime() -> CFAbsoluteTime? {
+        pendingSamplesLock.withLock { firstAudioSampleAt }
+    }
 
     func receivedAudioSamples(since observationTime: CFAbsoluteTime) -> Bool {
         pendingSamplesLock.withLock {
@@ -1052,6 +1060,7 @@ class ParakeetEngine: ObservableObject {
                     self.didReceiveAudioSamples = true
                     if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
                     self.lastAudioSampleAt = sampleArrivalTime
+                    if self.firstAudioSampleAt == nil { self.firstAudioSampleAt = sampleArrivalTime }
                     self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
                     var droppedSeconds = 0.0
                     let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
@@ -1797,6 +1806,9 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
+            if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+                firstAudioSampleAt = nil
+            }
         }
         if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
             return pinnedStarted
