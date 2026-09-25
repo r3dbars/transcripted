@@ -103,6 +103,56 @@ struct AgentDictationEntry: Codable {
     }
 }
 
+/// A parsed writing day file (`Writing_<YYYY-MM-dd>.md`): what the user typed
+/// with the Transcripted keyboard, one entry per app/idle-gap segment.
+struct AgentWritingDay: Codable {
+    let version: String
+    let captureType: String
+    let date: String
+    let formatVersion: Int?
+    let markdownFilename: String
+    let entryCount: Int
+    let wordCount: Int
+    let acceptedWordCount: Int
+    let entries: [AgentWritingEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case captureType = "capture_type"
+        case date
+        case formatVersion = "format_version"
+        case markdownFilename = "markdown_filename"
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case acceptedWordCount = "accepted_word_count"
+        case entries
+    }
+}
+
+struct AgentWritingEntry: Codable {
+    let id: String
+    let createdAt: String
+    let title: String
+    let text: String
+    let sourceAppName: String
+    let sourceAppBundleId: String?
+    let wordCount: Int
+    let characterCount: Int
+    let acceptedWordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt = "created_at"
+        case title
+        case text
+        case sourceAppName = "source_app_name"
+        case sourceAppBundleId = "source_app_bundle_id"
+        case wordCount = "word_count"
+        case characterCount = "character_count"
+        case acceptedWordCount = "accepted_word_count"
+    }
+}
+
 // MARK: - MCP Response Types
 
 struct GroupedSearchResult: Codable {
@@ -227,7 +277,13 @@ struct MeetingSpeaker: Codable {
 enum ContextKind: String, Codable {
     case meeting
     case dictation
+    case writing
     case all
+
+    /// Whether a query scoped to `self` covers artifacts of `kind`.
+    func includes(_ kind: ContextKind) -> Bool {
+        self == .all || self == kind
+    }
 }
 
 struct DictationDaySummary: Codable {
@@ -243,6 +299,25 @@ struct DictationDaySummary: Codable {
         case filename, date, datetime, titles
         case entryCount = "entry_count"
         case wordCount = "word_count"
+        case sourceApps = "source_apps"
+    }
+}
+
+struct WritingDaySummary: Codable {
+    let filename: String
+    let date: String
+    let datetime: String
+    let entryCount: Int
+    let wordCount: Int
+    let acceptedWordCount: Int
+    let sourceApps: [String]
+    let titles: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, titles
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case acceptedWordCount = "accepted_word_count"
         case sourceApps = "source_apps"
     }
 }
@@ -343,12 +418,15 @@ struct StatusResult: Codable {
     let serverVersion: String
     let meetingDirectories: [String]
     let dictationDirectories: [String]
+    let writingDirectories: [String]
     let resolutionSource: String
     let legacyFallbackAppended: Bool
     let indexDirectory: String
     let indexedMeetings: Int
     let indexedDictationDays: Int
     let indexedDictationEntries: Int
+    let indexedWritingDays: Int
+    let indexedWritingEntries: Int
     let indexedSummaryItems: Int
     let summarizedMeetings: Int
     let summariesIndexed: Bool
@@ -357,12 +435,15 @@ struct StatusResult: Codable {
         case serverVersion = "server_version"
         case meetingDirectories = "meeting_directories"
         case dictationDirectories = "dictation_directories"
+        case writingDirectories = "writing_directories"
         case resolutionSource = "resolution_source"
         case legacyFallbackAppended = "legacy_fallback_appended"
         case indexDirectory = "index_directory"
         case indexedMeetings = "indexed_meetings"
         case indexedDictationDays = "indexed_dictation_days"
         case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedWritingDays = "indexed_writing_days"
+        case indexedWritingEntries = "indexed_writing_entries"
         case indexedSummaryItems = "indexed_summary_items"
         case summarizedMeetings = "summarized_meetings"
         case summariesIndexed = "summaries_indexed"
@@ -377,6 +458,8 @@ struct EmptyQueryResult: Codable {
     let indexedMeetings: Int?
     let indexedDictationDays: Int?
     let indexedDictationEntries: Int?
+    var indexedWritingDays: Int? = nil
+    var indexedWritingEntries: Int? = nil
     let indexedSummaryItems: Int?
     let hint: String
 
@@ -385,6 +468,8 @@ struct EmptyQueryResult: Codable {
         case indexedMeetings = "indexed_meetings"
         case indexedDictationDays = "indexed_dictation_days"
         case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedWritingDays = "indexed_writing_days"
+        case indexedWritingEntries = "indexed_writing_entries"
         case indexedSummaryItems = "indexed_summary_items"
         case hint
     }
@@ -439,6 +524,26 @@ struct DictationDayPage: Codable {
     let nextOffset: Int?
     let hint: String
     let entries: [AgentDictationEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, offset, returned, truncated, hint, entries
+        case totalEntries = "total_entries"
+        case nextOffset = "next_offset"
+    }
+}
+
+/// Paginated window over a writing day's entries, same shape as
+/// `DictationDayPage`, for `read_writing` reads without an entry_id.
+struct WritingDayPage: Codable {
+    let filename: String
+    let date: String
+    let totalEntries: Int
+    let offset: Int
+    let returned: Int
+    let truncated: Bool
+    let nextOffset: Int?
+    let hint: String
+    let entries: [AgentWritingEntry]
 
     enum CodingKeys: String, CodingKey {
         case filename, date, offset, returned, truncated, hint, entries
