@@ -579,6 +579,36 @@ class STTRouter: ObservableObject {
         }
     }
 
+    /// Packed input limit for meeting segments, or nil when `model` can't
+    /// split a packed call back into segments. Parakeet runs a fixed 15 s
+    /// window; one encoder frame (80 ms) of headroom keeps a pack inside it.
+    func packedSegmentWindowSamples(for model: TranscriptionModelChoice) -> Int? {
+        switch model {
+        case .parakeetTDTv2, .parakeetTDTv3:
+            return ASRConstants.maxModelSamples - ASRConstants.samplesPerEncoderFrame
+        case .parakeetUltraExperimental, .whisperLargeV3Turbo, .whisperLargeV3, .appleSpeech:
+            return nil
+        }
+    }
+
+    /// One call over packed meeting segments, returning timed tokens; nil
+    /// when this model or language can't pack (the caller falls back).
+    func transcribePackedTokens(
+        samples: [Float],
+        model: TranscriptionModelChoice,
+        language: TranscriptionLanguageContext?
+    ) async throws -> [TimedTranscriptToken]? {
+        let resolvedModel = beginForegroundUse(of: model)
+        defer { endForegroundUse(of: resolvedModel) }
+        guard packedSegmentWindowSamples(for: resolvedModel) != nil else { return nil }
+        if let language, case .explicit = language.selection { return nil }
+        if !isModelLoaded(for: resolvedModel) {
+            await initializeModel(resolvedModel)
+        }
+        guard isModelLoaded(for: resolvedModel) else { return nil }
+        return try await parakeetEngine.transcribePackedSamplesWithTokenTimes(samples)
+    }
+
     func resolveLanguage(
         representativeSamples: [[Float]],
         selection: TranscriptionLanguageSelection,

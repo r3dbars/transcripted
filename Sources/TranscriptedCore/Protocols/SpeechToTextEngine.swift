@@ -42,6 +42,20 @@ public protocol SpeechToTextEngine: ObservableObject {
     func resolveLanguage(representativeSamples: [[Float]], selection: TranscriptionLanguageSelection) async throws -> TranscriptionLanguageContext
     func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String
 
+    /// Largest packed input, in 16 kHz samples, that one call covers at a
+    /// fixed cost. nil (the default) means the engine does not pack, and the
+    /// pipeline makes one call per segment.
+    var packedSegmentWindowSamples: Int? { get }
+
+    /// Transcribes several short segments in one call and returns one text per
+    /// segment, in order (see `SpeechSegmentPacking`). nil means this call
+    /// can't be packed; the pipeline then makes one call per segment.
+    func transcribePackedSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String]?
+
     /// Release model resources to free memory
     func cleanup()
 }
@@ -59,5 +73,15 @@ public extension SpeechToTextEngine {
     }
     var transcriptionEngineDescriptor: SpeechTranscriptionEngineDescriptor {
         .parakeetLocal
+    }
+
+    var packedSegmentWindowSamples: Int? { nil }
+
+    func transcribePackedSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String]? {
+        nil
     }
 }
