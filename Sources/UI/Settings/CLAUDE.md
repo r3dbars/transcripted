@@ -127,7 +127,8 @@ settings-side agent connection flow.
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
   held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
-  its header names the meeting. When a calendar invite overlaps the meeting,
+  its header names the meeting. When the recording started with a calendar event
+  (same window as the record-this-meeting pop-up),
   its invitees show as one-click name buttons on each row and lead the name
   list, and a 1:1 pre-fills the one remote voice
   (`MeetingInviteeSuggestionPolicy`). Suggestions only; the user still saves.

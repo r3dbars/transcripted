@@ -1,7 +1,7 @@
 import EventKit
 import Foundation
 
-/// Finds who was invited to the calendar event that overlaps a saved meeting,
+/// Finds who was invited to the calendar event a saved meeting started with,
 /// for the name buttons in speaker review. Read-only, and it never asks for
 /// calendar access: it only looks when access was already granted for the
 /// meeting prompt. Unlike the prompt, it keeps events with no meeting link,
@@ -17,25 +17,22 @@ final class MeetingInviteeCalendarReader: @unchecked Sendable {
     private let queue = DispatchQueue(label: "MeetingInviteeCalendarReader", qos: .utility)
     private var eventStore: EKEventStore?
 
-    /// Everyone but you on the event that best covers the recording, or an
-    /// empty list when there is no access, no event, or no clear winner.
-    func inviteeNames(recordingStart: Date, recordingDuration: TimeInterval) async -> [String] {
+    /// Everyone but you on the event the recording started with, or an empty
+    /// list when there is no access, no such event, or two of them.
+    func inviteeNames(recordingStart: Date) async -> [String] {
         guard TranscriptedPermissionAccess.calendarAccessGranted() else { return [] }
-        let events = await eventSnapshots(recordingStart: recordingStart, recordingDuration: recordingDuration)
-        return MeetingInviteeSuggestionPolicy.bestEvent(
+        let events = await eventSnapshots(recordingStart: recordingStart)
+        return MeetingInviteeSuggestionPolicy.matchingEvent(
             recordingStart: recordingStart,
-            recordingDuration: recordingDuration,
             among: events
         )?.inviteeNames ?? []
     }
 
-    private func eventSnapshots(
-        recordingStart: Date,
-        recordingDuration: TimeInterval
-    ) async -> [MeetingInviteeEventSnapshot] {
-        let length = max(recordingDuration, MeetingInviteeSuggestionPolicy.minimumRecordingSeconds)
-        let start = recordingStart
-        let end = recordingStart.addingTimeInterval(length)
+    /// Every event running at any point in the window where a matching event
+    /// could start; the policy keeps only the ones that actually start in it.
+    private func eventSnapshots(recordingStart: Date) async -> [MeetingInviteeEventSnapshot] {
+        let start = recordingStart.addingTimeInterval(-MeetingInviteeSuggestionPolicy.startGrace)
+        let end = recordingStart.addingTimeInterval(MeetingInviteeSuggestionPolicy.startLeadTime + 1)
         return await withCheckedContinuation { continuation in
             queue.async {
                 let store = self.eventStore ?? EKEventStore()

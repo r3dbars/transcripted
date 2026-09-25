@@ -10,7 +10,7 @@
 // transcript generic and preserves local review state for the Speakers page.
 // A review that arrives while a meeting records waits until that recording
 // stops (`SpeakerReviewPresentationGate`), so it never lands mid-call.
-// When a calendar invite overlaps the meeting, its invitees show up as
+// When the meeting started with a calendar event, its invitees show up as
 // one-click name buttons on each row (`MeetingInviteeSuggestionPolicy`).
 // They are suggestions only and never name anyone on their own.
 
@@ -124,15 +124,15 @@ final class SpeakerNamingSheet {
         }
     }
 
-    /// Looks up who was invited to the calendar event that overlaps this
-    /// meeting and offers them as names. Imported recordings are skipped:
-    /// their saved time is when the file was made, not a calendar slot.
+    /// Looks up who was invited to the calendar event this meeting started
+    /// with and offers them as names. Imported recordings are skipped: their
+    /// saved time is when the file was made, not a calendar slot.
     private func resolveInvitees(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
         let requestID = request.id
         let url = request.transcriptURL
         let transcriptID = request.transcriptId
         Task { [weak controller] in
-            let window = await Task.detached(priority: .utility) { () -> (start: Date, duration: TimeInterval)? in
+            let recordingStart = await Task.detached(priority: .utility) { () -> Date? in
                 var transcriptURL: URL? = url
                 if !FileManager.default.fileExists(atPath: url.path) {
                     transcriptURL = TranscriptSaver.existingTranscriptURL(
@@ -142,16 +142,11 @@ final class SpeakerNamingSheet {
                 }
                 guard let transcriptURL,
                       let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
-                      values["imported_at"] == nil,
-                      let start = TranscriptFrontmatter.recordedAt(values: values) else { return nil }
-                let duration = TranscriptFrontmatter.durationSeconds(from: values["duration"]) ?? 0
-                return (start, TimeInterval(duration))
+                      values["imported_at"] == nil else { return nil }
+                return TranscriptFrontmatter.recordedAt(values: values)
             }.value
-            guard let window else { return }
-            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(
-                recordingStart: window.start,
-                recordingDuration: window.duration
-            )
+            guard let recordingStart else { return }
+            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recordingStart)
             guard !names.isEmpty, let controller, controller.requestID == requestID else { return }
             controller.showInvitees(names)
         }

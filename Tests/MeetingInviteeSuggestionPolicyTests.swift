@@ -18,45 +18,57 @@ func testMeetingInviteeSuggestionPolicy() {
         )
     }
 
-    runSuite("MeetingInviteeSuggestionPolicy picks the event that covers the recording") {
-        let standup = event(from: -2, minutes: 30, names: ["Sam Lee", "Priya Shah"])
-        let later = event(from: 25, minutes: 30, names: ["Jo Park"])
-        let picked = MeetingInviteeSuggestionPolicy.bestEvent(
-            recordingStart: start,
-            recordingDuration: 28 * 60,
-            among: [later, standup]
+    func match(startedMinutesIntoEvent minutes: Double, _ events: [MeetingInviteeEventSnapshot]) -> MeetingInviteeEventSnapshot? {
+        MeetingInviteeSuggestionPolicy.matchingEvent(
+            recordingStart: start.addingTimeInterval(minutes * 60),
+            among: events
         )
-        assertEqual(picked, standup, "the event covering most of the recording should win")
     }
 
-    runSuite("MeetingInviteeSuggestionPolicy ignores weak, all-day, empty, and tied events") {
-        let barelyTouching = event(from: 20, minutes: 30, names: ["Jo Park"])
-        assertNil(
-            MeetingInviteeSuggestionPolicy.bestEvent(recordingStart: start, recordingDuration: 30 * 60, among: [barelyTouching]),
-            "an event covering under half the recording should not count"
-        )
+    runSuite("MeetingInviteeSuggestionPolicy matches a recording that starts with the event") {
+        let hour = event(from: 0, minutes: 60, names: ["Sam Lee", "Priya Shah"])
+        assertEqual(match(startedMinutesIntoEvent: 0, [hour]), hour, "starting right on time should match")
+        assertEqual(match(startedMinutesIntoEvent: -0.5, [hour]), hour, "starting a few seconds early, like from the pop-up, should match")
+        assertEqual(match(startedMinutesIntoEvent: 4, [hour]), hour, "starting a few minutes late should still match")
+    }
 
-        let allDay = event(from: -600, minutes: 1440, names: ["Sam Lee"], allDay: true)
-        let noInvitees = event(from: 0, minutes: 30, names: [])
+    runSuite("MeetingInviteeSuggestionPolicy ignores a later call inside a long calendar slot") {
+        let hour = event(from: 0, minutes: 60, names: ["Sam Lee", "Priya Shah"])
         assertNil(
-            MeetingInviteeSuggestionPolicy.bestEvent(recordingStart: start, recordingDuration: 30 * 60, among: [allDay, noInvitees]),
-            "all-day events and events with nobody else invited should not count"
+            match(startedMinutesIntoEvent: 30, [hour]),
+            "an hour-long meeting that ended early must not name a different call later in that hour"
         )
+        assertNil(match(startedMinutesIntoEvent: 6, [hour]), "past the pop-up's grace window is too late to be sure")
+        assertNil(match(startedMinutesIntoEvent: -2, [hour]), "more than a minute early is too early to be sure")
+        assertEqual(
+            MeetingInviteeSuggestionPolicy.startLeadTime,
+            MeetingPromptHeuristics.calendarReminderLeadTime,
+            "the match window should stay the same as the record-this-meeting pop-up"
+        )
+        assertEqual(
+            MeetingInviteeSuggestionPolicy.startGrace,
+            MeetingPromptHeuristics.calendarReminderPostStartGrace,
+            "the match window should stay the same as the record-this-meeting pop-up"
+        )
+    }
+
+    runSuite("MeetingInviteeSuggestionPolicy ignores all-day, empty, and double-booked events") {
+        let allDay = event(from: 0, minutes: 1440, names: ["Sam Lee"], allDay: true)
+        let noInvitees = event(from: 0, minutes: 30, names: [])
+        assertNil(match(startedMinutesIntoEvent: 0, [allDay, noInvitees]), "all-day events and events with nobody else invited should not count")
 
         let first = event(from: 0, minutes: 30, names: ["Sam Lee"])
         let doubleBooked = event(from: 0, minutes: 30, names: ["Jo Park"])
-        assertNil(
-            MeetingInviteeSuggestionPolicy.bestEvent(recordingStart: start, recordingDuration: 30 * 60, among: [first, doubleBooked]),
-            "a double booking with different people should suggest nobody"
-        )
-    }
+        assertNil(match(startedMinutesIntoEvent: 1, [first, doubleBooked]), "a double booking with different people should suggest nobody")
 
-    runSuite("MeetingInviteeSuggestionPolicy gives very short recordings a fair window") {
-        let meeting = event(from: 0, minutes: 30, names: ["Sam Lee"])
+        let sameInviteCopy = event(from: 0, minutes: 30, names: ["Sam Lee"])
+        assertEqual(match(startedMinutesIntoEvent: 1, [first, sameInviteCopy]), first, "the same invite on two calendars is still one meeting")
+
+        let earlier = event(from: -30, minutes: 60, names: ["Jo Park"])
         assertEqual(
-            MeetingInviteeSuggestionPolicy.bestEvent(recordingStart: start, recordingDuration: 0, among: [meeting]),
-            meeting,
-            "a zero-length duration should still match the event it started in"
+            match(startedMinutesIntoEvent: 0, [earlier, first]),
+            first,
+            "a longer event still running from earlier should not block the one that just started"
         )
     }
 

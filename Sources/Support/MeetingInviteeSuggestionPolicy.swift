@@ -20,43 +20,41 @@ struct MeetingInviteeRawParticipant: Equatable {
     let isPerson: Bool
 }
 
-/// Turns the calendar invite that overlaps a meeting into speaker-review
-/// suggestions: one-click name buttons, invitees first in the name list, and a
-/// pre-filled name for a 1:1. Suggestions only. Nothing here changes which
-/// voices get named silently.
+/// Turns the calendar invite for a meeting into speaker-review suggestions:
+/// one-click name buttons, invitees first in the name list, and a pre-filled
+/// name for a 1:1. Suggestions only. Nothing here changes which voices get
+/// named silently.
+///
+/// An event only counts when the recording started when the event did: in
+/// the same window the "record this meeting?" pop-up is offered (a minute
+/// before to five minutes after the start). A recording that merely falls
+/// inside a long calendar slot never picks up its invite list, so a second
+/// call later in that hour gets no names.
 enum MeetingInviteeSuggestionPolicy {
     /// Most name buttons one review row shows.
     static let maxSuggestions = 4
-    /// The event must cover at least this much of the recording to count.
-    static let minimumOverlapFraction = 0.5
-    /// Very short recordings still get a fair window to match against.
-    static let minimumRecordingSeconds: TimeInterval = 60
+    /// How early a recording may start before the event and still count.
+    static let startLeadTime = MeetingPromptHeuristics.calendarReminderLeadTime
+    /// How late a recording may start after the event and still count.
+    static let startGrace = MeetingPromptHeuristics.calendarReminderPostStartGrace
 
     // MARK: - Picking the event
 
-    /// The one event that covers most of the recording, or nil when none does
-    /// or two events tie (a double booking we can't tell apart).
-    static func bestEvent(
+    /// The one event whose start lines up with the recording's start, or nil
+    /// when none does or two different events do (a double booking we can't
+    /// tell apart).
+    static func matchingEvent(
         recordingStart: Date,
-        recordingDuration: TimeInterval,
         among events: [MeetingInviteeEventSnapshot]
     ) -> MeetingInviteeEventSnapshot? {
-        let length = max(recordingDuration, minimumRecordingSeconds)
-        let recordingEnd = recordingStart.addingTimeInterval(length)
-
-        let scored = events.compactMap { event -> (event: MeetingInviteeEventSnapshot, overlap: TimeInterval)? in
-            guard !event.isAllDay, !event.inviteeNames.isEmpty else { return nil }
-            let overlap = min(recordingEnd, event.endDate).timeIntervalSince(max(recordingStart, event.startDate))
-            guard overlap / length >= minimumOverlapFraction else { return nil }
-            return (event, overlap)
+        let matches = events.filter { event in
+            guard !event.isAllDay, !event.inviteeNames.isEmpty else { return false }
+            let startedAfterEvent = recordingStart.timeIntervalSince(event.startDate)
+            return (-startLeadTime ... startGrace).contains(startedAfterEvent)
         }
-        .sorted { $0.overlap > $1.overlap }
-
-        guard let best = scored.first else { return nil }
-        if scored.count > 1, scored[1].overlap == best.overlap, scored[1].event.inviteeNames != best.event.inviteeNames {
-            return nil
-        }
-        return best.event
+        guard let first = matches.first,
+              matches.allSatisfy({ $0.inviteeNames == first.inviteeNames }) else { return nil }
+        return first
     }
 
     // MARK: - Cleaning names
