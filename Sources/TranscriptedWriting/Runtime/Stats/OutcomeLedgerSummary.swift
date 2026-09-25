@@ -33,7 +33,7 @@ enum HeldBackReason: String, CaseIterable, Sendable {
         case .sensitive: "the conversation looked sensitive"
         case .modelHadNothing: "the model had nothing"
         case .filtersNotConfident: "the filters were not confident"
-        case .notReady: "Tilde was not ready"
+        case .notReady: "autocomplete was not ready"
         }
     }
 
@@ -333,16 +333,16 @@ enum OutcomeLedgerPresentation {
         if !screenAccessGranted {
             // The current state only: the ledger cannot establish that a
             // whole day was silent, and the legacy counters may say otherwise.
-            return "Screen Access is off now, so Tilde is not suggesting. Turn it on to get suggestions back."
+            return "Screen Recording is off now, so autocomplete is not suggesting. Turn it on to get suggestions back."
         }
         guard summary.heldBackToday > 0, let reason = summary.topHeldBackReason else {
             return nil
         }
         let times = summary.heldBackToday == 1 ? "once" : "\(summary.heldBackToday.formatted()) times"
         if reason == .notReady {
-            return "Tilde held back \(times) today because it was not ready. Open Tilde to check the model and Screen Access."
+            return "Autocomplete held back \(times) today because it was not ready. Check the model status and Screen Recording."
         }
-        return "Tilde held back \(times) today, mostly because \(reason.phrase)."
+        return "Autocomplete held back \(times) today, mostly because \(reason.phrase)."
     }
 
     /// The menu bar's one line under the status. Falls back to the old words
@@ -354,17 +354,17 @@ enum OutcomeLedgerPresentation {
     ) -> String {
         guard summary.hasTodayEvidence else {
             if !screenAccessGranted {
-                return "Screen Access is off now — Tilde is not suggesting"
+                return "Screen Recording is off now — autocomplete is not suggesting"
             }
-            return "\(wordsToday.formatted()) words with Tilde today"
+            return "\(wordsToday.formatted()) words with autocomplete today"
         }
         let saved = "\(summary.keystrokesSavedToday.formatted()) keystrokes saved today"
         if !screenAccessGranted {
-            return "\(saved) · Screen Access is off"
+            return "\(saved) · Screen Recording is off"
         }
         guard summary.heldBackToday > 0 else { return saved }
         if summary.topHeldBackReason == .notReady {
-            return "\(saved) · quiet \(summary.heldBackToday.formatted())×, Tilde was not ready"
+            return "\(saved) · quiet \(summary.heldBackToday.formatted())×, autocomplete was not ready"
         }
         return "\(saved) · held back \(summary.heldBackToday.formatted())×"
     }
