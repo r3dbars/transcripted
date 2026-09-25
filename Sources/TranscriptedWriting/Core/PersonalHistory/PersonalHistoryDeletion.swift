@@ -45,6 +45,10 @@ extension PersonalHistoryEvent {
         self.deletedCharacters = deletedCharacters
     }
 
+    /// Every event version this build reads. A history batch with any other
+    /// version is answered `unsupported` (`GhostBrainRequest`).
+    public static let supportedVersions: Set<Int> = [version, deletionVersion]
+
     /// Typed and accepted text is version 1, a deletion version 2.
     public var hasCurrentVersion: Bool {
         v == (source == .deletion ? Self.deletionVersion : Self.version)

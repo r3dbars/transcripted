@@ -28,7 +28,7 @@ enum GhostStats {
         switch outcome {
         case .error: key = "completionErrors"
         case .timeout: key = "completionTimeouts"
-        case .invalidRequest: key = "completionInvalidRequests"
+        case .invalidRequest, .unsupported: key = "completionInvalidRequests"
         case .suggestion, .silence, .unavailable, .recorded: return
         }
         record(1, key: key)

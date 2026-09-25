@@ -1232,7 +1232,7 @@ final class GhostInputController: IMKInputController {
                 await MainActor.run { self?.endOpenOpportunity(.runtimeUnavailable, ticket: requestTicket, receipt: receipt) }
                 await self?.settle(ticket: requestTicket)
                 Self.summonBrainIfNeeded()
-            case .error, .timeout, .invalidRequest:
+            case .error, .timeout, .invalidRequest, .unsupported:
                 await MainActor.run {
                     self?.endOpenOpportunity(
                         result.outcome == .timeout ? .timeout : .protocolError,

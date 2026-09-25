@@ -252,6 +252,13 @@ final class GhostBrainServerHost: @unchecked Sendable {
                 _ = Self.write(accepted ? .recorded : .error, to: connection)
                 return
             }
+            // Transcripted: a newer keyboard's events this app can't read.
+            // Terminal, so the keyboard drops them instead of retrying.
+            if case let .unsupportedPersonalHistory(rejectedEventIDs) = request {
+                DiagnosticsLog.shared.record("personal-history-unsupported-version", metadata: [:])
+                _ = Self.write(.unsupported(rejectedEventIDs: rejectedEventIDs), to: connection)
+                return
+            }
             if case let .screenMemory(event) = request {
                 self.onScreenMemoryEvent?(event)
                 _ = Self.write(.recorded, to: connection)
@@ -744,6 +751,8 @@ final class GhostBrainServerHost: @unchecked Sendable {
     private enum ValidatedRequest {
         case completion(GhostBrainRequest)
         case personalHistory([PersonalHistoryEvent])
+        /// Transcripted: a history batch with events of an unknown version.
+        case unsupportedPersonalHistory([String])
         case screenMemory(ScreenMemoryInputEvent)
     }
 
@@ -789,6 +798,9 @@ final class GhostBrainServerHost: @unchecked Sendable {
             data = data.prefix(upTo: newline)
             guard let request = try? JSONDecoder().decode(GhostBrainRequest.self, from: data),
                   request.v == GhostBrainRequest.version else {
+                if let rejected = GhostBrainRequest.unsupportedPersonalHistoryEventIDs(in: data) {
+                    return .success(.unsupportedPersonalHistory(rejected))
+                }
                 return .failure(WireError.invalid)
             }
             if let events = request.personalHistoryEvents {

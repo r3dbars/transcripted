@@ -109,6 +109,11 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
         case timeout
         case invalidRequest = "invalid_request"
         case recorded
+        /// Transcripted: a Personal History batch holds events whose version
+        /// this app can't read (a keyboard newer than the app). Terminal: the
+        /// keyboard drops the events `rejectedEventIDs` names and resends the
+        /// rest. Nothing in the batch was recorded.
+        case unsupported
     }
 
     public let outcome: Outcome
@@ -140,6 +145,9 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
     /// more than one response behind the app's actual configuration.
     public let configurationDigest: String?
     public let interaction: InteractionPolicy?
+    /// Transcripted: on an `unsupported` line, the IDs of the events the app
+    /// couldn't read. Random identifiers only, never text. Absent otherwise.
+    public let rejectedEventIDs: [String]?
 
     public init(
         outcome: Outcome,
@@ -153,7 +161,8 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
         generatorMilliseconds: Int? = nil,
         firstStableWordMilliseconds: Int? = nil,
         configurationDigest: String? = nil,
-        interaction: InteractionPolicy? = nil
+        interaction: InteractionPolicy? = nil,
+        rejectedEventIDs: [String]? = nil
     ) {
         self.outcome = outcome
         self.suggestion = suggestion
@@ -167,12 +176,14 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
         self.firstStableWordMilliseconds = firstStableWordMilliseconds
         self.configurationDigest = configurationDigest
         self.interaction = interaction
+        self.rejectedEventIDs = rejectedEventIDs
     }
 
     private enum CodingKeys: String, CodingKey {
         case outcome, suggestion, final, register, source
         case opportunityID, reason, generated, generatorMilliseconds, firstStableWordMilliseconds
         case configurationDigest, interaction
+        case rejectedEventIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -192,6 +203,7 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
         // A policy this keyboard cannot read is a policy it does not adopt;
         // it must never cost the writer the suggestion on the same line.
         interaction = try? container.decodeIfPresent(InteractionPolicy.self, forKey: .interaction)
+        rejectedEventIDs = try? container.decodeIfPresent([String].self, forKey: .rejectedEventIDs)
     }
 
     /// The same line naming the configuration that produced it. Applied by
@@ -209,7 +221,8 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
             generatorMilliseconds: generatorMilliseconds,
             firstStableWordMilliseconds: firstStableWordMilliseconds,
             configurationDigest: configuration.digestSHA256,
-            interaction: configuration.interaction
+            interaction: configuration.interaction,
+            rejectedEventIDs: rejectedEventIDs
         )
     }
 
@@ -234,7 +247,8 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
             generatorMilliseconds: generatorMilliseconds,
             firstStableWordMilliseconds: firstStableWordMilliseconds,
             configurationDigest: configurationDigest,
-            interaction: interaction
+            interaction: interaction,
+            rejectedEventIDs: rejectedEventIDs
         )
     }
 
@@ -301,9 +315,47 @@ public struct GhostBrainResponse: Codable, Equatable, Sendable {
     public static let invalidRequest = Self(outcome: .invalidRequest, suggestion: nil)
     public static let recorded = Self(outcome: .recorded, suggestion: nil)
 
+    /// Transcripted: the terminal answer to a history batch with events of a
+    /// version this app doesn't know.
+    public static func unsupported(rejectedEventIDs: [String]) -> Self {
+        Self(outcome: .unsupported, suggestion: nil, rejectedEventIDs: rejectedEventIDs)
+    }
+
     /// A response from an authenticated peer that does not match this protocol
     /// is a runtime error, not an unavailable app.
     public static func decode(_ data: Data) -> Self {
         (try? JSONDecoder().decode(Self.self, from: data)) ?? .error
+    }
+}
+
+// Transcripted (phase 3 review): an older app must not block a newer
+// keyboard's history queue. When a version-1 history batch fails to decode
+// only because some events carry a version this build doesn't know, the app
+// answers `unsupported` with those events' IDs instead of `invalid_request`.
+extension GhostBrainRequest {
+    private struct HistoryBatchProbe: Decodable {
+        struct Event: Decodable {
+            let v: Int
+            let id: String
+        }
+
+        let v: Int
+        let personalHistoryEvents: [Event]?
+    }
+
+    /// The IDs of the Personal History events in the request line `data`
+    /// whose version this build can't read. `nil` unless the line is a
+    /// version-1 history batch of valid size and identifiers with at least
+    /// one such event; anything else stays an invalid request.
+    public static func unsupportedPersonalHistoryEventIDs(in data: Data) -> [String]? {
+        guard let probe = try? JSONDecoder().decode(HistoryBatchProbe.self, from: data),
+              probe.v == version,
+              let events = probe.personalHistoryEvents,
+              (1...PersonalHistoryEvent.maximumBatchEvents).contains(events.count),
+              events.allSatisfy({ PersonalHistoryEvent.validIdentifier($0.id) }) else { return nil }
+        let unsupported = events
+            .filter { !PersonalHistoryEvent.supportedVersions.contains($0.v) }
+            .map(\.id)
+        return unsupported.isEmpty ? nil : unsupported
     }
 }

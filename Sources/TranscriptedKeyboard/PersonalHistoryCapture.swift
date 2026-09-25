@@ -14,6 +14,9 @@ final class PersonalHistoryCapture: @unchecked Sendable {
     private static let maximumDiscardedStreams = 192
     private static let flushDelay: TimeInterval = 0.75
     private static let retryDelay: TimeInterval = 5
+    /// Transcripted: how many times the app may refuse an event before it's
+    /// dropped (about a minute of retries at `retryDelay`).
+    static let maximumRefusedAttempts = 12
 
     private let queue = DispatchQueue(label: "com.justinbetker.draft.inputmethod.personal-history", qos: .utility)
     private let defaults: UserDefaults
@@ -29,6 +32,9 @@ final class PersonalHistoryCapture: @unchecked Sendable {
     private var sendWaiters: [CheckedContinuation<Void, Never>] = []
     private var discardedStreams: Set<StreamIdentity> = []
     private var discardedStreamOrder: [StreamIdentity] = []
+    /// Transcripted: how many times the app has refused each event still
+    /// waiting to be sent again.
+    private var refusals: [String: Int] = [:]
 
     struct Permit: Sendable {
         let appBundleIdentifier: String
@@ -273,12 +279,47 @@ final class PersonalHistoryCapture: @unchecked Sendable {
                     pending.removeAll { sentIDs.contains($0.id) }
                     attemptedEventIDs.subtract(sentIDs)
                     scheduleFlush(after: pending.isEmpty ? 0 : Self.flushDelay)
+                } else if let dropped = Self.rejectedEventIDs(in: response, sent: sentIDs)
+                    ?? exhaustedAfterRefusal(response, sent: sentIDs) {
+                    // Transcripted: events the app can't read (it's older
+                    // than this keyboard), or ones it refused 12 times, are
+                    // dropped so the text behind them can go. Tilde retried
+                    // a refused batch forever. The rest of the batch goes again.
+                    pending.removeAll { dropped.contains($0.id) }
+                    retainAttemptedIDsStillPending()
+                    scheduleFlush(after: pending.isEmpty ? 0 : Self.flushDelay)
                 } else {
                     scheduleFlush(after: Self.retryDelay)
                 }
+                refusals = refusals.filter { self.attemptedEventIDs.contains($0.key) }
                 resumeSendWaiters()
             }
         }
+    }
+
+    /// Transcripted: the IDs an `unsupported` answer names that were in the
+    /// batch. `nil` for any other answer, or one naming none of them.
+    private static func rejectedEventIDs(in response: GhostBrainResponse, sent: Set<String>) -> Set<String>? {
+        guard response.outcome == .unsupported,
+              let rejected = response.rejectedEventIDs.map({ sent.intersection($0) }),
+              !rejected.isEmpty else { return nil }
+        return rejected
+    }
+
+    /// Transcripted: counts a refusal of every sent event when the app
+    /// answered without recording the batch, and returns the events refused
+    /// `maximumRefusedAttempts` times (`nil` when none are). Not reaching
+    /// the app (`unavailable`, `timeout`) isn't a refusal; that retries as
+    /// long as Tilde's did.
+    private func exhaustedAfterRefusal(_ response: GhostBrainResponse, sent: Set<String>) -> Set<String>? {
+        guard response.outcome != .unavailable, response.outcome != .timeout else { return nil }
+        var exhausted: Set<String> = []
+        for id in sent {
+            let count = refusals[id, default: 0] + 1
+            refusals[id] = count
+            if count >= Self.maximumRefusedAttempts { exhausted.insert(id) }
+        }
+        return exhausted.isEmpty ? nil : exhausted
     }
 
     private func retainAttemptedIDsStillPending() {
