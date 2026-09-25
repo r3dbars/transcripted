@@ -491,11 +491,9 @@ enum DictationInputDeviceBindingPolicy {
     /// stale read can restart a slow driver's transition indefinitely.
     /// The probe must honor its remaining timeout, including native work.
     ///
-    /// The first probe runs right away. It used to wait a fixed
-    /// `audioRecoveryDelay` (300ms) first, and in the field that probe almost
-    /// always succeeded on the first try, so every routed start paid 300ms
-    /// for nothing. A probe that runs too early only reads the bound device
-    /// ID, fails `verify`, and falls into the normal poll.
+    /// The probe reads back the device ID the route command just set, so it
+    /// passes almost at once. The real settle is `initialDelayNanoseconds`,
+    /// which the caller picks with `initialSettleDelay(for:)`.
     @MainActor
     static func waitForBinding<Value>(
         timeoutNanoseconds: UInt64 = TranscriptedConstants.audioInputBindingSettleTimeout,
@@ -534,6 +532,15 @@ enum DictationInputDeviceBindingPolicy {
                 delay = max(1, pollIntervalNanoseconds)
             }
         }
+    }
+
+    /// Moving AUHAL off a Bluetooth headset that is the macOS input is the
+    /// AirPods call-mode path (#1784), so it keeps the 300ms settle before
+    /// the engine starts. Any other override starts right away.
+    static func initialSettleDelay(for selection: DictationInputDeviceSelection) -> UInt64 {
+        DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            ? TranscriptedConstants.audioRecoveryDelay
+            : 0
     }
 
     /// Returns whether a route command was issued. A changed route must be

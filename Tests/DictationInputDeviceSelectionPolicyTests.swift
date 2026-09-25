@@ -401,13 +401,11 @@ func testDictationInputDeviceSelectionPolicy() {
         assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: macDefault), "the built-in mic as the macOS input uses the faster recorder")
 
         let loopback = DictationAudioDevice(id: 5, name: "Loopback Audio", transport: .virtual, inputChannelCount: 2, uid: "loopback")
-        let virtualDefault = DictationInputDeviceSelectionPolicy.selection(
-            defaultInput: loopback, defaultOutput: nil,
-            availableInputs: [loopback, macMic], prefersBuiltInBluetoothInput: true
+        let virtualDefault = DictationInputDeviceSelection(
+            defaultInput: loopback, selectedInput: loopback,
+            defaultOutput: nil, reason: .defaultIsSafe
         )
-        if virtualDefault.selectedInput == loopback {
-            assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: virtualDefault), "a virtual macOS input keeps the engine")
-        }
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: virtualDefault), "a virtual macOS input keeps the engine")
 
         // What the pinned path used to get when the meetings-only "use the
         // macOS input" setting was on: the headset kept, so no recorder.

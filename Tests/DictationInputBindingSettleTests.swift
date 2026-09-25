@@ -51,6 +51,16 @@ func testDictationInputBindingSettle() async {
         assertEqual(clock, 0, "an already-bound input starts without a settle delay")
     } catch { assertTrue(false, "already-bound scenario failed: \(error)") }
 
+    let airPods = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
+    let skipsHeadset = DictationInputDeviceSelection(defaultInput: airPods, selectedInput: mic,
+        defaultOutput: nil, reason: .preferredBuiltInForBluetoothHeadset)
+    assertEqual(
+        DictationInputDeviceBindingPolicy.initialSettleDelay(for: skipsHeadset),
+        TranscriptedConstants.audioRecoveryDelay,
+        "moving off a Bluetooth macOS input keeps the settle before the engine starts"
+    )
+    assertEqual(DictationInputDeviceBindingPolicy.initialSettleDelay(for: selection), 0, "a safe macOS input starts without a settle")
+
     for staleID in [UInt32(0), UInt32(10)] {
         clock = 0
         var probes = 0

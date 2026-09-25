@@ -277,7 +277,9 @@ class TranscriptedAppState: ObservableObject {
         // `.userInitiated`, not `.utility`: the load inherits this priority,
         // and at utility macOS can run Core ML compilation on the efficiency
         // cores. Most launches in PostHog took 5s+ to warm, and a dictation
-        // pressed in that window waited on it.
+        // pressed in that window waited on it. This pass also reruns after
+        // wake and on a model switch; a dictation right after either is just
+        // as likely, so those keep the same priority.
         runtimeReadinessTask = Task(priority: .userInitiated) { @MainActor [weak self] in
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
