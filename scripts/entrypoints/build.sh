@@ -488,6 +488,10 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
+# Light + dark app icon for macOS 26 (Assets.car); Transcripted.icns stays the fallback
+source "$ENTRYPOINT_DIR/lib/compile-app-icon.sh"
+compile_app_icon "$APP_BUNDLE"
+
 bundle_mcp_server
 
 # Unified dependencies (FluidAudio + WhisperKit)

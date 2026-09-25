@@ -13,6 +13,16 @@ func testReleaseMetadataContract() {
             infoPlist.contains("<key>CFBundleIconFile</key>\n\t<string>Transcripted</string>"),
             "Info.plist should point at the active Transcripted icon"
         )
+        assertTrue(
+            infoPlist.contains("<key>CFBundleIconName</key>\n\t<string>Transcripted</string>"),
+            "Info.plist should name the compiled icon so macOS 26 uses the real dark variant"
+        )
+
+        let iconJSON = releaseContractFile("AppIcon/Transcripted.icon/icon.json")
+        assertTrue(
+            iconJSON.contains("\"appearance\" : \"dark\""),
+            "The app icon needs a dark appearance, or macOS 26 derives an all-black one"
+        )
 
         let resourceURL = releaseContractRepoRoot().appendingPathComponent("Resources", isDirectory: true)
         let shippedIcons = ((try? FileManager.default.contentsOfDirectory(

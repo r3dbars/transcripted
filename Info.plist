@@ -8,6 +8,8 @@
 	<string>Transcripted</string>
 	<key>CFBundleIconFile</key>
 	<string>Transcripted</string>
+	<key>CFBundleIconName</key>
+	<string>Transcripted</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.justinbetker.draft</string>
 	<key>CFBundleName</key>
