@@ -70,7 +70,7 @@ func testAgentConnectionGuide() {
             "local agent prompt should not include web/Cowork routing"
         )
         assertTrue(
-            prompt.contains("Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files."),
+            prompt.contains("Prefer Transcripted direct tools when available; otherwise search meetings, dictations, and writing together from files."),
             "prompt should support direct-tool retrieval and folder fallback"
         )
         assertTrue(
@@ -106,6 +106,15 @@ func testAgentConnectionGuide() {
             "prompt should include the dictations folder"
         )
         assertTrue(
+            prompt.contains("Writing:\n- \(AgentConnectionGuide.writingFolder.path)"),
+            "prompt should include the writing folder"
+        )
+        assertEqual(
+            AgentConnectionGuide.writingFolder.lastPathComponent,
+            "writing",
+            "writing folder should be the capture library's writing/ folder"
+        )
+        assertTrue(
             prompt.contains("If helpful, start with this meeting:\nPlanning Sync.md"),
             "meeting-specific prompt should preserve the selected filename"
         )
@@ -139,6 +148,10 @@ func testAgentConnectionGuide() {
 
         assertTrue(readme.contains("Transcripted Codex Inbox"), "README should name the Codex Inbox")
         assertTrue(agents.contains("Process only new unprocessed meetings"), "AGENTS should tell Codex not to backfill by default")
+        assertTrue(
+            agents.contains("- Writing: \(AgentConnectionGuide.writingFolder.path)"),
+            "AGENTS should list the writing folder next to meetings and dictations"
+        )
         assertTrue(setup.contains("transcripted-inbox-watch"), "setup prompt should name the heartbeat automation")
         assertTrue(state.contains("\"processedMeetings\": []"), "state should start with no processed meetings")
         assertTrue(state.contains("\"installedAt\""), "state should create a setup baseline")
@@ -151,6 +164,10 @@ func testAgentConnectionGuide() {
         assertTrue(prompt.contains("Transcripted Codex Inbox Setup"), "prompt should title the setup clearly")
         assertTrue(prompt.contains(inboxURL.path), "prompt should include the inbox path")
         assertTrue(prompt.contains(AgentConnectionGuide.meetingsFolder.path), "prompt should include the meetings folder")
+        assertTrue(
+            prompt.contains("- Writing: \(AgentConnectionGuide.writingFolder.path)"),
+            "prompt should include the writing folder"
+        )
         assertTrue(prompt.contains("Monday through Friday"), "prompt should ask for a weekday schedule")
         assertTrue(prompt.contains(":05 and :35"), "prompt should ask for checks after the hour and half-hour")
         assertTrue(prompt.contains("stay quiet"), "prompt should keep empty checks silent")
@@ -194,6 +211,7 @@ func testAgentConnectionGuide() {
         )
         assertTrue(folderText.contains(AgentConnectionGuide.meetingsFolder.path), "folder copy should include current meetings path")
         assertTrue(folderText.contains(AgentConnectionGuide.dictationsFolder.path), "folder copy should include current dictations path")
+        assertTrue(folderText.contains(AgentConnectionGuide.writingFolder.path), "folder copy should include current writing path")
     }
 
     runSuite("AgentConnectionGuide bundled skills — files and manifest are versioned") {
