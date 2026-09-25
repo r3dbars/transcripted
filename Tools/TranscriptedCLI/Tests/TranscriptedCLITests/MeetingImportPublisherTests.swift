@@ -72,6 +72,49 @@ final class MeetingImportPublisherTests: XCTestCase {
         }
     }
 
+    func testPlainFilenameUsesJustTheTitle() throws {
+        try withRoot { root in
+            let source = try makeSource(in: root)
+            let output = root.appendingPathComponent("notes")
+            let receipt = try MeetingImportPublisher.publish(
+                markdown: "# Synthetic meeting\n", normalizedAudioURL: source, outputDirectory: output,
+                title: "Voice memo", captureID: captureID, date: date, plainFilename: true
+            )
+            XCTAssertEqual(receipt.transcriptPath.asFileURL.lastPathComponent, "Voice memo.md")
+            XCTAssertEqual(try XCTUnwrap(receipt.audioPath).asFileURL.deletingLastPathComponent().lastPathComponent,
+                           "Voice memo_audio")
+        }
+    }
+
+    func testPlainFilenameAddsCaptureIDOnlyWhenNameIsTaken() throws {
+        try withRoot { root in
+            let existing = root.appendingPathComponent("Voice memo.md")
+            try Data("keep me\n".utf8).write(to: existing)
+            let source = try makeSource(in: root)
+            let output = root
+            let receipt = try MeetingImportPublisher.publish(
+                markdown: "# Synthetic meeting\n", normalizedAudioURL: source, outputDirectory: output,
+                title: "Voice memo", captureID: captureID, date: date, plainFilename: true
+            )
+            XCTAssertEqual(receipt.transcriptPath.asFileURL.lastPathComponent,
+                           "Voice memo_\(captureID.uuidString.lowercased()).md")
+            XCTAssertEqual(try String(contentsOf: existing), "keep me\n")
+            XCTAssertEqual(try children(output.appendingPathComponent("audio")).map(\.lastPathComponent),
+                           ["Voice memo_\(captureID.uuidString.lowercased())_audio"],
+                           "The abandoned plain-name audio directory must be cleaned up")
+        }
+    }
+
+    func testPlainFilenameNeverStartsWithADot() throws {
+        try withRoot { root in
+            let receipt = try MeetingImportPublisher.publish(
+                markdown: "# Synthetic meeting\n", normalizedAudioURL: nil, outputDirectory: root,
+                title: "..", captureID: captureID, date: date, plainFilename: true
+            )
+            XCTAssertEqual(receipt.transcriptPath.asFileURL.lastPathComponent, "Meeting.md")
+        }
+    }
+
     func testUnicodeTitleIsBoundedAndCannotCreateChildPaths() throws {
         try withRoot { root in
             let receipt = try publish(in: root, title: "Café 東京 👩🏽‍💻 / .. \\ :\n" + String(repeating: "é", count: 300))
