@@ -36,8 +36,8 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - Sentry automatic app-hang tracking is on in shipped builds (Info.plist
   `TranscriptedSentryAppHangTrackingEnabled`), but only reports a main thread
   stuck 5+ seconds, and `AppHangReportPolicy` drops any hang while a modal
-  popup or Sparkle update window is on screen (those don't drain the main
-  queue, so they used to be misreported as hangs). The code default with no
+  popup is on screen (a modal run loop doesn't drain the main queue, so
+  those used to be misreported as hangs). The code default with no
   Info.plist key stays off
 
 ## Current rollout checklist
@@ -78,7 +78,7 @@ references, meeting titles, speaker names, local paths, or user identifiers.
    in PostHog.
 11. App-hang tracking is on in release builds (reviewed 2026-09-25, with the
     popup filter). `SENTRY_ENABLE_APP_HANG_TRACKING=false` turns it off for a
-    local run. To check the popup filter, open an alert or the update window,
+    local run. To check the popup filter, open a modal alert or open panel,
     leave it up for 10+ seconds, and confirm no "App Hanging" event arrives.
 
 ## Allowlisted analytics events

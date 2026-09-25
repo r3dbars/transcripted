@@ -5,37 +5,22 @@ func testAppHangReportPolicy() {
         assertEqual(AppHangReportPolicy.timeoutSeconds, 5, "Sentry's 2 s default reported short stalls as freezes")
     }
 
-    runSuite("only app hang events can be dropped") {
+    runSuite("only app hangs behind a popup are dropped") {
+        assertTrue(
+            AppHangReportPolicy.shouldDrop(mechanismType: "AppHang", popupLikely: true),
+            "a hang while a modal popup is up is someone reading the popup"
+        )
         assertFalse(
-            AppHangReportPolicy.shouldDrop(mechanismType: "mach", popupLikely: true, mainThreadFunctions: ["runModal"]),
+            AppHangReportPolicy.shouldDrop(mechanismType: "AppHang", popupLikely: false),
+            "a hang with no popup is a real freeze"
+        )
+        assertFalse(
+            AppHangReportPolicy.shouldDrop(mechanismType: "mach", popupLikely: true),
             "crashes are never dropped for a popup"
         )
         assertFalse(
-            AppHangReportPolicy.shouldDrop(mechanismType: nil, popupLikely: true, mainThreadFunctions: []),
+            AppHangReportPolicy.shouldDrop(mechanismType: nil, popupLikely: true),
             "events without a mechanism are not hangs"
-        )
-    }
-
-    runSuite("app hangs behind a popup are dropped, real ones are kept") {
-        assertTrue(
-            AppHangReportPolicy.shouldDrop(mechanismType: "AppHang", popupLikely: true, mainThreadFunctions: []),
-            "a hang while a popup is on screen is someone reading the popup"
-        )
-        assertTrue(
-            AppHangReportPolicy.shouldDrop(
-                mechanismType: "AppHang",
-                popupLikely: false,
-                mainThreadFunctions: ["-[NSApplication runModalForWindow:]"]
-            ),
-            "a main thread inside runModal is waiting on a popup"
-        )
-        assertFalse(
-            AppHangReportPolicy.shouldDrop(
-                mechanismType: "AppHang",
-                popupLikely: false,
-                mainThreadFunctions: ["-[AVAudioEngine inputNode]", "_dispatch_sync_f_slow"]
-            ),
-            "a main thread stuck in app work is a real freeze"
         )
     }
 

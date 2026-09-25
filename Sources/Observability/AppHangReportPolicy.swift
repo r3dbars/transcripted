@@ -3,10 +3,10 @@ import Foundation
 /// Decides which Sentry app-hang reports are real freezes.
 ///
 /// Hang tracking used to be off because a modal window (an alert, an open
-/// panel, the update window) runs its own run loop that doesn't drain the
+/// panel, a modal update prompt) runs its own run loop that doesn't drain the
 /// main dispatch queue, so Sentry's watchdog counted a person reading a popup
 /// as a frozen app. This policy keeps the watchdog on but only reports a
-/// freeze of 5+ seconds, and drops any hang while a popup was showing.
+/// freeze of 5+ seconds, and drops any hang while a modal popup was showing.
 enum AppHangReportPolicy {
     /// A freeze must last this long before it is reported (Sentry's default is 2 s).
     static let timeoutSeconds: TimeInterval = 5
@@ -15,34 +15,12 @@ enum AppHangReportPolicy {
     /// watchdog's ping may have waited behind it and landed just after.
     static let popupGraceSeconds: TimeInterval = 1
 
-    /// Main-thread frame names that mean the app is waiting on a popup or a
-    /// system permission prompt, not frozen. Matched as substrings. Frame
-    /// names are only present when the SDK symbolicates on device, so this is
-    /// a backstop behind `PopupPresenceTracker`.
-    static let popupFrameMarkers: [String] = [
-        "runModal",
-        "ModalSession",
-        "NSAlert",
-        "SPUStandardUserDriver",
-        "TCC",
-        "AESendMessage",
-        "requestAccess",
-    ]
-
     static func isAppHang(mechanismType: String?) -> Bool {
         mechanismType == "AppHang"
     }
 
-    static func shouldDrop(
-        mechanismType: String?,
-        popupLikely: Bool,
-        mainThreadFunctions: [String]
-    ) -> Bool {
-        guard isAppHang(mechanismType: mechanismType) else { return false }
-        if popupLikely { return true }
-        return mainThreadFunctions.contains { function in
-            popupFrameMarkers.contains { function.contains($0) }
-        }
+    static func shouldDrop(mechanismType: String?, popupLikely: Bool) -> Bool {
+        isAppHang(mechanismType: mechanismType) && popupLikely
     }
 }
 

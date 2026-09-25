@@ -237,15 +237,9 @@ final class CrashReporter {
     private static func isPopupAppHang(_ event: Event) -> Bool {
         let mechanismType = event.exceptions?.first?.mechanism?.type
         guard AppHangReportPolicy.isAppHang(mechanismType: mechanismType) else { return false }
-        let mainThreadFunctions = event.threads?
-            .first { $0.isMain?.boolValue == true }?
-            .stacktrace?
-            .frames
-            .compactMap(\.function) ?? []
         return AppHangReportPolicy.shouldDrop(
             mechanismType: mechanismType,
-            popupLikely: PopupPresenceTracker.shared.isPopupLikely(),
-            mainThreadFunctions: mainThreadFunctions
+            popupLikely: PopupPresenceTracker.shared.isPopupLikely()
         )
     }
 

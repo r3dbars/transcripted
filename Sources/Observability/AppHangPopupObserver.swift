@@ -1,8 +1,8 @@
 import AppKit
 
 /// Feeds `PopupPresenceTracker` from AppKit window notifications on the main
-/// thread. A popup is a modal window (alerts, open/save panels) or a Sparkle
-/// update window. `NSAlert.runModal` orders its window out rather than
+/// thread. A popup is a modal window (alerts, open/save panels, any modal
+/// update prompt). `NSAlert.runModal` orders its window out rather than
 /// closing it, so a popup also counts as closed once it resigns key and is no
 /// longer visible.
 @MainActor
@@ -44,21 +44,35 @@ final class AppHangPopupObserver {
         })
     }
 
+    /// Only a modal window blocks the main queue. A non-modal window (like
+    /// Sparkle's usual update window) can stay open for hours without
+    /// explaining a freeze, so it must not silence one.
     static func isPopup(_ window: NSWindow) -> Bool {
-        if NSApp.modalWindow === window { return true }
-        // Sparkle's update windows are plain NSWindows owned by its own
-        // controllers (SUUpdateAlert, SPUStandardUserDriver...).
-        let classNames = [
-            String(describing: type(of: window)),
-            window.windowController.map { String(describing: type(of: $0)) } ?? "",
-        ]
-        return classNames.contains { $0.hasPrefix("SPU") || $0.hasPrefix("SU") }
+        NSApp.modalWindow === window
     }
 
     private func windowBecameKey(_ window: NSWindow?) {
         pruneHiddenPopups()
-        guard let window, Self.isPopup(window) else { return }
+        guard let window else { return }
+        if Self.isPopup(window) {
+            track(window)
+            return
+        }
+        // If the modal session hasn't registered the window yet, look again
+        // once the run loop turns, including inside the modal loop itself.
         let id = ObjectIdentifier(window)
+        RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let key = NSApp.keyWindow,
+                      ObjectIdentifier(key) == id, Self.isPopup(key) else { return }
+                self.track(key)
+            }
+        }
+    }
+
+    private func track(_ window: NSWindow) {
+        let id = ObjectIdentifier(window)
+        guard tracked[id] == nil else { return }
         tracked[id] = WeakWindow(window: window)
         tracker.popupOpened(id)
     }
