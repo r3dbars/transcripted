@@ -17,7 +17,9 @@
 // IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Stop click plays on Stop"
 // suite reads DictationSessionController.swift as TEXT and pins that the stop cue is
 // queued once, before the transcription task, so it acknowledges Stop without waiting
-// on paste. The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// on paste. The "Start click answers the key press" suite pins that the fast path
+// queues the start cue before the mic start task, and that it plays once per session.
+// The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
 // `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
@@ -161,6 +163,25 @@ func testDictationSounds() {
             controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,
             1,
             "Stop is the only end-of-take click; no second chime after paste"
+        )
+    }
+
+    runSuite("Start click answers the key press on the fast path, once") {
+        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let fastPathBeforeMicStart = sourceSlice(
+            in: controller,
+            from: "case .skipLoadingAndStartRecording:",
+            to: "recordingStartRetryTask = Task"
+        )
+        assertTrue(
+            fastPathBeforeMicStart.contains("DictationStartCuePolicy.playsOnKeyPress(")
+                && fastPathBeforeMicStart.contains("playStartCueOnce()"),
+            "the start click must be queued before the mic start task, so it doesn't wait on the mic"
+        )
+        assertEqual(
+            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStart)").count - 1,
+            1,
+            "every start click goes through playStartCueOnce, so a session never clicks twice"
         )
     }
 

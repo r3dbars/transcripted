@@ -1,6 +1,7 @@
 # Sounds
 
-`dictation-start.caf` plays when a dictation starts. It is made from "Button 5" by
+`dictation-start.caf` plays the moment you press the dictation key, or once recording
+starts when the mic is a Bluetooth headset. It is made from "Button 5" by
 skyscraper_seven on Pixabay.
 
 `dictation-stop.caf` plays once you press Stop and the mic has stopped, before transcription or paste.

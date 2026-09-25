@@ -22,6 +22,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts, plus the "Transcribe It" button title on messages about a saved recording (it runs the same import as Capture → Transcribe Audio File on that file)
 - `Overlay/DictationOverlayPlacementPolicy.swift` — pure geometry for the dictation overlay: AX-rect-to-Cocoa conversion, screen selection, and target-rect validation
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
+- `Overlay/DictationStartCuePolicy.swift` — decides whether the start click plays on key press (built-in or wired mic) or waits until recording starts (a headset or any input that could be one)
 - `Overlay/DictationSessionCapWarningPolicy.swift` — the live "28s left" countdown the listening pill shows in the last 30 seconds before the 5-minute dictation cap, worded for push-to-talk vs hands-free
 - `Overlay/DictationQueuedStartPolicy.swift` — a dictation shortcut press while the last take is still transcribing is remembered and starts when that take finishes (up to 2 s), instead of being refused
 - `Overlay/DictationStartActivation.swift` — optional foreground-activation handshake (and focus restore) tried after a background microphone start fails; a recovery attempt, not a mic-readiness signal
