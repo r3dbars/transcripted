@@ -219,7 +219,7 @@ enum DictationTranscriptWriter {
         let separator = data.suffix(2) == Data([0x0A, 0x0A]) ? "" : "\n\n"
         guard let appended = (separator + section).data(using: .utf8) else { return }
         data.append(appended)
-        try data.write(to: url, options: .atomic)
+        try TranscriptFileRewrite.write(data, to: url)
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {
