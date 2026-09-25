@@ -299,9 +299,9 @@ PY_TEST_SUITES=(
     scripts/ops/test-score-boards.py
     scripts/test_speaker_autoresearch.py
 )
-RB_TEST_SUITES=(
-    scripts/ops/agent-todo-runner-security-test.rb
-)
+# Empty for now. Expansions below use ${arr[@]+...} so an empty list is safe
+# under set -u on macOS's bash 3.2.
+RB_TEST_SUITES=()
 
 for script in "${SELF_TEST_SCRIPTS[@]}"; do
     check "self-test $(basename "$script")" "python3 $script --self-test"
@@ -313,7 +313,7 @@ for script in "${PY_TEST_SUITES[@]}"; do
 done
 
 if [ "$have_ruby" = true ]; then
-    for script in "${RB_TEST_SUITES[@]}"; do
+    for script in ${RB_TEST_SUITES[@]+"${RB_TEST_SUITES[@]}"}; do
         check "rb tests $(basename "$script")" "ruby $script" slow
     done
     check "dictation recovery autoeval (fixture)" "ruby scripts/ops/dictation-recovery-autoeval.rb --details" slow
@@ -324,7 +324,7 @@ fi
 # Informational only: candidates that look like self-tests/test suites but are
 # not in the lists above. Never fails; it just tells authors how to opt in.
 unlisted_candidates() {
-    local listed=" ${SELF_TEST_SCRIPTS[*]} ${PY_TEST_SUITES[*]} ${RB_TEST_SUITES[*]} "
+    local listed=" ${SELF_TEST_SCRIPTS[*]} ${PY_TEST_SUITES[*]} ${RB_TEST_SUITES[*]+${RB_TEST_SUITES[*]}} "
     {
         grep -l -- '"--self-test"' scripts/ops/*.py scripts/release/*.py 2>/dev/null
         find scripts \( -name 'test-*.py' -o -name 'test_*.py' -o -name '*-test.rb' -o -name '*_test.rb' -o -name 'test_*.rb' \) \
