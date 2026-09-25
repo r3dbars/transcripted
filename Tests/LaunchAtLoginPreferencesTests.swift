@@ -1,6 +1,33 @@
 import Foundation
 
 func testLaunchAtLoginPreferences() {
+    runSuite("LaunchWindowPolicy opens Home on a manual launch only") {
+        assertTrue(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "opening the app yourself should show the main window"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: true, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "a start at login should stay quietly in the menu bar"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, onboardingCompleted: false, isAutomatedLaunch: false
+            ),
+            "unfinished setup shows the setup window instead"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, onboardingCompleted: true, isAutomatedLaunch: true
+            ),
+            "launch harnesses must not get a window"
+        )
+    }
+
     runSuite("LaunchAtLoginPreferences defaults to off until the user chooses otherwise") {
         let suiteName = "LaunchAtLoginPreferencesTests.default.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

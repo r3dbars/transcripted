@@ -249,6 +249,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         guard acquireSingleInstanceLock() else { return }
+        // Read before anything else runs: the launch Apple event is only
+        // current while this delegate call is handling it.
+        let launchedAsLoginItem = Self.wasLaunchedAsLoginItem()
 
         // Crash reporting
         CrashReporter.setup()
@@ -656,6 +659,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         workspaceObservers.append(wakeRecoveryObserver)
 
         presentInitialOnboardingIfNeeded()
+        if LaunchWindowPolicy.shouldOpenMainWindow(
+            launchedAsLoginItem: launchedAsLoginItem,
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
+            isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
+        ) {
+            showSettingsWindow(page: .today, source: "app_launch")
+        }
 
         // Initialize engines
         Task { @MainActor in
@@ -663,6 +673,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
+    }
+
+    /// macOS tags a login-item start on the open-application event.
+    private static func wasLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
