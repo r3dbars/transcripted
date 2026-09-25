@@ -243,6 +243,7 @@ final class PackagedAppSmokeRunner {
         var checks = initialChecks
         checks.append(validateBundledFramework(relativePath: "Contents/Frameworks/Sparkle.framework", check: "sparkle-framework"))
         checks.append(validateBundledHelper(relativePath: "Contents/Helpers/transcripted-mcp", check: "mcp-helper"))
+        checks.append(contentsOf: validateBundledLlamaServer())
         checks.append(contentsOf: validateBundledCLI())
         checks.append(validateCodeSignature())
         checks.append(validateDSYM(binaryURL: executableURL))
@@ -484,6 +485,25 @@ final class PackagedAppSmokeRunner {
             return .pass(check, target: relativePath, detail: "Bundled helper exists and is executable.")
         }
         return .fail(check, target: relativePath, detail: "Bundled helper is missing or not executable.")
+    }
+
+    /// Writing's inference helper, pinned by build-deps.sh from Tilde 0.1.0 beta 1
+    /// and re-signed by the build. Never launched here: it would start a server.
+    private func validateBundledLlamaServer() -> [PackagedAppSmokeCheck] {
+        let relativePath = "Contents/Helpers/llama-server"
+        let helperCheck = validateBundledHelper(relativePath: relativePath, check: "llama-server-helper")
+        guard helperCheck.status == .pass else {
+            return [helperCheck]
+        }
+        guard verifyCodeSignature else {
+            return [helperCheck, .warn("llama-server-signature", target: relativePath, detail: "Code signature verification was skipped by request.")]
+        }
+        let url = appBundleURL.appendingPathComponent(relativePath, isDirectory: false)
+        let result = commandRunner.run("/usr/bin/codesign", ["--verify", "--strict", url.path])
+        if result.exitCode == 0 {
+            return [helperCheck, .pass("llama-server-signature", target: relativePath, detail: "codesign --verify --strict passed for the bundled llama-server.")]
+        }
+        return [helperCheck, .fail("llama-server-signature", target: relativePath, detail: result.combinedOutput.trimmedForReport)]
     }
 
     /// The build scripts run `build-info` before signing. This is the only check

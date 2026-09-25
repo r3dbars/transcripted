@@ -47,8 +47,30 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(report.checks.contains { $0.id == "logs/privacy-scan" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "cli-helper" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-signature" && $0.status == .pass })
         XCTAssertEqual(report.status, .warn)
         XCTAssertEqual(report.exitCode, 3)
+    }
+
+    func testMissingLlamaServerHelperFails() throws {
+        let fixture = try makeFixture()
+        try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/Helpers/llama-server"))
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .fail })
+        XCTAssertFalse(report.checks.contains { $0.id == "llama-server-signature" })
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testUnsignedLlamaServerHelperFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(codesignExitCode: 1)
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-signature" && $0.status == .fail })
     }
 
     func testPackagedAppSmokeWarnsWhenFirstRunReliabilityHarnessIsSkipped() throws {
@@ -268,7 +290,7 @@ final class PackagedAppSmokeTests: XCTestCase {
         try "binary".write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
 
-        for name in ["transcripted-mcp", "transcripted-cli"] {
+        for name in ["transcripted-mcp", "transcripted-cli", "llama-server"] {
             let helper = helpers.appendingPathComponent(name, isDirectory: false)
             try "helper".write(to: helper, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
