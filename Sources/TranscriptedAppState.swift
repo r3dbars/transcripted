@@ -274,14 +274,14 @@ class TranscriptedAppState: ObservableObject {
             return
         }
 
-        // `.userInitiated`, not `.utility`: the dictation model load inherits
-        // this priority, and at utility macOS can run Core ML compilation on
-        // the efficiency cores. Most launches in PostHog took 5s+ to warm,
-        // and a dictation pressed in that window waited on it. This pass also
-        // reruns after wake and on a model switch; a dictation right after
-        // either is just as likely. The meeting models stay at `.utility`
-        // (below) so launch-at-login doesn't spend full CPU on them.
-        runtimeReadinessTask = Task(priority: .userInitiated) { @MainActor [weak self] in
+        // The pass runs at `.utility` so launch-at-login, wake and model
+        // switches don't spend full CPU on the meeting models. Only the
+        // dictation model step runs at `.userInitiated`, in its own task:
+        // at utility macOS can run Core ML compilation on the efficiency
+        // cores, most launches in PostHog took 5s+ to warm, and a dictation
+        // pressed in that window waited on it. Awaiting a task escalates it
+        // to the waiter's priority, so the split has to go this way round.
+        runtimeReadinessTask = Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
@@ -295,17 +295,17 @@ class TranscriptedAppState: ObservableObject {
             repeat {
                 self.runtimeReadinessRerunRequested = false
                 guard !Task.isCancelled, !self.isShutDown else { return }
-                await self.sttRouter.initializeSelectedModelInBackground()
+                let dictationWarmup = Task(priority: .userInitiated) { @MainActor [weak self] in
+                    await self?.sttRouter.initializeSelectedModelInBackground()
+                }
+                await withTaskCancellationHandler {
+                    await dictationWarmup.value
+                } onCancel: {
+                    dictationWarmup.cancel()
+                }
                 guard !Task.isCancelled, !self.isShutDown else { return }
                 if #available(macOS 14.0, *), !self.meetingSession.areMeetingModelsWarm {
-                    let meetingWarmup = Task(priority: .utility) { @MainActor [weak self] in
-                        await self?.meetingSession.prepareModels(showLoadingUI: false)
-                    }
-                    await withTaskCancellationHandler {
-                        await meetingWarmup.value
-                    } onCancel: {
-                        meetingWarmup.cancel()
-                    }
+                    await self.meetingSession.prepareModels(showLoadingUI: false)
                 }
             } while self.runtimeReadinessRerunRequested
             self.reportLaunchWarmupOnce(startedAt: warmupStartedAt)
