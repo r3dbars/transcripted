@@ -347,14 +347,14 @@ final class WritingController {
     }
 
     /// Yesterday's count-only `writing_daily_counts`, at most once a day,
-    /// from the text-free outcome ledger summary. Save my writing and app
-    /// picking arrive in phases 3 and 4; until then they report off and all.
+    /// from the text-free outcome ledger summary.
     private func emitDailyCountsIfDue() {
         let ledgerURL = TildeLocalOutcomeStores.eventURL()
+        let preferences = Self.preferences()
         let setup = WritingAnalytics.Setup(
-            saveEnabled: false,
+            saveEnabled: preferences.saveMyWritingEnabled,
             autocompleteEnabled: Self.settings().suggestionsEnabled,
-            appScope: .all,
+            appScope: preferences.appScope.mode == .all ? .all : .picked,
             model: selectedModel
         )
         WritingAnalytics.emitDailyCountsIfDue(defaults: Self.appDefaults(), setup: setup) { day in
