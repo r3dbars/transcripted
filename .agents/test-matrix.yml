@@ -505,11 +505,40 @@ rules:
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:
+      - "scripts/stt_fluidaudio_ab.sh"
+      - "scripts/stt_fluidaudio_ab.py"
+      - "scripts/test_stt_fluidaudio_ab.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/stt_fluidaudio_ab.sh"
+      - "python3 -m py_compile scripts/stt_fluidaudio_ab.py"
+      - "python3 -m py_compile scripts/test_stt_fluidaudio_ab.py"
+      - "python3 scripts/test_stt_fluidaudio_ab.py"
+
+  - paths:
+      - "scripts/hillclimb/benches/speaker_lab.py"
+      - "scripts/hillclimb/benches/test_speaker_lab.py"
+      - "scripts/hillclimb/benches/speaker_lab.README.md"
+      - "config/hillclimb/suites/speaker-lab-ami.json"
+      - "scripts/run_speaker_lab.sh"
+      - "scripts/score_speaker_lab.py"
+      - "scripts/speaker_eval_common.py"
+      - "scripts/download_ami.sh"
+    checks:
+      - "python3 -m py_compile scripts/hillclimb/benches/speaker_lab.py"
+      - "python3 -m py_compile scripts/hillclimb/benches/test_speaker_lab.py"
+      - "python3 scripts/hillclimb/benches/speaker_lab.py --self-test"
+
+  - paths:
       - "Tools/SpeakerEvalHarness/**"
       - "scripts/download_ami.sh"
       - "scripts/run_speaker_eval.sh"
       - "scripts/score_speaker_eval.py"
       - "scripts/aggregate_sweep.py"
+      - "scripts/speaker_eval_common.py"
+      - "scripts/run_speaker_lab.sh"
+      - "scripts/score_speaker_lab.py"
+      - "scripts/test_score_speaker_lab.py"
       - "scripts/run_speaker_autoresearch.py"
       - "scripts/speaker_autoresearch_contract.py"
       - "scripts/speaker_autoresearch_runtime.py"
@@ -520,6 +549,11 @@ rules:
       - "bash -n scripts/run_speaker_eval.sh"
       - "python3 -m py_compile scripts/score_speaker_eval.py"
       - "python3 -m py_compile scripts/aggregate_sweep.py"
+      - "bash -n scripts/run_speaker_lab.sh"
+      - "python3 -m py_compile scripts/speaker_eval_common.py"
+      - "python3 -m py_compile scripts/score_speaker_lab.py"
+      - "python3 -m py_compile scripts/test_score_speaker_lab.py"
+      - "python3 scripts/test_score_speaker_lab.py"
       - "python3 -m py_compile scripts/run_speaker_autoresearch.py"
       - "python3 -m py_compile scripts/speaker_autoresearch_contract.py"
       - "python3 -m py_compile scripts/speaker_autoresearch_runtime.py"

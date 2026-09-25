@@ -364,6 +364,7 @@ APP_SOURCES=(
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/SpeakerEmbedderPreferences.swift"
+    "Sources/Support/DiarizationBackendPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/CallAppMicrophoneSharingMonitor.swift"

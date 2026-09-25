@@ -54,16 +54,20 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `TranscriptionLanguageSampling.swift` — picks bounded voiced samples for language detection
   - `PipelineFailureDisplayCopy.swift` — per-flow failure copy table
 - `Protocols/` — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `StatsStore`, and the typed `ImportedTranscriptionRecoverySession` ownership handoff (one file per protocol, same names)
-- `Services/` — DI container (`AppServices`), model bundle / download management, path indirection, capture-library path safety checks, recording validation, diarization, and failed-transcription persistence
+- `Services/` — DI container (`AppServices`), model bundle / download management, FluidAudio upgrade compatibility pins, path indirection, capture-library path safety checks, recording validation, diarization, and failed-transcription persistence
   - `AppServices.swift`, `CoreStoragePaths.swift`, `ModelBundleProvider.swift` — the seams listed below
   - `ModelDownloadService.swift` — model download with mirror fallback, retry, and error classification
-  - `DiarizationService.swift` — FluidAudio offline diarization (`DiarizationEngine` conformer)
+  - `DiarizationService.swift` — `DiarizationEngine` conformer: FluidAudio offline pyannote diarization, or Nemotron when the backend switch says so
+  - `DiarizationBackend.swift` — the `pyannote` / `nemotron` backend switch
+  - `NemotronDiarizationRunner.swift` — loads Nemotron 3 and runs it on a serial queue (`TRANSCRIPTED_NEMOTRON_PRESET` picks the preset)
+  - `NemotronTurnBuilder.swift` — pure: Nemotron frame probabilities → non-overlapping speaker turns
+  - `FluidAudioCompatibility.swift` — keeps the FluidAudio 0.17 upgrade from changing what shipped: unpinned diarizer model caches and the tuned offline config in 0.17 units
   - `RecordingValidator.swift` — pre-recording system checks
   - `FailedTranscriptionManager.swift` — persistent failed-transcription queue
   - `CaptureLibraryPathSafety.swift` — synced copy of the capture-library path checks (also in `Sources/Support/` and `Tools/TranscriptedCaptureKit/`)
-- `Speaker/` — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), an ERes2Net on-device embedding model wrapper, embedding matching / clustering, embedding thresholds and segment re-embedding, multi-exemplar voiceprint policy and store, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, retroactive transcript updates, negative-exemplar policy/store, write-path policy, a single-write-path identity mutation service for name/merge changes across the DB and saved transcripts, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
+- `Speaker/` — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), an ERes2Net on-device embedding model wrapper, a FluidAudio online-WeSpeaker segment embedder (the Nemotron backend's voiceprint fallback), embedding matching / clustering, embedding thresholds and segment re-embedding, multi-exemplar voiceprint policy and store, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, retroactive transcript updates, negative-exemplar policy/store, write-path policy, a single-write-path identity mutation service for name/merge changes across the DB and saved transcripts, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
   - Database and its extensions: `SpeakerDatabase.swift` (SQLite voice-fingerprint store), `SpeakerProfile.swift` (profile + match-result types), `SpeakerEmbeddingMatcher.swift` (`matchSpeaker`), `SpeakerProfileMerger.swift` (profile management/merging), `SpeakerProfileProvenance.swift` (provenance audit tables + un-merge), `SpeakerConfirmationStore.swift` (explicit user-confirmation ledger), `SpeakerExemplarStore.swift`, `SpeakerNegativeExemplarStore.swift`, `SpeakerMatchOutcomeStore.swift`
-  - Embeddings and matching: `SpeakerSegmentEmbedder.swift` (host-injected re-embedding seam), `ERes2NetEmbedder.swift` (CoreML ERes2Net conformer), `SpeakerEmbeddingThresholds.swift` (per-model cosine thresholds), `SpeakerVectorMath.swift`, `EmbeddingClusterer.swift` (diarization segment post-processing), `SpeakerMatchingService.swift` (`extension Transcription`, in-memory matching against profiles)
+  - Embeddings and matching: `SpeakerSegmentEmbedder.swift` (host-injected re-embedding seam), `ERes2NetEmbedder.swift` (CoreML ERes2Net conformer), `FluidWeSpeakerSegmentEmbedder.swift` (online WeSpeaker, Nemotron's voiceprint fallback), `SpeakerEmbeddingThresholds.swift` (per-model cosine thresholds), `SpeakerVectorMath.swift`, `EmbeddingClusterer.swift` (diarization segment post-processing), `SpeakerMatchingService.swift` (`extension Transcription`, in-memory matching against profiles)
   - Policies: `SpeakerNamingPolicy.swift` (auto-accept ladder, initial mapping), `SpeakerExemplarPolicy.swift`, `SpeakerNegativeExemplarPolicy.swift`, `SpeakerWritePathPolicy.swift` (voiceprint write-back gates), `SpeakerPeopleReviewPolicy.swift`, `SpeakerReviewPrioritizer.swift`
   - Lifeline: `SpeakerMatchOutcome.swift` (outcome kinds + `SpeakerProfileHealth` demotion)
   - Failures: `SpeakerFinalizationFailure.swift` (coarse, off-device-safe reason codes for why a speaker review could not be saved)
@@ -83,6 +87,16 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
+
+## Diarization backends
+
+`DiarizationService(bundleProvider:segmentEmbedder:backend:)` runs one of two FluidAudio diarizers, picked by `DiarizationBackend`. The public API (`initialize()`, `isReady`, `modelState`, both `diarizeOffline` overloads, `cleanup()`, `activeSpeakerThresholds`) is the same for both.
+
+- `.pyannote` (default) — `OfflineDiarizerManager` (community-1 segmentation + WeSpeaker + VBx) with the grid-searched config from `FluidAudioCompatibility.tunedOfflineDiarizerConfig()`, which undoes FluidAudio 0.17's two clustering changes (the threshold is now a Euclidean distance, so cosine 0.6 is passed as sqrt(0.8), and constrained assignment is off). Every existing caller gets this unchanged.
+- `FluidAudioCompatibility.keepUnpinnedDiarizerCaches()` runs in `DiarizationService.init`: FluidAudio 0.17 pins the `speaker-diarization-coreml` repo to one commit and deletes any cache (or bundled copy) without a matching revision marker, which every 0.15.x-era cache lacks. Resolving it at `main` keeps them valid. Anything that loads diarizer models without going through `DiarizationService` must call it first.
+- `.nemotron` (experimental, off by default) — NVIDIA Nemotron 3 Diarization. `NemotronDiarizationRunner` loads one `Nemotron3Config` preset (`fast128` by default; the lab-only `TRANSCRIPTED_NEMOTRON_PRESET` env var names another, e.g. `fast32` or `offline`, which runs on CPU+GPU because it fails the ANE compiler) and runs the non-thread-safe `Nemotron3Diarizer` on a private serial queue. Bundled copy: `bundleProvider("nemotron-diarizer-models")`, flat layout; otherwise FluidAudio downloads into `FluidAudio/Models/nemotron-3-diarization/`.
+- Nemotron's 10 ms per-speaker probabilities become turns through `NemotronTurnBuilder` (pure, unit-tested): argmax of speakers >= 0.5 per frame, same-speaker silence < 0.2874 s bridged, turns < 0.25 s dropped, slots renumbered by first appearance. Turns never overlap, because the pipeline transcribes each segment separately. Segment `speakerId`s are 1-based like pyannote's `S1…`, and `qualityScore` is the turn's mean winning probability.
+- Nemotron emits no voiceprints. Each turn is embedded with the injected `SpeakerSegmentEmbedder` when there is one (ERes2Net → its own DB, fully compatible), otherwise with `FluidWeSpeakerSegmentEmbedder` (FluidAudio's online `wespeaker_v2` model, 256-d, `.weSpeaker` thresholds). That model is very likely the same WeSpeaker network as the offline pipeline's `Embedding.mlmodelc` but a different Core ML conversion, and today's DB rows are VBx centroids rather than per-turn vectors, so cross-meeting matching against people saved by the pyannote backend is unverified — see the header of `Speaker/FluidWeSpeakerSegmentEmbedder.swift` before pointing it at `speakers.sqlite`.
 
 ## Audio backend notes
 
@@ -170,6 +184,9 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/AudioTests/MeetingRecordingJournalTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/MeetingRouteArtifactFixtureTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerTests/DiarizationSpeakerIdParsingTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerTests/DiarizationBackendTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerTests/NemotronTurnBuilderTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerTests/FluidAudioCompatibilityTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/QuietMicAttenuationDetectorTests.swift`

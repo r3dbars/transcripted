@@ -69,6 +69,13 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
 - `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
 - `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
+- `scripts/run_speaker_lab.sh` — speaker lab: one-command bake-off of diarizer backends (pyannote vs Nemotron) and fingerprint models (WeSpeaker vs ERes2Net) on AMI or on your own saved calls; sweep or `--single` trial, `--embedding-parity` adds the pyannote-vs-online WeSpeaker voiceprint check; writes `reports/speaker-lab/<stamp>/scores.json` + `REPORT.md` (gitignored)
+- `scripts/score_speaker_lab.py` — scores a speaker-lab run: raw vs pipeline DER, speaker-count error, returning-speaker recognition (recognized / wrong person / asked again), own-calls agreement + `timeline.html`
+- `scripts/speaker_eval_common.py` — shared dependency-free speaker scoring math (RTTM parsing, pyannote-equivalent DER/JER, fragmentation, false merge, re-ID, recognition) used by both speaker scorers
+- `scripts/test_score_speaker_lab.py` — unit + fake-harness end-to-end tests for the speaker lab scorer and driver (runs on Linux)
+- `scripts/stt_fluidaudio_ab.sh` — FluidAudio A/B for Parakeet V3 (default origin/main on 0.15.4 vs HEAD on 0.17.0): builds the CLI once per version in git worktrees under `~/stt-fluidaudio-ab`, then gates on lecture WER and on dictation-stop transcribe time for silence and noise; writes `result.json` + `report.md` (Mac only)
+- `scripts/stt_fluidaudio_ab.py` — the measuring and scoring half of that A/B; reuses the STT shootout's lecture download, caption parsing and WER scorer
+- `scripts/test_stt_fluidaudio_ab.py` — unit + fake-CLI end-to-end tests for the FluidAudio A/B, including the wrapper with stubbed Mac tools (runs on Linux)
 - `scripts/convert_eres2net_fused.py` — converts the pretrained ERes2Net speaker-embedding model to the fused raw-audio-in CoreML model shipped in the app; reproducibility record for the model `Sources/TranscriptedCore/Speaker/ERes2NetEmbedder.swift` loads
 - `scripts/recalibrate_eres2net_groundtruth.py` — recomputes the ERes2Net match/consolidation thresholds against AMI ground truth; reproducibility record for the thresholds in `Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift`
 - `scripts/make_eres2net_swift_fixture.py` — regenerates the checked-in golden fixture `Tests/TranscriptedCoreTests/SpeakerTests/Fixtures/eres2net_swift_golden.json` used by the Swift ERes2NetEmbedder parity test

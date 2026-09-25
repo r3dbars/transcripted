@@ -298,6 +298,9 @@ PY_TEST_SUITES=(
     scripts/ops/test-nightly-security-check.py
     scripts/ops/test-score-boards.py
     scripts/test_speaker_autoresearch.py
+    scripts/test_score_speaker_lab.py
+    scripts/test_stt_fluidaudio_ab.py
+    scripts/hillclimb/benches/test_speaker_lab.py
 )
 # Empty for now. Expansions below use ${arr[@]+...} so an empty list is safe
 # under set -u on macOS's bash 3.2.

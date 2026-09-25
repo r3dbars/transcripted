@@ -49,7 +49,7 @@ DEPS_TOOLS="$DRAFT_DIR/deps-tools"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
-FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.15.4}"
+FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.17.0}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
 SWIFT_JINJA_VERSION="${SWIFT_JINJA_VERSION:-2.3.6}"
 SWIFT_ARGUMENT_PARSER_VERSION="${SWIFT_ARGUMENT_PARSER_VERSION:-1.7.1}"
@@ -448,14 +448,24 @@ ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore" "$DEPS_BUILD/TranscriptedCor
 fetch_argmax_whisperkit_sources
 
 # Create unified Package.swift — both dependencies resolved together
+# Tools 6.2 so the FluidAudio dependency can opt out of its default
+# `NemoTextProcessing` trait (FluidAudio >= 0.17). That trait links a prebuilt
+# Rust static library (text normalization for TTS/ITN) that we never call, and
+# this script only archives SwiftPM *.o files, so leaving it on would strand an
+# unresolved `CNemoTextProcessing` module import. `swiftLanguageModes: [.v5]`
+# keeps the in-tree targets (TranscriptedCore, WhisperKit, ArgmaxCore) on the
+# Swift 5 language mode they compiled under with the old 5.9 manifest.
+# FluidAudio 0.17 also declares target resources (LuxTts G2p). Only *.o files
+# are archived below, so its `Bundle.module` bundle never ships: nothing in
+# Transcripted may call LuxTts G2p, or that accessor traps at runtime.
 cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 import PackageDescription
 let package = Package(
     name: "DraftDeps",
     platforms: [.macOS("26.0")],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER", traits: []),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER"),
         // The bundled CLI builds against the ArgumentParser modules exported
         // from this graph (export_argument_parser_modules).
@@ -517,7 +527,8 @@ let package = Package(
             ],
             path: "Sources"
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )
 PACKAGE_EOF
 

@@ -7,8 +7,9 @@ labeled audio** (AMI Meeting Corpus). Measures the two thresholds the team tunes
   (the same-voice merge; 0.88 on the `feat/embedding-clusterer-same-voice-consolidation` branch).
 - **cross-meeting match** — `SpeakerDatabase.matchSpeaker(threshold:)` (0.6).
 
-It uses the **app's own** diarizer + 256-dim WeSpeaker embeddings via
-`TranscriptedCore.DiarizationService`, so thresholds transfer to production.
+It uses the **app's own** diarizer + embeddings via `TranscriptedCore.DiarizationService`
+(pyannote or Nemotron; WeSpeaker 256-d or ERes2Net 192-d), so thresholds transfer to
+production. The **speaker lab** below puts those combinations side by side.
 
 See **[BASELINE_REPORT.md](BASELINE_REPORT.md)** for measured results + recommendations.
 
@@ -27,7 +28,7 @@ WAV ──dump──▶ raw segments + 256-dim embeddings (JSON, cached)
                   │
             scripts/score_speaker_eval.py vs AMI RTTM
                   ▼
-   DER (pyannote.metrics) · fragmentation · false-merge · cross-meeting re-ID curve
+   DER (pyannote.metrics conventions) · fragmentation · false-merge · cross-meeting re-ID curve
 ```
 
 The replay feeds sessions **in order** so profiles accumulate across meetings exactly as in
@@ -36,8 +37,9 @@ real usage. The DB starts empty each replay (a fresh user).
 ## Commands
 
 ```bash
-# diarize one WAV, dump segments+embeddings (expensive; cache once)
-speaker-eval-harness dump --audio path.wav --meeting NAME --out raw.json
+# diarize one WAV, dump segments+embeddings (expensive; cache once per variant)
+speaker-eval-harness dump --audio path.wav --meeting NAME --out raw.json \
+    [--backend pyannote|nemotron] [--embedder native|eres2net] [--eres2net-model Model.mlmodelc]
 
 # replay a series in order through clusterer + DB, emit hypothesis assignments (cheap; sweepable)
 speaker-eval-harness replay --inputs a.json,b.json,c.json,d.json \
@@ -45,12 +47,271 @@ speaker-eval-harness replay --inputs a.json,b.json,c.json,d.json \
 
 # A/B the write-path fixes (#6 write-time contamination gate + #8 cross-cluster link/merge decouple)
 speaker-eval-harness replay --inputs ... --write-path-fixes off|on --out result.json
+
+# production-shaped replay: the app's adaptive match floor, per-model thresholds, fingerprint-update knobs
+speaker-eval-harness replay --inputs ... --match adaptive --thresholds auto|weSpeaker|eRes2Net \
+    --same-voice profile|none|0.88 --dedup match|0.6 --write-path-fixes on \
+    --blend-confident 0.15 --blend-cautious 0.05 --writeback-confident-sim 0.80 \
+    --writeback-cautious-sim 0.72 --writeback-margin 0.12 --out result.json
+
+# can Nemotron voiceprints share today's speakers.sqlite? same segments, two WeSpeaker paths
+speaker-eval-harness embedding-parity --audio path.wav --out parity.json \
+    [--meeting NAME] [--rttm ref.rttm] [--min-seconds 1.0] [--online-models <dir>]
 ```
+
+Dumps record `backend`, `embedder`, `embeddingDimension`, `diarizeSeconds`, `audioSeconds`,
+`initSeconds`, and `nemotronPreset` (all optional, so pre-lab dumps still load as pyannote +
+WeSpeaker). `nemotronPreset` is the preset that actually ran, as Core resolves it
+(`DiarizationService.resolvedNemotronPresetName()`, so `fast128` when the env var is unset;
+older dumps say `default`, which the lab treats as `fast128`). `dump` never falls back
+silently: if ERes2Net is requested and can't load, or `TRANSCRIPTED_NEMOTRON_PRESET` names a
+preset Core wouldn't honor, it fails. `replay` refuses to mix embedding dimensions and, with `--thresholds auto`, uses the
+ERes2Net threshold set for ERes2Net dumps. Its defaults (`--match 0.6 --same-voice profile
+--dedup match --write-path-fixes off`) reproduce the pre-lab harness for WeSpeaker dumps.
+Each replayed meeting also reports `rawDiarizerClusters`, `profilesAfterMeeting`, and
+`clusterStatus` (per cluster: `matched` an existing profile or `new`).
 
 `--write-path-fixes` (default `off`): `off` is the legacy write path (every match blends at the
 full EMA rate; clusters matching the same profile collapse together). `on` applies the
 `SpeakerWritePathPolicy` gates, mirroring `TranscriptionPipeline` (gated EMA blend + cross-cluster
 spin-off of distinct voices). Replay the same dumps both ways to get a clean before/after.
+
+### `embedding-parity`: can Nemotron voiceprints share `speakers.sqlite`?
+
+Nemotron emits no voiceprints, so the Nemotron backend embeds each turn with Core's
+`FluidWeSpeakerSegmentEmbedder` (FluidAudio's **online** WeSpeaker, `wespeaker_v2.mlmodelc`).
+Everyone already in `speakers.sqlite` was fingerprinted by pyannote's **offline** WeSpeaker
+(`Embedding.mlmodelc`). Same network in principle, two Core ML conversions, never checked
+against each other, so today Nemotron voiceprints go to a separate DB. This command checks:
+
+1. diarize the file with today's `DiarizationService` (pyannote, native embeddings)
+2. re-embed each of those **same** segments with `FluidWeSpeakerSegmentEmbedder`
+3. compare. Segments shorter than `--min-seconds` (default 1.0, the DB-mean quality filter)
+   are skipped. With `--rttm`, speakers are the ground-truth labels (majority overlap, at
+   least half the segment); without it, pyannote's clusters.
+
+What lands in the JSON (`schema: transcripted.speaker-lab.embedding-parity`, v1). Every
+distribution is `{count, mean, median, p10, p90, min, max, histogram}`, where `histogram`
+has 200 equal bins over cosine [-1, 1] so the lab can pool meetings:
+
+- `perSegment`: cosine(native, online) for the same segment
+- `withinModel.native|online.sameSpeaker|differentSpeaker`: segment pairs inside one model
+- `crossModel.sameSpeaker|differentSpeaker`: online segment i vs native segment j (i ≠ j)
+- `clusters`: the numbers that decide it, on the production quality-filtered cluster
+  **means** (what the DB stores and matches). `sameCluster` = online mean vs native mean of
+  the same cluster; `differentCluster` = online mean vs other clusters' native means;
+  `nativeDifferentCluster` = today's native-vs-native baseline; `top1Count` = clusters whose
+  closest native mean is their own; `clearsMatchFloorCount` = same-cluster cosine at or above
+  the WeSpeaker adaptive match floor; `*ClearsMatchFloorCount` over `*Pairs` = false accepts.
+  `perCluster` has each cluster's row.
+- `nativeIsClusterCentroid`: FluidAudio's offline pipeline gives every segment its VBx
+  cluster centroid, not a per-segment vector. When true (expected), native same-speaker
+  pairs are trivially ~1 and only the cluster-mean numbers mean anything.
+- `looksInterchangeable`: closest-own ≥ 95% of clusters, clears the floor ≥ 90%, and
+  cross-model false accepts ≤ today's + 2 points. `null` under 2 clusters. It's a
+  heuristic for one recording; the corpus verdict is the lab's pooled one below.
+
+Pair stats use at most 1500 labeled segments (evenly strided) to bound the O(n²) cost;
+per-segment and cluster stats always use all of them.
+
+## Speaker lab (diarizer + fingerprint bake-off)
+
+One command runs our meeting speaker pipeline on the same calls with every diarizer /
+fingerprint combo you name and puts them side by side. It answers two questions:
+
+1. **Did it find the right speakers in each meeting?** DER, its parts, JER, and speaker-count
+   error, scored twice: on the **raw** diarizer output and on the **pipeline** output (after
+   `EmbeddingClusterer` consolidation and speaker-DB matching, i.e. what the app would save).
+2. **Did it recognize people on their next call?** Every time a person shows up again, the
+   lab checks where their voice landed:
+   - **recognized**: on the profile that already held their voice, so no re-naming
+   - **wrong person**: on someone else's profile (the worst outcome, a wrong name)
+   - **asked again**: on a brand-new profile, so the user has to name them again
+   - **undetected**: no speech attributed to them at all
+
+   It also counts **new people false-matched**: a first-time speaker glued to a profile the
+   app already knew. A profile "belongs" to whoever held most of its speech in earlier
+   meetings. Appearances under `--min-appearance-sec` (default 5 s) are skipped.
+
+A **variant** is diarizer backend × embedding model (× Nemotron preset):
+
+| piece | options | where it plugs in |
+|---|---|---|
+| backend | `pyannote` (ships today: FluidAudio `OfflineDiarizerManager`), `nemotron` (NVIDIA Nemotron 3 Diarization) | `DiarizationService(backend:)` |
+| embedder | `native` (both backends: FluidAudio WeSpeaker 256-d), `eres2net` (ERes2Net 192-d, re-embeds every segment) | `DiarizationService(segmentEmbedder:)` |
+| preset | `fast128` (default), `fast32`, `offline`, `low` … | `TRANSCRIPTED_NEMOTRON_PRESET` at dump time |
+
+Each variant gets its own dump cache (`data/eval/<corpus>/dumps/<variant>/`). A cached dump is
+reused only if its recorded backend/embedder/preset match, so variants never mix.
+
+### Run it on the public set
+
+```bash
+bash build-deps.sh --force                 # once
+bash scripts/download_ami.sh lab           # 24 AMI series × 4 sessions (same 4 people per series), ~5.2 GB
+bash scripts/run_speaker_lab.sh            # pyannote vs nemotron (+ eres2net variants if the model is staged)
+# last line printed = reports/speaker-lab/<stamp>/scores.json; REPORT.md sits next to it
+```
+
+`download_ami.sh scale` (8 series) or `es2002` (1 series) work too; `SERIES="ES2002 IS1000"`
+narrows a run (a bare series id expands to its downloaded sessions). The report has a
+headline table per variant at its best setting, a settings table, a "what moved
+recognition" breakdown per knob, and per-meeting rows. Raw per-appearance outcomes land in
+`recognition-events.json`.
+
+**Public sets where the same people recur** (what the recognition test needs): AMI scenario
+series (ES/IS/TS, 4 sessions each, same 4 participants; speaker ids are global across the
+corpus) and ICSI (lab members recur across many meetings; `CORPUS=icsi`). VoxConverse does
+not recur speakers across files; the VoxCeleb `sessions` mode stitches recurring identities
+synthetically.
+
+### Run it on your own calls
+
+```bash
+bash scripts/run_speaker_lab.sh --own-calls "$HOME/Library/Application Support/Transcripted/captures/meetings"
+# or a relocated capture library's meetings/ folder; --own-calls-limit 20 keeps the 20 most recent
+```
+
+It reads each saved meeting's call track in place (`meetings/audio/<stem>_audio/system_audio.*`,
+or `recording.*` for system-only and imported meetings; the `microphone` track is you, so it
+is skipped). Meetings replay oldest first. There's no ground truth, so it reports behavior:
+speakers found (raw / pipeline), speech covered, clusters matched to a known profile vs new,
+profiles at the end, and how much each variant disagrees with the first one (DER of B scored
+against A). Open `timeline.html` in the run folder to eyeball every variant's speaker turns
+stacked per call. Same color = same profile across calls, striped = a profile created in that
+call. Audio is never copied. Dumps (with voice embeddings) stay in `data/eval/own-calls/`,
+reports in `reports/speaker-lab/`, both gitignored. `scores.json` carries meeting ids only; no
+paths, names, or transcript text anywhere.
+
+### Knobs
+
+Every knob is a flag with an env twin (flag wins). Grid knobs take a space-separated list and
+the replay sweeps their cartesian product.
+
+| flag / env | default | what it changes |
+|---|---|---|
+| `--variants` / `VARIANTS` | `pyannote:native nemotron:native` (+ `:eres2net` twins when the model exists) | `backend:embedder[:preset]` list |
+| `--backend` `--embedder` `--preset` / `BACKEND` `EMBEDDER` `NEMOTRON_PRESET` | — | shorthand for one variant |
+| `--eres2net-model` / `ERES2NET_MODEL` | FluidAudio Models cache | ERes2Net `Model.mlmodelc` path |
+| `--match` / `MATCH` | WeSpeaker `adaptive 0.55 0.60 0.65 0.70`, ERes2Net `adaptive 0.45 0.50 0.55 0.60` | cross-call match floor; `adaptive` = the app's per-segment-count floor |
+| `--same-voice` / `SAME_VOICE` | `profile` | same-voice consolidation; `profile` = the model's calibrated value |
+| `--consolidation` / `CONSOLIDATION` | (none) | extra pairwise merge (the old sweep knob) |
+| `--thresholds` / `THRESHOLDS` | auto | `weSpeaker` / `eRes2Net` threshold set; auto = from the dumps |
+| `--write-path-fixes` / `WRITE_PATH_FIXES` | `on` | gated write-back + cross-cluster link decouple (what ships) |
+| `--dedup` / `DEDUP` | `0.6` | `mergeDuplicates` threshold after each meeting (app default) |
+| `--blend-confident` `--blend-cautious` | 0.15 / 0.05 | how far a matched voiceprint moves toward this meeting (EMA weight) |
+| `--writeback-confident-sim` `--writeback-cautious-sim` `--writeback-margin` | 0.80 / 0.72 / 0.12 | similarity gates for those weights; below cautious or inside the margin, the voiceprint is frozen |
+| `--corpus` `--series` `--collar` | `ami`, all downloaded, `0.25` | corpus + DER collar (pyannote convention: total width) |
+| `--min-appearance-sec` `--wrong-penalty` | `5`, `2` | recognition scoring |
+| `--single` / `SINGLE=1` | off | one variant, one setting, no sweep; unset knobs = production defaults |
+| `--embedding-parity` / `EMBEDDING_PARITY=1` | off | also run `embedding-parity` per meeting (pyannote only, cached in `data/eval/<corpus>/parity/`; RTTM labels on corpora, pyannote clusters on own calls) and add an "Embedding parity" section + `embeddingParity` to the report |
+| `--out-dir`, `--skip-build`, `--redump`, `ALLOW_PARTIAL_CORPUS=1` | | plumbing (`--redump` also recomputes parity) |
+
+The fingerprint-update knobs mirror `SpeakerWritePathPolicy`. Setting both blend weights to 0
+means a profile never learns after first sight. The cross-cluster link floor (0.78), the
+exemplar policy (3 exemplars, 0.80 same-condition bar), and the ghost-merge floor are Core
+constants the replay can't override yet.
+
+### Driving it from an optimizer
+
+`--single` runs one trial and the **last stdout line is always the absolute path of
+`scores.json`** (progress goes to stderr). The exit status is non-zero on any failure (build,
+missing corpus, dump, replay, or scoring), and nothing prompts. Example trial:
+
+```bash
+path=$(bash scripts/run_speaker_lab.sh --single --skip-build --backend nemotron --preset fast32 \
+        --match 0.62 --blend-confident 0.1 --writeback-margin 0.08 | tail -1)
+jq '.variants[0].best | {objective, r: .recognition.recognizedRate, der: .pipeline.meanDER}' "$path"
+```
+
+Dumps are cached, so after the first trial per variant each trial is just replay + scoring
+(seconds).
+
+### `scores.json` schema (`schemaVersion` 1)
+
+```text
+{
+  schema: "transcripted.speaker-lab.scores", schemaVersion: 1,
+  generatedAt: ISO-8601 UTC, gitRevision: short sha, gitDirty: bool, command: string,
+  mode: "corpus" | "own-calls", corpus, single: bool,
+  collar, minAppearanceSeconds, wrongPenalty,
+  requestedKnobs: {variants, series, match, same_voice, consolidation, write_path_fixes,
+                   thresholds, dedup, blend_confident, blend_cautious, writeback_confident_sim,
+                   writeback_cautious_sim, writeback_margin}      // as passed (strings)
+  meetings: [meeting id, ...]                                     // replay order
+  variants: [ corpus-mode variant | own-calls variant ]
+  embeddingParity: {...}                  // only with --embedding-parity; see below
+}
+
+corpus-mode variant = {
+  name, backend, embedder ("native" | "eres2net"), nemotronPreset | null, meetingsScored,
+  speed: {audioSeconds, diarizeSeconds, xRealtime, meanInitSeconds},
+  raw: {meanDER, meanMiss, meanFalseAlarm, meanConfusion, meanJER,
+        meanSpeakerCountError, meanAbsSpeakerCountError, exactSpeakerCountRate,
+        perMeeting: [{meeting, der, miss, falseAlarm, confusion, jer, refSpeakers, rawSpeakers,
+                      countError, xRealtime}]},
+  best: {tag, knobs, objective, pipeline, recognition, identity} | null,   // = the best setting
+  settings: [{
+    tag, replay (path relative to the run dir), objective,
+    knobs: {match (float | "adaptive"), consolidation, sameVoice, thresholds, dedup,
+            writePathFixes, blendConfident, blendCautious, writebackConfidentSim,
+            writebackCautiousSim, writebackMargin},              // effective values the replay used
+    pipeline: {meanDER, meanMiss, meanFalseAlarm, meanConfusion, meanJER,
+               meanSpeakerCountError, meanAbsSpeakerCountError, exactSpeakerCountRate},
+    recognition: {returningAppearances, recognized, wrongPerson, askedAgain, undetected,
+                  recognizedRate, wrongPersonRate, askedAgainRate, undetectedRate,
+                  firstAppearances, firstAppearanceFalseMatches, firstAppearanceFalseMatchRate,
+                  byAppearance: {"1": {outcome: count}, "2": ...}, minAppearanceSeconds},
+    identity: {trueSpeakers, profilesAtEnd, fragmentationMean, falseMergeProfiles, reidCurve},
+    perMeeting: [{meeting, der, miss, falseAlarm, confusion, jer, refSpeakers, hypSpeakers,
+                  countError, clustersMatched, clustersNew}]
+  }]
+}
+
+own-calls variant = {
+  name, backend, embedder, nemotronPreset, speed, knobs,
+  summary: {meetingsScored, meanRawSpeakers, meanPipelineSpeakers, meanSpeechCoverage,
+            clustersMatched, clustersNew, profilesAtEnd},
+  perMeeting: [{meeting, status, audioSeconds, rawSpeakers, speechSeconds, speechCoverage,
+                xRealtime, pipelineSpeakers, clustersMatched, clustersNew}],
+  agreement: {baseline, meanDerVsBaseline, perMeeting: [...]}     // absent on the first variant
+}
+
+embeddingParity = {                        // pooled harness `embedding-parity` reports
+  schema: "transcripted.speaker-lab.embedding-parity", nativeModel, onlineModel,
+  labelSource: "rttm" | "diarizer" | "mixed", meetings: [meeting id, ...], segmentsCompared,
+  nativeIsClusterCentroid: bool,           // true = native same-speaker pairs are trivially ~1
+  perSegment: stats,                       // cosine(native, online), same segment
+  withinModel: {native: {sameSpeaker, differentSpeaker}, online: {sameSpeaker, differentSpeaker}},
+  crossModel: {sameSpeaker, differentSpeaker},          // online seg i vs native seg j, i != j
+  clusters: {clustersCompared, top1Rate, clearsMatchFloorRate,
+             differentClearsMatchFloorRate, nativeDifferentClearsMatchFloorRate,
+             sameCluster, differentCluster, nativeDifferentCluster, onlineDifferentCluster},
+  looksInterchangeable: bool | null,       // same rule as the harness, on pooled counts
+  perMeeting: [{meeting, segmentsCompared, perSegmentMedian, sameClusterMedian,
+                clustersCompared, top1Rate, clearsMatchFloorRate, looksInterchangeable}]
+}
+stats = {count, mean, median, p10, p90, min, max}   // multi-meeting quantiles pooled from
+                                                     // the 200-bin histograms (within 0.01)
+```
+
+Rates are 0–1 (`null` when there's nothing to count). DER parts are fractions of reference
+speech. `countError` = found − real (negative = people merged). **`objective`** =
+`recognizedRate − wrongPenalty × (wrongPersonRate + firstAppearanceFalseMatchRate)`; the best
+setting maximizes it, and ties go to lower pipeline DER. Treat any rise in wrong person, false
+match, or `falseMergeProfiles` as a hard regression no matter what the objective does. New
+fields may be added within a schema version. Renames or removals bump `schemaVersion`.
+
+### Add a new diarizer or embedder
+
+- **New diarizer backend**: add a case to Core's `DiarizationBackend` and handle it in
+  `DiarizationService`. The harness takes any `DiarizationBackend.allCases` value, so the only
+  lab change is allowing the name in `run_speaker_lab.sh`'s variant check.
+- **New fingerprint model**: implement `SpeakerSegmentEmbedder` (with its own
+  `SpeakerEmbeddingThresholds`), add an `--embedder` case in `Dump.swift` that constructs it
+  from a path, add a `ThresholdProfile` case in `Replay.swift` (and to `inferred(from:)`), and
+  allow the embedder name in the driver. Everything downstream (cache, replay, scoring,
+  report, timeline) is keyed by the variant name.
 
 ## Automatic parameter research
 
@@ -155,7 +416,7 @@ bash scripts/download_voxceleb_sample.sh &&  CORPUS=voxceleb   scripts/run_speak
 |---|---|---|
 | `CORPUS` | `ami` | `ami` \| `icsi` \| `voxconverse` \| `voxceleb` — selects audio/rttm dirs |
 | `SERIES` | all RTTMs present | subset of meeting ids to replay (space-separated) |
-| `AMI_SET` | `es2002` | `es2002` \| `scale` (32 mtgs) \| `full` (~170) — `download_ami.sh` preset |
+| `AMI_SET` | `es2002` | `es2002` \| `scale` (32 mtgs) \| `lab` (64 mtgs, 3 sites) \| `full` (~170) — `download_ami.sh` preset |
 | `ICSI_SET` | `sample` | `sample` (6) \| `full` (75) — `download_icsi.sh` preset |
 | `VOXCONVERSE_SPLITS` | `dev test` | which VoxConverse splits to fetch |
 | `VOXCELEB_IDENTITY_CAP` | `300` | **HARD CAP** on sampled identities (max 1211; never the full corpus) |
@@ -176,7 +437,9 @@ hard-capped; there is no "download all of VoxCeleb" path.
 - macOS 14+ on Apple Silicon (CoreML diarizer models, downloaded once from HuggingFace).
 - Prebuilt deps from `build-deps.sh` (`deps-libs/libExternalDeps.a`, `deps-modules/`,
   `deps-frameworks/`). The harness `Package.swift` resolves them relative to the repo root.
-- Python: `pyannote.metrics` (`pip install pyannote.metrics`) for scoring. The VoxCeleb
+- Python 3 standard library for scoring (`scripts/speaker_eval_common.py` reimplements
+  pyannote.metrics' DER/JER; `scripts/test_score_speaker_lab.py` cross-checks it when
+  `pyannote.metrics` happens to be installed). The VoxCeleb
   sampler additionally needs `datasets` + `ffmpeg`; ICSI RTTM materialization needs
   `datasets` (`pip install datasets`).
 
@@ -184,7 +447,10 @@ hard-capped; there is no "download all of VoxCeleb" path.
 
 | Path | Purpose |
 |---|---|
-| `Sources/speaker-eval-harness/main.swift` | `dump` + `replay` + `autoeval` commands |
+| `Sources/speaker-eval-harness/main.swift` | wire models, helpers, command entry |
+| `Sources/speaker-eval-harness/Dump.swift` | `dump`: diarize one file per variant (backend × embedder) |
+| `Sources/speaker-eval-harness/Replay.swift` | `replay`: clusterer + speaker DB replay with threshold and fingerprint-update knobs |
+| `Sources/speaker-eval-harness/EmbeddingParity.swift` | `embedding-parity`: pyannote's offline WeSpeaker vs the online WeSpeaker embedder on the same segments |
 | `Sources/speaker-eval-harness/AutoResearch.swift` | frozen chronological ASK / SUGGEST / AUTO evaluator |
 | `Sources/speaker-eval-harness/AutoResearchModels.swift` | fingerprint, config, report, and simulation contracts |
 | `Sources/speaker-eval-harness/AutoResearchSelfTests.swift` | production-parity and end-to-end replay fixtures |
@@ -195,11 +461,15 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `../../scripts/run_speaker_eval.sh` | end-to-end driver, keyed by `CORPUS` |
 | `../../scripts/score_speaker_eval.py` | DER + fragmentation + false-merge + re-ID scorer (corpus-agnostic) |
 | `../../scripts/aggregate_sweep.py` | sweep table + closest-to-ideal picker |
+| `../../scripts/run_speaker_lab.sh` | speaker lab driver: variants × knob grid, corpus or own calls, `--single` trials |
+| `../../scripts/score_speaker_lab.py` | speaker lab scorer: `scores.json`, `REPORT.md`, `timeline.html` |
+| `../../scripts/speaker_eval_common.py` | shared scoring math (DER/JER, identity metrics, recognition) |
+| `../../scripts/test_score_speaker_lab.py` | lab unit tests + fake-harness end-to-end driver tests |
 | `../../scripts/run_speaker_autoresearch.py` | resumable parameter sweep, safety gates, and locked holdout promotion |
 | `../../scripts/speaker_autoresearch_contract.py` | parameter grids, promotion guardrails, and reports |
 | `../../scripts/speaker_autoresearch_runtime.py` | frozen-input, build, and checkpoint integrity |
 | `../../scripts/ab_dot_vs_cloud.py` | dot-vs-cloud matcher A/B simulator (runs on cached embeddings) |
-| `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `full`) |
+| `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `lab` \| `full`) |
 | `../../scripts/download_icsi.sh` | ICSI audio (Edinburgh) + RTTMs (HF, gated) |
 | `../../scripts/download_voxconverse.sh` | VoxConverse dev+test audio + RTTMs |
 | `../../scripts/download_voxceleb_sample.sh` | VoxCeleb SAMPLE-only (hard-capped) + synthetic sessions |
