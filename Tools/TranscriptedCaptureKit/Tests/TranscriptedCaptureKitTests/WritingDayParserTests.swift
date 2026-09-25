@@ -1,8 +1,8 @@
 import XCTest
 @testable import TranscriptedCaptureKit
 
-/// Parser side of the writing day-file contract (phase 3 format contract,
-/// mirrored in docs/capture-format.md once the writer ships). The first entry
+/// Parser side of the writing day-file contract (docs/capture-format.md,
+/// "Writing day files"). The first entry
 /// below is the contract example verbatim; the second covers the cases the
 /// contract calls out: a missing `Bundle ID:` line and keys this parser
 /// doesn't know (frontmatter and entry metadata), which must be ignored.

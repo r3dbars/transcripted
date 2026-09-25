@@ -188,9 +188,10 @@ final class CaptureLibraryWritingResolverTests: XCTestCase {
         ])
     }
 
-    func testRealAppWrittenManifestFixtureStillDecodesWithWritingDerived() throws {
-        // golden.json predates Writing and has no writingDirectory key; it must
-        // still decode, with writing derived from captureLibraryDirectory.
+    func testRealAppWrittenManifestFixtureResolvesWritingFolder() throws {
+        // golden.json is real output from the app's manifest writer, which
+        // writes `writingDirectory`; the reader must accept it and land on
+        // `<captureLibraryDirectory>/writing` (the only value it may hold).
         let fixtureURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -203,16 +204,21 @@ final class CaptureLibraryWritingResolverTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try fixtureData.write(to: root.appendingPathComponent("mcp-directories.json"))
 
-        struct Golden: Decodable { let captureLibraryDirectory: String }
+        struct Golden: Decodable {
+            let captureLibraryDirectory: String
+            let writingDirectory: String?
+        }
         let golden = try JSONDecoder().decode(Golden.self, from: fixtureData)
+        let expected = URL(fileURLWithPath: golden.captureLibraryDirectory)
+            .appendingPathComponent("writing").standardizedFileURL.path
+        if let writingDirectory = golden.writingDirectory {
+            XCTAssertEqual(URL(fileURLWithPath: writingDirectory).standardizedFileURL.path, expected)
+        }
 
         let resolved = CaptureLibraryResolver.resolve(environment: [:], homeDirectory: tempHome)
 
         XCTAssertEqual(resolved.resolutionSource, .appManifest)
-        XCTAssertEqual(paths(resolved.writingDirs), [
-            URL(fileURLWithPath: golden.captureLibraryDirectory)
-                .appendingPathComponent("writing").standardizedFileURL.path,
-        ])
+        XCTAssertEqual(paths(resolved.writingDirs), [expected])
     }
 
     // MARK: - Helpers

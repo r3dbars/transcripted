@@ -60,4 +60,4 @@ The e2e smoke matters because `scripts/entrypoints/run-e2e-smoke.sh` compiles th
 - Legacy candidate directories are only included when they actually contain capture Markdown; the directory root is symlink-resolved before enumeration (this was a CLI/MCP drift point — the resolved behavior is canonical now).
 - Speaker metadata from frontmatter is channel-scoped: `channel: mic` maps to `mic_<rawId>`, `channel: system` maps to `system_<rawId>`, and older channelless metadata is treated as system metadata.
 - Dictation and writing day entries are returned sorted ascending by `createdAt`.
-- The writing day-file format is defined by the Writing phase 3 contract and belongs in `docs/capture-format.md` once the writer ships; keep this parser and that doc in step.
+- The writing day-file format is specified in `docs/capture-format.md` ("Writing day files"); keep this parser, `WritingDayParserTests`, and that doc in step.
