@@ -95,6 +95,7 @@ Written at initial save (all flat unless noted):
 | `system_speakers` | `2` | |
 | `total_word_count` | `1204` | |
 | `title` | `"Weekly Sync"` | Optional at save (imported audio, detected meetings); the restyle always writes one. |
+| `imported_at` | `2026-09-24T19:34:04Z` | Imported files only: when the file was transcribed, as a UTC ISO 8601 instant. `date`/`time` stay the original recording time; the app lists an import by this key so it shows up where it was just made. Kept when the same file is re-transcribed. |
 
 The `transcription_engine` value identifies the concrete model used, not a
 later picker selection. Current identifiers are additive within format version 1:

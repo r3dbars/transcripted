@@ -154,6 +154,14 @@ struct QuietMeetingRow: View {
             .allowsHitTesting(isHovering)
             .accessibilityHidden(!isHovering)
 
+            if let modelName = item.transcriptionModelName {
+                Text(modelName)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .lineLimit(1)
+                    .help("Transcribed with \(modelName)")
+            }
+
             if let durationString {
                 Text(durationString)
                     .font(LibraryTokens.meta)
@@ -568,6 +576,9 @@ struct QuietMeetingExpansion: View {
         if let start = item.startDate, let end = item.endDate, end > start {
             let minutes = max(1, Int((end.timeIntervalSince(start) / 60).rounded()))
             parts.append("\(minutes) min")
+        }
+        if let modelName = item.transcriptionModelName {
+            parts.append(modelName)
         }
         return parts.joined(separator: "  ·  ")
     }
@@ -1014,5 +1025,12 @@ extension View {
     /// currently-open Home meeting expansion.
     func homeBackgroundTapCatcher(onTap: @escaping () -> Void) -> some View {
         modifier(HomeBackgroundTapCatcherModifier(onTap: onTap))
+    }
+}
+
+extension RecentMeetingItem {
+    /// The speech model that made this transcript, e.g. "Parakeet V3".
+    var transcriptionModelName: String? {
+        transcriptionEngine.flatMap(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier:))
     }
 }

@@ -8,13 +8,19 @@ public enum TranscriptAudioSource: String, Sendable, Equatable {
 public struct TranscriptFormatOptions: Sendable, Equatable {
     public var audioSources: [TranscriptAudioSource]
     public var includeObsidianMetadata: Bool
+    /// When an imported file was transcribed. Written as `imported_at` so the
+    /// library can list the import where the user expects it (today), while
+    /// `date:`/`time:` keep the original recording time.
+    public var importedAt: Date?
 
     public init(
         audioSources: [TranscriptAudioSource] = [.microphone, .systemAudio],
-        includeObsidianMetadata: Bool = false
+        includeObsidianMetadata: Bool = false,
+        importedAt: Date? = nil
     ) {
         self.audioSources = Self.normalizedAudioSources(audioSources)
         self.includeObsidianMetadata = includeObsidianMetadata
+        self.importedAt = importedAt
     }
 
     public static let `default` = TranscriptFormatOptions()
@@ -22,7 +28,8 @@ public struct TranscriptFormatOptions: Sendable, Equatable {
     public func withAudioSources(_ sources: [TranscriptAudioSource]) -> TranscriptFormatOptions {
         TranscriptFormatOptions(
             audioSources: sources,
-            includeObsidianMetadata: includeObsidianMetadata
+            includeObsidianMetadata: includeObsidianMetadata,
+            importedAt: importedAt
         )
     }
 

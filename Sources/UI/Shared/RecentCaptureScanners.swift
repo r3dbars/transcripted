@@ -17,6 +17,9 @@ struct RecentMeetingItem: Identifiable, Sendable {
     /// Named speakers from the transcript body, for the Home meetings search.
     /// Generic labels ("You", "Speaker 2") are left out.
     var speakerNames: [String] = []
+    /// Raw `transcription_engine` frontmatter id (e.g. `parakeet_local`), or
+    /// nil for files saved without one.
+    var transcriptionEngine: String? = nil
 
     var systemAudioVerificationWarning: String? {
         systemAudioSignalVerified == false ? "System audio unverified" : nil
@@ -688,7 +691,11 @@ enum RecentMeetingsScanner {
             frontmatter: frontmatter,
             fallbackDate: fallbackDate
         )
-        let displayDate = timing.start ?? fallbackDate
+        // An imported file keeps its original recording time in `date:`/`time:`,
+        // but is listed by when it was imported, so it shows up at the top
+        // instead of weeks back. `startDate` still shows the recording time.
+        let displayDate = frontmatter.flatMap { TranscriptFrontmatter.importedAt(values: $0.values) }
+            ?? timing.start ?? fallbackDate
         let speakerLabels = RecentMeetingSpeakerStatus.transcriptSpeakerLabels(in: markdown)
         return RecentMeetingItem(
             title: styled.title,
@@ -700,7 +707,8 @@ enum RecentMeetingsScanner {
             speakerStatus: RecentMeetingSpeakerStatus.detect(speakerLabels: speakerLabels),
             audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter),
             systemAudioSignalVerified: frontmatter?.values["system_audio_signal_verified"].flatMap(Bool.init),
-            speakerNames: RecentMeetingSpeakerStatus.speakerNames(fromLabels: speakerLabels)
+            speakerNames: RecentMeetingSpeakerStatus.speakerNames(fromLabels: speakerLabels),
+            transcriptionEngine: frontmatter?.values["transcription_engine"].flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
