@@ -337,6 +337,128 @@ func testCaptureLibraryMigrationPlanner() {
         assertEqual(readFile(at: oldDictation), "- dictated", "an original the Trash refused must still be there")
     }
 
+    runSuite("libraryHasCaptures - writing day files count") {
+        let writingOnly = makeLibraryRoot("writing-only")
+        defer { try? fileManager.removeItem(at: writingOnly) }
+        makeDirectory(at: writingOnly.appendingPathComponent("writing", isDirectory: true))
+        assertFalse(
+            planner.libraryHasCaptures(at: writingOnly),
+            "an empty writing folder should not offer a copy"
+        )
+
+        writeFile("## 10:42 AM - synthetic entry", at: writingOnly
+            .appendingPathComponent("writing", isDirectory: true)
+            .appendingPathComponent("Writing_2026-09-25.md", isDirectory: false))
+        assertTrue(
+            planner.libraryHasCaptures(at: writingOnly),
+            "a writing day file alone should count as existing captures"
+        )
+    }
+
+    runSuite("makePlan - writing day files are planned into the new writing folder") {
+        let old = makeLibraryRoot("writing-plan-old")
+        let new = makeLibraryRoot("writing-plan-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+
+        let oldWriting = old.appendingPathComponent("writing", isDirectory: true)
+        writeFile("day one", at: oldWriting.appendingPathComponent("Writing_2026-09-24.md", isDirectory: false))
+        writeFile("day two", at: oldWriting.appendingPathComponent("Writing_2026-09-25.md", isDirectory: false))
+        writeFile("not markdown", at: oldWriting.appendingPathComponent("notes.txt", isDirectory: false))
+        writeFile("hidden", at: oldWriting.appendingPathComponent(".Writing_2026-09-23.md", isDirectory: false))
+        makeDirectory(at: oldWriting.appendingPathComponent("nested.md", isDirectory: true))
+        writeFile("- dictated", at: old.appendingPathComponent("dictations/Dictations_2026-09-25.md"))
+
+        let plan = planner.makePlan(from: old, to: new)
+        let writingItems = plan.itemsToCopy.filter { $0.kind == .writingTranscript }
+
+        assertEqual(plan.itemsToCopy.count, 3, "two writing day files and one dictation day file should be planned")
+        assertEqual(
+            writingItems.map(\.sourceURL.lastPathComponent),
+            ["Writing_2026-09-24.md", "Writing_2026-09-25.md"],
+            "only visible writing Markdown files should be planned, in name order"
+        )
+        assertEqual(
+            writingItems.map(\.destinationURL.path),
+            [
+                new.standardizedFileURL.appendingPathComponent("writing/Writing_2026-09-24.md", isDirectory: false).path,
+                new.standardizedFileURL.appendingPathComponent("writing/Writing_2026-09-25.md", isDirectory: false).path,
+            ],
+            "writing day files should land in the new library's writing folder"
+        )
+        assertEqual(plan.itemsToCopy.filter { $0.kind == .dictationTranscript }.count, 1, "dictations stay their own kind")
+    }
+
+    runSuite("copy - writing day files copy, keep originals, and skip collisions") {
+        let old = makeLibraryRoot("writing-copy-old")
+        let new = makeLibraryRoot("writing-copy-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+
+        let oldFresh = old.appendingPathComponent("writing/Writing_2026-09-24.md")
+        let oldColliding = old.appendingPathComponent("writing/Writing_2026-09-25.md")
+        writeFile("old day one", at: oldFresh)
+        writeFile("old day two", at: oldColliding)
+        let collidingDestination = new.appendingPathComponent("writing/Writing_2026-09-25.md")
+        writeFile("destination keeps this", at: collidingDestination)
+
+        let plan = planner.makePlan(from: old, to: new)
+        assertEqual(plan.skippedExisting.map(\.kind), [.writingTranscript], "the colliding writing day file should be planned as a skip")
+
+        let result = try? planner.copy(plan)
+
+        assertEqual(result?.copiedCount, 1, "the non-colliding writing day file should copy")
+        assertEqual(result?.skippedExistingCount, 1, "the colliding writing day file should be skipped")
+        assertEqual(readFile(at: new.appendingPathComponent("writing/Writing_2026-09-24.md")), "old day one")
+        assertEqual(readFile(at: collidingDestination), "destination keeps this", "a collision must never be overwritten")
+        assertEqual(readFile(at: oldFresh), "old day one", "Copy must keep the original")
+        assertEqual(readFile(at: oldColliding), "old day two", "Copy must keep the colliding original")
+    }
+
+    runSuite("move - writing day files follow the dictation rules") {
+        let old = makeLibraryRoot("writing-move-old")
+        let new = makeLibraryRoot("writing-move-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+        var removedPaths: [String] = []
+        let movingPlanner = CaptureLibraryMigrationPlanner(removeOriginal: { url in
+            removedPaths.append(url.lastPathComponent)
+            try fileManager.removeItem(at: url)
+        })
+
+        let oldYesterday = old.appendingPathComponent("writing/Writing_2026-09-24.md")
+        let oldToday = old.appendingPathComponent("writing/Writing_2026-09-25.md")
+        let oldColliding = old.appendingPathComponent("writing/Writing_2026-09-23.md")
+        writeFile("yesterday", at: oldYesterday)
+        writeFile("today, first entry", at: oldToday)
+        writeFile("older day", at: oldColliding)
+        let collidingDestination = new.appendingPathComponent("writing/Writing_2026-09-23.md")
+        writeFile("destination keeps this", at: collidingDestination)
+
+        let copyResult = try? movingPlanner.copy(movingPlanner.makePlan(from: old, to: new))
+        assertEqual(copyResult?.copiedItems.count, 2, "yesterday and today should copy; the collision is skipped")
+        // The user keeps typing during the move, so today's file gains an entry
+        // after its copy.
+        writeFile("today, first entry\ntoday, written mid-move", at: oldToday)
+
+        let removal = movingPlanner.removeOriginals(of: copyResult?.copiedItems ?? [])
+
+        assertEqual(removal, CaptureLibraryOriginalsRemovalResult(removedCount: 1, keptChangedCount: 1, failedCount: 0))
+        assertEqual(removedPaths, ["Writing_2026-09-24.md"], "only the unchanged copied writing day file should go to the Trash")
+        assertFalse(fileManager.fileExists(atPath: oldYesterday.path), "an unchanged writing day file should leave the old library")
+        assertEqual(readFile(at: oldToday), "today, first entry\ntoday, written mid-move", "a writing day file changed since its copy must stay")
+        assertEqual(readFile(at: oldColliding), "older day", "a skipped collision must keep its original")
+        assertEqual(readFile(at: collidingDestination), "destination keeps this", "the destination file must not be touched")
+        assertEqual(readFile(at: new.appendingPathComponent("writing/Writing_2026-09-24.md")), "yesterday")
+        assertEqual(readFile(at: new.appendingPathComponent("writing/Writing_2026-09-25.md")), "today, first entry")
+    }
+
     runSuite("move summary - says what moved, what stayed, and where") {
         let clean = CaptureLibraryMoveSummary.text(
             copy: CaptureLibraryMigrationResult(copiedCount: 3, skippedExistingCount: 0),
