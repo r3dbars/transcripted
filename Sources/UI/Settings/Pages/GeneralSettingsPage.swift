@@ -64,7 +64,7 @@ struct GeneralSettingsPage<
                     help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
                     info: GeneralInfo(
                         title: "Sounds",
-                        message: "Short sounds when dictation starts, finishes, or hears no speech."
+                        message: "A click when dictation starts, another when you press Stop, and a soft drop if it hears no speech."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )

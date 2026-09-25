@@ -1173,6 +1173,10 @@ class DictationSessionController: ObservableObject {
             // idle stop path invalidates any pending recovery restart.
             await appState.sttRouter.stopRecording()
             stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
+            // The only end-of-take click. It plays once the mic is stopped, so on
+            // speakers it can't land in the take, and before transcription and
+            // paste, so it means "got it", not "pasted".
+            AppSoundPlayer.shared.play(.dictationStop)
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
@@ -1603,7 +1607,6 @@ class DictationSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
-                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if case .failed(let failure) = autoSendOutcome {
@@ -1615,7 +1618,6 @@ class DictationSessionController: ObservableObject {
                 // No Accessibility proof, but the target stayed in front and read
                 // the clipboard right after Cmd+V, so the text almost certainly
                 // landed and the user's clipboard is already being restored.
-                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if self.autoSendRequestDecision.expected {

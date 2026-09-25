@@ -316,11 +316,17 @@ enum TranscriptedConstants {
 
     /// Output volume for short overlay confirmation cues
     static let overlayCueVolume: Float = 0.7
-    static let deliveredCueVolumeMultiplier: Float = 0.3
+    /// Start and stop clicks play at 35% output (0.7 x 0.5), the level they were tuned at.
+    static let dictationClickCueVolumeMultiplier: Float = 0.5
+    /// Keeps the no-speech cue softer than the start and stop clicks.
+    static let noSpeechCueVolumeMultiplier: Float = 0.3
+    /// A cue still waiting this long behind a slow output device is dropped, not played late.
+    static let staleCueDropInterval: TimeInterval = 1.0
 
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
-    static let listeningStartSoundFileName = "dictation-start.mp3"
-    static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
+    static let listeningStartSoundFileName = "dictation-start.caf"
+    /// Acknowledges Stop right away. It does not mean the text was pasted.
+    static let dictationStopSoundFileName = "dictation-stop.caf"
     /// Soft two-note drop for "nothing was pasted": a cancelled dictation or one with no speech.
     static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"

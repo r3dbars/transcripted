@@ -19,7 +19,7 @@ final class AppSoundPlayer {
 
     enum Cue: CaseIterable {
         case dictationStart
-        case dictationDelivered
+        case dictationStop
         case dictationCancelled
         case noSpeech
         case meetingTranscriptComplete
@@ -28,10 +28,10 @@ final class AppSoundPlayer {
             switch self {
             case .dictationStart:
                 return TranscriptedConstants.listeningStartSoundFileName
-            case .dictationDelivered:
-                return TranscriptedConstants.dictationDeliveredSoundFileName
+            case .dictationStop:
+                return TranscriptedConstants.dictationStopSoundFileName
             case .noSpeech, .dictationCancelled:
-                // Nothing was pasted, so these must not sound like the "done" chime.
+                // Nothing was pasted, so these get their own soft drop.
                 return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
@@ -40,9 +40,11 @@ final class AppSoundPlayer {
 
         var volumeMultiplier: Float {
             switch self {
-            case .dictationDelivered, .noSpeech:
-                return TranscriptedConstants.deliveredCueVolumeMultiplier
-            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete:
+            case .dictationStart, .dictationStop:
+                return TranscriptedConstants.dictationClickCueVolumeMultiplier
+            case .noSpeech:
+                return TranscriptedConstants.noSpeechCueVolumeMultiplier
+            case .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0
             }
         }
@@ -50,7 +52,9 @@ final class AppSoundPlayer {
 
     static let shared = AppSoundPlayer()
 
-    private let queue = DispatchQueue(label: "com.transcripted.ui-sound-player", qos: .utility)
+    // Output only; never opens an input device. userInitiated so a cue is not
+    // starved behind background work while dictation is starting or stopping.
+    private let queue = DispatchQueue(label: "com.transcripted.ui-sound-player", qos: .userInitiated)
     private var players: [Cue: AVAudioPlayer] = [:]
     private var didAttemptPreload = false
     private var warningReporter: WarningReporter?
@@ -71,9 +75,12 @@ final class AppSoundPlayer {
 
     func play(_ cue: Cue, respectingPreferences: Bool = true) {
         guard !respectingPreferences || UISoundPreferences.isEnabled() else { return }
+        let requestedAt = ProcessInfo.processInfo.systemUptime
         queue.async { [weak self] in
             guard let self else { return }
             self.loadPlayersIfNeeded()
+            // A click that lands a second late reads as a glitch, not feedback.
+            guard !Self.isStale(requestedAt: requestedAt, now: ProcessInfo.processInfo.systemUptime) else { return }
             guard let player = self.players[cue] else { return }
             if player.isPlaying {
                 player.stop()
@@ -81,6 +88,10 @@ final class AppSoundPlayer {
             player.currentTime = 0
             _ = player.play()
         }
+    }
+
+    static func isStale(requestedAt: TimeInterval, now: TimeInterval) -> Bool {
+        now - requestedAt >= TranscriptedConstants.staleCueDropInterval
     }
 
     private func loadPlayersIfNeeded() {
