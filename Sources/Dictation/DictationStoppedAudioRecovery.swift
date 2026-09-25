@@ -51,6 +51,9 @@ enum DictationStoppedAudioRecoveryStore {
         let sessionID: UUID
         let createdAt: Date
         let audioFilename: String
+        /// Set when the user closed the "Transcribe It" message for this
+        /// recording. The launch reminder skips it; the file stays on disk.
+        var dismissed: Bool? = nil
     }
 
     static var defaultDirectory: URL {
@@ -84,6 +87,7 @@ enum DictationStoppedAudioRecoveryStore {
 
     static func pendingRecoveries(
         limit: Int = 10,
+        excludingDismissed: Bool = false,
         directory: URL? = nil,
         fileManager: FileManager = .default
     ) -> [DictationStoppedAudioRecovery] {
@@ -98,7 +102,8 @@ enum DictationStoppedAudioRecoveryStore {
         var recoveries: [DictationStoppedAudioRecovery] = []
         for case let metadataURL as URL in enumerator where metadataURL.pathExtension == "json" {
             guard let metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL)),
-                  metadata.version == 1 else { continue }
+                  metadata.version == 1,
+                  !(excludingDismissed && metadata.dismissed == true) else { continue }
             let audioURL = folder.appendingPathComponent(metadata.audioFilename, isDirectory: false)
             guard fileManager.fileExists(atPath: audioURL.path) else { continue }
             recoveries.append(DictationStoppedAudioRecovery(
@@ -146,6 +151,23 @@ enum DictationStoppedAudioRecoveryStore {
         }
     }
 
+    /// Stops the launch reminder for one saved recording without deleting it.
+    /// The user closed its "Transcribe It" message, so asking again on every
+    /// launch is a nag; the WAV stays where it is. Returns `true` when marked.
+    @discardableResult
+    static func markDismissed(audioURL: URL, fileManager: FileManager = .default) -> Bool {
+        let url = metadataURL(for: audioURL)
+        guard var metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: url)),
+              metadata.version == 1 else { return false }
+        metadata.dismissed = true
+        do {
+            try write(metadata, to: url, fileManager: fileManager)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private static func writeMetadata(
         for recovery: DictationStoppedAudioRecovery,
         fileManager: FileManager
@@ -156,7 +178,10 @@ enum DictationStoppedAudioRecoveryStore {
             createdAt: recovery.createdAt,
             audioFilename: recovery.url.lastPathComponent
         )
-        let url = metadataURL(for: recovery.url)
+        try write(metadata, to: metadataURL(for: recovery.url), fileManager: fileManager)
+    }
+
+    private static func write(_ metadata: Metadata, to url: URL, fileManager: FileManager) throws {
         try JSONEncoder().encode(metadata).write(to: url, options: .atomic)
         fileManager.restrictFileToOwnerOnly(at: url)
     }

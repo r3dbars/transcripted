@@ -319,18 +319,6 @@ rules:
       - "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
 
   - paths:
-      - "scripts/ops/build-codex-memory-index.py"
-    checks:
-      - "scripts/dev/agent-preflight.sh"
-      - "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
-
-  - paths:
-      - "scripts/ops/nightly-transcripted-archive-miner.sh"
-    checks:
-      - "scripts/dev/agent-preflight.sh"
-      - "bash -n scripts/ops/nightly-transcripted-archive-miner.sh"
-
-  - paths:
       - "scripts/ops/performance-budget.rb"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -370,16 +358,6 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
       - "ruby scripts/ops/dictation-recovery-autoeval.rb --details"
-
-  - paths:
-      - "scripts/ops/agent-todo-runner.rb"
-      - "scripts/ops/agent-todo-runner-security-test.rb"
-      - "scripts/ops/agent-todo-launchagent.sh"
-    checks:
-      - "scripts/dev/agent-preflight.sh"
-      - "ruby -c scripts/ops/agent-todo-runner.rb"
-      - "ruby scripts/ops/agent-todo-runner-security-test.rb"
-      - "bash -n scripts/ops/agent-todo-launchagent.sh"
 
   - paths:
       - "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift"

@@ -1603,6 +1603,32 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner lists imports by import time and reads the speech model") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let recordedAt = recentLoaderFrontmatterDate("2026-05-01 14:00:00")
+            let importedAt = recentLoaderDate("2026-05-29T14:00:00Z")
+            try? writeRecentLoaderMeeting(
+                title: "Old Lecture",
+                date: recentLoaderDate("2026-05-01T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("old-lecture.md", isDirectory: false),
+                fileDate: importedAt,
+                extraFrontmatterLines: [
+                    "transcription_engine: apple_speech_local",
+                    "imported_at: 2026-05-29T14:00:00Z"
+                ]
+            )
+
+            for pass in ["cold", "warm"] {
+                let meetings = RecentMeetingsScanner.loadRecent(limit: 1)
+                assertEqual(meetings.first?.listDate, importedAt, "\(pass): Home lists an import by when it was imported, not weeks back")
+                assertEqual(meetings.first?.date, recordedAt, "\(pass): Today and copy-for-agents keep the original recording time")
+                assertEqual(meetings.first?.startDate, recordedAt, "\(pass): the row still shows the original recording time")
+                assertEqual(meetings.first?.transcriptionEngine, "apple_speech_local", "\(pass): the row knows which model made it")
+            }
+        }
+    }
+
     await runSuite("RecentMeetingsScanner fills the limit after skipping dictation markdown in meetings storage") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)

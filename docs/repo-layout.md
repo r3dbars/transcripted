@@ -12,7 +12,7 @@ The repo root should only expose:
 - clearly marked historical/archive zones
 
 If a file or folder does not fit one of those jobs, it should usually live
-under `scripts/`, `Tools/`, `docs/`, or `archive/`.
+under `scripts/`, `Tools/`, or `docs/`.
 
 When a root shell command is part of the public repo surface, prefer a thin
 wrapper at the root and keep the implementation under `scripts/`.
@@ -91,7 +91,6 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `docs/qa/` — manual QA checklists
 - `docs/marketing/`, `docs/launch-assets/`, `docs/assets/`, `docs/screenshots/` — launch and marketing material, not engineering docs
 - `experiments/` — standalone probes (e.g. `audio-only-probe/`), not part of the app build
-- `archive/` — historical code and legacy tooling kept out of the live product surface
 - `config/` — app config artifacts including entitlements and nightly security manifests
 - `Casks/` — committed Homebrew cask release surface
 - `Resources/` — bundled app assets
@@ -117,7 +116,6 @@ Use these docs for these jobs:
 - `docs/agent-closeout.md` — compact coordinator and agent handoff format
 - `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
 - `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules
-- `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/install-attribution-map.md` — anonymous website/download/install to first-value signal map
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
 - `docs/retention-cohort-analytics.md` — privacy-safe PostHog habit and retention report for first/second artifact, next-day and 7-day return, repeat use, 3-days-this-week, and health-skill output
@@ -171,8 +169,7 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 
 ## Historical Zones
 
-Treat these as reference, not current product surface:
-
-- `archive/backend-beta-worker/`
+The old beta backend (`archive/`) was removed on 2026-09-25. It's still in git history (last on `main` at
+`73f4fa6`) if you need it.
 
 `.claude/` is live tooling, not a historical zone: it holds the `transcripted-qa` skill and the `humanize`/`tests`/`push` slash commands.

@@ -126,6 +126,37 @@ func testDictationStoppedAudioRecovery() {
         }
     }
 
+    runSuite("Closing a saved recording's prompt stops the launch reminder but keeps the audio") {
+        let directory = makeRecoveryTestDirectory("dismissed")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            let closed = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0, 0, 0], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 2), directory: directory
+            )!
+            let other = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0.1, -0.1, 0.1], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 1), directory: directory
+            )!
+            assertTrue(DictationStoppedAudioRecoveryStore.markDismissed(audioURL: closed.url), "an existing recording can be marked")
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.pendingRecoveries(excludingDismissed: true, directory: directory).map(\.url),
+                [other.url],
+                "the launch reminder skips the closed recording and still offers the other one"
+            )
+            assertEqual(
+                Set(DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).map(\.url)),
+                Set([closed.url, other.url]),
+                "importers still find the closed recording, so Transcribe It can clean it up later"
+            )
+            assertTrue(FileManager.default.fileExists(atPath: closed.url.path), "closing the prompt never deletes audio")
+            assertFalse(
+                DictationStoppedAudioRecoveryStore.markDismissed(audioURL: directory.appendingPathComponent("missing.wav")),
+                "a recording without metadata reports nothing marked"
+            )
+        } catch {
+            assertTrue(false, "marking a recovery dismissed should succeed: \(error)")
+        }
+    }
+
     runSuite("Dictation stopped audio recovery limits after newest-first ordering") {
         let oldSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let middleSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
