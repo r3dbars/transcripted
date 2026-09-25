@@ -202,24 +202,74 @@ struct WritingDayFileStoreTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: sandbox.writing.path).isEmpty)
     }
 
+    @Test("A write failure is kept for the Writing tab, reported once, and cleared by the next good write")
+    func recorderReportsWriteFailures() async throws {
+        let sandbox = try Sandbox()
+        defer { sandbox.remove() }
+        let clock = Clock(Self.start)
+        let written = Written()
+        let problems = Problems()
+        let recorder = Self.recorder(sandbox: sandbox, clock: clock, written: written, problems: problems)
+        #expect(recorder.lastWriteFailure == nil)
+
+        // A file where the folder should be fails the same closed way as a
+        // NAS or exFAT library that won't take 0700.
+        try Data().write(to: sandbox.writing)
+        await recorder.ingest([Self.typed("first entry", session: "a", at: Self.start)])
+        recorder.flush()
+        let failure = try #require(recorder.lastWriteFailure)
+        #expect(failure.error == .folderUnavailable)
+        #expect(failure.date == Self.date(Self.start))
+        #expect(problems.values == [.folderUnavailable])
+
+        // Still failing: the time moves on, but it's the same problem.
+        clock.now = Self.start + 5_000
+        await recorder.ingest([Self.typed("second entry", session: "b", at: Self.start + 5_000)])
+        recorder.flush()
+        #expect(recorder.lastWriteFailure?.date == Self.date(Self.start + 5_000))
+        #expect(problems.values == [.folderUnavailable])
+        #expect(written.urls.isEmpty)
+
+        // Fixed: the parked entries go out with the new one, and it clears.
+        try FileManager.default.removeItem(at: sandbox.writing)
+        await recorder.ingest([Self.typed("third entry", session: "c", at: Self.start + 6_000)])
+        recorder.flush()
+        #expect(recorder.lastWriteFailure == nil)
+        #expect(written.urls.count == 3)
+
+        // A failure after a success is a new problem.
+        try FileManager.default.removeItem(at: sandbox.writing)
+        try Data().write(to: sandbox.writing)
+        await recorder.ingest([Self.typed("fourth entry", session: "d", at: Self.start + 7_000)])
+        recorder.flush()
+        #expect(recorder.lastWriteFailure?.error == .folderUnavailable)
+        #expect(problems.values == [.folderUnavailable, .folderUnavailable])
+    }
+
     // MARK: - Helpers
+
+    private static func date(_ milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
+    }
 
     private static func recorder(
         sandbox: Sandbox,
         clock: Clock,
         written: Written,
-        gate: GateBox = GateBox(.init(enabled: true, historyIdentifier: "history", consentIdentifier: "consent"))
+        gate: GateBox = GateBox(.init(enabled: true, historyIdentifier: "history", consentIdentifier: "consent")),
+        problems: Problems = Problems()
     ) -> WritingDayFileRecorder {
         let writing = sandbox.writing
         return WritingDayFileRecorder(
             directory: { writing },
             gate: { gate.value },
             appName: { $0 == slack ? "Slack" : nil },
-            now: { Date(timeIntervalSince1970: TimeInterval(clock.now) / 1_000) },
+            now: { Self.date(clock.now) },
             timeZone: { TimeZone(identifier: "America/Chicago")! },
             locale: Locale(identifier: "en_US"),
             entryIDSuffix: { "0000abcd" },
-            didWrite: { written.append($0) }
+            didWrite: { written.append($0) },
+            writeProblemStarted: { problems.append($0) }
         )
     }
 
@@ -287,6 +337,13 @@ struct WritingDayFileStoreTests {
         private var values: [URL] = []
         var urls: [URL] { lock.withLock { values } }
         func append(_ url: URL) { lock.withLock { values.append(url) } }
+    }
+
+    private final class Problems: @unchecked Sendable {
+        private let lock = NSLock()
+        private var errors: [WritingDayFileStore.StoreError] = []
+        var values: [WritingDayFileStore.StoreError] { lock.withLock { errors } }
+        func append(_ error: WritingDayFileStore.StoreError) { lock.withLock { errors.append(error) } }
     }
 
     private final class GateBox: @unchecked Sendable {

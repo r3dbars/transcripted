@@ -27,7 +27,13 @@ final class WritingDayFileWriter {
     let recorder: WritingDayFileRecorder
     private var idleTimer: Timer?
 
-    init(directory: @escaping @Sendable () -> URL, preferences: @escaping @Sendable () -> WritingPreferences) {
+    /// `problemStarted` runs on the main actor once per write problem (see
+    /// `WritingDayFileRecorder.lastWriteFailure`), with the error case only.
+    init(
+        directory: @escaping @Sendable () -> URL,
+        preferences: @escaping @Sendable () -> WritingPreferences,
+        problemStarted: @escaping @MainActor @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in }
+    ) {
         let names = WritingAppDisplayNames()
         recorder = WritingDayFileRecorder(
             directory: directory,
@@ -40,6 +46,9 @@ final class WritingDayFileWriter {
             },
             writeFailed: {
                 DiagnosticsLog.shared.record("writing-day-file-write-failed")
+            },
+            writeProblemStarted: { error in
+                Task { @MainActor in problemStarted(error) }
             }
         )
     }

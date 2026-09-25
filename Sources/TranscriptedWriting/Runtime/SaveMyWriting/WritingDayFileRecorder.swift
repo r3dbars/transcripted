@@ -55,6 +55,14 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         }
     }
 
+    /// The last day-file write that failed: which `StoreError` and when.
+    /// Never a path or any text. The Writing tab reads it to say "Writing
+    /// couldn't be saved to this folder."
+    struct WriteFailure: Equatable, Sendable {
+        let error: WritingDayFileStore.StoreError
+        let date: Date
+    }
+
     private static let rememberedEventLimit = 512
     private static let unwrittenLimit = 32
 
@@ -67,12 +75,25 @@ final class WritingDayFileRecorder: @unchecked Sendable {
     private let locale: Locale
     private let didWrite: @Sendable (URL) -> Void
     private let writeFailed: @Sendable () -> Void
+    private let writeProblemStarted: @Sendable (WritingDayFileStore.StoreError) -> Void
     private var composer: WritingEntryComposer
     private var rememberedEventIDs: Set<String> = []
     private var rememberedEventOrder: [String] = []
     /// Entries whose append failed, retried on the next write.
     private var unwritten: [WritingEntryComposer.Entry] = []
+    /// Its own lock, not the queue: the Writing tab reads it from the main
+    /// thread and must not wait behind a slow write.
+    private let failureLock = NSLock()
+    private var failure: WriteFailure?
 
+    /// `nil` until a write fails, and again once one succeeds. Any thread.
+    var lastWriteFailure: WriteFailure? {
+        failureLock.withLock { failure }
+    }
+
+    /// `writeFailed` runs on every failed append. `writeProblemStarted` runs
+    /// once per problem: on the first failure after a success (or before any
+    /// write), not again until a write succeeds and another fails.
     init(
         directory: @escaping @Sendable () -> URL,
         gate: @escaping @Sendable () -> Gate,
@@ -84,7 +105,8 @@ final class WritingDayFileRecorder: @unchecked Sendable {
             String(format: "%08x", UInt32.random(in: .min ... .max))
         },
         didWrite: @escaping @Sendable (URL) -> Void = { _ in },
-        writeFailed: @escaping @Sendable () -> Void = {}
+        writeFailed: @escaping @Sendable () -> Void = {},
+        writeProblemStarted: @escaping @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in }
     ) {
         self.directory = directory
         self.gate = gate
@@ -94,6 +116,7 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         self.locale = locale
         self.didWrite = didWrite
         self.writeFailed = writeFailed
+        self.writeProblemStarted = writeProblemStarted
         composer = WritingEntryComposer { milliseconds in
             WritingDayFileFormatter.entryID(
                 forMilliseconds: milliseconds,
@@ -207,9 +230,17 @@ final class WritingDayFileRecorder: @unchecked Sendable {
                     ),
                     in: folder
                 )
+                failureLock.withLock { failure = nil }
                 didWrite(url)
             } catch {
                 if unwritten.count < Self.unwrittenLimit { unwritten.append(entry) }
+                let storeError = error as? WritingDayFileStore.StoreError ?? .writeFailed
+                let startsProblem = failureLock.withLock { () -> Bool in
+                    let starts = failure == nil
+                    failure = WriteFailure(error: storeError, date: now())
+                    return starts
+                }
+                if startsProblem { writeProblemStarted(storeError) }
                 writeFailed()
             }
         }

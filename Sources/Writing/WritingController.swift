@@ -119,6 +119,12 @@ final class WritingController {
     var screenRecordingGranted: Bool { ScreenRecordingPermission.isGranted() }
 
     var saveMyWritingEnabled: Bool { Self.preferences().saveMyWritingEnabled }
+    /// Set while Save my writing can't write its day files (for example a
+    /// capture library on a NAS that won't take owner-only permissions);
+    /// `nil` again after the next write that works. The Writing tab shows
+    /// "Writing couldn't be saved to this folder." The error case and a
+    /// time only, never a path.
+    var saveMyWritingProblem: WritingDayFileRecorder.WriteFailure? { runtime?.dayFiles.recorder.lastWriteFailure }
     var personalizedSuggestionsEnabled: Bool { Self.preferences().personalizedSuggestionsEnabled }
     var appScope: WritingAppScope { Self.preferences().appScope }
 
@@ -236,7 +242,13 @@ final class WritingController {
                 enabled: { Self.settings().screenMemoryEnabled },
                 excludedApps: { Self.settings().personalHistoryExcludedApps }
             ),
-            dayFiles: WritingDayFileWriter(directory: writingDirectory, preferences: { Self.preferences() })
+            dayFiles: WritingDayFileWriter(
+                directory: writingDirectory,
+                preferences: { Self.preferences() },
+                problemStarted: { [weak self] error in
+                    self?.log("WRITING | save my writing: day file write failed (\(error))")
+                }
+            )
         )
         self.runtime = runtime
         activeModel = selectedModel

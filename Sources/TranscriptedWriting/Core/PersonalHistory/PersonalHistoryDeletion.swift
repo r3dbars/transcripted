@@ -12,8 +12,8 @@ import Foundation
 // character from the entry it is composing.
 
 extension PersonalHistoryEvent {
-    /// A text-free deletion of `deletedCharacters` characters from the end of
-    /// `sessionIdentifier`'s chain. Travels as version 2.
+    /// A text-free deletion of `deletedCharacters` UTF-16 units from the end
+    /// of `sessionIdentifier`'s chain. Travels as version 2.
     public init?(
         deletionID id: String,
         timestampMilliseconds: Int64,
@@ -44,6 +44,10 @@ extension PersonalHistoryEvent {
         self.text = ""
         self.deletedCharacters = deletedCharacters
     }
+
+    /// Every event version this build reads. A history batch with any other
+    /// version is answered `unsupported` (`GhostBrainRequest`).
+    public static let supportedVersions: Set<Int> = [version, deletionVersion]
 
     /// Typed and accepted text is version 1, a deletion version 2.
     public var hasCurrentVersion: Bool {
@@ -105,7 +109,9 @@ public struct PersonalHistoryDeletionTracker: Equatable, Sendable {
     public static let maximumTrackedCharacters = PersonalHistoryEvent.maximumTextCharacters
 
     public struct Backspace: Equatable, Sendable {
-        /// How far the caret moves back.
+        /// How far the caret moves back, in UTF-16 units: one character as
+        /// the keyboard inserted it. The deletion event reports this count,
+        /// and the app removes the same number of units.
         public let utf16Length: Int
         /// The segment had text since its last rotation, so the predictor
         /// must see a new segment from here, as Tilde's always did.
