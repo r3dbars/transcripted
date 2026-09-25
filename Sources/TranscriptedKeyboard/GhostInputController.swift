@@ -1344,6 +1344,13 @@ final class GhostInputController: IMKInputController {
         DispatchQueue.main.async {
             guard Date().timeIntervalSince(lastBrainSummon) >= 60 else { return }
             guard !UserDefaults.standard.bool(forKey: "GhostBrainQuietQuit") else { return }
+            // Transcripted deviation from Tilde: if the app is already running,
+            // the brain is only starting up (model or helper still loading).
+            // Opening it again would deliver a reopen event, and Transcripted
+            // answers reopen by showing its window, up to once a minute.
+            guard NSRunningApplication.runningApplications(
+                withBundleIdentifier: TildeProductProfile.current.appBundleIdentifier
+            ).isEmpty else { return }
             guard let url = NSWorkspace.shared.urlForApplication(
                 withBundleIdentifier: TildeProductProfile.current.appBundleIdentifier
             ) else {

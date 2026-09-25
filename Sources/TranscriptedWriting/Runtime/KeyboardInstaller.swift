@@ -51,7 +51,7 @@ final class GhostKeyboardInstallerHost {
         var changed = false
 
         do {
-            guard let ownerTeam = Self.strictSignatureTeamIdentifier(at: Bundle.main.bundleURL) else {
+            guard let ownerTeam = Self.ownerTeamIdentifier else {
                 throw CocoaError(.fileReadNoPermission)
             }
             changed = try Self.installIfNeeded(
@@ -121,7 +121,7 @@ final class GhostKeyboardInstallerHost {
 
     private func trustedEnabledInputSource() -> TISInputSource? {
         let installed = URL(fileURLWithPath: Self.installedPath)
-        guard let ownerTeam = Self.strictSignatureTeamIdentifier(at: Bundle.main.bundleURL),
+        guard let ownerTeam = Self.ownerTeamIdentifier,
               Self.strictSignatureTeamIdentifier(at: installed) == ownerTeam,
               (try? Self.validateInputMethod(at: installed, fileManager: .default)) != nil,
               TISRegisterInputSource(installed as CFURL) == noErr,
@@ -182,6 +182,13 @@ final class GhostKeyboardInstallerHost {
         }
         return true
     }
+
+    /// Transcripted deviation from Tilde: this app's own seal is validated once
+    /// per launch. The strict nested check over the whole ~550 MB bundle costs
+    /// about 0.2 s on the main thread, and the running app's bundle can't
+    /// change until it relaunches. The keyboard bundles are still checked
+    /// every time.
+    private static let ownerTeamIdentifier: String? = strictSignatureTeamIdentifier(at: Bundle.main.bundleURL)
 
     /// Returns a non-empty Team ID only for a bundle whose complete code seal
     /// passes strict validation. Ad-hoc and unsigned bundles fail closed.

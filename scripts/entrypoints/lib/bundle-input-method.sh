@@ -92,7 +92,21 @@ bundle_transcripted_input_method() {
     fi
     cp "$source_plist" "$staged_plist" || return 1
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short_version" "$staged_plist" || return 1
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $bundle_version" "$staged_plist" || return 1
+    # The keyboard installer (ported from Tilde) upgrades only on a larger
+    # integer CFBundleVersion, so a dotted app build like 1.1.66 becomes
+    # 1001066 (major * 1,000,000 + minor * 1,000 + patch): monotonic across
+    # releases as long as minor and patch stay under 1,000.
+    local keyboard_build
+    if [[ "$bundle_version" =~ ^[0-9]+$ ]]; then
+        keyboard_build="$bundle_version"
+    elif [[ "$bundle_version" =~ ^([0-9]+)\.([0-9]+)(\.([0-9]+))?$ ]]; then
+        keyboard_build=$(( 10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 1000 + 10#${BASH_REMATCH[4]:-0} ))
+    else
+        echo "bundle-input-method: can't derive an integer keyboard build from '$bundle_version'" >&2
+        rm -rf "$staged_bundle"
+        return 1
+    fi
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $keyboard_build" "$staged_plist" || return 1
     if ! plutil -lint -s "$staged_plist"; then
         echo "bundle-input-method: stamped Info.plist is not a valid plist" >&2
         rm -rf "$staged_bundle"
@@ -101,5 +115,5 @@ bundle_transcripted_input_method() {
 
     rm -rf "$keyboard_bundle" || return 1
     mv "$staged_bundle" "$keyboard_bundle" || return 1
-    echo "Bundled Transcripted Keyboard $short_version ($bundle_version) at $keyboard_bundle"
+    echo "Bundled Transcripted Keyboard $short_version ($keyboard_build) at $keyboard_bundle"
 }
