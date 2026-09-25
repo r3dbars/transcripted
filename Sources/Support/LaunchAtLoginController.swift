@@ -11,13 +11,23 @@ enum LaunchAtLoginController {
         LaunchAtLoginState(status: SMAppService.mainApp.status)
     }
 
+    /// One serial queue for status reads. The read is a blocking XPC call, so
+    /// it stays off the Swift concurrency pool: if the daemon is slow, reads
+    /// queue up behind one waiting thread instead of tying up the pool.
+    private nonisolated static let statusQueue = DispatchQueue(
+        label: "com.transcripted.launch-at-login-status",
+        qos: .userInitiated
+    )
+
     /// Reads the status off the main thread. A slow `SMAppService.status` reply
     /// once froze the app on the Settings window, so refreshes that run on
     /// every app activation use this.
     nonisolated static func readState() async -> LaunchAtLoginState {
-        await Task.detached(priority: .userInitiated) {
-            LaunchAtLoginState(status: SMAppService.mainApp.status)
-        }.value
+        await withCheckedContinuation { continuation in
+            statusQueue.async {
+                continuation.resume(returning: LaunchAtLoginState(status: SMAppService.mainApp.status))
+            }
+        }
     }
 
     static var isEnabled: Bool {
