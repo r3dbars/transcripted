@@ -252,7 +252,8 @@ For each new or changed event:
   carries `start_latency_ms`, and `dictation_stop_latency_measured` carries
   `first_sound_latency_ms` (key press to first audio buffer),
   `decode_latency_ms`, and `stop_to_paste_latency_ms`, all rounded to 10 ms
-  by `MachineClassTelemetry.roundedMilliseconds`. Both events also carry
+  by `MachineClassTelemetry.roundedMilliseconds`. Both events, and
+  `dictation_start_requested` so the attempt funnel stays comparable, also carry
   `stt_model` (the `TranscriptionModelChoice` raw value), `mac_chip` (chip
   family and tier from the CPU brand string, such as `m2_pro`, else
   `unknown`), and `memory_gb_bucket`. These let PostHog compute P50/P95/P99

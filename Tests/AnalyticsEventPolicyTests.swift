@@ -911,7 +911,7 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             (started?.allowedProperties ?? Set<String>()).subtracting(allowed).sorted(),
-            ["start_latency_bucket"],
+            ["start_latency_bucket", "start_latency_ms"],
             "dropping a field the success event has would make the two uncomparable in a funnel; start latency is the only field a request cannot know yet"
         )
         assertTrue(

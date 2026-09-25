@@ -520,6 +520,7 @@ class DictationSessionController: ObservableObject {
         properties["model_state"] = ProductFrictionTelemetry.modelState(
             isReady: appState.sttRouter.isModelLoaded
         )
+        properties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_start_requested",
