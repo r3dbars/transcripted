@@ -72,7 +72,11 @@ bundle_transcripted_input_method() {
     # binary without that ObjC class installs fine and then does nothing.
     # The class is internal to the module, so the symbol is local: plain nm,
     # not nm -g.
-    if ! nm "$staged_binary" | grep -q ' _OBJC_CLASS_\$_GhostInputController$'; then
+    # Read nm into a variable first: under the callers' `set -o pipefail`,
+    # `nm | grep -q` fails whenever grep exits early and nm takes SIGPIPE.
+    local keyboard_symbols
+    keyboard_symbols="$(nm "$staged_binary")" || { rm -rf "$staged_bundle"; return 1; }
+    if ! grep -q ' _OBJC_CLASS_\$_GhostInputController$' <<< "$keyboard_symbols"; then
         echo "bundle-input-method: $executable_name lacks the GhostInputController class named in Info.plist" >&2
         rm -rf "$staged_bundle"
         return 1
