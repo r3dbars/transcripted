@@ -67,7 +67,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeCore/Runtime/ProcessPeerIdentityCache.swift` | `Sources/TranscriptedWriting/Core/Runtime/ProcessPeerIdentityCache.swift` | ported | 1 |  |
 | `Sources/TildeCore/Runtime/TildeConfiguration.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeConfiguration.swift` | ported | 1 | Rename Tilde-branded types only if the plan's rename table says so. |
 | `Sources/TildeCore/Runtime/TildeModelChoice.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift` | ported | 1 |  |
-| `Sources/TildeCore/Runtime/TildeProductProfile.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift` | ported | 1 | Keep the production and Qwen profiles; drop preview-build profiles. |
+| `Sources/TildeCore/Runtime/TildeProductProfile.swift` | `Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift` | ported | 1 | Keeps `.production` and `.preview9B`, drops 26B and Model Preview. `.preview9B` stays because the Qwen model choice uses its completion behavior; its bundle IDs are Tilde preview identities no Transcripted build uses. Collapse it into a Qwen completion profile once the runtime no longer reads it (phase 2 cleanup). |
 | `Sources/TildeCore/Scene/IntentFutureFusion.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutureFusion.swift` | ported | 1 |  |
 | `Sources/TildeCore/Scene/IntentFutures.swift` | `Sources/TranscriptedWriting/Core/Scene/IntentFutures.swift` | ported | 1 |  |
 | `Sources/TildeCore/Scene/SceneSuggestionPolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SceneSuggestionPolicy.swift` | ported | 1 |  |
