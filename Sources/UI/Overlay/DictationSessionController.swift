@@ -1844,6 +1844,43 @@ class DictationSessionController: ObservableObject {
     }
 
     /// Cancel dictation without pasting
+    /// This session's id while it is dictating, for a caller that needs to
+    /// act on this exact session later.
+    var activeDictationSessionID: UUID? {
+        isDictating ? currentDictationSessionID : nil
+    }
+
+    /// A hands-free modifier press started this session, then another key went
+    /// down while it was held: it was a combo (Option+M, or typing é), not a
+    /// dictation tap. Drop the start with no sound, error, or saved audio.
+    func abandonDictationStartForModifierCombo(sessionID: UUID) {
+        guard let (appState, overlayController) = readyState(),
+              isDictating,
+              currentDictationSessionID == sessionID else { return }
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
+        let stage = pendingStartStage
+        cancelActiveTasks(cancelRecording: true)
+        discardStoppedAudioRecovery(explicitDiscard: true)
+        overlayController.hideWithCancelAnimation()
+        isDictating = false
+        enterPendingStartStage(Self.idleStartStage)
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "modifier_combo")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_start_dropped_for_modifier_combo",
+            message: "A hands-free key press became a key combo, so its dictation start was dropped",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "pending_stage": stage
+                ]
+            )
+        )
+    }
+
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
         // Esc on a finishing take means stop, not "and start the next one".

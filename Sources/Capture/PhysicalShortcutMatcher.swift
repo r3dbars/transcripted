@@ -31,6 +31,21 @@ struct DelayedModifierShortcutPress: Equatable {
 }
 
 enum PhysicalShortcutMatcher {
+    /// A typed key this recent means the user is mid-typing, where a
+    /// hands-free modifier press is likely the start of a combo (typing é
+    /// with Option+E) rather than a dictation tap.
+    static let typingWindowForModifierCombos: TimeInterval = 1.0
+
+    /// Whether a hands-free modifier that other shortcuts also use in combos
+    /// (Right Option vs Option+M) fires on press instead of on release.
+    /// Waiting for release costs the whole time the key is held, so it fires
+    /// on press unless a key was typed just before. If a combo key does
+    /// follow while it's held, the detector reports `.comboInterrupted` and
+    /// the just-started dictation is dropped quietly.
+    static func firesSharedModifierOnPress(secondsSinceLastTypedKey: TimeInterval) -> Bool {
+        secondsSinceLastTypedKey >= typingWindowForModifierCombos
+    }
+
     static func shouldActivateDelayedModifierPress(
         current: DelayedModifierShortcutPress?,
         expected: DelayedModifierShortcutPress,
