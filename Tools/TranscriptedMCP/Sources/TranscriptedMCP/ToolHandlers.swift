@@ -124,6 +124,7 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedDictationDays: counts.dictationDays,
             indexedDictationEntries: nil,
             indexedWritingDays: counts.writingDays,
+            indexedWritingEntries: counts.writingEntries,
             indexedSummaryItems: nil,
             hint: counts.meetings == 0 && counts.dictationDays == 0 && counts.writingDays == 0
                 ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."

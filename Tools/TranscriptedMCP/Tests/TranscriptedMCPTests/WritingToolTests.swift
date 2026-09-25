@@ -134,6 +134,26 @@ final class WritingToolTests: XCTestCase {
         XCTAssertEqual(telemetry.observations.last?.result, "empty_not_found")
     }
 
+    func testMixedEmptyResultCountsWritingDaysAndEntries() throws {
+        let writingDir = try makeWritingDir()
+        let dictationDir = tempDir.appendingPathComponent("dictations", isDirectory: true).creatingDirectory()
+        try index.reconcile(meetingDirs: [], dictationDirs: [dictationDir], writingDirs: [writingDir])
+
+        // `kind` all with nothing matching: the empty answer covers every kind.
+        let result = try handleSearchContext(
+            params: CallTool.Parameters(name: "search_context", arguments: ["query": .string("no-such-phrase-anywhere")]),
+            index: index,
+            meetingDirs: [],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let json = try text(result)
+        let payload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(json.utf8))
+        XCTAssertEqual(payload.indexedWritingDays, 1)
+        XCTAssertEqual(payload.indexedWritingEntries, 2)
+        XCTAssertTrue(json.contains("\"indexed_writing_entries\""))
+    }
+
     // MARK: - read_writing
 
     func testReadWritingSmallDayIsByteIdenticalMarkdown() throws {
