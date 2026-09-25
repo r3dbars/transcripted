@@ -33,6 +33,9 @@ final class CrashReporter {
         options.enableCrashHandler = true
         options.enableUncaughtNSExceptionReporting = true
         options.enableAppHangTracking = SentryRuntimeConfiguration.appHangTrackingEnabled()
+        // Only a freeze of 5+ seconds counts, and `beforeSend` drops any hang
+        // while a popup was on screen (see AppHangReportPolicy).
+        options.appHangTimeoutInterval = AppHangReportPolicy.timeoutSeconds
         // Session tracking is started explicitly after onboarding and when the
         // user changes the crash-reporting preference. That keeps the first-run
         // choice and later opt-outs aligned with Release Health envelopes.
@@ -50,7 +53,16 @@ final class CrashReporter {
         options.beforeCaptureViewHierarchy = { _ in false }
         options.beforeSend = { event in
             guard CrashReportingPreferences.isEnabled() else { return nil }
+            if Self.isPopupAppHang(event) { return nil }
             return shared.sanitize(event: event)
+        }
+
+        if options.enableAppHangTracking {
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { AppHangPopupObserver.shared.start() }
+            } else {
+                DispatchQueue.main.async { AppHangPopupObserver.shared.start() }
+            }
         }
 
         SentrySDK.start(options: options)
@@ -218,6 +230,23 @@ final class CrashReporter {
         }
 
         return sentryID.sentryIdString
+    }
+
+    /// Runs on Sentry's thread, possibly while the main thread is stuck, so
+    /// it reads only the event and the lock-guarded popup tracker.
+    private static func isPopupAppHang(_ event: Event) -> Bool {
+        let mechanismType = event.exceptions?.first?.mechanism?.type
+        guard AppHangReportPolicy.isAppHang(mechanismType: mechanismType) else { return false }
+        let mainThreadFunctions = event.threads?
+            .first { $0.isMain?.boolValue == true }?
+            .stacktrace?
+            .frames
+            .compactMap(\.function) ?? []
+        return AppHangReportPolicy.shouldDrop(
+            mechanismType: mechanismType,
+            popupLikely: PopupPresenceTracker.shared.isPopupLikely(),
+            mainThreadFunctions: mainThreadFunctions
+        )
     }
 
     private func sanitize(event: Event) -> Event {
