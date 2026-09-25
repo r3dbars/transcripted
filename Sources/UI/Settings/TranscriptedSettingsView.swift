@@ -20,9 +20,8 @@ struct TranscriptedSettingsView: View {
     )
     @State private var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
-    @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
-    @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
-    @State private var launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
+    @State private var launchAtLogin = LaunchAtLoginController.currentState
+    @State private var launchAtLoginReadGeneration = 0
     @State private var launchAtLoginFailureMessage: String?
     @State private var showCorrectionsSheet = false
     /// Section id the combined settings page should scroll to on next render
@@ -2071,12 +2070,12 @@ struct TranscriptedSettingsView: View {
     private var generalPage: some View {
         GeneralSettingsPage(
             launchAtLoginEnabled: Binding(
-                get: { launchAtLoginEnabled },
+                get: { launchAtLogin.isEnabled },
                 set: { updateLaunchAtLogin($0) }
             ),
-            launchAtLoginStatus: launchAtLoginStatus,
+            launchAtLoginStatus: launchAtLogin.statusDescription,
             launchAtLoginNotice: LaunchAtLoginNoticePolicy.notice(
-                needsApproval: launchAtLoginNeedsApproval,
+                needsApproval: launchAtLogin.needsApproval,
                 failureMessage: launchAtLoginFailureMessage
             ),
             onOpenLoginItems: {
@@ -3327,26 +3326,33 @@ struct TranscriptedSettingsView: View {
         showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     }
 
+    /// Runs on every app activation, so the status read stays off main. A
+    /// newer read or a toggle bumps the generation, so a stale reply is dropped.
     private func refreshLaunchAtLoginState() {
-        launchAtLoginEnabled = LaunchAtLoginController.isEnabled
-        launchAtLoginStatus = LaunchAtLoginController.statusDescription
-        launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
-        launchAtLoginFailureMessage = nil
+        launchAtLoginReadGeneration += 1
+        let generation = launchAtLoginReadGeneration
+        Task { @MainActor in
+            let state = await LaunchAtLoginController.readState()
+            guard generation == launchAtLoginReadGeneration else { return }
+            launchAtLogin = state
+            launchAtLoginFailureMessage = nil
+        }
     }
 
     private func updateLaunchAtLogin(_ enabled: Bool) {
-        let previousValue = launchAtLoginEnabled
-        launchAtLoginEnabled = enabled
+        launchAtLoginReadGeneration += 1
+        let previousValue = launchAtLogin.isEnabled
+        launchAtLogin.isEnabled = enabled
         trackSettingsToggle("launch_at_login", enabled: enabled, page: .general)
 
         do {
             try LaunchAtLoginController.setEnabled(enabled)
             refreshLaunchAtLoginState()
         } catch {
-            launchAtLoginEnabled = previousValue
+            launchAtLogin.isEnabled = previousValue
             // Shown inline under the switch (it used to live only in the
             // tooltip); the raw error is captured to telemetry below.
-            launchAtLoginStatus = SettingsActionFailureCopy.launchAtLogin
+            launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin
             launchAtLoginFailureMessage = LaunchAtLoginController.isUnavailable
                 ? SettingsActionFailureCopy.launchAtLoginUnavailable
                 : SettingsActionFailureCopy.launchAtLogin

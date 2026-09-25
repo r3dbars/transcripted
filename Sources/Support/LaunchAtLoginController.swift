@@ -3,26 +3,46 @@ import ServiceManagement
 
 @MainActor
 enum LaunchAtLoginController {
-    static var isEnabled: Bool {
-        switch SMAppService.mainApp.status {
-        case .enabled, .requiresApproval:
-            return true
-        case .notRegistered, .notFound:
-            return false
-        @unknown default:
-            return false
+    /// One read of the login item's status. Each `SMAppService.status` read is
+    /// a synchronous XPC round trip, so callers that need several fields should
+    /// take one state instead of reading `isEnabled`, `needsApproval` and
+    /// `statusDescription` separately.
+    static var currentState: LaunchAtLoginState {
+        LaunchAtLoginState(status: SMAppService.mainApp.status)
+    }
+
+    /// One serial queue for status reads. The read is a blocking XPC call, so
+    /// it stays off the Swift concurrency pool: if the daemon is slow, reads
+    /// queue up behind one waiting thread instead of tying up the pool.
+    private nonisolated static let statusQueue = DispatchQueue(
+        label: "com.transcripted.launch-at-login-status",
+        qos: .userInitiated
+    )
+
+    /// Reads the status off the main thread. A slow `SMAppService.status` reply
+    /// once froze the app on the Settings window, so refreshes that run on
+    /// every app activation use this.
+    nonisolated static func readState() async -> LaunchAtLoginState {
+        await withCheckedContinuation { continuation in
+            statusQueue.async {
+                continuation.resume(returning: LaunchAtLoginState(status: SMAppService.mainApp.status))
+            }
         }
+    }
+
+    static var isEnabled: Bool {
+        currentState.isEnabled
     }
 
     /// Registered, but macOS won't launch it until the user allows it in
     /// System Settings > General > Login Items.
     static var needsApproval: Bool {
-        SMAppService.mainApp.status == .requiresApproval
+        currentState.needsApproval
     }
 
     /// macOS can't find the app to register (a DMG, Downloads, or a dev build).
     static var isUnavailable: Bool {
-        SMAppService.mainApp.status == .notFound
+        currentState.isUnavailable
     }
 
     static func openLoginItemsSettings() {
@@ -30,18 +50,7 @@ enum LaunchAtLoginController {
     }
 
     static var statusDescription: String {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            return "On. Transcripted will open automatically when you log in."
-        case .requiresApproval:
-            return "Waiting for approval in System Settings."
-        case .notRegistered:
-            return "Off. Transcripted will stay closed until you open it."
-        case .notFound:
-            return "Launch at login is unavailable in this build."
-        @unknown default:
-            return "Launch at login status is unavailable right now."
-        }
+        currentState.statusDescription
     }
 
     static func applySavedOptOutAtStartup() throws {
@@ -104,5 +113,34 @@ enum LaunchAtLoginController {
         @unknown default:
             try SMAppService.mainApp.unregister()
         }
+    }
+}
+
+struct LaunchAtLoginState: Equatable, Sendable {
+    var isEnabled: Bool
+    var needsApproval: Bool
+    var isUnavailable: Bool
+    var statusDescription: String
+
+    init(status: SMAppService.Status) {
+        switch status {
+        case .enabled:
+            isEnabled = true
+            statusDescription = "On. Transcripted will open automatically when you log in."
+        case .requiresApproval:
+            isEnabled = true
+            statusDescription = "Waiting for approval in System Settings."
+        case .notRegistered:
+            isEnabled = false
+            statusDescription = "Off. Transcripted will stay closed until you open it."
+        case .notFound:
+            isEnabled = false
+            statusDescription = "Launch at login is unavailable in this build."
+        @unknown default:
+            isEnabled = false
+            statusDescription = "Launch at login status is unavailable right now."
+        }
+        needsApproval = status == .requiresApproval
+        isUnavailable = status == .notFound
     }
 }
