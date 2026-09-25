@@ -163,7 +163,7 @@ audio, failed-import retries, and clipboard ownership protection remain required
   text matches the actual Capture -> Transcribe Audio File menu command.
   This is not live panel, Finder, ASR, Accessibility or hardware proof. See
   `.agent-review/visuals/reliability-2026-09-15/README.md` (removed 2026-09-25;
-  in git history before `73f4fa6`). Final generic recovery
+  still in git history at `73f4fa6`). Final generic recovery
   and missing-recovery copy was re-rendered at source `bd873f0a`; older images
   are explicitly labeled historical. Safe-Quit and Retry Saving fixtures are in
   `.agent-review/visuals/termination-quit/README.md` (also removed; same
