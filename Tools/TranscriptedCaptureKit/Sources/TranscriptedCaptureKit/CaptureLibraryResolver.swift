@@ -32,8 +32,9 @@ public enum CaptureLibraryResolutionSource: String, Codable, Sendable {
 public struct ResolvedCaptureDirectories {
     public let meetingDirs: [URL]
     public let dictationDirs: [URL]
-    /// Writing day files (`Writing_<date>.md`). `resolve()` always yields one
-    /// directory; it is empty only when a caller builds this value by hand.
+    /// Writing day files (`Writing_<date>.md`). Empty when meetings or
+    /// dictations were overridden per kind without a writing override (see
+    /// `resolve`), or when a caller builds this value by hand without one.
     public let writingDirs: [URL]
     /// Set when resolution used an explicit shared data directory
     /// (a `--data-dir` style argument or `TRANSCRIPTED_DATA_DIR`).
@@ -68,7 +69,10 @@ public struct ResolvedCaptureDirectories {
 ///    (uses `meetings/` + `dictations/` + `writing/` subfolders when any of
 ///    them exists; otherwise every kind reads the shared root itself)
 /// 2. explicit per-kind argument, then `TRANSCRIPTED_MEETINGS_DIR` /
-///    `TRANSCRIPTED_DICTATIONS_DIR` / `TRANSCRIPTED_WRITING_DIR`
+///    `TRANSCRIPTED_DICTATIONS_DIR` / `TRANSCRIPTED_WRITING_DIR`. A kind
+///    without an override falls through to the rules below, except writing:
+///    with a meetings or dictations override and no writing override, no
+///    writing folder is read at all
 /// 3. the app-selected capture library (`mcp-directories.json` manifest, then
 ///    the `transcriptSaveLocation` preference)
 /// 4. the default Transcripted captures folders, followed by legacy Draft
@@ -170,7 +174,22 @@ public enum CaptureLibraryResolver {
             )
         // Writing is new with this app generation, so there is no Draft-era or
         // `~/Documents/Transcripted` location to fall back to.
-        let writingDirs = [writingOverride ?? appConfigured?.writing ?? defaultWriting]
+        //
+        // Unlike meetings and dictations, writing does not fall through to the
+        // app library when the caller pointed other kinds at specific folders
+        // (`--meetings-dir`, TRANSCRIPTED_DICTATIONS_DIR, ...) without naming a
+        // writing folder: everything the user typed is the most personal thing
+        // in the library, and harnesses that isolate meetings and dictations
+        // this way must not pick up the real writing folder by accident. Pass
+        // a writing folder explicitly to include it in that mode.
+        let writingDirs: [URL]
+        if let writingOverride {
+            writingDirs = [writingOverride]
+        } else if meetingsOverride != nil || dictationsOverride != nil {
+            writingDirs = []
+        } else {
+            writingDirs = [appConfigured?.writing ?? defaultWriting]
+        }
 
         // When only some kinds are overridden, the others still resolve through
         // the manifest/preference/default chain; report the override tier as

@@ -42,6 +42,38 @@ final class CaptureLibraryWritingResolverTests: XCTestCase {
         XCTAssertEqual(resolved.resolutionSource, .envKindDirs)
     }
 
+    func testOtherKindOverridesWithoutWritingOverrideReadNoWritingFolder() throws {
+        // A harness that isolates meetings and dictations with per-kind
+        // folders must not fall through to the app library's writing folder.
+        let library = tempHome.appendingPathComponent("custom-captures", isDirectory: true)
+        try writeManifest(library: library, writing: nil)
+        let meetings = tempHome.appendingPathComponent("iso/meetings", isDirectory: true)
+        let dictations = tempHome.appendingPathComponent("iso/dictations", isDirectory: true)
+
+        let explicitArgs = CaptureLibraryResolver.resolve(
+            meetingsDir: meetings.path,
+            dictationsDir: dictations.path,
+            environment: [:],
+            homeDirectory: tempHome
+        )
+        XCTAssertEqual(explicitArgs.writingDirs, [])
+        XCTAssertEqual(explicitArgs.resolutionSource, .envKindDirs)
+
+        let envOnlyMeetings = CaptureLibraryResolver.resolve(
+            environment: ["TRANSCRIPTED_MEETINGS_DIR": meetings.path],
+            homeDirectory: tempHome
+        )
+        XCTAssertEqual(envOnlyMeetings.writingDirs, [])
+
+        let withWriting = CaptureLibraryResolver.resolve(
+            meetingsDir: meetings.path,
+            writingDir: tempHome.appendingPathComponent("iso/writing").path,
+            environment: [:],
+            homeDirectory: tempHome
+        )
+        XCTAssertEqual(paths(withWriting.writingDirs), [path("iso/writing")])
+    }
+
     func testExplicitWritingDirWinsOverEnvironment() {
         let explicit = tempHome.appendingPathComponent("explicit-writing", isDirectory: true)
         let env = tempHome.appendingPathComponent("env-writing", isDirectory: true)
