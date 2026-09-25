@@ -151,7 +151,7 @@ final class CameraActivityMonitor: @unchecked Sendable {
 
     private func startBackstopTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
+        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in self?.scanAndEmit() }
         backstopTimer = timer
         timer.resume()

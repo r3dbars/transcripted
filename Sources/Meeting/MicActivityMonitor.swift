@@ -348,7 +348,8 @@ final class MicActivityMonitor: @unchecked Sendable {
 
     private func startBackstopTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
+        // Leeway lets macOS batch this wake with others while the app idles.
+        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in self?.scanAndEmit() }
         backstopTimer = timer
         timer.resume()
@@ -490,10 +491,16 @@ final class MicActivityMonitor: @unchecked Sendable {
 
     private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
         Self.processObjectIDs().map { object in
-            (
-                bundleID: Self.bundleIDProperty(object),
-                isRunningInput: Self.isRunningInputProperty(object),
-                isRunningOutput: Self.isRunningOutputProperty(object)
+            let isRunningInput = Self.isRunningInputProperty(object)
+            let isRunningOutput = Self.isRunningOutputProperty(object)
+            // Every consumer ignores the bundle ID of a process that is doing
+            // no audio, and most of the 30-60 audio clients on a Mac are idle.
+            // Skipping the read saves a coreaudiod round trip and a CFString
+            // per idle process on every scan, including the 5 s backstop.
+            return (
+                bundleID: (isRunningInput || isRunningOutput) ? Self.bundleIDProperty(object) : nil,
+                isRunningInput: isRunningInput,
+                isRunningOutput: isRunningOutput
             )
         }
     }
