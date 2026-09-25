@@ -8,6 +8,7 @@ import SwiftUI
 /// sets `WritingSidebarNewBadge.dismissedDefaultsKey`, which drops the
 /// sidebar's "New" badge.
 struct WritingSettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var model: WritingSettingsModel
     /// A meeting or dictation is recording (or meeting audio is still being
     /// transcribed). The Screen Recording request waits while it's true.
@@ -26,7 +27,8 @@ struct WritingSettingsPage: View {
                     page: page,
                     onNext: { model.showIntroPage(page + 1) },
                     onBack: { model.showIntroPage(page - 1) },
-                    onSetUp: { model.beginSetup() }
+                    onSetUp: { model.beginSetup() },
+                    onNotNow: { model.dismissNewBadge() }
                 )
             case let .setup(step):
                 WritingSetupFlowView(model: model, step: step)
@@ -34,7 +36,7 @@ struct WritingSettingsPage: View {
                 WritingEverydayView(model: model)
             }
         }
-        .animation(.snappy(duration: 0.2), value: model.screen)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.screen)
         .background(WritingWindowReader { [model] window in model.hostWindow = window })
         .onAppear {
             model.isCaptureBusy = isCaptureBusy

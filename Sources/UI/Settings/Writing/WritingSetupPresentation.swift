@@ -125,7 +125,9 @@ enum WritingSetupPresentation {
     /// Shown instead of the Screen Recording request while a meeting or
     /// dictation records: macOS may ask Transcripted to quit and reopen after
     /// the grant.
-    static let finishRecordingFirst = "Finish your recording first"
+    /// The hold covers queued transcription too, so the line says so.
+    static let finishRecordingFirst = "Finish recording and transcribing first"
+    static let notNow = "Not now"
 
     /// The rows step 3 shows: only what the step 1 toggles need
     /// (docs/writing-plan.md, "Permissions").

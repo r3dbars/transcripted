@@ -94,7 +94,7 @@ func testWritingSetupPresentation() {
         assertEqual(Copy.Step3.footnote, "Suggestion counts only, never text. Follows your analytics setting.")
         assertEqual(Copy.Step3.turnOn, "Turn on writing")
         assertEqual(Copy.back, "Back")
-        assertEqual(Copy.finishRecordingFirst, "Finish your recording first")
+        assertEqual(Copy.finishRecordingFirst, "Finish recording and transcribing first")
     }
 
     runSuite("Writing step 3 shows only the rows the step 1 toggles need") {

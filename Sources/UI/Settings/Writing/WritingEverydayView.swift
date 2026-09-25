@@ -360,6 +360,7 @@ private struct WritingEntryRow: View {
         .onTapGesture(perform: onOpen)
         .help("Open writing")
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: Text("Open writing"), onOpen)
         .accessibilityIdentifier("transcripted.settings.writing.entry")
     }
 }
@@ -391,6 +392,8 @@ private struct WritingEntryExpansion: View {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onCollapse)
                 .help("Collapse")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: Text("Collapse"), onCollapse)
 
             HStack(spacing: 16) {
                 action(
