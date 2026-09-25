@@ -152,5 +152,17 @@ let package = Package(
             name: "TranscriptedWritingCore",
             path: "Sources/TranscriptedWriting/Core"
         ),
+        // Writing's IMKit keyboard, ported from Tilde's InlineGhostIME. The
+        // shipped bundle is built by scripts/entrypoints/lib/bundle-input-method.sh,
+        // which compiles these files together with Core into one module; this
+        // target exists so the keyboard's tests can run under `swift test`.
+        // Info.plist is the bundle's, stamped by that script, not a resource.
+        .executableTarget(
+            name: "TranscriptedKeyboard",
+            dependencies: ["TranscriptedWritingCore"],
+            path: "Sources/TranscriptedKeyboard",
+            exclude: ["Info.plist"],
+            linkerSettings: [.linkedFramework("InputMethodKit")]
+        ),
     ] + coreTestTargets
 )

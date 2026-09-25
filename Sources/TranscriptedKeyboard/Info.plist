@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Transcripted</string>
+    <key>CFBundleDisplayName</key>
+    <string>Transcripted</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.justinbetker.draft.inputmethod.Transcripted</string>
+    <!-- Placeholders: scripts/entrypoints/lib/bundle-input-method.sh stamps
+         both version keys from the root Info.plist at bundle time. -->
+    <key>CFBundleVersion</key>
+    <string>0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>TranscriptedKeyboard</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>26.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <key>InputMethodConnectionName</key>
+    <string>TranscriptedKeyboard_1_Connection</string>
+    <key>InputMethodServerControllerClass</key>
+    <string>GhostInputController</string>
+
+    <key>tsInputMethodCharacterRepertoireKey</key>
+    <array>
+        <string>Latn</string>
+    </array>
+
+    <key>TISInputSourceID</key>
+    <string>com.justinbetker.draft.inputmethod.Transcripted</string>
+    <key>TISIntendedLanguage</key>
+    <string>en</string>
+</dict>
+</plist>
