@@ -74,7 +74,7 @@ enum TranscriptedSupportActions {
         // off the main thread. Everything else here is cheap in-memory state.
         let diskFields = await Task.detached(priority: .userInitiated) {
             (
-                storage: diskFields.storage,
+                storage: ModelCacheInventory.snapshot().diagnosticsFields,
                 reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries()
             )
         }.value
