@@ -79,7 +79,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     }
 
     static var systemAudioRecordingSummary: String {
-        "For the other side of calls, videos, and meetings. Audio only — no screen access needed."
+        "For the other side of calls, videos, and meetings. Audio only — meetings never need screen access."
     }
 
     struct SystemAudioOnboardingPresentation {
@@ -111,7 +111,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     }
 
     static var systemAudioRecordingMigrationInstructions: String {
-        "In System Settings → Privacy & Security → Screen & System Audio Recording, enable Transcripted under System Audio Recording Only. If you previously allowed Screen & System Audio Recording, turn that broader permission off. Quit and reopen Transcripted if macOS asks. Play audio in another app, then check this permission again. Silence cannot distinguish a quiet Mac from denied access. Your existing recordings are unchanged."
+        "In System Settings → Privacy & Security → Screen & System Audio Recording, enable Transcripted under System Audio Recording Only. That's all meetings need. The broader Screen & System Audio Recording permission is only for Writing's autocomplete, so if you allowed it before and don't use autocomplete, you can turn it off. Quit and reopen Transcripted if macOS asks. Play audio in another app, then check this permission again. Silence cannot distinguish a quiet Mac from denied access. Your existing recordings are unchanged."
     }
 
     var actionButtonTitle: String {

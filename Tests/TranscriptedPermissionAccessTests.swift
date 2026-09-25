@@ -189,8 +189,10 @@ func testTranscriptedPermissionAccess() async {
 
     runSuite("Audio-only migration copy — names both macOS sections") {
         assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("System Audio Recording Only"), "guide must name narrow grant")
-        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("turn that broader permission off"), "guide must explain removing old access")
-        assertTrue(TranscriptedPermissionKind.systemAudioRecordingSummary.contains("no screen access needed"), "new onboarding should explain narrow access")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("That's all meetings need."), "guide must say meetings only need the narrow grant")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("only for Writing's autocomplete"), "guide must say the broader grant is only for Writing's autocomplete")
+        assertFalse(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("turn that broader permission off"), "guide must not tell autocomplete users to remove the grant it needs")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingSummary.contains("meetings never need screen access"), "onboarding should say meetings need audio access only")
     }
     // Exercise the actual Settings/onboarding action, including its external
     // handoff. Request-only helper tests cannot catch a dead Review button.
