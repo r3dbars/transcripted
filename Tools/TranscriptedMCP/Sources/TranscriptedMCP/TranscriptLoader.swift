@@ -7,6 +7,7 @@ private var logSuppressionDepth = 0
 enum ContextArtifactKind {
     case meeting
     case dictationDay
+    case writingDay
 }
 
 struct ContextArtifactFile {
@@ -126,13 +127,61 @@ enum TranscriptLoader {
         return (day, content)
     }
 
+    static func loadWritingDay(_ url: URL) -> AgentWritingDay? {
+        loadWritingDayWithContent(url)?.day
+    }
+
+    static func loadWritingDayWithContent(_ url: URL) -> (day: AgentWritingDay, content: String)? {
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
+              let parsed = CaptureMarkdownParser.parseWritingDay(from: content, markdownURL: url) else {
+            log("Cannot read writing markdown")
+            return nil
+        }
+
+        let day = AgentWritingDay(
+            version: "1.0",
+            captureType: parsed.captureType,
+            date: parsed.date,
+            formatVersion: parsed.formatVersion,
+            markdownFilename: parsed.markdownFilename,
+            entryCount: parsed.entryCount,
+            wordCount: parsed.wordCount,
+            acceptedWordCount: parsed.acceptedWordCount,
+            entries: parsed.entries.map { entry in
+                AgentWritingEntry(
+                    id: entry.id,
+                    createdAt: entry.createdAt,
+                    title: entry.title,
+                    text: entry.text,
+                    sourceAppName: entry.sourceAppName,
+                    sourceAppBundleId: entry.sourceAppBundleId,
+                    wordCount: entry.wordCount,
+                    characterCount: entry.characterCount,
+                    acceptedWordCount: entry.acceptedWordCount
+                )
+            }
+        )
+        return (day, content)
+    }
+
     static func artifactKind(for url: URL) -> ContextArtifactKind? {
-        guard url.pathExtension == "md", CaptureMarkdown.looksLikeCaptureMarkdown(url) else { return nil }
+        guard url.pathExtension == "md", let captureKind = CaptureMarkdown.captureKind(of: url) else { return nil }
+
+        // Writing is checked first (by `Writing_` prefix or `capture_type:
+        // writing_day`): in the TRANSCRIPTED_DATA_DIR flat-folder fallback,
+        // meetings, dictations, and writing share one directory, and a writing
+        // day file has frontmatter, so the meeting default below would index it
+        // as an empty meeting.
+        switch captureKind {
+        case .writingDay:
+            return .writingDay
+        case .dictationDay:
+            return .dictationDay
+        case .meeting:
+            break
+        }
 
         let filename = url.deletingPathExtension().lastPathComponent
-        if filename.hasPrefix("Dictations_") {
-            return .dictationDay
-        }
         // Generated `<stem>.summary.md` sidecars carry frontmatter too, but they
         // are not meetings — they are read as a fallback summary source for their
         // parent transcript (see loadMeetingSummary). Indexing them as meetings

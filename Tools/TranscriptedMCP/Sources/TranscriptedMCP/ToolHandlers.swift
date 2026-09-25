@@ -68,6 +68,7 @@ func autoWindowEnd<T>(items: [T], start: Int, cost: (T) -> Int) -> Int {
 enum EmptyResultScope {
     case meetings
     case dictations
+    case writing
     case mixed
     case summaries
 }
@@ -103,14 +104,29 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
                 ? "No dictations are indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No dictations matched these filters — try widening the date range or changing the query."
         )
+    case .writing:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: nil,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedWritingDays: counts.writingDays,
+            indexedWritingEntries: counts.writingEntries,
+            indexedSummaryItems: nil,
+            hint: counts.writingDays == 0
+                ? "No writing is indexed. Writing is saved only when Save my writing is on in Transcripted's Writing settings; call the status tool to see the writing folder."
+                : "No writing matched these filters — try widening the date range or changing the query."
+        )
     case .mixed:
         payload = EmptyQueryResult(
             searchedDirectories: directories,
             indexedMeetings: counts.meetings,
             indexedDictationDays: counts.dictationDays,
             indexedDictationEntries: nil,
+            indexedWritingDays: counts.writingDays,
+            indexedWritingEntries: counts.writingEntries,
             indexedSummaryItems: nil,
-            hint: counts.meetings == 0 && counts.dictationDays == 0
+            hint: counts.meetings == 0 && counts.dictationDays == 0 && counts.writingDays == 0
                 ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No items matched these filters — try widening the date range or changing the query."
         )
@@ -183,6 +199,10 @@ private struct AgentCaptureQueryDescriptor {
             self.init(toolKind: "read", captureKind: "meeting")
         case "read_dictation":
             self.init(toolKind: "read", captureKind: "dictation")
+        case "list_writing":
+            self.init(toolKind: "list", captureKind: "writing")
+        case "read_writing":
+            self.init(toolKind: "read", captureKind: "writing")
         case "search":
             self.init(toolKind: "search", captureKind: "meeting")
         case "search_context":
@@ -221,6 +241,8 @@ private struct AgentCaptureQueryDescriptor {
             return "meeting"
         case "dictation":
             return "dictation"
+        case "writing":
+            return "writing"
         default:
             return "mixed"
         }
@@ -423,8 +445,61 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
+                name: "list_writing",
+                description: "List saved writing days: what the user typed with the Transcripted keyboard, one Writing_<date> file per day, with entry counts, source apps, and recent titles. Use read_writing with a returned filename for the text.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Number of writing days to return (default: 10, max: 50)")
+                        ]),
+                        "date": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to a specific date (YYYY-MM-DD)")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "read_writing",
+                description: "Read a saved writing day, one specific entry by ID, or a bounded window of entries. Use list_writing, recent_context, or search_context first to find the filename or entry_id. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "filename": .object([
+                            "type": .string("string"),
+                            "description": .string("Writing day filename (e.g. 'Writing_2026-09-25')")
+                        ]),
+                        "entry_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional entry ID from recent_context or search_context to return one writing entry")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "description": .string("0-based entry index to start the window at (default: 0). Ignored when entry_id is set.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum entries to return. Setting this (or exceeding the size guard) switches the response to a paginated JSON window with total_entries, next_offset, and a hint. Ignored when entry_id is set.")
+                        ]),
+                    ]),
+                    "required": .array([.string("filename")]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
                 name: "search_context",
-                description: "Search across saved meetings, dictations, or both. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording. Great for finding everything you captured about a topic, regardless of whether it came from a meeting or a quick dictated note.",
+                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you typed.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -434,7 +509,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "kind": .object([
                             "type": .string("string"),
-                            "description": .string("Which context to search: 'all' (default), 'meeting', or 'dictation'")
+                            "description": .string("Which context to search: 'all' (default), 'meeting', 'dictation', or 'writing'")
                         ]),
                         "mode": .object([
                             "type": .string("string"),
@@ -463,13 +538,13 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "recent_context",
-                description: "List the most recent saved meetings and dictations together in one feed. Great for quickly orienting an agent before it starts summarizing or planning.",
+                description: "List the most recent saved meetings, dictations, and writing together in one feed. Great for quickly orienting an agent before it starts summarizing or planning.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "kind": .object([
                             "type": .string("string"),
-                            "description": .string("Which context to list: 'all' (default), 'meeting', or 'dictation'")
+                            "description": .string("Which context to list: 'all' (default), 'meeting', 'dictation', or 'writing'")
                         ]),
                         "count": .object([
                             "type": .string("integer"),
@@ -726,12 +801,16 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                     return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
                 case "read_dictation":
                     return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
+                case "list_writing":
+                    return try handleListWriting(params: params, index: index, writingDirs: directories.writingDirs)
+                case "read_writing":
+                    return try handleReadWriting(params: params, writingDirs: directories.writingDirs)
                 case "search":
                     return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
                 case "search_context":
-                    return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                    return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, writingDirs: directories.writingDirs)
                 case "recent_context":
-                    return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                    return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, writingDirs: directories.writingDirs)
                 case "who_is":
                     return try handleWhoIs(params: params, index: index)
                 case "recap":

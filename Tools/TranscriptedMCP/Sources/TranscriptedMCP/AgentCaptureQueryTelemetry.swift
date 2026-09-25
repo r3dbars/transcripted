@@ -259,7 +259,7 @@ enum AgentCaptureQueryTelemetryPolicy {
     ]
     private static let allowedValues: [String: Set<String>] = [
         "client_family": ["mcp"],
-        "capture_kind": ["dictation", "meeting", "mixed"],
+        "capture_kind": ["dictation", "meeting", "mixed", "writing"],
         "latency_bucket": ["lt_100ms", "100_249ms", "250_499ms", "500_999ms", "1_2s", "2_5s", "5s_plus", "unknown"],
         "result": Set(AgentCaptureQueryResult.allCases.map(\.rawValue)),
         "result_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],

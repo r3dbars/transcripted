@@ -326,7 +326,7 @@ Rules:
   - stamp its version from the root Info.plist. `bump-release-version.py` only touches the root.
   - place `Transcripted Keyboard.app` at `Contents/Library/Input Methods/`, keeping its icon inside its own bundle. `performance-budget.rb:329` requires the app's icons to be only `Transcripted.icns`.
   - sign it inside-out before the outer app.
-- **`llama-server`.** Pin the exact helper Tilde 0.1.0 beta 1 shipped (SHA-256 `41944b6115672ed375bbb1d2442253d00817d4abbce6628609f488464ff8bb10`) so inference matches.
+- **`llama-server`.** Pin the exact helper Tilde 0.1.0 beta 1 shipped, so inference matches. It's pinned by its code bytes with the signature removed (SHA-256 `3f6895ab8d077b02803761fb8cc254073d2c7b4006fbacbef4c844879333fffc`), taken from the release's `Tilde.zip` (SHA-256 `12b7f14ae31abea7d5cecf236d2e4de3b0facad89fa580877dec391336b26a50`). The `41944b…` hash in Tilde's release notes is the pre-strip, pre-sign input, which isn't published.
   - Fetch and hash-check it in `build-deps.sh` into `deps-tools/`, the way Sparkle and Sentry are pinned. CI already caches that folder.
   - Copy it to `Contents/Helpers/llama-server`. The existing Helpers signing loop (`build.sh:376`) covers it.
   - Any dylibs it needs must sit next to it. Tilde's is a static build with system-only dependencies.
@@ -361,11 +361,10 @@ Rules:
 
 **Fidelity.** Tilde's history is an insertion log. It doesn't see pastes or mouse edits, and it breaks segments on every deletion. For v1, the keyboard also reports backspaces inside its own typed buffer, so saved text drops what you deleted. Known gaps are pastes, mouse edits, and host autocorrect. (Open question 1.)
 
-**App-owned state** in `~/Library/Application Support/Transcripted/writing/`:
+**App-owned state** in `~/Library/Application Support/Transcripted/writing/` (the diagnostics log is at `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`):
 - `ghost.sock` and `runtime.lock`
 - `outcome-ledger/` (text-free)
 - `personal/` (predictor state)
-- `diagnostics.log`
 
 **Models** in `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`, excluded from backup.
 - If `~/Library/Application Support/Tilde/Models/<id>/model.gguf` exists and its SHA-256 matches the pin, clone it (APFS `clonefile`) instead of downloading 3.4 to 5.6 GB again.

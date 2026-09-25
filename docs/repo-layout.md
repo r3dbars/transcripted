@@ -82,6 +82,8 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Speech/` — local STT engines, router, and audio recovery
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
+- `Sources/TranscriptedWriting/` — Writing's autocomplete library, ported from Tilde: `Core/` (pure policy) and `Runtime/` (model, `llama-server` host, socket, Screen Memory); see `docs/writing-plan.md`
+- `Sources/TranscriptedKeyboard/` — Writing's IMKit keyboard; built by `scripts/entrypoints/lib/bundle-input-method.sh` into `Contents/Library/Input Methods/`, never into the app binary
 - `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`

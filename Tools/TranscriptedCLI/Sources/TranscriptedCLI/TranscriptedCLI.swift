@@ -17,6 +17,8 @@ struct TranscriptedCLI: AsyncParsableCommand {
             ReadMeeting.self,
             ListDictations.self,
             ReadDictation.self,
+            ListWriting.self,
+            ReadWriting.self,
         ]
     )
 }

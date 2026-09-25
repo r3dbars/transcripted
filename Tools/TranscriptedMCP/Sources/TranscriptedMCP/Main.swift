@@ -28,7 +28,7 @@ struct TranscriptedMCP {
         log("Starting transcripted-mcp v\(serverVersion)")
 
         var createdDirectoryCount = 0
-        for directory in directories.watchedDirectories + [directories.indexDir] {
+        for directory in directories.directoriesToCreate {
             if !FileManager.default.fileExists(atPath: directory.path) {
                 try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 createdDirectoryCount += 1
@@ -54,7 +54,8 @@ struct TranscriptedMCP {
             try MCPStartupIndexing.prepareForAttach(
                 index: index,
                 meetingDirs: directories.meetingDirs,
-                dictationDirs: directories.dictationDirs
+                dictationDirs: directories.dictationDirs,
+                writingDirs: directories.writingDirs
             )
             log(MCPStartupDiagnostics.message(
                 phase: .lexicalIndexReady,
@@ -68,7 +69,11 @@ struct TranscriptedMCP {
         let watchers = directories.watchedDirectories.map { directory in
             FileWatcher(directory: directory) {
                 do {
-                    try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                    try index.reconcile(
+                        meetingDirs: directories.meetingDirs,
+                        dictationDirs: directories.dictationDirs,
+                        writingDirs: directories.writingDirs
+                    )
                 } catch {
                     log("Failed to reconcile the watched capture index")
                 }
@@ -118,7 +123,7 @@ struct TranscriptedMCP {
     }
 
     private static let helpText = """
-    OVERVIEW: Read-only MCP server for Transcripted meetings and dictations.
+    OVERVIEW: Read-only MCP server for Transcripted meetings, dictations, and writing.
 
     USAGE: transcripted-mcp [--self-test] [--version] [--help]
 
@@ -128,16 +133,17 @@ struct TranscriptedMCP {
       -h, --help    Show help information.
 
     ENVIRONMENT:
-      TRANSCRIPTED_DATA_DIR         Shared root with meetings/ and dictations/.
+      TRANSCRIPTED_DATA_DIR         Shared root with meetings/, dictations/, and writing/.
       TRANSCRIPTED_MEETINGS_DIR     Meeting directory override.
       TRANSCRIPTED_DICTATIONS_DIR   Dictation directory override.
+      TRANSCRIPTED_WRITING_DIR      Writing directory override.
       TRANSCRIPTED_INDEX_DIR        SQLite index directory override.
     """
 
     private static func runSelfTest() throws {
         let directories = TranscriptedDataDirectories.resolve()
 
-        for directory in directories.watchedDirectories + [directories.indexDir] {
+        for directory in directories.directoriesToCreate {
             if !FileManager.default.fileExists(atPath: directory.path) {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             }
@@ -146,7 +152,11 @@ struct TranscriptedMCP {
         try withLogsSuppressed {
             let index = try TranscriptIndex(indexDir: directories.indexDir)
             do {
-                try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                try index.reconcile(
+                    meetingDirs: directories.meetingDirs,
+                    dictationDirs: directories.dictationDirs,
+                    writingDirs: directories.writingDirs
+                )
             } catch is MCPReconcileFileFailures {
                 // The index opened and every other file indexed; the server
                 // would start fine. One bad meeting file must not fail the
@@ -160,9 +170,11 @@ struct TranscriptedMCP {
             dictationsDirectory: directories.dictationsDir.path,
             meetingDirectories: directories.meetingDirs.map(\.path),
             dictationDirectories: directories.dictationDirs.map(\.path),
+            writingDirectories: directories.writingDirs.map(\.path),
             indexDirectory: directories.indexDir.path,
             meetingFileCount: markdownFileCount(in: directories.meetingDirs),
-            dictationFileCount: markdownFileCount(in: directories.dictationDirs)
+            dictationFileCount: markdownFileCount(in: directories.dictationDirs),
+            writingFileCount: markdownFileCount(in: directories.writingDirs)
         )
 
         let encoder = JSONEncoder()
@@ -202,18 +214,24 @@ private struct TranscriptedMCPSelfTestResult: Codable {
     let dictationsDirectory: String
     let meetingDirectories: [String]
     let dictationDirectories: [String]
+    let writingDirectories: [String]
     let indexDirectory: String
     let meetingFileCount: Int
     let dictationFileCount: Int
+    let writingFileCount: Int
 
+    // Additive keys only: the app's installer decodes this payload with its
+    // own struct (TranscriptedMCPSelfTest) that ignores keys it doesn't know.
     enum CodingKeys: String, CodingKey {
         case ok
         case meetingsDirectory = "meetings_directory"
         case dictationsDirectory = "dictations_directory"
         case meetingDirectories = "meeting_directories"
         case dictationDirectories = "dictation_directories"
+        case writingDirectories = "writing_directories"
         case indexDirectory = "index_directory"
         case meetingFileCount = "meeting_file_count"
         case dictationFileCount = "dictation_file_count"
+        case writingFileCount = "writing_file_count"
     }
 }

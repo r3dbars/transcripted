@@ -4,12 +4,12 @@ import Foundation
 struct ContextRecent: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "context-recent",
-        abstract: "List recent meetings and dictations from saved local context."
+        abstract: "List recent meetings, dictations, and writing from saved local context."
     )
 
     @OptionGroup var paths: CLIContextPathOptions
 
-    @Option(name: .long, help: "Which context to return: all, meeting, or dictation.")
+    @Option(name: .long, help: "Which context to return: all, meeting, dictation, or writing.")
     var kind: CLIContextKind = .all
 
     @Option(name: .long, help: "Start date filter (YYYY-MM-DD).")
@@ -44,7 +44,7 @@ struct ContextRecent: ParsableCommand {
 struct ContextSearch: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "context-search",
-        abstract: "Search across saved meetings and dictations."
+        abstract: "Search across saved meetings, dictations, and writing."
     )
 
     @Argument(help: "Search query.")
@@ -52,7 +52,7 @@ struct ContextSearch: ParsableCommand {
 
     @OptionGroup var paths: CLIContextPathOptions
 
-    @Option(name: .long, help: "Which context to search: all, meeting, or dictation.")
+    @Option(name: .long, help: "Which context to search: all, meeting, dictation, or writing.")
     var kind: CLIContextKind = .all
 
     @Option(name: .long, help: "Optional speaker filter for meetings.")
@@ -74,7 +74,15 @@ struct ContextSearch: ParsableCommand {
         let directories = paths.resolved
         var notes: [String] = []
         if speaker != nil, kind != .meeting {
-            notes.append("Note: --speaker only matches meetings; dictations skipped.")
+            let skipsDictations = kind.includes(.dictation)
+            let skipsWriting = kind.includes(.writing) && !directories.writingDirs.isEmpty
+            let skipped: String
+            switch (skipsDictations, skipsWriting) {
+            case (true, true): skipped = "dictations and writing"
+            case (false, true): skipped = "writing"
+            default: skipped = "dictations"
+            }
+            notes.append("Note: --speaker only matches meetings; \(skipped) skipped.")
         }
         let items = CLIContextStore.search(
             query: query,
@@ -149,6 +157,98 @@ struct ListDictations: ParsableCommand {
     }
 }
 
+struct ListWriting: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list-writing",
+        abstract: "List saved writing day files (what you typed with the Transcripted keyboard)."
+    )
+
+    @OptionGroup var paths: CLIContextPathOptions
+
+    @Option(name: .long, help: "Start date filter (YYYY-MM-DD).")
+    var dateFrom: String?
+
+    @Option(name: .long, help: "End date filter (YYYY-MM-DD).")
+    var dateTo: String?
+
+    @Option(name: .shortAndLong, help: "Number of days to return (valid range 1-50; values outside are clamped).")
+    var count: Int = 10
+
+    @Flag(name: .long, help: "Output JSON instead of text.")
+    var json: Bool = false
+
+    func run() throws {
+        let directories = paths.resolved
+        let days = CLIContextStore.listWritingDays(
+            in: directories,
+            count: max(1, min(count, 50)),
+            dateFrom: dateFrom,
+            dateTo: dateTo
+        )
+        let searchedDirectories = searchedDirectoryPaths(in: directories, kind: .writing)
+
+        if json {
+            if days.isEmpty {
+                try printEmptyResultsJSON(searchedDirectories: searchedDirectories, notes: [])
+                return
+            }
+            let data = try JSONEncoder.contextPretty.encode(days)
+            print(String(data: data, encoding: .utf8) ?? "[]")
+            return
+        }
+
+        if days.isEmpty {
+            printEmptyResultsToStandardError(searchedDirectories: searchedDirectories)
+            return
+        }
+
+        for day in days {
+            let titles = day.titles.prefix(3).joined(separator: " | ")
+            print("[\(day.date)] \(day.filename)  \(day.entryCount) entries  \(day.sourceApps.joined(separator: ", "))")
+            if !titles.isEmpty {
+                print("  \(titles)")
+            }
+        }
+    }
+}
+
+struct ReadWriting: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "read-writing",
+        abstract: "Read a writing day file or one specific writing entry."
+    )
+
+    @Argument(help: "Writing day filename, with or without .md.")
+    var filename: String
+
+    @OptionGroup var paths: CLIContextPathOptions
+
+    @Option(name: .long, help: "Optional entry ID to read a single writing entry.")
+    var entryId: String?
+
+    @Flag(name: .long, help: "Output JSON instead of raw Markdown.")
+    var json: Bool = false
+
+    func run() throws {
+        let read = try CLIContextStore.readWritingDocument(filename: filename, entryId: entryId, in: paths.resolved)
+        guard json else {
+            print(read.markdown)
+            return
+        }
+
+        let document = CLIReadWritingDocument(
+            kind: .writing,
+            filename: normalizedMarkdownFilename(filename),
+            entryId: entryId,
+            markdown: read.markdown,
+            date: read.date,
+            entries: read.entries
+        )
+        let data = try JSONEncoder.contextPretty.encode(document)
+        print(String(data: data, encoding: .utf8) ?? "{}")
+    }
+}
+
 struct ReadMeeting: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "read-meeting",
@@ -210,7 +310,7 @@ struct ReadDictation: ParsableCommand {
     }
 }
 
-private let emptyResultsHint = "No captures matched. Check the searched directories or pass --data-dir, --meetings-dir, or --dictations-dir."
+private let emptyResultsHint = "No captures matched. Check the searched directories or pass --data-dir, --meetings-dir, --dictations-dir, or --writing-dir."
 
 private func printContextItems(
     _ items: [CLIContextItem],
@@ -292,11 +392,14 @@ private func printToStandardError(_ message: String) {
 
 private func searchedDirectoryPaths(in directories: CLIContextDirectories, kind: CLIContextKind) -> [String] {
     var urls: [URL] = []
-    if kind != .dictation {
+    if kind.includes(.meeting) {
         urls.append(contentsOf: directories.meetingDirs)
     }
-    if kind != .meeting {
+    if kind.includes(.dictation) {
         urls.append(contentsOf: directories.dictationDirs)
+    }
+    if kind.includes(.writing) {
+        urls.append(contentsOf: directories.writingDirs)
     }
 
     var seen: Set<String> = []

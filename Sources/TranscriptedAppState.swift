@@ -17,6 +17,8 @@ class TranscriptedAppState: ObservableObject {
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
     let runtimeDiagnostics = RuntimeDiagnostics()
+    /// Writing's autocomplete runtime. Idle until `initialize()` starts it.
+    let writingController = WritingController()
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.
@@ -129,6 +131,10 @@ class TranscriptedAppState: ObservableObject {
         if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
         }
+        // Phase 2 debug default; phase 4 replaces it with the Writing tab's setup state.
+        if !Self.isLaunchSmokeMode, UserDefaults.standard.bool(forKey: WritingController.debugEnabledKey) {
+            writingController.start { [weak self] message in self?.logger.log(message) }
+        }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
         runtimeDiagnostics.setActiveWorkProvider { [weak self] in
@@ -179,6 +185,7 @@ class TranscriptedAppState: ObservableObject {
     /// (file descriptors, audio hardware, Metal contexts, Carbon hotkeys) must be checked
     /// and restored here. ParakeetEngine handles its own wake via NSWorkspace observer.
     func handleSystemWake() async {
+        writingController.handleSystemWake()
         let result = await wakeRecoveryCoordinator.handleSystemWake {
             self.logger.log("WAKE | system wake detected — running recovery checks")
         }
@@ -224,6 +231,7 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
+        writingController.stop()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)

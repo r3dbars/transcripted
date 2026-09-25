@@ -68,9 +68,40 @@ public struct ParsedDictationDayCapture {
     public let entries: [Entry]
 }
 
-/// Shared parser for Transcripted capture Markdown (meeting transcripts and
-/// dictation day files). Single source of truth for TranscriptedCLI and
-/// TranscriptedMCP.
+/// Parsed writing day file (`<capture-library>/writing/Writing_<YYYY-MM-dd>.md`).
+/// Same day-file shape as dictations, with `Accepted words:` in place of
+/// `Delivery:`. See docs/capture-format.md and the phase 3 format contract.
+public struct ParsedWritingDayCapture {
+    public struct Entry {
+        public let id: String
+        /// `Captured:` value: ISO 8601 UTC of the entry's first keystroke.
+        public let createdAt: String
+        public let title: String
+        public let text: String
+        public let sourceAppName: String
+        /// Nil when the `Bundle ID:` line is absent (the writer omits it when unknown).
+        public let sourceAppBundleId: String?
+        public let wordCount: Int
+        public let characterCount: Int
+        /// Words that came from accepted suggestions. 0 when the line is absent.
+        public let acceptedWordCount: Int
+    }
+
+    public let captureType: String
+    public let date: String
+    /// `format_version` frontmatter when present. Absent means version 1.
+    public let formatVersion: Int?
+    public let markdownFilename: String
+    public let entryCount: Int
+    public let wordCount: Int
+    public let acceptedWordCount: Int
+    /// Sorted ascending by `createdAt`.
+    public let entries: [Entry]
+}
+
+/// Shared parser for Transcripted capture Markdown (meeting transcripts,
+/// dictation day files, and writing day files). Single source of truth for
+/// TranscriptedCLI and TranscriptedMCP.
 public enum CaptureMarkdownParser {
     private struct ParsedTranscriptEntry {
         let timestamp: String
@@ -302,6 +333,30 @@ public enum CaptureMarkdownParser {
         )
     }
 
+    // MARK: - Writing days
+
+    /// Parse a writing day file. Unknown frontmatter keys and unknown metadata
+    /// lines inside an entry are ignored; a missing `Bundle ID:` line yields a
+    /// nil bundle ID.
+    public static func parseWritingDay(from content: String, markdownURL url: URL) -> ParsedWritingDayCapture? {
+        guard let document = parseFrontmatter(from: content) else { return nil }
+
+        let entries = parseWritingEntries(from: document.body)
+        let fallbackDate = url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: CaptureMarkdown.writingDayFilenamePrefix, with: "")
+
+        return ParsedWritingDayCapture(
+            captureType: document.values["capture_type"] ?? CaptureMarkdownKind.writingDay.rawValue,
+            date: document.values["date"] ?? fallbackDate,
+            formatVersion: Int(document.values["format_version"] ?? ""),
+            markdownFilename: url.lastPathComponent,
+            entryCount: entries.count,
+            wordCount: entries.reduce(0) { $0 + $1.wordCount },
+            acceptedWordCount: entries.reduce(0) { $0 + $1.acceptedWordCount },
+            entries: entries
+        )
+    }
+
     // MARK: - Frontmatter speakers
 
     private static func parseFrontmatterSpeakers(from content: String) -> [ParsedFrontmatterSpeaker] {
@@ -498,9 +553,43 @@ public enum CaptureMarkdownParser {
         )
     }
 
-    // MARK: - Dictation entries
+    // MARK: - Day-file entries (dictation + writing)
 
-    private static func parseDictationEntries(from body: String) -> [ParsedDictationDayCapture.Entry] {
+    /// Which day-file grammar a section belongs to. Each flavor recognizes only
+    /// the metadata lines its writer emits, so a line one kind doesn't know
+    /// (a dictation `Accepted words:`, a writing `Delivery:`) behaves exactly as
+    /// any other unknown line: dropped once metadata has started, body text
+    /// before that.
+    private enum DayFileFlavor {
+        case dictation
+        case writing
+
+        var recognizesDelivery: Bool { self == .dictation }
+        var recognizesLegacyTimestamp: Bool { self == .dictation }
+        var recognizesAcceptedWords: Bool { self == .writing }
+    }
+
+    /// One `## ` section of a day file, before per-kind defaults are applied.
+    private struct DayFileSection {
+        let heading: String
+        let title: String
+        var entryId = ""
+        var createdAt = ""
+        var sourceAppName: String?
+        var sourceAppBundleId: String?
+        var delivery: String?
+        var wordCount = 0
+        var characterCount = 0
+        var acceptedWordCount = 0
+        var text = ""
+
+        /// The heading without its `## ` marker, used when the title is empty.
+        var headingText: String {
+            heading.replacingOccurrences(of: "## ", with: "")
+        }
+    }
+
+    private static func parseDayFileSections(from body: String, flavor: DayFileFlavor) -> [DayFileSection] {
         let lines = body.components(separatedBy: "\n")
         var sections: [String] = []
         var currentSection: [String] = []
@@ -520,7 +609,7 @@ public enum CaptureMarkdownParser {
             sections.append(currentSection.joined(separator: "\n"))
         }
 
-        return sections.compactMap { section -> ParsedDictationDayCapture.Entry? in
+        return sections.compactMap { section -> DayFileSection? in
             let lines = section.components(separatedBy: "\n")
             guard let heading = lines.first, heading.hasPrefix("## ") else { return nil }
             let title = heading.replacingOccurrences(of: "## ", with: "")
@@ -528,16 +617,15 @@ public enum CaptureMarkdownParser {
                 .dropFirst()
                 .joined(separator: " - ")
 
-            var entryId = ""
-            var createdAt = ""
-            var sourceAppName = "Unknown"
-            var sourceAppBundleId: String?
-            var delivery = "failed"
-            var wordCount = 0
-            var characterCount = 0
+            var parsed = DayFileSection(heading: heading, title: title)
             var bodyLines: [String] = []
             var inBody = false
             var sawMetadata = false
+
+            func value(of line: String, key: String) -> String {
+                line.replacingOccurrences(of: key, with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
 
             for line in lines.dropFirst() {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -557,54 +645,87 @@ public enum CaptureMarkdownParser {
 
                 if trimmed.hasPrefix("Entry ID:") {
                     sawMetadata = true
-                    entryId = trimmed.replacingOccurrences(of: "Entry ID:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.entryId = value(of: trimmed, key: "Entry ID:")
                         .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
                 } else if trimmed.hasPrefix("Captured:") {
                     sawMetadata = true
-                    createdAt = trimmed.replacingOccurrences(of: "Captured:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.createdAt = value(of: trimmed, key: "Captured:")
                 } else if trimmed.hasPrefix("Source app:") {
                     sawMetadata = true
-                    sourceAppName = trimmed.replacingOccurrences(of: "Source app:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.sourceAppName = value(of: trimmed, key: "Source app:")
                 } else if trimmed.hasPrefix("Bundle ID:") {
                     sawMetadata = true
-                    sourceAppBundleId = trimmed.replacingOccurrences(of: "Bundle ID:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.sourceAppBundleId = value(of: trimmed, key: "Bundle ID:")
                         .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
-                } else if trimmed.hasPrefix("Delivery:") {
+                } else if flavor.recognizesDelivery, trimmed.hasPrefix("Delivery:") {
                     sawMetadata = true
-                    delivery = trimmed.replacingOccurrences(of: "Delivery:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.delivery = value(of: trimmed, key: "Delivery:")
                 } else if trimmed.hasPrefix("Words:") {
                     sawMetadata = true
-                    wordCount = Int(trimmed.replacingOccurrences(of: "Words:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                    parsed.wordCount = Int(value(of: trimmed, key: "Words:")) ?? 0
                 } else if trimmed.hasPrefix("Characters:") {
                     sawMetadata = true
-                    characterCount = Int(trimmed.replacingOccurrences(of: "Characters:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-                } else if trimmed.hasPrefix("Timestamp:") {
+                    parsed.characterCount = Int(value(of: trimmed, key: "Characters:")) ?? 0
+                } else if flavor.recognizesAcceptedWords, trimmed.hasPrefix("Accepted words:") {
+                    sawMetadata = true
+                    parsed.acceptedWordCount = Int(value(of: trimmed, key: "Accepted words:")) ?? 0
+                } else if flavor.recognizesLegacyTimestamp, trimmed.hasPrefix("Timestamp:") {
                     sawMetadata = true
                     // Backward compatibility with pre-refactor dictation markdown.
-                    createdAt = trimmed.replacingOccurrences(of: "Timestamp:", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    parsed.createdAt = value(of: trimmed, key: "Timestamp:")
                 } else if !sawMetadata {
                     inBody = true
                     bodyLines.append(line)
                 }
             }
 
-            let text = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            return ParsedDictationDayCapture.Entry(
-                id: entryId.isEmpty ? "dictation-\(UUID().uuidString)" : entryId,
-                createdAt: createdAt.isEmpty ? "1970-01-01T00:00:00Z" : createdAt,
-                title: title.isEmpty ? heading.replacingOccurrences(of: "## ", with: "") : title,
+            parsed.text = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return parsed
+        }
+    }
+
+    // MARK: - Dictation entries
+
+    private static func parseDictationEntries(from body: String) -> [ParsedDictationDayCapture.Entry] {
+        parseDayFileSections(from: body, flavor: .dictation).map { section in
+            ParsedDictationDayCapture.Entry(
+                id: section.entryId.isEmpty ? "dictation-\(UUID().uuidString)" : section.entryId,
+                createdAt: section.createdAt.isEmpty ? "1970-01-01T00:00:00Z" : section.createdAt,
+                title: section.title.isEmpty ? section.headingText : section.title,
+                text: section.text,
+                sourceAppName: section.sourceAppName ?? "Unknown",
+                sourceAppBundleId: section.sourceAppBundleId,
+                delivery: section.delivery ?? "failed",
+                wordCount: section.wordCount == 0 ? section.text.split(whereSeparator: \.isWhitespace).count : section.wordCount,
+                characterCount: section.characterCount == 0 ? section.text.count : section.characterCount
+            )
+        }
+        .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    // MARK: - Writing entries
+
+    /// The app's `WritingDayFileFormatter` writes a body line that starts with
+    /// `## ` as `\## ` so it can't open a new section. Undo that on read.
+    static func unescapeWritingBody(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.hasPrefix("\\## ") ? String($0.dropFirst()) : String($0) }
+            .joined(separator: "\n")
+    }
+
+    private static func parseWritingEntries(from body: String) -> [ParsedWritingDayCapture.Entry] {
+        parseDayFileSections(from: body, flavor: .writing).map { section in
+            let text = unescapeWritingBody(section.text)
+            return ParsedWritingDayCapture.Entry(
+                id: section.entryId.isEmpty ? "writing-\(UUID().uuidString)" : section.entryId,
+                createdAt: section.createdAt.isEmpty ? "1970-01-01T00:00:00Z" : section.createdAt,
+                title: section.title.isEmpty ? section.headingText : section.title,
                 text: text,
-                sourceAppName: sourceAppName,
-                sourceAppBundleId: sourceAppBundleId,
-                delivery: delivery,
-                wordCount: wordCount == 0 ? text.split(whereSeparator: \.isWhitespace).count : wordCount,
-                characterCount: characterCount == 0 ? text.count : characterCount
+                sourceAppName: section.sourceAppName ?? "Unknown",
+                sourceAppBundleId: section.sourceAppBundleId,
+                wordCount: section.wordCount == 0 ? text.split(whereSeparator: \.isWhitespace).count : section.wordCount,
+                characterCount: section.characterCount == 0 ? text.count : section.characterCount,
+                acceptedWordCount: max(0, section.acceptedWordCount)
             )
         }
         .sorted { $0.createdAt < $1.createdAt }

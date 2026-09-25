@@ -81,6 +81,7 @@ private struct FirstRunReliabilityRuntimeState: Codable {
     let captureLibraryPath: String
     let meetingsPath: String
     let dictationsPath: String
+    let writingPath: String
     let cachePath: String
     let logsPath: String
     let temporaryPath: String
@@ -762,6 +763,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WritingController.noteTerminationRequest()
         if duplicateInstanceShouldTerminateImmediately {
             return .terminateNow
         }
@@ -1203,6 +1205,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let captureLibraryURL = fileManager.transcriptedCaptureLibraryDir
         let meetingsURL = fileManager.meetingSupportDir
         let dictationsURL = fileManager.dictationSupportDir
+        let writingURL = fileManager.writingSupportDir
         let cacheURL = fileManager.transcriptedCacheDir
         let logsURL = fileManager.transcriptedLogsDir
         let temporaryURL = fileManager.transcriptedTemporaryDir
@@ -1235,6 +1238,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 captureLibraryPath: captureLibraryURL.path,
                 meetingsPath: meetingsURL.path,
                 dictationsPath: dictationsURL.path,
+                writingPath: writingURL.path,
                 cachePath: cacheURL.path,
                 logsPath: logsURL.path,
                 temporaryPath: temporaryURL.path,

@@ -15,9 +15,27 @@ public enum CaptureFileLimits {
     public static let classificationPrefixBytes = 512 * 1024
 }
 
-/// Detection helpers for Transcripted capture Markdown artifacts (meetings and
-/// dictation day files). Shared by TranscriptedCLI and TranscriptedMCP.
+/// Which kind of capture artifact a Markdown file is, as far as the filename
+/// and flat frontmatter can tell (see `CaptureMarkdown.captureKind(of:)`).
+public enum CaptureMarkdownKind: String, Sendable {
+    /// `Dictations_<date>.md` day file.
+    case dictationDay = "dictation_day"
+    /// `Writing_<date>.md` day file, or any file with `capture_type: writing_day`.
+    case writingDay = "writing_day"
+    /// Any other Markdown file with YAML frontmatter. Callers apply their own
+    /// meeting filters on top (summary sidecars, `meeting_summary`, ...).
+    case meeting
+}
+
+/// Detection helpers for Transcripted capture Markdown artifacts (meetings,
+/// dictation day files, and writing day files). Shared by TranscriptedCLI,
+/// TranscriptedMCP, and TranscriptedQA.
 public enum CaptureMarkdown {
+    /// Filename prefix of dictation day files (`Dictations_<YYYY-MM-dd>.md`).
+    public static let dictationDayFilenamePrefix = "Dictations_"
+    /// Filename prefix of writing day files (`Writing_<YYYY-MM-dd>.md`).
+    public static let writingDayFilenamePrefix = "Writing_"
+
     /// Read a capture Markdown file as UTF-8, refusing files larger than
     /// `CaptureFileLimits.maxTranscriptBytes`.
     public static func readBoundedContents(of url: URL) -> String? {
@@ -29,11 +47,26 @@ public enum CaptureMarkdown {
     }
 
     /// Whether a Markdown file looks like a Transcripted capture artifact:
-    /// either a dictation day file by name, or a file with YAML frontmatter.
+    /// either a dictation or writing day file by name, or a file with YAML
+    /// frontmatter.
     public static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        captureKind(of: url) != nil
+    }
+
+    /// Classify a capture Markdown file, or nil when it isn't one.
+    ///
+    /// Writing day files are recognized first, by the `Writing_` prefix or by
+    /// `capture_type: writing_day`, so a writing file sitting in a shared
+    /// folder (the `TRANSCRIPTED_DATA_DIR` fallback) is never mistaken for a
+    /// meeting. Dictation day files are still recognized by filename only,
+    /// exactly as before this helper existed.
+    public static func captureKind(of url: URL) -> CaptureMarkdownKind? {
         let filename = url.deletingPathExtension().lastPathComponent
-        if filename.hasPrefix("Dictations_") {
-            return true
+        if filename.hasPrefix(writingDayFilenamePrefix) {
+            return .writingDay
+        }
+        if filename.hasPrefix(dictationDayFilenamePrefix) {
+            return .dictationDay
         }
 
         // Keep the oversized-file refusal, but classify from a bounded prefix
@@ -44,10 +77,17 @@ public enum CaptureMarkdown {
         guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
               size <= CaptureFileLimits.maxTranscriptBytes,
               let head = readPrefix(of: url, maxBytes: CaptureFileLimits.classificationPrefixBytes) else {
-            return false
+            return nil
         }
 
-        return head.hasPrefix("---\n") && head.contains("\n---\n")
+        guard head.hasPrefix("---\n") && head.contains("\n---\n") else {
+            return nil
+        }
+
+        if CaptureMarkdownParser.parseFrontmatter(from: head)?.values["capture_type"] == CaptureMarkdownKind.writingDay.rawValue {
+            return .writingDay
+        }
+        return .meeting
     }
 
     /// First `maxBytes` of a file decoded as UTF-8. The prefix can cut a
