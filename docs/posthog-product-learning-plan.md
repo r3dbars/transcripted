@@ -183,7 +183,7 @@ aggregate reliability sizing and should not be expanded to raw device names.
 | `meeting_recording_stopped` | diagnostics plus `capture_quality`, `duration_bucket`, `gap_count_bucket`, `reason`, `route_change_count_bucket`, `system_stream_present`, `stop_timed_out`, `trigger` |
 | `meeting_capture_health_snapshot` | same as `meeting_recording_stopped` |
 | `meeting_recording_cancelled` | diagnostics plus `duration_bucket`, `reason`, `stop_timed_out`, `system_stream_present`, `trigger` |
-| `meeting_transcript_saved` | `duration_bucket`, `participant_count_bucket`, `queue_depth_bucket`, `trigger`, `word_count_bucket` |
+| `meeting_transcript_saved` | `diarize_ms`, `duration_bucket`, `mac_chip`, `memory_gb_bucket`, `models_ready_ms`, `participant_count_bucket`, `processing_ms`, `queue_depth_bucket`, `recording_minutes`, `resample_ms`, `sleep_ms`, `stt_calls`, `stt_input_seconds`, `stt_ms`, `stt_model`, `trigger`, `word_count_bucket` |
 | `meeting_transcript_failed` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |
 | `meeting_speaker_finalization_failed` | `failure_kind`, `queue_depth_bucket`, `session_stage`, `trigger`, plus when known `finalization_reason` (a fixed save-failure code such as `name_rewrite_failed` or `database_write_failed`), `review_mode` (`save` or `review_later`), and `is_retry` |
 | `meeting_transcript_skipped` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |

@@ -149,7 +149,9 @@ public enum AudioResampler {
     /// Load a WAV file and return mono Float32 samples resampled to 16kHz.
     /// Uses AVAudioConverter for hardware-accelerated resampling with anti-aliasing.
     public static func loadAndResample(url: URL, targetRate: Double = 16000) throws -> [Float] {
-        return try convertToMono(url: url, targetRate: targetRate)
+        return try MeetingPipelineTimings.measure(.resample) {
+            try convertToMono(url: url, targetRate: targetRate)
+        }
     }
 
     /// Hardware-accelerated resampling via AVAudioConverter.
