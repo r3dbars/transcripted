@@ -336,8 +336,8 @@ Entry ID: `writing-20260925-104211-387-4f2a9c1e`
 Captured: 2026-09-25T15:42:11.387Z
 Source app: Slack
 Bundle ID: `com.tinyspeck.slackmacgap`
-Words: 14
-Characters: 71
+Words: 12
+Characters: 65
 Accepted words: 3
 
 Pushing the launch to Thursday so QA can finish the AirPods pass.
@@ -364,6 +364,9 @@ Details:
   end of file. It is the settled text: characters removed with Backspace inside
   the keyboard's own buffer aren't saved. Pastes, mouse edits, and the host
   app's autocorrect aren't seen (a known v1 limit).
+- A text line that starts with `## ` is written as `\## ` so it can't open a
+  new section. Readers strip that one backslash
+  (`CaptureMarkdownParser.unescapeWritingBody`).
 - An entry is one app's continuous writing. A new entry starts on an app
   switch, after 2 minutes idle, or on a caret jump or segment break the
   keyboard reports. Entries under 2 characters after trimming aren't saved.
@@ -386,4 +389,7 @@ Details:
 - Treat every key as optional. Missing `format_version` = version 1 semantics.
 - `Tools/TranscriptedCaptureKit` exposes `format_version` / `transcript_style`
   as optional `formatVersion` / `transcriptStyle` fields on
-  `ParsedMeetingCapture` and `formatVersion` on `ParsedDictationDayCapture`.
+  `ParsedMeetingCapture` and `formatVersion` on `ParsedDictationDayCapture`
+  and `ParsedWritingDayCapture` (`CaptureMarkdownParser.parseWritingDay`).
+  Detect writing day files via `capture_type: writing_day` or the `Writing_`
+  prefix, and check for them before the "frontmatter means meeting" fallback.

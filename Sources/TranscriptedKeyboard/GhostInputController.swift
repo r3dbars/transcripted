@@ -141,6 +141,9 @@ final class GhostInputController: IMKInputController {
     /// unstable client identifiers. Rotate this on known edit/session
     /// boundaries so replay does not join across deletion or navigation.
     private var historySegmentIdentifier = UUID().uuidString
+    /// Transcripted: the keyboard's own text in this segment chain, so a
+    /// Backspace right after it can be reported to Save my writing.
+    private var historyDeletions = PersonalHistoryDeletionTracker()
     private var state = InlineSuggestionState()
     private var typedFallback = ""
     private var fallbackOwner: FallbackOwner?
@@ -214,6 +217,8 @@ final class GhostInputController: IMKInputController {
                     secureInput: secureInput,
                     observation: nil
                 )
+            } else if event.keyCode == 51 {
+                noteHistoryBackspace(client, observation: nil)
             } else {
                 breakHistorySegment()
             }
@@ -221,6 +226,15 @@ final class GhostInputController: IMKInputController {
         }
         let previousOwner = fallbackOwner
         let insertionObservation = synchronizeFallback(with: client)
+        // Transcripted (Tilde bug fix): the app scope and the exclusion list
+        // gate suggestions too, not only capture and screen context. Outside
+        // them keys behave as with suggestions off, and nothing is captured.
+        guard WritingAppScopeReader.shared.allowsSuggestions(in: insertionObservation.bundle) else {
+            dismiss(client)
+            resetFallback()
+            breakHistorySegment()
+            return false
+        }
         if previousOwner != insertionObservation.owner {
             notifyScreenMemory(.textFieldFocused)
         }
@@ -262,7 +276,7 @@ final class GhostInputController: IMKInputController {
             return wasVisible
 
         case 51: // The host owns deletion; wait for the next typed character.
-            breakHistorySegment()
+            noteHistoryBackspace(client, observation: insertionObservation)
             dismiss(client)
             resetFallback()
             return false
@@ -745,6 +759,51 @@ final class GhostInputController: IMKInputController {
         PersonalHistoryCapture.shared.record(
             text: text,
             source: source,
+            sessionIdentifier: historySegmentIdentifier,
+            permit: permit
+        )
+        historyDeletions.inserted(text)
+    }
+
+    /// Transcripted: a plain Backspace. The host still deletes; this only
+    /// reports it when the character is the keyboard's own, sent in this
+    /// segment chain and still right before the caret. Anything else breaks
+    /// the segment, as every Backspace did in Tilde. Reads the caret only
+    /// when there is something to report.
+    private func noteHistoryBackspace(
+        _ client: IMKTextInput,
+        observation: InsertionObservation?
+    ) {
+        guard let owner = historyOwner, historyDeletions.hasTrackedText else {
+            breakHistorySegment()
+            return
+        }
+        let observed = observation ?? InsertionObservation(
+            bundle: client.bundleIdentifier() ?? "",
+            selection: client.selectedRange()
+        )
+        guard observed.owner == owner,
+              let permit = PersonalHistoryCapture.shared.permit(
+                appBundleIdentifier: owner.bundle,
+                secureInput: false
+              ),
+              let backspace = historyDeletions.backspace() else {
+            breakHistorySegment()
+            return
+        }
+        // Tilde's predictor saw a new segment after every Backspace; it still
+        // does. The continuation keeps the chain for the day file.
+        if backspace.rotatesSegment {
+            historySegmentIdentifier = PersonalHistorySegmentChain.continuation(
+                of: historySegmentIdentifier
+            )
+        }
+        historyOwner = FallbackOwner(
+            bundle: owner.bundle,
+            caret: max(0, owner.caret - backspace.utf16Length)
+        )
+        PersonalHistoryCapture.shared.recordDeletion(
+            characters: 1,
             sessionIdentifier: historySegmentIdentifier,
             permit: permit
         )
@@ -1308,6 +1367,7 @@ final class GhostInputController: IMKInputController {
     private func breakHistorySegment() {
         historySegmentIdentifier = UUID().uuidString
         historyOwner = nil
+        historyDeletions.reset()
     }
 
     private func invalidateHistoryContinuity() {

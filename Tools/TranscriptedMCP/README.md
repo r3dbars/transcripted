@@ -1,6 +1,6 @@
 # Transcripted MCP
 
-Read-only local tools for Transcripted meetings and dictations.
+Read-only local tools for Transcripted meetings, dictations, and writing.
 
 For Claude Desktop users, the best setup is inside the app:
 
@@ -53,14 +53,25 @@ Without a custom library, it reads:
 ```text
 ~/Library/Application Support/Transcripted/captures/meetings
 ~/Library/Application Support/Transcripted/captures/dictations
+~/Library/Application Support/Transcripted/captures/writing
 ```
 
 Override paths with `TRANSCRIPTED_DATA_DIR`, `TRANSCRIPTED_MEETINGS_DIR`,
-`TRANSCRIPTED_DICTATIONS_DIR`, or `TRANSCRIPTED_INDEX_DIR`.
-If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
-`dictations/` subfolders, `transcripted-mcp` uses those subfolders
-automatically and stores its SQLite index in that shared root unless
-`TRANSCRIPTED_INDEX_DIR` is also set.
+`TRANSCRIPTED_DICTATIONS_DIR`, `TRANSCRIPTED_WRITING_DIR`, or
+`TRANSCRIPTED_INDEX_DIR`.
+If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/`,
+`dictations/`, or `writing/` subfolders, `transcripted-mcp` uses those
+subfolders automatically and stores its SQLite index in that shared root unless
+`TRANSCRIPTED_INDEX_DIR` is also set. With per-kind meeting or dictation
+overrides, writing is read only when `TRANSCRIPTED_WRITING_DIR` is set too.
+
+## Writing
+
+`list_writing` and `read_writing` mirror `list_dictations` and
+`read_dictation` for `Writing_<date>.md` day files (what the user typed with
+the Transcripted keyboard). `search_context` and `recent_context` take
+`kind: "writing"` and include writing in `all`. Writing search is full-text
+only; the on-device embeddings cover meetings and dictations.
 
 ## Telemetry
 

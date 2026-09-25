@@ -280,6 +280,10 @@ final class PersonalHistoryController: PersonalHistoryIngesting, @unchecked Send
 
     func ingest(_ events: [PersonalHistoryEvent]) async -> Bool {
         guard PersonalHistoryEvent.validBatch(events) else { return false }
+        // Transcripted: Backspace counts are for Save my writing's day files.
+        // The encrypted log and the predictor get exactly Tilde's events.
+        let events = events.filter { $0.source != .deletion }
+        guard !events.isEmpty else { return true }
         let configuration = configurationState.snapshot()
         do {
             try await operations.ingest(events, configuration: configuration)

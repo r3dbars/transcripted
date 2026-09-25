@@ -8,16 +8,19 @@ It does not build or run the app target.
 
 ### Local Context
 
-- `transcripted-cli context-recent` — list recent meetings and dictations
-- `transcripted-cli context-search <query>` — search across saved meetings and dictations, including meeting titles and speaker names
+- `transcripted-cli context-recent` — list recent meetings, dictations, and writing
+- `transcripted-cli context-search <query>` — search across saved meetings, dictations, and writing, including meeting titles and speaker names
 - `transcripted-cli read-meeting <filename>` — read one saved meeting transcript
 - `transcripted-cli list-dictations` — list saved dictation day files
 - `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
+- `transcripted-cli list-writing` — list saved writing day files (`Writing_<date>.md`)
+- `transcripted-cli read-writing <filename>` — read one writing day or one entry
 
 By default these commands read:
 
 - meetings: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/dictations`
+- writing: the app-selected capture library's `writing/` folder, otherwise `~/Library/Application Support/Transcripted/captures/writing`. With `--meetings-dir`/`--dictations-dir` (or their env vars) and no `--writing-dir`, no writing folder is read
 
 Read order for default local context:
 
@@ -31,16 +34,19 @@ They also honor:
 - `--data-dir`
 - `--meetings-dir`
 - `--dictations-dir`
+- `--writing-dir`
 - `TRANSCRIPTED_DATA_DIR`
 - `TRANSCRIPTED_MEETINGS_DIR`
 - `TRANSCRIPTED_DICTATIONS_DIR`
+- `TRANSCRIPTED_WRITING_DIR`
 
 ### Output Shapes
 
-- `context-recent`, `context-search`, and `list-dictations` print a bare JSON array with `--json` when there are results; with zero results they emit `{"results": [], "searched_directories": [...], "hint": "..."}` instead, and in text mode print `No results. Searched: <dirs>` to stderr
-- `context-search --speaker` with `--kind all` or `--kind dictation` skips dictations by design; text mode prints a one-line note to stderr, `--json` wraps the results as `{"results": [...], "notes": [...]}`
+- `context-recent`, `context-search`, `list-dictations`, and `list-writing` print a bare JSON array with `--json` when there are results; with zero results they emit `{"results": [], "searched_directories": [...], "hint": "..."}` instead, and in text mode print `No results. Searched: <dirs>` to stderr
+- `context-search --speaker` with `--kind all`, `--kind dictation`, or `--kind writing` skips dictations and writing by design; text mode prints a one-line note to stderr, `--json` wraps the results as `{"results": [...], "notes": [...]}`
 - `--count` values are clamped to 1-50
-- `read-meeting --json` includes `recording`, `speakers`, and `utterances` (parsed transcript structure) alongside the raw `markdown`; `read-dictation --json` includes `date` and `entries` (entry id, captured timestamp, source app, title, text) alongside `markdown`
+- `read-meeting --json` includes `recording`, `speakers`, and `utterances` (parsed transcript structure) alongside the raw `markdown`; `read-dictation --json` includes `date` and `entries` (entry id, captured timestamp, source app, title, text) alongside `markdown`; `read-writing --json` has the same shape with `accepted_word_count` per entry and no `delivery`
+- writing day files never read as meetings, even when they share a folder with meetings (`--data-dir` pointing at a flat folder)
 
 ### Offline Audio
 
@@ -92,6 +98,7 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 |------|---------|
 | `Tests/TranscriptedCLITests/ContextDirectoriesTests.swift` | Coverage for current Transcripted captures vs legacy Draft fallback path resolution |
 | `Tests/TranscriptedCLITests/ContextStoreTests.swift` | Coverage for `ContextStore` recent/search loading and dictation day-file filtering |
+| `Tests/TranscriptedCLITests/WritingContextTests.swift` | Writing day files in recent/search/list/read, the flat shared folder, per-kind isolation, and the `list-writing` / `read-writing` commands |
 | `Tests/TranscriptedCLITests/TranscribeOutputTests.swift` | Coverage for transcribe output formats, segment grouping, SRT timestamps, and output-path derivation |
 | `Tests/TranscriptedCLITests/BuildModeTests.swift` | Compiled capabilities vs requested build mode, and `build-info` output |
 | `Tests/TranscriptedCLITests/CLIModelPathsTests.swift` | Containing-app-first model lookup, relocated/symlinked helpers |

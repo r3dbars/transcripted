@@ -16,6 +16,7 @@ struct ValidateAll: ParsableCommand {
 
         results += validateTranscripts(in: paths.meetingDirs)
         results += validateDictations(in: paths.dictationDirs)
+        results += validateWriting(in: paths.writingDirs)
         results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
         results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()
         results += LogValidator(logPath: paths.logFilePath).validate()
@@ -34,5 +35,11 @@ func validateTranscripts(in directories: [URL]) -> [ValidationResult] {
 func validateDictations(in directories: [URL]) -> [ValidationResult] {
     directories.reduce(into: [ValidationResult]()) { results, directory in
         results += DictationValidator(directory: directory).validate()
+    }
+}
+
+func validateWriting(in directories: [URL]) -> [ValidationResult] {
+    directories.reduce(into: [ValidationResult]()) { results, directory in
+        results += WritingValidator(directory: directory).validate()
     }
 }

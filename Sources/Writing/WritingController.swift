@@ -78,6 +78,15 @@ final class WritingController {
         )
     }
 
+    /// Writing's own preferences (Save my writing, personalized suggestions,
+    /// the app scope), read fresh on each use like `settings()`.
+    nonisolated static func preferences() -> WritingPreferences {
+        WritingPreferences(
+            keyboard: UserDefaults(suiteName: TildeSettings.keyboardSuiteName),
+            app: appDefaults()
+        )
+    }
+
     // MARK: - Read-only state for the Writing tab
 
     let physicalMemoryBytes: UInt64
@@ -108,6 +117,10 @@ final class WritingController {
     var runtimeState: LlamaRuntimeSnapshot? { runtime?.llamaServerHost.snapshot }
 
     var screenRecordingGranted: Bool { ScreenRecordingPermission.isGranted() }
+
+    var saveMyWritingEnabled: Bool { Self.preferences().saveMyWritingEnabled }
+    var personalizedSuggestionsEnabled: Bool { Self.preferences().personalizedSuggestionsEnabled }
+    var appScope: WritingAppScope { Self.preferences().appScope }
 
     /// The prompt was shown at least once. With `screenRecordingGranted`
     /// still false, the UI asks the user to reopen Transcripted (macOS
@@ -146,9 +159,13 @@ final class WritingController {
         /// next trigger. `excludedApps` is the SAME list Personal History
         /// uses, per the covenant's "shared with Personal History" rule.
         let screenCaptureService: ScreenCaptureService
+        /// Save my writing's Markdown day files.
+        let dayFiles: WritingDayFileWriter
     }
 
     private let modelRoot: URL
+    /// `<capture-library>/writing`, for the day files and Delete all writing.
+    private let writingDirectory: @Sendable () -> URL
     private let keyboardInstaller = GhostKeyboardInstallerHost()
     private var runtime: Runtime?
     /// Rebuilt on a model switch: its served configuration is per model.
@@ -176,10 +193,12 @@ final class WritingController {
 
     init(
         physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory,
-        modelRoot: URL = WritingController.defaultModelRoot
+        modelRoot: URL = WritingController.defaultModelRoot,
+        writingDirectory: @escaping @Sendable () -> URL = WritingDayFileWriter.defaultDirectory
     ) {
         self.physicalMemoryBytes = physicalMemoryBytes
         self.modelRoot = modelRoot
+        self.writingDirectory = writingDirectory
         // Transcripted's bundles always resolve to the production profile,
         // so the saved choice is never nil here; Gemma is Tilde's default.
         self.selectedModel = WritingModelEligibility.resolvedChoice(
@@ -216,7 +235,8 @@ final class WritingController {
             screenCaptureService: ScreenCaptureService(
                 enabled: { Self.settings().screenMemoryEnabled },
                 excludedApps: { Self.settings().personalHistoryExcludedApps }
-            )
+            ),
+            dayFiles: WritingDayFileWriter(directory: writingDirectory, preferences: { Self.preferences() })
         )
         self.runtime = runtime
         activeModel = selectedModel
@@ -232,6 +252,7 @@ final class WritingController {
         }
         ghostBrainServerHost = server
         isRunning = true
+        runtime.dayFiles.start()
 
         // The keyboard is only as smart as this process is alive.
         ProcessInfo.processInfo.disableAutomaticTermination(Self.automaticTerminationReason)
@@ -276,6 +297,8 @@ final class WritingController {
         DiagnosticsLog.shared.record("shutdown", metadata: [:])
         DiagnosticsLog.shared.flush()
         ghostBrainServerHost?.stop()
+        // The last open entry goes to its day file before the app quits.
+        runtime?.dayFiles.stop()
         runtime?.llamaServerHost.stop()
         if let frontmostAppObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(frontmostAppObserver)
@@ -376,6 +399,56 @@ final class WritingController {
         }
     }
 
+    /// Save my writing is Tilde's Personal History switch. It goes through the
+    /// controller when Writing runs, so consent rotates and text queued
+    /// before the change is refused, as in Tilde.
+    func setSaveMyWriting(_ enabled: Bool) {
+        if let runtime {
+            runtime.personalHistoryController.isEnabled = enabled
+        } else {
+            let settings = Self.settings()
+            settings.personalHistoryConsentIdentifier = UUID().uuidString
+            settings.personalHistoryEnabled = enabled
+        }
+    }
+
+    /// Off by default (decision 11). Serving also needs Save my writing on.
+    func setPersonalizedSuggestions(_ enabled: Bool) {
+        Self.preferences().personalizedSuggestionsEnabled = enabled
+    }
+
+    /// One scope for capture, the day files, Screen Memory context and
+    /// suggestions. The keyboard picks it up on its next key.
+    func setAppScope(_ scope: WritingAppScope) {
+        Self.preferences().appScope = scope
+    }
+
+    /// Delete all writing: Tilde's delete-all (history, trained model,
+    /// Keychain key, outcome ledger) plus every `Writing_*.md` in the writing
+    /// folder. Like Tilde's, it turns Save my writing off. `true` when
+    /// everything went.
+    func deleteAllWriting() async -> Bool {
+        let controller = runtime?.personalHistoryController ?? PersonalHistoryController(
+            store: EncryptedPersonalHistoryStore(),
+            settings: Self.settings(),
+            diagnostics: .shared
+        )
+        var deleted = true
+        do {
+            try await controller.deleteAll()
+        } catch {
+            deleted = false
+        }
+        if !TildeLocalOutcomeStores.deleteAll() { deleted = false }
+        let recorder = runtime?.dayFiles.recorder
+        let directory = writingDirectory
+        let filesDeleted = await Task.detached(priority: .userInitiated) {
+            recorder?.deleteAll() ?? WritingDayFileStore.deleteAll(in: directory())
+        }.value
+        log("WRITING | delete all writing: \(deleted && filesDeleted ? "done" : "incomplete")")
+        return deleted && filesDeleted
+    }
+
     /// Shows the system Screen Recording prompt the first time. macOS then
     /// offers its own "Quit & Reopen", which goes through Transcripted's
     /// normal quit path and its meeting guard. Nothing here relaunches.
@@ -467,7 +540,11 @@ final class WritingController {
         // belongs only to the keyboard's system spell-checker path.
         return GhostBrainServerHost(
             runtime: runtime.llamaServerHost,
-            personalHistory: runtime.personalHistoryController,
+            personalHistory: WritingHistoryIngest(
+                personalHistory: runtime.personalHistoryController,
+                dayFiles: runtime.dayFiles.recorder,
+                appScope: { Self.preferences().appScope }
+            ),
             sceneProvider: Self.sceneProvider(for: runtime.screenCaptureService),
             targetProvider: { appBundleIdentifier, fieldSessionIdentifier in
                 Self.suggestionTargetProvider(appBundleIdentifier, fieldSessionIdentifier)
@@ -478,7 +555,7 @@ final class WritingController {
                 prewarmer: runtime.scaffoldPrewarmer
             ),
             onScreenMemoryEvent: Self.screenMemoryEventHandler(for: runtime.screenCaptureService),
-            suggestionsGate: { Self.suggestionsGate() },
+            suggestionsGate: { Self.suggestionsGate(appBundleIdentifier: $0) },
             personalSuggestionsGate: { Self.personalSuggestionsGate() },
             personalNextWordProvider: Self.personalNextWordProvider(for: runtime.personalHistoryController),
             configuration: configuration,
@@ -575,9 +652,9 @@ final class WritingController {
             let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             prewarmer.noteFrontmostApp(bundleIdentifier: activated?.bundleIdentifier)
             Task {
-                await screenCaptureService.noteWindowChanged(
-                    target: Self.currentTypingTarget(sessionIdentifier: "")
-                )
+                let target = Self.currentTypingTarget(sessionIdentifier: "")
+                guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else { return }
+                await screenCaptureService.noteWindowChanged(target: target)
             }
         }
         lastFrontWindowIdentity = Self.currentFrontWindowIdentity()
@@ -596,9 +673,9 @@ final class WritingController {
         guard identity != lastFrontWindowIdentity else { return }
         lastFrontWindowIdentity = identity
         Task {
-            await screenCaptureService.noteWindowChanged(
-                target: identity.map { Self.typingTarget(from: $0, sessionIdentifier: "") }
-            )
+            let target = identity.map { Self.typingTarget(from: $0, sessionIdentifier: "") }
+            guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else { return }
+            await screenCaptureService.noteWindowChanged(target: target)
         }
     }
 
@@ -656,22 +733,25 @@ final class WritingController {
 
     // MARK: - Server closures
 
-    /// Screen Recording is required for any suggestion; see
-    /// `WritingSuggestionsGate` for the whole rule. Read fresh on every
-    /// completion request (never cached), so a permission revoked or granted
-    /// mid-session applies to the very next request.
-    private nonisolated static func suggestionsGate() -> Bool {
+    /// Screen Recording is required for any suggestion, and the request's app
+    /// must be in the Writing scope; see `WritingSuggestionsGate` for the
+    /// whole rule. Read fresh on every completion request (never cached), so
+    /// a permission revoked or granted mid-session applies to the very next
+    /// request.
+    private nonisolated static func suggestionsGate(appBundleIdentifier: String?) -> Bool {
         WritingSuggestionsGate.allows(WritingSuggestionsGate.Inputs(
-            settings: settings(),
+            preferences: preferences(),
+            appBundleIdentifier: appBundleIdentifier,
             screenRecordingGranted: ScreenRecordingPermission.isGranted()
         ))
     }
 
-    /// Personalization has one product-level choice. When local Personal
-    /// History is enabled, safe personal suggestions may be served; when it
-    /// is disabled, neither learning nor personal serving runs.
+    /// Tilde had one choice: Personal History on meant personal suggestions
+    /// on. Transcripted splits them (decision 11): personalized suggestions
+    /// are their own switch, off by default, and still need Save my writing,
+    /// which is what the predictor learns from.
     private nonisolated static func personalSuggestionsGate() -> Bool {
-        settings().personalHistoryEnabled
+        preferences().personalSuggestionsAllowed
     }
 
     /// `nonisolated` for the same reason `sceneProvider`/
@@ -710,23 +790,34 @@ final class WritingController {
     ) -> @Sendable (ScreenMemoryInputEvent) -> Void {
         { event in
             Task {
+                guard event.kind != .textFieldBlurred else {
+                    await service.noteTextFieldBlurred(sessionIdentifier: event.sessionIdentifier)
+                    return
+                }
+                let target = Self.currentTypingTarget(sessionIdentifier: event.sessionIdentifier)
+                // Screen Memory reads only apps in the Writing scope. A field
+                // outside it ends the capture session instead of starting one.
+                guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else {
+                    await service.noteTextFieldBlurred(sessionIdentifier: event.sessionIdentifier)
+                    return
+                }
                 switch event.kind {
                 case .textFieldFocused:
                     _ = await service.noteTextFieldFocused(
                         sessionIdentifier: event.sessionIdentifier,
-                        target: Self.currentTypingTarget(sessionIdentifier: event.sessionIdentifier)
+                        target: target
                     )
                 case .typingPaused:
                     _ = await service.noteTypingPaused(
                         sessionIdentifier: event.sessionIdentifier,
-                        target: Self.currentTypingTarget(sessionIdentifier: event.sessionIdentifier)
+                        target: target
                     )
                 case .textFieldBlurred:
-                    await service.noteTextFieldBlurred(sessionIdentifier: event.sessionIdentifier)
+                    break
                 case .contentReset:
                     _ = await service.noteContentReset(
                         sessionIdentifier: event.sessionIdentifier,
-                        target: Self.currentTypingTarget(sessionIdentifier: event.sessionIdentifier)
+                        target: target
                     )
                 }
             }
@@ -745,7 +836,8 @@ final class WritingController {
         String?, String, String?, TypingTargetIdentity?
     ) async -> ScreenScene.Scene? {
         { appBundleIdentifier, fieldText, fieldSessionIdentifier, expectedTarget in
-            guard settings().screenMemoryEnabled else { return nil }
+            guard settings().screenMemoryEnabled,
+                  preferences().allows(appBundleIdentifier: appBundleIdentifier) else { return nil }
             return await service.freshScene(
                 frontmostBundleID: appBundleIdentifier,
                 fieldText: fieldText,
