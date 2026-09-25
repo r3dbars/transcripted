@@ -175,7 +175,16 @@ PY
 
 # 2. No deltas: the item has no sparkle:deltas and the manifest is empty.
 run_case none 9.9.9 STUB_MODE=none || { cat "$test_root/none/out.txt" >&2; fail "none: script failed"; }
-grep -q "sparkle:deltas" "$case_dir/appcast.xml" && fail "none: unexpected sparkle:deltas"
+# Only the new 9.9.9 item: older real items (1.1.65 on) carry their own deltas.
+python3 - "$case_dir/appcast.xml" <<'PY' || fail "none: unexpected sparkle:deltas"
+import sys
+import xml.etree.ElementTree as ET
+
+ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+latest = ET.parse(sys.argv[1]).getroot().findall("./channel/item")[0]
+assert latest.findtext("sparkle:shortVersionString", namespaces=ns) == "9.9.9"
+assert latest.find("sparkle:deltas", namespaces=ns) is None
+PY
 [ ! -s "$case_dir/updates/sparkle-deltas.txt" ] || fail "none: manifest should be empty"
 grep -q "No delta updates for 9.9.9" "$case_dir/out.txt" || fail "none: missing no-delta note"
 

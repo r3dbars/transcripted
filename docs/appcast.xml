@@ -7,6 +7,21 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>1.1.65</title>
+      <pubDate>Fri, 25 Sep 2026 12:46:04 +0000</pubDate>
+      <sparkle:version>1.1.65</sparkle:version>
+      <sparkle:shortVersionString>1.1.65</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.65/Transcripted-1.1.65.dmg" length="515323855" type="application/octet-stream" sparkle:edSignature="2RbdpfMOmnfBbrS+P0ZJVxlcAdK1M3tjmyknKuZ+RcZeJ6/srvTUABbRB6EqjYZ05XRW/G5MR+z7P/AezeHhAg==" />
+      <sparkle:deltas>
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.65/Transcripted1.1.65-1.1.64.delta" sparkle:deltaFrom="1.1.64" length="2976110" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="LjQd+1biPwHBSfRWfL7hEb//q7lrSBrAF9F1cIwnPgP/P0/EXpP5gYkN7X0+ZMI1JWSoESvP10yH+ReF8vMwAA==" />
+      </sparkle:deltas>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.65</link>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.65</sparkle:releaseNotesLink>
+      <sparkle:criticalUpdate sparkle:version="1.1.63" />
+    </item>
+    <item>
       <title>1.1.64</title>
       <pubDate>Thu, 24 Sep 2026 20:50:54 +0000</pubDate>
       <sparkle:version>1.1.64</sparkle:version>
