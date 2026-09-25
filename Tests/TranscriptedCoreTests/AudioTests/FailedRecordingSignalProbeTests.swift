@@ -89,6 +89,33 @@ final class FailedRecordingSignalProbeTests: XCTestCase {
         XCTAssertEqual(FailedRecordingSignalProbe.probe(url: url), .absent)
     }
 
+    // MARK: - Speech check for short recordings (stopped dictations)
+
+    func testMayContainSpeechIsFalseForSilence() throws {
+        let url = try writeWAV(named: "dictation-silent.wav", duration: 4)
+        XCTAssertFalse(FailedRecordingSignalProbe.mayContainSpeech(url: url))
+    }
+
+    func testMayContainSpeechIsFalseForSteadyHum() throws {
+        // Room tone or hum at a level the loose capture check accepts, but it
+        // never rises and falls the way speech does.
+        let url = try writeWAV(named: "dictation-hum.wav", duration: 4, toneRange: 0..<4, amplitude: 0.02)
+        XCTAssertFalse(FailedRecordingSignalProbe.mayContainSpeech(url: url))
+    }
+
+    func testMayContainSpeechIsTrueForABurstOfSound() throws {
+        let url = try writeWAV(named: "dictation-burst.wav", duration: 4, toneRange: 1..<2)
+        XCTAssertTrue(FailedRecordingSignalProbe.mayContainSpeech(url: url))
+    }
+
+    func testMayContainSpeechKeepsUnreadableFiles() throws {
+        let missing = testRoot.appendingPathComponent("missing.wav")
+        XCTAssertTrue(FailedRecordingSignalProbe.mayContainSpeech(url: missing))
+        let garbage = testRoot.appendingPathComponent("garbage.wav")
+        try Data("not audio".utf8).write(to: garbage)
+        XCTAssertTrue(FailedRecordingSignalProbe.mayContainSpeech(url: garbage))
+    }
+
     // MARK: - Any audio anywhere must be found
 
     func testProbeFindsAudioAtTheStart() throws {

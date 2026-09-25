@@ -126,6 +126,42 @@ func testDictationStoppedAudioRecovery() {
         }
     }
 
+    runSuite("Dictation stopped audio recovery drops only recordings with no speech") {
+        let directory = makeRecoveryTestDirectory("silent")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            let silent = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0, 0, 0], sessionID: UUID(), directory: directory
+            )!
+            let spoken = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0.1, -0.1, 0.1], sessionID: UUID(), directory: directory
+            )!
+            var checked: [URL] = []
+            let kept = DictationStoppedAudioRecoveryStore.discardSilent(
+                [silent, spoken],
+                mayContainSpeech: { url in
+                    checked.append(url)
+                    return url == spoken.url
+                }
+            )
+            assertEqual(kept, [spoken], "a recording that may hold speech is kept and still offered")
+            assertEqual(checked, [silent.url, spoken.url], "every leftover is checked")
+            assertFalse(FileManager.default.fileExists(atPath: silent.url.path), "the empty recording is deleted")
+            assertTrue(FileManager.default.fileExists(atPath: spoken.url.path), "the spoken recording stays on disk")
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).map(\.url),
+                [spoken.url],
+                "the empty recording's metadata is removed too, so launch stops asking about it"
+            )
+            assertFalse(
+                DictationStoppedAudioRecoveryStore.discardSilent(at: silent.url, mayContainSpeech: { _ in false }),
+                "a recording that is already gone reports nothing deleted"
+            )
+        } catch {
+            assertTrue(false, "silent recovery discard should succeed: \(error)")
+        }
+    }
+
     runSuite("Dictation stopped audio recovery limits after newest-first ordering") {
         let oldSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let middleSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!

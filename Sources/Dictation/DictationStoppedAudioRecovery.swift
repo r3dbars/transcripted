@@ -146,6 +146,33 @@ enum DictationStoppedAudioRecoveryStore {
         }
     }
 
+    /// Deletes each recording that holds no speech and returns the ones that
+    /// were kept. `mayContainSpeech` must answer `true` whenever it isn't
+    /// sure, so only a recording known to be empty is ever deleted.
+    @discardableResult
+    static func discardSilent(
+        _ recoveries: [DictationStoppedAudioRecovery],
+        mayContainSpeech: (URL) -> Bool,
+        fileManager: FileManager = .default
+    ) -> [DictationStoppedAudioRecovery] {
+        recoveries.filter { recovery in
+            !discardSilent(at: recovery.url, mayContainSpeech: mayContainSpeech, fileManager: fileManager)
+        }
+    }
+
+    /// Deletes one saved recording (and its metadata) if it holds no speech.
+    /// Returns `true` when it was deleted.
+    @discardableResult
+    static func discardSilent(
+        at url: URL,
+        mayContainSpeech: (URL) -> Bool,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard fileManager.fileExists(atPath: url.path), !mayContainSpeech(url) else { return false }
+        let recovery = DictationStoppedAudioRecovery(url: url, sessionID: UUID(), createdAt: Date())
+        return cleanup(recovery, explicitDiscard: true, fileManager: fileManager)
+    }
+
     private static func writeMetadata(
         for recovery: DictationStoppedAudioRecovery,
         fileManager: FileManager

@@ -96,6 +96,32 @@ public enum FailedRecordingSignalProbe {
         return .absent
     }
 
+    /// Longest recording `mayContainSpeech` will decode. Stopped dictations
+    /// are capped well under this; anything longer is kept without a scan.
+    static let speechScanMaxSeconds: Double = 10 * 60
+
+    /// Whether a short saved recording, such as a stopped dictation, has
+    /// anything in it that rises and falls like speech.
+    ///
+    /// Stricter than `probe(url:)`: steady room tone, hum, a DC offset and
+    /// digital silence all come back `false`, using the same modulation gate
+    /// the meeting pipeline uses before discarding an accidental start. Only a
+    /// file that was read in full can be called speech-free. Unreadable,
+    /// unusual or over-long files return `true`, so a caller that deletes on
+    /// `false` never throws away audio on a guess.
+    public static func mayContainSpeech(url: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: url) else { return true }
+        let sampleRate = file.processingFormat.sampleRate
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate),
+              file.processingFormat.channelCount > 0,
+              Double(file.length) <= speechScanMaxSeconds * sampleRate,
+              let loaded = try? AudioResampler.loadWAV(url: url),
+              Int64(loaded.samples.count) == file.length else {
+            return true
+        }
+        return AudioSignalRecovery.hasSpeechLikeModulation(samples: loaded.samples, sampleRate: loaded.sampleRate)
+    }
+
     private static func readMonoWindow(
         file: AVAudioFile,
         startFrame: Int64,

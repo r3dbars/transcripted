@@ -4,6 +4,7 @@
 import AppKit
 import AVFoundation
 import Combine
+import TranscriptedCore
 
 @MainActor
 class DictationSessionController: ObservableObject {
@@ -113,6 +114,7 @@ class DictationSessionController: ObservableObject {
             }
             overlayController?.onActionableMessageDiscarded = { [weak self] in
                 self?.textPaster.discardPasteRetry()
+                self?.discardSavedAudioPromptRecordingIfSilent()
             }
             // Any Esc, including the first of "press again to discard",
             // takes back a start that is waiting on this take.
@@ -153,6 +155,13 @@ class DictationSessionController: ObservableObject {
     private var currentDictationShortcutMode: DictationShortcutMode?
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
+    /// The saved recording the overlay is currently offering to transcribe.
+    /// Closing that message with X throws the recording away when it holds no
+    /// speech, so an empty take doesn't come back on every launch.
+    private var savedAudioPromptURL: URL?
+    /// Leftover recordings from earlier runs are checked for speech once,
+    /// on the first (launch) scan.
+    private var didDiscardSilentLeftoverRecordings = false
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
     /// A start-shortcut press that landed while the last take was still
@@ -203,6 +212,25 @@ class DictationSessionController: ObservableObject {
     }
 
     func presentPendingStoppedAudioRecoveryIfNeeded() {
+        guard didDiscardSilentLeftoverRecordings else {
+            didDiscardSilentLeftoverRecordings = true
+            // A take stopped before anything was said can still be kept as a
+            // recording. Asking about it on every launch is only a nag, so
+            // leftovers from earlier runs that hold no speech are dropped
+            // first. Reading the audio stays off the main actor.
+            let launchedAt = Date()
+            Task { @MainActor [weak self] in
+                _ = await Task.detached(priority: .utility) {
+                    DictationStoppedAudioRecoveryStore.discardSilent(
+                        DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 50)
+                            .filter { $0.createdAt < launchedAt },
+                        mayContainSpeech: FailedRecordingSignalProbe.mayContainSpeech(url:)
+                    )
+                }.value
+                self?.presentPendingStoppedAudioRecoveryIfNeeded()
+            }
+            return
+        }
         guard !isDictating,
               let overlayController,
               let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
@@ -212,6 +240,22 @@ class DictationSessionController: ObservableObject {
             actionTitle: savedAudioAction.title,
             action: savedAudioAction.action
         )
+        savedAudioPromptURL = recovery.url
+    }
+
+    /// Called when a message with a button goes away without its button being
+    /// pressed (X, Esc, or a newer message). If it was offering a saved
+    /// recording that holds no speech, the recording is deleted: transcribing
+    /// it could only fail with "no audio".
+    private func discardSavedAudioPromptRecordingIfSilent() {
+        guard let url = savedAudioPromptURL else { return }
+        savedAudioPromptURL = nil
+        Task.detached(priority: .utility) {
+            _ = DictationStoppedAudioRecoveryStore.discardSilent(
+                at: url,
+                mayContainSpeech: FailedRecordingSignalProbe.mayContainSpeech(url:)
+            )
+        }
     }
 
     /// The button on a message about a saved dictation recording. The
@@ -224,6 +268,7 @@ class DictationSessionController: ObservableObject {
             return ("Show Audio", { NSWorkspace.shared.activateFileViewerSelecting([url]) })
         }
         return (DictationSavedAudioActionCopy.transcribeTitle, { [weak self] in
+            self?.savedAudioPromptURL = nil
             self?.overlayController?.hideWithConfirmAnimation()
             onTranscribeSavedAudio(url)
         })
@@ -1308,6 +1353,7 @@ class DictationSessionController: ObservableObject {
                             actionTitle: savedAudioAction.title,
                             action: savedAudioAction.action
                         )
+                        self.savedAudioPromptURL = recovery.url
                     } else {
                         overlayController.showError(
                             DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
@@ -1456,6 +1502,7 @@ class DictationSessionController: ObservableObject {
                         actionTitle: savedAudioAction.title,
                         action: savedAudioAction.action
                     )
+                    self.savedAudioPromptURL = recovery.url
                 } else {
                     if emptyReason == .audioNeedsRecovery {
                         // The captured audio has no durable WAV. If native RAM
