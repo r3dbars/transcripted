@@ -192,13 +192,11 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     required_primary = {
         "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
         "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
-        "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
-    }
+        }
     required_utility = {
         "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
         "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
-        "settings": ("Settings…", "transcripted.menubar.utility.settings"),
-        "quit": ("Quit", "transcripted.menubar.utility.quit"),
+            "quit": ("Quit", "transcripted.menubar.utility.quit"),
     }
 
     for key, expected in required_primary.items():
@@ -223,7 +221,7 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{key} automation identifier mismatch")
         if not row.get("isVisible"):
             errors.append(f"{key} row hidden")
-    for key in ("openTranscripted", "settings", "quit"):
+    for key in ("openTranscripted", "quit"):
         if not (utility.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
 
@@ -668,7 +666,7 @@ def self_test() -> int:
                     return 1
     for group, keys in (
         ("primaryActions", ("startDictation", "startMeeting")),
-        ("utilityActions", ("openTranscripted", "settings", "quit")),
+        ("utilityActions", ("openTranscripted", "quit")),
     ):
         for key in keys:
             broken = json.loads(json.dumps(launch))

@@ -58,17 +58,18 @@ into a taller loading or error state.
 
 ### MenuBar/
 
-- `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
+- `MenuBar/MenuBarActionRowView.swift` — AppKit control backing the two side-by-side buttons (`.button` size: short title, shortcut only when it fits, detail as tooltip) and the utility rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup; "Starting…"/"Saving…" around it)
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings (clickable when they have a fix to open), and the red "Recording" state while a meeting records
+- `MenuBar/MenuBarHeaderView.swift` — popover header with no title: hidden entirely when idle and ready; shows a status line for warmup, a transcript being made, and the red "Recording" state, plus hotkey warnings (clickable when they have a fix to open)
 - `MenuBar/MenuBarMeetingCapturePhase.swift` — Foundation-pure starting/recording/saving phase of a live meeting capture, used by the popover header, the meeting row, and the status item's right-click menu
 - `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access, or the macOS Fn key conflict)
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
-- `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
-- `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
+- `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (Paste Last Dictation keeps its shortcut but has no row)
+- `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate"); the full title stays the accessibility label
+- `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 

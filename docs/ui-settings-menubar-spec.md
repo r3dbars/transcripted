@@ -64,54 +64,36 @@ There is no first-class `Advanced` page in this version.
 
 ### Header
 
-The header shows:
+The header has no title. It only shows up when it has something to say:
 
-- app name
-- current readiness summary
-- progress or warning detail only when needed
+- a status line while a meeting records, a transcript is being made, or the
+  voice model is warming up (with progress)
+- a one-line shortcut warning, clickable when it has a fix to open
 
-Examples:
+A ready, idle popover shows no header at all.
 
-- `Ready for dictation and meetings`
-- `Meeting tools are still loading`
-- `Local voice setup needs attention`
+### Buttons
 
-### Primary actions
+Two small buttons sit side by side at the top:
 
-The first action group contains:
-
-- `Start Dictation`
-- `Start Meeting`
-- `Paste Last Dictation`
+- `Record` (Record Meeting; becomes `Stop` with the elapsed time while recording)
+- `Dictate` (Start Dictation; becomes `Stop` while dictating)
 
 Rules:
 
-- `Paste Last Dictation` pastes the newest saved dictation into the current text field
-- if automatic paste is not possible, it falls back to copying and explains why
-- buttons should show short supporting detail text, not just labels
+- each button shows its shortcut only when it fits; the full title stays the
+  accessibility label
+- setup or failure detail moves to the button's tooltip
+- `Paste Last Dictation` has no row; its shortcut (default ⌥⇧V) still works
 
-### Secondary actions
+### Utility rows
 
-The second action group contains:
+Under the buttons:
 
-- `Connect Agent`
-- `Submit Feedback`
-- dynamic updates row
-- `Open Settings`
+- `Open Transcripted` (Settings lives inside it)
+- dynamic updates row: `Check for Updates`, `Checking for Updates…`, or an
+  update state; a prominent update callout replaces it when an update needs a click
 - `Quit`
-
-The updates row changes state:
-
-- default: `Check for Updates`
-- while probing: `Checking for Updates…`
-- update found: `Update Available`
-
-When an update is found, the row also shows the available version as supporting text, for example:
-
-- `Version 1.1.10 ready`
-
-Utility rows such as `Connect Agent`, `Submit Feedback`, updates, `Settings`,
-and `Quit` remain visible in this version.
 
 ## Settings Window
 

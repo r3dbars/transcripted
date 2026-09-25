@@ -8,17 +8,9 @@
       "warningText": ""
     },
     "primaryActions": {
-      "pasteLastDictation": {
-        "automationIdentifier": "transcripted.menubar.primary.paste-last-dictation",
-        "detail": "No saved dictation yet.",
-        "isEnabled": false,
-        "isVisible": true,
-        "title": "Paste Last Dictation",
-        "trailingText": ""
-      },
       "startDictation": {
         "automationIdentifier": "transcripted.menubar.primary.start-dictation",
-        "detail": "Starts local voice setup on first use",
+        "detail": "",
         "isEnabled": true,
         "isVisible": true,
         "title": "Start Dictation",
@@ -26,7 +18,7 @@
       },
       "startMeeting": {
         "automationIdentifier": "transcripted.menubar.primary.start-meeting",
-        "detail": "Starts local meeting setup on first use",
+        "detail": "",
         "isEnabled": true,
         "isVisible": true,
         "title": "Record Meeting",
@@ -65,14 +57,6 @@
         "isVisible": true,
         "title": "Quit",
         "trailingText": "⌘Q"
-      },
-      "settings": {
-        "automationIdentifier": "transcripted.menubar.utility.settings",
-        "detail": "",
-        "isEnabled": true,
-        "isVisible": true,
-        "title": "Settings…",
-        "trailingText": ""
       }
     }
   },

@@ -456,6 +456,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarMeetingCapturePhase.swift"
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/MenuBarShortcutWarningPresentation.swift"
+    "Sources/UI/MenuBar/MenuBarPrimaryButtonTitle.swift"
     "Sources/UI/MenuBar/MenuBarGlyph.swift"
     "Sources/UI/Shared/MeetingPillFinishPresentation.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"

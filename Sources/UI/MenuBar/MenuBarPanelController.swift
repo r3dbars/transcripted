@@ -24,7 +24,6 @@ final class MenuBarPanelController: NSViewController {
     private let dismissPopover: () -> Void
     private let openSettingsWindow: (TranscriptedSettingsPage) -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
-    private let textPaster = ClipboardRestoringTextPaster()
 
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -59,12 +58,10 @@ final class MenuBarPanelController: NSViewController {
         content.appState = appState
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
-        content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
         content.headerView.onWarningAction = { [weak self] action in self?.handleShortcutWarningAction(action) }
         // Opens on Today; keeps the "home" action id so the menu_action series stays continuous.
         content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.today, actionID: "home") }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
-        content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.general) }
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
@@ -73,10 +70,7 @@ final class MenuBarPanelController: NSViewController {
         setupSubscriptions()
     }
 
-    func refresh(
-        forcePasteRowVisible: Bool = false,
-        allowUpdateRefresh: Bool = true
-    ) {
+    func refresh(allowUpdateRefresh: Bool = true) {
         scheduledRefreshTask?.cancel()
         scheduledRefreshTask = nil
 
@@ -118,7 +112,7 @@ final class MenuBarPanelController: NSViewController {
             capturePhase: capturePhase
         )
 
-        // While a meeting records, the row's trailing slot shows the live
+        // While a meeting records, the button's trailing slot shows the live
         // elapsed timer instead of the start shortcut.
         content.primaryActionsView.update(
             dictationTrailing: appState.contextCapture.dictationShortcutDisplay,
@@ -127,18 +121,7 @@ final class MenuBarPanelController: NSViewController {
                 : appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
-            pasteDetail: pasteDetail(for: latestDictation),
-            // The paste shortcut works whether or not dictation shortcuts are on.
-            pasteTrailing: PhysicalDictationTriggerPreferences.displayString(
-                for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
-            ),
-            pasteEnabled: latestDictation != nil,
-            isMeetingRecording: isMeetingRecording,
-            // A disabled "no saved dictation yet" row is an empty state
-            // advertising itself — hide paste until it has content.
-            // `forcePasteRowVisible` overrides this so launch smoke automation
-            // can assert on the row regardless of saved-dictation state.
-            showPasteLastDictation: forcePasteRowVisible || latestDictation != nil
+            isMeetingRecording: isMeetingRecording
         )
 
         content.updateProminentUpdate(
@@ -179,7 +162,7 @@ final class MenuBarPanelController: NSViewController {
         launchToInteractiveMs: Double? = nil
     ) -> MenuBarLaunchUISmokeReport {
         loadViewIfNeeded()
-        refresh(forcePasteRowVisible: true, allowUpdateRefresh: false)
+        refresh(allowUpdateRefresh: false)
         return MenuBarLaunchUISmokeReport(
             appLaunched: true,
             statusItemExists: statusItemExists,
@@ -347,7 +330,6 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func prepareForClose() {
-        textPaster.restorePendingClipboardNow()
         contentView?.scrollToTop()
     }
 
@@ -384,21 +366,6 @@ final class MenuBarPanelController: NSViewController {
                 await meetingSession.startRecording(trigger: .menu)
             }
         }
-    }
-
-    private func pasteLastDictationFromMenu() {
-        trackMenuAction("paste_last_dictation")
-        guard let latestText = DictationTranscriptStore.latestSavedText() else {
-            PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)
-            return
-        }
-
-        let sourceApp = resolvedSourceApp()
-        let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
-        dismissPopover()
-        sourceApp?.activate(options: [])
-        let outcome = textPaster.paste(latestText, target: pasteTarget)
-        PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 
     private func openSettingsFromMenu(_ page: TranscriptedSettingsPage, actionID: String? = nil) {
@@ -595,33 +562,5 @@ final class MenuBarPanelController: NSViewController {
         case .readyToInstall:
             return .readyToInstall
         }
-    }
-
-    private func pasteDetail(for entry: SavedDictationEntry?) -> String {
-        guard let entry else {
-            return "No saved dictation yet."
-        }
-
-        let collapsed = entry.text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
-
-        guard !collapsed.isEmpty else {
-            return "Paste the newest saved dictation."
-        }
-
-        return shortenedPreview(for: collapsed, limit: 40)
-    }
-
-    private func shortenedPreview(for text: String, limit: Int) -> String {
-        let normalized = text
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        guard normalized.count > limit else {
-            return normalized
-        }
-        let truncated = normalized.prefix(max(0, limit - 1)).trimmingCharacters(in: .whitespaces)
-        return "\(truncated)…"
     }
 }

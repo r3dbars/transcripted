@@ -12,7 +12,6 @@ struct MenuBarHeaderSmokeSnapshot: Codable, Equatable {
 
 @MainActor
 final class MenuBarHeaderView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "Transcripted")
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
     private let progressBar = NSProgressIndicator()
@@ -43,10 +42,6 @@ final class MenuBarHeaderView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        titleLabel.font = MenuTokens.Font.headerTitle
-        titleLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(titleLabel)
-
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
@@ -102,28 +97,24 @@ final class MenuBarHeaderView: NSView {
 
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
+        // No title: a ready, idle header shows only a warning (if any). The
+        // status line appears while recording, making a transcript, or
+        // warming up.
+        let showsStatus = !isReady || currentStatusTone != .ready
 
-        if isReady && !hasWarning {
+        statusDot.isHidden = !showsStatus
+        statusLabel.isHidden = !showsStatus
+        if showsStatus {
             let dotSize = MenuTokens.statusDotSize
-            let labelWidth = statusLabel.intrinsicContentSize.width
-            let statusWidth = dotSize + 6 + labelWidth
-            let statusX = bounds.width - statusWidth
-            titleLabel.frame = NSRect(x: 0, y: 0, width: max(120, statusX - 8), height: 20)
-            statusDot.frame = NSRect(x: statusX, y: 7, width: dotSize, height: dotSize)
-            statusLabel.frame = NSRect(x: statusDot.frame.maxX + 6, y: 3, width: labelWidth, height: 16)
-        } else {
-            titleLabel.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 20)
-            let statusY: CGFloat = 22
-            let dotSize = MenuTokens.statusDotSize
-            statusDot.frame = NSRect(x: 0, y: statusY + 3, width: dotSize, height: dotSize)
-            statusLabel.frame = NSRect(x: dotSize + 8, y: statusY, width: bounds.width - dotSize - 8, height: 14)
+            statusDot.frame = NSRect(x: 0, y: 7, width: dotSize, height: dotSize)
+            statusLabel.frame = NSRect(x: dotSize + 8, y: 3, width: bounds.width - dotSize - 8, height: 16)
         }
 
         progressBar.isHidden = isReady
         detailLabel.isHidden = isReady
         if !isReady {
-            progressBar.frame = NSRect(x: 0, y: 42, width: bounds.width, height: 8)
-            detailLabel.frame = NSRect(x: 0, y: 54, width: bounds.width, height: 24)
+            progressBar.frame = NSRect(x: 0, y: MenuBarHeaderLayoutPolicy.progressTop, width: bounds.width, height: 8)
+            detailLabel.frame = NSRect(x: 0, y: MenuBarHeaderLayoutPolicy.detailTop, width: bounds.width, height: 24)
         }
 
         warningIconView.isHidden = !hasWarning
@@ -132,7 +123,7 @@ final class MenuBarHeaderView: NSView {
         // The button carries the same text, so VoiceOver reads it once.
         warningLabel.setAccessibilityElement(warningButton.isHidden)
         if hasWarning {
-            let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady)
+            let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady, showsStatus: showsStatus)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
             warningLabel.frame = NSRect(
                 x: 18,
