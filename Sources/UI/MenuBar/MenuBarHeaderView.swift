@@ -23,7 +23,7 @@ final class MenuBarHeaderView: NSView {
     // popover's Tab loop, which FocusOrderContract keeps to the action rows.
     private let warningButton = NSButton(title: "", target: nil, action: nil)
 
-    /// Runs the warning's fix (open Accessibility or Keyboard settings).
+    /// Runs the warning's fix (open Accessibility settings).
     var onWarningAction: ((MenuBarShortcutWarningPresentation.Action) -> Void)?
     private var currentWarningAction: MenuBarShortcutWarningPresentation.Action?
 

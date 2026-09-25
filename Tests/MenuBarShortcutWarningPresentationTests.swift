@@ -6,8 +6,7 @@ func testMenuBarShortcutWarningPresentation() {
         MenuBarShortcutWarningPresentation.resolve(
             hotkeyError: hotkeyError,
             accessibilityErrorMessage: axMessage,
-            functionKeyConflictWarning: fnWarning,
-            functionKeySystemActionTitle: "Show Emoji & Symbols"
+            functionKeyConflictWarning: fnWarning
         )
     }
 
@@ -16,23 +15,20 @@ func testMenuBarShortcutWarningPresentation() {
         assertEqual(resolve(""), nil, "an empty hotkey error should hide the warning row")
     }
 
-    runSuite("MenuBarShortcutWarningPresentation — known warnings say what to do and open the fix") {
+    runSuite("MenuBarShortcutWarningPresentation — the Accessibility warning says what to do and opens the fix") {
         let accessibility = resolve(axMessage)
         assertEqual(accessibility?.action, .openAccessibilitySettings, "the Accessibility warning should open Accessibility settings")
         assertTrue(
             accessibility?.text.contains("Click to turn it on") == true,
             "the Accessibility warning should say clicking fixes it"
         )
+    }
 
-        let fn = resolve(fnWarning)
-        assertEqual(fn?.action, .openKeyboardSettings, "the Fn conflict should open Keyboard settings")
-        assertTrue(
-            fn?.text.contains("Show Emoji & Symbols") == true,
-            "the Fn warning should name what macOS does with Fn"
-        )
-        assertTrue(
-            fn?.text.contains("Do Nothing") == true,
-            "the Fn warning should name the setting to pick"
+    runSuite("MenuBarShortcutWarningPresentation — the Fn conflict stays out of the menu") {
+        assertEqual(
+            resolve(fnWarning),
+            nil,
+            "the Fn conflict belongs in Settings > Shortcuts, not the menu bar menu"
         )
     }
 
@@ -44,9 +40,8 @@ func testMenuBarShortcutWarningPresentation() {
         let noFnConflict = MenuBarShortcutWarningPresentation.resolve(
             hotkeyError: fnWarning,
             accessibilityErrorMessage: axMessage,
-            functionKeyConflictWarning: nil,
-            functionKeySystemActionTitle: "Show Emoji & Symbols"
+            functionKeyConflictWarning: nil
         )
-        assertEqual(noFnConflict?.action, nil, "without a live Fn conflict the same text should not open Keyboard settings")
+        assertEqual(noFnConflict?.text, fnWarning, "without a live Fn conflict the same text is just another warning")
     }
 }

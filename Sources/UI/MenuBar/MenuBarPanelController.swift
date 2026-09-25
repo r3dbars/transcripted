@@ -284,28 +284,22 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
-        let systemAction = PhysicalDictationTriggerPreferences.functionKeySystemAction()
-        return MenuBarShortcutWarningPresentation.resolve(
+        MenuBarShortcutWarningPresentation.resolve(
             hotkeyError: appState.contextCapture.hotkeyError,
             accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
             functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
                 for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),
-                systemAction: systemAction
-            ),
-            functionKeySystemActionTitle: systemAction.title
+                systemAction: PhysicalDictationTriggerPreferences.functionKeySystemAction()
+            )
         )
     }
 
     private func handleShortcutWarningAction(_ action: MenuBarShortcutWarningPresentation.Action) {
-        trackMenuAction(action == .openAccessibilitySettings
-            ? "shortcut_warning_open_accessibility"
-            : "shortcut_warning_open_keyboard")
+        trackMenuAction("shortcut_warning_open_accessibility")
         dismissPopover()
         switch action {
         case .openAccessibilitySettings:
             TranscriptedPermissionAccess.openSettings(for: .accessibility)
-        case .openKeyboardSettings:
-            PhysicalDictationTriggerPreferences.openKeyboardSettings()
         }
     }
 
