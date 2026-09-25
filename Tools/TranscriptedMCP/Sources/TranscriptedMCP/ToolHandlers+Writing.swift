@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import TranscriptedCaptureKit
 
-// Writing day files (`Writing_<date>.md`): what the user typed with the
+// Writing day files (`Writing_<date>.md`): what the user wrote with the
 // Transcripted keyboard. These mirror list_dictations / read_dictation so an
 // agent that knows one knows the other.
 
