@@ -52,6 +52,7 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // Required on decode too: payloads written before rows showed the speech
     // model (and imports were listed by import time) miss once and reparse.
     var transcriptionEngine: String = ""
+    var importedAt: Date? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -71,6 +72,7 @@ extension CachedRecentMeetingMetadata {
         self.systemAudioSignalVerified = item.systemAudioSignalVerified
         self.speakerNames = item.speakerNames
         self.transcriptionEngine = item.transcriptionEngine ?? ""
+        self.importedAt = item.importedAt
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -89,7 +91,8 @@ extension CachedRecentMeetingMetadata {
                 : nil,
             systemAudioSignalVerified: systemAudioSignalVerified,
             speakerNames: speakerNames,
-            transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine
+            transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
+            importedAt: importedAt
         )
     }
 }

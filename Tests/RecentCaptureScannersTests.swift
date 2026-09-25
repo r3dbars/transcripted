@@ -1621,7 +1621,8 @@ func testRecentCaptureLoader() async {
 
             for pass in ["cold", "warm"] {
                 let meetings = RecentMeetingsScanner.loadRecent(limit: 1)
-                assertEqual(meetings.first?.date, importedAt, "\(pass): an import is grouped by when it was imported, not weeks back")
+                assertEqual(meetings.first?.listDate, importedAt, "\(pass): Home lists an import by when it was imported, not weeks back")
+                assertEqual(meetings.first?.date, recordedAt, "\(pass): Today and copy-for-agents keep the original recording time")
                 assertEqual(meetings.first?.startDate, recordedAt, "\(pass): the row still shows the original recording time")
                 assertEqual(meetings.first?.transcriptionEngine, "apple_speech_local", "\(pass): the row knows which model made it")
             }

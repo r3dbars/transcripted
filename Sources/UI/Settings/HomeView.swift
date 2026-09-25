@@ -258,9 +258,9 @@ final class HomeViewModel: ObservableObject {
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
             self.todayDictationCount = snapshot.dictationCounts.today
-            self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.date) }.count
+            self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.listDate) }.count
             self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
-            self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.date)
+            self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.listDate)
             self.canLoadMoreDictations = snapshot.dictations.count > requestedDictationLimit
             self.canLoadMoreMeetings = snapshot.meetings.count > requestedMeetingLimit
             self.trackActivationReturnProxyIfNeeded(
@@ -369,10 +369,11 @@ enum HomeMeetingListItem: Identifiable {
         }
     }
 
+    /// Home's list order and day grouping (imports by import time).
     var date: Date {
         switch self {
         case .saved(let item):
-            return item.date
+            return item.listDate
         case .failed(let item):
             return item.timestamp
         }
