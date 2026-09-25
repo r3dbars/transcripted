@@ -193,15 +193,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
 - `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
   - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
-- `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --watch`
-  - Reads `WORKFLOW.md` and watches issues labeled `agent todo` or `agent in progress`
-- `scripts/ops/agent-todo-launchagent.sh` — install, restart, inspect, or remove the macOS background watcher
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, release-health fixture checks, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
@@ -225,8 +216,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - JSON usage: `scripts/ops/speaker-naming-simulator.py --json`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
 - `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
-- `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
-  - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state
   - Usage: `python3 scripts/ops/generate-nightly-digest.py --open`
   - Self-test: `python3 scripts/ops/generate-nightly-digest.py --self-test`
@@ -235,16 +224,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
     - `/Users/redbars/Delance/transcripted-nightly-digest-latest.html`
     - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.json`
     - `/Users/redbars/Delance/transcripted-nightly-digest-latest.json`
-- `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
-  - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
-  - Writes:
-    - `build/codex-memory-index/transcripted-codex-index.json`
-    - `build/codex-memory-index/transcripted-codex-stats.json`
-    - `build/codex-memory-index/transcripted-codex-followups.json`
-    - `build/codex-memory-index/transcripted-paperclip-task-seeds.json`
-    - `build/codex-memory-index/transcripted-codex-digest.md`
-  - Optional: `--limit 200` to scan only the newest 200 session files while iterating
-  - Optional: `--mlx-summarize --mlx-model <model-id>` to generate local intent summaries through an MLX OpenAI-compatible endpoint
+
 
 ## Rule of thumb
 
