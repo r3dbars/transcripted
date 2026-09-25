@@ -33,8 +33,12 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - keep analytics to allowlisted events and coarse buckets only (the reviewed
   exceptions are dictation and meeting speed timings, rounded to 10 ms; see below)
 - keep crash reporting separately user-controllable from anonymous analytics
-- keep Sentry automatic app-hang tracking off by default; modal macOS update,
-  permission, and confirmation dialogs can otherwise be misreported as hangs
+- Sentry automatic app-hang tracking is on in shipped builds (Info.plist
+  `TranscriptedSentryAppHangTrackingEnabled`), but only reports a main thread
+  stuck 5+ seconds, and `AppHangReportPolicy` drops any hang while a modal
+  popup is on screen (a modal run loop doesn't drain the main queue, so
+  those used to be misreported as hangs). The code default with no
+  Info.plist key stays off
 
 ## Current rollout checklist
 
@@ -72,9 +76,10 @@ references, meeting titles, speaker names, local paths, or user identifiers.
    simplification).
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive
    in PostHog.
-11. If intentionally testing Sentry app-hang tracking, launch locally with
-    `SENTRY_ENABLE_APP_HANG_TRACKING=true`. Do not enable it in release builds
-    without a specific review of modal dialog false positives.
+11. App-hang tracking is on in release builds (reviewed 2026-09-25, with the
+    popup filter). `SENTRY_ENABLE_APP_HANG_TRACKING=false` turns it off for a
+    local run. To check the popup filter, open a modal alert or open panel,
+    leave it up for 10+ seconds, and confirm no "App Hanging" event arrives.
 
 ## Allowlisted analytics events
 
