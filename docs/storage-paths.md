@@ -52,7 +52,8 @@ library moves:
 
 - state root: `~/Library/Application Support/Transcripted/writing/`, holding
   the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
-  `Outcome Ledger/`, the local `Word Diary/`, and the encrypted
+  `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
+  ported; accepted text is saved only by Save my writing), and the encrypted
   `Personal History/`
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup

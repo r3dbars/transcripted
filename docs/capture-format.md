@@ -361,12 +361,19 @@ Details:
   - `Accepted words:` (words that came from accepted suggestions)
 - There is no `Delivery:` line; nothing is pasted.
 - The text follows after one blank line and runs to the next `## ` heading or
-  end of file. It is the settled text: characters removed with Backspace inside
-  the keyboard's own buffer aren't saved. Pastes, mouse edits, and the host
-  app's autocorrect aren't seen (a known v1 limit).
+  end of file. It is the settled text: characters removed with plain Backspace
+  inside the keyboard's own buffer aren't saved. Option- or Cmd-Backspace
+  breaks the segment instead, so the word it deleted stays in the saved text.
+  Pastes, mouse edits, and the host app's autocorrect aren't seen (a known v1
+  limit).
 - A text line that starts with `## ` is written as `\## ` so it can't open a
   new section. Readers strip that one backslash
-  (`CaptureMarkdownParser.unescapeWritingBody`).
+  (`CaptureMarkdownParser.unescapeWritingBody`). So a line that literally
+  starts with `\## ` doesn't round-trip: it reads back as `## `. Whole-day
+  reads (MCP `read_writing` without `entry_id` when it returns the file
+  unpaged, and `read-writing` without `--entry-id`) return the raw Markdown
+  with the escape still in it. Entry reads, pages, and parsed entries are
+  unescaped.
 - An entry is one app's continuous writing. A new entry starts on an app
   switch, after 2 minutes idle, or on a caret jump or segment break the
   keyboard reports. Entries under 2 characters after trimming aren't saved.
