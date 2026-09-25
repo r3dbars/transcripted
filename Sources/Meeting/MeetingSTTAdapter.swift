@@ -199,6 +199,51 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         }
     }
 
+    var packedSegmentWindowSamples: Int? {
+        guard Self.packingEnabled else { return nil }
+        return router.packedSegmentWindowSamples(for: activeJobModel ?? preparedModel ?? router.selectedModel)
+    }
+
+    func transcribePackedSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String]? {
+        guard Self.packingEnabled, segments.count > 1 else { return nil }
+        let model = activeJobModel ?? preparedModel ?? router.selectedModel
+        let layout = SpeechSegmentPacking.layout(segments)
+        let start = ProcessInfo.processInfo.systemUptime
+        let recordCall = {
+            MeetingPipelineTimings.current?.addSpeechToTextCall(
+                seconds: ProcessInfo.processInfo.systemUptime - start,
+                inputSeconds: Double(layout.samples.count) / 16_000,
+                model: model.rawValue
+            )
+        }
+        let packedTokens: [TimedTranscriptToken]?
+        do {
+            packedTokens = try await router.transcribePackedTokens(
+                samples: layout.samples,
+                model: model,
+                language: language
+            )
+        } catch {
+            // A packed call that throws still spent its time before the fallback.
+            recordCall()
+            throw error
+        }
+        guard let tokens = packedTokens else { return nil }
+        recordCall()
+        return SpeechSegmentPacking.split(tokens: tokens, ranges: layout.ranges)
+            .map { $0.isEmpty ? $0 : CustomDictionaryTextProcessor.apply(to: $0) }
+    }
+
+    /// Packing is on unless `TRANSCRIPTED_MEETING_STT_PACKING=0`, which turns
+    /// it off for a before/after speed comparison or if it ever misbehaves.
+    static var packingEnabled: Bool {
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_MEETING_STT_PACKING"] != "0"
+    }
+
     /// Adds one speech-to-text call to the meeting job's timings, when a job
     /// bound a recorder. Includes any wait for the shared speech model.
     private static func timed(

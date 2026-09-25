@@ -3049,6 +3049,58 @@ class ParakeetEngine: ObservableObject {
         return corrected
     }
 
+    /// One Parakeet call over several meeting segments packed end to end
+    /// (`SpeechSegmentPacking`), returning each token with its start time so
+    /// the caller can split the text back per segment. nil when the model
+    /// isn't loaded, the audio doesn't fit one window, or the result carries
+    /// no token times; the caller then transcribes the segments one by one.
+    func transcribePackedSamplesWithTokenTimes(_ samples: [Float]) async throws -> [TimedTranscriptToken]? {
+        try Task.checkCancellation()
+        beginPureSampleTranscriptionActivity()
+        defer { finishPureSampleTranscriptionActivity() }
+
+        guard let manager = asrManager, asrManagerReady else { return nil }
+        guard samples.count >= Int(TranscriptedConstants.parakeetSampleRate),
+              samples.count <= ASRConstants.maxModelSamples else { return nil }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        try await beginASRInference()
+        let tokens: [TimedTranscriptToken]?
+        do {
+            try Task.checkCancellation()
+            let decoderLayers = await manager.decoderLayerCount
+            try Task.checkCancellation()
+            var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+            let result = try await manager.transcribe(samples, decoderState: &decoderState)
+            try Task.checkCancellation()
+            // Copy out of the CoreML-backed result before it is released.
+            tokens = withExtendedLifetime(result) {
+                let text = String(result.text).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let timings = result.tokenTimings, !timings.isEmpty else {
+                    return text.isEmpty ? [] : nil
+                }
+                return timings.map { TimedTranscriptToken(text: String($0.token), startSeconds: $0.startTime) }
+            }
+            finishASRInference()
+        } catch {
+            finishASRInference()
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
+        EventReporter.shared.capture(level: .info, engine: "parakeet", event: "meeting_packed_segments_transcribed",
+            message: "Packed meeting segments transcribed in \(String(format: "%.2f", elapsed))s",
+            context: [
+                "elapsed_s": String(format: "%.3f", elapsed),
+                "audio_duration_s": String(format: "%.2f", audioDuration),
+                "rtf": String(format: "%.3f", audioDuration > 0 ? elapsed / audioDuration : 0),
+                "tokens": "\(tokens?.count ?? 0)",
+            ])
+        return tokens
+    }
+
     // MARK: - Cleanup
 
     func resetAfterFailedRecordingStart() async {
