@@ -51,8 +51,10 @@ public struct PersonalHistoryEvent: Codable, Equatable, Sendable {
     public let appBundleIdentifier: String
     public let source: PersonalHistoryEventSource
     public let text: String
-    /// Transcripted: how many characters a `.deletion` removed from the end
-    /// of its segment chain; `nil` for typed and accepted text.
+    /// Transcripted: how many UTF-16 units a `.deletion` removed from the end
+    /// of its segment chain; `nil` for typed and accepted text. UTF-16, not
+    /// `Character`s: a combining mark typed on its own is its own Backspace,
+    /// though it joins the character before it once the text is put together.
     public let deletedCharacters: Int?
 
     public init?(

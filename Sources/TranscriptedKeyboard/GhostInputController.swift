@@ -218,7 +218,7 @@ final class GhostInputController: IMKInputController {
                     observation: nil
                 )
             } else if event.keyCode == 51 {
-                noteHistoryBackspace(client, observation: nil)
+                noteHistoryBackspace(client, secureInput: secureInput, observation: nil)
             } else {
                 breakHistorySegment()
             }
@@ -276,7 +276,7 @@ final class GhostInputController: IMKInputController {
             return wasVisible
 
         case 51: // The host owns deletion; wait for the next typed character.
-            noteHistoryBackspace(client, observation: insertionObservation)
+            noteHistoryBackspace(client, secureInput: secureInput, observation: insertionObservation)
             dismiss(client)
             resetFallback()
             return false
@@ -772,6 +772,7 @@ final class GhostInputController: IMKInputController {
     /// when there is something to report.
     private func noteHistoryBackspace(
         _ client: IMKTextInput,
+        secureInput: Bool,
         observation: InsertionObservation?
     ) {
         guard let owner = historyOwner, historyDeletions.hasTrackedText else {
@@ -785,7 +786,7 @@ final class GhostInputController: IMKInputController {
         guard observed.owner == owner,
               let permit = PersonalHistoryCapture.shared.permit(
                 appBundleIdentifier: owner.bundle,
-                secureInput: false
+                secureInput: secureInput
               ),
               let backspace = historyDeletions.backspace() else {
             breakHistorySegment()
@@ -803,7 +804,7 @@ final class GhostInputController: IMKInputController {
             caret: max(0, owner.caret - backspace.utf16Length)
         )
         PersonalHistoryCapture.shared.recordDeletion(
-            characters: 1,
+            utf16Length: backspace.utf16Length,
             sessionIdentifier: historySegmentIdentifier,
             permit: permit
         )

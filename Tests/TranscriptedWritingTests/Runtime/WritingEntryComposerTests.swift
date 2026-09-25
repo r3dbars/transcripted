@@ -40,6 +40,23 @@ struct WritingEntryComposerTests {
         #expect(entry.acceptedWordCount == 0)
     }
 
+    @Test("Deletions count UTF-16 units, so a mark typed on its own goes on its own")
+    func deletionCountsUTF16Units() throws {
+        var composer = Self.composer()
+        _ = composer.ingest([
+            Self.typed("Ok cafe", at: Self.start),
+            // Joins the "e" before it into one Character once concatenated.
+            Self.typed("\u{301}", at: Self.start + 500),
+            try Self.deletion(1, session: "chain_1", at: Self.start + 1_000),
+            Self.typed(" 👍", session: "chain_1", at: Self.start + 1_500),
+            // A skin tone modifier: two UTF-16 units, one Character with 👍.
+            Self.typed("\u{1F3FD}", session: "chain_1", at: Self.start + 2_000),
+            try Self.deletion(2, session: "chain_1", at: Self.start + 2_500),
+        ], receivedAt: Self.date(Self.start + 3_000))
+        let entry = try #require(composer.closeAll().first)
+        #expect(entry.text == "Ok cafe 👍")
+    }
+
     @Test("A deletion from a chain that isn't open changes nothing")
     func strayDeletion() throws {
         var composer = Self.composer()

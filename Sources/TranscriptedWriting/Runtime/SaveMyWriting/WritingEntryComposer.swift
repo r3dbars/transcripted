@@ -8,7 +8,7 @@ import Foundation
 /// a new one starts on an app switch, after 2 minutes idle, or on a segment
 /// break the keyboard reports (a caret jump, Return, a shortcut: anything
 /// that starts a new segment chain). A Backspace the keyboard tracked removes
-/// characters from the open entry; an entry under 2 characters after trimming
+/// its UTF-16 units from the open entry; an entry under 2 characters after trimming
 /// isn't saved. Pure: the caller passes the clock. Not part of Tilde.
 struct WritingEntryComposer {
     static let idleGapMilliseconds: Int64 = 120_000
@@ -50,12 +50,18 @@ struct WritingEntryComposer {
             }
         }
 
+        /// Removes `count` UTF-16 units from the end, the unit the keyboard
+        /// reports a Backspace in. Not `Character`s: a combining mark or a
+        /// joiner typed on its own merges into the character before it once
+        /// pieces are joined, and one `Character` would take both.
         mutating func deleteLast(_ count: Int) {
             var remaining = count
             while remaining > 0, let last = pieces.indices.last {
-                let removed = min(remaining, pieces[last].text.count)
-                pieces[last].text.removeLast(removed)
-                remaining -= removed
+                var scalars = pieces[last].text.unicodeScalars
+                while remaining > 0, let scalar = scalars.popLast() {
+                    remaining -= scalar.utf16.count
+                }
+                pieces[last].text = String(scalars)
                 if pieces[last].text.isEmpty { pieces.removeLast() }
             }
         }

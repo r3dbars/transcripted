@@ -130,10 +130,11 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         }
     }
 
-    /// Transcripted: Backspace removed `characters` of the keyboard's own
-    /// text at the end of this segment chain. Text-free; queued like typing.
+    /// Transcripted: Backspace removed `utf16Length` UTF-16 units of the
+    /// keyboard's own text at the end of this segment chain. Text-free;
+    /// queued like typing.
     func recordDeletion(
-        characters: Int,
+        utf16Length: Int,
         sessionIdentifier: String,
         permit: Permit
     ) {
@@ -145,7 +146,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
                 consentIdentifier: permit.consentIdentifier,
                 sessionIdentifier: sessionIdentifier,
                 appBundleIdentifier: permit.appBundleIdentifier,
-                deletedCharacters: characters
+                deletedCharacters: utf16Length
             ) else { return }
             recordEventOnQueue(event)
         }

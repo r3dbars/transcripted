@@ -95,8 +95,8 @@ struct PersonalHistoryDeletionTests {
         let fixture = CaptureFixture()
         let permit = try #require(fixture.capture.permit(appBundleIdentifier: "com.example.Editor", secureInput: false))
         fixture.capture.record(text: "teh", source: .typed, sessionIdentifier: "chain", permit: permit)
-        fixture.capture.recordDeletion(characters: 1, sessionIdentifier: "chain_1", permit: permit)
-        fixture.capture.recordDeletion(characters: 1, sessionIdentifier: "chain_1", permit: permit)
+        fixture.capture.recordDeletion(utf16Length: 1, sessionIdentifier: "chain_1", permit: permit)
+        fixture.capture.recordDeletion(utf16Length: 1, sessionIdentifier: "chain_1", permit: permit)
         fixture.capture.record(text: "he", source: .typed, sessionIdentifier: "chain_1", permit: permit)
         await fixture.capture.flushAndWait()
 
@@ -156,6 +156,28 @@ struct PersonalHistoryDeletionTests {
         var reported = 0
         while tracker.backspace() != nil { reported += 1 }
         #expect(reported == PersonalHistoryDeletionTracker.maximumTrackedCharacters)
+    }
+
+    @Test("A combining mark typed on its own is one Backspace on both sides")
+    func combiningMarkRoundTrip() throws {
+        let start: Int64 = 1_786_600_000_000
+        var tracker = PersonalHistoryDeletionTracker()
+        var events: [PersonalHistoryEvent] = []
+        for (offset, text) in ["cafe", "\u{301}"].enumerated() {
+            tracker.inserted(text)
+            events.append(Self.typed(text, session: "chain", at: start + Int64(offset)))
+        }
+        let result = tracker.backspace()
+        let backspace = try #require(result)
+        #expect(backspace.utf16Length == 1)
+        events.append(try #require(Self.deletion(backspace.utf16Length, session: "chain_1", at: start + 10)))
+
+        // The app joins the pieces into "café" (one Character for "é") and
+        // still takes only the mark.
+        var composer = WritingEntryComposer { "entry-\($0)" }
+        _ = composer.ingest(events, receivedAt: Date(timeIntervalSince1970: TimeInterval(start + 10) / 1_000))
+        let entry = try #require(composer.closeAll().first)
+        #expect(entry.text == "cafe")
     }
 
     @Test("The personal predictor ignores deletions")

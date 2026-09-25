@@ -81,7 +81,7 @@ struct PersonalHistoryRetryTests {
         let capture = Self.capture(app)
         let permit = try #require(capture.permit(appBundleIdentifier: "com.example.Editor", secureInput: false))
         capture.record(text: "teh", source: .typed, sessionIdentifier: "chain", permit: permit)
-        capture.recordDeletion(characters: 1, sessionIdentifier: "chain_1", permit: permit)
+        capture.recordDeletion(utf16Length: 1, sessionIdentifier: "chain_1", permit: permit)
         capture.record(text: "he", source: .typed, sessionIdentifier: "chain_1", permit: permit)
 
         await capture.flushAndWait()
@@ -99,7 +99,7 @@ struct PersonalHistoryRetryTests {
         }
         let capture = Self.capture(app)
         let permit = try #require(capture.permit(appBundleIdentifier: "com.example.Editor", secureInput: false))
-        capture.recordDeletion(characters: 1, sessionIdentifier: "chain_1", permit: permit)
+        capture.recordDeletion(utf16Length: 1, sessionIdentifier: "chain_1", permit: permit)
         for _ in 1..<PersonalHistoryCapture.maximumRefusedAttempts {
             await capture.flushAndWait()
         }
