@@ -30,7 +30,8 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - never send absolute file paths
 - never send free-form context strings
 - never send emails, tokens, or raw URLs
-- keep analytics to allowlisted events and coarse buckets only
+- keep analytics to allowlisted events and coarse buckets only (the one reviewed
+  exception is dictation speed timings, rounded to 10 ms; see below)
 - keep crash reporting separately user-controllable from anonymous analytics
 - keep Sentry automatic app-hang tracking off by default; modal macOS update,
   permission, and confirmation dialogs can otherwise be misreported as hangs
@@ -247,6 +248,15 @@ For each new or changed event:
 - use raw numeric diagnostics only for reviewed audio-health shape, such as
   sample rate, channel count, scalar volume, or peak buckets needed to debug
   capture reliability
+- dictation speed is the other reviewed raw-number case: `dictation_started`
+  carries `start_latency_ms`, and `dictation_stop_latency_measured` carries
+  `first_sound_latency_ms` (key press to first audio buffer),
+  `decode_latency_ms`, and `stop_to_paste_latency_ms`, all rounded to 10 ms
+  by `MachineClassTelemetry.roundedMilliseconds`. Both events also carry
+  `stt_model` (the `TranscriptionModelChoice` raw value), `mac_chip` (chip
+  family and tier from the CPU brand string, such as `m2_pro`, else
+  `unknown`), and `memory_gb_bucket`. These let PostHog compute P50/P95/P99
+  per model and per kind of Mac; none of them identifies a user or a machine
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and

@@ -3076,7 +3076,10 @@ class DictationSessionController: ObservableObject {
     /// models and machines. No device or user identifiers.
     private func dictationSpeedContext(appState: TranscriptedAppState) -> [String: String] {
         var context = MachineClassTelemetry.current
-        context["stt_model"] = appState.sttRouter.selectedModel.rawValue
+        // The lease is the model this recording actually uses, even if the
+        // setting changes mid-dictation.
+        let model = appState.sttRouter.recordingModelLease?.model ?? appState.sttRouter.selectedModel
+        context["stt_model"] = model.rawValue
         return context
     }
 

@@ -998,7 +998,12 @@ func testAnalyticsEventPolicy() {
                 "cleanup_enabled": "true",
                 "copy_reason": "focus_changed",
                 "decode_bucket": "250_499ms",
+                "decode_latency_ms": "420",
                 "delivery": "pasted",
+                "first_sound_latency_bucket": "100_249ms",
+                "first_sound_latency_ms": "200",
+                "mac_chip": "m2_pro",
+                "memory_gb_bucket": "16gb",
                 "mic_stop_bucket": "lt_100ms",
                 "model_wait_bucket": "lt_100ms",
                 "outcome": "completed",
@@ -1011,6 +1016,8 @@ func testAnalyticsEventPolicy() {
                 "stop_to_done_ms": "742",
                 "stop_to_paste_bucket": "500_999ms",
                 "stop_to_paste_ms": "621",
+                "stop_to_paste_latency_ms": "620",
+                "stt_model": "parakeet-tdt-v3",
                 "target_confirmation_mode": "clipboard_read_only",
                 "trigger": "physical_key",
                 "word_count_bucket": "10_49",
@@ -1027,6 +1034,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["decode_bucket"], "250_499ms", "bucketed model work should survive")
         assertEqual(sanitized["copy_reason"], "focus_changed", "normalized copy reason should survive")
         assertEqual(sanitized["word_count_bucket"], "10_49", "coarse word count should survive")
+        assertEqual(sanitized["decode_latency_ms"], "420", "10 ms decode timing should survive for per-model percentiles")
+        assertEqual(sanitized["stop_to_paste_latency_ms"], "620", "10 ms stop-to-paste timing should survive")
+        assertEqual(sanitized["first_sound_latency_ms"], "200", "10 ms key-to-first-sound timing should survive")
+        assertEqual(sanitized["first_sound_latency_bucket"], "100_249ms", "bucketed key-to-first-sound timing should survive")
+        assertEqual(sanitized["stt_model"], "parakeet-tdt-v3", "the speech model id should survive")
+        assertEqual(sanitized["mac_chip"], "m2_pro", "the coarse chip family should survive")
+        assertEqual(sanitized["memory_gb_bucket"], "16gb", "the coarse memory bucket should survive")
         assertNil(sanitized["stop_to_paste_ms"], "raw stop-to-paste milliseconds should stay local")
         assertNil(sanitized["stop_to_done_ms"], "raw stop pipeline milliseconds should stay local")
         assertNil(sanitized["chars"], "raw character counts should stay local")
