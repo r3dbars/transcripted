@@ -23,6 +23,23 @@ final class TranscriptFormatterAudioHealthTests: XCTestCase {
         }
         XCTAssertNil(RecordingHealthInfo.perfect.systemAudioSignalVerified, "imports and legacy captures stay unknown")
     }
+    func testImportTimeIsWrittenFlatAndReadsBack() {
+        let importedAt = Date(timeIntervalSince1970: 1_790_000_000)
+        let imported = TranscriptSaver.formatTranscriptMarkdown(
+            result: makeResult(), transcriptId: UUID(), date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(importedAt: importedAt).withAudioSources([.systemAudio])
+        )
+        let values = TranscriptFrontmatter.document(in: imported)?.values ?? [:]
+        XCTAssertEqual(TranscriptFrontmatter.importedAt(values: values), importedAt,
+                       "imports carry when they were imported, and a copy of the options keeps it")
+        XCTAssertEqual(TranscriptFrontmatter.recordedAt(values: values), Date(timeIntervalSince1970: 0),
+                       "date/time stay the original recording time")
+
+        let live = TranscriptSaver.formatTranscriptMarkdown(
+            result: makeResult(), transcriptId: UUID(), date: Date(timeIntervalSince1970: 0))
+        XCTAssertFalse(live.contains("imported_at:"), "live meetings don't get an import time")
+    }
+
     func testMicAttenuationHealthInfoEmitsFlatAudioHealthKeys() {
         let markdown = TranscriptSaver.formatTranscriptMarkdown(
             result: makeResult(),

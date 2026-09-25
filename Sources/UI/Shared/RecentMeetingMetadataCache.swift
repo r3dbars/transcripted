@@ -49,6 +49,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // search learned speaker names miss once and get reparsed, instead of
     // leaving those meetings unfindable by name.
     var speakerNames: [String] = []
+    // Required on decode too: payloads written before rows showed the speech
+    // model (and imports were listed by import time) miss once and reparse.
+    var transcriptionEngine: String = ""
+    var importedAt: Date? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -67,6 +71,8 @@ extension CachedRecentMeetingMetadata {
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
         self.systemAudioSignalVerified = item.systemAudioSignalVerified
         self.speakerNames = item.speakerNames
+        self.transcriptionEngine = item.transcriptionEngine ?? ""
+        self.importedAt = item.importedAt
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -84,7 +90,9 @@ extension CachedRecentMeetingMetadata {
                 ? RecentMeetingAudioHealth(micBoostPromptOutcome: audioHealthMicBoostOutcome)
                 : nil,
             systemAudioSignalVerified: systemAudioSignalVerified,
-            speakerNames: speakerNames
+            speakerNames: speakerNames,
+            transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
+            importedAt: importedAt
         )
     }
 }

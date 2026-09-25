@@ -98,7 +98,8 @@ enum MeetingImportWorkflow {
         try Task.checkCancellation()
         let receipt = try MeetingImportPublisher.publish(
             markdown: markdown, normalizedAudioURL: command.noRetainAudio ? nil : normalized,
-            outputDirectory: command.resolvedOutputDirectory, title: title, captureID: captureID, date: date
+            outputDirectory: command.resolvedOutputDirectory, title: title, captureID: captureID, date: date,
+            plainFilename: command.plainFilename
         )
         log("Saved \(result.systemWordCount) words, \(result.systemSpeakerCount) speaker(s). Original input preserved.")
         return receipt

@@ -97,7 +97,7 @@ one-time ~600MB download into that cache (`--no-download` fails instead).
 | `Tests/TranscriptedCLITests/CLIModelPathsTests.swift` | Containing-app-first model lookup, relocated/symlinked helpers |
 | `Tests/TranscriptedCLITests/ConfigLoaderTests.swift` | Diarizer config JSON decoding and unsupported-key rejection |
 | `Tests/TranscriptedCLITests/ImportAudioCommandTests.swift` | `import-audio` options, validation, registration, and default write directory |
-| `Tests/TranscriptedCLITests/MeetingImportPublisherTests.swift` | No-clobber publication, retained-audio copies, concurrent-publish winners |
+| `Tests/TranscriptedCLITests/MeetingImportPublisherTests.swift` | No-clobber publication, retained-audio copies, concurrent-publish winners, `--plain-filename` naming and fallback |
 | `Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift` | WAL-inclusive snapshot, never repairing/overwriting, symlink rejection |
 | `Tests/TranscriptedCLITests/MeetingImportSpeakerMappingTests.swift` | Meeting-import build only: naming policy on snapshot matches |
 | `Tests/TranscriptedCLITests/MeetingImportWorkflowTests.swift` | Meeting-import build only: decode, input validation, model resolution |

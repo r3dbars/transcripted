@@ -9,6 +9,7 @@ final class ImportAudioCommandTests: XCTestCase {
         XCTAssertEqual(command.mediaPath, "memo.m4a")
         XCTAssertNil(command.outputDir)
         XCTAssertFalse(command.noRetainAudio)
+        XCTAssertFalse(command.plainFilename)
         XCTAssertFalse(command.noSpeakerIdentification)
         XCTAssertEqual(command.speakerEmbedder, "app")
     }
@@ -16,8 +17,10 @@ final class ImportAudioCommandTests: XCTestCase {
     func testOptionsAreAvailableInBothBuildModes() throws {
         let command = try ImportAudio.parse(["äänet test.mp4", "--output-dir", "/tmp/Meeting Notes", "--no-retain-audio",
                                            "--no-speaker-identification", "--speaker-embedder", "wespeaker", "--title", "Roadmap",
-                                           "--no-download", "--json", "--models-dir", "models", "--diarization-models-dir", "voices"])
+                                           "--no-download", "--json", "--models-dir", "models", "--diarization-models-dir", "voices",
+                                           "--plain-filename"])
         XCTAssertTrue(command.noRetainAudio)
+        XCTAssertTrue(command.plainFilename)
         XCTAssertTrue(command.noSpeakerIdentification)
         XCTAssertTrue(command.noDownload)
         XCTAssertTrue(command.json)

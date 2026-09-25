@@ -119,6 +119,9 @@ class FloatingOverlayController {
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
     var onActionableMessageDiscarded: (() -> Void)?
+    /// A message with a button was closed by the user (X or Esc) without the
+    /// button being pressed. Fires before `onActionableMessageDiscarded`.
+    var onActionableMessageClosedByUser: (() -> Void)?
     /// Every Esc during an active session, before the discard decision.
     var onEscapeKeyDuringSession: (() -> Void)?
 
@@ -265,7 +268,7 @@ class FloatingOverlayController {
                 handler?()
             },
             messageTone: messageTone,
-            onErrorDismiss: { [weak self] in self?.dismissError() },
+            onErrorDismiss: { [weak self] in self?.dismissErrorClosedByUser() },
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             successTitle: successTitle,
@@ -690,6 +693,16 @@ class FloatingOverlayController {
         return panel.frame.contains(NSEvent.mouseLocation)
     }
 
+    /// `dismissError()` for an explicit user close (X or Esc), as opposed to
+    /// a timeout or a newer message.
+    func dismissErrorClosedByUser() {
+        guard state == .drafting, !errorMessage.isEmpty else { return }
+        if errorActionHandler != nil {
+            onActionableMessageClosedByUser?()
+        }
+        dismissError()
+    }
+
     func dismissError() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
         errorDismissTask?.cancel()
@@ -826,7 +839,7 @@ class FloatingOverlayController {
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
                 if self.state == .drafting, !self.errorMessage.isEmpty {
-                    self.dismissError()
+                    self.dismissErrorClosedByUser()
                     return
                 }
                 self.handleEscapeDuringSession()
