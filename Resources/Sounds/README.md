@@ -25,3 +25,8 @@ app plays it at 7% volume, and only when both the app's sounds and the Mac's
 `menu-row-hover.wav` is the same idea for the rows under the buttons (Open
 Transcripted, Check for Updates, Quit): a lower 1.15 kHz tick, 40 ms, played at
 about 5% volume. Also made in code and MIT licensed.
+
+`menu-press.wav` is the soft click when you press Record, Restart to Update, or
+one of the rows (Dictate has its own start and stop sounds). A 60 ms 620 Hz body
+with a short noise snap, made in code, MIT licensed, played at about 10%. None of
+the menu sounds play while a meeting or dictation is recording.

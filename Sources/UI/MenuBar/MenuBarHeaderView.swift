@@ -98,9 +98,9 @@ final class MenuBarHeaderView: NSView {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
         // No title: a ready, idle header shows only a warning (if any). The
-        // status line appears while recording, making a transcript, or
-        // warming up.
-        let showsStatus = !isReady || currentStatusTone != .ready
+        // status line appears while starting or saving a meeting, making a
+        // transcript, or warming up.
+        let showsStatus = showsStatusRow
 
         statusDot.isHidden = !showsStatus
         statusLabel.isHidden = !showsStatus
@@ -200,8 +200,15 @@ final class MenuBarHeaderView: NSView {
         return MenuBarHeaderLayoutPolicy.intrinsicHeight(
             isReady: isReady,
             hasWarning: hasWarning,
-            isRecording: currentStatusTone != .ready
+            isRecording: isReady && showsStatusRow
         )
+    }
+
+    /// A steady recording has no status line: the red Stop button with its
+    /// timer already says so.
+    private var showsStatusRow: Bool {
+        guard currentStatusTone != .recording else { return false }
+        return !currentWarmupStatus.isReadyForMenuHeader || currentStatusTone != .ready
     }
 
     var smokeSnapshot: MenuBarHeaderSmokeSnapshot {

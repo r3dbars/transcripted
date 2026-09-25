@@ -38,6 +38,8 @@ final class AppSoundPlayer {
         /// A softer, lower tick for the rows under the buttons (Open
         /// Transcripted, Check for Updates, Quit).
         case menuRowHover
+        /// A short, soft click when a menu bar button or row is pressed.
+        case menuPress
 
         var bundledFileName: String? {
             switch self {
@@ -54,6 +56,8 @@ final class AppSoundPlayer {
                 return "menu-hover.wav"
             case .menuRowHover:
                 return "menu-row-hover.wav"
+            case .menuPress:
+                return "menu-press.wav"
             }
         }
 
@@ -69,12 +73,23 @@ final class AppSoundPlayer {
             case .menuRowHover:
                 // Quieter still (about 5%), so the rows sit a tier below the buttons.
                 return 0.07
+            case .menuPress:
+                // A touch firmer than the hover ticks (about 10%), still well
+                // under the 35% dictation clicks.
+                return 0.15
             case .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0
             }
         }
 
-        var followsSystemInterfaceSounds: Bool { self == .menuHover || self == .menuRowHover }
+        var followsSystemInterfaceSounds: Bool {
+            switch self {
+            case .menuHover, .menuRowHover, .menuPress:
+                return true
+            case .dictationStart, .dictationStop, .dictationCancelled, .noSpeech, .meetingTranscriptComplete:
+                return false
+            }
+        }
     }
 
     static let shared = AppSoundPlayer()

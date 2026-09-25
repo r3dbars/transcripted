@@ -91,6 +91,12 @@ func testDictationSounds() {
             "the rows tick softer than the buttons"
         )
         assertTrue(AppSoundPlayer.Cue.menuRowHover.followsSystemInterfaceSounds, "row tick follows the Mac's interface-sounds switch")
+        assertEqual(AppSoundPlayer.Cue.menuPress.bundledFileName, "menu-press.wav", "menu press click file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuPress.volumeMultiplier < TranscriptedConstants.dictationClickCueVolumeMultiplier,
+            "the press click stays quieter than the dictation clicks"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuPress.followsSystemInterfaceSounds, "press click follows the Mac's interface-sounds switch")
         assertFalse(AppSoundPlayer.Cue.dictationStart.followsSystemInterfaceSounds, "dictation clicks keep the app's own sound switch only")
     }
 
@@ -121,6 +127,7 @@ func testDictationSounds() {
                 "dictation-stop.caf",
                 "meeting-transcript-complete.mp3",
                 "menu-hover.wav",
+                "menu-press.wav",
                 "menu-row-hover.wav",
             ],
             "Resources/Sounds is copied wholesale, so unused surprise cues should not ship"

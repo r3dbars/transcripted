@@ -15,6 +15,14 @@ final class MenuBarUtilityActionsView: NSView {
             }
         }
     }
+    /// The press click for these rows.
+    var onRowPressStart: (() -> Void)? {
+        didSet {
+            for row in allRows {
+                row.onPressStart = { [weak self] in self?.onRowPressStart?() }
+            }
+        }
+    }
 
     private let updatesRow = MenuBarActionRowView()
     private let openTranscriptedRow = MenuBarActionRowView()

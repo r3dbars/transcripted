@@ -64,7 +64,12 @@ final class MenuBarContentView: NSView {
         for row in primaryActionsView.keyboardFocusableRows + [updateCalloutRow] {
             row.onHoverStart = { [weak self] in self?.playHoverTick(.menuHover) }
         }
+        // Dictate has its own start and stop sounds, so it gets no press click.
+        for row in [primaryActionsView.meetingButton, updateCalloutRow] {
+            row.onPressStart = { [weak self] in self?.playPressClick() }
+        }
         utilityActionsView.onRowHoverStart = { [weak self] in self?.playHoverTick(.menuRowHover) }
+        utilityActionsView.onRowPressStart = { [weak self] in self?.playPressClick() }
         [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
 
         applyLayerColors()
@@ -151,22 +156,29 @@ final class MenuBarContentView: NSView {
 
     // A very quiet tick when the pointer lands on Record, Dictate, or
     // Restart to Update, and a softer, lower one on the rows below. Sweeping
-    // down the menu ticks once per row, never a buzz. Silent while recording.
+    // down the menu ticks once per row, never a buzz. Pressing Record, a row,
+    // or Restart to Update adds a soft click. Silent while recording.
     private var hoverTickQuietUntil: TimeInterval = 0
 
     private func playHoverTick(_ cue: AppSoundPlayer.Cue) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now >= hoverTickQuietUntil else { return }
-        // The room mic could catch a tick mid-meeting or mid-dictation, so
-        // stay silent while anything is recording.
-        if let appState,
-           appState.meetingSession.isRecording
-            || appState.meetingSession.isCaptureSessionActive
-            || appState.sttRouter.isRecording {
-            return
-        }
+        guard now >= hoverTickQuietUntil, !isCapturing else { return }
         hoverTickQuietUntil = now + 0.08
         AppSoundPlayer.shared.play(cue)
+    }
+
+    private func playPressClick() {
+        guard !isCapturing else { return }
+        AppSoundPlayer.shared.play(.menuPress)
+    }
+
+    // The room mic could catch a menu sound mid-meeting or mid-dictation, so
+    // they all stay silent while anything is recording.
+    private var isCapturing: Bool {
+        guard let appState else { return false }
+        return appState.meetingSession.isRecording
+            || appState.meetingSession.isCaptureSessionActive
+            || appState.sttRouter.isRecording
     }
 
     func scrollToTop() {

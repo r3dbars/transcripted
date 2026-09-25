@@ -34,6 +34,8 @@ final class MenuBarActionRowView: NSControl {
     var onPress: (() -> Void)?
     /// Fires when the pointer lands on an enabled row (the hover tick).
     var onHoverStart: (() -> Void)?
+    /// Fires on mouse-down of an enabled row (the press click).
+    var onPressStart: (() -> Void)?
     /// Keeps a button's quiet fill at rest on a full-width row, so the
     /// "Restart to Update" callout reads as a button like Record and Dictate.
     var restsFilled = false { didSet { updateAppearance() } }
@@ -371,6 +373,7 @@ final class MenuBarActionRowView: NSControl {
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         isPressing = true
+        onPressStart?()
     }
 
     override func mouseUp(with event: NSEvent) {
