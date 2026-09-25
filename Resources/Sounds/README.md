@@ -15,3 +15,18 @@ see `THIRD_PARTY_LICENSES.md`.
 
 `dictation-cancelled.wav` and `meeting-transcript-complete.mp3` are the older cues
 for cancel/no-speech and a finished meeting transcript.
+
+`menu-hover.wav` is the quiet tick when the pointer lands on Record, Dictate, or
+Restart to Update in the menu bar menu. It was made for Transcripted in code (a
+45 ms 1.85 kHz tone with a fast decay), so it is under the repo's MIT license. The
+app plays it at 7% volume, and only when both the app's sounds and the Mac's
+"Play user interface sound effects" setting are on.
+
+`menu-row-hover.wav` is the same idea for the rows under the buttons (Open
+Transcripted, Check for Updates, Quit): a lower 1.15 kHz tick, 40 ms, played at
+about 5% volume. Also made in code and MIT licensed.
+
+`menu-press.wav` is the soft click when you press Record, Restart to Update, or
+one of the rows (Dictate has its own start and stop sounds). A 60 ms 620 Hz body
+with a short noise snap, made in code, MIT licensed, played at about 10%. None of
+the menu sounds play while a meeting or dictation is recording.
