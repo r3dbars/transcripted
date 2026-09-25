@@ -916,6 +916,7 @@ class ParakeetEngine: ObservableObject {
         )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                initialDelayNanoseconds: DictationInputDeviceBindingPolicy.initialSettleDelay(for: selection),
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false

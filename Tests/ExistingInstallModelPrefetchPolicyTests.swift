@@ -38,6 +38,14 @@ func testExistingInstallModelPrefetchPolicy() {
             source.contains("await self.meetingSession.prepareModels(showLoadingUI: false)"),
             "launch warmup should also load the meeting models quietly, not just dictation"
         )
+        assertTrue(
+            source.contains("let dictationWarmup = Task(priority: .userInitiated)"),
+            "the dictation model warms at user priority so Core ML isn't compiled on efficiency cores"
+        )
+        assertTrue(
+            source.contains("runtimeReadinessTask = Task(priority: .utility)"),
+            "the pass (and so the meeting models) warms at utility so launch-at-login doesn't spend full CPU"
+        )
     }
 
     runSuite("ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals — requires durable evidence") {

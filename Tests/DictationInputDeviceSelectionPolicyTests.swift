@@ -371,7 +371,7 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
-    runSuite("PinnedDictationInputPolicy only needs the recorder to skip a Bluetooth input") {
+    runSuite("PinnedDictationInputPolicy uses the recorder for every non-Bluetooth mic") {
         let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
         let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
@@ -392,7 +392,20 @@ func testDictationInputDeviceSelectionPolicy() {
             defaultInput: usbMic, defaultOutput: airPodsInput,
             availableInputs: [airPodsInput, macMic, usbMic], prefersBuiltInBluetoothInput: true
         )
-        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: usbDefault), "a safe macOS input uses the engine")
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: usbDefault), "a safe wired macOS input uses the faster recorder")
+
+        let macDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macMic, defaultOutput: nil,
+            availableInputs: [macMic], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: macDefault), "the built-in mic as the macOS input uses the faster recorder")
+
+        let loopback = DictationAudioDevice(id: 5, name: "Loopback Audio", transport: .virtual, inputChannelCount: 2, uid: "loopback")
+        let virtualDefault = DictationInputDeviceSelection(
+            defaultInput: loopback, selectedInput: loopback,
+            defaultOutput: nil, reason: .defaultIsSafe
+        )
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: virtualDefault), "a virtual macOS input keeps the engine")
 
         // What the pinned path used to get when the meetings-only "use the
         // macOS input" setting was on: the headset kept, so no recorder.
@@ -447,8 +460,8 @@ func testDictationInputDeviceSelectionPolicy() {
             preferredUID: "mac",
             chosenInputAlwaysWins: true
         )
-        assertEqual(pickedIsDefault, safeDefault, "picking the macOS input itself keeps the engine path")
-        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: pickedIsDefault), "nothing to override")
+        assertEqual(pickedIsDefault, safeDefault, "picking the macOS input itself keeps the automatic selection")
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: pickedIsDefault), "nothing to override, but the built-in mic still takes the faster recorder")
 
         let unplugged = PinnedDictationInputPolicy.selection(
             automatic: safeDefault,

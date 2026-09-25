@@ -155,6 +155,9 @@ class DictationSessionController: ObservableObject {
     private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    /// Whether this session's start click has played. It plays once, on key
+    /// press or after recording starts (see `DictationStartCuePolicy`).
+    private var didPlayStartCue = false
     /// The shortcut that started this session, when a shortcut did. Read from
     /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
     private var currentDictationShortcutMode: DictationShortcutMode?
@@ -358,6 +361,7 @@ class DictationSessionController: ObservableObject {
         enterPendingStartStage("start_requested")
         currentDictationSessionID = UUID()
         didAttemptStartActivation = false
+        didPlayStartCue = false
         stopFinalizationGate.reset()
         dictationSession.startReadinessProfile = currentStartReadinessProfile
         dictationSession.telemetryContext = [
@@ -706,6 +710,11 @@ class DictationSessionController: ObservableObject {
             // still runs asynchronously so a slow device graph never blocks UI.
             enterPendingStartStage("opening_microphone")
             overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
+            if DictationStartCuePolicy.playsOnKeyPress(
+                recordedInput: appState.sttRouter.parakeetEngine.cachedInputDeviceSelection?.selectedInput
+            ) {
+                playStartCueOnce()
+            }
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -747,7 +756,7 @@ class DictationSessionController: ObservableObject {
                             ]
                         )
                     )
-                    AppSoundPlayer.shared.play(.dictationStart)
+                    self.playStartCueOnce()
                     self.installSessionTimeout()
                 } else {
                     let requestToFallbackMs = Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000)
@@ -799,6 +808,15 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = Task { @MainActor [weak self] in
             await self?.waitForEngineAndStart(sourceApp: sourceApp)
         }
+    }
+
+    /// The start click, once per session, from whichever path gets there
+    /// first: the key press on a built-in or wired mic, otherwise the moment
+    /// recording starts.
+    private func playStartCueOnce() {
+        guard !didPlayStartCue else { return }
+        didPlayStartCue = true
+        AppSoundPlayer.shared.play(.dictationStart)
     }
 
     // The recovery wait-loop state machine (deadline, readiness-refresh
@@ -877,7 +895,7 @@ class DictationSessionController: ObservableObject {
             // which discards the audio the engine preserved instead of
             // transcribing it.
             recordingStartRetryTask = nil
-            AppSoundPlayer.shared.play(.dictationStart)
+            playStartCueOnce()
             installSessionTimeout()
 
         case .timedOut(let info):
