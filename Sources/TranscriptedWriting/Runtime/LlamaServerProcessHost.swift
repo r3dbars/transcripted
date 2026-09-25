@@ -7,7 +7,7 @@ enum LlamaRuntimeSnapshot: Equatable, Sendable {
 
         fileprivate var menuDescription: String {
             switch self {
-            case .assetsMissing: "Engine files missing — reinstall Tilde"
+            case .assetsMissing: "Engine files missing — reinstall Transcripted"
             case .portInUse: "Engine port busy"
             case .launchFailed: "Engine couldn't start"
             case .healthTimeout: "Engine didn't become ready"
