@@ -52,6 +52,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `Transcription.swift` — the `Transcription` service object
   - `TranscriptionPipeline.swift` — `extension Transcription` for local multichannel / mic-only transcription, mic-channel diarization, and speech-segment detection
   - `TranscriptionLanguageSampling.swift` — picks bounded voiced samples for language detection
+  - `MeetingPipelineTimings.swift` — task-local per-job stage timer (models ready, resample, diarize, speech-to-text, sleep); the task manager binds one per job and hands the snapshot to the host with the save
   - `PipelineFailureDisplayCopy.swift` — per-flow failure copy table
 - `Protocols/` — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `StatsStore`, and the typed `ImportedTranscriptionRecoverySession` ownership handoff (one file per protocol, same names)
 - `Services/` — DI container (`AppServices`), model bundle / download management, path indirection, capture-library path safety checks, recording validation, diarization, and failed-transcription persistence

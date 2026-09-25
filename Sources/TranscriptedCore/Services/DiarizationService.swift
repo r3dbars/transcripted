@@ -169,6 +169,7 @@ public class DiarizationService: ObservableObject {
 
         AppLogger.transcription.info("Offline diarization starting", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
 
+        let diarizeStart = ProcessInfo.processInfo.systemUptime
         let result = try await {
             do {
                 return try await manager.process(audio: samples)
@@ -193,6 +194,10 @@ public class DiarizationService: ObservableObject {
         }
 
         let finalSegments = reembedIfNeeded(segments: segments, samples: samples, sampleRate: sampleRate)
+        MeetingPipelineTimings.current?.add(
+            .diarize,
+            seconds: ProcessInfo.processInfo.systemUptime - diarizeStart
+        )
 
         let speakerIds = Set(finalSegments.map { $0.speakerId })
         AppLogger.transcription.info("Offline diarization complete", ["segments": "\(finalSegments.count)", "speakers": "\(speakerIds.count)"])

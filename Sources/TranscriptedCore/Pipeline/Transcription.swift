@@ -69,6 +69,13 @@ public class Transcription: ObservableObject {
     }
 
     func ensureModelsReadyForPipeline() async throws {
+        let readyStart = ProcessInfo.processInfo.systemUptime
+        defer {
+            MeetingPipelineTimings.current?.add(
+                .modelsReady,
+                seconds: ProcessInfo.processInfo.systemUptime - readyStart
+            )
+        }
         if parakeet.isReady && diarization.isReady {
             hasInitialized = true
             AppLogger.transcription.debug("Models already initialized, skipping")

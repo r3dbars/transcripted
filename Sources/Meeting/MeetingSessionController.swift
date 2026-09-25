@@ -3371,11 +3371,18 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
+            var savedTranscriptProperties = [
+                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
+                "trigger": transcriptionTrigger.rawValue,
+            ]
+            if let timings = taskManager.lastPipelineTimings {
+                savedTranscriptProperties.merge(
+                    MeetingProcessingTelemetry.properties(for: Self.processingTelemetryTimings(timings)),
+                    uniquingKeysWith: { current, _ in current }
+                )
+            }
             trackSavedTranscriptAnalyticsInBackground(
-                baseProperties: [
-                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
-                    "trigger": transcriptionTrigger.rawValue,
-                ],
+                baseProperties: savedTranscriptProperties,
                 promptTelemetryProperties: promptTelemetryProperties,
                 promptRecordingStartedAt: promptRecordingStartedAt
             )
@@ -3889,6 +3896,23 @@ final class MeetingSessionController: ObservableObject {
                 }
             }
         }
+    }
+
+    nonisolated static func processingTelemetryTimings(
+        _ snapshot: MeetingPipelineTimings.Snapshot
+    ) -> MeetingProcessingTelemetry.Timings {
+        MeetingProcessingTelemetry.Timings(
+            processingSeconds: snapshot.processingSeconds,
+            sleepSeconds: snapshot.sleepSeconds,
+            modelsReadySeconds: snapshot.modelsReadySeconds,
+            resampleSeconds: snapshot.resampleSeconds,
+            diarizeSeconds: snapshot.diarizeSeconds,
+            speechToTextSeconds: snapshot.speechToTextSeconds,
+            speechToTextCalls: snapshot.speechToTextCalls,
+            speechToTextInputSeconds: snapshot.speechToTextInputSeconds,
+            recordingSeconds: snapshot.recordingSeconds,
+            speechModel: snapshot.speechModel
+        )
     }
 
     /// One bucketed event per auto-recognized *person* in the saved meeting,

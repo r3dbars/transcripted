@@ -80,6 +80,7 @@ default_system_output_volume_changed
 default_system_output_volume_dropped
 default_system_output_volume_during
 delivery
+diarize_ms
 dictation_ready
 dictations_completed
 digest_day
@@ -130,6 +131,7 @@ mic_status
 mic_stream_present
 missing_permission
 model_state
+models_ready_ms
 models_warm
 os_major
 outcome
@@ -151,6 +153,7 @@ previous_version
 prior_artifact_kind
 prior_ready_state
 prior_status
+processing_ms
 prompt_kind
 prompt_outcome
 prompt_reason
@@ -165,10 +168,12 @@ realtime_agc
 reason
 reason_kind
 recent_meetings_available
+recording_minutes
 recovering
 repair_kind
 reporting_kind
 required
+resample_ms
 restart_trigger
 result
 retry_source
@@ -194,6 +199,7 @@ setting_id
 setup_kind
 setup_ready
 signal_kinds
+sleep_ms
 source
 stabilization_outcome
 stage
@@ -207,7 +213,10 @@ step_id
 step_index
 stop_timed_out
 stop_to_paste_latency_ms
+stt_calls
+stt_input_seconds
 stt_model
+stt_ms
 summary_action
 suppression_reason
 surface

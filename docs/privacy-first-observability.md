@@ -30,8 +30,8 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - never send absolute file paths
 - never send free-form context strings
 - never send emails, tokens, or raw URLs
-- keep analytics to allowlisted events and coarse buckets only (the one reviewed
-  exception is dictation speed timings, rounded to 10 ms; see below)
+- keep analytics to allowlisted events and coarse buckets only (the reviewed
+  exceptions are dictation and meeting speed timings, rounded to 10 ms; see below)
 - keep crash reporting separately user-controllable from anonymous analytics
 - keep Sentry automatic app-hang tracking off by default; modal macOS update,
   permission, and confirmation dialogs can otherwise be misreported as hangs
@@ -259,6 +259,14 @@ For each new or changed event:
   family and tier from the CPU brand string, such as `m2_pro`, else
   `unknown`), and `memory_gb_bucket`. These let PostHog compute P50/P95/P99
   per model and per kind of Mac; none of them identifies a user or a machine
+- meeting processing speed is the third: `meeting_transcript_saved` carries
+  `processing_ms` (job start to saved, wall clock), `sleep_ms` (the part the
+  Mac slept), and the stage times `models_ready_ms`, `resample_ms`,
+  `diarize_ms`, and `stt_ms`, all rounded to 10 ms; `stt_calls` (speech-to-text
+  calls, one per speech segment) and `stt_input_seconds` (audio seconds fed to
+  them, whole seconds); `recording_minutes` (whole minutes); plus `stt_model`,
+  `mac_chip`, and `memory_gb_bucket`. `MeetingPipelineTimings` collects them in
+  Core and `MeetingProcessingTelemetry` formats them. Durations and counts only
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and
