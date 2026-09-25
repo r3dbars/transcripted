@@ -132,7 +132,7 @@ final class SpeakerNamingSheet {
         let url = request.transcriptURL
         let transcriptID = request.transcriptId
         Task { [weak controller] in
-            let recordingStart = await Task.detached(priority: .utility) { () -> Date? in
+            let recording = await Task.detached(priority: .utility) { () -> (start: Date, remoteVoices: Int?)? in
                 var transcriptURL: URL? = url
                 if !FileManager.default.fileExists(atPath: url.path) {
                     transcriptURL = TranscriptSaver.existingTranscriptURL(
@@ -142,13 +142,14 @@ final class SpeakerNamingSheet {
                 }
                 guard let transcriptURL,
                       let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
-                      values["imported_at"] == nil else { return nil }
-                return TranscriptFrontmatter.recordedAt(values: values)
+                      values["imported_at"] == nil,
+                      let start = TranscriptFrontmatter.recordedAt(values: values) else { return nil }
+                return (start, values["system_speakers"].flatMap { Int($0) })
             }.value
-            guard let recordingStart else { return }
-            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recordingStart)
+            guard let recording else { return }
+            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recording.start)
             guard !names.isEmpty, let controller, controller.requestID == requestID else { return }
-            controller.showInvitees(names)
+            controller.showInvitees(names, remoteVoicesInMeeting: recording.remoteVoices)
         }
     }
 
@@ -223,8 +224,8 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         contentView.showMeetingTitle(meetingTitle)
     }
 
-    func showInvitees(_ inviteeNames: [String]) {
-        contentView.showInvitees(inviteeNames)
+    func showInvitees(_ inviteeNames: [String], remoteVoicesInMeeting: Int?) {
+        contentView.showInvitees(inviteeNames, remoteVoicesInMeeting: remoteVoicesInMeeting)
     }
 
     private func finish(with updates: [SpeakerNameUpdate]) {
@@ -280,15 +281,16 @@ final class SpeakerNamingContentView: NSView {
         titleLabel.stringValue = SpeakerReviewPresentationCopy.title(meetingTitle: meetingTitle)
     }
 
-    /// Adds the calendar invitees to every row. In a 1:1 with a single
-    /// unnamed remote voice, that voice gets the other invitee's name filled
-    /// in; the user still presses Save.
-    func showInvitees(_ inviteeNames: [String]) {
+    /// Adds the calendar invitees to every row. In a 1:1 where the meeting
+    /// heard a single unnamed remote voice, that voice gets the other
+    /// invitee's name filled in; the user still presses Save.
+    func showInvitees(_ inviteeNames: [String], remoteVoicesInMeeting: Int?) {
         guard !inviteeNames.isEmpty else { return }
         let prefill = MeetingInviteeSuggestionPolicy.oneOnOnePrefill(
             inviteeNames: inviteeNames,
-            remoteVoiceCount: systemRows.count,
-            remoteVoiceHasSuggestion: systemRows.first?.hasSuggestedName ?? false
+            remoteVoicesInMeeting: remoteVoicesInMeeting,
+            remoteRowsInReview: systemRows.count,
+            remoteRowHasSuggestion: systemRows.first?.hasSuggestedName ?? false
         )
         for row in micRows + systemRows {
             row.showInvitees(inviteeNames, prefillName: systemRows.first === row ? prefill : nil)

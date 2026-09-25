@@ -139,17 +139,25 @@ enum MeetingInviteeSuggestionPolicy {
         return inviteeLabels + rest
     }
 
-    /// A 1:1 on the calendar with a single remote voice that has no suggested
-    /// name: that voice is almost certainly the one other invitee. Returns the
-    /// name to pre-fill; the user still has to press Save.
+    /// A 1:1 on the calendar where the whole meeting heard one remote voice,
+    /// that voice is up for review, and it has no suggested name: that voice
+    /// is almost certainly the one other invitee. Returns the name to
+    /// pre-fill; the user still has to press Save.
+    ///
+    /// `remoteVoicesInMeeting` counts every remote voice, including ones
+    /// already named silently that never reach review, so an extra guest
+    /// next to an auto-named invitee is not handed the invitee's name. When
+    /// that count is unknown, nothing is pre-filled.
     static func oneOnOnePrefill(
         inviteeNames: [String],
-        remoteVoiceCount: Int,
-        remoteVoiceHasSuggestion: Bool
+        remoteVoicesInMeeting: Int?,
+        remoteRowsInReview: Int,
+        remoteRowHasSuggestion: Bool
     ) -> String? {
         guard inviteeNames.count == 1,
-              remoteVoiceCount == 1,
-              !remoteVoiceHasSuggestion else { return nil }
+              remoteVoicesInMeeting == 1,
+              remoteRowsInReview == 1,
+              !remoteRowHasSuggestion else { return nil }
         return inviteeNames[0]
     }
 }

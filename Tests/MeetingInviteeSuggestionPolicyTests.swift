@@ -140,23 +140,23 @@ func testMeetingInviteeSuggestionPolicy() {
     }
 
     runSuite("MeetingInviteeSuggestionPolicy pre-fills only a clear 1:1") {
-        assertEqual(
-            MeetingInviteeSuggestionPolicy.oneOnOnePrefill(inviteeNames: ["Sam Lee"], remoteVoiceCount: 1, remoteVoiceHasSuggestion: false),
-            "Sam Lee",
-            "one other invitee and one unnamed remote voice is a 1:1"
-        )
+        func prefill(invitees: [String], voices: Int?, rows: Int, suggested: Bool = false) -> String? {
+            MeetingInviteeSuggestionPolicy.oneOnOnePrefill(
+                inviteeNames: invitees,
+                remoteVoicesInMeeting: voices,
+                remoteRowsInReview: rows,
+                remoteRowHasSuggestion: suggested
+            )
+        }
+        assertEqual(prefill(invitees: ["Sam Lee"], voices: 1, rows: 1), "Sam Lee", "one other invitee and one unnamed remote voice is a 1:1")
+        assertNil(prefill(invitees: ["Sam Lee", "Priya Shah"], voices: 1, rows: 1), "two invitees is not a 1:1")
+        assertNil(prefill(invitees: ["Sam Lee"], voices: 2, rows: 2), "two remote voices is not a 1:1")
         assertNil(
-            MeetingInviteeSuggestionPolicy.oneOnOnePrefill(inviteeNames: ["Sam Lee", "Priya Shah"], remoteVoiceCount: 1, remoteVoiceHasSuggestion: false),
-            "two invitees is not a 1:1"
+            prefill(invitees: ["Sam Lee"], voices: 2, rows: 1),
+            "if Sam was already named silently, the one extra guest left in review must not be handed Sam's name"
         )
-        assertNil(
-            MeetingInviteeSuggestionPolicy.oneOnOnePrefill(inviteeNames: ["Sam Lee"], remoteVoiceCount: 2, remoteVoiceHasSuggestion: false),
-            "two remote voices is not a 1:1"
-        )
-        assertNil(
-            MeetingInviteeSuggestionPolicy.oneOnOnePrefill(inviteeNames: ["Sam Lee"], remoteVoiceCount: 1, remoteVoiceHasSuggestion: true),
-            "a voice the matcher already suggested a name for keeps its suggestion"
-        )
+        assertNil(prefill(invitees: ["Sam Lee"], voices: nil, rows: 1), "an unknown voice count should not pre-fill")
+        assertNil(prefill(invitees: ["Sam Lee"], voices: 1, rows: 1, suggested: true), "a voice the matcher already suggested a name for keeps its suggestion")
     }
 }
 
