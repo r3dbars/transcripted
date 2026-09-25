@@ -23,7 +23,28 @@ final class DiagnosticsLog: @unchecked Sendable {
             .homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Transcripted/logs")
             .appendingPathComponent("writing-diagnostics.log")
-        self.enabled = true
+        // Transcripted rule (CLAUDE.md, "Harnesses must not touch real user
+        // state"): test and smoke runs never write the real log. Same checks
+        // as TranscriptedCore's FileLogger, plus Swift Testing's helper.
+        self.enabled = !Self.shouldDisableFileWrites(
+            environment: ProcessInfo.processInfo.environment,
+            arguments: CommandLine.arguments
+        )
+    }
+
+    static func shouldDisableFileWrites(environment: [String: String], arguments: [String]) -> Bool {
+        if let flag = environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"],
+           ["1", "true", "yes", "on"].contains(flag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+            return true
+        }
+        if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
+            return true
+        }
+        if let executable = arguments.first,
+           executable.contains(".xctest") || executable.hasSuffix("swiftpm-testing-helper") {
+            return true
+        }
+        return NSClassFromString("XCTestCase") != nil
     }
 
     init(logURL: URL, enabled: Bool = true) {

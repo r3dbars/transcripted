@@ -115,7 +115,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | ported | 2 | Type name kept (`TildeStats`). |
 | `Sources/TildeApp/App/YourTildeView.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Everyday view stats. |
 | `Sources/TildeApp/App/main.swift` | `—` | not-ported | 2 | Dev flags only. |
-| `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | ported | 2 | Writes `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`. |
+| `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | ported | 2 | Write under Transcripted's logs. Deviation: never writes under tests or with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`, same as `FileLogger`. |
 | `Sources/TildeApp/Mac/SecureLocalStorage.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/SecureLocalStorage.swift` | ported | 2 | Straight port; moved from phase 3. |
 | `Sources/TildeApp/PersonalHistory/PersonalBrainStatus.swift` | `—` | not-ported | 3 | Only used by a dev JSON flag. |
 | `Sources/TildeApp/PersonalHistory/PersonalHistoryController.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryController.swift` | ported | 2 | Straight port; moved from phase 3. Phase 3 gates it on Save my writing and the app scope. |
@@ -144,6 +144,12 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/ScreenMemory/ScreenRecordingPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenRecordingPermission.swift` | ported | 2 | Not in the global permission enum (plan: Permissions changes). `request()` stays; callers decide. |
 | `Sources/TildeApp/ScreenMemory/ScreenTextRecognizer.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenTextRecognizer.swift` | ported | 2 |  |
 | `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | ported | 2 |  |
+
+## Follow-ups
+
+- Phase 4: user-visible runtime strings still say "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
+- Phase 2 cleanup: collapse `.preview9B` into a Qwen completion profile once nothing reads its preview identities.
+- Before rollout: the `llama-server` pin depends on `codesign --remove-signature` output staying byte-stable across toolchains (it fails closed). Revisit with the reproducible build recipe (plan decision 9).
 
 ## Tests
 
