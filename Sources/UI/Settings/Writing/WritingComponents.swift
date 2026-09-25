@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Small pieces shared by the Writing tab's intro, setup and everyday views.
@@ -212,6 +213,39 @@ struct WritingChoiceRow: View {
         .opacity(isEnabled ? 1 : 0.5)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier(automationIdentifier)
+    }
+}
+
+/// Reports the window hosting the view, so the refresh timers and the demo
+/// can idle while the Settings window is closed or covered. The window
+/// stays alive when closed, so `onDisappear` alone isn't enough.
+struct WritingWindowReader: NSViewRepresentable {
+    let onWindow: @MainActor (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> ReportingView {
+        let view = ReportingView()
+        view.onWindow = onWindow
+        return view
+    }
+
+    func updateNSView(_ nsView: ReportingView, context: Context) {
+        nsView.onWindow = onWindow
+    }
+
+    final class ReportingView: NSView {
+        var onWindow: (@MainActor (NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onWindow?(window)
+        }
+    }
+}
+
+extension NSWindow {
+    /// Open and at least partly on screen.
+    var writingIsShowingContent: Bool {
+        isVisible && occlusionState.contains(.visible)
     }
 }
 

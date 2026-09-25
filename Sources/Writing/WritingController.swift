@@ -589,15 +589,16 @@ final class WritingController {
 
     /// The Writing tab's keyboard step: install or update, register, enable
     /// and select, every time it's asked (the launch path does the enable and
-    /// select only on the first setup). Falls back to Keyboard settings when
-    /// it can't. `true` once the keyboard is the selected input source.
+    /// select only on the first setup). With `openSettingsOnFailure`, falls
+    /// back to Keyboard settings when it can't. `true` once the keyboard is
+    /// the selected input source.
     @discardableResult
-    func turnOnKeyboard() -> Bool {
+    func turnOnKeyboard(openSettingsOnFailure: Bool = true) -> Bool {
         let result = keyboardInstaller.installOrUpdateIfNeeded()
         keyboardInstallResult = result
         log("WRITING | keyboard install: \(result)")
         guard result == .installed || result == .alreadyInstalled else {
-            keyboardInstaller.openKeyboardSettings()
+            if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
             return false
         }
         let enable = WritingKeyboardInputSource.enable()
@@ -609,7 +610,7 @@ final class WritingController {
         log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
         if selected {
             Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
-        } else {
+        } else if openSettingsOnFailure {
             keyboardInstaller.openKeyboardSettings()
         }
         return selected

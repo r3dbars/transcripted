@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Intro page 2's autocomplete demo, drawn in SwiftUI (not a video) so it
@@ -7,6 +8,12 @@ import SwiftUI
 struct WritingDemoView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var frameIndex = 0
+    @State private var host = WindowHost()
+
+    /// The hosting window, held weakly outside SwiftUI's state diffing.
+    private final class WindowHost {
+        weak var window: NSWindow?
+    }
 
     private var frame: WritingDemoScript.Frame {
         reduceMotion ? WritingDemoScript.stillFrame : WritingDemoScript.allFrames[frameIndex]
@@ -53,6 +60,7 @@ struct WritingDemoView: View {
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
         )
+        .background(WritingWindowReader { [host] window in host.window = window })
         .task(id: reduceMotion) { await play() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Autocomplete demo: \(scene.typed)\(scene.suggestion)"))
@@ -82,6 +90,12 @@ struct WritingDemoView: View {
         guard !reduceMotion else { return }
         let frames = WritingDemoScript.allFrames
         while !Task.isCancelled {
+            // A closed or covered Settings window keeps this view alive;
+            // don't animate what nobody can see.
+            if let window = host.window, !window.writingIsShowingContent {
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
             let duration = frames[frameIndex].duration
             try? await Task.sleep(for: .milliseconds(Int(duration * 1_000)))
             guard !Task.isCancelled else { return }

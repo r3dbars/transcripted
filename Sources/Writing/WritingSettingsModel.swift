@@ -41,6 +41,13 @@ final class WritingSettingsModel: ObservableObject {
     /// A meeting records, a dictation records, or meeting audio is still
     /// being transcribed. Set by the page from the settings shell.
     var isCaptureBusy: () -> Bool = { false }
+    /// The Settings window, reported by the page. It stays alive when
+    /// closed, so the refresh timers idle unless it's showing.
+    weak var hostWindow: NSWindow?
+
+    private var isOnScreen: Bool {
+        hostWindow?.writingIsShowingContent ?? true
+    }
 
     @Published var screen: Screen
     @Published var draft = Presentation.Draft()
@@ -124,10 +131,16 @@ final class WritingSettingsModel: ObservableObject {
     private func startObserving() {
         guard liveTimer == nil else { return }
         let live = Timer(timeInterval: Self.liveRefreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshLive() }
+            Task { @MainActor in
+                guard let self, self.isOnScreen else { return }
+                self.refreshLive()
+            }
         }
         let stats = Timer(timeInterval: Self.statsRefreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshStats() }
+            Task { @MainActor in
+                guard let self, self.isOnScreen else { return }
+                self.refreshStats()
+            }
         }
         RunLoop.main.add(live, forMode: .common)
         RunLoop.main.add(stats, forMode: .common)
@@ -321,7 +334,7 @@ final class WritingSettingsModel: ObservableObject {
         controller.setAutocomplete(choices.autocomplete)
         WritingSetupState.markCompleted(defaults: WritingController.appDefaults())
 
-        controller.turnOnKeyboard()
+        let keyboardSelected = controller.turnOnKeyboard(openSettingsOnFailure: false)
         controller.applyRunState()
         if choices.autocomplete, !controller.screenRecordingGranted, !isCaptureBusy() {
             controller.requestScreenRecording()
@@ -337,6 +350,16 @@ final class WritingSettingsModel: ObservableObject {
 
         isEditingSetup = false
         screen = .everyday
+        if !keyboardSelected {
+            // Text Input Sources can take a moment to list a just-registered
+            // keyboard. One retry, then Keyboard settings.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                self.controller.turnOnKeyboard()
+                self.refreshKeyboard()
+            }
+        }
         refreshLive()
         refreshKeyboard()
         reloadToday()

@@ -35,6 +35,7 @@ struct WritingSettingsPage: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: model.screen)
+        .background(WritingWindowReader { [model] window in model.hostWindow = window })
         .onAppear {
             model.isCaptureBusy = isCaptureBusy
             model.pageAppeared()
