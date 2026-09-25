@@ -318,6 +318,7 @@ extension ParakeetEngine {
             didReceiveAudioSamples = true
             if hasNonZeroSignal { didReceiveNonZeroAudioSamples = true }
             lastAudioSampleAt = sampleArrivalTime
+            if firstAudioSampleAt == nil { firstAudioSampleAt = sampleArrivalTime }
             pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
             var droppedSeconds = 0.0
             let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)

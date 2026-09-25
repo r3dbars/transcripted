@@ -61,6 +61,7 @@ crash_reporting_enabled
 cross_app_capture_status
 cta
 cta_type
+decode_latency_ms
 default_input_class
 default_input_volume_after
 default_input_volume_before
@@ -94,6 +95,7 @@ finalization_reason
 first_artifact_kind
 first_dictation_saved
 first_since_launch
+first_sound_latency_ms
 format_ready
 from_status
 graduated
@@ -110,6 +112,7 @@ install_uuid
 is_retry
 last_event
 location_type
+mac_chip
 meeting_dry_run_completed
 meeting_recording_ready
 meetings_completed
@@ -197,11 +200,14 @@ stage
 stall_kind
 stall_stage
 start_failure_stage
+start_latency_ms
 start_retry
 state
 step_id
 step_index
 stop_timed_out
+stop_to_paste_latency_ms
+stt_model
 summary_action
 suppression_reason
 surface

@@ -491,8 +491,9 @@ class DictationSessionController: ObservableObject {
                 extra: [
                     "trigger": trigger.rawValue,
                     "start_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: requestToRecordingMs),
+                    "start_latency_ms": MachineClassTelemetry.roundedMilliseconds(requestToRecordingMs),
                     "first_since_launch": currentRequestIsFirstSinceLaunch ? "true" : "false",
-                ]
+                ].merging(dictationSpeedContext(appState: appState)) { current, _ in current }
             )
         )
     }
@@ -2976,6 +2977,9 @@ class DictationSessionController: ObservableObject {
         for (key, value) in measurements {
             localContext[key] = "\(value)"
         }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            localContext["press_to_first_sound_ms"] = "\(firstSoundMs)"
+        }
 
         DiagnosticsTrail.record(
             logger: appState.logger,
@@ -3026,6 +3030,21 @@ class DictationSessionController: ObservableObject {
             guard let milliseconds = measurements[timingBucket.metric] else { continue }
             analyticsProperties[timingBucket.bucket] = AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
         }
+        // Exact (10 ms) timings next to the buckets, so PostHog can compute
+        // real percentiles per model and per kind of Mac.
+        let exactTimings: [(metric: String, key: String)] = [
+            ("decode_ms", "decode_latency_ms"),
+            ("stop_to_paste_ms", "stop_to_paste_latency_ms"),
+        ]
+        for exactTiming in exactTimings {
+            guard let milliseconds = measurements[exactTiming.metric] else { continue }
+            analyticsProperties[exactTiming.key] = MachineClassTelemetry.roundedMilliseconds(milliseconds)
+        }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            analyticsProperties["first_sound_latency_bucket"] = AnalyticsReporter.latencyBucket(milliseconds: firstSoundMs)
+            analyticsProperties["first_sound_latency_ms"] = MachineClassTelemetry.roundedMilliseconds(firstSoundMs)
+        }
+        analyticsProperties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_stop_latency_measured",
@@ -3051,6 +3070,27 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+
+    /// Model and coarse Mac class, so dictation speed can be compared across
+    /// models and machines. No device or user identifiers.
+    private func dictationSpeedContext(appState: TranscriptedAppState) -> [String: String] {
+        var context = MachineClassTelemetry.current
+        context["stt_model"] = appState.sttRouter.selectedModel.rawValue
+        return context
+    }
+
+    /// Key press to the first real audio buffer of this dictation. Nil when
+    /// the audio didn't come through the dictation engine (for example the
+    /// shared meeting mic) or the stamp belongs to another session.
+    private func pressToFirstSoundMilliseconds(
+        appState: TranscriptedAppState,
+        stopRequestedAt: CFAbsoluteTime
+    ) -> Int? {
+        guard let firstSampleAt = appState.sttRouter.parakeetEngine.firstAudioSampleTime(),
+              firstSampleAt >= sessionStartTime,
+              firstSampleAt <= stopRequestedAt else { return nil }
+        return Int(((firstSampleAt - sessionStartTime) * 1_000).rounded())
     }
 
     private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {
