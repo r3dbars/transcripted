@@ -237,6 +237,7 @@ final class WritingController {
         UserDefaults(suiteName: TildeSettings.keyboardSuiteName)?.removeObject(forKey: Self.quietQuitKey)
         DiagnosticsLog.shared.record("launch", metadata: ["model": runtime.models.manager.descriptor.identifier])
         log("WRITING | started with \(selectedModel.rawValue)")
+        emitDailyCountsIfDue()
     }
 
     /// Tilde's stop order (`AppDelegate.applicationWillTerminate`). Safe to
@@ -277,6 +278,7 @@ final class WritingController {
     /// answering, and a runtime that had given up.
     func handleSystemWake() {
         guard isRunning, let runtime else { return }
+        emitDailyCountsIfDue()
         wakeTask?.cancel()
         wakeTask = Task { @MainActor [weak self] in
             let host = runtime.llamaServerHost
@@ -301,6 +303,28 @@ final class WritingController {
             await Task.detached(priority: .utility) { host.stop() }.value
             guard !Task.isCancelled, self.isRunning, self.modelTask == nil else { return }
             host.start()
+        }
+    }
+
+    /// Yesterday's count-only `writing_daily_counts`, at most once a day,
+    /// from the text-free outcome ledger summary. Save my writing and app
+    /// picking arrive in phases 3 and 4; until then they report off and all.
+    private func emitDailyCountsIfDue() {
+        let ledgerURL = TildeLocalOutcomeStores.eventURL()
+        let setup = WritingAnalytics.Setup(
+            saveEnabled: false,
+            autocompleteEnabled: Self.settings().suggestionsEnabled,
+            appScope: .all,
+            model: selectedModel
+        )
+        WritingAnalytics.emitDailyCountsIfDue(defaults: Self.appDefaults(), setup: setup) { day in
+            let facts = OutcomeLedgerReader.facts(in: OutcomeLedgerReader.readTail(url: ledgerURL))
+            let summary = OutcomeLedgerSummary.make(facts: facts.filter { $0.occurredAt < day.end }, now: day.start)
+            return WritingAnalytics.DailyCounts(
+                suggestionsShown: summary.ghostsShownToday,
+                suggestionsAccepted: summary.acceptedGhostsToday,
+                acceptedCharacters: summary.keystrokesSavedToday
+            )
         }
     }
 
