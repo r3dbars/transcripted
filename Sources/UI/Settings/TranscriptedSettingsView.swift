@@ -706,13 +706,16 @@ struct TranscriptedSettingsView: View {
             .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else {
             // Today can open any meeting from the past week, not only the 10
             // newest. Page the list until it shows up; each page publishes
-            // new sections and lands back here. Deferred because sections
-            // publish while the load still counts as in flight.
-            if homeViewModel.canLoadMoreMeetings {
-                Task { @MainActor in
-                    guard homePendingRevealMeetingKey == key else { return }
-                    homeViewModel.loadMoreMeetings()
-                }
+            // new sections and lands back here. Deferred, and decided inside
+            // the Task, because sections publish before the load sets
+            // canLoadMoreMeetings and clears its in-flight flag.
+            Task { @MainActor in
+                guard HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
+                    pendingKey: homePendingRevealMeetingKey,
+                    requestedKey: key,
+                    canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings
+                ) else { return }
+                homeViewModel.loadMoreMeetings()
             }
             return
         }
