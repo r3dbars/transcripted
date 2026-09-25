@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import transcripted_mcp
 
@@ -302,6 +303,28 @@ final class SemanticSearchTests: XCTestCase {
 
         MCPStartupIndexing.completeAfterAttach(index: index)
         XCTAssertGreaterThan(provider.requests, 0, "semantic vectors should still be populated after attach")
+    }
+
+    func testWatcherReconcileStillEmbedsGoodFilesWhenOneFails() throws {
+        let provider = CountingEmbeddingProvider()
+        let index = try makeIndex(provider)
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "The product roadmap is ready"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(makeFixtureJSON(date: "2026-03-30T10:00:00-0500"), filename: "Call_2026-03-30_10-00-00", to: tempDir)
+
+        // Make only the second meeting fail to index.
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(tempDir.appendingPathComponent("mcp_index.sqlite").path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(
+            db,
+            "CREATE TRIGGER test_fail_insert BEFORE INSERT ON utterances WHEN NEW.filename = 'Call_2026-03-30_10-00-00' BEGIN SELECT RAISE(ABORT, 'test sabotage'); END",
+            nil, nil, nil
+        ), SQLITE_OK)
+        sqlite3_close(db)
+
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
+        XCTAssertGreaterThan(provider.requests, 0, "the meeting that did index must still get vectors")
     }
 
     func testStartupEmbeddingComputationDoesNotHoldLexicalWriteLock() throws {

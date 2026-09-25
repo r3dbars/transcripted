@@ -588,3 +588,14 @@ enum MCPIndexError: Error, LocalizedError {
         }
     }
 }
+
+/// Thrown by `TranscriptIndex.reconcile` when the pass finished but some files
+/// failed to index. The index is still usable; every other file was indexed.
+struct MCPReconcileFileFailures: Error, LocalizedError {
+    let failedFileCount: Int
+    let firstFailure: Error
+
+    var errorDescription: String? {
+        "\(failedFileCount) file(s) failed to index: \(firstFailure.localizedDescription)"
+    }
+}
