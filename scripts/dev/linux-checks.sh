@@ -273,8 +273,8 @@ check "vnc driver self-test" "python3 scripts/vm/vnc.py --self-test"
 check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 
 # ---------------------------------------------------------------- ops/release self-tests
-# Explicit opt-in lists: anything here becomes a REQUIRED check on every PR
-# once the repo-hygiene job runs this script. To add yours, append its path to the
+# Explicit opt-in lists: anything here is a REQUIRED check on every PR (the
+# repo-hygiene job runs this script). To add yours, append its path to the
 # matching array below. It must pass offline, in any timezone, with only the
 # python3 stdlib (or ruby), and write nothing outside build/ or $TMPDIR.
 SELF_TEST_SCRIPTS=(
