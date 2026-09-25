@@ -663,6 +663,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
+
+        #if TRANSCRIPTED_LAB_CONTROL
+        // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
+        LabControlChannel.startIfRequested(appDelegate: self)
+        #endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

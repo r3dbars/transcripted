@@ -16,6 +16,10 @@ LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+# Lab builds compile in the hill-climb lab control channel
+# (Sources/Support/LabControlChannel.swift). Local dev only: never distribute
+# one. build-beta.sh refuses this flag and rejects any binary that has it.
+TRANSCRIPTED_LAB_BUILD="${TRANSCRIPTED_LAB_BUILD:-0}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
@@ -45,9 +49,12 @@ while [ "$#" -gt 0 ]; do
         --full)
             BUNDLE_PARAKEET_MODELS=1
             ;;
+        --lab)
+            TRANSCRIPTED_LAB_BUILD=1
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: bash build.sh [--no-open] [--thin|--full]"
+            echo "Usage: bash build.sh [--no-open] [--thin|--full] [--lab]"
             exit 1
             ;;
     esac
@@ -501,6 +508,10 @@ echo "Dependencies found"
 # build-beta.sh so dev and shipped builds cannot diverge.
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
+if [ "$TRANSCRIPTED_LAB_BUILD" = "1" ]; then
+    echo "LAB BUILD: compiling in the lab control channel (-D TRANSCRIPTED_LAB_CONTROL). Local use only; never distribute this app."
+    APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_LAB_CONTROL)
+fi
 
 # ESpeakNG.framework is only present on FluidAudio < 0.15 deps builds.
 [ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"

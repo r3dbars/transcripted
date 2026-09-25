@@ -1,0 +1,274 @@
+{
+  "_comment": "One objective per user outcome. See docs/hill-climb-lab.md for how verdicts work.",
+  "objectives": [
+    {
+      "id": "dictation-stop-latency",
+      "title": "Dictation: time from releasing the key to text on screen",
+      "bench": "dictation-stop",
+      "suite": "dictation-phrases-v1",
+      "primary": {
+        "id": "stop_to_text_s",
+        "direction": "lower",
+        "compare": "log_ratio",
+        "aggregate": "median",
+        "min_effect": 0.05,
+        "unit": "s"
+      },
+      "guardrails": [
+        {
+          "id": "word_error_rate",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01,
+          "requires_item_field": "text"
+        },
+        {
+          "id": "stop_to_delivery_s",
+          "direction": "lower",
+          "compare": "log_ratio",
+          "aggregate": "median",
+          "max_regression": 0.05,
+          "unit": "s"
+        }
+      ],
+      "hard_gates": [
+        "missing_text",
+        "silence_text",
+        "unstable_output"
+      ],
+      "knobs": [
+        "speech.parakeet.encoder_compute_units",
+        "dictation.stop.path",
+        "dictation.stop.finalization_order",
+        "dictation.stop.chunk_seconds"
+      ],
+      "repetitions": 3,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "app_binary": "build/Transcripted.app/Contents/MacOS/Transcripted",
+        "voice": "Samantha"
+      },
+      "notes": "Measures the production stop path through DictationStopBenchmarkRunner. Press-to-recording latency is not in this loop yet; it comes from real-use events via transcripted-lab snapshot."
+    },
+    {
+      "id": "meeting-turnaround",
+      "title": "Meetings: time from Stop to finished transcript, per minute of audio",
+      "bench": "meeting-import",
+      "suite": "meeting-corpus",
+      "primary": {
+        "id": "turnaround_rtf",
+        "direction": "lower",
+        "compare": "log_ratio",
+        "aggregate": "median",
+        "min_effect": 0.05
+      },
+      "guardrails": [
+        {
+          "id": "word_recall",
+          "direction": "higher",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01,
+          "requires_item_field": "truth"
+        },
+        {
+          "id": "speaker_count_error",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.25,
+          "requires_item_field": "speakers"
+        }
+      ],
+      "hard_gates": [
+        "no_transcript",
+        "empty_transcript"
+      ],
+      "knobs": [
+        "speaker.embedder",
+        "diarization.clustering_threshold",
+        "diarization.vbx_fa",
+        "diarization.vbx_fb",
+        "diarization.min_segment_duration",
+        "speaker.cluster.same_voice_consolidation.wespeaker",
+        "speaker.cluster.small_cluster_absorb.wespeaker",
+        "speaker.cluster.same_voice_consolidation.eres2net",
+        "speaker.cluster.small_cluster_absorb.eres2net"
+      ],
+      "repetitions": 2,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "cli_binary": "Tools/TranscriptedCLI/.build/release/transcripted-cli"
+      },
+      "notes": "Runs the full import pipeline (Parakeet + speaker detection) headlessly through transcripted-cli import-audio. Most pipeline knobs are still hardcoded (status needs-seam). The encoder compute-units knob is left out because transcripted-cli import-audio does not read TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS yet (TranscribeCommand.swift AsrManager(config: .default))."
+    },
+    {
+      "id": "speaker-naming-across-calls",
+      "title": "Speakers: recognized on the next call without asking again",
+      "bench": "speaker-autoeval",
+      "suite": "speaker-identities",
+      "primary": {
+        "id": "auto_coverage",
+        "direction": "higher",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.03
+      },
+      "guardrails": [
+        {
+          "id": "prompts_per_recurring_speaker",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.05
+        }
+      ],
+      "hard_gates": [
+        "false_automatic_name",
+        "false_automatic_name_all_purities",
+        "open_set_false_automatic_name",
+        "cross_person_merge",
+        "contaminated_profile"
+      ],
+      "knobs": [
+        "speaker.naming.auto_similarity",
+        "speaker.naming.auto_margin",
+        "speaker.naming.required_maturity_count",
+        "speaker.naming.auto_maturity_evidence",
+        "speaker.naming.match_maturity_evidence",
+        "speaker.naming.match_floor_offset",
+        "speaker.naming.minimum_average_similarity",
+        "speaker.naming.minimum_speech_seconds",
+        "speaker.naming.minimum_segment_count",
+        "speaker.writeback.evidence",
+        "speaker.writeback.margin",
+        "speaker.writeback.confident_similarity",
+        "speaker.writeback.cautious_similarity",
+        "speaker.writeback.confident_blend_alpha",
+        "speaker.writeback.cautious_blend_alpha",
+        "speaker.exemplar.max_count",
+        "speaker.exemplar.same_condition_similarity",
+        "speaker.exemplar.blend_alpha"
+      ],
+      "repetitions": 1,
+      "interleave": false,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "harness_binary": "Tools/SpeakerEvalHarness/.build/release/speaker-eval-harness",
+        "manifest": "data/eval/qmatrix-manifest.sha256",
+        "input_root": "data/eval/qmatrix"
+      },
+      "notes": "Replays real voice fingerprints through the app's naming policy in SpeakerEvalHarness autoeval. Deterministic, so one repetition. Any new false automatic name vetoes a candidate.",
+      "post_confirm_checks": [
+        {
+          "command": "python3 scripts/run_speaker_autoresearch.py",
+          "why": "The climber's gates only see per-corpus safety totals. This runs the per-condition-bucket no-regression contract (scripts/speaker_autoresearch_contract.py) that a winner must also pass before any constant changes in the app."
+        }
+      ]
+    },
+    {
+      "id": "speech-model-accuracy",
+      "title": "Speech model: fewer wrong words without getting much slower",
+      "bench": "stt-shootout",
+      "suite": "stt-clips",
+      "primary": {
+        "id": "word_error_rate",
+        "direction": "lower",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.01,
+        "requires_item_field": "truth"
+      },
+      "guardrails": [
+        {
+          "id": "rtf",
+          "direction": "lower",
+          "compare": "log_ratio",
+          "aggregate": "median",
+          "max_regression": 0.3
+        }
+      ],
+      "hard_gates": [
+        "engine_failed",
+        "empty_text"
+      ],
+      "knobs": [
+        "stt.engine"
+      ],
+      "repetitions": 1,
+      "interleave": true,
+      "holdout_peek_budget": 3,
+      "bench_options": {},
+      "notes": "Bench lives in scripts/stt-shootout/hillclimb_bench.py from PR #1788 (merge it or check out its branch first). Each item already runs latency_runs times inside the bench. rtf guardrail allows up to ~35% slower (log 0.3)."
+    },
+    {
+      "id": "speaker-lab-recognition",
+      "title": "Speakers (lab): returning people land on their own profile, any diarizer + fingerprint",
+      "bench": "speaker-lab",
+      "suite": "speaker-lab-ami",
+      "primary": {
+        "id": "recognition_rate",
+        "direction": "higher",
+        "compare": "difference",
+        "aggregate": "mean",
+        "min_effect": 0.03
+      },
+      "guardrails": [
+        {
+          "id": "pipeline_der",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.01
+        },
+        {
+          "id": "speaker_count_abs_error",
+          "direction": "lower",
+          "compare": "difference",
+          "aggregate": "mean",
+          "max_regression": 0.25
+        }
+      ],
+      "hard_gates": [
+        "wrong_person",
+        "new_person_false_match"
+      ],
+      "knobs": [
+        "diarization.backend",
+        "diarization.nemotron.preset",
+        "speaker.embedder",
+        "speaker.match.mode",
+        "speaker.match.fixed_floor",
+        "speaker.cluster.same_voice_consolidation.wespeaker",
+        "speaker.cluster.same_voice_consolidation.eres2net",
+        "speaker.profile.duplicate_merge_similarity_replay",
+        "speaker.writeback.confident_blend_alpha",
+        "speaker.writeback.cautious_blend_alpha",
+        "speaker.writeback.confident_similarity",
+        "speaker.writeback.cautious_similarity",
+        "speaker.writeback.margin"
+      ],
+      "repetitions": 1,
+      "interleave": false,
+      "holdout_peek_budget": 3,
+      "bench_options": {
+        "harness_binary": "Tools/SpeakerEvalHarness/.build/release/speaker-eval-harness",
+        "data_dir": "data",
+        "collar": 0.25,
+        "min_appearance_sec": 5,
+        "wrong_penalty": 2,
+        "lab_timeout_seconds": 20000
+      },
+      "notes": "Runs the full meeting speaker pipeline (diarizer -> embeddings -> clusterer -> speaker DB) on AMI series through scripts/run_speaker_lab.sh --single, one call per trial over the whole split. Replay is deterministic given cached dumps, so one repetition. The first trial of each backend x embedder x preset variant dumps every meeting (slow, and CoreML inference is not guaranteed bit-identical, so never clear dumps mid-climb); pre-warm with bash scripts/run_speaker_lab.sh --variants ... first. Hard gates: any extra returning person put on someone else's profile, or any extra first-time speaker glued to a known profile, vetoes a candidate. ERes2Net needs its Model.mlmodelc staged (bench_options.eres2net_model); without it eres2net trials come back as item errors, which the item_error gate rejects. The adapter (scripts/hillclimb/benches/speaker_lab.py) and this suite come from #1789; until it merges every trial is an item error. The suite (24 series, 16 dev / 8 holdout, salt speaker-lab-ami-v2) is copied byte for byte from #1789; keep them identical.",
+      "post_confirm_checks": [
+        {
+          "command": "bash scripts/run_speaker_lab.sh --single <winning settings>",
+          "why": "The adapter hasn't been run on the Mac yet; a plain driver run of the winner must reproduce the bench's numbers before any constant changes."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,333 @@
+{
+ "id": "dictation-phrases-v1",
+ "title": "Dictation phrases v1",
+ "salt": "dictation-phrases-v1",
+ "holdout_fraction": 0.3,
+ "notes": "Original synthetic dictation phrases spoken by macOS `say` (voice from bench_options.voice, rate 170) and converted to 48 kHz 16-bit WAV by the dictation-stop bench. Covers very short replies, ordinary sentences, names, numbers/dates/times, emails and URLs, punctuation-heavy text, technical vocabulary, and ~45 s rambling notes. No filler words on purpose: the runner's filler cleanup would remove them and inflate WER. Silence items are pinned 3 dev / 1 holdout and guard against hallucinated text. Changing any text changes the suite fingerprint and the fixture cache key.",
+ "items": [
+  {
+   "id": "p001",
+   "kind": "speech",
+   "text": "Yes."
+  },
+  {
+   "id": "p002",
+   "kind": "speech",
+   "text": "Sounds good."
+  },
+  {
+   "id": "p003",
+   "kind": "speech",
+   "text": "Ship it."
+  },
+  {
+   "id": "p004",
+   "kind": "speech",
+   "text": "Thanks so much!"
+  },
+  {
+   "id": "p005",
+   "kind": "speech",
+   "text": "Call me later."
+  },
+  {
+   "id": "p006",
+   "kind": "speech",
+   "text": "Running five minutes late."
+  },
+  {
+   "id": "p007",
+   "kind": "speech",
+   "text": "Done."
+  },
+  {
+   "id": "p008",
+   "kind": "speech",
+   "text": "Good morning, team."
+  },
+  {
+   "id": "p009",
+   "kind": "speech",
+   "text": "Can you send me the updated budget before Friday afternoon?"
+  },
+  {
+   "id": "p010",
+   "kind": "speech",
+   "text": "I think we should move the launch to next Tuesday so the design review can finish."
+  },
+  {
+   "id": "p011",
+   "kind": "speech",
+   "text": "Remind me to pick up groceries on the way home tonight."
+  },
+  {
+   "id": "p012",
+   "kind": "speech",
+   "text": "The build passed on my machine, but the integration tests are still flaky."
+  },
+  {
+   "id": "p013",
+   "kind": "speech",
+   "text": "Let's schedule a thirty minute sync with the platform team tomorrow."
+  },
+  {
+   "id": "p014",
+   "kind": "speech",
+   "text": "Please add a note that the client approved the second draft."
+  },
+  {
+   "id": "p015",
+   "kind": "speech",
+   "text": "Honestly, the new onboarding flow feels much smoother than the old one."
+  },
+  {
+   "id": "p016",
+   "kind": "speech",
+   "text": "I'll review the pull request after lunch and leave comments by three."
+  },
+  {
+   "id": "p017",
+   "kind": "speech",
+   "text": "Could you double check whether the invoice was paid last month?"
+  },
+  {
+   "id": "p018",
+   "kind": "speech",
+   "text": "We need a backup plan in case the venue cancels again."
+  },
+  {
+   "id": "p019",
+   "kind": "speech",
+   "text": "The weather looks clear, so the outdoor event is still on for Saturday."
+  },
+  {
+   "id": "p020",
+   "kind": "speech",
+   "text": "Write a quick reply saying I'm interested and ask about the timeline."
+  },
+  {
+   "id": "p021",
+   "kind": "speech",
+   "text": "Tell Priya Raman that Marcus Oyelaran will join the call instead of me."
+  },
+  {
+   "id": "p022",
+   "kind": "speech",
+   "text": "Forward the contract to Elena Vasquez and copy Tomasz Kowalczyk on the thread."
+  },
+  {
+   "id": "p023",
+   "kind": "speech",
+   "text": "Siobhan and Lan Nguyen are presenting the quarterly results together."
+  },
+  {
+   "id": "p024",
+   "kind": "speech",
+   "text": "Ask Dr. Okafor whether the Thursday appointment can move to Friday."
+  },
+  {
+   "id": "p025",
+   "kind": "speech",
+   "text": "Rafael, Ingrid, and Kenji all voted for the blue logo."
+  },
+  {
+   "id": "p026",
+   "kind": "speech",
+   "text": "Meeting notes from the call with Anika Deshpande about the Lisbon office."
+  },
+  {
+   "id": "p027",
+   "kind": "speech",
+   "text": "The meeting is on March 14th at 3:30 PM in room 204."
+  },
+  {
+   "id": "p028",
+   "kind": "speech",
+   "text": "Our revenue grew 18 percent to 2.4 million dollars in the third quarter."
+  },
+  {
+   "id": "p029",
+   "kind": "speech",
+   "text": "Set the thermostat to 68 degrees and the timer for 45 minutes."
+  },
+  {
+   "id": "p030",
+   "kind": "speech",
+   "text": "Flight 1172 leaves at 6:05 AM on Monday, October 2nd."
+  },
+  {
+   "id": "p031",
+   "kind": "speech",
+   "text": "Order 3 boxes of paper, 12 pens, and 250 envelopes."
+  },
+  {
+   "id": "p032",
+   "kind": "speech",
+   "text": "The deadline moved from June 30th, 2027 to July 15th, 2027."
+  },
+  {
+   "id": "p033",
+   "kind": "speech",
+   "text": "Call the front desk at 555-0142, extension 7."
+  },
+  {
+   "id": "p034",
+   "kind": "speech",
+   "text": "We measured a latency of 120 milliseconds at the 95th percentile."
+  },
+  {
+   "id": "p035",
+   "kind": "speech",
+   "text": "Send the draft to jordan.lee@example.com when it's ready."
+  },
+  {
+   "id": "p036",
+   "kind": "speech",
+   "text": "The docs are at docs.example.org slash getting started."
+  },
+  {
+   "id": "p037",
+   "kind": "speech",
+   "text": "Check out example.com/pricing for the new plans."
+  },
+  {
+   "id": "p038",
+   "kind": "speech",
+   "text": "Reply to support@example.com and mention ticket number 4821."
+  },
+  {
+   "id": "p039",
+   "kind": "speech",
+   "text": "The staging server is at https://staging.example.com, so try it there first."
+  },
+  {
+   "id": "p040",
+   "kind": "speech",
+   "text": "You can reach the team at hello at example dot org or on the website."
+  },
+  {
+   "id": "p041",
+   "kind": "speech",
+   "text": "Wait, what? No, that's not what I meant; let me explain."
+  },
+  {
+   "id": "p042",
+   "kind": "speech",
+   "text": "First: gather the data. Second: clean it. Third: ship the report!"
+  },
+  {
+   "id": "p043",
+   "kind": "speech",
+   "text": "She said, \"We're almost there,\" and then, well, we weren't."
+  },
+  {
+   "id": "p044",
+   "kind": "speech",
+   "text": "Options are: A, B, or C (though C is risky)."
+  },
+  {
+   "id": "p045",
+   "kind": "speech",
+   "text": "Honestly? I love it. Really, truly, love it."
+  },
+  {
+   "id": "p046",
+   "kind": "speech",
+   "text": "Note to self - buy milk, eggs, bread; also, call Mom."
+  },
+  {
+   "id": "p047",
+   "kind": "speech",
+   "text": "The Kubernetes pod keeps crashing because the readiness probe times out."
+  },
+  {
+   "id": "p048",
+   "kind": "speech",
+   "text": "Refactor the async function to use a dispatch queue instead of a semaphore."
+  },
+  {
+   "id": "p049",
+   "kind": "speech",
+   "text": "Run the migration, then rebuild the PostgreSQL index on the users table."
+  },
+  {
+   "id": "p050",
+   "kind": "speech",
+   "text": "The JSON payload includes an OAuth token and a nullable timestamp field."
+  },
+  {
+   "id": "p051",
+   "kind": "speech",
+   "text": "We switched the CI pipeline from Jenkins to GitHub Actions last sprint."
+  },
+  {
+   "id": "p052",
+   "kind": "speech",
+   "text": "The Core ML encoder runs on the Neural Engine while the decoder uses the GPU."
+  },
+  {
+   "id": "p053",
+   "kind": "speech",
+   "text": "Add a regression test for the off-by-one error in the pagination cursor."
+  },
+  {
+   "id": "p054",
+   "kind": "speech",
+   "text": "Swift concurrency warnings showed up after we enabled strict sendability checking."
+  },
+  {
+   "id": "p055",
+   "kind": "speech",
+   "text": "Okay so here is where I landed on the kitchen renovation after talking it through with the contractor this morning. The cabinets are going to take about six weeks longer than we planned, which means the countertops slip too, and honestly I would rather wait than rush the install and end up with gaps along the wall. The contractor suggested we use the extra time to redo the lighting, which was always on the maybe list, so I asked for a quote on recessed lights over the island and a dimmer by the back door. I also want to double check that the permit covers the electrical work, because the last thing we need is an inspection surprise right before we move everything back in."
+  },
+  {
+   "id": "p056",
+   "kind": "speech",
+   "text": "Quick brain dump before I forget everything from the planning session. The big takeaway is that people love the export feature but nobody can find it, so the first job next sprint is moving it out of the settings page and into the main toolbar. Second, the search results feel slow on large workspaces, and I think the fix is caching the recent queries rather than rewriting the whole index. Third, we keep promising a dark mode and we keep pushing it, so either we commit to a date or we stop mentioning it in the roadmap. I lean toward committing, maybe the end of next month, as long as design can hand over the color tokens in the next two weeks."
+  },
+  {
+   "id": "p057",
+   "kind": "speech",
+   "text": "So for the trip next month, I'm thinking we fly into Porto on the Thursday, spend two nights there, and then take the train down to Lisbon for the weekend. The train is about three hours and it's cheaper than renting a car, plus nobody has to drive after dinner. In Lisbon I'd like one slow day with no plans at all, just walking around and eating, and one day where we actually do the museums and maybe the tram up the hill. We still need to figure out where to stay, and I'd rather have a small apartment with a kitchen than a hotel, because breakfast at home saves a lot of money and time. Let me know if the dates work for everyone."
+  },
+  {
+   "id": "p058",
+   "kind": "speech",
+   "text": "Notes for the incident review. Around two in the morning the queue workers stopped processing jobs, and the alert didn't fire because the health check only verified that the process was running, not that it was making progress. By the time someone noticed, about four thousand jobs were waiting. The root cause was a lock that never got released after a network timeout, so every worker ended up waiting on the same record. The immediate fix was restarting the workers and clearing the stale lock. The longer term fixes are adding a progress based health check, putting a timeout on the lock itself, and writing a small runbook so whoever is on call at two in the morning doesn't have to guess."
+  },
+  {
+   "id": "p059",
+   "kind": "speech",
+   "text": "Hey, I wanted to write down a few thoughts after our conversation yesterday, because I don't think I said it very well in the moment. I really do appreciate how much effort you've put into the garden project this year, and I know it has not been easy with everything else going on. My only worry is that we keep adding new beds before the old ones are settled, and then the watering turns into a two hour job every evening. Maybe this season we just focus on the tomatoes, the herbs, and the strawberries, and see how that feels. If we still have energy in August, we can plan the bigger expansion together over the winter."
+  },
+  {
+   "id": "p060",
+   "kind": "speech",
+   "text": "Summary of the budget meeting. We are about twelve percent over on software licenses, mostly because three teams bought overlapping tools for project tracking. The plan is to pick one tool by the end of the month and cancel the others at renewal, which should save somewhere around forty thousand dollars a year. Travel is under budget, which is nice, but that is mainly because two conferences moved online. Hiring stays the same, two engineers and one designer, and the designer role is the priority. Finance wants an updated forecast by the fifteenth, so please send me your numbers by the tenth, even if they're rough, and flag anything you think might change before the end of the quarter."
+  },
+  {
+   "id": "silence-01",
+   "kind": "silence",
+   "seconds": 1,
+   "split": "dev"
+  },
+  {
+   "id": "silence-02",
+   "kind": "silence",
+   "seconds": 3,
+   "split": "dev"
+  },
+  {
+   "id": "silence-03",
+   "kind": "silence",
+   "seconds": 5,
+   "split": "dev"
+  },
+  {
+   "id": "silence-04",
+   "kind": "silence",
+   "seconds": 8,
+   "split": "holdout"
+  }
+ ]
+}

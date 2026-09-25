@@ -54,19 +54,26 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
 
     /// WeSpeaker (256-d) — the diarizer's built-in model. Exactly the production
     /// values the matcher/clusterer used before per-model thresholds existed, so
-    /// the default path is unchanged.
+    /// the default path is unchanged. `consolidation` and `absorb` go through
+    /// LabKnobOverrides, which returns these exact defaults unless the hill-climb
+    /// lab sets TRANSCRIPTED_LAB_KNOBS_FILE; the value is fixed at first use.
     public static let weSpeaker = SpeakerEmbeddingThresholds(
         matchOneSegment: 0.85, matchFewSegments: 0.78, matchManySegments: 0.70,
         ghostMergeFloor: 0.72,
-        consolidation: 0.88, absorb: 0.72, microAbsorb: 0.62,
+        consolidation: LabKnobOverrides.float("speaker.cluster.same_voice_consolidation.wespeaker", default: 0.88),
+        absorb: LabKnobOverrides.float("speaker.cluster.small_cluster_absorb.wespeaker", default: 0.72),
+        microAbsorb: 0.62,
         perSegmentSplit: 0.62, knownProfileConflict: 0.70)
 
     /// ERes2Net (192-d) — calibrated on AMI ground truth (equal-false-accept-rate
     /// remap of the WeSpeaker operating points). Lower absolute values because
-    /// ERes2Net's different-speaker cosines are much tighter.
+    /// ERes2Net's different-speaker cosines are much tighter. `consolidation` and
+    /// `absorb` go through LabKnobOverrides (defaults unchanged, see weSpeaker).
     public static let eRes2Net = SpeakerEmbeddingThresholds(
         matchOneSegment: 0.70, matchFewSegments: 0.62, matchManySegments: 0.55,
         ghostMergeFloor: 0.55,
-        consolidation: 0.65, absorb: 0.55, microAbsorb: 0.45,
+        consolidation: LabKnobOverrides.float("speaker.cluster.same_voice_consolidation.eres2net", default: 0.65),
+        absorb: LabKnobOverrides.float("speaker.cluster.small_cluster_absorb.eres2net", default: 0.55),
+        microAbsorb: 0.45,
         perSegmentSplit: 0.50, knownProfileConflict: 0.55)
 }

@@ -70,7 +70,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - Naming and transcript rewrites: `SpeakerNamingCoordinator.swift` (`extension TranscriptionTaskManager` + review-ownership registry), `SpeakerIdentityMutationService.swift`, `SpeakerClipExtractor.swift`, `RetroactiveSpeakerUpdater.swift` plus `RetroactiveSpeakerUpdater+Scanning.swift`, `RetroactiveSpeakerUpdater+TranscriptRewrite.swift`, and `RetroactiveSpeakerUpdater+BreakdownRewrite.swift` (all `extension TranscriptSaver`)
 - `Stats/` — recording stats database (`StatsDatabase.swift`), models (`StatsDatabaseModels.swift`), and queries (`StatsDatabaseQueries.swift`)
 - `Storage/` — transcript save (`TranscriptSaver.swift`), formatter (`TranscriptFormatter.swift`), format options (`TranscriptFormatOptions.swift`), shared frontmatter parsing (`TranscriptFrontmatter.swift`), retained-recording audio archiving (`RecordingAudioArchiver.swift`), and `SQLiteHandle` (shared low-level SQLite open/permission/pragma bootstrap used by `SpeakerDatabase` and `StatsDatabase`)
-- `Utilities/` — date formatting (`DateFormattingHelper.swift`), file permission helpers (`FilePermissions.swift`), and `SupersessionEpoch` (a generation/epoch counter for superseded async work)
+- `Utilities/` — date formatting (`DateFormattingHelper.swift`), file permission helpers (`FilePermissions.swift`), `SupersessionEpoch` (a generation/epoch counter for superseded async work), and `LabKnobOverrides.swift` (hill-climb lab knob overrides; see "Environment variables Core reads" below)
 
 ## The seams embedders should know
 
@@ -83,6 +83,10 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
+
+## Environment variables Core reads
+
+- `TRANSCRIPTED_LAB_KNOBS_FILE` — read once per process by `Utilities/LabKnobOverrides.swift`. It names a JSON object of hill-climb lab knob overrides; unset (every normal app and CLI run) means no file I/O and every knob keeps its source default. Only the ids in `LabKnobOverrides.knownIDs` are honored (today: `diarization.clustering_threshold`, `diarization.vbx_fa`, `diarization.vbx_fb`, `diarization.min_segment_duration` in `Services/DiarizationService.swift`, and the four `speaker.cluster.*` thresholds in `Speaker/SpeakerEmbeddingThresholds.swift`); any other key is warned about on stderr (ids only) and dropped. Adding a knob means adding the call site, the id to `knownIDs`, and its entry in `config/hillclimb/knobs.json`. It is the only env var that changes Core's pipeline math; don't add more unless a host seam can't do the job.
 
 ## Audio backend notes
 
@@ -191,6 +195,7 @@ SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
 - `Tests/TranscriptedCoreTests/StorageTests/StatsDatabaseModelsTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/RecordingMetadataFactoryTests.swift`
 - `Tests/TranscriptedCoreTests/UtilitiesTests/LogPrivacySanitizerTests.swift`
+- `Tests/TranscriptedCoreTests/UtilitiesTests/LabKnobOverridesTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/TranscriptFormatVersionTests.swift`
 - `Tests/TranscriptedCoreTests/StorageTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/TranscriptMetadataBuilderTests.swift`

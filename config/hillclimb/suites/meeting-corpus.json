@@ -1,0 +1,8 @@
+{
+  "id": "meeting-corpus",
+  "title": "Meeting corpus (local imports)",
+  "salt": "meeting-corpus-v1",
+  "holdout_fraction": 0.3,
+  "items_file": "~/Library/Application Support/Transcripted Lab/HillClimb/suites/meeting-corpus.items.json",
+  "notes": "Private meeting audio lives on the Mac, never in git. Build the items file with python3 scripts/hillclimb/benches/make_meeting_suite.py --corpus-root ~/Downloads/meeting-corpus (or --folder DIR). Item ids are manifest ids or content hashes, so the split never depends on where files sit."
+}

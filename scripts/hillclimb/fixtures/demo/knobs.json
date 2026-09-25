@@ -1,0 +1,15 @@
+{
+  "_comment": "Synthetic demo registry. Lets anyone run the whole climb loop on any machine, and backs the self-tests. Not real app settings.",
+  "knobs": [
+    {"id": "demo.chunk_seconds", "title": "Chunk length", "type": "float", "default": 30.0, "min": 5.0, "max": 60.0, "step": 10.0,
+     "status": "bench-only", "apply": [{"via": "request", "name": "demo.chunk_seconds"}], "affects": ["demo-latency", "demo-naming"]},
+    {"id": "demo.encoder", "title": "Encoder compute units", "type": "enum", "default": "default", "choices": ["default", "cpu-and-gpu", "all"],
+     "status": "bench-only", "apply": [{"via": "env", "name": "DEMO_ENCODER"}], "affects": ["demo-latency"]},
+    {"id": "demo.prewarm", "title": "Prewarm model", "type": "bool", "default": false,
+     "status": "bench-only", "apply": [{"via": "env", "name": "DEMO_PREWARM"}], "affects": ["demo-latency"]},
+    {"id": "demo.match_threshold", "title": "Speaker match threshold", "type": "float", "default": 0.85, "min": 0.5, "max": 0.95, "step": 0.05,
+     "status": "bench-only", "apply": [{"via": "env", "name": "DEMO_MATCH"}], "affects": ["demo-naming"]},
+    {"id": "demo.unbuilt", "title": "Hardcoded setting with no seam yet", "type": "int", "default": 5, "min": 1, "max": 9, "step": 1,
+     "status": "needs-seam", "apply": [], "affects": ["demo-naming"]}
+  ]
+}

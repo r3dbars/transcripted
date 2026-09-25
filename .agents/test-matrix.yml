@@ -530,6 +530,25 @@ rules:
       - "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test"
 
   - paths:
+      - "scripts/hillclimb/**"
+      - "config/hillclimb/**"
+      - "docs/hill-climb-lab.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/hillclimb/hillclimb.py"
+      - "python3 scripts/hillclimb/hillclimb.py --self-test"
+      - "python3 scripts/hillclimb/hillclimb.py validate"
+
+  - paths:
+      - "Sources/Support/LabControlChannel.swift"
+      - "Sources/Support/LabControlCommand.swift"
+      - "scripts/dev/typecheck-lab-build.sh"
+    checks:
+      - "bash build-deps.sh"
+      - "bash build.sh --no-open"
+      - "bash scripts/dev/typecheck-lab-build.sh"
+
+  - paths:
       - "README.md"
       - "AGENT_START.md"
       - "AGENTS.md"

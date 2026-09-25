@@ -1,0 +1,169 @@
+{
+ "id": "demo-clips",
+ "title": "Demo clips",
+ "salt": "demo-clips-v1",
+ "holdout_fraction": 0.3,
+ "notes": "Synthetic items for the demo registry.",
+ "items": [
+  {
+   "id": "clip-01",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-02",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-03",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-04",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-05",
+   "synthetic_base": 2.55
+  },
+  {
+   "id": "clip-06",
+   "synthetic_base": 2.9
+  },
+  {
+   "id": "clip-07",
+   "synthetic_base": 0.8
+  },
+  {
+   "id": "clip-08",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-09",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-10",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-11",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-12",
+   "synthetic_base": 2.55
+  },
+  {
+   "id": "clip-13",
+   "synthetic_base": 2.9
+  },
+  {
+   "id": "clip-14",
+   "synthetic_base": 0.8
+  },
+  {
+   "id": "clip-15",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-16",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-17",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-18",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-19",
+   "synthetic_base": 2.55
+  },
+  {
+   "id": "clip-20",
+   "synthetic_base": 2.9
+  },
+  {
+   "id": "clip-21",
+   "synthetic_base": 0.8
+  },
+  {
+   "id": "clip-22",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-23",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-24",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-25",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-26",
+   "synthetic_base": 2.55
+  },
+  {
+   "id": "clip-27",
+   "synthetic_base": 2.9
+  },
+  {
+   "id": "clip-28",
+   "synthetic_base": 0.8
+  },
+  {
+   "id": "clip-29",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-30",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-31",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-32",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-33",
+   "synthetic_base": 2.55
+  },
+  {
+   "id": "clip-34",
+   "synthetic_base": 2.9
+  },
+  {
+   "id": "clip-35",
+   "synthetic_base": 0.8
+  },
+  {
+   "id": "clip-36",
+   "synthetic_base": 1.15
+  },
+  {
+   "id": "clip-37",
+   "synthetic_base": 1.5
+  },
+  {
+   "id": "clip-38",
+   "synthetic_base": 1.85
+  },
+  {
+   "id": "clip-39",
+   "synthetic_base": 2.2
+  },
+  {
+   "id": "clip-40",
+   "synthetic_base": 2.55
+  }
+ ]
+}

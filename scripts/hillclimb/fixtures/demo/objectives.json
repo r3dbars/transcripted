@@ -1,0 +1,30 @@
+{
+  "objectives": [
+    {
+      "id": "demo-latency",
+      "title": "Demo: stop-to-text latency",
+      "bench": "demo-synthetic-latency",
+      "suite": "demo-clips",
+      "primary": {"id": "stop_to_text_s", "direction": "lower", "compare": "log_ratio", "aggregate": "median", "min_effect": 0.02, "unit": "s"},
+      "guardrails": [{"id": "accuracy", "direction": "higher", "compare": "difference", "aggregate": "mean", "max_regression": 0.01}],
+      "hard_gates": ["lost_text"],
+      "knobs": ["demo.chunk_seconds", "demo.encoder", "demo.prewarm"],
+      "repetitions": 3,
+      "interleave": true,
+      "holdout_peek_budget": 3
+    },
+    {
+      "id": "demo-naming",
+      "title": "Demo: speaker recognized on the next call",
+      "bench": "demo-synthetic-naming",
+      "suite": "demo-clips",
+      "primary": {"id": "recognized_rate", "direction": "higher", "compare": "difference", "aggregate": "mean", "min_effect": 0.01},
+      "guardrails": [],
+      "hard_gates": ["false_name"],
+      "knobs": ["demo.match_threshold", "demo.chunk_seconds", "demo.unbuilt"],
+      "repetitions": 1,
+      "interleave": false,
+      "holdout_peek_budget": 2
+    }
+  ]
+}

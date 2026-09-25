@@ -1,0 +1,2252 @@
+{
+  "_comment": "The real knob registry for Transcripted. One entry per tunable setting: the shipped default (verified against the source line in `source`), a search range, how a bench applies it (`apply`), and which objectives it can move. status live = a bench can override it in the shipped app today; bench-only = only a bench path honors it (the app hardcodes it), so a winner means a source change; needs-seam = hardcoded and no bench can move it yet: the climber skips it, and the entry documents where a seam would go. Line numbers drift: re-check `source` before editing.",
+  "knobs": [
+    {
+      "id": "speech.parakeet.encoder_compute_units",
+      "area": "speech",
+      "title": "Parakeet encoder compute units",
+      "type": "enum",
+      "default": "default",
+      "choices": [
+        "default",
+        "cpu_and_gpu",
+        "all"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_PARAKEET_ENCODER_COMPUTE_UNITS"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency",
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Speech/ParakeetModelLifecycle.swift:43",
+      "risk": "Faster encoder on one Mac can mean more heat/battery or a slower first load after a compile-cache miss; ANE vs GPU numerics can shift words slightly.",
+      "notes": "default = FluidAudio's power-efficient default (the shipped path); cpu_and_gpu/all map to MLComputeUnits. Read by the app's ParakeetEngine and by DictationStopBenchmarkRunner (Sources/Dictation/DictationStopBenchmarkRunner.swift:439). CAVEAT for meeting-turnaround: transcripted-cli import-audio loads Parakeet through AsrManager(config: .default) (Tools/TranscriptedCLI/Sources/TranscriptedCLI/TranscribeCommand.swift:246) and never reads this env var, so the meeting-import bench cannot see this knob until the CLI honors it. Shipping a non-default value means changing the production default in ParakeetModelLifecycle, not just an env var."
+    },
+    {
+      "id": "speech.transcription_model",
+      "area": "speech",
+      "title": "Speech model for dictation and meetings",
+      "type": "enum",
+      "default": "parakeet-tdt-v3",
+      "choices": [
+        "parakeet-tdt-v3",
+        "parakeet-tdt-v2",
+        "whisper-large-v3-turbo",
+        "whisper-large-v3"
+      ],
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "transcription-model-preference"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency",
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/TranscriptionModelPreferences.swift:150",
+      "risk": "Whisper models are much slower and bigger; v2 is English-only. A bad pick makes dictation feel laggy or drops non-English words.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). The CLI import path is hardwired to Parakeet v3, so meeting-import cannot measure this either."
+    },
+    {
+      "id": "speech.model_warmup.eager",
+      "area": "speech",
+      "title": "Load speech and speaker models at launch",
+      "type": "bool",
+      "default": true,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency",
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedAppState.swift:43",
+      "risk": "Lazy loading saves idle memory but makes the first dictation or meeting after launch wait for a model load.",
+      "notes": "Controlled today by env TRANSCRIPTED_LAZY_MODEL_WARMUP=1, which is INVERTED relative to this knob (true = eager = env unset). Deliberately no env apply entry: the registry encodes true as '1', which would set LAZY=1 and turn warmup OFF. Needs either an inverted apply mode or a positive env name. The stop benches preload the model, so they would not see this anyway."
+    },
+    {
+      "id": "speech.meeting_language.min_probability",
+      "area": "speech",
+      "title": "Minimum confidence to auto-pick a meeting language",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.5,
+      "max": 0.95,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Speech/MeetingLanguageDetectionPolicy.swift:16",
+      "risk": "Too low picks the wrong language and garbles a whole meeting; too high falls back to multilingual/uncertain more often.",
+      "notes": "Only used by Whisper models (WhisperEngine). With the default Parakeet model this has no effect."
+    },
+    {
+      "id": "speech.meeting_language",
+      "area": "speech",
+      "title": "Meeting transcription language",
+      "type": "enum",
+      "default": "auto",
+      "choices": [
+        "auto",
+        "en"
+      ],
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "meetingTranscriptionLanguage"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/TranscriptionLanguagePreferences.swift:13",
+      "risk": "Forcing a language transcribes other-language speech as nonsense.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). The real setting accepts every code in TranscriptionLanguagePreferences.supportedLanguages; only auto/en are listed here because those are the only values worth benchmarking on an English corpus. Whisper-only."
+    },
+    {
+      "id": "dictation.stop.path",
+      "area": "dictation",
+      "title": "Dictation stop pipeline variant",
+      "type": "enum",
+      "default": "production",
+      "choices": [
+        "production",
+        "native",
+        "pre_resampled",
+        "chunked"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Dictation/DictationStopBenchmarkRunner.swift:398",
+      "risk": "Non-production paths skip parts of the real stop path (recovery checkpoint, persistence snapshot), so a win can be a measurement artifact.",
+      "notes": "Only 'production' is what ships. A non-production winner is a lead, not a setting: it means porting that decode path into ParakeetEngine/DictationSessionController and re-benching as production. Note the runner's own fallback when the env var is unset is 'native' (DictationStopBenchmarkRunner.swift:429), so the bench adapter must always set this env var."
+    },
+    {
+      "id": "dictation.stop.finalization_order",
+      "area": "dictation",
+      "title": "Save transcript before or after auto-Enter",
+      "type": "enum",
+      "default": "saveBeforeAutoEnter",
+      "choices": [
+        "saveBeforeAutoEnter",
+        "saveAfterAutoEnter"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Dictation/DictationStopFinalizationPolicy.swift:25",
+      "risk": "saveAfterAutoEnter can lose the saved dictation if the app dies right after Enter; saveBefore adds disk I/O contention near paste.",
+      "notes": "Shipping a change means editing DictationStopFinalizationPolicy.order. Only moves stop_to_delivery when auto-Enter is simulated."
+    },
+    {
+      "id": "dictation.stop.chunk_seconds",
+      "area": "dictation",
+      "title": "Chunk length for the chunked stop path (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 5.0,
+      "max": 60.0,
+      "step": 5.0,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Dictation/DictationStopBenchmarkRunner.swift:452",
+      "risk": "Short chunks cut words at chunk seams and raise WER.",
+      "notes": "Only matters when dictation.stop.path = chunked; every other path ignores it, so searching it alone on the production path is wasted trials."
+    },
+    {
+      "id": "dictation.hotkey.debounce_s",
+      "area": "dictation",
+      "title": "Hotkey repeat debounce (seconds)",
+      "type": "float",
+      "default": 0.2,
+      "min": 0.05,
+      "max": 0.5,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:308",
+      "risk": "Too short lets a key bounce start/stop dictation twice; too long swallows a quick second press.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.hotkey.chord_delay_s",
+      "area": "dictation",
+      "title": "Push-to-talk modifier chord wait (seconds)",
+      "type": "float",
+      "default": 0.14,
+      "min": 0.05,
+      "max": 0.3,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Capture/ContextCaptureEngine.swift:84",
+      "risk": "Too short fires dictation when the user meant a modifier shortcut; too long adds lag before recording starts.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.readiness.poll_interval_s",
+      "area": "dictation",
+      "title": "Recorder readiness poll interval (seconds)",
+      "type": "float",
+      "default": 0.1,
+      "min": 0.02,
+      "max": 0.3,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:171",
+      "risk": "Too long adds start lag; too short burns main-thread wakeups while waiting on the mic.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.audio.recovery_delay_s",
+      "area": "dictation",
+      "title": "Wait before retrying a failed mic start (seconds)",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.1,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:48",
+      "risk": "Too short retries before CoreAudio settles and fails again; too long stalls dictation after a device change. Also scales prewarm retry time.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.audio.binding_settle_timeout_s",
+      "area": "dictation",
+      "title": "Wait for a new input device to settle (seconds)",
+      "type": "float",
+      "default": 1.2,
+      "min": 0.4,
+      "max": 3.0,
+      "step": 0.2,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:52",
+      "risk": "Too short records from the old or wrong mic after a switch (Bluetooth especially); too long delays start.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.audio.prewarm_retry_budget",
+      "area": "dictation",
+      "title": "Background mic prewarm retries",
+      "type": "int",
+      "default": 18,
+      "min": 4,
+      "max": 40,
+      "step": 2,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:193",
+      "risk": "Too few gives up before a slow device settles, so the next press is cold; too many loops on a dead mic.",
+      "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned. Each retry waits dictation.audio.recovery_delay_s."
+    },
+    {
+      "id": "dictation.input.keep_mic_active",
+      "area": "dictation",
+      "title": "Keep the recommended mic open between dictations",
+      "type": "bool",
+      "default": false,
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "dictationKeepRecommendedMicrophoneActive"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/DictationPersistentInputPreferences.swift:10",
+      "risk": "Keeps the mic indicator on all the time and can block other apps' device changes; users see it as always listening.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
+    },
+    {
+      "id": "dictation.cleanup.enabled",
+      "area": "dictation",
+      "title": "Clean up dictated text before paste",
+      "type": "bool",
+      "default": true,
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "dictationCleanupEnabled"
+        }
+      ],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/DictationCleanupPreferences.swift:8",
+      "risk": "Turning it off pastes raw filler words and spacing; turning it on adds a small post-processing step.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). Default is true when the key is unset."
+    },
+    {
+      "id": "dictation.paste.target_activation_wait_s",
+      "area": "dictation",
+      "title": "Wait for the target app to activate before paste (seconds)",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:244",
+      "risk": "Too short falls back to copy-only in apps that activate slowly; too long delays text when activation already failed.",
+      "notes": "On the stop-to-text path, but only when the target app is not frontmost."
+    },
+    {
+      "id": "dictation.paste.confirmation_wait_s",
+      "area": "dictation",
+      "title": "Wait for the target app to read the clipboard (seconds)",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:248",
+      "risk": "Too short marks slow apps' pastes as unconfirmed (user sees a copy notice for text that did land); too long delays delivery.",
+      "notes": ""
+    },
+    {
+      "id": "dictation.paste.clipboard_restore_delay_s",
+      "area": "dictation",
+      "title": "Wait before restoring the user's clipboard (seconds)",
+      "type": "float",
+      "default": 0.12,
+      "min": 0.04,
+      "max": 0.5,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:235",
+      "risk": "Too short restores the old clipboard before a slow app finishes reading, so it pastes the wrong thing.",
+      "notes": "Moves stop_to_delivery, not stop_to_text. Slow-pasteback smoke (run-slow-pasteback-smoke.sh) must pass after any change."
+    },
+    {
+      "id": "dictation.paste.auto_enter_delay_s",
+      "area": "dictation",
+      "title": "Pause between paste and auto-Enter (seconds)",
+      "type": "float",
+      "default": 0.15,
+      "min": 0.05,
+      "max": 0.5,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "dictation-stop-latency"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:266",
+      "risk": "Too short presses Enter before the text lands, submitting an empty or partial message.",
+      "notes": "Only when auto-Enter is on. Moves stop_to_delivery."
+    },
+    {
+      "id": "speaker.embedder",
+      "area": "speaker",
+      "title": "Speaker voiceprint model",
+      "type": "enum",
+      "default": "wespeaker",
+      "choices": [
+        "wespeaker",
+        "eres2net"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_SPEAKER_EMBEDDER"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--embedder"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/Support/SpeakerEmbedderPreferences.swift:41",
+      "risk": "Switching embedders uses a separate speaker database, so every saved voice is forgotten until re-confirmed.",
+      "notes": "Also a user setting (UserDefaults key speaker-embedder-preference); the env var wins over it. transcripted-cli reads the same env var (MeetingImportWorkflow.swift:218). Not listed for speaker-naming-across-calls: autoeval replays fixed fingerprints, so the embedder is baked into the fingerprint cache, not applied per trial."
+    },
+    {
+      "id": "speaker.naming.auto_similarity",
+      "area": "speaker",
+      "title": "Similarity needed to name a returning speaker silently",
+      "type": "float",
+      "default": 0.92,
+      "min": 0.86,
+      "max": 0.98,
+      "step": 0.02,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "autoSimilarity"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:17",
+      "risk": "Too low silently puts the wrong person's name on a transcript; too high keeps asking about people it knows.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. Invariant: must stay >= EmbeddingClusterer.sameVoiceConsolidationThreshold (0.88), pinned by testConsolidationThresholdNotAboveAutoAcceptBar."
+    },
+    {
+      "id": "speaker.naming.auto_margin",
+      "area": "speaker",
+      "title": "Lead over the next-closest person needed to auto-name",
+      "type": "float",
+      "default": 0.12,
+      "min": 0.04,
+      "max": 0.28,
+      "step": 0.04,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "autoMargin"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:24",
+      "risk": "Too low names the wrong one of two similar-sounding people; this margin is the main guard on compressed call audio.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.naming.required_maturity_count",
+      "area": "speaker",
+      "title": "Confirmed meetings before a person can be auto-named",
+      "type": "int",
+      "default": 5,
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "requiredMaturityCount"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:28",
+      "risk": "Too low trusts a voiceprint built from one or two meetings and mislabels; too high means users confirm the same person for weeks.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.naming.auto_maturity_evidence",
+      "area": "speaker",
+      "title": "What counts toward auto-name maturity",
+      "type": "enum",
+      "default": "confirmed_meetings",
+      "choices": [
+        "confirmed_meetings",
+        "appearances"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "autoMaturityEvidence"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:41",
+      "risk": "appearances lets passive, never-confirmed matches graduate a profile, so one early mistake can become a silent auto-name.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. The app counts profile.confirmedMeetingCount; 'appearances' would need a different counter in isAutoRecognizable."
+    },
+    {
+      "id": "speaker.naming.match_maturity_evidence",
+      "area": "speaker",
+      "title": "What counts toward match maturity (immature-profile bonus)",
+      "type": "enum",
+      "default": "appearances",
+      "choices": [
+        "appearances",
+        "confirmed_meetings"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "matchMaturityEvidence"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerMatchingService.swift:143",
+      "risk": "confirmed_meetings keeps the stricter immature-profile bar longer, so fewer suggestions for people the user never confirms.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. The app keys the maturity bonus on profile.callCount (appearances)."
+    },
+    {
+      "id": "speaker.naming.match_floor_offset",
+      "area": "speaker",
+      "title": "Shift on the cross-call match floors",
+      "type": "float",
+      "default": 0.0,
+      "min": -0.06,
+      "max": 0.06,
+      "step": 0.02,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "matchFloorOffset"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "Negative matches more strangers to known profiles (wrong suggestions, contaminated voiceprints); positive asks about known people more.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. The app has no offset: shipping a winner means shifting the three WeSpeaker adaptive match floors (speaker.match.adaptive_*.wespeaker) by this amount. The harness only applies it to WeSpeaker floors."
+    },
+    {
+      "id": "speaker.naming.minimum_average_similarity",
+      "area": "speaker",
+      "title": "Extra auto-name gate on similarity to the profile average",
+      "type": "enum",
+      "default": -1.0,
+      "choices": [
+        -1.0,
+        0.8,
+        0.85,
+        0.9,
+        0.92
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "minimumAverageSimilarity"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:84",
+      "risk": "Too high blocks auto-naming for people whose voice varies across mics; too low adds nothing over the best-exemplar gate.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. -1.0 means off (the shipped behavior; the app has no such gate). Modeled as an enum of numbers, not a float, because the only meaningful values are 'off' or roughly 0.80-0.92: a stepped float starting at -1 would crawl through a dead zone where every value behaves like off, and the climber would never reach the useful range. Choices match scripts/speaker_autoresearch_contract.py one_knob_grid. The value is sent to the bench as a JSON number."
+    },
+    {
+      "id": "speaker.naming.minimum_speech_seconds",
+      "area": "speaker",
+      "title": "Minimum speech in a meeting before auto-naming",
+      "type": "float",
+      "default": 0.0,
+      "min": 0.0,
+      "max": 16.0,
+      "step": 2.0,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "minimumSpeechSeconds"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:84",
+      "risk": "Too high never auto-names people who only say a few words; 0 lets a two-second 'yeah' be silently named.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. 0 = off (shipped). The app has no such gate yet; a winner means adding it to shouldAutoAccept."
+    },
+    {
+      "id": "speaker.naming.minimum_segment_count",
+      "area": "speaker",
+      "title": "Minimum speaking turns before auto-naming",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "step": 1,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "minimumSegmentCount"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift:84",
+      "risk": "Too high skips auto-naming for quiet participants; 0 trusts a voiceprint from one turn.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. 0 = off (shipped). The app has no such gate yet; a winner means adding it to shouldAutoAccept."
+    },
+    {
+      "id": "speaker.writeback.evidence",
+      "area": "speaker",
+      "title": "Which matches may update a stored voiceprint",
+      "type": "enum",
+      "default": "production",
+      "choices": [
+        "production",
+        "confirmed_or_auto",
+        "confirmed_only"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "writeBackEvidence"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:67",
+      "risk": "production lets unconfirmed suggestions drift a voiceprint; confirmed_only can leave voiceprints stale as voices or mics change.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. 'production' = every accepted DB match may blend (voiceprintBlendAlpha gate only)."
+    },
+    {
+      "id": "speaker.writeback.margin",
+      "area": "speaker",
+      "title": "Lead over runner-up needed to update a voiceprint",
+      "type": "float",
+      "default": 0.12,
+      "min": 0.04,
+      "max": 0.24,
+      "step": 0.04,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "writeBackMargin"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-margin"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:50",
+      "risk": "Too low blends ambiguous matches into the wrong person's voiceprint, which compounds across meetings.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.writeback.confident_similarity",
+      "area": "speaker",
+      "title": "Similarity for full-rate voiceprint update",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.72,
+      "max": 0.92,
+      "step": 0.04,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "confidentWriteSimilarity"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-confident-sim"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:55",
+      "risk": "Too low adapts fast on weak matches (drift); too high freezes profiles so they fall behind real voice drift.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. Keep >= speaker.writeback.cautious_similarity; the harness does not enforce the ordering."
+    },
+    {
+      "id": "speaker.writeback.cautious_similarity",
+      "area": "speaker",
+      "title": "Similarity for slow-rate voiceprint update (below = frozen)",
+      "type": "float",
+      "default": 0.72,
+      "min": 0.6,
+      "max": 0.8,
+      "step": 0.04,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "cautiousWriteSimilarity"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--writeback-cautious-sim"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:58",
+      "risk": "Too low lets mediocre matches nudge the voiceprint; too high freezes most real-world matches.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. Keep <= speaker.writeback.confident_similarity."
+    },
+    {
+      "id": "speaker.writeback.confident_blend_alpha",
+      "area": "speaker",
+      "title": "Voiceprint update weight for confident matches",
+      "type": "float",
+      "default": 0.15,
+      "min": 0.0,
+      "max": 0.35,
+      "step": 0.05,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "confidentBlendAlpha"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--blend-confident"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:37",
+      "risk": "Too high lets one meeting overwrite a voiceprint; 0 freezes profiles entirely.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. Keep >= speaker.writeback.cautious_blend_alpha."
+    },
+    {
+      "id": "speaker.writeback.cautious_blend_alpha",
+      "area": "speaker",
+      "title": "Voiceprint update weight for cautious matches",
+      "type": "float",
+      "default": 0.05,
+      "min": 0.0,
+      "max": 0.15,
+      "step": 0.01,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "cautiousBlendAlpha"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--blend-cautious"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:41",
+      "risk": "Too high lets borderline matches drift a voiceprint.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check. Keep <= speaker.writeback.confident_blend_alpha."
+    },
+    {
+      "id": "speaker.exemplar.max_count",
+      "area": "speaker",
+      "title": "Extra voiceprints stored per person",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 6,
+      "step": 1,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "maximumExemplars"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerExemplarPolicy.swift:30",
+      "risk": "Too many lets a stray condition (or a different person) earn its own slot and match strangers; too few loses the clean-vs-call split.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.exemplar.same_condition_similarity",
+      "area": "speaker",
+      "title": "Similarity at which a new sample folds into an existing voiceprint",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.7,
+      "max": 0.92,
+      "step": 0.04,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "exemplarSameConditionSimilarity"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerExemplarPolicy.swift:38",
+      "risk": "Too low folds different mic conditions together; too high fills slots with near-duplicates.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.exemplar.blend_alpha",
+      "area": "speaker",
+      "title": "Update weight when folding a sample into its voiceprint",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.1,
+      "max": 0.6,
+      "step": 0.1,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "exemplarBlendAlpha"
+        }
+      ],
+      "affects": [
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerExemplarPolicy.swift:43",
+      "risk": "Too high lets one meeting rewrite a condition's voiceprint.",
+      "notes": "Tunable per trial in SpeakerEvalHarness autoeval (AutoResearchConfig); hardcoded in the app, so a winner means editing the source constant and re-running the harness's productionBaseline check."
+    },
+    {
+      "id": "speaker.match.adaptive_one_segment.wespeaker",
+      "area": "speaker",
+      "title": "Cross-call match floor, 1 speaking turn (WeSpeaker)",
+      "type": "float",
+      "default": 0.85,
+      "min": 0.73,
+      "max": 0.97,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "Too low matches strangers to saved people on one short turn; too high never recognizes quiet speakers.",
+      "notes": "Match floor in TranscriptionPipeline via adaptiveMatch(forSegmentCount:). The autoeval harness reads SpeakerEmbeddingThresholds.weSpeaker directly (AutoResearch.swift:243), so speaker.naming.match_floor_offset is the bench-only proxy for moving this."
+    },
+    {
+      "id": "speaker.match.adaptive_one_segment.eres2net",
+      "area": "speaker",
+      "title": "Cross-call match floor, 1 speaking turn (ERes2Net)",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.58,
+      "max": 0.82,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:73",
+      "risk": "Too low matches strangers to saved people on one short turn; too high never recognizes quiet speakers.",
+      "notes": "Match floor in TranscriptionPipeline via adaptiveMatch(forSegmentCount:). Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.match.adaptive_few_segments.wespeaker",
+      "area": "speaker",
+      "title": "Cross-call match floor, 2-3 turns (WeSpeaker)",
+      "type": "float",
+      "default": 0.78,
+      "min": 0.66,
+      "max": 0.9,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "Too low attaches strangers to saved profiles and contaminates them; too high loses returning people.",
+      "notes": "The autoeval harness reads SpeakerEmbeddingThresholds.weSpeaker directly (AutoResearch.swift:243), so speaker.naming.match_floor_offset is the bench-only proxy for moving this."
+    },
+    {
+      "id": "speaker.match.adaptive_few_segments.eres2net",
+      "area": "speaker",
+      "title": "Cross-call match floor, 2-3 turns (ERes2Net)",
+      "type": "float",
+      "default": 0.62,
+      "min": 0.5,
+      "max": 0.74,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:73",
+      "risk": "Too low attaches strangers to saved profiles and contaminates them; too high loses returning people.",
+      "notes": "Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.match.adaptive_many_segments.wespeaker",
+      "area": "speaker",
+      "title": "Cross-call match floor, 4+ turns (WeSpeaker)",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.58,
+      "max": 0.82,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "Too low attaches strangers to saved profiles and contaminates them; too high loses returning people.",
+      "notes": "The autoeval harness reads SpeakerEmbeddingThresholds.weSpeaker directly (AutoResearch.swift:243), so speaker.naming.match_floor_offset is the bench-only proxy for moving this."
+    },
+    {
+      "id": "speaker.match.adaptive_many_segments.eres2net",
+      "area": "speaker",
+      "title": "Cross-call match floor, 4+ turns (ERes2Net)",
+      "type": "float",
+      "default": 0.55,
+      "min": 0.43,
+      "max": 0.67,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:73",
+      "risk": "Too low attaches strangers to saved profiles and contaminates them; too high loses returning people.",
+      "notes": "Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.cluster.ghost_merge_floor.wespeaker",
+      "area": "speaker",
+      "title": "Floor for folding a low-quality ghost speaker into a real one (WeSpeaker)",
+      "type": "float",
+      "default": 0.72,
+      "min": 0.6,
+      "max": 0.84,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:62",
+      "risk": "Too low folds a real quiet participant into someone else; too high leaves phantom speakers in the transcript.",
+      "notes": "Used at TranscriptionPipeline.swift:372 and :1187."
+    },
+    {
+      "id": "speaker.cluster.ghost_merge_floor.eres2net",
+      "area": "speaker",
+      "title": "Floor for folding a low-quality ghost speaker into a real one (ERes2Net)",
+      "type": "float",
+      "default": 0.55,
+      "min": 0.43,
+      "max": 0.67,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:74",
+      "risk": "Too low folds a real quiet participant into someone else; too high leaves phantom speakers in the transcript.",
+      "notes": "Used at TranscriptionPipeline.swift:372 and :1187. Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.cluster.same_voice_consolidation.wespeaker",
+      "area": "speaker",
+      "title": "Same-voice cluster merge within a meeting (WeSpeaker)",
+      "type": "float",
+      "default": 0.88,
+      "min": 0.76,
+      "max": 0.92,
+      "step": 0.02,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "speaker.cluster.same_voice_consolidation.wespeaker"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--same-voice"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:63",
+      "risk": "Too low merges two people into one speaker row; too high splits one person into several.",
+      "notes": "WeSpeaker invariant: must stay <= speaker.naming.auto_similarity (0.92), pinned by a test. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "speaker.cluster.same_voice_consolidation.eres2net",
+      "area": "speaker",
+      "title": "Same-voice cluster merge within a meeting (ERes2Net)",
+      "type": "float",
+      "default": 0.65,
+      "min": 0.53,
+      "max": 0.77,
+      "step": 0.02,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "speaker.cluster.same_voice_consolidation.eres2net"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--same-voice"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:75",
+      "risk": "Too low merges two people into one speaker row; too high splits one person into several.",
+      "notes": "WeSpeaker invariant: must stay <= speaker.naming.auto_similarity (0.92), pinned by a test. Only active when speaker.embedder = eres2net. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "speaker.cluster.small_cluster_absorb.wespeaker",
+      "area": "speaker",
+      "title": "Absorb a small cluster (<30s) into a large one (WeSpeaker)",
+      "type": "float",
+      "default": 0.72,
+      "min": 0.6,
+      "max": 0.84,
+      "step": 0.02,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "speaker.cluster.small_cluster_absorb.wespeaker"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:64",
+      "risk": "Too low absorbs a real short-speaking participant into someone else; too high leaves fragment speakers.",
+      "notes": "Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "speaker.cluster.small_cluster_absorb.eres2net",
+      "area": "speaker",
+      "title": "Absorb a small cluster (<30s) into a large one (ERes2Net)",
+      "type": "float",
+      "default": 0.55,
+      "min": 0.43,
+      "max": 0.67,
+      "step": 0.02,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "speaker.cluster.small_cluster_absorb.eres2net"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:76",
+      "risk": "Too low absorbs a real short-speaking participant into someone else; too high leaves fragment speakers.",
+      "notes": "Only active when speaker.embedder = eres2net. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "speaker.cluster.micro_absorb.wespeaker",
+      "area": "speaker",
+      "title": "Absorb a micro cluster (<10s) (WeSpeaker)",
+      "type": "float",
+      "default": 0.62,
+      "min": 0.5,
+      "max": 0.74,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:65",
+      "risk": "Too low hides a brief real participant; too high leaves many one-line phantom speakers.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.cluster.micro_absorb.eres2net",
+      "area": "speaker",
+      "title": "Absorb a micro cluster (<10s) (ERes2Net)",
+      "type": "float",
+      "default": 0.45,
+      "min": 0.33,
+      "max": 0.57,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:77",
+      "risk": "Too low hides a brief real participant; too high leaves many one-line phantom speakers.",
+      "notes": "Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.cluster.db_split_per_segment.wespeaker",
+      "area": "speaker",
+      "title": "Per-turn match floor for splitting a mixed cluster by saved voices (WeSpeaker)",
+      "type": "float",
+      "default": 0.62,
+      "min": 0.5,
+      "max": 0.74,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:66",
+      "risk": "Too low splits one person into two known names; too high leaves two known people merged.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.cluster.db_split_per_segment.eres2net",
+      "area": "speaker",
+      "title": "Per-turn match floor for splitting a mixed cluster by saved voices (ERes2Net)",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.38,
+      "max": 0.62,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:78",
+      "risk": "Too low splits one person into two known names; too high leaves two known people merged.",
+      "notes": "Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.cluster.known_profile_conflict.wespeaker",
+      "area": "speaker",
+      "title": "Guard that stops merging clusters that look like different known people (WeSpeaker)",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.58,
+      "max": 0.82,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:66",
+      "risk": "Too high merges two known people during consolidation; too low blocks legitimate merges.",
+      "notes": "EmbeddingClusterer.knownProfileConflictThreshold (EmbeddingClusterer.swift:44) mirrors the WeSpeaker value as a default argument."
+    },
+    {
+      "id": "speaker.cluster.known_profile_conflict.eres2net",
+      "area": "speaker",
+      "title": "Guard that stops merging clusters that look like different known people (ERes2Net)",
+      "type": "float",
+      "default": 0.55,
+      "min": 0.43,
+      "max": 0.67,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:78",
+      "risk": "Too high merges two known people during consolidation; too low blocks legitimate merges.",
+      "notes": "EmbeddingClusterer.knownProfileConflictThreshold (EmbeddingClusterer.swift:44) mirrors the WeSpeaker value as a default argument. Only active when speaker.embedder = eres2net."
+    },
+    {
+      "id": "speaker.cluster.min_cluster_seconds",
+      "area": "speaker",
+      "title": "Speech below which a cluster counts as small (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 10.0,
+      "max": 60.0,
+      "step": 5.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift:203",
+      "risk": "Too high absorbs real participants who spoke less than this; too low leaves fragment speakers.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.cluster.micro_cluster_seconds",
+      "area": "speaker",
+      "title": "Speech below which a cluster counts as micro (seconds)",
+      "type": "float",
+      "default": 10.0,
+      "min": 2.0,
+      "max": 20.0,
+      "step": 2.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift:205",
+      "risk": "Too high applies the loose micro-absorb bar to real short speakers.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.cluster.db_split_min_segments",
+      "area": "speaker",
+      "title": "Turns per saved voice needed to split a mixed cluster",
+      "type": "int",
+      "default": 8,
+      "min": 3,
+      "max": 16,
+      "step": 1,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift:477",
+      "risk": "Too low splits clusters on noise; too high never separates two known people the diarizer merged.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.match.maturity_bonus_new",
+      "area": "speaker",
+      "title": "Extra similarity needed for profiles seen in 1-2 meetings",
+      "type": "float",
+      "default": 0.08,
+      "min": 0.0,
+      "max": 0.16,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerMatchingService.swift:144",
+      "risk": "Too low lets a fresh, noisy profile grab strangers; too high means new people are not recognized on their second call.",
+      "notes": "The autoeval harness runs this code (Transcription.matchAgainstProfiles), so it moves speaker-naming-across-calls, but the value is compiled in."
+    },
+    {
+      "id": "speaker.match.maturity_bonus_growing",
+      "area": "speaker",
+      "title": "Extra similarity needed for profiles seen in 3-4 meetings",
+      "type": "float",
+      "default": 0.04,
+      "min": 0.0,
+      "max": 0.1,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerMatchingService.swift:145",
+      "risk": "Same trade-off as maturity_bonus_new, smaller.",
+      "notes": "Compiled into the matcher the harness uses."
+    },
+    {
+      "id": "speaker.match.ambiguity_separation",
+      "area": "speaker",
+      "title": "Minimum gap between top two profiles to accept a match",
+      "type": "float",
+      "default": 0.05,
+      "min": 0.0,
+      "max": 0.12,
+      "step": 0.01,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerMatchingService.swift:161",
+      "risk": "Too low picks one of two near-identical profiles at random; too high drops matches whenever two family members are saved.",
+      "notes": "Compiled into the matcher the harness uses."
+    },
+    {
+      "id": "speaker.match.cross_cluster_link_floor",
+      "area": "speaker",
+      "title": "Similarity for fusing two clusters that matched one person",
+      "type": "float",
+      "default": 0.78,
+      "min": 0.66,
+      "max": 0.9,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:90",
+      "risk": "Too low fuses two different people into one named row; too high leaves one person split across two rows.",
+      "notes": "Not per-embedder today (same 0.78 for ERes2Net). The harness mirrors the production collision planner."
+    },
+    {
+      "id": "speaker.match.negative_veto_floor",
+      "area": "speaker",
+      "title": "Similarity to a rejected sample that vetoes a match",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.7,
+      "max": 0.92,
+      "step": 0.02,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNegativeExemplarPolicy.swift:31",
+      "risk": "Too low vetoes the real owner after one correction; too high keeps re-suggesting someone the user already rejected.",
+      "notes": "Not per-embedder today."
+    },
+    {
+      "id": "speaker.match.negative_transport_scale",
+      "area": "speaker",
+      "title": "How far rejected samples are projected across mic conditions",
+      "type": "float",
+      "default": 0.75,
+      "min": 0.0,
+      "max": 1.25,
+      "step": 0.25,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerNegativeExemplarPolicy.swift:39",
+      "risk": "Too high vetoes the real owner on degraded audio; 0 loses cross-condition veto coverage.",
+      "notes": ""
+    },
+    {
+      "id": "speaker.profile.duplicate_merge_similarity",
+      "area": "speaker",
+      "title": "Similarity at which two saved profiles auto-merge after a meeting",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.5,
+      "max": 0.9,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround",
+        "speaker-naming-across-calls"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift:394",
+      "risk": "Too low permanently fuses two different people's saved profiles (hard to undo); too high leaves duplicates for the user to clean up.",
+      "notes": "Called from TranscriptionPipelineRunner.swift:518 with the default. Same 0.6 for both embedders, which is loose for WeSpeaker (different-speaker p95 cosine ~0.62 per SpeakerEmbeddingThresholds.swift:11); worth a look. shouldSkipDuplicateMerge protects some profiles. Not exercised by autoeval (fixed fingerprints, no duplicate-merge pass)."
+    },
+    {
+      "id": "diarization.clustering_threshold",
+      "area": "diarization",
+      "title": "Diarizer clustering threshold",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.4,
+      "max": 0.8,
+      "step": 0.05,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "diarization.clustering_threshold"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:127",
+      "risk": "Too low merges different people; too high splits one person into several speakers.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source. Units: cosine similarity. If #1789 (FluidAudio 0.17, where the config takes a distance) lands first, this must go through clusteringDistance(fromCosineSimilarity:) and the source moves to FluidAudioCompatibility.swift; see /mnt/project-files/hill-climb/merge-note-1789.md."
+    },
+    {
+      "id": "diarization.vbx_fa",
+      "area": "diarization",
+      "title": "VBx Fa (acoustic scaling)",
+      "type": "float",
+      "default": 0.25,
+      "min": 0.05,
+      "max": 0.5,
+      "step": 0.05,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "diarization.vbx_fa"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:128",
+      "risk": "Mis-tuned VBx reassigns turns to the wrong speaker; the grid found Fa is the biggest DER lever.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "diarization.vbx_fb",
+      "area": "diarization",
+      "title": "VBx Fb (speaker regularization)",
+      "type": "float",
+      "default": 0.63,
+      "min": 0.3,
+      "max": 1.0,
+      "step": 0.05,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "diarization.vbx_fb"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:129",
+      "risk": "Too low over-splits speakers; too high collapses them.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "diarization.window_seconds",
+      "area": "diarization",
+      "title": "Segmentation window (seconds)",
+      "type": "float",
+      "default": 10.0,
+      "min": 5.0,
+      "max": 10.0,
+      "step": 1.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:130",
+      "risk": "The PyAnnote segmentation model is trained on 10s windows; shorter windows usually hurt accuracy.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.step_ratio",
+      "area": "diarization",
+      "title": "Segmentation window step ratio",
+      "type": "float",
+      "default": 0.266,
+      "min": 0.1,
+      "max": 0.5,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:131",
+      "risk": "Larger steps are faster but miss short turns; smaller steps cost time.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.embedding_batch_size",
+      "area": "diarization",
+      "title": "Speaker embedding batch size",
+      "type": "int",
+      "default": 32,
+      "min": 8,
+      "max": 64,
+      "step": 8,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:132",
+      "risk": "Bigger batches use more memory; too small is slower. Should not change results.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.min_segment_duration",
+      "area": "diarization",
+      "title": "Minimum speech segment (seconds)",
+      "type": "float",
+      "default": 1.1821,
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.1,
+      "status": "live",
+      "apply": [
+        {
+          "via": "request",
+          "name": "diarization.min_segment_duration"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:134",
+      "risk": "Too high drops short replies like 'yes'; too low creates noisy one-word speakers.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
+    },
+    {
+      "id": "diarization.min_gap_duration",
+      "area": "diarization",
+      "title": "Minimum gap between segments (seconds)",
+      "type": "float",
+      "default": 0.2874,
+      "min": 0.1,
+      "max": 0.6,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:135",
+      "risk": "Too high glues two people's turns together; too low chops one turn into fragments.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.speech_onset_threshold",
+      "area": "diarization",
+      "title": "Speech onset threshold",
+      "type": "float",
+      "default": 0.4472,
+      "min": 0.3,
+      "max": 0.6,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:136",
+      "risk": "Too low marks noise as speech; too high misses quiet speech starts.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.speech_offset_threshold",
+      "area": "diarization",
+      "title": "Speech offset threshold",
+      "type": "float",
+      "default": 0.4472,
+      "min": 0.3,
+      "max": 0.6,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:137",
+      "risk": "Too low ends turns early; too high runs turns into silence.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.min_duration_on",
+      "area": "diarization",
+      "title": "Segmentation min speech duration (seconds)",
+      "type": "float",
+      "default": 0.0,
+      "min": 0.0,
+      "max": 0.5,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:138",
+      "risk": "Too high drops short utterances before clustering.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.min_duration_off",
+      "area": "diarization",
+      "title": "Segmentation min silence duration (seconds)",
+      "type": "float",
+      "default": 0.2738,
+      "min": 0.0,
+      "max": 0.6,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:139",
+      "risk": "Too high bridges real pauses between speakers.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.max_vbx_iterations",
+      "area": "diarization",
+      "title": "Max VBx iterations",
+      "type": "int",
+      "default": 24,
+      "min": 8,
+      "max": 48,
+      "step": 4,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:140",
+      "risk": "Too few stops VBx before it converges (worse speaker assignment); more costs time on long meetings.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.convergence_tolerance",
+      "area": "diarization",
+      "title": "VBx convergence tolerance",
+      "type": "float",
+      "default": 0.0001,
+      "min": 1e-05,
+      "max": 0.001,
+      "step": 0.0001,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:141",
+      "risk": "Looser tolerance is faster but can stop VBx early.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "diarization.embedding_exclude_overlap",
+      "area": "diarization",
+      "title": "Exclude overlapped speech from voiceprints",
+      "type": "bool",
+      "default": true,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:133",
+      "risk": "Including overlap blends two voices into one embedding and causes false merges.",
+      "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
+    },
+    {
+      "id": "meeting.embedding.min_quality",
+      "area": "meeting",
+      "title": "Minimum segment quality to use for a voiceprint",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.1,
+      "max": 0.6,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:284",
+      "risk": "Too low lets noisy turns pull voiceprints off; too high leaves quiet speakers with no voiceprint (unnamed).",
+      "notes": "Affects cross-call naming in real use, but autoeval replays fingerprints already computed, so only meeting-import sees it."
+    },
+    {
+      "id": "meeting.embedding.min_segment_seconds",
+      "area": "meeting",
+      "title": "Minimum turn length to use for a voiceprint (seconds)",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.5,
+      "max": 2.5,
+      "step": 0.25,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:289",
+      "risk": "Too low builds voiceprints from fragments; too high leaves people who speak in short bursts without a voiceprint.",
+      "notes": ""
+    },
+    {
+      "id": "meeting.utterance.merge_max_gap_s",
+      "area": "meeting",
+      "title": "Join same-speaker lines separated by less than this (seconds)",
+      "type": "float",
+      "default": 1.5,
+      "min": 0.5,
+      "max": 3.0,
+      "step": 0.25,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:735",
+      "risk": "Too high glues separate thoughts into walls of text; too low produces choppy one-line transcript rows.",
+      "notes": "Same literal at TranscriptionPipeline.swift:736, :848 and :929; a seam must change all four."
+    },
+    {
+      "id": "meeting.utterance.merge_max_duration_s",
+      "area": "meeting",
+      "title": "Longest joined transcript line (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 10.0,
+      "max": 60.0,
+      "step": 5.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:1373",
+      "risk": "Too high produces huge unreadable paragraphs; too low splits long monologues mid-thought.",
+      "notes": ""
+    },
+    {
+      "id": "meeting.mic.silence_split_s",
+      "area": "meeting",
+      "title": "Silence that splits the mic track into segments (seconds)",
+      "type": "float",
+      "default": 0.4,
+      "min": 0.2,
+      "max": 1.0,
+      "step": 0.1,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:1468",
+      "risk": "Too low chops words mid-phrase for STT; too high sends long segments with more latency and hallucination risk.",
+      "notes": "Mic channel only (live capture). The meeting-import bench runs imports as system audio and does not exercise it."
+    },
+    {
+      "id": "meeting.mic.min_segment_s",
+      "area": "meeting",
+      "title": "Shortest mic segment sent to STT (seconds)",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.2,
+      "max": 1.0,
+      "step": 0.1,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:1469",
+      "risk": "Too high drops short replies like 'yes'; too low sends clicks and breaths to STT.",
+      "notes": "Mic channel only (live capture); not exercised by meeting-import."
+    },
+    {
+      "id": "meeting.local_speaker_split.enabled",
+      "area": "meeting",
+      "title": "Separate multiple people sharing the room mic",
+      "type": "bool",
+      "default": false,
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "local-speaker-split-enabled"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/LocalSpeakerPreferences.swift:21",
+      "risk": "Turning it on runs a second diarization pass (slower) and can split the owner into several 'You' speakers.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). Default false (UserDefaults.bool on a missing key). Live-capture mic path only."
+    },
+    {
+      "id": "meeting.audio.speech_threshold_floor",
+      "area": "meeting",
+      "title": "Lowest adaptive speech-detect level",
+      "type": "float",
+      "default": 0.003,
+      "min": 0.001,
+      "max": 0.008,
+      "step": 0.001,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/AudioSignalRecovery.swift:181",
+      "risk": "Too low treats room noise as speech (hallucinated words); too high drops quiet WebRTC-attenuated mics.",
+      "notes": "Same clamp literal at AudioSignalRecovery.swift:186; change both. Live mic capture path; the meeting-import bench does not exercise it."
+    },
+    {
+      "id": "meeting.audio.speech_threshold_ceiling",
+      "area": "meeting",
+      "title": "Highest adaptive speech-detect level",
+      "type": "float",
+      "default": 0.02,
+      "min": 0.01,
+      "max": 0.04,
+      "step": 0.005,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/AudioSignalRecovery.swift:181",
+      "risk": "Too low lets loud background noise pass as speech; too high misses normal-level speech on hot mics.",
+      "notes": "Same clamp literal at AudioSignalRecovery.swift:186; change both. Live mic capture path; the meeting-import bench does not exercise it."
+    },
+    {
+      "id": "meeting.audio.normalize_target_peak",
+      "area": "meeting",
+      "title": "Peak level quiet mic audio is lifted to before STT",
+      "type": "float",
+      "default": 0.45,
+      "min": 0.2,
+      "max": 0.8,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/AudioSignalRecovery.swift:129",
+      "risk": "Too high clips loud audio after gain; too low leaves quiet mics under-recognized.",
+      "notes": "Default argument also at AudioSignalRecovery.swift:167 (normalizationGain); change both. Used for mic STT and mic diarization input."
+    },
+    {
+      "id": "meeting.audio.normalize_max_gain",
+      "area": "meeting",
+      "title": "Maximum gain for quiet mic audio before STT",
+      "type": "float",
+      "default": 12.0,
+      "min": 4.0,
+      "max": 24.0,
+      "step": 2.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/AudioSignalRecovery.swift:130",
+      "risk": "Too high amplifies noise into hallucinated words; too low cannot rescue WebRTC-attenuated mics (issue #500).",
+      "notes": "Default argument also at AudioSignalRecovery.swift:168; change both."
+    },
+    {
+      "id": "meeting.agc.target_peak",
+      "area": "meeting",
+      "title": "Live mic autogain target peak",
+      "type": "float",
+      "default": 0.45,
+      "min": 0.2,
+      "max": 0.8,
+      "step": 0.05,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/RealtimeAGC.swift:90",
+      "risk": "Too high clips the saved mic track; too low leaves quiet mics quiet. Runs inside the CoreAudio tap: a seam must read the value outside the real-time callback.",
+      "notes": "Only when meeting.mic.processing_mode = software_agc. Live mic capture path; the meeting-import bench does not exercise it."
+    },
+    {
+      "id": "meeting.agc.max_gain",
+      "area": "meeting",
+      "title": "Live mic autogain maximum gain",
+      "type": "float",
+      "default": 25.0,
+      "min": 5.0,
+      "max": 40.0,
+      "step": 5.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/RealtimeAGC.swift:91",
+      "risk": "Too high pumps room noise during silence into the saved mic track; too low cannot lift attenuated WebRTC mics.",
+      "notes": "Only when meeting.mic.processing_mode = software_agc. Live mic capture path; the meeting-import bench does not exercise it."
+    },
+    {
+      "id": "meeting.mic.processing_mode",
+      "area": "meeting",
+      "title": "Meeting mic processing",
+      "type": "enum",
+      "default": "software_agc",
+      "choices": [
+        "software_agc",
+        "none",
+        "apple_voice_processing"
+      ],
+      "status": "needs-seam",
+      "apply": [
+        {
+          "via": "defaults",
+          "name": "meeting-mic-processing-mode"
+        }
+      ],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/MicrophoneProcessingPreferences.swift:91",
+      "risk": "apple_voice_processing ducks other apps' audio during calls; none leaves quiet WebRTC mics near-silent.",
+      "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). Falls back to the legacy meeting-mic-voice-processing-enabled bool when the mode key is unset. Live mic capture path; the meeting-import bench does not exercise it."
+    },
+    {
+      "id": "meeting.stop.file_close_timeout_s",
+      "area": "meeting",
+      "title": "Base wait for capture files to close after Stop (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 10.0,
+      "max": 60.0,
+      "step": 10.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:108",
+      "risk": "Too short fails meetings whose audio was still flushing (user sees a failed meeting); too long delays failure reporting.",
+      "notes": "A failure ceiling, not a speed knob: lowering it does not make healthy stops faster. Scaled by the next two knobs for 1h+ recordings."
+    },
+    {
+      "id": "meeting.stop.file_close_timeout_growth_s",
+      "area": "meeting",
+      "title": "Extra file-close wait per recorded hour (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 10.0,
+      "max": 60.0,
+      "step": 10.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:116",
+      "risk": "Too short fails long meetings during finalization.",
+      "notes": "Failure ceiling, see meeting.stop.file_close_timeout_s."
+    },
+    {
+      "id": "meeting.stop.file_close_timeout_max_s",
+      "area": "meeting",
+      "title": "Cap on the file-close wait (seconds)",
+      "type": "float",
+      "default": 120.0,
+      "min": 60.0,
+      "max": 140.0,
+      "step": 10.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/Support/TranscriptedConstants.swift:112",
+      "risk": "Too short fails 2h+ meetings; must stay below meetingTerminationFinishWaitTimeout (145s, TranscriptedConstants.swift:133).",
+      "notes": "Failure ceiling. Hard upper bound 145s because quit-time preservation waits at most that long."
+    },
+    {
+      "id": "meeting.audio.resample_chunk_seconds",
+      "area": "meeting",
+      "title": "Resampler read chunk (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 5.0,
+      "max": 120.0,
+      "step": 5.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/AudioResampler.swift:225",
+      "risk": "Bigger chunks use more memory on long meetings; tiny chunks add per-read overhead.",
+      "notes": "Throughput only; should not change transcript content."
+    },
+    {
+      "id": "meeting.audio.mic_merge_chunk_seconds",
+      "area": "meeting",
+      "title": "Mic recording merge chunk (seconds)",
+      "type": "float",
+      "default": 30.0,
+      "min": 5.0,
+      "max": 120.0,
+      "step": 5.0,
+      "status": "needs-seam",
+      "apply": [],
+      "affects": [
+        "meeting-turnaround"
+      ],
+      "source": "Sources/TranscriptedCore/Audio/MicRecordingFileMerger.swift:35",
+      "risk": "Bigger chunks use more memory; tiny chunks slow the stop-time merge on long meetings.",
+      "notes": "chunkSize at MicRecordingFileMerger.swift:34 is a separate literal (16_000 * 30) that must move with it. Live capture stop only."
+    },
+    {
+      "id": "stt.engine",
+      "area": "speech",
+      "title": "Speech-to-text model (shootout engine)",
+      "type": "enum",
+      "default": "parakeet-v3",
+      "choices": [
+        "parakeet-v3",
+        "parakeet-ultra",
+        "apple-speech",
+        "whisperkit-turbo",
+        "whisper-turbo",
+        "distil-whisper",
+        "parakeet-v3-mlx",
+        "parakeet-v2-mlx",
+        "canary-1b-v2",
+        "canary-180m-flash",
+        "moonshine-base",
+        "moonshine-medium",
+        "whisper-cpp-turbo",
+        "granite-speech",
+        "nemotron-streaming"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "request",
+          "name": "stt.engine"
+        }
+      ],
+      "affects": [
+        "speech-model-accuracy"
+      ],
+      "source": "scripts/stt-shootout/shootout.py (ENGINES, PR #1788)",
+      "risk": "A model that wins on WER can be much slower, need a big download, or not ship in the app at all.",
+      "notes": "Choices mirror `run.sh --list-engines` on #1788 head ef548dd. Only parakeet-v3, apple-speech (#1776), whisperkit-turbo and parakeet-ultra (#1783) have app paths; any other winner means new app work."
+    },
+    {
+      "id": "diarization.backend",
+      "area": "diarization",
+      "title": "Speaker diarization model",
+      "type": "enum",
+      "default": "pyannote",
+      "choices": [
+        "pyannote",
+        "nemotron"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_DIARIZATION_BACKEND"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--backend"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/Support/DiarizationBackendPreferences.swift:26",
+      "risk": "Nemotron is experimental and off by default; first use downloads its CoreML model. A different diarizer changes every turn boundary, so DER and speaker counts can move in either direction.",
+      "notes": "The app reads TRANSCRIPTED_DIARIZATION_BACKEND (env wins over the hidden diarization-backend-preference default). The speaker-lab bench scrubs that env var and passes --backend to run_speaker_lab.sh instead. The first trial of each backend x embedder x preset variant dumps every meeting (slow); later trials reuse the per-variant dump cache. Shipping nemotron means flipping DiarizationBackendPreferences.defaultChoice."
+    },
+    {
+      "id": "diarization.nemotron.preset",
+      "area": "diarization",
+      "title": "Nemotron diarization preset",
+      "type": "enum",
+      "default": "fast128",
+      "choices": [
+        "fast128",
+        "fast32",
+        "fast32-int8",
+        "offline"
+      ],
+      "status": "live",
+      "apply": [
+        {
+          "via": "env",
+          "name": "TRANSCRIPTED_NEMOTRON_PRESET"
+        },
+        {
+          "via": "bench-flag",
+          "name": "--preset"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Services/NemotronDiarizationRunner.swift:33",
+      "risk": "offline runs on CPU+GPU (fails the ANE compiler), so it is much slower and hotter; smaller chunks (fast32) trade DER for latency.",
+      "notes": "Only applies when diarization.backend = nemotron (the adapter reports it in environment.ignored_knobs otherwise). Core silently falls back to fast128 on an unknown name (NemotronDiarizationRunner.resolvePresetName); the harness dump refuses one, so choices are limited to presets the tests pin (DiarizationBackendTests.swift) plus offline. The adapter does not pass fast128: the driver names variants after the preset string, so passing it would fork the dump cache and re-diarize everything."
+    },
+    {
+      "id": "speaker.match.mode",
+      "area": "speaker",
+      "title": "Cross-call match floor: the app's adaptive floor or one fixed value",
+      "type": "enum",
+      "default": "adaptive",
+      "choices": [
+        "adaptive",
+        "fixed"
+      ],
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--match"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift:61",
+      "risk": "A fixed floor ignores how many turns a voiceprint came from, so short speakers get matched on thin evidence.",
+      "notes": "adaptive = SpeakerEmbeddingThresholds.adaptiveMatch(forSegmentCount:), what ships. fixed uses speaker.match.fixed_floor. A fixed winner means replacing the adaptive tiers (speaker.match.adaptive_*, needs-seam) in source."
+    },
+    {
+      "id": "speaker.match.fixed_floor",
+      "area": "speaker",
+      "title": "Cross-call match floor when speaker.match.mode = fixed",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.4,
+      "max": 0.8,
+      "step": 0.05,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--match"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/Replay.swift:143",
+      "risk": "Too low glues strangers to saved people (wrong names); too high asks about everyone again.",
+      "notes": "Ignored under speaker.match.mode = adaptive (listed in environment.ignored_knobs). Cosine scales differ by embedder: the lab's own sweep uses 0.55-0.70 for WeSpeaker and 0.45-0.60 for ERes2Net. 0.6 is the harness's pre-lab default."
+    },
+    {
+      "id": "speaker.profile.duplicate_merge_similarity_replay",
+      "area": "speaker",
+      "title": "Duplicate-profile merge similarity (speaker lab replay)",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.5,
+      "max": 0.9,
+      "step": 0.05,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--dedup"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift:376",
+      "risk": "Too low permanently fuses two different people's saved profiles; too high leaves duplicates for the user to clean up.",
+      "notes": "Bench-only twin of speaker.profile.duplicate_merge_similarity (needs-seam, so the climber skips it; flipping that knob's status would make the speaker-autoeval and meeting-import objectives search a knob their benches reject). Same source constant: a winner edits mergeDuplicates' 0.6 default."
+    },
+    {
+      "id": "speaker.writeback.path_fixes",
+      "area": "speaker",
+      "title": "Gated voiceprint write-back + cross-cluster spin-off",
+      "type": "bool",
+      "default": true,
+      "status": "bench-only",
+      "apply": [
+        {
+          "via": "bench-flag",
+          "name": "--write-path-fixes"
+        }
+      ],
+      "affects": [
+        "speaker-lab-recognition"
+      ],
+      "source": "Sources/TranscriptedCore/Speaker/SpeakerWritePathPolicy.swift:37",
+      "risk": "false replays the legacy write path (every match blends at full rate), which is known to drift voiceprints.",
+      "notes": "true is what ships. Kept as a sanity lever for before/after checks, not in speaker-lab-recognition's search list."
+    }
+  ]
+}

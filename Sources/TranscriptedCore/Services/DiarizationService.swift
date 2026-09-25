@@ -121,15 +121,17 @@ public class DiarizationService: ObservableObject {
 
         // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
         // Key win: Fa 0.07→0.25 (~halves DER by letting VBx reconsider speaker assignments).
+        // The four LabKnobOverrides values return these exact defaults unless the
+        // hill-climb lab sets TRANSCRIPTED_LAB_KNOBS_FILE (see LabKnobOverrides.swift).
         let offlineConfig = OfflineDiarizerConfig(
-            clusteringThreshold: 0.6,
-            Fa: 0.25,
-            Fb: 0.63,
+            clusteringThreshold: LabKnobOverrides.double("diarization.clustering_threshold", default: 0.6),
+            Fa: LabKnobOverrides.double("diarization.vbx_fa", default: 0.25),
+            Fb: LabKnobOverrides.double("diarization.vbx_fb", default: 0.63),
             windowDuration: 10.0,
             segmentationStepRatio: 0.266,
             embeddingBatchSize: 32,
             embeddingExcludeOverlap: true,
-            minSegmentDuration: 1.1821,
+            minSegmentDuration: LabKnobOverrides.double("diarization.min_segment_duration", default: 1.1821),
             minGapDuration: 0.2874,
             speechOnsetThreshold: 0.4472,
             speechOffsetThreshold: 0.4472,
