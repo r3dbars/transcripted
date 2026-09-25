@@ -38,12 +38,18 @@ enum PhysicalShortcutMatcher {
 
     /// Whether a hands-free modifier that other shortcuts also use in combos
     /// (Right Option vs Option+M) fires on press instead of on release.
-    /// Waiting for release costs the whole time the key is held, so it fires
-    /// on press unless a key was typed just before. If a combo key does
+    /// Waiting for release costs the whole time the key is held, so a start
+    /// fires on press unless a key was typed just before. If a combo key does
     /// follow while it's held, the detector reports `.comboInterrupted` and
     /// the just-started dictation is dropped quietly.
-    static func firesSharedModifierOnPress(secondsSinceLastTypedKey: TimeInterval) -> Bool {
-        secondsSinceLastTypedKey >= typingWindowForModifierCombos
+    ///
+    /// A press during a dictation stops and pastes it, which a combo can't
+    /// undo, so that one still waits for release.
+    static func firesSharedModifierOnPress(
+        secondsSinceLastTypedKey: TimeInterval,
+        isDictating: Bool
+    ) -> Bool {
+        !isDictating && secondsSinceLastTypedKey >= typingWindowForModifierCombos
     }
 
     static func shouldActivateDelayedModifierPress(

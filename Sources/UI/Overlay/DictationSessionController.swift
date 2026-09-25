@@ -1843,7 +1843,6 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    /// Cancel dictation without pasting
     /// This session's id while it is dictating, for a caller that needs to
     /// act on this exact session later.
     var activeDictationSessionID: UUID? {
@@ -1853,10 +1852,15 @@ class DictationSessionController: ObservableObject {
     /// A hands-free modifier press started this session, then another key went
     /// down while it was held: it was a combo (Option+M, or typing é), not a
     /// dictation tap. Drop the start with no sound, error, or saved audio.
-    func abandonDictationStartForModifierCombo(sessionID: UUID) {
-        guard let (appState, overlayController) = readyState(),
-              isDictating,
-              currentDictationSessionID == sessionID else { return }
+    /// With no session id the press only queued a start behind a take that
+    /// was still finishing, so that queued start is dropped instead.
+    func abandonDictationStartForModifierCombo(sessionID: UUID?) {
+        guard let (appState, overlayController) = readyState() else { return }
+        guard let sessionID else {
+            dropQueuedDictationStart(showMessage: false)
+            return
+        }
+        guard isDictating, currentDictationSessionID == sessionID else { return }
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
         cancelActiveTasks(cancelRecording: true)
@@ -1879,8 +1883,18 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        // Closes the attempt `dictation_start_requested` opened, so the start
+        // funnel doesn't read a dropped combo as a lost start.
+        AnalyticsReporter.track(
+            "dictation_start_dropped_for_modifier_combo",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
+        )
     }
 
+    /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
         // Esc on a finishing take means stop, not "and start the next one".

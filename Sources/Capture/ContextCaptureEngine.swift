@@ -2,6 +2,7 @@
 // Orchestrates the active capture flows: meeting hotkey + dictation tap handling.
 
 import AppKit
+import Combine
 import CoreGraphics
 
 // MARK: - Shared Hotkey Routing
@@ -85,6 +86,10 @@ private final class PhysicalShortcutDetector {
     /// When a key was last typed, so a hands-free modifier pressed mid-typing
     /// still waits for release (see `firesSharedModifierOnPress`).
     private var lastTypedKeyDownUptime: TimeInterval = -.infinity
+    /// Mirrors `DictationSessionController.isDictating`, pushed from the main
+    /// actor, so a hands-free press that would stop a dictation waits for
+    /// release.
+    private var isDictating = false
 
     private struct PendingModifierShortcut {
         let press: DelayedModifierShortcutPress
@@ -99,6 +104,12 @@ private final class PhysicalShortcutDetector {
             .fromOpaque(userInfo)
             .takeUnretainedValue()
         return detector.handle(type: type, event: event)
+    }
+
+    func updateDictationActive(_ isDictating: Bool) {
+        stateLock.lock()
+        self.isDictating = isDictating
+        stateLock.unlock()
     }
 
     func updateShortcutBindings(_ bindings: [PhysicalShortcutBinding]) {
@@ -327,7 +338,8 @@ private final class PhysicalShortcutDetector {
                 // press unless a key was just typed.
                 let sharesModifier = hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action)
                 if sharesModifier, !PhysicalShortcutMatcher.firesSharedModifierOnPress(
-                    secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime
+                    secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime,
+                    isDictating: isDictating
                 ) {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationHandsFree)
                 } else {
@@ -505,7 +517,10 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     /// Set by TranscriptedAppDelegate to wire the hotkey to the session controller
-    var sessionController: DictationSessionController?
+    var sessionController: DictationSessionController? {
+        didSet { observeDictationActive() }
+    }
+    private var dictationActiveObservation: AnyCancellable?
 
     /// Gates dictation-toggle routing to the registered-hotkey window. Physical
     /// shortcut callbacks hop from the CGEventTap thread through a queued
@@ -744,12 +759,25 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     /// The hands-free press turned out to be a combo (Option+M, or typing é),
-    /// so drop the dictation it started, quietly. A press that stopped a
-    /// dictation is left alone.
+    /// so drop the dictation it started, or the start it queued behind a take
+    /// that was still finishing, quietly. A press that stopped a dictation
+    /// waited for release, so it never gets here.
     private func handlePhysicalDictationHandsFreeComboInterrupted() {
-        guard let sessionID = handsFreePressStartedSessionID else { return }
+        let sessionID = handsFreePressStartedSessionID
         handsFreePressStartedSessionID = nil
         sessionController?.abandonDictationStartForModifierCombo(sessionID: sessionID)
+    }
+
+    /// Keeps the detector's copy of "is a dictation running" current, so a
+    /// hands-free press that would stop one waits for release.
+    private func observeDictationActive() {
+        dictationActiveObservation = sessionController?.$isDictating
+            .sink { [weak self] isDictating in
+                self?.physicalShortcutDetector.updateDictationActive(isDictating)
+            }
+        if sessionController == nil {
+            physicalShortcutDetector.updateDictationActive(false)
+        }
     }
 
     private func handlePhysicalDictationPushToTalkPress() {
