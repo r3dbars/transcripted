@@ -3,6 +3,10 @@ import Foundation
 enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hashable {
     case nearText
     case cursorMini
+    /// One black island at the top of the screen, grown out of the MacBook
+    /// notch (or hanging from the top edge of a display without one). It also
+    /// carries meetings and the call-detected prompt, see NotchIslandController.
+    case notchIsland
 
     var id: String { rawValue }
 
@@ -12,6 +16,8 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
             return "Near text box"
         case .cursorMini:
             return "Mini cursor"
+        case .notchIsland:
+            return "Notch island"
         }
     }
 
@@ -21,6 +27,8 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
             return "Full dictation window appears near the active text box."
         case .cursorMini:
             return "Tiny waveform follows the cursor. Stop with your dictation shortcut. Esc cancels."
+        case .notchIsland:
+            return "Grows out of the notch, or the top of other displays. Meetings use it too."
         }
     }
 }

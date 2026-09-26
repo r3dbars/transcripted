@@ -31,6 +31,23 @@ func testDictationOverlayPresentationPreferences() {
         )
     }
 
+    runSuite("DictationOverlayPresentationPreferences persists notch island mode") {
+        let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DictationOverlayPresentationPreferences.setMode(.notchIsland, userDefaults: defaults)
+        assertEqual(
+            DictationOverlayPresentationPreferences.mode(userDefaults: defaults),
+            .notchIsland,
+            "notch island mode should persist"
+        )
+        assertEqual(
+            defaults.string(forKey: DictationOverlayPresentationPreferences.modeKey),
+            "notchIsland",
+            "the stored value is the raw case name, so it survives updates"
+        )
+    }
+
     runSuite("DictationOverlayPresentationPreferences falls back from unknown values") {
         let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -81,6 +98,24 @@ func testDictationOverlayPresentationPreferences() {
         assertFalse(
             DictationOverlayPresentationMode.cursorMini.detail.contains("shortcut or Escape"),
             "Esc is not a second way to stop and paste"
+        )
+        assertEqual(
+            DictationOverlayPresentationMode.notchIsland.title,
+            "Notch island",
+            "island mode should match the settings card label"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.notchIsland.detail.contains("top of other displays"),
+            "island mode should say what happens on a display without a notch"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.notchIsland.detail.contains("Meetings use it too"),
+            "island mode changes the meeting pill as well, so the card has to say so"
+        )
+        assertEqual(
+            DictationOverlayPresentationMode.allCases,
+            [.nearText, .cursorMini, .notchIsland],
+            "the settings picker shows the three styles in this order"
         )
     }
 }

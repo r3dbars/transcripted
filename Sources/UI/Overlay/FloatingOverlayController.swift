@@ -160,6 +160,23 @@ class FloatingOverlayController {
 
     var sttRouter: STTRouter?
 
+    /// Draws the session instead of the panel when Settings › Dictation
+    /// window is Notch island. The state machine, timers and Esc handling
+    /// below stay the same; only where it shows changes.
+    weak var island: NotchIslandController? {
+        didSet {
+            island?.dictationActionHandler = { [weak self] action in
+                self?.handleIslandAction(action)
+            }
+        }
+    }
+    /// The app the words go to, for the island's "Inserting into" line.
+    private var islandSourceApp: NSRunningApplication?
+
+    private var isIslandMode: Bool {
+        island != nil && NotchIslandController.isSelected
+    }
+
     // MARK: - Setup
 
     func setup(sttRouter: STTRouter) {
@@ -239,6 +256,9 @@ class FloatingOverlayController {
                     rawLevel: level
                 )
                 self.rootView?.headerView.updateWaveformLevel(presentation.level)
+                if self.isIslandMode {
+                    self.island?.updateDictationLevel(presentation.level)
+                }
             }
             .store(in: &subscriptions)
 
@@ -278,6 +298,80 @@ class FloatingOverlayController {
         )
         updatePanelMouseBehavior()
         updatePanelCornerRadius()
+        pushStateToIsland()
+    }
+
+    private func pushStateToIsland() {
+        guard let island else { return }
+        guard isIslandMode, isVisible else {
+            island.updateDictation(nil, targetApp: nil)
+            return
+        }
+        island.updateDictation(islandContent(), targetApp: islandSourceApp)
+    }
+
+    private func islandContent() -> NotchIslandDictationContent? {
+        let phase: NotchIslandDictationContent.Phase
+        switch state {
+        case .idle:
+            return nil
+        case .starting:
+            phase = .starting
+        case .loading:
+            // Only a model download has a real number ("42% downloaded").
+            let downloaded = loadingPresentation.status
+                .flatMap { $0.hasSuffix("% downloaded") ? $0.split(separator: "%").first : nil }
+                .flatMap { Double($0) }
+                .map { $0 / 100 }
+            phase = .loading(
+                title: loadingPresentation.title,
+                detail: loadingPresentation.detail,
+                progress: downloaded
+            )
+        case .listening:
+            phase = .listening
+        case .drafting where errorMessage.isEmpty:
+            phase = .writing
+        case .drafting:
+            let tone: NotchIslandDictationContent.Message.Tone
+            switch messageTone {
+            case .error:
+                tone = messageCanGiveWayToNextStart ? .noSpeech : .error
+            case .notice:
+                tone = .notice
+            case .saved:
+                tone = .saved
+            }
+            phase = .message(.init(tone: tone, text: errorMessage, actionTitle: errorActionTitle))
+        case .success:
+            phase = .success(title: successTitle)
+        }
+        return NotchIslandDictationContent(
+            phase: phase,
+            notice: listeningNotice,
+            targetAppName: islandSourceApp?.localizedName,
+            microphoneName: sttRouter?.inputDeviceName
+        )
+    }
+
+    private func handleIslandAction(_ action: NotchIslandAction) {
+        switch action {
+        case .dictationStop:
+            guard state == .listening else { return }
+            onStopListening?()
+        case .dictationCancel:
+            guard state.isActiveDictationState else { return }
+            clearEscapeConfirmation()
+            onEscapeDuringSession?()
+        case .dictationMessageAction:
+            let handler = errorActionHandler
+            clearActionableErrorWithoutHiding()
+            handler?()
+        case .dictationDismissMessage:
+            dismissErrorClosedByUser()
+        default:
+            break
+        }
     }
 
     // MARK: - Panel Show/Hide
@@ -295,6 +389,15 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         successDismissTask?.cancel()
         successDismissTask = nil
+
+        if isIslandMode {
+            // The island draws the session; the panel stays hidden.
+            islandSourceApp = sourceApp
+            isVisible = true
+            pushStateToViews()
+            installEscapeMonitor()
+            return
+        }
 
         let shouldOpenAtCursor = isCursorMiniPanelMode
         let rawTargetRect = shouldOpenAtCursor
@@ -431,7 +534,7 @@ class FloatingOverlayController {
         successDismissTask?.cancel()
         successDismissTask = nil
 
-        guard let panel, isVisible else { return }
+        guard let panel, isVisible, !isIslandMode else { return }
         cancelPanelHideAnimations(panel)
         panel.ignoresMouseEvents = isCursorMiniPanelMode
         if !panel.isVisible {
@@ -462,7 +565,7 @@ class FloatingOverlayController {
     // MARK: - Hide Animations
 
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
-        guard let panel = panel else { completion?(); _performHide(); return }
+        guard let panel = panel, !isIslandMode else { completion?(); _performHide(); return }
         let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
@@ -493,7 +596,7 @@ class FloatingOverlayController {
     }
 
     func hideWithCancelAnimation() {
-        guard let panel = panel else { _performHide(); return }
+        guard let panel = panel, !isIslandMode else { _performHide(); return }
         let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
@@ -689,6 +792,9 @@ class FloatingOverlayController {
     private static let messageHoverHoldLimit: UInt64 = 30_000_000_000  // 30 s
 
     private var isMouseOverPanel: Bool {
+        if isIslandMode {
+            return isVisible && island?.isPointerOverIsland == true
+        }
         guard let panel, isVisible, panel.isVisible else { return false }
         return panel.frame.contains(NSEvent.mouseLocation)
     }
@@ -775,6 +881,9 @@ class FloatingOverlayController {
         messageTone = .error
         discardActionableMessageIfNeeded()
         successTitle = title
+        if isIslandMode {
+            island?.noteDictationInserted(title: title)
+        }
         state = .success
         resizePanelToCompact()
         if !isVisible {
@@ -817,6 +926,8 @@ class FloatingOverlayController {
         discardActionableMessageIfNeeded()
         listeningNotice = ""
         loadingPresentation = .initial
+        islandSourceApp = nil
+        pushStateToIsland()
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh
@@ -938,7 +1049,7 @@ class FloatingOverlayController {
     }
 
     private func resizePanel(to size: NSSize, keepingVisible: Bool = false, animated: Bool = true) {
-        guard let panel = panel else { return }
+        guard let panel = panel, !isIslandMode else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height

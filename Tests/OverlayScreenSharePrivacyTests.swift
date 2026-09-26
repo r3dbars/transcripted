@@ -67,6 +67,30 @@ func testOverlayScreenSharePrivacy() async {
         assertTrue(panel.canBecomeKey, "the capture pill must be keyboard-dismissable")
     }
 
+    runSuite("NotchIslandPanel is excluded from screen capture and never takes focus") {
+        _ = NSApplication.shared
+        let panel = NotchIslandPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 32),
+            styleMask: [],
+            backing: .buffered,
+            defer: true
+        )
+        assertEqual(
+            panel.sharingType,
+            .none,
+            "the notch island shows live dictation and must not be visible to screen sharing / capture"
+        )
+        assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
+        assertFalse(panel.canBecomeMain, "the island is never a main window")
+        assertEqual(panel.level, .statusBar, "the island sits in the menu bar, above it, below open menus")
+        let offscreen = NSRect(x: 0, y: 5000, width: 360, height: 32)
+        assertEqual(
+            panel.constrainFrameRect(offscreen, to: nil),
+            offscreen,
+            "AppKit must not push the island out of the menu bar"
+        )
+    }
+
     runSuite("CapturePillController scopes Return and Escape to the pill panel") {
         let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
         let presentBlock = overlayPrivacySlice(
@@ -202,6 +226,7 @@ func testOverlayScreenSharePrivacy() async {
             "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
             "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",
             "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
+            "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
             "Sources/UI/Settings/SpeakerNamingSheet.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",

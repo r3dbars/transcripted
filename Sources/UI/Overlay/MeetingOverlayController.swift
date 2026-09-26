@@ -140,6 +140,22 @@ final class MeetingOverlayController: NSObject {
     /// button. A transcript URL asks the page to expand that meeting.
     var onOpenMeetings: ((URL?) -> Void)?
 
+    /// Draws the meeting instead of the pill when Settings › Dictation
+    /// window is Notch island. States, prompts and timers stay here.
+    weak var island: NotchIslandController? {
+        didSet {
+            island?.meetingActionHandler = { [weak self] action in self?.handleIslandAction(action) }
+            island?.meetingHoverHandler = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
+            island?.meetingMenuProvider = { [weak self] in self?.makeStripMenu() }
+        }
+    }
+    /// Whether the island is carrying the meeting (the pill's `isVisible`).
+    private var islandShown = false
+
+    private var isIslandMode: Bool {
+        island != nil && NotchIslandController.isSelected
+    }
+
     // MARK: - Setup
 
     /// Create the panel, wire subscriptions, and keep it hidden until state
@@ -707,6 +723,10 @@ final class MeetingOverlayController: NSObject {
     // MARK: - Panel show/hide
 
     private func showPanel() {
+        if isIslandMode {
+            islandShown = true
+            return
+        }
         guard let panel = panel else { return }
         if panel.isVisible { return }
 
@@ -771,6 +791,11 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func hidePanel() {
+        if islandShown {
+            islandShown = false
+            isPanelHovered = false
+            island?.updateMeeting(nil)
+        }
         guard let panel = panel, panel.isVisible else { return }
         lastRequestedPanelSize = nil
         // A panel hidden under the cursor never delivers mouseExited; a
@@ -1019,6 +1044,9 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pointerIsOverPanel() -> Bool {
+        if islandShown {
+            return island?.isPointerOverIsland == true
+        }
         guard let panel, panel.isVisible else { return false }
         return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
     }
@@ -1319,9 +1347,107 @@ final class MeetingOverlayController: NSObject {
         MeetingDurationFormatter.formatInactiveDuration(duration)
     }
 
+    // MARK: - Notch island
+
+    private func islandContent() -> NotchIslandMeetingContent {
+        let sessionState = meetingSession?.state
+        let phase: NotchIslandMeetingContent.Phase
+        switch state {
+        case .idle:
+            phase = .none
+        case .prompt:
+            // Warning prompts arrive mid-recording; the missed-call nudge
+            // arrives with nothing recording.
+            switch sessionState {
+            case .recording?, .stoppingRecording?:
+                phase = .recording
+            default:
+                phase = .none
+            }
+        case .preparing where currentWarmupStatus.progress >= 1:
+            // Models are ready; the mic and call audio are what's starting.
+            phase = .preparing(title: "Starting meeting…", detail: "Checking permissions and audio")
+        case .preparing:
+            phase = .preparing(
+                title: currentWarmupStatus.title,
+                detail: currentWarmupStatus.subtitle.isEmpty ? currentWarmupStatus.detail : currentWarmupStatus.subtitle
+            )
+        case .recording:
+            phase = .recording
+        case .transcribing:
+            phase = .transcribing(
+                progress: MeetingPillFinishPresentation.percent(progress: currentTranscriptionProgress).map { Double($0) / 100 },
+                detail: finishDetail
+            )
+        case .saved:
+            phase = .saved(title: savedTranscriptTitle)
+        case .error(let message):
+            let copy = MeetingFailureCopy.make(forMessage: message, shortErrorMessage: message, isRetryable: true)
+            phase = .error(
+                title: copy.title,
+                message: copy.detail,
+                canOpen: MeetingPillFinishPresentation.errorOffersOpenMeetings(
+                    failureKind: MeetingFailureKind.classify(message: message),
+                    hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
+                )
+            )
+        }
+        let prompt = currentPrompt.map {
+            NotchIslandMeetingContent.Prompt(
+                title: $0.title,
+                detail: $0.detail,
+                countdown: $0.countdownText,
+                primaryTitle: $0.primaryTitle,
+                secondaryTitle: $0.secondaryTitle,
+                tertiaryTitle: $0.tertiaryTitle
+            )
+        }
+        var callAudioNote: NotchIslandMeetingContent.CallAudioNote?
+        switch showsMicOnlyNote ? micOnlyNotice : nil {
+        case .callAudioOff?:
+            callAudioNote = .off
+        case .callAudioOnForNextMeeting?:
+            callAudioNote = .onForNextMeeting
+        case nil:
+            callAudioNote = nil
+        }
+        return NotchIslandMeetingContent(
+            phase: phase,
+            prompt: state == .prompt ? prompt : nil,
+            duration: currentDuration,
+            callAudioNote: callAudioNote,
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+        )
+    }
+
+    private func handleIslandAction(_ action: NotchIslandAction) {
+        switch action {
+        case .meetingStop, .meetingDismissError:
+            handleCloseTapped()
+        case .meetingPrimary, .meetingOpen:
+            handlePrimaryActionTapped()
+        case .meetingSecondary:
+            handleSecondaryActionTapped()
+        case .meetingTertiary:
+            handleCallAudioActionTapped()
+        case .meetingCallAudio:
+            // The "Mic only" chip, which can show under a warning prompt too.
+            guard micOnlyNotice == .callAudioOff else { return }
+            Task { @MainActor [weak self] in
+                await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
+            }
+        default:
+            break
+        }
+    }
+
     // MARK: - View push
 
     private func pushToView() {
+        if islandShown {
+            island?.updateMeeting(islandContent())
+            return
+        }
         resizePanelIfNeeded()
         rootView?.update(
             state: state,
@@ -1373,6 +1499,10 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pushAudioLevelsToView() {
+        if islandShown {
+            island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
+            return
+        }
         rootView?.updateAudioLevels(
             micLevel: currentMicLevel,
             systemLevel: currentSystemLevel
