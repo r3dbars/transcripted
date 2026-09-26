@@ -56,6 +56,10 @@ const STALE_MS = 15_000
 /** How long "meeting ended" stays in the status line. */
 const ENDED_VISIBLE_MS = 30 * 60_000
 const DEFAULT_ATTACH_MINUTES = 5
+/** "04:09 them " — the label column the text hangs beside. */
+const LABEL_WIDTH = 11
+/** A pause this long repeats the speaker label even when the speaker did not change. */
+const TURN_GAP_SECONDS = 60
 
 const HELP_TEXT = [
   '/meeting              show or hide the live meeting pane',
@@ -189,110 +193,91 @@ export function register(on: On) {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
 
     const { Box, Text } = await $.ui.resolve(e)
-    const columns = Math.max(20, e.props.bodyColumns - 1)
-    const rows = Math.max(8, e.props.scroll.bodyRows)
-    const isDocked = e.props.placement === 'dock'
+    const columns = Math.max(24, e.props.bodyColumns - 1)
+    const rows = Math.max(6, e.props.scroll.bodyRows)
+    const textColumns = columns - LABEL_WIDTH
     const now = Date.now()
     const session = s.session
-    const rule = <Text dimColor>{'─'.repeat(columns)}</Text>
 
     if (!session) {
       return (
         <Box flexDirection="column">
-          <Text bold>No live transcript</Text>
-          {rule}
-          {HELPER_MISSING_TEXT.split('\n').map(line => (
-            <Text dimColor wrap="wrap">
-              {line}
-            </Text>
-          ))}
+          <Text dimColor>No live transcript yet.</Text>
+          <Text dimColor wrap="wrap">
+            Run transcripted-live watch, then record a meeting in Transcripted.
+          </Text>
         </Box>
       )
     }
 
     const live = isLive(s, now)
-    const headline = live
-      ? `rec ${clock(session.audioSeconds)}`
-      : isStalled(s, now)
-        ? 'stalled'
-        : session.state === 'ended'
-          ? 'meeting ended'
-          : 'waiting for a meeting'
-    const where = session.source === 'replay' ? 'replay' : 'on-device'
+    const headline = live ? 'Live' : isStalled(s, now) ? 'Stalled' : session.state === 'ended' ? 'Ended' : 'Waiting'
+    const detail = [clock(session.audioSeconds), session.source === 'replay' ? 'replay' : '']
+      .filter(Boolean)
+      .join(' · ')
 
     const partials = (['them', 'you'] as const)
-      .map(speaker => [speaker, lastWords(session.partial?.[speaker] ?? '', columns * 2 - 12)] as const)
+      .map(speaker => [speaker, (session.partial?.[speaker] ?? '').trim()] as const)
       .filter(([, text]) => text !== '')
 
-    const partialRows = partials.reduce(
-      (sum, [, text]) => sum + wrapRows(text, columns) + (isDocked ? 1 : 0),
-      0,
-    )
-    const budget = rows - 3 - 2 - partialRows
-
-    const shown: Utterance[] = []
+    // Newest lines that fit under the header and above the typing rows.
+    const budget = rows - 2 - partials.length
+    const shown: { line: Utterance; hasLabel: boolean }[] = []
     let used = 0
     for (let index = s.lines.length - 1; index >= 0; index -= 1) {
       const line = s.lines[index]!
-      const need = isDocked
-        ? 1 + wrapRows(line.text, columns)
-        : wrapRows(`${clock(line.t)} ${line.speaker}  ${line.text}`, columns)
+      const previous = s.lines[index - 1]
+      const hasLabel = startsTurn(line, previous)
+      const need = wrapRows(line.text, textColumns) + (hasLabel ? 1 : 0)
       if (used + need > budget && shown.length > 0) break
       used += need
-      shown.unshift(line)
+      shown.unshift({ line, hasLabel })
     }
+    if (shown[0]) shown[0].hasLabel = true
+
+    const label = (line: Utterance) => (
+      <Text>
+        <Text dimColor>{`${clock(line.t)} `}</Text>
+        <Text color={line.speaker === 'you' ? 'cyan' : undefined} dimColor={line.speaker === 'them'}>
+          {line.speaker}
+        </Text>
+      </Text>
+    )
 
     return (
       <Box flexDirection="column">
-        <Text>
-          <Text color={live ? 'red' : undefined} dimColor={!live}>
-            {live ? '● ' : '○ '}
+        <Box marginBottom={1}>
+          <Text>
+            <Text color={live ? 'red' : undefined} dimColor={!live}>
+              {live ? '● ' : '○ '}
+            </Text>
+            <Text bold>{headline}</Text>
+            <Text dimColor>{`  ${detail}`}</Text>
           </Text>
-          <Text bold>{headline}</Text>
-          <Text dimColor>{` · ${where}`}</Text>
-        </Text>
-        <Text dimColor wrap="truncate-end">
-          {`${session.title ?? session.meetingId ?? 'Transcripted'} · ${session.model}`}
-        </Text>
-        {rule}
-        {shown.length === 0 && partials.length === 0 ? (
-          <Text dimColor>{live ? 'listening…' : 'nothing yet'}</Text>
-        ) : null}
-        {shown.map(line =>
-          isDocked ? (
-            <Box flexDirection="column">
-              <Text>
-                <Text dimColor>{`${clock(line.t)} `}</Text>
-                <Text color={speakerColor(line.speaker)}>{line.speaker}</Text>
-              </Text>
-              <Text wrap="wrap">{line.text}</Text>
+        </Box>
+        {shown.length === 0 && partials.length === 0 ? <Text dimColor>Listening…</Text> : null}
+        {shown.map(({ line, hasLabel }, index) => (
+          <Box flexDirection="row" marginTop={hasLabel && index > 0 ? 1 : 0}>
+            <Box width={LABEL_WIDTH} flexShrink={0}>
+              {hasLabel ? label(line) : <Text> </Text>}
             </Box>
-          ) : (
-            <Text wrap="wrap">
-              <Text dimColor>{`${clock(line.t)} `}</Text>
-              <Text color={speakerColor(line.speaker)}>{line.speaker.padEnd(5)}</Text>
-              {line.text}
-            </Text>
-          ),
-        )}
-        {partials.map(([speaker, text]) =>
-          isDocked ? (
-            <Box flexDirection="column">
-              <Text dimColor>{`now ${speaker}`}</Text>
-              <Text dimColor italic wrap="wrap">
-                {`${text}▍`}
+            <Box flexGrow={1} flexShrink={1}>
+              <Text wrap="wrap">{readable(line.text)}</Text>
+            </Box>
+          </Box>
+        ))}
+        {partials.map(([speaker, text], index) => (
+          <Box flexDirection="row" marginTop={index === 0 && shown.length > 0 ? 1 : 0}>
+            <Box width={LABEL_WIDTH} flexShrink={0}>
+              <Text dimColor>{`   … ${speaker}`}</Text>
+            </Box>
+            <Box flexGrow={1} flexShrink={1}>
+              <Text dimColor italic wrap="truncate-start">
+                {`${readable(text)}▍`}
               </Text>
             </Box>
-          ) : (
-            <Text dimColor italic wrap="wrap">
-              {`now   ${speaker.padEnd(5)}${text}▍`}
-            </Text>
-          ),
-        )}
-        {rule}
-        <Text dimColor wrap="truncate-end">
-          {s.lines.length > 0 ? '/meeting attach · Claude can call read_live' : '/meeting help'}
-        </Text>
+          </Box>
+        ))}
       </Box>
     )
   })
@@ -380,13 +365,11 @@ function statusText(s: LiveState, now: number): string | undefined {
   const session = s.session
   if (!session) return undefined
   if (isLive(s, now)) {
-    const source = session.source === 'replay' ? ' · replay' : ''
-    return `● rec ${clock(session.audioSeconds)}${source} · ${countLabel(s.lines.length)} · /meeting attach`
+    return `● ${clock(session.audioSeconds)} · /meeting attach`
   }
-  if (isStalled(s, now)) return 'live transcript stalled · is transcripted-live still running?'
-  if (endedRecently(s, now) && s.lines.length > 0) {
-    return `○ meeting ended · ${countLabel(s.lines.length)} · /meeting attach`
-  }
+  if (isStalled(s, now)) return 'stalled · is transcripted-live running?'
+  if (endedRecently(s, now) && s.lines.length > 0) return '○ ended · /meeting attach'
+
   return undefined
 }
 
@@ -457,8 +440,14 @@ function parseUtterances(body: string): Utterance[] {
   return parsed.sort((a, b) => a.t - b.t)
 }
 
-function speakerColor(speaker: Speaker): string {
-  return speaker === 'you' ? 'cyan' : 'magenta'
+function startsTurn(line: Utterance, previous: Utterance | undefined): boolean {
+  return !previous || previous.speaker !== line.speaker || line.t - previous.t > TURN_GAP_SECONDS
+}
+
+/** The live model writes lowercase with no punctuation; a capital and "I" help a lot. */
+function readable(text: string): string {
+  const fixed = text.replace(/\bi\b/g, 'I')
+  return fixed.charAt(0).toUpperCase() + fixed.slice(1)
 }
 
 function clock(seconds: number): string {
@@ -479,11 +468,3 @@ function wrapRows(text: string, columns: number): number {
   return Math.max(1, Math.ceil(text.length / Math.max(8, columns - 4)))
 }
 
-/** The tail of an in-progress line, so a long monologue does not fill the pane. */
-function lastWords(text: string, maxLength: number): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= maxLength) return trimmed
-  const tail = trimmed.slice(trimmed.length - maxLength)
-  const space = tail.indexOf(' ')
-  return `…${space >= 0 ? tail.slice(space + 1) : tail}`
-}
