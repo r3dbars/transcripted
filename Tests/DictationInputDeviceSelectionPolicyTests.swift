@@ -416,6 +416,96 @@ func testDictationInputDeviceSelectionPolicy() {
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
     }
 
+    runSuite("Engine warmup is skipped whenever the recorder records, and never runs on a Bluetooth macOS input") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let loopback = DictationAudioDevice(id: 5, name: "Loopback Audio", transport: .virtual, inputChannelCount: 2, uid: "loopback")
+
+        let macDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macMic, defaultOutput: nil,
+            availableInputs: [macMic, usbMic], prefersBuiltInBluetoothInput: true
+        )
+        let usbDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: usbMic, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic, usbMic], prefersBuiltInBluetoothInput: true
+        )
+        let pickedOverMac = PinnedDictationInputPolicy.selection(
+            automatic: macDefault,
+            availableInputs: [macMic, usbMic],
+            preferredUID: "mv7",
+            chosenInputAlwaysWins: true
+        )
+        let virtualDefault = DictationInputDeviceSelection(
+            defaultInput: loopback, selectedInput: loopback,
+            defaultOutput: nil, reason: .defaultIsSafe
+        )
+
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: macDefault, afterEngineFallback: false),
+            "the built-in mic records through the recorder, so a start never waits on the engine"
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: pickedOverMac, afterEngineFallback: false),
+            "a mic picked over the Mac mic records through the recorder, so the engine warmup is skipped"
+        )
+        assertFalse(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: virtualDefault, afterEngineFallback: false),
+            "a virtual macOS input records through the engine, so the engine stays warm"
+        )
+        for selection in [macDefault, usbDefault, pickedOverMac, virtualDefault] {
+            assertEqual(
+                PinnedDictationInputPolicy.skipsEngineWarmup(for: selection, afterEngineFallback: false),
+                PinnedDictationInputPolicy.recorderIsNeeded(for: selection),
+                "off a Bluetooth input, warmup and recording follow one rule (\(selection.selectedInput.name))"
+            )
+        }
+
+        let skipsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: true
+        )
+        let headsetOnly = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: skipsHeadset, afterEngineFallback: false),
+            "skipping a Bluetooth macOS input never warms the engine on it"
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: headsetOnly, afterEngineFallback: false),
+            "even when the headset itself is recorded, idle warmup never binds it"
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: skipsHeadset, afterEngineFallback: true),
+            "a fallback never turns warmup on for a Bluetooth macOS input"
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: nil, afterEngineFallback: false),
+            "an unreadable route counts as a headset"
+        )
+
+        assertFalse(
+            PinnedDictationInputPolicy.skipsEngineWarmup(for: macDefault, afterEngineFallback: true),
+            "after a fallback the engine is warmed again, so a repeat fallback isn't a cold start"
+        )
+
+        let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
+        assertTrue(
+            pinned.contains("for: try? Self.pinnedDictationInputSelection(),"),
+            "warmup is judged on the same selection the start records"
+        )
+        assertTrue(
+            pinned.contains("pinnedDictationFellBackToEngine = true"),
+            "an engine fallback turns warmup back on"
+        )
+        assertTrue(
+            pinned.contains("pinnedDictationRecording = recording\n        pinnedDictationFellBackToEngine = false"),
+            "a recorder start turns the fallback warmup off again"
+        )
+    }
+
     runSuite("Pinned dictation skips a Bluetooth headset unless the Microphone choice keeps the macOS input") {
         let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
         assertFalse(
