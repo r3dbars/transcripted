@@ -236,15 +236,27 @@ struct WritingSetupFlowView: View {
         VStack(alignment: .leading, spacing: 6) {
             switch row {
             case .keyboard:
+                // Once the keyboard is installed, the steps for where it
+                // stands; "Turn on writing" never waits on them.
+                let keyboardStep = Copy.keyboardStep(model.keyboardSetup)
                 rowHeader(
                     title: Copy.Step3.keyboardTitle,
                     badge: Copy.keyboardBadge(
                         saveMyWriting: model.draft.saveMyWriting,
                         autocomplete: model.draft.autocomplete
                     ),
-                    done: model.keyboardOn == true
+                    done: keyboardStep.isDone
                 )
-                rowLine(Copy.Step3.keyboardLine)
+                rowLine(keyboardStep.line)
+                if let buttonTitle = keyboardStep.buttonTitle {
+                    SettingsInlineActionButton(
+                        title: buttonTitle,
+                        tone: .warning,
+                        automationIdentifier: "transcripted.settings.writing.setup.keyboard.open-settings"
+                    ) {
+                        model.openKeyboardSettings()
+                    }
+                }
             case .screenRecording:
                 rowHeader(
                     title: Copy.Step3.screenRecordingTitle,

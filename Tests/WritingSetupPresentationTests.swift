@@ -85,7 +85,7 @@ func testWritingSetupPresentation() {
 
         assertEqual(Copy.Step3.title, "Allow and download")
         assertEqual(Copy.Step3.keyboardTitle, "Transcripted keyboard")
-        assertEqual(Copy.Step3.keyboardLine, "Turns on in Input Sources. No privacy prompt.")
+        assertEqual(Copy.Step3.keyboardLine, "You add it in Keyboard settings. No privacy prompt.")
         assertEqual(Copy.Step3.screenRecordingTitle, "Screen Recording")
         assertEqual(Copy.Step3.screenRecordingLine, "Reads the window you're replying in, on this Mac.")
         assertEqual(Copy.Step3.modelTitle, "Model")
@@ -106,6 +106,60 @@ func testWritingSetupPresentation() {
         )
         assertEqual(Copy.step3Rows(saveMyWriting: false, autocomplete: true), [.keyboard, .screenRecording, .model])
         assertEqual(Copy.step3Rows(saveMyWriting: false, autocomplete: false), [])
+    }
+
+    // macOS 26 ignores an app's TISEnableInputSource, so the keyboard row
+    // tells the user what to do instead of claiming it turned on.
+    runSuite("Writing keyboard row gives the steps for where the keyboard stands") {
+        assertEqual(
+            Copy.keyboardStep(.needsUserToAdd),
+            Copy.KeyboardStep(
+                line: "Add Transcripted in Keyboard settings: Input Sources › Edit… › +, then English › Transcripted.",
+                buttonTitle: "Open Keyboard Settings",
+                isDone: false
+            )
+        )
+        assertEqual(
+            Copy.keyboardStep(.needsRelogin),
+            Copy.KeyboardStep(
+                line: "macOS lists new keyboards after you log out and back in. Log out, then add Transcripted in Keyboard settings.",
+                buttonTitle: "Open Keyboard Settings",
+                isDone: false
+            )
+        )
+        assertEqual(
+            Copy.keyboardStep(.enabledNotSelected),
+            Copy.KeyboardStep(
+                line: "Choose Transcripted from the input menu in the menu bar.",
+                buttonTitle: nil,
+                isDone: false
+            ),
+            "an added keyboard only needs picking from the input menu; Keyboard settings wouldn't help"
+        )
+        assertEqual(
+            Copy.keyboardStep(.selected),
+            Copy.KeyboardStep(line: "You add it in Keyboard settings. No privacy prompt.", buttonTitle: nil, isDone: true)
+        )
+        assertEqual(
+            Copy.keyboardStep(nil),
+            Copy.KeyboardStep(line: "You add it in Keyboard settings. No privacy prompt.", buttonTitle: nil, isDone: false),
+            "before the keyboard is installed, step 3 shows the plain line"
+        )
+        assertEqual(
+            Copy.everydayKeyboardStep(nil),
+            Copy.keyboardStep(.needsUserToAdd),
+            "after setup, a keyboard that isn't installed gets the add steps and the button"
+        )
+        assertEqual(Copy.everydayKeyboardStep(.needsRelogin), Copy.keyboardStep(.needsRelogin))
+        let guidance = [
+            Copy.KeyboardGuidance.needsUserToAdd,
+            Copy.KeyboardGuidance.needsRelogin,
+            Copy.KeyboardGuidance.enabledNotSelected,
+        ]
+        assertFalse(
+            guidance.contains { $0.contains("Turns on") || $0.contains("!") },
+            "the guidance never claims the app turned the keyboard on, and stays plain"
+        )
     }
 
     runSuite("Writing keyboard badge says Both only when both features use it") {
