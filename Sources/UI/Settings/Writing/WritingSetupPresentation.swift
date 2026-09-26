@@ -6,7 +6,8 @@ import Foundation
 /// status lines. Views read every string from here, so the fast tests pin
 /// the approved copy word for word.
 ///
-/// Foundation plus `TildeModelChoice` only, so the root fast tests compile it.
+/// Foundation plus `TildeModelChoice` and `WritingKeyboardSetupState` only, so
+/// the root fast tests compile it.
 enum WritingSetupPresentation {
     // MARK: - Intro, page 1 of 2
 
@@ -109,7 +110,9 @@ enum WritingSetupPresentation {
     enum Step3 {
         static let title = "Allow and download"
         static let keyboardTitle = "Transcripted keyboard"
-        static let keyboardLine = "Turns on in Input Sources. No privacy prompt."
+        /// Before the keyboard is installed. macOS 26 won't let an app turn a
+        /// keyboard on, so the user adds it (`keyboardStep(_:)`).
+        static let keyboardLine = "You add it in Keyboard settings. No privacy prompt."
         static let screenRecordingTitle = "Screen Recording"
         static let screenRecordingLine = "Reads the window you're replying in, on this Mac."
         static let modelTitle = "Model"
@@ -142,6 +145,58 @@ enum WritingSetupPresentation {
         if saveMyWriting || autocomplete { rows.append(.keyboard) }
         if autocomplete { rows += [.screenRecording, .model] }
         return rows
+    }
+
+    // MARK: - Keyboard guidance
+
+    /// What to do about the keyboard, per `WritingKeyboardSetupState`
+    /// (docs/writing-plan.md, "Permissions"). Nothing here logs the user out
+    /// or opens System Settings; the button does, when the user asks.
+    enum KeyboardGuidance {
+        static let needsUserToAdd = "Add Transcripted in Keyboard settings: Input Sources › Edit… › +, then English › Transcripted."
+        static let needsRelogin = "macOS lists new keyboards after you log out and back in. Log out, then add Transcripted in Keyboard settings."
+        static let enabledNotSelected = "Choose Transcripted from the input menu in the menu bar."
+        static let openKeyboardSettings = "Open Keyboard Settings"
+    }
+
+    /// The keyboard row in step 3 and the everyday view.
+    struct KeyboardStep: Equatable {
+        let line: String
+        /// "Open Keyboard Settings", or `nil` when that wouldn't help.
+        let buttonTitle: String?
+        let isDone: Bool
+    }
+
+    /// `nil` means the keyboard isn't installed yet (step 3 before "Turn on
+    /// writing"): the plain line, no button.
+    static func keyboardStep(_ state: WritingKeyboardSetupState?) -> KeyboardStep {
+        switch state {
+        case nil:
+            KeyboardStep(line: Step3.keyboardLine, buttonTitle: nil, isDone: false)
+        case .selected?:
+            KeyboardStep(line: Step3.keyboardLine, buttonTitle: nil, isDone: true)
+        case .enabledNotSelected?:
+            KeyboardStep(line: KeyboardGuidance.enabledNotSelected, buttonTitle: nil, isDone: false)
+        case .needsUserToAdd?:
+            KeyboardStep(
+                line: KeyboardGuidance.needsUserToAdd,
+                buttonTitle: KeyboardGuidance.openKeyboardSettings,
+                isDone: false
+            )
+        case .needsRelogin?:
+            KeyboardStep(
+                line: KeyboardGuidance.needsRelogin,
+                buttonTitle: KeyboardGuidance.openKeyboardSettings,
+                isDone: false
+            )
+        }
+    }
+
+    /// The everyday view's "Keyboard off" row. Setup is done there, so a
+    /// keyboard that isn't installed (say the copy failed) gets the add
+    /// steps too; the button tries the install again first.
+    static func everydayKeyboardStep(_ state: WritingKeyboardSetupState?) -> KeyboardStep {
+        keyboardStep(state ?? .needsUserToAdd)
     }
 
     /// Both features use the keyboard; with only one on it's simply needed.
@@ -370,7 +425,6 @@ enum WritingSetupPresentation {
     static let deleteConfirmTitle = "Delete all writing?"
     static let deleteConfirmMessage = "This deletes your saved writing files and what autocomplete learned from them, and turns off Save my writing. It can't be undone."
     static let deleteFailed = "Some writing couldn't be deleted. Try again."
-    static let turnOnKeyboard = "Turn on keyboard"
     static let allowScreenRecording = "Allow Screen Recording"
     static let openScreenRecordingSettings = "Open Screen Recording settings"
     static let screenRecordingReopenLine = "After you allow it, macOS may ask to reopen Transcripted."

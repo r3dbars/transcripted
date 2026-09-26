@@ -553,6 +553,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
     "Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift"
+    "Sources/TranscriptedWriting/Core/Runtime/WritingKeyboardSetupState.swift"
     "Sources/Writing/WritingAnalytics.swift"
     "Sources/Writing/WritingSetupState.swift"
     "Sources/Writing/WritingDayFileReader.swift"

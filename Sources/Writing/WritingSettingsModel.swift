@@ -64,6 +64,10 @@ final class WritingSettingsModel: ObservableObject {
     /// The Transcripted keyboard is the selected input source. `nil` until
     /// first read.
     @Published private(set) var keyboardOn: Bool?
+    /// Where the keyboard stands, for the guidance in step 3 and the
+    /// everyday view. `nil` until first read, and while the keyboard isn't
+    /// installed yet.
+    @Published private(set) var keyboardSetup: WritingKeyboardSetupState?
     @Published private(set) var screenRecordingGranted = false
     @Published private(set) var screenRecordingRequested = false
     @Published private(set) var captureBusy = false
@@ -169,7 +173,9 @@ final class WritingSettingsModel: ObservableObject {
                 self.refreshLive()
             }
         })
-        // Input Sources changes from the menu bar or System Settings.
+        // Input Sources changes from the menu bar or System Settings: the
+        // user added the keyboard, or picked it. Only while the page is
+        // showing, like activation above.
         let inputSourceNotifications: [CFString?] = [
             kTISNotifySelectedKeyboardInputSourceChanged,
             kTISNotifyEnabledKeyboardInputSourcesChanged,
@@ -180,7 +186,10 @@ final class WritingSettingsModel: ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.refreshKeyboard() }
+                Task { @MainActor in
+                    guard let self, self.isOnScreen else { return }
+                    self.refreshKeyboard()
+                }
             })
         }
     }
@@ -210,9 +219,13 @@ final class WritingSettingsModel: ObservableObject {
 
     /// Validates code signatures and asks Text Input Sources, so it runs on
     /// appear, on app activation, on Input Sources changes and after actions,
-    /// never on the timer.
+    /// never on the timer. When the keyboard has just been added in Keyboard
+    /// settings, the controller selects it once here. Never opens System
+    /// Settings.
     func refreshKeyboard() {
-        update(\.keyboardOn, controller.keyboardState().selected)
+        let state = controller.keyboardState(previous: keyboardSetup)
+        update(\.keyboardSetup, state.setup)
+        update(\.keyboardOn, state.selected)
     }
 
     func refreshStats() {
@@ -315,7 +328,10 @@ final class WritingSettingsModel: ObservableObject {
     func showStep(_ step: Int) {
         let clamped = min(max(1, step), Presentation.setupStepCount)
         if clamped == 2 { loadInstalledAppsIfNeeded() }
-        if clamped == 3 { refreshLive() }
+        if clamped == 3 {
+            refreshLive()
+            refreshKeyboard()
+        }
         screen = .setup(step: clamped)
     }
 
@@ -328,10 +344,15 @@ final class WritingSettingsModel: ObservableObject {
     }
 
     /// "Turn on writing", in the approved order: save the choices, install
-    /// and select the keyboard, start Writing (which starts the model
-    /// download in the background), and ask for Screen Recording last. The
-    /// Screen Recording ask waits while anything records: macOS may ask
+    /// the keyboard and select it if it's on, start Writing (which starts the
+    /// model download in the background), and ask for Screen Recording last.
+    /// The Screen Recording ask waits while anything records: macOS may ask
     /// Transcripted to quit and reopen after the grant.
+    ///
+    /// It never waits on the keyboard. macOS 26 won't let an app turn a
+    /// keyboard on, so until the user adds it the keyboard row shows as
+    /// pending with the steps (`WritingKeyboardSetupState`), and nothing
+    /// opens System Settings unasked.
     func turnOnWriting() {
         let choices = draft
         guard choices.canContinueStep1, choices.canContinueStep2 else { return }
@@ -372,11 +393,11 @@ final class WritingSettingsModel: ObservableObject {
         screen = .everyday
         if !keyboardSelected {
             // Text Input Sources can take a moment to list a just-registered
-            // keyboard. One retry, then Keyboard settings.
+            // keyboard. One retry; after that the guidance stays up.
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let self else { return }
-                self.controller.turnOnKeyboard()
+                self.controller.turnOnKeyboard(openSettingsOnFailure: false)
                 self.refreshKeyboard()
             }
         }
@@ -423,8 +444,11 @@ final class WritingSettingsModel: ObservableObject {
         refreshLive()
     }
 
-    func turnOnKeyboard() {
-        controller.turnOnKeyboard()
+    /// "Open Keyboard Settings": tries the install, enable and select once
+    /// more, then opens Keyboard settings if the keyboard still isn't the
+    /// input source. The only path that opens System Settings for it.
+    func openKeyboardSettings() {
+        controller.turnOnKeyboard(openSettingsOnFailure: true)
         refreshKeyboard()
     }
 
