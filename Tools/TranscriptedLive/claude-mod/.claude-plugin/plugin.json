@@ -1,0 +1,8 @@
+{
+  "name": "transcripted-live",
+  "version": "0.1.0",
+  "description": "Experiment: the meeting Transcripted is recording, live beside the transcript. A pane of what was just said (you = mic, them = call audio), a status line while recording, /meeting attach to hand Claude the last few minutes, and a read_live tool Claude can call. Needs the transcripted-live helper running.",
+  "author": {
+    "name": "Transcripted"
+  }
+}
