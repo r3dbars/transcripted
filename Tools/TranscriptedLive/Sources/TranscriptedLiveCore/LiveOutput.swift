@@ -75,12 +75,11 @@ public final class LiveOutput {
 
     public func begin(meetingId: String, startedAt: Date, title: String?, source: String) throws {
         try? handle?.close()
+        // The helper always reads a recording from its first sample, so a
+        // restart mid-meeting rewrites the file rather than doubling every line.
         let url = root.appendingPathComponent("meetings/\(meetingId).jsonl")
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-        }
+        FileManager.default.createFile(atPath: url.path, contents: nil)
         let handle = try FileHandle(forWritingTo: url)
-        try handle.seekToEnd()
         self.handle = handle
 
         session.state = .recording
@@ -90,7 +89,7 @@ public final class LiveOutput {
         session.startedAt = startedAt
         session.endedAt = nil
         session.utterancesPath = url.path
-        session.lineCount = Self.countLines(at: url)
+        session.lineCount = 0
         session.audioSeconds = 0
         session.partial = [:]
         try writeSession(force: true)
@@ -160,8 +159,4 @@ public final class LiveOutput {
         return String(cString: path).hasSuffix("/transcripted-live") ? existing.pid : nil
     }
 
-    private static func countLines(at url: URL) -> Int {
-        guard let data = try? Data(contentsOf: url) else { return 0 }
-        return data.reduce(0) { $1 == 0x0A ? $0 + 1 : $0 }
-    }
 }
