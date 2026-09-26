@@ -31,11 +31,12 @@ function sessionJson(state: 'recording' | 'ended'): string {
   })
 }
 
-type World = { statuses: (string | undefined)[]; opened: string[] }
+type World = { statuses: (string | undefined)[]; opened: string[]; closed: string[] }
 
 /** The helper's files and the engine calls the mod makes, answered from memory. */
 function world(on: On, state: 'recording' | 'ended' = 'recording'): World {
-  const seen: World = { statuses: [], opened: [] }
+  const seen: World = { statuses: [], opened: [], closed: [] }
+  const open = new Set<string>()
   const files: Record<string, string> = {
     [`${ROOT}/session.json`]: sessionJson(state),
     [JSONL_PATH]: UTTERANCES.map(line => JSON.stringify(line)).join('\n') + '\n',
@@ -63,8 +64,17 @@ function world(on: On, state: 'recording' | 'ended' = 'recording'): World {
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.open', ($, e) => {
     seen.opened.push(e.id)
+    open.add(e.id)
     return { value: undefined }
   })
+  on('ui.close', ($, e) => {
+    seen.closed.push(e.id)
+    open.delete(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({
+    value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })),
+  }))
   return seen
 }
 
@@ -111,5 +121,19 @@ describe('register', () => {
 
     expect(seen.statuses.at(-1)).toBe('○ ended · /meeting attach')
     expect(seen.opened).toEqual([])
+  })
+
+  test('/meeting quietly hides the pane, then shows it again', async ($, on) => {
+    const seen = world(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    expect(seen.opened).toEqual(['live-meeting'])
+
+    const hidden = await $.command.run({ command: 'meeting', args: '', ...COMPOSER })
+    expect(hidden.text).toBeUndefined()
+    expect(seen.closed).toEqual(['live-meeting'])
+
+    await $.command.run({ command: 'meeting', args: '', ...COMPOSER })
+    expect(seen.opened).toEqual(['live-meeting', 'live-meeting'])
   })
 })

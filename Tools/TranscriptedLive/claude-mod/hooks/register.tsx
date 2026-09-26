@@ -41,7 +41,8 @@ type LiveState = {
   lastStatus: string | undefined
   lastRenderKey: string
   autoOpenedFor: string
-  closedFor: string
+  /** The person hid the pane; it stays hidden, new meetings too, until /meeting. */
+  isHidden: boolean
   /** The poll under way, so a command waits for fresh state instead of racing it. */
   polling: Promise<void> | null
 }
@@ -84,7 +85,7 @@ export function register(on: On) {
     lastStatus: undefined,
     lastRenderKey: '',
     autoOpenedFor: '',
-    closedFor: '',
+    isHidden: false,
     polling: null,
   }
 
@@ -134,6 +135,19 @@ export function register(on: On) {
     const session = s.session
 
     if (verb === 'help') return { text: HELP_TEXT }
+
+    if (verb === '') {
+      // Plain /meeting shows or hides the pane, quietly.
+      const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID)
+      s.isHidden = isOpen
+      if (isOpen) {
+        await $.ui.close({ id: PANE_ID }).catch(() => undefined)
+      } else {
+        await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+      }
+      return {}
+    }
+
     if (!session) return { text: HELPER_MISSING_TEXT }
 
     if (verb === 'attach') {
@@ -160,23 +174,11 @@ export function register(on: On) {
       }
     }
 
-    if (verb !== '') return { text: HELP_TEXT }
-
-    const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID)
-    if (isOpen) {
-      s.closedFor = session.meetingId ?? ''
-      await $.ui.close({ id: PANE_ID }).catch(() => undefined)
-      return { text: 'Live meeting pane hidden. /meeting brings it back.' }
-    }
-    s.closedFor = ''
-    await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
-    return {
-      text: 'Live meeting pane open. It docks beside the conversation in fullscreen (/tui fullscreen) at 110+ columns.',
-    }
+    return { text: HELP_TEXT }
   })
 
   on('ui.close', { id: PANE_ID }, ($, e, next) => {
-    if (e.origin.kind === 'person') s.closedFor = s.session?.meetingId ?? ''
+    if (e.origin.kind === 'person') s.isHidden = true
     return next(e)
   })
 
@@ -326,7 +328,7 @@ async function pollOnce($: EngineInterface, s: LiveState) {
     }
 
     const meetingId = s.session?.meetingId ?? ''
-    if (isLive(s, now) && meetingId && s.autoOpenedFor !== meetingId && s.closedFor !== meetingId) {
+    if (isLive(s, now) && meetingId && s.autoOpenedFor !== meetingId && !s.isHidden) {
       s.autoOpenedFor = meetingId
       await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
     }
