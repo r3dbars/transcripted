@@ -50,7 +50,7 @@ const PANE_ID = 'live-meeting'
 const PANE_TITLE = 'Live meeting'
 const COMMAND_NAME = 'meeting'
 const TOOL_SHORT_NAME = 'read_live'
-const POLL_MS = 1000
+const POLL_MS = 400
 /** A recording session whose helper stopped writing this long ago is stale. */
 const STALE_MS = 15_000
 /** How long "meeting ended" stays in the status line. */

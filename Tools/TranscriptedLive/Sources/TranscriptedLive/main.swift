@@ -5,7 +5,7 @@ import TranscriptedLiveCore
 let usage = """
 transcripted-live: live meeting transcription for the Claude Code mod (experiment)
 
-  transcripted-live watch [--recordings DIR] [--chunk 160|320|1280]
+  transcripted-live watch [--recordings DIR] [--chunk 160|320|1280] [--pause-ms 640]
       Wait for Transcripted to record a meeting and transcribe it live.
 
   transcripted-live replay FILE [--as you|them] [--mic FILE] [--system FILE]
@@ -68,7 +68,9 @@ do {
 } catch {
     fail("can't write \(LiveOutput.defaultRoot.path): \(error)")
 }
-let runner = LiveRunner(output: output, chunkSize: chunkSize, log: log)
+// How long a speaker must pause before their line is final (FluidAudio's default is 1280).
+let pauseMs = Int(option("--pause-ms") ?? "640") ?? 640
+let runner = LiveRunner(output: output, chunkSize: chunkSize, pauseMs: pauseMs, log: log)
 
 let work = Task {
     do {

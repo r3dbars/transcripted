@@ -61,10 +61,10 @@ public final class LiveRunner {
     private let log: (String) -> Void
     private var echo = EchoFilter()
 
-    public init(output: LiveOutput, chunkSize: StreamingChunkSize, log: @escaping (String) -> Void) {
+    public init(output: LiveOutput, chunkSize: StreamingChunkSize, pauseMs: Int, log: @escaping (String) -> Void) {
         self.output = output
-        self.you = StreamTranscriber(speaker: "you", chunkSize: chunkSize)
-        self.them = StreamTranscriber(speaker: "them", chunkSize: chunkSize)
+        self.you = StreamTranscriber(speaker: "you", chunkSize: chunkSize, pauseMs: pauseMs)
+        self.them = StreamTranscriber(speaker: "them", chunkSize: chunkSize, pauseMs: pauseMs)
         self.log = log
     }
 

@@ -165,9 +165,10 @@ public actor StreamTranscriber {
     private var resampler: MonoResampler?
     private var utteranceStart: Double?
 
-    public init(speaker: String, chunkSize: StreamingChunkSize = .ms320) {
+    /// `pauseMs` is how long a speaker must stop before their line is final.
+    public init(speaker: String, chunkSize: StreamingChunkSize = .ms320, pauseMs: Int = 640) {
         self.speaker = speaker
-        self.manager = StreamingEouAsrManager(chunkSize: chunkSize)
+        self.manager = StreamingEouAsrManager(chunkSize: chunkSize, eouDebounceMs: pauseMs)
     }
 
     /// Downloads the model on first use (FluidAudio's cache), then loads it.
