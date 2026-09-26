@@ -72,8 +72,8 @@ func testDictationSounds() {
     }
 
     runSuite("AppSoundPlayer uses expected bundled files only") {
-        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.caf", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.caf", "stop cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.wav", "start cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.wav", "stop cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the stop click")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "dictation-cancelled.wav", "cancel cue uses the bundled soft cue, never a system sound")
@@ -125,8 +125,8 @@ func testDictationSounds() {
             [
                 "README.md",
                 "dictation-cancelled.wav",
-                "dictation-start.caf",
-                "dictation-stop.caf",
+                "dictation-start.wav",
+                "dictation-stop.wav",
                 "meeting-transcript-complete.mp3",
                 "menu-hover.wav",
                 "menu-press.wav",

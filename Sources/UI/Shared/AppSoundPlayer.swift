@@ -48,7 +48,7 @@ final class AppSoundPlayer {
             case .dictationStop:
                 return TranscriptedConstants.dictationStopSoundFileName
             case .noSpeech, .dictationCancelled:
-                // Nothing was pasted, so these get their own soft drop.
+                // Nothing was pasted, so these get their own double click.
                 return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName

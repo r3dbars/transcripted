@@ -324,10 +324,10 @@ enum TranscriptedConstants {
     static let staleCueDropInterval: TimeInterval = 1.0
 
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
-    static let listeningStartSoundFileName = "dictation-start.caf"
+    static let listeningStartSoundFileName = "dictation-start.wav"
     /// Acknowledges Stop right away. It does not mean the text was pasted.
-    static let dictationStopSoundFileName = "dictation-stop.caf"
-    /// Soft two-note drop for "nothing was pasted": a cancelled dictation or one with no speech.
+    static let dictationStopSoundFileName = "dictation-stop.wav"
+    /// A quick double click for "nothing was pasted": a cancelled dictation or one with no speech.
     static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
 
