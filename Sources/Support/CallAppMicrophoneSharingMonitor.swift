@@ -59,7 +59,11 @@ enum MicrophoneSharingPolicy {
 /// opened here.
 @MainActor
 final class CallAppMicrophoneSharingMonitor: ObservableObject {
-    static let shared = CallAppMicrophoneSharingMonitor()
+    static let shared = CallAppMicrophoneSharingMonitor(
+        backgroundRunningApplicationBundleIDs: {
+            Array(await RunningApplicationsReader.bundleIdentifiers())
+        }
+    )
 
     @Published private(set) var isCallAppRunning = false
     /// Which listed call apps are open. Lets owners notice a second call app
@@ -67,27 +71,58 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
     @Published private(set) var runningCallAppBundleIDs: Set<String> = []
     private let notificationCenter: NotificationCenter
     private let runningApplicationBundleIDs: () -> [String]
+    /// Read used for app launch/quit notifications. Off the main thread,
+    /// because a just-launched app's first bundle ID read can block on
+    /// LaunchServices. Nil (tests) refreshes synchronously instead.
+    private let backgroundRunningApplicationBundleIDs: (() async -> [String])?
+    /// Bumped by every refresh, so a background read that finishes after a
+    /// newer one (or after a synchronous pre-capture refresh) is dropped.
+    private var refreshGeneration = 0
     private var observers: [NSObjectProtocol] = []
 
     init(
         notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         runningApplicationBundleIDs: @escaping () -> [String] = {
             NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-        }
+        },
+        backgroundRunningApplicationBundleIDs: (() async -> [String])? = nil
     ) {
         self.notificationCenter = notificationCenter
         self.runningApplicationBundleIDs = runningApplicationBundleIDs
+        self.backgroundRunningApplicationBundleIDs = backgroundRunningApplicationBundleIDs
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             observers.append(notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
+                MainActor.assumeIsolated { self?.refreshAfterApplicationChange() }
             })
         }
         refresh()
     }
 
+    /// Synchronous read, for capture start: it must decide before the mic
+    /// opens. The background refreshes on launch/quit keep each app's info
+    /// cached, so this read is usually instant.
     func refresh() {
+        refreshGeneration += 1
+        apply(runningApplicationBundleIDs: runningApplicationBundleIDs())
+    }
+
+    private func refreshAfterApplicationChange() {
+        guard let backgroundRunningApplicationBundleIDs else {
+            refresh()
+            return
+        }
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        Task { @MainActor [weak self] in
+            let bundleIDs = await backgroundRunningApplicationBundleIDs()
+            guard let self, generation == self.refreshGeneration else { return }
+            self.apply(runningApplicationBundleIDs: bundleIDs)
+        }
+    }
+
+    private func apply(runningApplicationBundleIDs bundleIDs: [String]) {
         let apps = MicrophoneSharingPolicy.runningCallApps(
-            runningApplicationBundleIDs: runningApplicationBundleIDs()
+            runningApplicationBundleIDs: bundleIDs
         )
         if runningCallAppBundleIDs != apps { runningCallAppBundleIDs = apps }
         let running = !apps.isEmpty
