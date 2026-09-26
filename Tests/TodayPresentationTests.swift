@@ -186,5 +186,26 @@ func testTodayPresentation() {
         assertEqual(stats.todayWritingApps.map(\.appName), ["Slack", "Notes"], "apps by words written")
         let parts = TodayTapeBuilder.headerParts(stats).map(\.text)
         assertEqual(parts, ["1 meeting (42m)", "14 words written"], "header skips empty streams")
+
+        let item = { (kind: TodayRecentItem.Kind, id: String, seconds: Int?, app: String?, words: Int?) in
+            TodayRecentItem(kind: kind, id: id, title: id, date: date(20, 10), durationSeconds: seconds, transcriptURL: nil, appName: app, words: words)
+        }
+        let friday = TodayTapeBuilder.days(
+            captures: [
+                item(.meeting, "m", 30 * 60, nil, nil),
+                item(.dictation, "d", nil, nil, 8),
+                item(.writing, "w1", 60, "Notes", 40),
+                item(.writing, "w2", 60, "Slack", 60),
+            ],
+            now: now,
+            calendar: calendar
+        ).first { calendar.isDate($0.day, inSameDayAs: date(20)) }
+        let dayStats = friday.map(TodayTapeBuilder.dayStats)
+        assertEqual(dayStats?.todayMeetings, 1, "the day's meetings")
+        assertEqual(dayStats?.todayMeetingMinutes, 30, "the day's meeting minutes")
+        assertEqual(dayStats?.todayDictations, 1, "the day's dictations")
+        assertEqual(dayStats?.todayWritingWords, 100, "the day's words written")
+        assertEqual(dayStats?.todayWritingApps.map(\.appName), ["Slack", "Notes"], "the day's apps by words")
+        assertEqual(TodayCopy.weekdayLong(for: date(20), locale: locale, calendar: calendar), "Sunday", "long weekday")
     }
 }

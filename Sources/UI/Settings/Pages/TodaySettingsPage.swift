@@ -44,15 +44,24 @@ struct TodaySettingsPage: View {
 
     // MARK: Header
 
+    /// Today's numbers, or the picked day's from its tape.
+    private var headerStats: TodayContextStats {
+        guard let selectedDay, !selectedDay.isToday else { return stats }
+        return TodayTapeBuilder.dayStats(selectedDay)
+    }
+
     private var header: some View {
-        HStack(alignment: .bottom, spacing: 24) {
+        let day = selectedDay
+        let isToday = day?.isToday ?? true
+        return HStack(alignment: .bottom, spacing: 24) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(TodayCopy.dateLine(for: now))
+                Text(TodayCopy.dateLine(for: day?.day ?? now))
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink2)
-                Text("Today")
+                Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? now))
                     .font(LibraryTokens.title)
-                TodaySentence(stats: stats, onShowMeetings: onShowMeetings, onShowDictations: onShowDictations)
+                    .contentTransition(.opacity)
+                TodaySentence(stats: headerStats, isToday: isToday)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -161,8 +170,7 @@ extension TodayRecentItem.Kind {
 /// apps." Each stream in its color; the app count opens a per-app breakdown.
 private struct TodaySentence: View {
     let stats: TodayContextStats
-    let onShowMeetings: () -> Void
-    let onShowDictations: () -> Void
+    let isToday: Bool
 
     @State private var showsApps = false
 
@@ -170,7 +178,7 @@ private struct TodaySentence: View {
         let parts = TodayTapeBuilder.headerParts(stats)
         HStack(spacing: 0) {
             if parts.isEmpty {
-                Text("Nothing saved yet today.")
+                Text(isToday ? "Nothing saved yet today." : "Nothing saved this day.")
                     .foregroundStyle(LibraryTokens.ink2)
             } else {
                 sentence(parts)
@@ -245,6 +253,11 @@ private struct TodayDayCard: View {
         return marks.first { $0.id == pickedMarkID } ?? marks.max { $0.item.date < $1.item.date }
     }
 
+    /// What the preview shows: the hovered mark, else the picked one.
+    private var shown: TodayTapeMark? {
+        day.allMarks.first { $0.id == hoveredMarkID } ?? picked
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -280,8 +293,8 @@ private struct TodayDayCard: View {
             }
 
             Group {
-                if let picked {
-                    preview(picked)
+                if let shown {
+                    preview(shown)
                 } else {
                     Text(day.isToday ? "Nothing saved yet today." : "Nothing saved this day.")
                         .font(LibraryTokens.meta)
@@ -338,7 +351,7 @@ private struct TodayDayCard: View {
 
     private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat) -> some View {
         let markWidth: CGFloat = mark.isDot ? 10 : max(8, width * CGFloat((mark.end ?? mark.start) - mark.start))
-        let isPicked = picked?.id == mark.id
+        let isPicked = shown?.id == mark.id
         let isHovered = hoveredMarkID == mark.id
         return Button {
             withAnimation(.easeOut(duration: 0.12)) { pickedMarkID = mark.id }
@@ -402,25 +415,21 @@ private struct TodayDayCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 14) {
-                Button("← Prev") {
+            HStack(spacing: 2) {
+                arrowButton("chevron.left", label: "Previous") {
                     if let index, index > 0 { pickedMarkID = marks[index - 1].id }
                 }
                 .disabled(index == nil || index == 0)
                 .accessibilityIdentifier("transcripted.today.preview.prev")
-                Button("Next →") {
+                arrowButton("chevron.right", label: "Next") {
                     if let index, index + 1 < marks.count { pickedMarkID = marks[index + 1].id }
                 }
                 .disabled(index == nil || index == marks.count - 1)
                 .accessibilityIdentifier("transcripted.today.preview.next")
-                Button("Open") { onOpen(item) }
-                    .foregroundStyle(LibraryTokens.accent)
-                    .fontWeight(.semibold)
+                arrowButton("arrow.up.right", label: "Open") { onOpen(item) }
                     .accessibilityIdentifier("transcripted.today.preview.open")
             }
-            .buttonStyle(.plain)
-            .font(LibraryTokens.meta)
-            .foregroundStyle(LibraryTokens.ink3)
+            .padding(.top, -2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -434,6 +443,38 @@ private struct TodayDayCard: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.today.preview")
+    }
+}
+
+/// A small borderless arrow for the preview card.
+private func arrowButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+    TodayArrowButton(systemImage: systemImage, label: label, action: action)
+}
+
+private struct TodayArrowButton: View {
+    let systemImage: String
+    let label: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isEnabled ? (isHovering ? Color.primary : LibraryTokens.ink2) : LibraryTokens.ink3.opacity(0.5))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                        .fill(isHovering && isEnabled ? LibraryTokens.rowHover : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 

@@ -225,6 +225,33 @@ enum TodayTapeBuilder {
         return min(1, max(0, date.timeIntervalSince(windowStart) / span))
     }
 
+    /// A past day's numbers for the header, from its tape marks: meeting
+    /// count and length, dictation count, words written and in which apps.
+    /// Only the `today…` fields are filled; the header reads those.
+    static func dayStats(_ day: TodayTapeDay) -> TodayContextStats {
+        let meetingSeconds = day.meetings.reduce(0) { $0 + max(0, $1.item.durationSeconds ?? 0) }
+        var wordsByApp: [String: Int] = [:]
+        for mark in day.writing {
+            wordsByApp[mark.item.appName ?? "Unknown app", default: 0] += mark.item.words ?? 0
+        }
+        var stats = TodayContextStats(
+            todayMeetings: day.meetings.count,
+            todayDictations: day.dictations.count,
+            todayMeetingMinutes: Int((Double(meetingSeconds) / 60).rounded()),
+            todayDictationWords: day.dictations.reduce(0) { $0 + ($1.item.words ?? 0) },
+            weekMeetings: 0,
+            weekDictations: 0,
+            weekMeetingMinutes: 0,
+            weekDictationWords: 0
+        )
+        stats.todayWritingWords = wordsByApp.values.reduce(0, +)
+        stats.todayWritingEntries = day.writing.count
+        stats.todayWritingApps = wordsByApp
+            .map { TodayAppWords(appName: $0.key, words: $0.value) }
+            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.appName < $1.appName }
+        return stats
+    }
+
     /// Header sentence pieces: "4 meetings (2h 10m)", "12 dictations",
     /// "1,280 words written". Only the streams with something today.
     static func headerParts(_ stats: TodayContextStats) -> [(kind: TodayRecentItem.Kind, text: String)] {
@@ -410,6 +437,11 @@ enum TodayCopy {
     /// "Thursday, September 24".
     static func dateLine(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
         TodayFormatterCache.string(from: date, template: "EEEEMMMMd", locale: locale, calendar: calendar)
+    }
+
+    /// "Friday".
+    static func weekdayLong(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        TodayFormatterCache.string(from: date, template: "EEEE", locale: locale, calendar: calendar)
     }
 
     /// "Thu".
