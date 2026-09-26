@@ -43,6 +43,10 @@ type LiveState = {
   autoOpenedFor: string
   /** The person hid the pane; it stays hidden, new meetings too, until /meeting. */
   isHidden: boolean
+  /** Keep the pane on the newest line; off once the person scrolls back to read. */
+  isFollowing: boolean
+  /** Where the pane's window sat at the last drawing, to see a scroll up. */
+  lastOffset: number
   /** The poll under way, so a command waits for fresh state instead of racing it. */
   polling: Promise<void> | null
 }
@@ -86,6 +90,8 @@ export function register(on: On) {
     lastRenderKey: '',
     autoOpenedFor: '',
     isHidden: false,
+    isFollowing: true,
+    lastOffset: 0,
     polling: null,
   }
 
@@ -140,6 +146,7 @@ export function register(on: On) {
       // Plain /meeting shows or hides the pane, quietly.
       const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID)
       s.isHidden = isOpen
+      s.isFollowing = true
       if (isOpen) {
         await $.ui.close({ id: PANE_ID }).catch(() => undefined)
       } else {
@@ -196,8 +203,6 @@ export function register(on: On) {
 
     const { Box, Text } = await $.ui.resolve(e)
     const columns = Math.max(24, e.props.bodyColumns - 1)
-    const rows = Math.max(6, e.props.scroll.bodyRows)
-    const textColumns = columns - LABEL_WIDTH
     const now = Date.now()
     const session = s.session
 
@@ -222,20 +227,17 @@ export function register(on: On) {
       .map(speaker => [speaker, (session.partial?.[speaker] ?? '').trim()] as const)
       .filter(([, text]) => text !== '')
 
-    // Newest lines that fit under the header and above the typing rows.
-    const budget = rows - 2 - partials.length
-    const shown: { line: Utterance; hasLabel: boolean }[] = []
-    let used = 0
-    for (let index = s.lines.length - 1; index >= 0; index -= 1) {
-      const line = s.lines[index]!
-      const previous = s.lines[index - 1]
-      const hasLabel = startsTurn(line, previous)
-      const need = wrapRows(line.text, textColumns) + (hasLabel ? 1 : 0)
-      if (used + need > budget && shown.length > 0) break
-      used += need
-      shown.unshift({ line, hasLabel })
+    // The whole meeting; the pane scrolls it, and poll keeps it on the newest
+    // line unless the person scrolled back to read.
+    const shown = s.lines.map((line, index) => ({ line, hasLabel: startsTurn(line, s.lines[index - 1]) }))
+    // Scrolling up in the focused pane pauses following; leaving the pane resumes it.
+    const { offset } = e.props.scroll
+    if (!e.props.isFocused) {
+      s.isFollowing = true
+    } else if (offset < s.lastOffset) {
+      s.isFollowing = false
     }
-    if (shown[0]) shown[0].hasLabel = true
+    s.lastOffset = offset
 
     const label = (line: Utterance) => (
       <Text>
@@ -344,6 +346,12 @@ async function pollOnce($: EngineInterface, s: LiveState) {
     if (renderKey !== s.lastRenderKey) {
       s.lastRenderKey = renderKey
       $.ui.invalidate('ui.render')
+      if (s.isFollowing) {
+        // After the redraw lands, so "end" is the new end.
+        $.clock.after(60, () => {
+          void $.ui.scroll({ in: PANE_ID, to: 'end' }).catch(() => undefined)
+        })
+      }
     }
   }
 }
@@ -463,10 +471,5 @@ function clock(seconds: number): string {
 
 function countLabel(count: number): string {
   return `${count} line${count === 1 ? '' : 's'}`
-}
-
-/** Rows a wrapped Text of `text` takes; a bit generous, since wrap breaks at words. */
-function wrapRows(text: string, columns: number): number {
-  return Math.max(1, Math.ceil(text.length / Math.max(8, columns - 4)))
 }
 
