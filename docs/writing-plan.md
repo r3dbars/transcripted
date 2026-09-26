@@ -46,7 +46,9 @@ It is not a code source for this port.
    phase 2 it's pointed at `Sources/TranscriptedWriting/Core`, so it tests what
    ships. It's Justin's testing tool, not a product.
 9. `llama-server`: re-sign the exact binary Tilde 0.1.0 beta 1 shipped. Write
-   down a reproducible llama.cpp build recipe before public rollout.
+   down a reproducible llama.cpp build recipe before public rollout. It was built
+   from llama.cpp commit `2115b73` (AppleClang 21, arm64, static); see the
+   ledger's Follow-ups for the recipe.
 10. Saved-text fidelity for v1: keyboard capture only, plus Backspace
     tracking so deleted text isn't saved. Look at real files before deciding
     whether an Accessibility read of the final field text is worth adding.
@@ -175,7 +177,10 @@ Shaped like the Dictations page:
 - Today's saved writing, newest first, in the same row style as dictations.
 - "N suggestions accepted today".
 - Actions: **Edit setup**, **Pause for 1 hour**, **Delete all writing**, a
-  storage meter, and the model switch.
+  storage meter, and the model switch. Pause stops suggestions, saving and
+  screen reading for the hour (Tilde's pause only stopped suggestions).
+- The intro has a quiet **Not now** that leaves Writing off and clears the
+  sidebar's `New` badge.
 
 ## Permissions
 

@@ -28,7 +28,9 @@ settings-side agent connection flow.
   `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
   by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Today/Meetings/Dictations/Speakers/Agent); all configuration lives
+  content section (Today/Meetings/Dictations/Writing/Speakers/Agent); the
+  Writing row carries a quiet trailing "New" badge until
+  `WritingSidebarNewBadge.dismissedDefaultsKey` is set. All configuration lives
   on one combined scrolling settings page reached from the sidebar gear — the
   old General/Storage/About tab strip was removed, and `.storage`/`.about`
   (like the earlier `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
@@ -42,7 +44,10 @@ settings-side agent connection flow.
   recorder container.
 - `TranscriptedSettingsPage.swift` - the sidebar page enum. `.today` is first
   and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
-  automation ids, analytics `page_id`, and source pins stay stable.
+  automation ids, analytics `page_id`, and source pins stay stable. Then
+  Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6. Also holds
+  `WritingSidebarNewBadge`, whose defaults key the Writing page sets when
+  setup finishes.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
   `Pages/TodaySettingsPage.swift` - the Today page. Counts, the rolling
   seven-day tape, and Recent context all come from local capture files: the
@@ -144,7 +149,9 @@ settings-side agent connection flow.
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
   `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`,
-  `StorageSettingsPage.swift`, and `TodaySettingsPage.swift`). Model, shortcut, and privacy editors are
+  `StorageSettingsPage.swift`, `TodaySettingsPage.swift`, and
+  `WritingSettingsPage.swift`, which hosts the Writing intro, setup, and
+  everyday views from `Sources/UI/Settings/Writing/`). Model, shortcut, and privacy editors are
   injected into General's cards as closures. New settings pages should land here as
   their own file instead of growing the shell. `HomeSettingsPage.swift` owns
   the header, scan-warning/activity rows, search field, and day-grouped

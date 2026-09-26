@@ -191,6 +191,8 @@ allowlist.
 - `meeting_speaker_review_submitted`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
+- `writing_daily_counts`
+- `writing_setup_completed`
 
 ## Allowed property style
 
@@ -229,6 +231,14 @@ allowlist.
   `dictation_pinned_microphone_*` events are forwarded from local
   `EventReporter` events by `AnalyticsEventForwardingPolicy`, which rebuilds
   every value from a fixed set; raw pinned counts stay in local logs
+- Writing analytics limited to `save_enabled`, `autocomplete_enabled`,
+  `app_scope` (`all` / `picked`), and `model_choice` (`gemma_e2b` /
+  `qwen_9b`) on `writing_setup_completed`, plus, on `writing_daily_counts`,
+  the previous local day's `suggestions_shown`, `suggestions_accepted`, and
+  `words_accepted_bucket`. `Sources/Writing/WritingAnalytics.swift` builds
+  them from the text-free outcome ledger summary, sends at most one daily
+  event, and skips a day with nothing shown or accepted. Never text, app
+  names, bundle IDs, or per-suggestion events
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
@@ -272,6 +282,10 @@ For each new or changed event:
   them, whole seconds); `recording_minutes` (whole minutes); plus `stt_model`,
   `mac_chip`, and `memory_gb_bucket`. `MeetingPipelineTimings` collects them in
   Core and `MeetingProcessingTelemetry` formats them. Durations and counts only
+- Writing usage is the fourth: `writing_daily_counts` carries the raw
+  `suggestions_shown` and `suggestions_accepted` totals for one whole local
+  day, read from the text-free outcome ledger. Accepted words go out only as
+  `words_accepted_bucket`, on the `word_count_bucket` boundaries
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and

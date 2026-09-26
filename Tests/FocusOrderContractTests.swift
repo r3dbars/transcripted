@@ -54,6 +54,7 @@ func testFocusOrderContract() {
                     "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
                     "transcripted.settings.sidebar.dictations",
+                    "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
                     "transcripted.settings.sidebar.connect-agent",
                 ],
@@ -134,18 +135,25 @@ func testFocusOrderContract() {
             sidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
         )
+        assertTrue(
+            sidebarSource.contains("pages: [.today, .home, .dictations, .writing, .people, .connectAgent]"),
+            "the sidebar's primary rows should list the pages in the focus order the contract pins"
+        )
 
-        // The five primary navigation pages the contract orders must still exist.
-        for pageCase in ["case today", "case home", "case dictations", "case people", "case connectAgent"] {
+        // The six primary navigation pages the contract orders must still exist.
+        for pageCase in ["case today", "case home", "case dictations", "case writing", "case people", "case connectAgent"] {
             assertTrue(
                 pagesSource.contains(pageCase),
                 "\(pageCase) should stay in the settings navigation surface the focus order depends on"
             )
         }
+        // The primary pages are the ones with a ⌘ shortcut, in page order.
         assertEqual(
-            FocusOrderContract.settingsSidebarOrder.count,
-            5,
-            "settings sidebar focus order should cover the five primary navigation pages"
+            FocusOrderContract.settingsSidebarOrder,
+            TranscriptedSettingsPage.allCases
+                .filter { $0.navigationShortcutKey != nil }
+                .map(\.automationIdentifier),
+            "settings sidebar focus order should cover the six primary navigation pages in ⌘1–⌘6 order"
         )
     }
 }
