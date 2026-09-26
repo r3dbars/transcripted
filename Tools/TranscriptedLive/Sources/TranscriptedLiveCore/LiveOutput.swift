@@ -24,11 +24,25 @@ public struct LiveSession: Codable, Equatable {
     public var pid: Int32
 }
 
+public enum LiveOutputError: Error, CustomStringConvertible {
+    case alreadyRunning(pid: Int32)
+
+    public var description: String {
+        switch self {
+        case .alreadyRunning(let pid):
+            return "another transcripted-live is already running (pid \(pid)); stop it first, since both would write the same session.json"
+        }
+    }
+}
+
 public final class LiveOutput {
     /// Separate from the app's own Application Support folder on purpose: the
     /// helper never writes anywhere Transcripted reads.
     public static var defaultRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let override = ProcessInfo.processInfo.environment["TRANSCRIPTED_LIVE_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TranscriptedLive", isDirectory: true)
     }
 
@@ -46,6 +60,9 @@ public final class LiveOutput {
     public init(root: URL = LiveOutput.defaultRoot, model: String) throws {
         self.root = root
         try FileManager.default.createDirectory(at: root.appendingPathComponent("meetings"), withIntermediateDirectories: true)
+        if let pid = Self.runningHelperPid(sessionURL: root.appendingPathComponent("session.json")) {
+            throw LiveOutputError.alreadyRunning(pid: pid)
+        }
         session = LiveSession(
             state: .idle, meetingId: nil, title: nil, source: nil, model: model,
             startedAt: nil, endedAt: nil, updatedAt: Date(), utterancesPath: nil, lineCount: 0,
@@ -126,6 +143,21 @@ public final class LiveOutput {
         session.updatedAt = now
         try encoder.encode(session).write(to: sessionURL, options: .atomic)
         lastSessionWrite = now
+    }
+
+    /// The pid in an existing session.json, if that process is still a
+    /// transcripted-live (a crashed helper's pid may belong to something else now).
+    static func runningHelperPid(sessionURL: URL) -> Int32? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let data = try? Data(contentsOf: sessionURL),
+              let existing = try? decoder.decode(LiveSession.self, from: data),
+              existing.pid > 0, existing.pid != getpid(), kill(existing.pid, 0) == 0 else {
+            return nil
+        }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(existing.pid, &path, UInt32(path.count)) > 0 else { return nil }
+        return String(cString: path).hasSuffix("/transcripted-live") ? existing.pid : nil
     }
 
     private static func countLines(at url: URL) -> Int {

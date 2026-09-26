@@ -63,6 +63,8 @@ guard command == "watch" || command == "replay" else { fail(usage) }
 let output: LiveOutput
 do {
     output = try LiveOutput(model: modelLabel)
+} catch let error as LiveOutputError {
+    fail("\(error)")
 } catch {
     fail("can't write \(LiveOutput.defaultRoot.path): \(error)")
 }
