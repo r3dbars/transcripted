@@ -643,17 +643,20 @@ final class MeetingPromptDetector {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.handleWorkspaceApplicationNotification(notification)
+                    guard let app else { return }
+                    // Off the main thread: a just-launched app's first
+                    // bundle ID read can block on LaunchServices.
+                    let bundleIdentifier = await RunningApplicationsReader.bundleIdentifier(of: app)
+                    self?.handleWorkspaceApplication(bundleIdentifier: bundleIdentifier)
                 }
             }
         }
     }
 
-    private func handleWorkspaceApplicationNotification(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleIdentifier = app.bundleIdentifier,
+    private func handleWorkspaceApplication(bundleIdentifier: String?) {
+        guard let bundleIdentifier,
               let provider = provider(forBundleIdentifier: bundleIdentifier),
               provider.supportsNativeRuntimePrompt else { return }
 

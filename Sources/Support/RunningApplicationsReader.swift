@@ -4,9 +4,11 @@
 // `NSRunningApplication.bundleIdentifier` can make a synchronous
 // LaunchServices call the first time it is read for an app. On one 1.1.66
 // Mac that call blocked the main thread for 5+ seconds, several times in
-// half an hour, while meeting detection scanned the running apps. The scan
-// now runs on one serial queue, so a slow LaunchServices reply only delays
-// that scan and never freezes the app. A serial queue (not a detached task)
+// half an hour, inside an async job on the main actor (meeting detection's
+// scan or its app-launch handler; the app frame was unsymbolicated). These
+// reads now run on one serial queue, so a slow LaunchServices reply only
+// delays that work and never freezes the app. Reading here also warms each
+// app's cached info, so a later main-thread read is usually instant. A serial queue (not a detached task)
 // keeps a stuck reply from tying up Swift's shared thread pool.
 
 import AppKit
@@ -20,7 +22,7 @@ struct RunningApplicationInfo: Sendable {
 enum RunningApplicationsReader {
     private static let readQueue = DispatchQueue(
         label: "com.transcripted.running-applications",
-        qos: .utility
+        qos: .userInitiated
     )
 
     static func applications() async -> [RunningApplicationInfo] {
@@ -40,5 +42,15 @@ enum RunningApplicationsReader {
 
     static func bundleIdentifiers() async -> Set<String> {
         Set(await applications().compactMap(\.bundleIdentifier))
+    }
+
+    /// One app's bundle ID. A just-launched app's `NSRunningApplication`
+    /// has no cached info yet, so its first read is the slow one.
+    static func bundleIdentifier(of app: NSRunningApplication) async -> String? {
+        await withCheckedContinuation { continuation in
+            readQueue.async {
+                continuation.resume(returning: app.bundleIdentifier)
+            }
+        }
     }
 }
