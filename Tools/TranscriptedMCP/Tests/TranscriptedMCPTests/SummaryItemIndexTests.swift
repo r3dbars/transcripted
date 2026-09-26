@@ -221,6 +221,52 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertEqual(try reopened.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count, 2)
     }
 
+    func testRebuildKeepsOtherServersConnectionsWorking() throws {
+        // After an update, an agent's server from the old version still has the
+        // index open when a new server trips the schema gate. The rebuild must
+        // happen in place: deleting the file under that connection left it
+        // failing every query with "disk I/O error".
+        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        let olderServer = try XCTUnwrap(index)
+
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &raw), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(raw, "PRAGMA user_version=1", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+
+        let newerServer = try TranscriptIndex(indexDir: tempDir)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dbPath))
+        XCTAssertTrue(try olderServer.listRecentMeetings(count: 10).isEmpty)
+
+        try newerServer.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(try olderServer.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try newerServer.listRecentMeetings(count: 10).count, 1)
+    }
+
+    func testOpeningNeverLowersANewerSchemaVersion() throws {
+        // An older helper opening an index a newer one already rebuilt must not
+        // stamp its own, lower version back, or the newer helper would rebuild
+        // again on its next start.
+        index = nil
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &raw), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(raw, "PRAGMA user_version=99", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+
+        _ = try TranscriptIndex(indexDir: tempDir)
+
+        XCTAssertEqual(sqlite3_open(dbPath, &raw), SQLITE_OK)
+        defer { sqlite3_close(raw) }
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(raw, "PRAGMA user_version", -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(stmt, 0), 99)
+    }
+
     func testVersionTwoIndexBackfillsSummarySearchDocuments() throws {
         try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
