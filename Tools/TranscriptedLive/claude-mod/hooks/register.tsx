@@ -202,7 +202,6 @@ export function register(on: On) {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
 
     const { Box, Text } = await $.ui.resolve(e)
-    const columns = Math.max(24, e.props.bodyColumns - 1)
     const now = Date.now()
     const session = s.session
 
