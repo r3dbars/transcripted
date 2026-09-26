@@ -41,6 +41,10 @@ class ParakeetEngine: ObservableObject {
     /// Set while dictation records through the pinned-device recorder
     /// (ParakeetPinnedMicrophone.swift) instead of this engine.
     var pinnedDictationRecording: ParakeetPinnedDictationRecording?
+    /// Set when a pinned start fell back to this engine, cleared when the
+    /// recorder next starts. Keeps engine warmup on in between
+    /// (`PinnedDictationInputPolicy.skipsEngineWarmup`).
+    var pinnedDictationFellBackToEngine = false
     /// The meeting-minted claim on its live mic stream, or `nil` when
     /// dictation owns its own mic path. Replaces the former bare
     /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's

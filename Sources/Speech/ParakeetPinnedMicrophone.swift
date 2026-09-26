@@ -53,8 +53,8 @@ extension ParakeetEngine {
     }
 
     /// True when the pinned recorder may be used: the switch is on and Apple
-    /// voice processing is not requested. Each start still keeps the engine
-    /// unless the macOS input is a Bluetooth headset that dictation skips
+    /// voice processing is not requested. Each start still picks the recorder
+    /// or the engine for the mic it records
     /// (`PinnedDictationInputPolicy.recorderIsNeeded`).
     func usesPinnedDictationMicrophone() -> Bool {
         guard PinnedMicrophoneCapturePreferences.isEnabled() else { return false }
@@ -64,9 +64,9 @@ extension ParakeetEngine {
         return !voiceProcessingRequested
     }
 
-    /// Prewarm and readiness recovery while the macOS input is a Bluetooth
-    /// headset. Touching the engine here is exactly what binds that input,
-    /// so readiness is simply marked; the start validates the device.
+    /// Prewarm and readiness recovery when the engine warmup is skipped
+    /// (`pinnedDictationSkipsEngineWarmup`). Readiness is simply marked; the
+    /// start validates the device.
     func markPinnedDictationInputReady() {
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -78,20 +78,23 @@ extension ParakeetEngine {
     }
 
     /// Idle warmup and readiness recovery touch the macOS default input.
-    /// Skip them only while that input is a Bluetooth headset, which is the
-    /// one case the pinned recorder exists for; everyone else keeps the
-    /// engine's fast start. An unreadable route counts as a headset.
+    /// Skip them while that input is a Bluetooth headset, and whenever the
+    /// recorder will record the mic, judged on the same selection the start
+    /// makes (`PinnedDictationInputPolicy.skipsEngineWarmup`). Otherwise a key
+    /// press after a wake or route change waited on an engine it never used.
+    /// An unreadable route counts as a headset.
     func pinnedDictationSkipsEngineWarmup() async -> Bool {
-        let defaultIsBluetooth = try? await Self.systemInputWorkCoordinator.run(
-            operation: "pinned_dictation_default_input_class",
+        let afterEngineFallback = pinnedDictationFellBackToEngine
+        let skipsEngineWarmup = try? await Self.systemInputWorkCoordinator.run(
+            operation: "pinned_dictation_warmup_decision",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) { () -> Bool in
-            guard let selection = try? CoreAudioInputDeviceLookup.preferredDictationInputSelection() else {
-                return true
-            }
-            return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            PinnedDictationInputPolicy.skipsEngineWarmup(
+                for: try? Self.pinnedDictationInputSelection(),
+                afterEngineFallback: afterEngineFallback
+            )
         }
-        return defaultIsBluetooth ?? true
+        return skipsEngineWarmup ?? true
     }
 
     /// Idle wake with the pinned switch on. Mirrors the idle route-change
@@ -237,6 +240,7 @@ extension ParakeetEngine {
         // appending next to this one.
         discardPinnedDictationRecording()
         pinnedDictationRecording = recording
+        pinnedDictationFellBackToEngine = false
         updateCachedInputDeviceSelection(prepared.selection)
         updateNativeSampleRate(prepared.format.sampleRate)
         isRecording = true
@@ -284,7 +288,9 @@ extension ParakeetEngine {
 
     /// The engine path this falls back to opens the macOS input first, so a
     /// Bluetooth default goes back into call mode. Counted so a rise shows up.
+    /// Also turns engine warmup back on until the recorder next starts.
     private func reportPinnedDictationEngineFallback(stage: String) {
+        pinnedDictationFellBackToEngine = true
         EventReporter.shared.capture(
             level: .warning,
             engine: "parakeet",

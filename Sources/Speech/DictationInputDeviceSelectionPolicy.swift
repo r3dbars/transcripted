@@ -88,6 +88,25 @@ enum PinnedDictationInputPolicy {
         }
     }
 
+    /// Whether idle warmup and readiness recovery skip the engine. Both open
+    /// the macOS input through AVAudioEngine, so they never run while that
+    /// input is a Bluetooth headset (a missing selection, from an unreadable
+    /// route, counts as one). Otherwise the engine is skipped whenever the
+    /// recorder will record the mic, since that start never touches it: a
+    /// key press that waited on the warmup was only slower. After a fallback
+    /// to the engine it is warmed again until the recorder next starts, so a
+    /// repeat fallback isn't also a cold start.
+    static func skipsEngineWarmup(
+        for selection: DictationInputDeviceSelection?,
+        afterEngineFallback: Bool
+    ) -> Bool {
+        guard let selection else { return true }
+        if DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" {
+            return true
+        }
+        return !afterEngineFallback && recorderIsNeeded(for: selection)
+    }
+
     /// Inputs to rank when re-picking after `excluded` died or went silent.
     /// The macOS default stays listed so the selection can still describe it;
     /// the caller rejects a pick that lands on the excluded id.
