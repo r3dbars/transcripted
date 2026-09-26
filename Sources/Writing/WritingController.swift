@@ -10,6 +10,9 @@ struct WritingKeyboardState: Equatable {
     let enabled: Bool
     /// The current input source.
     let selected: Bool
+    /// What the Writing tab tells the user, or `nil` while the keyboard
+    /// isn't installed (before the first "Turn on writing").
+    let setup: WritingKeyboardSetupState?
 }
 
 /// Hosts Writing's runtime inside Transcripted: the socket the keyboard talks
@@ -21,8 +24,15 @@ struct WritingKeyboardState: Equatable {
 /// item (Transcripted's `LaunchAtLoginController` owns that), its status
 /// menu and its setup window.
 ///
-/// `TranscriptedAppState` owns one and starts it from `initialize()`. In
-/// phase 2 that happens only behind the `WritingDebugEnabled` default.
+/// `TranscriptedAppState` owns one and calls `startIfEnabled(log:)` from
+/// `initialize()`. It runs once the Writing tab's setup is done and Save my
+/// writing or Autocomplete is on (`WritingActivation`), or behind the phase 2
+/// `WritingDebugEnabled` default. The Writing tab calls `applyRunState()`
+/// after "Turn on writing" and after a feature toggle, which starts it or,
+/// with both features off, stops it until they come back on.
+///
+/// Autocomplete alone needs the model, the `llama-server` helper and Screen
+/// Memory; with only Save my writing on, none of them run.
 ///
 /// Nothing here relaunches the app. Tilde relaunched itself after a model
 /// switch and after the Screen Recording grant; here a switch restarts only
@@ -33,8 +43,8 @@ final class WritingController {
     /// in this suite, apart from Transcripted's `.standard`. The keyboard's
     /// keys stay in the keyboard's own domain, shared with its process.
     nonisolated static let appSuiteName = "com.justinbetker.draft.writing"
-    /// Phase 2's switch in Transcripted's `.standard` defaults. Phase 4
-    /// replaces it with the Writing tab's setup state.
+    /// Phase 2's switch in Transcripted's `.standard` defaults, kept for
+    /// development: it starts Writing even before setup finishes.
     nonisolated static let debugEnabledKey = "WritingDebugEnabled"
     /// Keyboard-suite flag: when set, the keyboard stops opening the app
     /// after a failed request. Tilde's name, which the keyboard reads.
@@ -96,7 +106,9 @@ final class WritingController {
     /// The socket server is up and the runtime is live.
     private(set) var isRunning = false
     private(set) var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
-    /// What `TISEnableInputSource` returned on the first setup, if it ran.
+    /// What enabling the keyboard did on the last try, if it ran. On macOS
+    /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
+    /// and the source stays off.
     private(set) var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
     /// Whether selecting the keyboard on the first setup worked, if it ran.
     private(set) var keyboardSelectSucceeded: Bool?
@@ -125,8 +137,14 @@ final class WritingController {
     /// "Writing couldn't be saved to this folder." The error case and a
     /// time only, never a path.
     var saveMyWritingProblem: WritingDayFileRecorder.WriteFailure? { runtime?.dayFiles.recorder.lastWriteFailure }
+    /// Tilde's suggestions switch (`GhostSuggestionsEnabled`), on by default.
+    var autocompleteEnabled: Bool { Self.settings().suggestionsEnabled }
     var personalizedSuggestionsEnabled: Bool { Self.preferences().personalizedSuggestionsEnabled }
     var appScope: WritingAppScope { Self.preferences().appScope }
+    /// "Turn on writing" finished at least once.
+    var setupCompleted: Bool { WritingSetupState.isCompleted(defaults: Self.appDefaults()) }
+    /// Autocomplete and Save my writing are paused until then.
+    var pausedUntil: Date? { Self.settings().pausedUntil }
 
     /// The prompt was shown at least once. With `screenRecordingGranted`
     /// still false, the UI asks the user to reopen Transcripted (macOS
@@ -136,16 +154,49 @@ final class WritingController {
     /// Expensive: validates this app's and the keyboard's code signatures,
     /// and Text Input Sources wants the main thread. Call it when a screen
     /// needs it, not on a timer.
-    func keyboardState() -> WritingKeyboardState {
+    ///
+    /// `previous` is the state the tab showed last. When the keyboard has
+    /// just become enabled (the user added it in Keyboard settings), this
+    /// selects it once (`WritingKeyboardSetupState.shouldSelect`). It never
+    /// enables the keyboard and never opens System Settings.
+    func keyboardState(previous: WritingKeyboardSetupState? = nil) -> WritingKeyboardState {
+        let installed = Self.keyboardIsInstalled
+        let refresh = WritingKeyboardInputSource.refresh(
+            using: inputSources,
+            previous: previous,
+            firstInstalledThisLoginSession: keyboardFirstInstalledThisLoginSession,
+            selectedOnce: Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
+        )
+        if let selected = refresh.selectSucceeded {
+            keyboardSelectSucceeded = selected && refresh.state == .selected
+            log("WRITING | keyboard select after it was added: \(keyboardSelectSucceeded == true ? "selected" : "not selected")")
+        }
+        if refresh.state == .selected {
+            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
+        }
+        let enabled = refresh.state == .selected || refresh.state == .enabledNotSelected
+        return WritingKeyboardState(
+            installed: installed,
+            enabled: enabled,
+            selected: refresh.state == .selected,
+            setup: installed || enabled ? refresh.state : nil
+        )
+    }
+
+    private nonisolated static var keyboardIsInstalled: Bool {
         let installedPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Input Methods", isDirectory: true)
             .appendingPathComponent(TildeProductProfile.current.inputMethodInstalledBundleName)
             .path
-        let status = keyboardInstaller.inputSourceStatus()
-        return WritingKeyboardState(
-            installed: FileManager.default.fileExists(atPath: installedPath),
-            enabled: status != .missing,
-            selected: status == .selected
+        return FileManager.default.fileExists(atPath: installedPath)
+    }
+
+    /// The app first copied the keyboard in during this login session, so
+    /// Keyboard settings won't list it until the user logs out and back in.
+    private var keyboardFirstInstalledThisLoginSession: Bool {
+        WritingKeyboardFirstInstall.happenedThisLoginSession(
+            currentSession: WritingLoginSession.currentIdentifier(),
+            defaults: Self.appDefaults()
         )
     }
 
@@ -173,6 +224,9 @@ final class WritingController {
     /// `<capture-library>/writing`, for the day files and Delete all writing.
     private let writingDirectory: @Sendable () -> URL
     private let keyboardInstaller = GhostKeyboardInstallerHost()
+    private var inputSources: SystemWritingInputSources {
+        SystemWritingInputSources(installer: keyboardInstaller)
+    }
     private var runtime: Runtime?
     /// Rebuilt on a model switch: its served configuration is per model.
     private var ghostBrainServerHost: GhostBrainServerHost?
@@ -195,7 +249,14 @@ final class WritingController {
     private var modelTaskID: UUID?
     private var wakeTask: Task<Void, Never>?
     private var hasStarted = false
-    private var hasStopped = false
+    /// Set by `stop()` at quit. Nothing starts after it.
+    private var isTerminated = false
+    /// Set by `startIfEnabled(log:)`. Until launch allows it, the Writing tab
+    /// can't start Writing, so automated launches never do.
+    private var activationAllowed = false
+    /// The model and helper run for Autocomplete. Follows the Autocomplete
+    /// switch while Writing runs.
+    private var autocompleteRuntimeActive = false
 
     init(
         physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory,
@@ -216,10 +277,43 @@ final class WritingController {
 
     // MARK: - Lifecycle
 
+    /// Launch: keeps the log sink for later starts, then starts Writing if it
+    /// should run (`applyRunState()`).
+    func startIfEnabled(log: @escaping (String) -> Void) {
+        self.log = log
+        activationAllowed = true
+        applyRunState()
+    }
+
+    /// Brings the runtime in line with the saved setup: starts it when
+    /// `WritingActivation` says so, stops it when both features are off, and
+    /// starts or stops the model and helper as Autocomplete turns on or off.
+    /// The Writing tab calls it after every change it saves.
+    func applyRunState() {
+        guard activationAllowed, !isTerminated else { return }
+        let settings = Self.settings()
+        let shouldRun = WritingActivation.shouldRun(
+            setupCompleted: setupCompleted,
+            saveMyWriting: settings.personalHistoryEnabled,
+            autocomplete: settings.suggestionsEnabled,
+            debugEnabled: UserDefaults.standard.bool(forKey: Self.debugEnabledKey)
+        )
+        if !shouldRun {
+            if hasStarted {
+                log("WRITING | both features off; stopping")
+                tearDown()
+            }
+        } else if hasStarted {
+            applyAutocompleteToRuntime()
+        } else {
+            start(log: log)
+        }
+    }
+
     /// Tilde's startup order (`AppDelegate.applicationDidFinishLaunching`).
-    /// Runs once; a stopped controller stays stopped.
+    /// Runs once per start; after `stop()` nothing starts again.
     func start(log: @escaping (String) -> Void = { _ in }) {
-        guard !hasStarted else { return }
+        guard !hasStarted, !isTerminated else { return }
         hasStarted = true
         self.log = log
 
@@ -238,8 +332,15 @@ final class WritingController {
                 settings: settings,
                 diagnostics: .shared
             ),
+            // Screen Memory serves Autocomplete only: with it off, nothing
+            // on screen is read, even with Screen Recording granted.
             screenCaptureService: ScreenCaptureService(
-                enabled: { Self.settings().screenMemoryEnabled },
+                enabled: {
+                    let settings = Self.settings()
+                    // Pause stops screen reading too, not just suggestions.
+                    return settings.screenMemoryEnabled && settings.suggestionsEnabled
+                        && settings.pausedUntil == nil
+                },
                 excludedApps: { Self.settings().personalHistoryExcludedApps }
             ),
             dayFiles: WritingDayFileWriter(
@@ -277,14 +378,19 @@ final class WritingController {
         }
         if llamaServerHost.snapshot == .ready { prewarmer.noteHelperReady() }
         // No Accessibility prompt: Transcripted already holds Accessibility
-        // for paste-back, and Writing asks for nothing at launch.
-        startModelPreparation()
+        // for paste-back, and Writing asks for nothing at launch. The model
+        // (a 3.4 or 5.6 GB download) and the helper are Autocomplete's only.
+        if settings.suggestionsEnabled {
+            autocompleteRuntimeActive = true
+            startModelPreparation()
+        }
         installKeyboard()
         // Any start means the brain is wanted again: lift the keyboard's
         // stay-quiet flag from a deliberate quit.
         UserDefaults(suiteName: TildeSettings.keyboardSuiteName)?.removeObject(forKey: Self.quietQuitKey)
         DiagnosticsLog.shared.record("launch", metadata: ["model": runtime.models.manager.descriptor.identifier])
         log("WRITING | started with \(selectedModel.rawValue)")
+        emitDailyCountsIfDue()
     }
 
     /// Tilde's stop order (`AppDelegate.applicationWillTerminate`). Safe to
@@ -292,8 +398,16 @@ final class WritingController {
     /// every graceful quit, which is when the user quits on purpose; a crash
     /// or force quit skips it, so the keyboard still summons the app back.
     func stop() {
-        guard hasStarted, !hasStopped else { return }
-        hasStopped = true
+        isTerminated = true
+        guard hasStarted else { return }
+        tearDown()
+    }
+
+    /// The stop itself, shared by the quit and by turning both features off.
+    /// A later `start` builds a fresh runtime.
+    private func tearDown() {
+        hasStarted = false
+        autocompleteRuntimeActive = false
         let wasRunning = isRunning
         isRunning = false
         if wasRunning && !Self.terminationIsSystemInitiated {
@@ -308,17 +422,34 @@ final class WritingController {
         DiagnosticsLog.shared.record("shutdown", metadata: [:])
         DiagnosticsLog.shared.flush()
         ghostBrainServerHost?.stop()
+        ghostBrainServerHost = nil
         // The last open entry goes to its day file before the app quits.
         runtime?.dayFiles.stop()
-        runtime?.llamaServerHost.stop()
+        // A download in flight stops too; its resumable partial stays.
+        runtime?.models.manager.cancel()
+        if let host = runtime?.llamaServerHost {
+            if isTerminated {
+                // The quit waits for the helper, as Tilde's did.
+                host.stop()
+            } else {
+                // Up to 1.2 s of TERM-then-KILL; keep it off the main thread.
+                Task.detached(priority: .userInitiated) { host.stop() }
+            }
+        }
         if let frontmostAppObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(frontmostAppObserver)
             self.frontmostAppObserver = nil
         }
         windowIdentityPollTimer?.invalidate()
         windowIdentityPollTimer = nil
+        lastFrontWindowIdentity = nil
         modelTask?.cancel()
+        modelTask = nil
+        modelTaskID = nil
         wakeTask?.cancel()
+        wakeTask = nil
+        runtime = nil
+        activeModel = nil
         if wasRunning {
             ProcessInfo.processInfo.enableAutomaticTermination(Self.automaticTerminationReason)
         }
@@ -329,6 +460,9 @@ final class WritingController {
     /// answering, and a runtime that had given up.
     func handleSystemWake() {
         guard isRunning, let runtime else { return }
+        emitDailyCountsIfDue()
+        // With Autocomplete off there's no helper to look after.
+        guard autocompleteRuntimeActive else { return }
         wakeTask?.cancel()
         wakeTask = Task { @MainActor [weak self] in
             let host = runtime.llamaServerHost
@@ -340,7 +474,8 @@ final class WritingController {
                 if healthy { break }
             }
             // A model preparation or switch owns the helper while it runs.
-            guard let self, !Task.isCancelled, self.isRunning, self.modelTask == nil else { return }
+            guard let self, !Task.isCancelled, self.isRunning, self.autocompleteRuntimeActive,
+                  self.modelTask == nil else { return }
             let snapshot = host.snapshot
             let action = WritingHelperWakePolicy.action(
                 modelReady: runtime.models.manager.state.isReady,
@@ -351,8 +486,31 @@ final class WritingController {
             guard action == .restart else { return }
             DiagnosticsLog.shared.record("llama-server-wake-restart", metadata: [:])
             await Task.detached(priority: .utility) { host.stop() }.value
-            guard !Task.isCancelled, self.isRunning, self.modelTask == nil else { return }
+            guard !Task.isCancelled, self.isRunning, self.autocompleteRuntimeActive,
+                  self.modelTask == nil else { return }
             host.start()
+        }
+    }
+
+    /// Yesterday's count-only `writing_daily_counts`, at most once a day,
+    /// from the text-free outcome ledger summary.
+    private func emitDailyCountsIfDue() {
+        let ledgerURL = TildeLocalOutcomeStores.eventURL()
+        let preferences = Self.preferences()
+        let setup = WritingAnalytics.Setup(
+            saveEnabled: preferences.saveMyWritingEnabled,
+            autocompleteEnabled: Self.settings().suggestionsEnabled,
+            appScope: preferences.appScope.mode == .all ? .all : .picked,
+            model: selectedModel
+        )
+        WritingAnalytics.emitDailyCountsIfDue(defaults: Self.appDefaults(), setup: setup) { day in
+            let facts = OutcomeLedgerReader.facts(in: OutcomeLedgerReader.readTail(url: ledgerURL))
+            let summary = OutcomeLedgerSummary.make(facts: facts.filter { $0.occurredAt < day.end }, now: day.start)
+            return WritingAnalytics.DailyCounts(
+                suggestionsShown: summary.ghostsShownToday,
+                suggestionsAccepted: summary.acceptedGhostsToday,
+                acceptedCharacters: summary.keystrokesSavedToday
+            )
         }
     }
 
@@ -369,6 +527,15 @@ final class WritingController {
         guard isRunning else {
             TildeModelSelection.persist(choice, defaults: Self.appDefaults())
             selectedModel = choice
+            return
+        }
+        guard autocompleteRuntimeActive else {
+            // No helper and no download with Autocomplete off: save the
+            // choice and serve its configuration. Turning Autocomplete on
+            // prepares this model.
+            guard choice != activeModel else { return }
+            persistModelChoice(choice)
+            rebuildRuntime(for: choice)
             return
         }
         // An interrupted switch leaves the runtime's model unknown, so the
@@ -400,9 +567,28 @@ final class WritingController {
         }
     }
 
+    /// Tilde's suggestions switch. Saves only; `applyRunState()` then starts
+    /// or stops the model and helper.
+    func setAutocomplete(_ enabled: Bool) {
+        Self.settings().suggestionsEnabled = enabled
+    }
+
     /// Off by default (decision 11). Serving also needs Save my writing on.
     func setPersonalizedSuggestions(_ enabled: Bool) {
         Self.preferences().personalizedSuggestionsEnabled = enabled
+    }
+
+    /// Tilde's "Pause for 1 hour", which here pauses Save my writing too:
+    /// the keyboard stops suggesting, and text it sends meanwhile is
+    /// acknowledged and never kept (`WritingPausableIngest`).
+    func pause(for interval: TimeInterval) {
+        Self.settings().pause(for: interval)
+        log("WRITING | paused for \(Int(interval / 60)) min")
+    }
+
+    func resume() {
+        Self.settings().resume()
+        log("WRITING | resumed")
     }
 
     /// One scope for capture, the day files, Screen Memory context and
@@ -451,6 +637,102 @@ final class WritingController {
         return granted
     }
 
+    /// After the one system prompt, macOS only grants from System Settings.
+    func openScreenRecordingSettings() {
+        NSWorkspace.shared.open(ScreenRecordingPermission.systemSettingsURL)
+    }
+
+    /// The Writing tab's keyboard step: install or update, register, try to
+    /// enable, and select when it's enabled, every time it's asked (the
+    /// launch path tries the enable and select only on the first setup).
+    /// macOS 26 ignores the enable, so until the user adds the keyboard in
+    /// Keyboard settings this ends not selected. `openSettingsOnFailure` is
+    /// only for the tab's "Open Keyboard Settings" button: nothing else opens
+    /// System Settings. `true` once the keyboard is the selected input
+    /// source.
+    @discardableResult
+    func turnOnKeyboard(openSettingsOnFailure: Bool = false) -> Bool {
+        guard installKeyboardRecordingFirstInstall() else {
+            if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
+            return false
+        }
+        let selected = enableAndSelectKeyboard()
+        if !selected, openSettingsOnFailure {
+            keyboardInstaller.openKeyboardSettings()
+        }
+        return selected
+    }
+
+    /// Install or update and register. When this copied the keyboard in
+    /// where none was before, remembers the login session it happened in
+    /// (`WritingKeyboardFirstInstall`). `true` when the keyboard is in place.
+    private func installKeyboardRecordingFirstInstall() -> Bool {
+        let wasInstalled = Self.keyboardIsInstalled
+        let result = keyboardInstaller.installOrUpdateIfNeeded()
+        keyboardInstallResult = result
+        log("WRITING | keyboard install: \(result)")
+        if result == .installed, !wasInstalled {
+            WritingKeyboardFirstInstall.record(
+                currentSession: WritingLoginSession.currentIdentifier(),
+                defaults: Self.appDefaults()
+            )
+        }
+        return result == .installed || result == .alreadyInstalled
+    }
+
+    /// Tries `TISEnableInputSource`, checks it took, and selects the
+    /// keyboard when it's enabled. Logs what actually happened. `true` once
+    /// the keyboard is the selected input source.
+    private func enableAndSelectKeyboard() -> Bool {
+        let enable = WritingKeyboardInputSource.enable(using: inputSources)
+        keyboardEnableResult = enable
+        switch enable {
+        case .enabled:
+            log("WRITING | keyboard enable: enabled")
+        case .alreadyEnabled:
+            log("WRITING | keyboard enable: already enabled")
+        case .needsUserToAdd:
+            log("WRITING | keyboard enable: still off after TISEnableInputSource returned noErr; the user has to add it in Keyboard settings")
+        case .notRegistered:
+            log("WRITING | keyboard enable: not registered")
+        case let .failed(status):
+            log("WRITING | keyboard enable: TISEnableInputSource failed (\(status))")
+        }
+        guard enable.isEnabled else {
+            keyboardSelectSucceeded = false
+            log("WRITING | keyboard select: skipped, keyboard not enabled")
+            return false
+        }
+        let selected = keyboardInstaller.selectInputSourceIfAvailable()
+        keyboardSelectSucceeded = selected
+        log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
+        if selected {
+            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
+        }
+        return selected
+    }
+
+    /// Bytes on this Mac, for the Writing tab's storage meter. Reads sizes
+    /// only, off the main thread.
+    func storageUsage() async -> WritingStorageUsage {
+        let historyController = runtime?.personalHistoryController
+        let directory = writingDirectory
+        let modelRoot = modelRoot
+        let historyBytes: Int64
+        if let historyController {
+            historyBytes = await historyController.summary()?.approximateBytes ?? 0
+        } else {
+            historyBytes = (try? await EncryptedPersonalHistoryStore().summary().approximateBytes) ?? 0
+        }
+        return await Task.detached(priority: .utility) {
+            WritingStorageUsage(
+                savedWritingBytes: WritingStorageUsage.dayFileBytes(in: directory()),
+                learningBytes: historyBytes + TildeLocalOutcomeStores.approximateBytes(),
+                modelBytes: WritingStorageUsage.fileBytes(under: modelRoot)
+            )
+        }.value
+    }
+
     // MARK: - Model
 
     private func makeModelManager(for model: TildeModelChoice) -> ModelManager {
@@ -465,10 +747,35 @@ final class WritingController {
 
     private func startModelPreparation() {
         guard let runtime else { return }
+        let previous = modelTask
         runModelTask { controller in
+            // Turning Autocomplete back on right after turning it off: let
+            // that stop finish before this start.
+            await previous?.value
+            guard !Task.isCancelled, controller.isRunning, controller.autocompleteRuntimeActive else { return }
             let ready = await controller.prepareCurrentModel()
-            guard !Task.isCancelled, controller.isRunning else { return }
+            guard !Task.isCancelled, controller.isRunning, controller.autocompleteRuntimeActive else { return }
             if ready { runtime.llamaServerHost.start() }
+        }
+    }
+
+    /// Autocomplete on: prepare the model (downloading it if needed) and
+    /// start the helper. Off: stop the download and the helper.
+    private func applyAutocompleteToRuntime() {
+        guard isRunning, let runtime else { return }
+        let wanted = Self.settings().suggestionsEnabled
+        guard wanted != autocompleteRuntimeActive else { return }
+        autocompleteRuntimeActive = wanted
+        if wanted {
+            log("WRITING | autocomplete on; preparing \(selectedModel.rawValue)")
+            startModelPreparation()
+        } else {
+            log("WRITING | autocomplete off; stopping the model and helper")
+            let manager = runtime.models.manager
+            runModelTask { controller in
+                manager.cancel()
+                await controller.stopHelper()
+            }
         }
     }
 
@@ -528,10 +835,13 @@ final class WritingController {
         // belongs only to the keyboard's system spell-checker path.
         return GhostBrainServerHost(
             runtime: runtime.llamaServerHost,
-            personalHistory: WritingHistoryIngest(
-                personalHistory: runtime.personalHistoryController,
-                dayFiles: runtime.dayFiles.recorder,
-                appScope: { Self.preferences().appScope }
+            personalHistory: WritingPausableIngest(
+                base: WritingHistoryIngest(
+                    personalHistory: runtime.personalHistoryController,
+                    dayFiles: runtime.dayFiles.recorder,
+                    appScope: { Self.preferences().appScope }
+                ),
+                isPaused: { Self.settings().pausedUntil != nil }
             ),
             sceneProvider: Self.sceneProvider(for: runtime.screenCaptureService),
             targetProvider: { appBundleIdentifier, fieldSessionIdentifier in
@@ -583,36 +893,27 @@ final class WritingController {
     }
 
     fileprivate func startHelper() {
-        guard isRunning else { return }
+        guard isRunning, autocompleteRuntimeActive else { return }
         runtime?.llamaServerHost.start()
     }
 
     // MARK: - Keyboard
 
-    /// Install or update, register, and the first time only, enable and
-    /// select. Every result lands in the state above and the app log.
+    /// Install or update, register, and until the keyboard was selected
+    /// once, try the enable and select. Every result lands in the state
+    /// above and the app log. Never opens System Settings: the Writing tab
+    /// shows the guidance and its button does that.
     private func installKeyboard() {
-        let result = keyboardInstaller.installOrUpdateIfNeeded()
-        keyboardInstallResult = result
-        log("WRITING | keyboard install: \(result)")
-        guard result == .installed || result == .alreadyInstalled,
+        guard installKeyboardRecordingFirstInstall(),
               !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
         enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
     }
 
     private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool) {
-        let enable = WritingKeyboardInputSource.enable()
-        keyboardEnableResult = enable
-        log("WRITING | keyboard enable (TISEnableInputSource): \(enable)")
-        let selected = (enable == .enabled || enable == .alreadyEnabled)
-            && keyboardInstaller.selectInputSourceIfAvailable()
-        keyboardSelectSucceeded = selected
-        log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
-        if selected {
-            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
-        } else if retryAfterDelay {
-            // Text Input Sources can take a moment to list a just-registered
-            // or just-enabled source. One retry; after that, the next start.
+        let selected = enableAndSelectKeyboard()
+        // Text Input Sources can take a moment to list a just-registered or
+        // just-enabled source. One retry; after that, the next start.
+        if !selected, retryAfterDelay {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, self.isRunning else { return }
@@ -868,6 +1169,20 @@ final class WritingController {
         case let .retrying(reason): "retrying (\(reason))"
         case let .failed(reason): "failed (\(reason))"
         }
+    }
+}
+
+/// "Pause for 1 hour" pauses Save my writing as well as suggestions. Tilde's
+/// pause stopped only the ghost, and its keyboard keeps sending typed text
+/// while paused; here that text is acknowledged and never kept, so the
+/// keyboard doesn't retry it.
+struct WritingPausableIngest: PersonalHistoryIngesting {
+    let base: any PersonalHistoryIngesting
+    let isPaused: @Sendable () -> Bool
+
+    func ingest(_ events: [PersonalHistoryEvent]) async -> Bool {
+        guard !isPaused() else { return PersonalHistoryEvent.validBatch(events) }
+        return await base.ingest(events)
     }
 }
 

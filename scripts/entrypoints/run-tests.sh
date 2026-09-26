@@ -552,6 +552,14 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
+    "Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift"
+    "Sources/TranscriptedWriting/Core/Runtime/WritingKeyboardSetupState.swift"
+    "Sources/Writing/WritingAnalytics.swift"
+    "Sources/Writing/WritingSetupState.swift"
+    "Sources/Writing/WritingDayFileReader.swift"
+    "Sources/Writing/WritingStorageUsage.swift"
+    "Sources/UI/Settings/Writing/WritingSetupPresentation.swift"
+    "Sources/UI/Settings/Writing/WritingDemoScript.swift"
 )
 
 # Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the

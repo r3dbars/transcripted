@@ -107,13 +107,13 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/App/TildeLocalOutcomeStores.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingLocalOutcomeStores.swift` | ported | 2 | Type name kept (`TildeLocalOutcomeStores`). |
 | `Sources/TildeApp/App/TildeProgress.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingProgress.swift` | ported | 2 | Type name kept (`TildeProgress`). |
 | `Sources/TildeApp/App/TildeSettings.swift` | `Sources/TranscriptedWriting/Runtime/TildeSettings.swift` | ported | 2 | Straight port, type name kept; the H01, local-OCR-evaluation and incremental-OCR keys are stripped. The bridge's `WritingPreferences` (P2-B) wraps it. |
-| `Sources/TildeApp/App/TildeSettingsSupportingViews.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 |  |
-| `Sources/TildeApp/App/TildeSettingsViewModel.swift` | `Sources/Writing/WritingSettingsModel.swift` | replaced | 4 |  |
-| `Sources/TildeApp/App/TildeSettingsWindowController.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Writing tab settings section. |
-| `Sources/TildeApp/App/TildeSetupState.swift` | `Sources/Writing/WritingSetupState.swift` | replaced | 4 | Approved three-step setup. |
-| `Sources/TildeApp/App/TildeSetupWindowController.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Intro pages and setup steps. |
+| `Sources/TildeApp/App/TildeSettingsSupportingViews.swift` | `Sources/UI/Settings/Writing/WritingComponents.swift` | replaced | 4 | (phase 4). |
+| `Sources/TildeApp/App/TildeSettingsViewModel.swift` | `Sources/Writing/WritingSettingsModel.swift` | replaced | 4 | Writing tab model (phase 4). |
+| `Sources/TildeApp/App/TildeSettingsWindowController.swift` | `Sources/UI/Settings/Writing/WritingSettingsSection.swift` | replaced | 4 | Writing tab settings section (phase 4). |
+| `Sources/TildeApp/App/TildeSetupState.swift` | `Sources/Writing/WritingSetupState.swift` | replaced | 4 | Approved three-step setup (phase 4). |
+| `Sources/TildeApp/App/TildeSetupWindowController.swift` | `Sources/UI/Settings/Writing/WritingIntroView.swift, WritingSetupFlowView.swift` | replaced | 4 | Intro pages and setup steps (phase 4). |
 | `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | ported | 2 | Type name kept (`TildeStats`). |
-| `Sources/TildeApp/App/YourTildeView.swift` | `Sources/UI/Settings/Writing/` | replaced | 4 | Everyday view stats. |
+| `Sources/TildeApp/App/YourTildeView.swift` | `Sources/UI/Settings/Writing/WritingEverydayView.swift` | replaced | 4 | Everyday view stats in plain Transcripted words; the personalization-stage progress isn't shown (phase 4). |
 | `Sources/TildeApp/App/main.swift` | `—` | not-ported | 2 | Dev flags only. |
 | `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | ported | 2 | Write under Transcripted's logs. Deviation: never writes under tests or with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`, same as `FileLogger`. |
 | `Sources/TildeApp/Mac/SecureLocalStorage.swift` | `Sources/TranscriptedWriting/Runtime/PersonalHistory/SecureLocalStorage.swift` | ported | 2 | Straight port; moved from phase 3. |
@@ -163,9 +163,9 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 - Check with real files: Return, Tab, arrows and shortcuts break segments, so each Slack message or Notes paragraph becomes its own writing entry. Decide at the phase 3 checkpoint whether consecutive segments in one app should merge.
 - Narrowing the app scope doesn't retroactively remove already-stored encrypted personal history; replay filters by the exclusion list only.
 - Phase 6: `AgentConnectionGuide`'s file-fallback prompt lists the meetings and dictations folders only. Add the writing folder there (four places) and in its pinned tests.
-- Phase 4: user-visible runtime strings still say "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
+- Done in phase 4: user-visible runtime strings that said "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
 - Phase 2 cleanup: collapse `.preview9B` into a Qwen completion profile once nothing reads its preview identities.
-- Before rollout: the `llama-server` pin depends on `codesign --remove-signature` output staying byte-stable across toolchains (it fails closed). Revisit with the reproducible build recipe (plan decision 9).
+- Before rollout: the `llama-server` pin depends on `codesign --remove-signature` output staying byte-stable across toolchains (it fails closed). Provenance found 2026-09-25: `llama-server --version` reports `version: 0.2.0-dev (build 1, commit 2115b73)`, built with AppleClang 21.0.0 for Darwin arm64, static with system-only dependencies. Reproducible recipe: build `ggml-org/llama.cpp` at `2115b73` as a static Release with the Metal library embedded, then `strip -S -x`, and compare the unsigned code hash `3f6895ab…`. The exact CMake flags still need confirming. Once it matches, build-deps can build instead of fetching Tilde's zip.
 
 ## Tests
 

@@ -15,6 +15,7 @@ agent_cta
 agent_target
 analytics_available
 anonymous_usage_enabled
+app_scope
 app_signal
 app_version
 artifact_count_bucket
@@ -25,6 +26,7 @@ auto_send
 auto_send_block_reason
 auto_send_expected
 auto_send_key
+autocomplete_enabled
 automatic_downloads_enabled
 available
 backoff_kind
@@ -130,6 +132,7 @@ mic_signal
 mic_status
 mic_stream_present
 missing_permission
+model_choice
 model_state
 models_ready_ms
 models_warm
@@ -185,6 +188,7 @@ route_shape
 route_stability_warning
 runtime
 sample_flow_started
+save_enabled
 save_outcome
 screen_permission_granted
 second_artifact_kind
@@ -217,6 +221,8 @@ stt_calls
 stt_input_seconds
 stt_model
 stt_ms
+suggestions_accepted
+suggestions_shown
 summary_action
 suppression_reason
 surface

@@ -10,8 +10,9 @@ enum SettingsRecentCaptureRefreshPolicy {
         switch page {
         case .home, .dictations:
             return .homeDashboard
-        case .today, .general, .people, .connectAgent:
-            // Today loads its own snapshot (`TodayViewModel`).
+        case .today, .writing, .general, .people, .connectAgent:
+            // Today loads its own snapshot (`TodayViewModel`), and Writing
+            // doesn't list meetings or dictations.
             return .none
         }
     }

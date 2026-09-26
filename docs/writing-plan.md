@@ -46,7 +46,9 @@ It is not a code source for this port.
    phase 2 it's pointed at `Sources/TranscriptedWriting/Core`, so it tests what
    ships. It's Justin's testing tool, not a product.
 9. `llama-server`: re-sign the exact binary Tilde 0.1.0 beta 1 shipped. Write
-   down a reproducible llama.cpp build recipe before public rollout.
+   down a reproducible llama.cpp build recipe before public rollout. It was built
+   from llama.cpp commit `2115b73` (AppleClang 21, arm64, static); see the
+   ledger's Follow-ups for the recipe.
 10. Saved-text fidelity for v1: keyboard capture only, plus Backspace
     tracking so deleted text isn't saved. Look at real files before deciding
     whether an Accessibility read of the final field text is worth adding.
@@ -148,8 +150,20 @@ read like a keylogger.
 
 Only the rows the step 1 toggles need are shown.
 
-- **Transcripted keyboard** (`Both` or `Needed`): "Turns on in Input Sources.
-  No privacy prompt."
+- **Transcripted keyboard** (`Both` or `Needed`): "You add it in Keyboard
+  settings. No privacy prompt." Once the keyboard is installed, the row shows
+  what to do next instead, and the everyday view's "Keyboard off" row shows
+  the same:
+  - Not enabled: "Add Transcripted in Keyboard settings: Input Sources ›
+    Edit… › +, then English › Transcripted." Button: **Open Keyboard
+    Settings**.
+  - Not enabled, and first installed during this login session: "macOS lists
+    new keyboards after you log out and back in. Log out, then add
+    Transcripted in Keyboard settings." Button: **Open Keyboard Settings**.
+    Transcripted never logs out for the user.
+  - Enabled but another input source is current: "Choose Transcripted from
+    the input menu in the menu bar."
+  - Selected: done.
 - **Screen Recording** (`Autocomplete`): "Reads the window you're replying in,
   on this Mac."
 - **Model** (`Autocomplete`): Gemma 4 E2B, 3.4 GB, faster (default). Qwen 3.5
@@ -160,9 +174,10 @@ Only the rows the step 1 toggles need are shown.
   setting."
 - **Back**, **Turn on writing**.
 
-Order of operations after **Turn on writing**: install and select the keyboard
-first, start the model download in the background, ask for Screen Recording
-last. macOS usually asks the app to quit and reopen after Screen Recording is
+Order of operations after **Turn on writing**: install the keyboard (and select
+it if it's already enabled) first, start the model download in the background,
+ask for Screen Recording last. Setup never waits on the keyboard: its row stays
+pending with the steps above until the user adds it. macOS usually asks the app to quit and reopen after Screen Recording is
 granted, so Transcripted must hold that relaunch while a meeting is recording.
 
 ### Everyday view (after setup)
@@ -175,7 +190,10 @@ Shaped like the Dictations page:
 - Today's saved writing, newest first, in the same row style as dictations.
 - "N suggestions accepted today".
 - Actions: **Edit setup**, **Pause for 1 hour**, **Delete all writing**, a
-  storage meter, and the model switch.
+  storage meter, and the model switch. Pause stops suggestions, saving and
+  screen reading for the hour (Tilde's pause only stopped suggestions).
+- The intro has a quiet **Not now** that leaves Writing off and clears the
+  sidebar's `New` badge.
 
 ## Permissions
 
@@ -187,7 +205,10 @@ Shaped like the Dictations page:
 
 **Keyboard.** It needs no TCC prompt. It only has to be enabled and selected in Input Sources.
 - Tilde's installer registers and selects the keyboard but never enables it, so Tilde users add it by hand in System Settings.
-- Transcripted also calls `TISEnableInputSource`, which Context proved works, and falls back to opening Keyboard settings.
+- macOS 26 ignores an app-initiated enable: `TISEnableInputSource` returns `noErr` and the keyboard stays off, even in a later process (seen on Justin's Mac, 2026-09-25). Transcripted still calls it, reads the source again, and logs the truth.
+- So the user adds the keyboard by hand: Keyboard settings › Input Sources › Edit… › +, then English › Transcripted.
+- A keyboard first copied into `~/Library/Input Methods` during this login session isn't listed there until the user logs out and back in (`killall TextInputMenuAgent` doesn't help). Transcripted remembers the login session it first installed the keyboard in (boot time plus audit session ID) and says so.
+- The Writing tab re-checks on app activation and on the Input Sources change notifications while it's on screen. The moment the keyboard is enabled, it selects it once. Only the **Open Keyboard Settings** button opens System Settings.
 
 **Screen Recording.** It's required for autocomplete, same as Tilde. Without it the keyboard stays silent, and the Writing tab says why with a one-click path to grant it.
 
@@ -224,7 +245,7 @@ Source: Tilde `f36f6562`. "Same" means a straight port, with only identities and
 | Pinned Gemma/Qwen download: resume, retries, disk check, SHA-256 verify, excluded from backup | Same. **New:** adopt an already-verified Tilde model file instead of downloading again |
 | Model switch relaunches the app | **Change:** restart only the helper. Transcripted can't relaunch mid-meeting |
 | Setup window | **Replaced** by the Writing tab intro and setup above |
-| Keyboard installer: staged copy to `~/Library/Input Methods`, signature and Team ID check, replace on newer version, kill the running keyboard | Same, plus `TISEnableInputSource` |
+| Keyboard installer: staged copy to `~/Library/Input Methods`, signature and Team ID check, replace on newer version, kill the running keyboard | Same, plus a `TISEnableInputSource` try that's checked afterwards (macOS 26 ignores it) and guidance for adding the keyboard by hand |
 | Menu bar: status, pause for 1 hour, ignore the front app | Moves to the Writing tab. Menu bar rows are an open question |
 | Settings: on/off, model, personalized suggestions, Screen Memory, exact screen text, ignored apps, data size and delete, fix screen access, redownload model, run setup again, export diagnostics | Same controls in the Writing tab's settings section. Launch at login is already Transcripted's |
 | "Your Tilde" stats: keystrokes saved today and 7 days, % kept after 30 s, streaks, held back by reason, personalization stage | Same, in the everyday view |
