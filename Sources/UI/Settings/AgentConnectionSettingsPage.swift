@@ -20,6 +20,7 @@ struct AgentConnectionSettingsPage: View {
 
     private let meetingsFolderURL = AgentConnectionGuide.meetingsFolder
     private let dictationsFolderURL = AgentConnectionGuide.dictationsFolder
+    private let writingFolderURL = AgentConnectionGuide.writingFolder
     @State private var detectedAgents: Set<AgentMCPAgent> = []
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
@@ -307,6 +308,15 @@ struct AgentConnectionSettingsPage: View {
                 isAvailable: folderExists(dictationsFolderURL)
             ) {
                 reveal(dictationsFolderURL)
+            }
+
+            AgentFolderRow(
+                name: "Writing",
+                detail: "Writing Markdown files.",
+                path: writingFolderURL.path,
+                isAvailable: folderExists(writingFolderURL)
+            ) {
+                reveal(writingFolderURL)
             }
 
             SettingsInlineActionButton(

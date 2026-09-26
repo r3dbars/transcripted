@@ -21,6 +21,9 @@ cask "transcripted" do
   zap trash: [
     "~/Library/Application Support/Transcripted",
     "~/Library/Caches/com.justinbetker.draft",
+    "~/Library/Input Methods/Transcripted Keyboard.app",
     "~/Library/Preferences/com.justinbetker.draft.plist",
+    "~/Library/Preferences/com.justinbetker.draft.inputmethod.Transcripted.plist",
+    "~/Library/Preferences/com.justinbetker.draft.writing.plist",
   ]
 end

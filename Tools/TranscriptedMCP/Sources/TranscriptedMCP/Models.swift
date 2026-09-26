@@ -103,7 +103,7 @@ struct AgentDictationEntry: Codable {
     }
 }
 
-/// A parsed writing day file (`Writing_<YYYY-MM-dd>.md`): what the user typed
+/// A parsed writing day file (`Writing_<YYYY-MM-dd>.md`): what the user wrote
 /// with the Transcripted keyboard, one entry per app/idle-gap segment.
 struct AgentWritingDay: Codable {
     let version: String
