@@ -441,6 +441,7 @@ APP_SOURCES=(
     "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/BrowserCallEvidence.swift"
     "Sources/Meeting/BrowserWindowTitleReader.swift"
+    "Sources/Meeting/RunningApplicationsReader.swift"
     "Sources/Meeting/MeetingPromptLearnedBackoff.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
