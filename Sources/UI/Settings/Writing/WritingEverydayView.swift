@@ -125,16 +125,20 @@ struct WritingEverydayView: View {
         if keyboardOff || needsScreenRecording {
             SettingsCard {
                 if keyboardOff {
+                    // What to do depends on where the keyboard stands: add it
+                    // in Keyboard settings, log out first, or pick it from
+                    // the input menu.
+                    let keyboardStep = Copy.everydayKeyboardStep(model.keyboardSetup)
                     attentionRow(
                         title: Copy.Step3.keyboardTitle,
-                        line: Copy.Step3.keyboardLine,
+                        line: keyboardStep.line,
                         note: nil,
-                        buttonTitle: Copy.turnOnKeyboard,
+                        buttonTitle: keyboardStep.buttonTitle,
                         buttonEnabled: true,
                         automationIdentifier: "transcripted.settings.writing.keyboard.turn-on",
                         showsDivider: needsScreenRecording
                     ) {
-                        model.turnOnKeyboard()
+                        model.openKeyboardSettings()
                     }
                 }
                 if needsScreenRecording {
@@ -160,7 +164,7 @@ struct WritingEverydayView: View {
         title: String,
         line: String,
         note: String?,
-        buttonTitle: String,
+        buttonTitle: String?,
         buttonEnabled: Bool,
         automationIdentifier: String,
         showsDivider: Bool,
@@ -184,13 +188,15 @@ struct WritingEverydayView: View {
                 }
             }
             Spacer(minLength: 12)
-            SettingsInlineActionButton(
-                title: buttonTitle,
-                tone: .warning,
-                automationIdentifier: automationIdentifier,
-                action: action
-            )
-            .disabled(!buttonEnabled)
+            if let buttonTitle {
+                SettingsInlineActionButton(
+                    title: buttonTitle,
+                    tone: .warning,
+                    automationIdentifier: automationIdentifier,
+                    action: action
+                )
+                .disabled(!buttonEnabled)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

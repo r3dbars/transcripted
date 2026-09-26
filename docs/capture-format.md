@@ -376,7 +376,10 @@ Details:
   unescaped.
 - An entry is one app's continuous writing. A new entry starts on an app
   switch, after 2 minutes idle, or on a caret jump or segment break the
-  keyboard reports. Entries under 2 characters after trimming aren't saved.
+  keyboard reports. A scrap under 3 words (a quick "sounds good") doesn't end
+  at a segment break when the same app's next segment starts within a
+  minute: it folds into that entry, each segment on its own line. Entries
+  under 2 characters after trimming aren't saved.
 - Nothing is written for secure input, excluded apps (password managers
   always), apps outside the user's scope, or while Save my writing is off.
 - Files are created 0600 and the `writing/` folder 0700.

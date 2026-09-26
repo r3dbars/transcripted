@@ -10,6 +10,9 @@ struct WritingKeyboardState: Equatable {
     let enabled: Bool
     /// The current input source.
     let selected: Bool
+    /// What the Writing tab tells the user, or `nil` while the keyboard
+    /// isn't installed (before the first "Turn on writing").
+    let setup: WritingKeyboardSetupState?
 }
 
 /// Hosts Writing's runtime inside Transcripted: the socket the keyboard talks
@@ -103,7 +106,9 @@ final class WritingController {
     /// The socket server is up and the runtime is live.
     private(set) var isRunning = false
     private(set) var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
-    /// What `TISEnableInputSource` returned on the first setup, if it ran.
+    /// What enabling the keyboard did on the last try, if it ran. On macOS
+    /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
+    /// and the source stays off.
     private(set) var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
     /// Whether selecting the keyboard on the first setup worked, if it ran.
     private(set) var keyboardSelectSucceeded: Bool?
@@ -149,16 +154,49 @@ final class WritingController {
     /// Expensive: validates this app's and the keyboard's code signatures,
     /// and Text Input Sources wants the main thread. Call it when a screen
     /// needs it, not on a timer.
-    func keyboardState() -> WritingKeyboardState {
+    ///
+    /// `previous` is the state the tab showed last. When the keyboard has
+    /// just become enabled (the user added it in Keyboard settings), this
+    /// selects it once (`WritingKeyboardSetupState.shouldSelect`). It never
+    /// enables the keyboard and never opens System Settings.
+    func keyboardState(previous: WritingKeyboardSetupState? = nil) -> WritingKeyboardState {
+        let installed = Self.keyboardIsInstalled
+        let refresh = WritingKeyboardInputSource.refresh(
+            using: inputSources,
+            previous: previous,
+            firstInstalledThisLoginSession: keyboardFirstInstalledThisLoginSession,
+            selectedOnce: Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
+        )
+        if let selected = refresh.selectSucceeded {
+            keyboardSelectSucceeded = selected && refresh.state == .selected
+            log("WRITING | keyboard select after it was added: \(keyboardSelectSucceeded == true ? "selected" : "not selected")")
+        }
+        if refresh.state == .selected {
+            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
+        }
+        let enabled = refresh.state == .selected || refresh.state == .enabledNotSelected
+        return WritingKeyboardState(
+            installed: installed,
+            enabled: enabled,
+            selected: refresh.state == .selected,
+            setup: installed || enabled ? refresh.state : nil
+        )
+    }
+
+    private nonisolated static var keyboardIsInstalled: Bool {
         let installedPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Input Methods", isDirectory: true)
             .appendingPathComponent(TildeProductProfile.current.inputMethodInstalledBundleName)
             .path
-        let status = keyboardInstaller.inputSourceStatus()
-        return WritingKeyboardState(
-            installed: FileManager.default.fileExists(atPath: installedPath),
-            enabled: status != .missing,
-            selected: status == .selected
+        return FileManager.default.fileExists(atPath: installedPath)
+    }
+
+    /// The app first copied the keyboard in during this login session, so
+    /// Keyboard settings won't list it until the user logs out and back in.
+    private var keyboardFirstInstalledThisLoginSession: Bool {
+        WritingKeyboardFirstInstall.happenedThisLoginSession(
+            currentSession: WritingLoginSession.currentIdentifier(),
+            defaults: Self.appDefaults()
         )
     }
 
@@ -186,6 +224,9 @@ final class WritingController {
     /// `<capture-library>/writing`, for the day files and Delete all writing.
     private let writingDirectory: @Sendable () -> URL
     private let keyboardInstaller = GhostKeyboardInstallerHost()
+    private var inputSources: SystemWritingInputSources {
+        SystemWritingInputSources(installer: keyboardInstaller)
+    }
     private var runtime: Runtime?
     /// Rebuilt on a model switch: its served configuration is per model.
     private var ghostBrainServerHost: GhostBrainServerHost?
@@ -601,31 +642,72 @@ final class WritingController {
         NSWorkspace.shared.open(ScreenRecordingPermission.systemSettingsURL)
     }
 
-    /// The Writing tab's keyboard step: install or update, register, enable
-    /// and select, every time it's asked (the launch path does the enable and
-    /// select only on the first setup). With `openSettingsOnFailure`, falls
-    /// back to Keyboard settings when it can't. `true` once the keyboard is
-    /// the selected input source.
+    /// The Writing tab's keyboard step: install or update, register, try to
+    /// enable, and select when it's enabled, every time it's asked (the
+    /// launch path tries the enable and select only on the first setup).
+    /// macOS 26 ignores the enable, so until the user adds the keyboard in
+    /// Keyboard settings this ends not selected. `openSettingsOnFailure` is
+    /// only for the tab's "Open Keyboard Settings" button: nothing else opens
+    /// System Settings. `true` once the keyboard is the selected input
+    /// source.
     @discardableResult
-    func turnOnKeyboard(openSettingsOnFailure: Bool = true) -> Bool {
-        let result = keyboardInstaller.installOrUpdateIfNeeded()
-        keyboardInstallResult = result
-        log("WRITING | keyboard install: \(result)")
-        guard result == .installed || result == .alreadyInstalled else {
+    func turnOnKeyboard(openSettingsOnFailure: Bool = false) -> Bool {
+        guard installKeyboardRecordingFirstInstall() else {
             if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
             return false
         }
-        let enable = WritingKeyboardInputSource.enable()
+        let selected = enableAndSelectKeyboard()
+        if !selected, openSettingsOnFailure {
+            keyboardInstaller.openKeyboardSettings()
+        }
+        return selected
+    }
+
+    /// Install or update and register. When this copied the keyboard in
+    /// where none was before, remembers the login session it happened in
+    /// (`WritingKeyboardFirstInstall`). `true` when the keyboard is in place.
+    private func installKeyboardRecordingFirstInstall() -> Bool {
+        let wasInstalled = Self.keyboardIsInstalled
+        let result = keyboardInstaller.installOrUpdateIfNeeded()
+        keyboardInstallResult = result
+        log("WRITING | keyboard install: \(result)")
+        if result == .installed, !wasInstalled {
+            WritingKeyboardFirstInstall.record(
+                currentSession: WritingLoginSession.currentIdentifier(),
+                defaults: Self.appDefaults()
+            )
+        }
+        return result == .installed || result == .alreadyInstalled
+    }
+
+    /// Tries `TISEnableInputSource`, checks it took, and selects the
+    /// keyboard when it's enabled. Logs what actually happened. `true` once
+    /// the keyboard is the selected input source.
+    private func enableAndSelectKeyboard() -> Bool {
+        let enable = WritingKeyboardInputSource.enable(using: inputSources)
         keyboardEnableResult = enable
-        log("WRITING | keyboard enable (TISEnableInputSource): \(enable)")
-        let selected = (enable == .enabled || enable == .alreadyEnabled)
-            && keyboardInstaller.selectInputSourceIfAvailable()
+        switch enable {
+        case .enabled:
+            log("WRITING | keyboard enable: enabled")
+        case .alreadyEnabled:
+            log("WRITING | keyboard enable: already enabled")
+        case .needsUserToAdd:
+            log("WRITING | keyboard enable: still off after TISEnableInputSource returned noErr; the user has to add it in Keyboard settings")
+        case .notRegistered:
+            log("WRITING | keyboard enable: not registered")
+        case let .failed(status):
+            log("WRITING | keyboard enable: TISEnableInputSource failed (\(status))")
+        }
+        guard enable.isEnabled else {
+            keyboardSelectSucceeded = false
+            log("WRITING | keyboard select: skipped, keyboard not enabled")
+            return false
+        }
+        let selected = keyboardInstaller.selectInputSourceIfAvailable()
         keyboardSelectSucceeded = selected
         log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
         if selected {
             Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
-        } else if openSettingsOnFailure {
-            keyboardInstaller.openKeyboardSettings()
         }
         return selected
     }
@@ -817,30 +899,21 @@ final class WritingController {
 
     // MARK: - Keyboard
 
-    /// Install or update, register, and the first time only, enable and
-    /// select. Every result lands in the state above and the app log.
+    /// Install or update, register, and until the keyboard was selected
+    /// once, try the enable and select. Every result lands in the state
+    /// above and the app log. Never opens System Settings: the Writing tab
+    /// shows the guidance and its button does that.
     private func installKeyboard() {
-        let result = keyboardInstaller.installOrUpdateIfNeeded()
-        keyboardInstallResult = result
-        log("WRITING | keyboard install: \(result)")
-        guard result == .installed || result == .alreadyInstalled,
+        guard installKeyboardRecordingFirstInstall(),
               !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
         enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
     }
 
     private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool) {
-        let enable = WritingKeyboardInputSource.enable()
-        keyboardEnableResult = enable
-        log("WRITING | keyboard enable (TISEnableInputSource): \(enable)")
-        let selected = (enable == .enabled || enable == .alreadyEnabled)
-            && keyboardInstaller.selectInputSourceIfAvailable()
-        keyboardSelectSucceeded = selected
-        log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
-        if selected {
-            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
-        } else if retryAfterDelay {
-            // Text Input Sources can take a moment to list a just-registered
-            // or just-enabled source. One retry; after that, the next start.
+        let selected = enableAndSelectKeyboard()
+        // Text Input Sources can take a moment to list a just-registered or
+        // just-enabled source. One retry; after that, the next start.
+        if !selected, retryAfterDelay {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, self.isRunning else { return }
