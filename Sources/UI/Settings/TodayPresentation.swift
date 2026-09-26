@@ -19,6 +19,22 @@ struct TodayDictationDayFact: Equatable, Sendable {
     let words: Int
 }
 
+/// One saved writing entry, read from a `Writing_<date>.md` day file.
+struct TodayWritingFact: Equatable, Sendable {
+    let entryID: String
+    let date: Date
+    let appName: String
+    let words: Int
+    let acceptedWords: Int
+    let text: String
+}
+
+/// Words written in one app today, for the header's per-app breakdown.
+struct TodayAppWords: Equatable, Sendable {
+    let appName: String
+    let words: Int
+}
+
 struct TodayContextStats: Equatable, Sendable {
     let todayMeetings: Int
     let todayDictations: Int
@@ -28,6 +44,11 @@ struct TodayContextStats: Equatable, Sendable {
     let weekDictations: Int
     let weekMeetingMinutes: Int
     let weekDictationWords: Int
+    var todayWritingWords: Int = 0
+    var todayWritingEntries: Int = 0
+    var weekWritingWords: Int = 0
+    /// Most words first.
+    var todayWritingApps: [TodayAppWords] = []
 
     static let empty = TodayContextStats(
         todayMeetings: 0,
@@ -41,7 +62,7 @@ struct TodayContextStats: Equatable, Sendable {
     )
 
     var hasAnyCapture: Bool {
-        weekMeetings + weekDictations + todayMeetings + todayDictations > 0
+        weekMeetings + weekDictations + todayMeetings + todayDictations + weekWritingWords + todayWritingWords > 0
     }
 }
 
@@ -49,6 +70,7 @@ enum TodayStatsBuilder {
     static func build(
         meetings: [TodayMeetingFact],
         dictationDays: [TodayDictationDayFact],
+        writing: [TodayWritingFact] = [],
         now: Date,
         calendar: Calendar = .current
     ) -> TodayContextStats {
@@ -89,7 +111,23 @@ enum TodayStatsBuilder {
             }
         }
 
-        return TodayContextStats(
+        var todayWritingWords = 0
+        var todayWritingEntries = 0
+        var weekWritingWords = 0
+        var wordsByApp: [String: Int] = [:]
+        for entry in writing {
+            if calendar.isDate(entry.date, inSameDayAs: now) {
+                todayWritingWords += entry.words
+                todayWritingEntries += 1
+                wordsByApp[entry.appName, default: 0] += entry.words
+            }
+            if week.contains(entry.date) { weekWritingWords += entry.words }
+        }
+        let apps = wordsByApp
+            .map { TodayAppWords(appName: $0.key, words: $0.value) }
+            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.appName < $1.appName }
+
+        var stats = TodayContextStats(
             todayMeetings: todayMeetings,
             todayDictations: todayDictations,
             todayMeetingMinutes: minutes(fromSeconds: todayMeetingSeconds),
@@ -99,6 +137,11 @@ enum TodayStatsBuilder {
             weekMeetingMinutes: minutes(fromSeconds: weekMeetingSeconds),
             weekDictationWords: weekWords
         )
+        stats.todayWritingWords = todayWritingWords
+        stats.todayWritingEntries = todayWritingEntries
+        stats.weekWritingWords = weekWritingWords
+        stats.todayWritingApps = apps
+        return stats
     }
 
     private static func minutes(fromSeconds seconds: Int) -> Int {
@@ -127,9 +170,14 @@ struct TodayTapeDay: Identifiable, Equatable, Sendable {
     let isToday: Bool
     let meetings: [TodayTapeMark]
     let dictations: [TodayTapeMark]
+    var writing: [TodayTapeMark] = []
 
     var id: TimeInterval { day.timeIntervalSinceReferenceDate }
-    var isEmpty: Bool { meetings.isEmpty && dictations.isEmpty }
+    var isEmpty: Bool { meetings.isEmpty && dictations.isEmpty && writing.isEmpty }
+    /// Every mark in time order, for stepping through the day.
+    var allMarks: [TodayTapeMark] {
+        (meetings + dictations + writing).sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+    }
 }
 
 enum TodayTapeBuilder {
@@ -151,8 +199,8 @@ enum TodayTapeBuilder {
                 .sorted { $0.date < $1.date }
             func mark(_ item: TodayRecentItem) -> TodayTapeMark {
                 let start = fraction(of: item.date, onDayStarting: day, calendar: calendar)
-                guard item.kind == .meeting, let seconds = item.durationSeconds, seconds > 0 else {
-                    return TodayTapeMark(item: item, start: start, end: item.kind == .meeting ? start : nil)
+                guard item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 else {
+                    return TodayTapeMark(item: item, start: start, end: item.kind == .dictation ? nil : start)
                 }
                 let end = fraction(of: item.date.addingTimeInterval(TimeInterval(seconds)), onDayStarting: day, calendar: calendar)
                 return TodayTapeMark(item: item, start: start, end: max(start, end))
@@ -161,7 +209,8 @@ enum TodayTapeBuilder {
                 day: day,
                 isToday: offset == 0,
                 meetings: onDay.filter { $0.kind == .meeting }.map(mark),
-                dictations: onDay.filter { $0.kind == .dictation }.map(mark)
+                dictations: onDay.filter { $0.kind == .dictation }.map(mark),
+                writing: onDay.filter { $0.kind == .writing }.map(mark)
             )
         }
     }
@@ -174,6 +223,23 @@ enum TodayTapeBuilder {
         let span = windowEnd.timeIntervalSince(windowStart)
         guard span > 0 else { return 0 }
         return min(1, max(0, date.timeIntervalSince(windowStart) / span))
+    }
+
+    /// Header sentence pieces: "4 meetings (2h 10m)", "12 dictations",
+    /// "1,280 words written". Only the streams with something today.
+    static func headerParts(_ stats: TodayContextStats) -> [(kind: TodayRecentItem.Kind, text: String)] {
+        var parts: [(TodayRecentItem.Kind, String)] = []
+        if stats.todayMeetings > 0 {
+            let minutes = stats.todayMeetingMinutes > 0 ? " (\(TodayCopy.duration(minutes: stats.todayMeetingMinutes)))" : ""
+            parts.append((.meeting, TodayCopy.count(stats.todayMeetings, singular: "meeting", plural: "meetings") + minutes))
+        }
+        if stats.todayDictations > 0 {
+            parts.append((.dictation, TodayCopy.count(stats.todayDictations, singular: "dictation", plural: "dictations")))
+        }
+        if stats.todayWritingWords > 0 {
+            parts.append((.writing, TodayCopy.words(stats.todayWritingWords) + " written"))
+        }
+        return parts
     }
 
     /// Hour labels under the full tape, evenly spaced across 6 AM to midnight.
@@ -200,6 +266,7 @@ struct TodayRecentItem: Equatable, Identifiable, Sendable {
     enum Kind: Equatable, Sendable {
         case meeting
         case dictation
+        case writing
     }
 
     let kind: Kind
@@ -207,21 +274,92 @@ struct TodayRecentItem: Equatable, Identifiable, Sendable {
     let title: String
     let date: Date
     let durationSeconds: Int?
-    /// Meeting transcript to reveal on the Meetings page; nil for dictations.
+    /// Meeting transcript to reveal on the Meetings page, or a writing
+    /// entry's day file; nil for dictations.
     let transcriptURL: URL?
+    /// The first lines of what was said or written, for the preview card.
+    var preview: String? = nil
+    /// Where it was written ("Slack"); writing only.
+    var appName: String? = nil
+    var words: Int? = nil
+    /// Words that came from accepted suggestions; writing only.
+    var acceptedWords: Int? = nil
+}
+
+// MARK: - Writing day files
+
+/// Reads Save my writing's `Writing_<YYYY-MM-dd>.md` day files (the format in
+/// docs/capture-format.md). Pure text in, entries out.
+enum TodayWritingParser {
+    /// A writing entry's bar on the tape: the file keeps only the first
+    /// keystroke, so the length is estimated from the words at a steady
+    /// typing pace, at least a minute and at most an hour.
+    static func estimatedSeconds(words: Int) -> Int {
+        min(3_600, max(60, words * 3))
+    }
+
+    static func entries(fromDayFile contents: String) -> [TodayWritingFact] {
+        var facts: [TodayWritingFact] = []
+        let normalized = contents.replacingOccurrences(of: "\r\n", with: "\n")
+        for chunk in normalized.components(separatedBy: "\n## ").dropFirst() {
+            var lines = chunk.components(separatedBy: "\n")
+            lines.removeFirst()  // the heading
+            var fields: [String: String] = [:]
+            var index = 0
+            while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces).isEmpty { index += 1 }
+            while index < lines.count, !lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
+                let line = lines[index]
+                if let colon = line.range(of: ": ") {
+                    fields[String(line[..<colon.lowerBound])] = String(line[colon.upperBound...])
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "` "))
+                }
+                index += 1
+            }
+            guard let captured = fields["Captured"].flatMap(parseDate) else { continue }
+            let body = lines[index...]
+                .map { $0.hasPrefix("\\## ") ? String($0.dropFirst()) : $0 }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            facts.append(TodayWritingFact(
+                entryID: fields["Entry ID"] ?? "writing-\(captured.timeIntervalSince1970)",
+                date: captured,
+                appName: fields["Source app"].flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown app",
+                words: fields["Words"].flatMap { Int($0) } ?? body.split(whereSeparator: \.isWhitespace).count,
+                acceptedWords: fields["Accepted words"].flatMap { Int($0) } ?? 0,
+                text: body
+            ))
+        }
+        return facts
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+
+    /// A writing row's title: the first line, trimmed like a dictation title
+    /// but without quotes, since it's the user's own text.
+    static func title(for text: String, maxLength: Int = 70) -> String {
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !collapsed.isEmpty else { return "Writing" }
+        guard collapsed.count > maxLength else { return collapsed }
+        return collapsed.prefix(maxLength).trimmingCharacters(in: .whitespaces) + "\u{2026}"
+    }
 }
 
 enum TodayRecentActivity {
     /// Rows per page of the Recent context list.
     static let pageSize = 10
 
-    /// Newest first across both kinds.
+    /// Newest first across every kind.
     static func merge(
         meetings: [TodayRecentItem],
         dictations: [TodayRecentItem],
+        writing: [TodayRecentItem] = [],
         limit: Int = pageSize
     ) -> [TodayRecentItem] {
-        Array((meetings + dictations).sorted { $0.date > $1.date }.prefix(max(0, limit)))
+        Array((meetings + dictations + writing).sorted { $0.date > $1.date }.prefix(max(0, limit)))
     }
 
     /// One-line title for a dictation row: the spoken text, quoted and
