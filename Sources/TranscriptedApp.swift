@@ -306,6 +306,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] in
             self?.pasteLastDictationFromSettings()
         }
+        if NotchIslandController.isSelected {
+            notchIsland.prewarm()
+        }
         sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.

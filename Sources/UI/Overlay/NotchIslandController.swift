@@ -24,8 +24,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// The text of the dictation that just landed, for Copy and the preview.
     var lastDictationTextProvider: (() -> String?)?
 
-    private static let growDuration: TimeInterval = 0.36
-    private static let shrinkDuration: TimeInterval = 0.28
     private static let hoverOpenDelay: UInt64 = 120_000_000
     private static let hoverCloseDelay: UInt64 = 380_000_000
     private static let recentInsertLinger: UInt64 = 2_600_000_000
@@ -51,12 +49,18 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// The screen the island is on, kept while it is up so it never jumps.
     private var screen: NotchIslandScreenInfo?
     private var isShown = false
+    /// Where the finished island sits on screen (the panel can be larger
+    /// while the shape springs).
     private var targetFrame: NSRect?
     private var hideGeneration = 0
     private var hoverTask: Task<Void, Never>?
     private var recentInsertTask: Task<Void, Never>?
     private var tickTask: Task<Void, Never>?
     private var screenObserver: NSObjectProtocol?
+    /// Mouse monitors while the island is up: the window lets clicks through
+    /// everywhere except over the island itself, and hover is judged from
+    /// the pointer instead of tracking areas on a window that may ignore it.
+    private var pointerMonitors: [Any] = []
 
     static var isSelected: Bool {
         DictationOverlayPresentationPreferences.mode() == .notchIsland
@@ -89,8 +93,38 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// True while the pointer rests on the island (holds messages and the
     /// saved meeting, like hovering the old pills did).
     var isPointerOverIsland: Bool {
-        guard isShown, let panel else { return false }
-        return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+        guard isShown, let frame = targetFrame else { return false }
+        return frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+    }
+
+    /// Builds the panel and draws a sample island once at launch, so the
+    /// first key press shows the island on the next frame instead of paying
+    /// for window creation, fonts and symbols.
+    func prewarm() {
+        let (panel, islandView) = ensurePanel()
+        guard !isShown, !panel.isVisible else { return }
+        let screen = currentScreen()
+        islandView.apply(
+            NotchIslandPresentation.layout(
+                dictation: NotchIslandDictationContent(phase: .listening),
+                meeting: nil,
+                callPrompt: nil,
+                recentInsert: nil,
+                expanded: false
+            ),
+            live: live
+        )
+        islandView.setGeometry(screen: screen, hasDrop: false, edgeProgress: nil)
+        panel.alphaValue = 0
+        panel.setFrame(
+            NotchIslandGeometry.envelope(screen: screen, containing: [], margin: NotchIslandMotion.springMargin),
+            display: true
+        )
+        panel.orderFrontRegardless()
+        panel.display()
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+        self.screen = nil
     }
 
     // MARK: - Dictation
@@ -218,27 +252,137 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             dropHeight: islandView.dropHeight
         )
         let frame = NotchIslandGeometry.frame(screen: screen, size: size)
-        panel.hasShadow = layout.drop != nil
 
+        let radius = islandView.currentCornerRadius
         if !isShown {
+            islandView.resetBlur()
             isShown = true
             hideGeneration += 1
-            if !panel.isVisible {
-                panel.setFrame(NotchIslandGeometry.collapsedFrame(screen: screen), display: false)
-            }
-            islandView.setContentVisible(false, animated: false)
-            panel.orderFrontRegardless()
+            let appearingFromHidden = !panel.isVisible
+            let start = appearingFromHidden ? NotchIslandGeometry.collapsedFrame(screen: screen) : presentedShapeFrame(panel, islandView)
+            let startRadius = appearingFromHidden ? NotchIslandGeometry.collapsedRadius(screen: screen) : islandView.shapeCornerRadius
             targetFrame = frame
-            move(panel, to: frame, animated: animated) { [weak self] in
-                guard let self, self.isShown else { return }
-                self.islandView?.setContentVisible(true, animated: true)
+            islandView.setContentVisible(false, animated: false)
+            springShape(panel, islandView, from: start, fromRadius: startRadius, to: frame, radius: radius, spring: animated ? growSpring(screen) : nil)
+            panel.orderFrontRegardless()
+            startPointerWatch()
+            islandView.setContentVisible(true, animated: animated)
+            if animated {
+                islandView.blurContent(in: true)
             }
             updateTicker()
             return
         }
-        guard targetFrame != frame else { return }
+        guard targetFrame != frame || islandView.shapeCornerRadius != radius else { return }
         targetFrame = frame
-        move(panel, to: frame, animated: animated)
+        springShape(
+            panel,
+            islandView,
+            from: presentedShapeFrame(panel, islandView),
+            fromRadius: islandView.shapeCornerRadius,
+            to: frame,
+            radius: radius,
+            spring: animated ? growSpring(screen) : nil
+        )
+        pointerMoved()
+    }
+
+    private func growSpring(_ screen: NotchIslandScreenInfo) -> NotchIslandMotion.Spring {
+        screen.hasNotch ? NotchIslandMotion.grow : NotchIslandMotion.growFromEdge
+    }
+
+    /// The shape's current on-screen rect, mid-spring included.
+    private func presentedShapeFrame(_ panel: NSPanel, _ islandView: NotchIslandView) -> NSRect {
+        let shape = islandView.presentedShapeRect
+        let canvas = panel.frame
+        return NSRect(x: canvas.minX + shape.minX, y: canvas.maxY - shape.maxY, width: shape.width, height: shape.height)
+    }
+
+    /// Springs the shape from one on-screen rect to another. The window
+    /// stays put while the island is up (a fixed envelope with room for the
+    /// overshoot); only Core Animation moves the shape, so the window can
+    /// never resize out of step with it.
+    private func springShape(
+        _ panel: NotchIslandPanel,
+        _ islandView: NotchIslandView,
+        from start: NSRect,
+        fromRadius: CGFloat,
+        to end: NSRect,
+        radius: CGFloat,
+        spring: NotchIslandMotion.Spring?,
+        completion: (() -> Void)? = nil
+    ) {
+        let screen = currentScreen()
+        let needed = NotchIslandGeometry.envelope(screen: screen, containing: [start, end], margin: NotchIslandMotion.springMargin)
+        let oldCanvas = panel.frame
+        let canvas: NSRect
+        if !panel.isVisible {
+            canvas = needed
+        } else if oldCanvas.contains(needed) {
+            canvas = oldCanvas
+        } else {
+            canvas = oldCanvas.union(needed)
+        }
+        func local(_ rect: NSRect) -> CGRect {
+            CGRect(x: rect.minX - canvas.minX, y: canvas.maxY - rect.maxY, width: rect.width, height: rect.height)
+        }
+        // Where the wings' content sits now, to slide it from there. Not on
+        // the first grow, where the content starts in place.
+        let slidesContent = spring != nil && completion == nil && panel.isVisible
+        let previousAnchors = islandView.contentAnchors().map { $0 + oldCanvas.minX - canvas.minX }
+        if canvas != oldCanvas || !panel.isVisible {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            panel.setFrame(canvas, display: false)
+            islandView.frame = NSRect(origin: .zero, size: canvas.size)
+            CATransaction.commit()
+        }
+        islandView.setIslandRect(local(end))
+        if slidesContent, let spring {
+            islandView.slideContent(from: previousAnchors, spring: spring)
+        }
+        islandView.morph(from: local(start), fromRadius: fromRadius, to: local(end), radius: radius, spring: spring) {
+            completion?()
+        }
+    }
+
+    // MARK: - Pointer
+
+    private func startPointerWatch() {
+        guard pointerMonitors.isEmpty else {
+            pointerMoved()
+            return
+        }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.pointerMoved() }
+        }) {
+            pointerMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.pointerMoved() }
+            return event
+        }) {
+            pointerMonitors.append(local)
+        }
+        pointerMoved()
+    }
+
+    private func stopPointerWatch() {
+        pointerMonitors.forEach { NSEvent.removeMonitor($0) }
+        pointerMonitors = []
+        panel?.ignoresMouseEvents = true
+    }
+
+    /// Clicks go to whatever is under the envelope unless the pointer is on
+    /// the island itself.
+    private func pointerMoved() {
+        guard isShown, let panel, let frame = targetFrame else { return }
+        let inside = frame.contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == inside {
+            panel.ignoresMouseEvents = !inside
+        }
+        handleHover(inside)
     }
 
     /// Timers and countdowns tick without rebuilding the island, unless a
@@ -251,21 +395,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         if widths.left != lastWingWidths.left || widths.right != lastWingWidths.right {
             render()
         }
-    }
-
-    private func move(_ panel: NSPanel, to frame: NSRect, animated: Bool, completion: (() -> Void)? = nil) {
-        guard animated, !NotchIslandPalette.reduceMotion else {
-            panel.setFrame(frame, display: true)
-            completion?()
-            return
-        }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = Self.growDuration
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0, 1)
-            panel.animator().setFrame(frame, display: true)
-        }, completionHandler: {
-            Task { @MainActor in completion?() }
-        })
     }
 
     private func hide(animated: Bool) {
@@ -281,7 +410,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard isShown, let panel, let islandView else { return }
         isShown = false
         targetFrame = nil
-        panel.hasShadow = false
+        stopPointerWatch()
         hideGeneration += 1
         let generation = hideGeneration
         let finish = { [weak self] in
@@ -293,14 +422,20 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             finish()
             return
         }
+        // Content fades and softens while the shape pulls back into the
+        // notch (or up into the top edge).
         islandView.setContentVisible(false, animated: true)
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = Self.shrinkDuration
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0, 1)
-            panel.animator().setFrame(NotchIslandGeometry.collapsedFrame(screen: screen), display: true)
-        }, completionHandler: {
-            Task { @MainActor in finish() }
-        })
+        islandView.blurContent(in: false)
+        springShape(
+            panel,
+            islandView,
+            from: presentedShapeFrame(panel, islandView),
+            fromRadius: islandView.shapeCornerRadius,
+            to: NotchIslandGeometry.collapsedFrame(screen: screen),
+            radius: NotchIslandGeometry.collapsedRadius(screen: screen),
+            spring: NotchIslandMotion.shrink,
+            completion: finish
+        )
     }
 
     private func ensurePanel() -> (NotchIslandPanel, NotchIslandView) {
@@ -310,7 +445,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         let view = NotchIslandView(frame: initial)
         view.autoresizingMask = [.width, .height]
         view.onAction = { [weak self] action in self?.handleAction(action) }
-        view.onHoverChanged = { [weak self] hovered in self?.handleHover(hovered) }
         view.onBackgroundClick = { [weak self] in self?.handleBackgroundClick() }
         view.menuProvider = { [weak self] in self?.meetingMenuProvider?() }
         panel.contentView = view

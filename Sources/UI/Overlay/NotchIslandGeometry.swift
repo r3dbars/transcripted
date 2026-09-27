@@ -33,6 +33,13 @@ enum NotchIslandGeometry {
     static let dropTopGap: CGFloat = 2
     static let screenMargin: CGFloat = 8
     static let restingCornerRadius: CGFloat = 16
+    /// On a display without a notch the island swells out of a small nub
+    /// at the top edge.
+    static let edgeNubWidth: CGFloat = 72
+    /// The window the island springs inside while it is up. It is sized once
+    /// when the island appears (and only grows if an island needs more), so
+    /// the window never resizes under a moving shape.
+    static let envelopeMinimumSize = CGSize(width: 720, height: 380)
     static let dropCornerRadius: CGFloat = 26
 
     /// Rounds up to a 4-point step so a timer ticking from 9:59 to 10:00
@@ -93,9 +100,9 @@ enum NotchIslandGeometry {
             )
         }
         return CGRect(
-            x: halfPoint(screen.frame.midX - minimumTabWidth / 2),
+            x: halfPoint(screen.frame.midX - edgeNubWidth / 2),
             y: screen.frame.maxY - 2,
-            width: minimumTabWidth,
+            width: edgeNubWidth,
             height: 2
         )
     }
@@ -134,4 +141,79 @@ enum NotchIslandGeometry {
         }
         return NotchIslandScreenInfo(frame: frame, notchWidth: nil, rowHeight: tabRowHeight)
     }
+}
+
+// MARK: - Shape and motion
+
+extension NotchIslandGeometry {
+    /// Corner radius of the shape the island grows from and shrinks into.
+    static func collapsedRadius(screen: NotchIslandScreenInfo) -> CGFloat {
+        screen.hasNotch ? 10 : 2
+    }
+
+    /// Top-centered window that holds every rect given plus `margin` of
+    /// room for a spring's overshoot, at least `envelopeMinimumSize`, and
+    /// never wider than the screen.
+    static func envelope(screen: NotchIslandScreenInfo, containing rects: [CGRect], margin: CGFloat) -> CGRect {
+        let midX = screen.frame.midX
+        var half = envelopeMinimumSize.width / 2
+        var height = envelopeMinimumSize.height
+        for rect in rects {
+            half = max(half, max(midX - rect.minX, rect.maxX - midX) + margin)
+            height = max(height, screen.frame.maxY - rect.minY + margin)
+        }
+        half = min(half.rounded(.up), screen.frame.width / 2)
+        height = min(height.rounded(.up), screen.frame.height)
+        return CGRect(x: midX - half, y: screen.frame.maxY - height, width: 2 * half, height: height)
+    }
+}
+
+/// How the island moves: springs on the system's render server, so a busy
+/// main thread (the mic starting up) can't make it stutter.
+enum NotchIslandMotion {
+    struct Spring: Equatable {
+        var stiffness: CGFloat
+        var damping: CGFloat
+
+        /// SwiftUI-style response (seconds per oscillation) and damping
+        /// ratio (1 = no overshoot) as Core Animation spring constants.
+        static func response(_ response: CGFloat, dampingRatio: CGFloat) -> Spring {
+            let omega = 2 * CGFloat.pi / response
+            return Spring(stiffness: omega * omega, damping: 2 * dampingRatio * omega)
+        }
+
+        var dampingRatio: CGFloat { damping / (2 * stiffness.squareRoot()) }
+
+        /// Progress from 0 to 1 (past 1 while it overshoots) after `time`
+        /// seconds, starting at rest. Mirrors CASpringAnimation with mass 1.
+        func progress(at time: CGFloat) -> CGFloat {
+            guard time > 0 else { return 0 }
+            let omega = stiffness.squareRoot()
+            let zeta = dampingRatio
+            if zeta < 1 {
+                let omegaD = omega * (1 - zeta * zeta).squareRoot()
+                let decay = exp(-zeta * omega * time)
+                return 1 - decay * (cos(omegaD * time) + zeta * omega / omegaD * sin(omegaD * time))
+            }
+            return 1 - exp(-omega * time) * (1 + omega * time)
+        }
+    }
+
+    /// Growing out of the notch and between states: quick, with a small
+    /// Dynamic Island overshoot.
+    static let grow = Spring.response(0.34, dampingRatio: 0.74)
+    /// Swelling out of the top edge of a display without a notch: a touch
+    /// softer, so it pours out instead of snapping.
+    static let growFromEdge = Spring.response(0.42, dampingRatio: 0.8)
+    /// Pulling back into the notch: quick and without a bounce.
+    static let shrink = Spring.response(0.26, dampingRatio: 1)
+    static let contentFadeIn: Double = 0.12
+    static let contentFadeOut: Double = 0.08
+    /// Content blurs in while the shape uncovers it (about the first fifth
+    /// of a second), then is fully sharp.
+    static let blurRadius: CGFloat = 6
+    static let blurInDuration: Double = 0.2
+    /// Room around the island while it springs, so an overshoot isn't
+    /// cut off by the window's edge.
+    static let springMargin: CGFloat = 14
 }

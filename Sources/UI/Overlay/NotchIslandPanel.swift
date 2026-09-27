@@ -1,8 +1,9 @@
 // NotchIslandPanel.swift
 // The borderless, non-activating panel the notch island draws in. It sits
-// above the menu bar (so the island can grow out of the notch), is sized to
-// the island exactly (so it never blocks clicks around it), and never takes
-// keyboard focus from the app being dictated into.
+// above the menu bar (so the island can grow out of the notch) and never
+// takes keyboard focus from the app being dictated into. It stays one size
+// while the island is up; NotchIslandController lets clicks through it
+// everywhere except over the island itself.
 
 import AppKit
 
