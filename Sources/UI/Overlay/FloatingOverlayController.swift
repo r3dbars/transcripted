@@ -552,6 +552,13 @@ class FloatingOverlayController {
         panel.alphaValue = 1
     }
 
+    /// The earliest show on a key press, before the start's checks run.
+    /// Only in Notch island mode; the other windows need the target field.
+    func showIslandStartingStateIfSelected(near sourceApp: NSRunningApplication?) {
+        guard isIslandMode, !state.isActiveDictationState else { return }
+        showStartingState(near: sourceApp)
+    }
+
     @discardableResult
     func showMiniCursorStartingStateIfNeeded(
         near sourceApp: NSRunningApplication?,

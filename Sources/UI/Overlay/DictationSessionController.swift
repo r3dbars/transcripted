@@ -290,6 +290,10 @@ class DictationSessionController: ObservableObject {
         ) {
             return
         }
+        // Notch island: put it up on this key press, ahead of the telemetry
+        // and admission checks below (~12 ms on the main thread), so it lands
+        // on the next frame. A refused start replaces it with its message.
+        overlayController.showIslandStartingStateIfSelected(near: sourceApp)
         // The attempt denominator.
         //
         // `dictation_started` is emitted only once the microphone is actually
