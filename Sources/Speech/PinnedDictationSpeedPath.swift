@@ -40,9 +40,17 @@ enum PinnedDictationSpeedPath {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     }
 
-    /// Nil when the take says nothing about the mic: too short, a model
-    /// failure, or cancelled.
-    static func outcome(text: String?, emptyReason: DictationEmptyTranscriptionReason?) -> TakeOutcome? {
+    /// Nil when the take says nothing about the mic: a tap, a model failure,
+    /// or cancelled.
+    ///
+    /// Too little audio from a key held past a mis-tap is empty: the recorder
+    /// was open that long and delivered almost nothing, which is the "mic
+    /// never delivers audio" failure, not a tap.
+    static func outcome(
+        text: String?,
+        emptyReason: DictationEmptyTranscriptionReason?,
+        heldSeconds: TimeInterval = 0
+    ) -> TakeOutcome? {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .hadWords
         }
@@ -52,7 +60,9 @@ enum PinnedDictationSpeedPath {
         case .otherLanguage?:
             // Words came back, just in another script, so the mic worked.
             return .hadWords
-        case .recordingTooShort?, .modelFailure?, nil:
+        case .recordingTooShort?:
+            return heldSeconds >= DictationEmptyTranscriptionReason.accidentalStartMaximumPress ? .empty : nil
+        case .modelFailure?, nil:
             return nil
         }
     }
@@ -137,6 +147,8 @@ struct PinnedDictationSpeedPathTake: Equatable {
     let restarts: Int
     let gaps: Int
     let droppedCallbacks: Int
+    /// How long the recorder was open, start to stop.
+    var heldSeconds: TimeInterval = 0
 
     /// Local `EventReporter` context; `AnalyticsEventForwardingPolicy`
     /// bounds and buckets it before anything leaves the Mac.

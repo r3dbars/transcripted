@@ -19,6 +19,27 @@ func testPinnedDictationSpeedPath() {
         )
         assertEqual(PinnedDictationSpeedPath.outcome(text: "  ", emptyReason: .noSpeech), .empty)
         assertNil(PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort), "a tap says nothing about the mic")
+        assertNil(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 1.2),
+            "still a mis-tap"
+        )
+        assertEqual(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 1.5),
+            .empty,
+            "held past a mis-tap and the recorder delivered almost nothing"
+        )
+        assertEqual(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 6),
+            .empty
+        )
+        assertEqual(
+            PinnedDictationSpeedPath.outcome(text: "hello", emptyReason: .recordingTooShort, heldSeconds: 6),
+            .hadWords
+        )
+        assertNil(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .modelFailure, heldSeconds: 6),
+            "a long take the model failed on still says nothing about the mic"
+        )
         assertNil(PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .modelFailure), "the model failed, not the mic")
         assertNil(PinnedDictationSpeedPath.outcome(text: nil, emptyReason: nil), "cancelled")
     }

@@ -28,17 +28,21 @@ final class ParakeetPinnedDictationRecording: @unchecked Sendable {
     let delivery = ParakeetAudioStartCancellationState()
     let channelCount: Int
     let sampleRate: Double
+    /// Made just before the capture starts, so it marks when the take began.
+    let startedUptime: TimeInterval
 
     init(
         capture: PinnedMicrophoneCapture,
         selection: DictationInputDeviceSelection,
         channelCount: Int = 0,
-        sampleRate: Double = 0
+        sampleRate: Double = 0,
+        startedUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) {
         self.capture = capture
         self.selection = selection
         self.channelCount = channelCount
         self.sampleRate = sampleRate
+        self.startedUptime = startedUptime
     }
 }
 
@@ -313,7 +317,11 @@ extension ParakeetEngine {
         guard let take = pendingPinnedSpeedPathTake else { return }
         pendingPinnedSpeedPathTake = nil
         guard !Task.isCancelled,
-              let outcome = PinnedDictationSpeedPath.outcome(text: text, emptyReason: emptyReason) else { return }
+              let outcome = PinnedDictationSpeedPath.outcome(
+                  text: text,
+                  emptyReason: emptyReason,
+                  heldSeconds: take.heldSeconds
+              ) else { return }
         let result = PinnedDictationSpeedPath.record(outcome, for: take.input)
         guard result.turnedOffNow else { return }
         AppLogger.transcription.warning("PARAKEET | pinned microphone takes kept coming out empty; this mic uses the audio engine now", [
@@ -657,7 +665,8 @@ extension ParakeetEngine {
                 sampleRate: recording.sampleRate,
                 restarts: diagnostics.restarts,
                 gaps: diagnostics.gaps,
-                droppedCallbacks: diagnostics.droppedCallbacks
+                droppedCallbacks: diagnostics.droppedCallbacks,
+                heldSeconds: ProcessInfo.processInfo.systemUptime - recording.startedUptime
             )
         }
     }
