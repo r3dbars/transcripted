@@ -531,6 +531,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard hovered != isHovered else { return }
         isHovered = hovered
         meetingHoverHandler?(hovered)
+        islandView?.setCountdownPaused(hovered)
         hoverTask?.cancel()
         hoverTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: hovered ? Self.hoverOpenDelay : Self.hoverCloseDelay)

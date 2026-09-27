@@ -269,6 +269,24 @@ class DictationSessionController: ObservableObject {
     ///   alone cannot tell a retry apart from the press that preceded it, and
     ///   a user who taps Try Again four times would otherwise read as five
     ///   independent attempts in the denominator.
+    /// The "Not pasted" notice, whose Paste button pastes into whatever app
+    /// is in front now (the user clicks where the words go first).
+    private func showNotPasted(_ text: String, message: String, overlayController: FloatingOverlayController) {
+        overlayController.showNotPastedNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+            guard let self, let overlayController else { return }
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            guard frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+            switch self.textPaster.paste(text, target: DictationPasteTarget.capture(sourceApp: frontmost)) {
+            case .pasted, .likelyPasted:
+                overlayController.showSuccessAndDismiss(title: "Pasted")
+            case .copied(let retryMessage, reason: _):
+                self.showNotPasted(text, message: retryMessage, overlayController: overlayController)
+            case .failed(let failure, reason: _):
+                overlayController.showError(failure)
+            }
+        }
+    }
+
     func startDictation(
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
@@ -1688,8 +1706,9 @@ class DictationSessionController: ObservableObject {
                     overlayController.showError("\(message) \(saveFailureMessage)")
                 } else {
                     // The text is safe on the clipboard — present it as a calm
-                    // "press ⌘V" notice, not a warning-triangle error.
-                    overlayController.showClipboardNotice(message)
+                    // "press ⌘V" notice, not a warning-triangle error. The
+                    // island also shows the words and a Paste button.
+                    self.showNotPasted(text, message: message, overlayController: overlayController)
                 }
             case .failed(let message, reason: _):
                 let combinedMessage: String

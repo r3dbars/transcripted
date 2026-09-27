@@ -36,6 +36,12 @@ struct NotchIslandDictationContent: Equatable {
         var tone: Tone
         var text: String
         var actionTitle: String?
+        /// The words of a dictation that didn't paste, shown so the user
+        /// knows what ⌘V will put in.
+        var preview: String? = nil
+        /// Seconds until the message closes on its own, drawn as a ring
+        /// around Dismiss.
+        var dismissSeconds: Double? = nil
     }
 
     var phase: Phase
@@ -217,7 +223,7 @@ enum NotchIslandDrop: Equatable {
     /// until something new needs saying.
     var stickyKey: String {
         switch self {
-        case .dictationMessage(let message): return "dictation-message:\(message.text)"
+        case .dictationMessage(let message): return "dictation-message:\(message.text)\(message.preview.map { "|\($0)" } ?? "")"
         case .meetingPrompt(let prompt): return "meeting-prompt:\(prompt.title)"
         case .meetingError(let title, let message, _): return "meeting-error:\(title)|\(message)"
         case .callPrompt(let title, _): return "call:\(title)"
@@ -337,6 +343,7 @@ enum NotchIslandPresentation {
         case .error:
             return "Dictation"
         case .notice:
+            if message.preview != nil { return "Not pasted" }
             return message.text.hasPrefix("Pasted") ? "Pasted" : "Copied"
         case .saved:
             return "Saved"

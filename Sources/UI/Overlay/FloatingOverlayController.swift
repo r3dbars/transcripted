@@ -88,6 +88,7 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state != .drafting { clearNotPasted() }
             updateEscapeCancelTracking()
             if state.isActiveDictationState {
                 cancelPendingHideForActiveDictation()
@@ -108,6 +109,13 @@ class FloatingOverlayController {
     var messageCanGiveWayToNextStart = false
     private var errorActionTitle: String?
     private var errorActionHandler: (() -> Void)?
+    /// A dictation that didn't paste: its words, shown in the island, and
+    /// what the island's Paste button does. Kept apart from the actionable
+    /// error handler so closing the notice leaves the text on the clipboard.
+    private var notPastedText: String?
+    private var notPastedPasteHandler: (() -> Void)?
+    private var notPastedKeyMonitor: Any?
+    static let notPastedDismissSeconds: Double = 15
     var loadingElapsedSeconds: Int = 0 {
         didSet { pushStateToViews() }
     }
@@ -342,7 +350,13 @@ class FloatingOverlayController {
             case .saved:
                 tone = .saved
             }
-            phase = .message(.init(tone: tone, text: errorMessage, actionTitle: errorActionTitle))
+            phase = .message(.init(
+                tone: tone,
+                text: errorMessage,
+                actionTitle: notPastedText != nil ? "Paste" : errorActionTitle,
+                preview: notPastedText,
+                dismissSeconds: notPastedText != nil ? Self.notPastedDismissSeconds : nil
+            ))
         case .success:
             phase = .success(title: successTitle)
         }
@@ -364,6 +378,10 @@ class FloatingOverlayController {
             clearEscapeConfirmation()
             onEscapeDuringSession?()
         case .dictationMessageAction:
+            if let paste = notPastedPasteHandler {
+                paste()
+                return
+            }
             let handler = errorActionHandler
             clearActionableErrorWithoutHiding()
             handler?()
@@ -743,6 +761,42 @@ class FloatingOverlayController {
         showMessage(message, tone: .notice)
     }
 
+    /// A dictation that didn't paste (no text box, or focus moved). The
+    /// island shows the words, a Paste button, and a ring that runs down to
+    /// the close; pressing ⌘V elsewhere turns it into "Pasted". Other
+    /// overlay modes keep the plain clipboard notice.
+    func showNotPastedNotice(_ text: String, fallbackMessage: String, paste: @escaping () -> Void) {
+        guard isIslandMode else {
+            showClipboardNotice(fallbackMessage)
+            return
+        }
+        showMessage("Not pasted", tone: .notice, notPasted: (text, paste))
+    }
+
+    private func clearNotPasted() {
+        notPastedText = nil
+        notPastedPasteHandler = nil
+        if let notPastedKeyMonitor {
+            NSEvent.removeMonitor(notPastedKeyMonitor)
+            self.notPastedKeyMonitor = nil
+        }
+    }
+
+    /// Watches for the user's own ⌘V in another app while the words are
+    /// still on the clipboard.
+    private func watchForManualPaste(of text: String) {
+        notPastedKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags == .command, event.charactersIgnoringModifiers?.lowercased() == "v" else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.notPastedText == text, self.state == .drafting,
+                      NSPasteboard.general.string(forType: .string) == text else { return }
+                self.clearNotPasted()
+                self.showSuccessAndDismiss(title: "Pasted")
+            }
+        }
+    }
+
     /// Calm "it's saved" message, with an optional action such as Paste It.
     func showSavedNotice(
         _ message: String,
@@ -756,9 +810,16 @@ class FloatingOverlayController {
         _ message: String,
         tone: MessageTone,
         actionTitle: String? = nil,
-        action: (() -> Void)? = nil
+        action: (() -> Void)? = nil,
+        notPasted: (text: String, paste: () -> Void)? = nil
     ) {
         errorDismissTask?.cancel()
+        clearNotPasted()
+        if let notPasted {
+            notPastedText = notPasted.text
+            notPastedPasteHandler = notPasted.paste
+            watchForManualPaste(of: notPasted.text)
+        }
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         discardActionableMessageIfNeeded()
@@ -773,6 +834,20 @@ class FloatingOverlayController {
             showPanel(near: nil)
         }
         pushStateToViews()  // Force update for error message
+        if notPasted != nil {
+            // Runs down with the island's ring, and holds while hovered.
+            errorDismissTask = Task { @MainActor [weak self] in
+                var remaining = Self.notPastedDismissSeconds
+                while remaining > 0 {
+                    do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                    guard let self else { return }
+                    if !self.isMouseOverPanel { remaining -= 0.1 }
+                }
+                guard let self, !self.errorMessage.isEmpty else { return }
+                self.dismissError()
+            }
+            return
+        }
         guard actionTitle == nil else { return }
         let dismissDelay = TranscriptedConstants.messageDismissDelay(
             base: tone != .error
@@ -818,6 +893,7 @@ class FloatingOverlayController {
 
     func dismissError() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
+        clearNotPasted()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         errorMessage = ""
@@ -841,6 +917,7 @@ class FloatingOverlayController {
 
     private func clearActionableErrorWithoutHiding() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
+        clearNotPasted()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         errorMessage = ""
@@ -856,6 +933,7 @@ class FloatingOverlayController {
         shortcutMode: DictationShortcutMode? = nil
     ) {
         errorDismissTask?.cancel()
+        clearNotPasted()
         errorMessage = DictationNoSpeechPresentationPolicy.message(
             trigger: trigger,
             reason: reason,
@@ -882,6 +960,7 @@ class FloatingOverlayController {
 
     func showSuccessAndDismiss(title: String = "Pasted", completion: (() -> Void)? = nil) {
         errorDismissTask?.cancel()
+        clearNotPasted()
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
         errorMessage = ""
