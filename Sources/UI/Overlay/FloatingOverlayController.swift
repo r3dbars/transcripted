@@ -740,13 +740,15 @@ class FloatingOverlayController {
     func showNoSpeechAndDismiss(
         trigger: String = "unknown",
         reason: DictationEmptyTranscriptionReason = .noSpeech,
-        shortcutMode: DictationShortcutMode? = nil
+        shortcutMode: DictationShortcutMode? = nil,
+        silentMicName: String? = nil
     ) {
         errorDismissTask?.cancel()
         errorMessage = DictationNoSpeechPresentationPolicy.message(
             trigger: trigger,
             reason: reason,
-            shortcutMode: shortcutMode
+            shortcutMode: shortcutMode,
+            silentMicName: silentMicName
         )
         messageTone = .error
         messageCanGiveWayToNextStart = true
@@ -757,9 +759,17 @@ class FloatingOverlayController {
             showPanel(near: nil)
         }
         pushStateToViews()
+        // A muted mic needs reading and acting on, so it stays up as long
+        // as other messages of its length; plain "no speech" is a flash.
+        let dismissDelay = silentMicName == nil
+            ? TranscriptedConstants.noSpeechDismissDelay
+            : TranscriptedConstants.messageDismissDelay(
+                base: TranscriptedConstants.errorDismissDelay,
+                characterCount: errorMessage.count
+            )
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: TranscriptedConstants.noSpeechDismissDelay)
+                try await Task.sleep(nanoseconds: dismissDelay)
             } catch { return }
             guard let self = self else { return }
             self.errorMessage = ""

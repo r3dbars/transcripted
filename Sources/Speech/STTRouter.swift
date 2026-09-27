@@ -62,6 +62,7 @@ class STTRouter: ObservableObject {
     }
 
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
+    var lastRecordingWasDigitalSilence: Bool { parakeetEngine.lastRecordingWasDigitalSilence }
     var isRecordingFromSharedMeetingMic: Bool { parakeetEngine.isRecordingFromSharedMeetingMic }
     var hasRecoverableRecording: Bool { parakeetEngine.hasRecoverableRecording }
     var dictationAudioRouteAnalyticsContext: [String: String] {
