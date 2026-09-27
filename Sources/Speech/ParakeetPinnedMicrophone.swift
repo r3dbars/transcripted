@@ -28,8 +28,9 @@ final class ParakeetPinnedDictationRecording: @unchecked Sendable {
     let delivery = ParakeetAudioStartCancellationState()
     let channelCount: Int
     let sampleRate: Double
-    /// Made just before the capture starts, so it marks when the take began.
-    let startedUptime: TimeInterval
+    /// Reset once the capture's start returns, so waiting for the start
+    /// never counts as time the recorder was open.
+    var startedUptime: TimeInterval
 
     init(
         capture: PinnedMicrophoneCapture,
@@ -251,6 +252,7 @@ extension ParakeetEngine {
         // A capture left by a start that lost its reset should never keep
         // appending next to this one.
         discardPinnedDictationRecording()
+        recording.startedUptime = ProcessInfo.processInfo.systemUptime
         pinnedDictationRecording = recording
         updateCachedInputDeviceSelection(prepared.selection)
         updateNativeSampleRate(prepared.format.sampleRate)
@@ -320,7 +322,8 @@ extension ParakeetEngine {
               let outcome = PinnedDictationSpeedPath.outcome(
                   text: text,
                   emptyReason: emptyReason,
-                  heldSeconds: take.heldSeconds
+                  heldSeconds: take.heldSeconds,
+                  audioSeconds: take.audioSeconds
               ) else { return }
         let result = PinnedDictationSpeedPath.record(outcome, for: take.input)
         guard result.turnedOffNow else { return }
@@ -636,6 +639,8 @@ extension ParakeetEngine {
     /// drain finishes so wake and route handlers keep treating it as live.
     func stopPinnedDictationRecording() async {
         guard let recording = pinnedDictationRecording else { return }
+        // Before the drain: it only delivers audio captured before Stop.
+        let stoppedUptime = ProcessInfo.processInfo.systemUptime
         let capture = recording.capture
         await Task.detached(priority: .userInitiated) {
             capture.finishAndDrain()
@@ -666,7 +671,8 @@ extension ParakeetEngine {
                 restarts: diagnostics.restarts,
                 gaps: diagnostics.gaps,
                 droppedCallbacks: diagnostics.droppedCallbacks,
-                heldSeconds: ProcessInfo.processInfo.systemUptime - recording.startedUptime
+                heldSeconds: stoppedUptime - recording.startedUptime,
+                audioSeconds: stoppedDuration
             )
         }
     }

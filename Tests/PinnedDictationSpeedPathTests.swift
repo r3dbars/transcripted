@@ -29,8 +29,21 @@ func testPinnedDictationSpeedPath() {
             "held past a mis-tap and the recorder delivered almost nothing"
         )
         assertEqual(
-            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 6),
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 6, audioSeconds: 0),
+            .empty,
+            "open 6 s and nothing arrived"
+        )
+        assertEqual(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 6, audioSeconds: 0.4),
             .empty
+        )
+        assertNil(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 6, audioSeconds: 0.5),
+            "some audio arrived, so the recorder isn't dead"
+        )
+        assertNil(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .recordingTooShort, heldSeconds: 1.8, audioSeconds: 0.9),
+            "a slow start on a healthy mic still delivers most of the hold"
         )
         assertEqual(
             PinnedDictationSpeedPath.outcome(text: "hello", emptyReason: .recordingTooShort, heldSeconds: 6),
