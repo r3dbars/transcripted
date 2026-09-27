@@ -416,6 +416,62 @@ func testDictationInputDeviceSelectionPolicy() {
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
     }
 
+    runSuite("PinnedDictationInputPolicy moves a mic back to the engine only where speed was the reason") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Air Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let everyMicIsOff: (DictationAudioDevice) -> Bool = { _ in true }
+
+        let macDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macMic, defaultOutput: nil,
+            availableInputs: [macMic], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsSpeedOnly(for: macDefault), "the built-in macOS input uses the recorder only for speed")
+        assertFalse(
+            PinnedDictationInputPolicy.recorderIsNeeded(for: macDefault, speedPathIsOff: everyMicIsOff),
+            "a built-in mic whose takes kept coming out empty goes back to the engine"
+        )
+        assertTrue(
+            PinnedDictationInputPolicy.recorderIsNeeded(for: macDefault, speedPathIsOff: { _ in false }),
+            "a healthy built-in mic keeps the faster recorder"
+        )
+
+        let usbDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: usbMic, defaultOutput: nil,
+            availableInputs: [macMic, usbMic], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsSpeedOnly(for: usbDefault), "a wired macOS input uses the recorder only for speed")
+        assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: usbDefault, speedPathIsOff: everyMicIsOff))
+
+        let skipsHeadset = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsRequired(for: skipsHeadset))
+        assertFalse(PinnedDictationInputPolicy.recorderIsSpeedOnly(for: skipsHeadset), "skipping a headset is never scored")
+        assertTrue(
+            PinnedDictationInputPolicy.recorderIsNeeded(for: skipsHeadset, speedPathIsOff: everyMicIsOff),
+            "the engine would open the headset, so the recorder stays"
+        )
+
+        let picked = PinnedDictationInputPolicy.selection(
+            automatic: macDefault,
+            availableInputs: [macMic, usbMic],
+            preferredUID: usbMic.uid,
+            chosenInputAlwaysWins: true
+        )
+        assertTrue(PinnedDictationInputPolicy.recorderIsRequired(for: picked), "only the recorder reaches a picked mic")
+        assertFalse(PinnedDictationInputPolicy.recorderIsSpeedOnly(for: picked))
+        assertTrue(PinnedDictationInputPolicy.recorderIsNeeded(for: picked, speedPathIsOff: everyMicIsOff))
+
+        let loopback = DictationAudioDevice(id: 5, name: "Loopback Audio", transport: .virtual, inputChannelCount: 2, uid: "loopback")
+        let virtualDefault = DictationInputDeviceSelection(
+            defaultInput: loopback, selectedInput: loopback,
+            defaultOutput: nil, reason: .defaultIsSafe
+        )
+        assertFalse(PinnedDictationInputPolicy.recorderIsSpeedOnly(for: virtualDefault), "the engine records it anyway")
+    }
+
     runSuite("Pinned dictation skips a Bluetooth headset unless the Microphone choice keeps the macOS input") {
         let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
         assertFalse(
