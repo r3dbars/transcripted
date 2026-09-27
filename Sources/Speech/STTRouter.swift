@@ -331,6 +331,8 @@ class STTRouter: ObservableObject {
 
     func startRecording() async -> Bool {
         setActiveRecordingModel(selectedModel)
+        // A take that never reached transcription must not be scored as this one.
+        parakeetEngine.pendingPinnedSpeedPathTake = nil
         return await parakeetEngine.startRecording()
     }
 
@@ -341,6 +343,7 @@ class STTRouter: ObservableObject {
 
     func startRecordingFromSharedMeetingMic(claim: SharedMeetingMicClaim) -> Bool {
         setActiveRecordingModel(selectedModel)
+        parakeetEngine.pendingPinnedSpeedPathTake = nil
         return parakeetEngine.startSharedMeetingMicRecording(claim: claim)
     }
 
@@ -382,6 +385,11 @@ class STTRouter: ObservableObject {
         let model = recordingModelOwnership.activeLease?.model ?? selectedModel
         heldBackDictationText = nil
         let text = await transcribeWithRecordingModel(preparedRecording: preparedRecording)
+        // Words (even held back ones) or an empty take score the pinned
+        // recorder's speed-only use of this mic.
+        defer {
+            parakeetEngine.scorePendingPinnedSpeedPathTake(text: text, emptyReason: lastEmptyTranscriptionReason)
+        }
         // Read the person's languages (a Carbon keyboard lookup) only when the
         // text is nearly all one non-Latin script.
         guard let text, !Task.isCancelled,

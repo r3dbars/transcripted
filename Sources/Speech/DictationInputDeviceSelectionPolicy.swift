@@ -69,14 +69,28 @@ enum PinnedDictationInputPolicy {
     /// same Mac the recorder delivered the first audio in about 70ms where
     /// the engine took about 190ms, with an engine tail past 500ms. A
     /// Bluetooth headset that is itself the recorded mic, and aggregate,
-    /// virtual or unknown inputs, keep the engine path.
-    static func recorderIsNeeded(for selection: DictationInputDeviceSelection) -> Bool {
-        if selection.didOverrideDefault,
-           selection.reason == .userChosenInput
-            || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" {
-            return true
-        }
-        return recorderIsFasterPath(for: selection.selectedInput)
+    /// virtual or unknown inputs, keep the engine path. So does a mic whose
+    /// speed-only takes kept coming out empty (`PinnedDictationSpeedPath`).
+    static func recorderIsNeeded(
+        for selection: DictationInputDeviceSelection,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        if recorderIsRequired(for: selection) { return true }
+        return recorderIsFasterPath(for: selection.selectedInput) && !speedPathIsOff(selection.selectedInput)
+    }
+
+    /// Only the recorder can record this selection without touching a
+    /// Bluetooth headset or while honoring a picked mic.
+    static func recorderIsRequired(for selection: DictationInputDeviceSelection) -> Bool {
+        selection.didOverrideDefault
+            && (selection.reason == .userChosenInput
+                || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth")
+    }
+
+    /// The recorder was used for this selection only because it is faster,
+    /// so its takes are scored by `PinnedDictationSpeedPath`.
+    static func recorderIsSpeedOnly(for selection: DictationInputDeviceSelection) -> Bool {
+        !recorderIsRequired(for: selection) && recorderIsFasterPath(for: selection.selectedInput)
     }
 
     static func recorderIsFasterPath(for input: DictationAudioDevice) -> Bool {

@@ -127,7 +127,13 @@ enum AnalyticsEventForwardingPolicy {
     ]
     /// `PinnedMicrophoneRestartTrigger` raw values.
     static let pinnedMicrophoneRestartTriggers: Set<String> = ["format_change", "stall"]
-    static let pinnedMicrophoneFallbackStages: Set<String> = ["setup_timeout", "start_failed", "unavailable"]
+    /// `empty_takes`: the mic's speed-only takes kept coming out empty, so
+    /// it records through the engine now (`PinnedDictationSpeedPath`).
+    static let pinnedMicrophoneFallbackStages: Set<String> = ["empty_takes", "setup_timeout", "start_failed", "unavailable"]
+    /// Device rates a Mac mic reports; anything else is `other`.
+    static let pinnedMicrophoneSampleRates: Set<Int> = [
+        8_000, 11_025, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000,
+    ]
     static let pinnedMicrophoneSilentInputActions: Set<String> = ["kept", "switched"]
 
     static func forwardedEvent(
@@ -162,10 +168,25 @@ enum AnalyticsEventForwardingPolicy {
                 properties: ["selection_reason": selectionReason(context["reason"])]
             )
         case "pinned_microphone_fell_back_to_engine":
-            return ForwardedEvent(
-                name: "dictation_pinned_microphone_fell_back_to_engine",
-                properties: ["stage": bounded(context["stage"], to: pinnedMicrophoneFallbackStages)]
-            )
+            var properties = ["stage": bounded(context["stage"], to: pinnedMicrophoneFallbackStages)]
+            // Only the empty-takes fallback carries the last take's format and
+            // health, to tell a wrong layout from lost buffers.
+            if let channels = context["input_channels"].flatMap(Int.init), (1...64).contains(channels) {
+                properties["input_channels"] = "\(channels)"
+            }
+            if let rate = context["input_rate_hz"].flatMap(Int.init) {
+                properties["input_rate_hz"] = pinnedMicrophoneSampleRates.contains(rate) ? "\(rate)" : "other"
+            }
+            for (key, bucketKey) in [
+                ("restarts", "pinned_mic_restart_bucket"),
+                ("gaps", "pinned_mic_gap_bucket"),
+                ("dropped_callbacks", "pinned_mic_dropped_callback_bucket"),
+            ] {
+                if let count = context[key].flatMap(Int.init) {
+                    properties[bucketKey] = AnalyticsReporter.countBucket(count)
+                }
+            }
+            return ForwardedEvent(name: "dictation_pinned_microphone_fell_back_to_engine", properties: properties)
         case "pinned_microphone_silent_input":
             return ForwardedEvent(
                 name: "dictation_pinned_microphone_silent_input",
