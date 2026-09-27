@@ -83,6 +83,11 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
         assertFalse(panel.canBecomeMain, "the island is never a main window")
         assertEqual(panel.level, .statusBar, "the island sits in the menu bar, above it, below open menus")
+        let controller = overlayPrivacySource("Sources/UI/Overlay/NotchIslandController.swift")
+        assertTrue(
+            controller.contains("panel.sharingType = NotchIslandPreferences.visibleInScreenSharing() ? .readOnly : .none"),
+            "the island only becomes capturable when the person turns on Show island in screen sharing"
+        )
         let offscreen = NSRect(x: 0, y: 5000, width: 360, height: 32)
         assertEqual(
             panel.constrainFrameRect(offscreen, to: nil),

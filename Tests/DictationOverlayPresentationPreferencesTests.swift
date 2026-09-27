@@ -48,6 +48,23 @@ func testDictationOverlayPresentationPreferences() {
         )
     }
 
+    runSuite("NotchIslandPreferences keeps the island out of screen sharing unless turned on") {
+        let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            NotchIslandPreferences.visibleInScreenSharing(userDefaults: defaults),
+            "a shared screen must not show live dictation by default"
+        )
+        NotchIslandPreferences.setVisibleInScreenSharing(true, userDefaults: defaults)
+        assertTrue(NotchIslandPreferences.visibleInScreenSharing(userDefaults: defaults), "turning it on persists")
+        assertEqual(
+            NotchIslandPreferences.visibleInScreenSharingKey,
+            "notchIslandVisibleInScreenSharing",
+            "the Settings toggle and the island read the same key"
+        )
+    }
+
     runSuite("DictationOverlayPresentationPreferences falls back from unknown values") {
         let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

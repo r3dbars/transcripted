@@ -143,6 +143,27 @@ struct GeneralTitleLabel: View {
     }
 }
 
+/// Shown under the dictation window picker while Notch island is picked.
+struct NotchIslandScreenSharingRow: View {
+    @AppStorage(NotchIslandPreferences.visibleInScreenSharingKey)
+    private var visibleInScreenSharing = false
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Show island in screen sharing",
+            isOn: $visibleInScreenSharing,
+            help: visibleInScreenSharing
+                ? "The island shows in screen sharing, recordings, and screenshots."
+                : "The island is hidden from screen sharing, recordings, and screenshots.",
+            info: GeneralInfo(
+                title: "Show island in screen sharing",
+                message: "Off keeps the island out of screen sharing, screen recordings, and screenshots, so people watching your screen never see what you dictate. Turn it on to demo it or capture it in a screenshot."
+            ),
+            automationIdentifier: "transcripted.settings.general.island-screen-sharing"
+        )
+    }
+}
+
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool
