@@ -209,6 +209,9 @@ enum NotchIslandMotion {
     static let shrink = Spring.response(0.26, dampingRatio: 1)
     static let contentFadeIn: Double = 0.12
     static let contentFadeOut: Double = 0.08
+    /// Backstop for taking the window down after a hide, well past the
+    /// shrink spring's settling time.
+    static let hideFallbackNanoseconds: UInt64 = 1_200_000_000
     /// Content blurs in while the shape uncovers it (about the first fifth
     /// of a second), then is fully sharp.
     static let blurRadius: CGFloat = 6

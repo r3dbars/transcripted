@@ -439,6 +439,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             spring: NotchIslandMotion.shrink,
             completion: finish
         )
+        // Core Animation's "done" can be lost (the Mac sleeping mid-shrink);
+        // take the window down anyway once the shrink must be over.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: NotchIslandMotion.hideFallbackNanoseconds)
+            finish()
+        }
     }
 
     private func ensurePanel() -> (NotchIslandPanel, NotchIslandView) {

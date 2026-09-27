@@ -134,6 +134,10 @@ func testNotchIslandGeometry() {
         let shrinkPeak = stride(from: 0.0, through: 1.0, by: 0.005).map { shrink.progress(at: CGFloat($0)) }.max() ?? 0
         assertTrue(shrinkPeak <= 1.0001, "pulling back into the notch never overshoots")
         assertTrue(shrink.progress(at: 0.3) > 0.95, "hiding is nearly done in 0.3 s")
+        assertTrue(
+            abs(shrink.progress(at: CGFloat(NotchIslandMotion.hideFallbackNanoseconds) / 1_000_000_000) - 1) < 0.001,
+            "the backstop that takes the window down never cuts a shrink short"
+        )
 
         let spring = NotchIslandMotion.Spring.response(0.5, dampingRatio: 0.8)
         assertTrue(abs(spring.dampingRatio - 0.8) < 0.0001, "response/damping converts to spring constants and back")
