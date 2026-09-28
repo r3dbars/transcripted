@@ -59,6 +59,32 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         )
     }
 
+    /// Home's header line for the failed-meetings pile. A speaker-name failure
+    /// keeps the saved transcript, so a pile of only those must not read as
+    /// lost meetings.
+    static func attentionSummary(
+        failureKinds: [MeetingFailureKind]
+    ) -> (title: String, detail: String, onlySpeakerNamesMissing: Bool) {
+        let count = failureKinds.count
+        let onlySpeakerNamesMissing = !failureKinds.isEmpty && failureKinds.allSatisfy {
+            $0 == .speakerNameFinalizationFailed || $0 == .speakerFinalizationFailed
+        }
+        if onlySpeakerNamesMissing {
+            return (
+                title: count == 1 ? "1 meeting needs speaker names" : "\(count) meetings need speaker names",
+                detail: "The transcripts are saved. Try again to name the speakers.",
+                onlySpeakerNamesMissing: true
+            )
+        }
+        return (
+            title: count == 1 ? "1 meeting failed" : "\(count) meetings failed",
+            detail: count == 1
+                ? "Saved audio is waiting for review or retry."
+                : "\(count) saved recordings are waiting for review or retry.",
+            onlySpeakerNamesMissing: false
+        )
+    }
+
     /// The one-line reason shown on a retry-ready row, in Home's own words
     /// (the long failure copy is written for the pill and points at the Meetings page).
     /// Nil keeps the generic saved-audio line: for these kinds, Try again is
@@ -84,7 +110,7 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         case .savedBeforeQuit:
             return "Saved when Transcripted quit. Try again to finish the transcript."
         case .speakerNameFinalizationFailed, .speakerFinalizationFailed:
-            return "The speaker names didn't save. Try again to rebuild the meeting."
+            return "The transcript is saved, but the speaker names didn't save. Try again to rebuild it and name them."
         case .saveFailed:
             return "The transcript file couldn't be written. Check free disk space, then try again."
         default:

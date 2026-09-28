@@ -26,10 +26,24 @@ final class ParakeetPinnedDictationRecording: @unchecked Sendable {
     let capture: PinnedMicrophoneCapture
     let selection: DictationInputDeviceSelection
     let delivery = ParakeetAudioStartCancellationState()
+    let channelCount: Int
+    let sampleRate: Double
+    /// Reset once the capture's start returns, so waiting for the start
+    /// never counts as time the recorder was open.
+    var startedUptime: TimeInterval
 
-    init(capture: PinnedMicrophoneCapture, selection: DictationInputDeviceSelection) {
+    init(
+        capture: PinnedMicrophoneCapture,
+        selection: DictationInputDeviceSelection,
+        channelCount: Int = 0,
+        sampleRate: Double = 0,
+        startedUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
         self.capture = capture
         self.selection = selection
+        self.channelCount = channelCount
+        self.sampleRate = sampleRate
+        self.startedUptime = startedUptime
     }
 }
 
@@ -53,8 +67,8 @@ extension ParakeetEngine {
     }
 
     /// True when the pinned recorder may be used: the switch is on and Apple
-    /// voice processing is not requested. Each start still keeps the engine
-    /// unless the macOS input is a Bluetooth headset that dictation skips
+    /// voice processing is not requested. Each start still picks the recorder
+    /// or the engine for the mic it records
     /// (`PinnedDictationInputPolicy.recorderIsNeeded`).
     func usesPinnedDictationMicrophone() -> Bool {
         guard PinnedMicrophoneCapturePreferences.isEnabled() else { return false }
@@ -64,9 +78,9 @@ extension ParakeetEngine {
         return !voiceProcessingRequested
     }
 
-    /// Prewarm and readiness recovery while the macOS input is a Bluetooth
-    /// headset. Touching the engine here is exactly what binds that input,
-    /// so readiness is simply marked; the start validates the device.
+    /// Prewarm and readiness recovery when the engine warmup is skipped
+    /// (`pinnedDictationSkipsEngineWarmup`). Readiness is simply marked; the
+    /// start validates the device.
     func markPinnedDictationInputReady() {
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -78,20 +92,23 @@ extension ParakeetEngine {
     }
 
     /// Idle warmup and readiness recovery touch the macOS default input.
-    /// Skip them only while that input is a Bluetooth headset, which is the
-    /// one case the pinned recorder exists for; everyone else keeps the
-    /// engine's fast start. An unreadable route counts as a headset.
+    /// Skip them while that input is a Bluetooth headset, and whenever the
+    /// recorder will record the mic, judged on the same selection the start
+    /// makes (`PinnedDictationInputPolicy.skipsEngineWarmup`). Otherwise a key
+    /// press after a wake or route change waited on an engine it never used.
+    /// An unreadable route counts as a headset.
     func pinnedDictationSkipsEngineWarmup() async -> Bool {
-        let defaultIsBluetooth = try? await Self.systemInputWorkCoordinator.run(
-            operation: "pinned_dictation_default_input_class",
+        let afterEngineFallback = pinnedDictationFellBackToEngine
+        let skipsEngineWarmup = try? await Self.systemInputWorkCoordinator.run(
+            operation: "pinned_dictation_warmup_decision",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) { () -> Bool in
-            guard let selection = try? CoreAudioInputDeviceLookup.preferredDictationInputSelection() else {
-                return true
-            }
-            return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            PinnedDictationInputPolicy.skipsEngineWarmup(
+                for: try? Self.pinnedDictationInputSelection(),
+                afterEngineFallback: afterEngineFallback
+            )
         }
-        return defaultIsBluetooth ?? true
+        return skipsEngineWarmup ?? true
     }
 
     /// Idle wake with the pinned switch on. Mirrors the idle route-change
@@ -116,10 +133,6 @@ extension ParakeetEngine {
         owner: ParakeetAudioEngineQueueOwnerToken
     ) async -> Bool? {
         guard usesPinnedDictationMicrophone() else { return nil }
-        // Mirror the meeting mic's Bluetooth isolation: unless the user chose
-        // to record the macOS input, a Bluetooth headset that is the default
-        // input stays out of it.
-        let prefersBuiltInBluetoothInput = !MeetingMicrophonePreferences.usesSystemInput()
         let startedAt = CFAbsoluteTimeGetCurrent()
 
         let result: PinnedDictationPrepareResult
@@ -133,9 +146,7 @@ extension ParakeetEngine {
             ) { () -> PinnedDictationPrepareResult in
                 let selection: DictationInputDeviceSelection
                 do {
-                    selection = try Self.pinnedDictationInputSelection(
-                        prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
-                    )
+                    selection = try Self.pinnedDictationInputSelection()
                 } catch {
                     return .unavailable("selection: \(error.localizedDescription)")
                 }
@@ -190,7 +201,9 @@ extension ParakeetEngine {
 
         let recording = ParakeetPinnedDictationRecording(
             capture: prepared.capture,
-            selection: prepared.selection
+            selection: prepared.selection,
+            channelCount: Int(prepared.format.channelCount),
+            sampleRate: prepared.format.sampleRate
         )
         let delivery = recording.delivery
         // Both closures are formed here, on the main actor, like the engine
@@ -242,7 +255,9 @@ extension ParakeetEngine {
         // A capture left by a start that lost its reset should never keep
         // appending next to this one.
         discardPinnedDictationRecording()
+        recording.startedUptime = ProcessInfo.processInfo.systemUptime
         pinnedDictationRecording = recording
+        pinnedDictationFellBackToEngine = false
         updateCachedInputDeviceSelection(prepared.selection)
         updateNativeSampleRate(prepared.format.sampleRate)
         isRecording = true
@@ -290,14 +305,42 @@ extension ParakeetEngine {
 
     /// The engine path this falls back to opens the macOS input first, so a
     /// Bluetooth default goes back into call mode. Counted so a rise shows up.
-    private func reportPinnedDictationEngineFallback(stage: String) {
+    /// Also turns engine warmup back on until the recorder next starts.
+    private func reportPinnedDictationEngineFallback(stage: String, extra: [String: String] = [:]) {
+        pinnedDictationFellBackToEngine = true
         EventReporter.shared.capture(
             level: .warning,
             engine: "parakeet",
             event: "pinned_microphone_fell_back_to_engine",
             message: "Pinned dictation microphone unavailable; using the audio engine",
-            context: ["stage": stage]
+            context: extra.merging(["stage": stage]) { _, new in new }
         )
+    }
+
+    /// Scores the last speed-only pinned take once its transcript is known
+    /// (`PinnedDictationSpeedPath`). Called once per transcription; a take
+    /// with no pending mark, or an outcome that says nothing about the mic,
+    /// changes nothing.
+    func scorePendingPinnedSpeedPathTake(text: String?, emptyReason: DictationEmptyTranscriptionReason?) {
+        guard let take = pendingPinnedSpeedPathTake else { return }
+        pendingPinnedSpeedPathTake = nil
+        guard !Task.isCancelled,
+              let outcome = PinnedDictationSpeedPath.outcome(
+                  text: text,
+                  emptyReason: emptyReason,
+                  heldSeconds: take.heldSeconds,
+                  audioSeconds: take.audioSeconds
+              ) else { return }
+        let result = PinnedDictationSpeedPath.record(outcome, for: take.input)
+        guard result.turnedOffNow else { return }
+        AppLogger.transcription.warning("PARAKEET | pinned microphone takes kept coming out empty; this mic uses the audio engine now", [
+            "emptyTakes": "\(result.state.emptyTakesInARow)",
+            "channels": "\(take.channelCount)",
+            "sampleRate": "\(take.sampleRate)",
+            "gaps": "\(take.gaps)",
+            "droppedCallbacks": "\(take.droppedCallbacks)"
+        ])
+        reportPinnedDictationEngineFallback(stage: "empty_takes", extra: take.reportContext)
     }
 
     /// Runs on the capture's queue. Same admission as the engine tap in
@@ -324,6 +367,7 @@ extension ParakeetEngine {
             didReceiveAudioSamples = true
             if hasNonZeroSignal { didReceiveNonZeroAudioSamples = true }
             lastAudioSampleAt = sampleArrivalTime
+            if firstAudioSampleAt == nil { firstAudioSampleAt = sampleArrivalTime }
             pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
             var droppedSeconds = 0.0
             let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
@@ -434,23 +478,34 @@ extension ParakeetEngine {
         }
     }
 
-    /// The automatic pick, then PinnedDictationInputPolicy: a mic the user
-    /// chose, or a wired/USB mic on a Mac without a built-in one, instead of
-    /// the Bluetooth headset. Runs on the system-input work queue.
+    /// The Settings "Microphone" choice (`MicrophoneChoicePreferences`):
+    /// the automatic pick, then PinnedDictationInputPolicy: a mic the user
+    /// chose (over any macOS input), or a wired/USB mic on a Mac without a
+    /// built-in one, instead of the Bluetooth headset. Runs on the
+    /// system-input work queue.
+    ///
+    /// A Bluetooth headset that is the macOS input is skipped unless the user
+    /// chose "Same as macOS Sound settings". The meetings-only "use the macOS
+    /// input" setting (`MeetingMicrophonePreferences`) is hidden while this
+    /// recorder is on and does not apply: following it put dictation back on
+    /// the engine and the headset mic, the call-mode garble this path exists
+    /// to prevent.
     nonisolated private static func pinnedDictationInputSelection(
-        prefersBuiltInBluetoothInput: Bool,
         excludingDeviceID: AudioDeviceID? = nil
     ) throws -> DictationInputDeviceSelection {
+        let microphoneChoice = MicrophoneChoicePreferences.choice()
         // A closed MacBook's own mic is listed but hears nothing.
         let lidClosed = MacLidState.isClosed()
         // The excluded mic (the one that just died or went silent) is left
         // out before ranking, so a Studio Display mic beats the AirPods default.
         let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-            prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
+            prefersBuiltInBluetoothInput: microphoneChoice != .macOSInput,
             lidClosed: lidClosed,
             excludingDeviceID: excludingDeviceID
         )
-        guard PinnedDictationInputPolicy.mayReplace(automatic),
+        let chosenUID = microphoneChoice.deviceUID
+        guard microphoneChoice != .macOSInput,
+              PinnedDictationInputPolicy.mayReplace(automatic) || chosenUID != nil,
               var availableInputs = try? CoreAudioInputDeviceLookup.availableInputDevices() else {
             return automatic
         }
@@ -460,7 +515,8 @@ extension ParakeetEngine {
         return PinnedDictationInputPolicy.selection(
             automatic: automatic,
             availableInputs: availableInputs,
-            preferredUID: DictationPersistentInputPreferences.preferredDeviceUID(),
+            preferredUID: chosenUID,
+            chosenInputAlwaysWins: true,
             lidClosed: lidClosed
         )
     }
@@ -480,7 +536,6 @@ extension ParakeetEngine {
         because cause: PinnedDictationReplacementCause
     ) async {
         guard pinnedDictationRecording === recording, isRecording else { return }
-        let prefersBuiltInBluetoothInput = !MeetingMicrophonePreferences.usesSystemInput()
         let capture = recording.capture
         let failedDeviceID = capture.deviceID
         let attempts = cause == .deviceLost ? 3 : 1
@@ -495,7 +550,6 @@ extension ParakeetEngine {
                 timeoutNanoseconds: Self.pinnedDictationStartTimeout
             ) { () -> DictationInputDeviceSelection? in
                 guard let selection = try? Self.pinnedDictationInputSelection(
-                    prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
                     excludingDeviceID: failedDeviceID
                 ), selection.selectedInput.id != failedDeviceID else { return nil }
                 do {
@@ -591,6 +645,8 @@ extension ParakeetEngine {
     /// drain finishes so wake and route handlers keep treating it as live.
     func stopPinnedDictationRecording() async {
         guard let recording = pinnedDictationRecording else { return }
+        // Before the drain: it only delivers audio captured before Stop.
+        let stoppedUptime = ProcessInfo.processInfo.systemUptime
         let capture = recording.capture
         await Task.detached(priority: .userInitiated) {
             capture.finishAndDrain()
@@ -613,6 +669,18 @@ extension ParakeetEngine {
             "gaps": "\(diagnostics.gaps)",
             "droppedCallbacks": "\(diagnostics.droppedCallbacks)"
         ])
+        if PinnedDictationInputPolicy.recorderIsSpeedOnly(for: recording.selection) {
+            pendingPinnedSpeedPathTake = PinnedDictationSpeedPathTake(
+                input: recording.selection.selectedInput,
+                channelCount: recording.channelCount,
+                sampleRate: recording.sampleRate,
+                restarts: diagnostics.restarts,
+                gaps: diagnostics.gaps,
+                droppedCallbacks: diagnostics.droppedCallbacks,
+                heldSeconds: stoppedUptime - recording.startedUptime,
+                audioSeconds: stoppedDuration
+            )
+        }
     }
 
     /// Cancel and cleanup: drop the recording without delivering its tail.

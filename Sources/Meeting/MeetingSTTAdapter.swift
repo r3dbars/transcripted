@@ -169,7 +169,9 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
         let model = activeJobModel ?? preparedModel ?? router.selectedModel
-        return try await router.transcribeSegment(samples: samples, source: source, model: model)
+        return try await Self.timed(samples: samples, model: model) {
+            try await router.transcribeSegment(samples: samples, source: source, model: model)
+        }
     }
 
     func resolveLanguage(
@@ -190,9 +192,30 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         language: TranscriptionLanguageContext
     ) async throws -> String {
         let model = activeJobModel ?? preparedModel ?? router.selectedModel
-        return try await router.transcribeSegment(
-            samples: samples, source: source, model: model, language: language
-        )
+        return try await Self.timed(samples: samples, model: model) {
+            try await router.transcribeSegment(
+                samples: samples, source: source, model: model, language: language
+            )
+        }
+    }
+
+    /// Adds one speech-to-text call to the meeting job's timings, when a job
+    /// bound a recorder. Includes any wait for the shared speech model.
+    private static func timed(
+        samples: [Float],
+        model: TranscriptionModelChoice,
+        _ body: () async throws -> String
+    ) async throws -> String {
+        guard let timings = MeetingPipelineTimings.current else { return try await body() }
+        let start = ProcessInfo.processInfo.systemUptime
+        defer {
+            timings.addSpeechToTextCall(
+                seconds: ProcessInfo.processInfo.systemUptime - start,
+                inputSeconds: Double(samples.count) / 16_000,
+                model: model.rawValue
+            )
+        }
+        return try await body()
     }
 
     func cleanup() {

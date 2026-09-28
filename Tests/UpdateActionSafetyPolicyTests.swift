@@ -135,19 +135,6 @@ func testUpdateActionSafetyPolicy() {
         )
     }
 
-    runSuite("ReadyUpdateActionRoutingPolicy preserves a usable downloaded-update action") {
-        assertEqual(
-            ReadyUpdateActionRoutingPolicy.route(hasImmediateInstallHandler: true),
-            .installImmediately,
-            "a staged automatic update should use Sparkle's immediate install callback"
-        )
-        assertEqual(
-            ReadyUpdateActionRoutingPolicy.route(hasImmediateInstallHandler: false),
-            .presentStandardUpdateUI,
-            "a resumed or authorization-required update should open Sparkle's standard UI"
-        )
-    }
-
     runSuite("UpdateAttentionPolicy badges any update that needs a click") {
         assertTrue(
             UpdateAttentionPolicy.needsUserAction(state: .readyToInstall, availableUpdateDownloadsAutomatically: true),

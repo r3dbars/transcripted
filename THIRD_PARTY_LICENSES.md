@@ -1,9 +1,9 @@
 # Third-Party Licenses
 
 Transcripted bundles the third-party components listed below — dynamic frameworks copied
-into the app bundle (`Sentry.framework`, `Sparkle.framework`) and
-libraries statically linked into the app binary (FluidAudio, MLX Swift, mlx-swift-lm,
-swift-transformers, WhisperKit/ArgmaxCore). Versions are pinned in
+into the app bundle (`Sentry.framework`, `Sparkle.framework`),
+libraries statically linked into the app binary (FluidAudio, swift-transformers,
+WhisperKit/ArgmaxCore), and a helper executable (llama.cpp's `llama-server`). Versions are pinned in
 `scripts/entrypoints/build-deps.sh`. The full license text for each component is
 reproduced verbatim from the pinned upstream revision.
 
@@ -12,10 +12,9 @@ reproduced verbatim from the pinned upstream revision.
 - [Sparkle](#sparkle)
 - [Sentry (sentry-cocoa)](#sentry-sentry-cocoa)
 - [FluidAudio](#fluidaudio)
-- [MLX Swift](#mlx-swift)
-- [mlx-swift-lm](#mlx-swift-lm)
 - [swift-transformers](#swift-transformers)
 - [WhisperKit / ArgmaxCore](#whisperkit--argmaxcore)
+- [llama.cpp (llama-server)](#llamacpp-llama-server)
 
 ---
 
@@ -422,76 +421,6 @@ framework; 0.15.x dropped it, so Transcripted no longer bundles or links it.)
 
 ---
 
-## MLX Swift
-
-- **Component:** Statically linked Swift library (`MLX`, `MLXNN`, `MLXOptimizers`) plus the bundled `mlx.metallib` Metal shader library
-- **Version:** 0.31.x — resolved at build time from mlx-swift-lm's pin `.upToNextMinor(from: "0.31.3")`
-- **Upstream:** https://github.com/ml-explore/mlx-swift
-- **License:** MIT
-
-### License text
-
-```
-MIT License
-
-Copyright (c) 2023 ml-explore
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-## mlx-swift-lm
-
-- **Component:** Statically linked Swift library (`MLXLLM`, `MLXLMCommon` — local LLM inference)
-- **Version:** revision `25b00d4`
-- **Upstream:** https://github.com/ml-explore/mlx-swift-lm
-- **License:** MIT
-
-### License text
-
-```
-MIT License
-
-Copyright (c) 2024 ml-explore
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
 ## swift-transformers
 
 - **Component:** Statically linked Swift library (tokenizers and Hugging Face Hub utilities)
@@ -720,6 +649,44 @@ SOFTWARE.
 MIT License
 
 Copyright (c) 2024 argmax, inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## llama.cpp (llama-server)
+
+- **Component:** `Contents/Helpers/llama-server` (local text-model inference for Writing)
+- **Version:** the build shipped in Tilde 0.1.0 beta 1 (https://github.com/r3dbars/tilde/releases/tag/v0.1.0-beta.1), used unchanged and re-signed. The llama.cpp revision it was built from isn't recorded yet.
+- **Upstream:** https://github.com/ggml-org/llama.cpp
+- **License:** MIT
+
+llama.cpp itself redistributes third-party components (for example nlohmann/json, MIT), whose
+license texts ship in the upstream repository's `licenses/` directory.
+
+### License text
+
+```
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

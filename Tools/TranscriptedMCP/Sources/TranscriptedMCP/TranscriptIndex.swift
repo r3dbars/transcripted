@@ -4,10 +4,15 @@ import SQLite3
 import TranscriptedCaptureKit
 
 final class TranscriptIndex: @unchecked Sendable {
-    private var db: OpaquePointer?
-    private let queue = DispatchQueue(label: "com.transcripted.mcp.index", qos: .utility)
+    /// `private(set)` rather than `private`, and `queue` internal, only so the
+    /// cross-file writing extension (TranscriptIndex+Writing.swift) can run its
+    /// statements on this connection under the same serial queue. Nothing
+    /// outside this type should touch either.
+    private(set) var db: OpaquePointer?
+    let queue = DispatchQueue(label: "com.transcripted.mcp.index", qos: .utility)
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let indexPath: URL
+    private let reconcileLockPath: URL
 
     /// Optional semantic-search sidecar. Nil when no embedding provider was
     /// supplied or the provider is unavailable on this host; in that case every
@@ -17,9 +22,10 @@ final class TranscriptIndex: @unchecked Sendable {
 
     init(indexDir: URL, embeddingProvider: EmbeddingProvider? = nil) throws {
         self.indexPath = indexDir.appendingPathComponent("mcp_index.sqlite")
+        self.reconcileLockPath = indexDir.appendingPathComponent("mcp_index.reconcile.lock", isDirectory: false)
         let setupLockPath = indexDir.appendingPathComponent("mcp_index.setup.lock", isDirectory: false)
         try queue.sync {
-            try Self.withExclusiveSetupLock(at: setupLockPath) {
+            try Self.withExclusiveLock(at: setupLockPath) {
                 try self.openAndSetup()
             }
         }
@@ -36,16 +42,16 @@ final class TranscriptIndex: @unchecked Sendable {
 
     // MARK: - Setup
 
-    /// Schema gates can delete and recreate the derived index. Serialize only
-    /// that setup window across MCP client processes so two cold starts cannot
-    /// remove the database underneath each other.
-    private static func withExclusiveSetupLock(
+    /// Serializes a window across MCP client processes sharing one index. Setup
+    /// uses it so two cold starts cannot remove the database underneath each
+    /// other; reconcile uses a separate lock (see `reconcile`).
+    private static func withExclusiveLock(
         at lockPath: URL,
         operation: () throws -> Void
     ) throws {
         let descriptor = open(lockPath.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else {
-            throw MCPIndexError.databaseOpenFailed("Could not open the index setup lock")
+            throw MCPIndexError.databaseOpenFailed("Could not open the index lock")
         }
         defer {
             _ = flock(descriptor, LOCK_UN)
@@ -54,7 +60,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         while flock(descriptor, LOCK_EX) != 0 {
             guard errno == EINTR else {
-                throw MCPIndexError.databaseOpenFailed("Could not acquire the index setup lock")
+                throw MCPIndexError.databaseOpenFailed("Could not acquire the index lock")
             }
         }
         _ = chmod(lockPath.path, 0o600)
@@ -89,32 +95,70 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try applySchemaVersionGate()
         createTables()
-        exec("PRAGMA user_version=\(Self.schemaVersion)")
+        // Only ever raise it. An older helper still running from before an
+        // update must not roll the version back, or the next newer helper to
+        // open would rebuild again.
+        if storedUserVersion() < Self.schemaVersion {
+            exec("PRAGMA user_version=\(Self.schemaVersion)")
+        }
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
     /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 added
     /// the meeting-summary FTS document used by general search; v4 adds action
-    /// item `status` and `due` metadata; v5 makes that metadata searchable.
-    private static let schemaVersion: Int32 = 5
+    /// item `status` and `due` metadata; v5 makes that metadata searchable; v6
+    /// adds the writing day tables and stops indexing `Writing_` files found in
+    /// a shared folder as meetings.
+    private static let schemaVersion: Int32 = 6
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
     /// populate for it. When the stored `user_version` is older than the current
-    /// schema, wipe and reopen the index so the next reconcile rebuilds every
-    /// derived table from disk. Mirrors the corruption-recovery path above.
-    /// (Old/unversioned indexes report 0, indistinguishable from a fresh DB —
-    /// rebuilding an empty fresh DB is a harmless no-op.)
+    /// schema, empty the index so the next reconcile rebuilds every derived
+    /// table from disk. (Old/unversioned indexes report 0, indistinguishable
+    /// from a fresh DB — emptying an empty fresh DB is a harmless no-op.)
+    ///
+    /// It drops the tables in place, in one transaction, rather than deleting
+    /// the file: every agent runs its own server on this index, and after an
+    /// update some are still the old version. Deleting the database under
+    /// their open connections left them failing every query with "disk I/O
+    /// error" until they were restarted.
     private func applySchemaVersionGate() throws {
         guard storedUserVersion() < Self.schemaVersion else { return }
-        sqlite3_close(db)
-        db = nil
-        try? FileManager.default.removeItem(at: indexPath)
         log("Index schema older than v\(Self.schemaVersion), rebuilding from disk")
-        if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
-            throw MCPIndexError.databaseOpenFailed(dbError())
+        try execOrThrow("BEGIN IMMEDIATE")
+        do {
+            // Virtual tables first: dropping one drops its shadow tables,
+            // which must never be dropped on their own.
+            for name in schemaObjectNames(virtualTablesOnly: true) {
+                try execOrThrow("DROP TABLE IF EXISTS \(Self.quotedIdentifier(name))")
+            }
+            for name in schemaObjectNames(virtualTablesOnly: false) {
+                try execOrThrow("DROP TABLE IF EXISTS \(Self.quotedIdentifier(name))")
+            }
+            try execOrThrow("COMMIT")
+        } catch {
+            exec("ROLLBACK")
+            throw error
         }
-        configureDatabase()
+    }
+
+    /// The index's own tables (triggers and indexes go with them).
+    private func schemaObjectNames(virtualTablesOnly: Bool) -> [String] {
+        let filter = virtualTablesOnly ? " AND sql LIKE 'CREATE VIRTUAL TABLE%'" : ""
+        let sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'\(filter)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            names.append(colText(stmt, 0))
+        }
+        return names
+    }
+
+    private static func quotedIdentifier(_ name: String) -> String {
+        "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     private func storedUserVersion() -> Int32 {
@@ -151,48 +195,83 @@ final class TranscriptIndex: @unchecked Sendable {
     func reconcile(
         meetingDirs: [URL],
         dictationDirs: [URL],
+        writingDirs: [URL] = [],
         updateEmbeddings: Bool = true
     ) throws {
-        try queue.sync {
-            var seenPaths: Set<String> = []
-            var diskMap: [String: ContextArtifactFile] = [:]
+        // Every MCP client (a desktop chat app, an IDE agent, ...) launches its own
+        // server against the same index. Without this lock two processes reconcile
+        // the same files at once: both see a file as new, both insert it, and the
+        // loser fails with "UNIQUE constraint failed: meeting_summary_documents.filename",
+        // which used to abort its whole pass. Holding the lock, the second process
+        // re-reads the indexed mtimes after the first commits and skips that work.
+        // The lock is taken before `queue`, not inside it: waiting on another
+        // process's pass must not block this server's own read tools, which share
+        // `queue` and can read the WAL database while the other process writes.
+        var failedFileCount = 0
+        var firstFailure: Error?
+        try Self.withExclusiveLock(at: reconcileLockPath) {
+            try queue.sync {
+                var seenPaths: Set<String> = []
+                var diskMap: [String: ContextArtifactFile] = [:]
 
-            for directory in meetingDirs + dictationDirs {
-                let directoryPath = directory.standardizedFileURL.path
-                guard !seenPaths.contains(directoryPath) else { continue }
-                seenPaths.insert(directoryPath)
+                // A file's kind comes from the file (prefix / capture_type), not
+                // from which directory list found it, so the flat shared-folder
+                // fallback (all three lists are the same folder) stays correct.
+                for directory in meetingDirs + dictationDirs + writingDirs {
+                    let directoryPath = directory.standardizedFileURL.path
+                    guard !seenPaths.contains(directoryPath) else { continue }
+                    seenPaths.insert(directoryPath)
 
-                for file in TranscriptLoader.enumerateArtifacts(in: directory) {
-                    let filename = file.url.deletingPathExtension().lastPathComponent
-                    if diskMap[filename] == nil {
-                        diskMap[filename] = file
+                    for file in TranscriptLoader.enumerateArtifacts(in: directory) {
+                        let filename = file.url.deletingPathExtension().lastPathComponent
+                        if diskMap[filename] == nil {
+                            diskMap[filename] = file
+                        }
                     }
                 }
-            }
 
-            let indexed = try getIndexedModDates()
+                let indexed = try getIndexedModDates()
 
-            // Index new or updated files
-            for (filename, info) in diskMap {
-                if let indexedMod = indexed[filename] {
-                    if abs(info.modDate - indexedMod) > 0.001 {
-                        try reindex(file: info.url, filename: filename, kind: info.kind)
+                // Index new or updated files. A file that fails to index doesn't stop
+                // the rest; the first failure is rethrown once the pass finishes.
+                for (filename, info) in diskMap {
+                    do {
+                        if let indexedMod = indexed[filename] {
+                            if abs(info.modDate - indexedMod) > 0.001 {
+                                try reindex(file: info.url, filename: filename, kind: info.kind)
+                            }
+                        } else {
+                            try indexOne(file: info.url, filename: filename, modDate: info.modDate, kind: info.kind)
+                        }
+                    } catch {
+                        failedFileCount += 1
+                        if firstFailure == nil { firstFailure = error }
                     }
-                } else {
-                    try indexOne(file: info.url, filename: filename, modDate: info.modDate, kind: info.kind)
                 }
-            }
 
-            // Remove stale entries
-            for filename in indexed.keys where diskMap[filename] == nil {
-                try removeFromIndex(filename: filename)
+                // Remove stale entries
+                for filename in indexed.keys where diskMap[filename] == nil {
+                    do {
+                        try removeFromIndex(filename: filename)
+                    } catch {
+                        failedFileCount += 1
+                        if firstFailure == nil { firstFailure = error }
+                    }
+                }
             }
         }
 
         // Best-effort: embed any newly indexed rows. Never fails the reconcile —
-        // lexical search must keep working even if embedding hits a snag.
+        // lexical search must keep working even if embedding hits a snag. Runs
+        // even when some files failed, so the files that did index still get
+        // vectors instead of waiting for the bad file to be fixed.
         if updateEmbeddings {
             reconcileEmbeddings()
+        }
+
+        if let firstFailure {
+            log("Reconcile skipped files that failed to index (count_bucket=\(MCPLogPrivacy.countBucket(failedFileCount)))")
+            throw MCPReconcileFileFailures(failedFileCount: failedFileCount, firstFailure: firstFailure)
         }
     }
 
@@ -207,6 +286,8 @@ final class TranscriptIndex: @unchecked Sendable {
             SELECT filename, json_modified_at FROM meetings
             UNION ALL
             SELECT filename, json_modified_at FROM dictation_days
+            UNION ALL
+            SELECT filename, json_modified_at FROM writing_days
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw MCPIndexError.queryFailed(dbError())
@@ -220,17 +301,21 @@ final class TranscriptIndex: @unchecked Sendable {
         return result
     }
 
-    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextArtifactKind) throws {
+    /// Returns false when the file couldn't be parsed, so nothing was written.
+    @discardableResult
+    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextArtifactKind) throws -> Bool {
         switch kind {
         case .meeting:
-            try indexMeeting(file: url, filename: filename, modDate: modDate)
+            return try indexMeeting(file: url, filename: filename, modDate: modDate)
         case .dictationDay:
-            try indexDictationDay(file: url, filename: filename, modDate: modDate)
+            return try indexDictationDay(file: url, filename: filename, modDate: modDate)
+        case .writingDay:
+            return try indexWritingDay(file: url, filename: filename, modDate: modDate)
         }
     }
 
-    private func indexMeeting(file url: URL, filename: String, modDate: TimeInterval) throws {
-        guard let transcript = TranscriptLoader.loadMeeting(url) else { return }
+    private func indexMeeting(file url: URL, filename: String, modDate: TimeInterval) throws -> Bool {
+        guard let transcript = TranscriptLoader.loadMeeting(url) else { return false }
         let speakers = TranscriptLoader.speakerLookup(from: transcript)
 
         let dateOnly = String(transcript.recording.date.prefix(10))
@@ -239,6 +324,9 @@ final class TranscriptIndex: @unchecked Sendable {
         try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
+        // Clear rows an earlier interrupted pass may have left for this file, so
+        // indexing it is idempotent and the plain INSERTs below can't collide.
+        try deleteIndexedRows(filename: filename)
 
         try bindExec(
             "INSERT OR REPLACE INTO meetings (filename, date, datetime, duration_seconds, speaker_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
@@ -279,6 +367,7 @@ final class TranscriptIndex: @unchecked Sendable {
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
+        return true
     }
 
     /// Parse the meeting's structured summary (inline transcript summary, then a
@@ -329,14 +418,15 @@ final class TranscriptIndex: @unchecked Sendable {
         )
     }
 
-    private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws {
-        guard let day = TranscriptLoader.loadDictationDay(url) else { return }
+    private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws -> Bool {
+        guard let day = TranscriptLoader.loadDictationDay(url) else { return false }
 
         let latestEntryDate = day.entries.last?.createdAt ?? "\(day.date)T00:00:00+0000"
 
         try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
+        try deleteIndexedRows(filename: filename)
 
         try bindExec(
             "INSERT OR REPLACE INTO dictation_days (filename, date, datetime, markdown_filename, entry_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
@@ -372,19 +462,34 @@ final class TranscriptIndex: @unchecked Sendable {
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed dictation day (entry_count_bucket=\(MCPLogPrivacy.countBucket(day.entries.count)))")
+        return true
     }
 
+    /// `indexOne` clears the file's old rows inside its own transaction, so a
+    /// failed reindex rolls back to the old rows instead of dropping the file
+    /// from the index. Only a file that no longer parses is removed.
     private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {
-        try removeFromIndex(filename: filename)
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate?.timeIntervalSince1970) ?? Date().timeIntervalSince1970
-        try indexOne(file: url, filename: filename, modDate: modDate, kind: kind)
+        let indexed = try indexOne(file: url, filename: filename, modDate: modDate, kind: kind)
+        if !indexed {
+            try removeFromIndex(filename: filename)
+        }
     }
 
     private func removeFromIndex(filename: String) throws {
         try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
+        try deleteIndexedRows(filename: filename)
+        try execOrThrow("COMMIT")
+        committed = true
+    }
+
+    /// Deletes every derived row for one file. Must run inside a transaction.
+    /// Internal (not `private`) so TranscriptIndex+Writing.swift's indexer
+    /// clears rows the same way the meeting and dictation indexers do.
+    func deleteIndexedRows(filename: String) throws {
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_documents WHERE filename = ?", bindings: [.text(filename)])
@@ -392,8 +497,8 @@ final class TranscriptIndex: @unchecked Sendable {
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
-        try execOrThrow("COMMIT")
-        committed = true
+        try bindExec("DELETE FROM writing_entries WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM writing_days WHERE filename = ?", bindings: [.text(filename)])
     }
 
     // MARK: - Structured summary queries
@@ -498,6 +603,8 @@ final class TranscriptIndex: @unchecked Sendable {
         let meetings: Int
         let dictationDays: Int
         let dictationEntries: Int
+        let writingDays: Int
+        let writingEntries: Int
         let summaryItems: Int
         let summarizedMeetings: Int
     }
@@ -508,6 +615,8 @@ final class TranscriptIndex: @unchecked Sendable {
                 meetings: try scalarCount("SELECT COUNT(*) FROM meetings"),
                 dictationDays: try scalarCount("SELECT COUNT(*) FROM dictation_days"),
                 dictationEntries: try scalarCount("SELECT COUNT(*) FROM dictation_entries"),
+                writingDays: try scalarCount("SELECT COUNT(*) FROM writing_days"),
+                writingEntries: try scalarCount("SELECT COUNT(*) FROM writing_entries"),
                 summaryItems: try scalarCount("SELECT COUNT(*) FROM meeting_summary_items"),
                 summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items")
             )
@@ -1023,7 +1132,7 @@ final class TranscriptIndex: @unchecked Sendable {
     func searchContext(query: String, speaker: String?, kind: ContextKind, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> ContextSearchResult {
         var combined: [ContextSearchGroup] = []
 
-        if kind != .dictation {
+        if kind.includes(.meeting) {
             let meetings = try searchUtterances(
                 query: query,
                 speaker: speaker,
@@ -1055,13 +1164,23 @@ final class TranscriptIndex: @unchecked Sendable {
             })
         }
 
-        if kind != .meeting, speaker == nil {
+        if kind.includes(.dictation), speaker == nil {
             combined.append(contentsOf: try searchDictationEntries(
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
                 maxItems: maxItems,
                 mode: mode
+            ))
+        }
+
+        // Writing has no speakers, so a speaker filter skips it like dictations.
+        if kind.includes(.writing), speaker == nil {
+            combined.append(contentsOf: try searchWritingEntries(
+                query: query,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxItems: maxItems
             ))
         }
 
@@ -1078,7 +1197,7 @@ final class TranscriptIndex: @unchecked Sendable {
     func listRecentContext(kind: ContextKind, count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> RecentContextResult {
         var items: [RecentContextItem] = []
 
-        if kind != .dictation {
+        if kind.includes(.meeting) {
             let meetings = try queryMeetings(
                 count: count,
                 dateFrom: dateFrom,
@@ -1105,8 +1224,12 @@ final class TranscriptIndex: @unchecked Sendable {
             })
         }
 
-        if kind != .meeting {
+        if kind.includes(.dictation) {
             items.append(contentsOf: try listRecentDictationEntries(count: count, dateFrom: dateFrom, dateTo: dateTo))
+        }
+
+        if kind.includes(.writing) {
+            items.append(contentsOf: try listRecentWritingEntries(count: count, dateFrom: dateFrom, dateTo: dateTo))
         }
 
         items.sort { $0.datetime > $1.datetime }
@@ -1728,14 +1851,22 @@ enum MCPStartupIndexing {
     static func prepareForAttach(
         index: TranscriptIndex,
         meetingDirs: [URL],
-        dictationDirs: [URL]
+        dictationDirs: [URL],
+        writingDirs: [URL] = []
     ) throws {
         index.embeddingStore?.deferSemanticSearchUntilReconciled()
-        try index.reconcile(
-            meetingDirs: meetingDirs,
-            dictationDirs: dictationDirs,
-            updateEmbeddings: false
-        )
+        do {
+            try index.reconcile(
+                meetingDirs: meetingDirs,
+                dictationDirs: dictationDirs,
+                writingDirs: writingDirs,
+                updateEmbeddings: false
+            )
+        } catch is MCPReconcileFileFailures {
+            // Some files failed but the rest are indexed and the index is usable.
+            // reconcile already logged the count; the watcher retries on change.
+            // Pre-pass errors (lock, database) still stop startup.
+        }
     }
 
     static func completeAfterAttach(index: TranscriptIndex) {

@@ -230,9 +230,11 @@ enum TranscriptedConstants {
 
     // MARK: - Clipboard
 
-    /// Delay after the target app reads the borrowed dictation text before
-    /// restoring the user's clipboard.
-    static let clipboardRestoreDelay: UInt64 = 120_000_000  // 120ms
+    /// Delay after a proven paste (Accessibility saw the text land) before
+    /// restoring the user's clipboard. The target has already read it by
+    /// then, so this is only a short margin; unproven pastes wait the longer
+    /// fallback below. It gates Auto Enter, which waits for the restore.
+    static let clipboardRestoreDelay: UInt64 = 30_000_000  // 30ms
 
     /// Maximum time to keep borrowed dictation text available if the target app
     /// has not requested it yet. This protects slower paste consumers without
@@ -273,8 +275,11 @@ enum TranscriptedConstants {
 
     // MARK: - Dictation Auto Enter
 
-    /// Small pause after paste-back before optionally pressing Enter.
-    static let dictationAutoEnterDelay: UInt64 = 150_000_000  // 150ms
+    /// Pause after a proven paste before pressing Enter. Auto Enter only runs
+    /// once Accessibility has seen the text land in the field, so this is a
+    /// short settle for the app, not a guess at when the paste arrives. It
+    /// was 150 ms; release-to-Enter was ~390 ms at p50 on an M5 Max.
+    static let dictationAutoEnterDelay: UInt64 = 40_000_000  // 40ms
 
     /// Ignore extremely short sessions so quick accidental taps do not submit.
     static let dictationAutoEnterMinimumDuration: TimeInterval = 0.3
@@ -316,12 +321,19 @@ enum TranscriptedConstants {
 
     /// Output volume for short overlay confirmation cues
     static let overlayCueVolume: Float = 0.7
-    static let deliveredCueVolumeMultiplier: Float = 0.3
+    /// Start and stop clicks play at about 49% output (0.7 x 0.7). The short
+    /// Hairline ticks were too quiet at the 35% the older clicks were tuned at.
+    static let dictationClickCueVolumeMultiplier: Float = 0.7
+    /// Keeps the no-speech cue softer than the start and stop clicks.
+    static let noSpeechCueVolumeMultiplier: Float = 0.3
+    /// A cue still waiting this long behind a slow output device is dropped, not played late.
+    static let staleCueDropInterval: TimeInterval = 1.0
 
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
-    static let listeningStartSoundFileName = "dictation-start.mp3"
-    static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
-    /// Soft two-note drop for "nothing was pasted": a cancelled dictation or one with no speech.
+    static let listeningStartSoundFileName = "dictation-start.wav"
+    /// Acknowledges Stop right away. It does not mean the text was pasted.
+    static let dictationStopSoundFileName = "dictation-stop.wav"
+    /// A quick double click for "nothing was pasted": a cancelled dictation or one with no speech.
     static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
 

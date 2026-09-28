@@ -101,7 +101,7 @@ enum MeetingQuickSummaryWriter {
                 return false
             }
             guard updated != raw else { return false }
-            try updated.write(to: url, atomically: true, encoding: .utf8)
+            try TranscriptFileRewrite.write(updated, to: url)
             fileManager.restrictFileToOwnerOnly(at: url)
             return true
         }) ?? false

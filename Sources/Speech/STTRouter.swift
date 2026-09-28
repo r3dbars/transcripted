@@ -24,6 +24,9 @@ class STTRouter: ObservableObject {
     @Published var isRecovering = false
     @Published var inputFormatReady = true
     private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
+    /// Text from the latest dictation that was held back as `.otherLanguage`,
+    /// for the Paste Anyway button. Memory only; never logged or sent.
+    private(set) var heldBackDictationText: String?
 
     private var cancellables: Set<AnyCancellable> = []
     private var recordingModelOwnership = TranscriptionRecordingModelOwnership()
@@ -59,6 +62,7 @@ class STTRouter: ObservableObject {
     }
 
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
+    var lastRecordingWasDigitalSilence: Bool { parakeetEngine.lastRecordingWasDigitalSilence }
     var isRecordingFromSharedMeetingMic: Bool { parakeetEngine.isRecordingFromSharedMeetingMic }
     var hasRecoverableRecording: Bool { parakeetEngine.hasRecoverableRecording }
     var dictationAudioRouteAnalyticsContext: [String: String] {
@@ -328,6 +332,8 @@ class STTRouter: ObservableObject {
 
     func startRecording() async -> Bool {
         setActiveRecordingModel(selectedModel)
+        // A take that never reached transcription must not be scored as this one.
+        parakeetEngine.pendingPinnedSpeedPathTake = nil
         return await parakeetEngine.startRecording()
     }
 
@@ -338,6 +344,7 @@ class STTRouter: ObservableObject {
 
     func startRecordingFromSharedMeetingMic(claim: SharedMeetingMicClaim) -> Bool {
         setActiveRecordingModel(selectedModel)
+        parakeetEngine.pendingPinnedSpeedPathTake = nil
         return parakeetEngine.startSharedMeetingMicRecording(claim: claim)
     }
 
@@ -376,6 +383,38 @@ class STTRouter: ObservableObject {
     }
 
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
+        let model = recordingModelOwnership.activeLease?.model ?? selectedModel
+        heldBackDictationText = nil
+        let text = await transcribeWithRecordingModel(preparedRecording: preparedRecording)
+        // Words (even held back ones) or an empty take score the pinned
+        // recorder's speed-only use of this mic.
+        defer {
+            parakeetEngine.scorePendingPinnedSpeedPathTake(text: text, emptyReason: lastEmptyTranscriptionReason)
+        }
+        // Read the person's languages (a Carbon keyboard lookup) only when the
+        // text is nearly all one non-Latin script.
+        guard let text, !Task.isCancelled,
+              let script = DictationLanguageScriptPolicy.dominantNonLatinScript(in: text),
+              !DictationLanguageScriptPolicy.isExpected(
+                  script,
+                  userLanguageCodes: DictationUserLanguages.current()
+              ) else { return text }
+        // A multilingual model probably guessed a language this person doesn't
+        // use (Russian for an English speaker). Don't paste it unasked; the
+        // message offers Paste Anyway in case the text is right.
+        heldBackDictationText = text
+        lastEmptyTranscriptionReason = .otherLanguage
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "dictation",
+            event: "dictation_output_language_mismatch",
+            message: "Dictation text was in a writing system none of the Mac's languages use",
+            context: ["model": model.rawValue, "script": script.rawValue]
+        )
+        return nil
+    }
+
+    private func transcribeWithRecordingModel(preparedRecording: RecordedSpeechSamples?) async -> String? {
         let recordingLease = recordingModelOwnership.activeLease
         let model = recordingLease?.model ?? selectedModel
         lastEmptyTranscriptionReason = nil

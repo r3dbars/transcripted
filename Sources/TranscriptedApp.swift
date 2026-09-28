@@ -81,6 +81,7 @@ private struct FirstRunReliabilityRuntimeState: Codable {
     let captureLibraryPath: String
     let meetingsPath: String
     let dictationsPath: String
+    let writingPath: String
     let cachePath: String
     let logsPath: String
     let temporaryPath: String
@@ -172,11 +173,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         cancelPendingAudioImports: { [weak self] in self?.cancelPendingAudioImports() },
         sendFeedback: { [weak self] in
             guard let self else { return }
-            TranscriptedSupportActions.sendFeedback(appState: self.appState)
+            let appState = self.appState
+            Task { @MainActor in
+                await TranscriptedSupportActions.sendFeedback(appState: appState)
+            }
         },
         sendDiagnosticEvent: { [weak self] in
             guard let self else { return nil }
-            return TranscriptedSupportActions.sendDiagnosticEvent(appState: self.appState)
+            return await TranscriptedSupportActions.sendDiagnosticEvent(appState: self.appState)
         }
     )
     private lazy var settingsWindowController = TranscriptedSettingsWindowController(
@@ -202,6 +206,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     let appState = TranscriptedAppState()
     let overlayController = FloatingOverlayController()
+    /// Carries dictation, meetings and the call prompt when Settings ›
+    /// Dictation window is Notch island; idle and hidden otherwise.
+    let notchIsland = NotchIslandController()
     let sessionController = DictationSessionController()
     /// Second non-activating panel for meeting mode (Lane C). Distinct from
     /// the dictation overlay so regressions to one can't break the other.
@@ -249,6 +256,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         guard acquireSingleInstanceLock() else { return }
+        // Read before anything else runs: the launch Apple event is only
+        // current while this delegate call is handling it.
+        let launchedAsLoginItem = Self.wasLaunchedAsLoginItem()
 
         // Crash reporting
         CrashReporter.setup()
@@ -289,6 +299,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
         overlayController.setup(sttRouter: appState.sttRouter)
+        overlayController.island = notchIsland
+        notchIsland.lastDictationTextProvider = { [weak self] in
+            self?.sessionController.lastCompletedText
+        }
+        notchIsland.onPasteLastDictation = { [weak self] in
+            self?.pasteLastDictationFromSettings()
+        }
+        if NotchIslandController.isSelected {
+            notchIsland.prewarm()
+        }
         sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
@@ -304,6 +324,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 ).allowsDetectedMeetingPrompt
             }
             meetingOverlayController.setup(meetingSession: meetingSession)
+            meetingOverlayController.island = notchIsland
+            capturePillController.island = notchIsland
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
                     self?.meetingPromptRecordInFlight = true
@@ -656,6 +678,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         workspaceObservers.append(wakeRecoveryObserver)
 
         presentInitialOnboardingIfNeeded()
+        if LaunchWindowPolicy.shouldOpenMainWindow(
+            launchedAsLoginItem: launchedAsLoginItem,
+            secondsSinceLogin: Self.secondsSinceConsoleLogin(),
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
+            isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
+        ) {
+            showSettingsWindow(page: .today, source: "app_launch")
+        }
 
         // Initialize engines
         Task { @MainActor in
@@ -668,6 +698,37 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
         LabControlChannel.startIfRequested(appDelegate: self)
         #endif
+    }
+
+    /// macOS tags a login-item start on the open-application event.
+    private static func wasLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
+    }
+
+    /// How long ago this user's current console login happened, from utmpx.
+    private static func secondsSinceConsoleLogin(now: Date = Date()) -> TimeInterval? {
+        let user = NSUserName()
+        var latestLogin: Date?
+        setutxent()
+        defer { endutxent() }
+        while let entry = getutxent() {
+            guard Int(entry.pointee.ut_type) == Int(USER_PROCESS) else { continue }
+            let line = withUnsafeBytes(of: entry.pointee.ut_line) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            let entryUser = withUnsafeBytes(of: entry.pointee.ut_user) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            guard line == "console", entryUser == user else { continue }
+            let loginTime = Date(timeIntervalSince1970: TimeInterval(entry.pointee.ut_tv.tv_sec))
+            if latestLogin.map({ loginTime > $0 }) ?? true {
+                latestLogin = loginTime
+            }
+        }
+        return latestLogin.map { now.timeIntervalSince($0) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -683,7 +744,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return false
         }
 
-        showSettingsWindow(page: .home, source: "dock_icon")
+        showSettingsWindow(page: .today, source: "dock_icon")
         return false
     }
 
@@ -722,6 +783,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WritingController.noteTerminationRequest()
         if duplicateInstanceShouldTerminateImmediately {
             return .terminateNow
         }
@@ -930,7 +992,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let button = statusItem?.button, let popover = popover {
             showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
         } else {
-            showSettingsWindow(page: .home, source: "single_instance_reopen")
+            showSettingsWindow(page: .today, source: "single_instance_reopen")
         }
     }
 
@@ -1054,7 +1116,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @objc private func quickMenuOpenHome() {
         trackQuickMenuAction("quick_menu_home")
-        showSettingsWindow(page: .home, source: "quick_menu")
+        showSettingsWindow(page: .today, source: "quick_menu")
     }
 
     @objc private func quickMenuQuit() {
@@ -1163,6 +1225,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let captureLibraryURL = fileManager.transcriptedCaptureLibraryDir
         let meetingsURL = fileManager.meetingSupportDir
         let dictationsURL = fileManager.dictationSupportDir
+        let writingURL = fileManager.writingSupportDir
         let cacheURL = fileManager.transcriptedCacheDir
         let logsURL = fileManager.transcriptedLogsDir
         let temporaryURL = fileManager.transcriptedTemporaryDir
@@ -1195,6 +1258,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 captureLibraryPath: captureLibraryURL.path,
                 meetingsPath: meetingsURL.path,
                 dictationsPath: dictationsURL.path,
+                writingPath: writingURL.path,
                 cachePath: cacheURL.path,
                 logsPath: logsURL.path,
                 temporaryPath: temporaryURL.path,
@@ -1533,7 +1597,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func showSettingsWindow(
-        page: TranscriptedSettingsPage = .home,
+        page: TranscriptedSettingsPage = .today,
         source: String = "unknown"
     ) {
         settingsWindowController.present(page: page, source: source)

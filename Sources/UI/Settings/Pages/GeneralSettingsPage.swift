@@ -7,7 +7,7 @@ import SwiftUI
 /// Card-based layout (2026-08 settings restyle): every setting is an
 /// always-visible row inside a rounded card — no disclosures to hunt through.
 /// Rows carry at most a few words; the explanation for each setting lives in
-/// its ⓘ info popover. Sections: Dictation, Bluetooth microphone, Send after
+/// its ⓘ info popover. Sections: Dictation, Microphone, Send after
 /// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy.
 struct GeneralSettingsPage<
     ShortcutEditor: View,
@@ -64,12 +64,16 @@ struct GeneralSettingsPage<
                     help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
                     info: GeneralInfo(
                         title: "Sounds",
-                        message: "Short sounds when dictation starts, finishes, or hears no speech."
+                        message: "A click when dictation starts, another when you press Stop, and a soft drop if it hears no speech."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 DictationOverlayModeRow(selection: $dictationOverlayMode)
+
+                if dictationOverlayMode == .notchIsland {
+                    NotchIslandScreenSharingRow()
+                }
 
                 GeneralToggleRow(
                     title: "Clean up pasted text",
@@ -86,7 +90,7 @@ struct GeneralSettingsPage<
             }
             .accessibilityIdentifier("transcripted.settings.section.dictation")
 
-            SettingsCardLabel(text: "Bluetooth microphone")
+            SettingsCardLabel(text: "Microphone")
                 .padding(.top, 16)
             SettingsCard {
                 bluetoothMicEditor()

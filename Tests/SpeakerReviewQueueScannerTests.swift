@@ -295,6 +295,83 @@ func testSpeakerReviewQueueScanner() {
         )
     }
 
+    runSuite("SpeakerReviewQueueScanner rereads a skipped transcript once it changes") {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory
+            .appendingPathComponent("SpeakerReviewQueueScannerTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Named_Then_Pending.md")
+        let speakerId = UUID()
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+
+        let namedMarkdown = """
+        ---
+        title: "Named Call"
+        capture_type: meeting
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Maya"
+            confidence: confirmed
+            source: user_manual
+        ---
+
+        # Named Call
+        """
+        try? namedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        assertFalse(
+            SpeakerReviewQueueScanner.hasPendingSpeakers(in: namedMarkdown),
+            "a transcript with only named speakers has nothing to review"
+        )
+        let profiles = [makeReviewQueueProfile(id: speakerId, name: nil)]
+        let first = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: directory,
+            profiles: profiles,
+            clipURLsByProfileID: [:]
+        )
+        assertEqual(first.count, 0, "no pending speakers means no review rows")
+
+        let pendingMarkdown = deferredMarkdown(
+            speakerId: speakerId,
+            title: "Named Call",
+            speakerName: "Speaker 1",
+            sampleText: "Now this voice needs a name, and the file grew."
+        )
+        assertTrue(
+            SpeakerReviewQueueScanner.hasPendingSpeakers(in: pendingMarkdown),
+            "a db_pending speaker counts as pending"
+        )
+        try? pendingMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let second = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: directory,
+            profiles: profiles,
+            clipURLsByProfileID: [:]
+        )
+        assertEqual(second.count, 1, "a rewritten transcript must be read again, not skipped from the cache")
+    }
+
+    runSuite("SpeakerReviewQueueScanner no-pending cache matches only the same file version") {
+        let cache = SpeakerReviewQueueScanner.NoPendingSpeakersCache()
+        let url = URL(fileURLWithPath: "/tmp/Cache_Probe.md")
+        let date = Date(timeIntervalSinceReferenceDate: 100)
+        let fingerprint = SpeakerReviewQueueScanner.NoPendingSpeakersCache.Fingerprint(modifiedAt: date, size: 10)
+        assertFalse(cache.contains(url, fingerprint: fingerprint), "an empty cache skips nothing")
+        cache.insert(url, fingerprint: fingerprint)
+        assertTrue(cache.contains(url, fingerprint: fingerprint), "the same version is skipped")
+        assertFalse(
+            cache.contains(url, fingerprint: .init(modifiedAt: date, size: 11)),
+            "a size change means the file must be read again"
+        )
+        assertFalse(
+            cache.contains(url, fingerprint: .init(modifiedAt: date.addingTimeInterval(1), size: 10)),
+            "a new modification date means the file must be read again"
+        )
+        let undated = SpeakerReviewQueueScanner.NoPendingSpeakersCache.Fingerprint(modifiedAt: nil, size: 10)
+        cache.insert(url, fingerprint: undated)
+        assertFalse(cache.contains(url, fingerprint: undated), "without a modification date nothing is cached")
+    }
+
     runSuite("SpeakerReviewQueueScanner treats missing channel as legacy system audio") {
         let speakerId = UUID()
         let transcriptURL = URL(fileURLWithPath: "/tmp/Legacy_Deferred.md")

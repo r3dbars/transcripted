@@ -92,6 +92,7 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
+KEYBOARD_ENTITLEMENTS="config/entitlements/keyboard.plist"
 DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
@@ -103,6 +104,9 @@ WHISPERKIT_MODULE="deps-modules/WhisperKit.swiftmodule/arm64-apple-macos.swiftmo
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
+# Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
+LLAMA_SERVER_BINARY="deps-tools/llama-server"
+BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
 
 # NOTE: build.sh, build-deps.sh, and run-integration-smoke.sh share their
 # dependency-staleness-check functions via scripts/entrypoints/lib/deps-staleness.sh.
@@ -310,9 +314,9 @@ resolve_sign_identity() {
 sign_embedded_payloads() {
     local sign_hash="$1"
     local framework_path
-    local metallib_path
     local nested_code_path
     local helper_path
+    local input_method_path
 
     while IFS= read -r -d '' nested_code_path; do
         if [ "$sign_hash" = "-" ]; then
@@ -338,11 +342,6 @@ sign_embedded_payloads() {
         codesign --force --sign "$sign_hash" "$framework_path"
     done
 
-    for metallib_path in "$APP_BUNDLE"/Contents/MacOS/*.metallib; do
-        [ -f "$metallib_path" ] || continue
-        codesign --force --sign "$sign_hash" "$metallib_path"
-    done
-
     for helper_path in "$APP_BUNDLE"/Contents/Helpers/*; do
         [ -f "$helper_path" ] || continue
         if [ "$sign_hash" = "-" ]; then
@@ -353,6 +352,26 @@ sign_embedded_payloads() {
                 --options runtime \
                 --timestamp \
                 "$helper_path"
+        fi
+    done
+
+    # The Writing keyboard is a nested input-method bundle with no nested code
+    # of its own. Signing is inside-out, so it's signed here, before the outer
+    # app, with its own entitlements. With no keyboard bundle this loop does
+    # nothing.
+    for input_method_path in "$APP_BUNDLE/Contents/Library/Input Methods"/*.app; do
+        [ -d "$input_method_path" ] || continue
+        if [ "$sign_hash" = "-" ]; then
+            codesign --force --sign "$sign_hash" \
+                --entitlements "$KEYBOARD_ENTITLEMENTS" \
+                "$input_method_path"
+        else
+            codesign --force \
+                --sign "$sign_hash" \
+                --options runtime \
+                --timestamp \
+                --entitlements "$KEYBOARD_ENTITLEMENTS" \
+                "$input_method_path"
         fi
     done
 }
@@ -370,12 +389,18 @@ bundle_mcp_server() {
     chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
+# Writing's inference helper. sign_embedded_payloads' Helpers loop signs it.
+bundle_llama_server() {
+    cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
+    chmod 755 "$BUNDLED_LLAMA_SERVER"
+}
+
 if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     echo "❌ Missing entitlements file: $BETA_ENTITLEMENTS"
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ] || [ ! -x "$LLAMA_SERVER_BINARY" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
@@ -383,6 +408,7 @@ if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d
     echo "   Missing module: $WHISPERKIT_MODULE"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
+    echo "   Missing helper: $LLAMA_SERVER_BINARY"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi
@@ -500,20 +526,20 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
-bundle_mcp_server
+# Light + dark app icon for macOS 26 (Assets.car); Transcripted.icns stays the fallback
+source "$ENTRYPOINT_DIR/lib/compile-app-icon.sh"
+compile_app_icon "$APP_BUNDLE"
 
-# Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
+bundle_mcp_server
+bundle_llama_server
+
+# Unified dependencies (FluidAudio + WhisperKit)
 echo "Dependencies found"
 
 # Shared frameworks/linker/source arguments — single source of truth with
 # build.sh so dev and shipped builds cannot diverge.
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
-
-# Bundle Metal libraries if present
-for metallib in deps-libs/*.metallib; do
-    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
-done
 
 [ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
@@ -537,6 +563,11 @@ cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
 
 source "$ENTRYPOINT_DIR/lib/bundle-cli.sh"
 bundle_transcripted_cli "$REPO_ROOT" "$APP_BUNDLE"
+
+# Writing keyboard (IMKit input method). Built before the nested-code signing
+# step so it is signed inside-out with the rest of the app.
+source "$ENTRYPOINT_DIR/lib/bundle-input-method.sh"
+bundle_transcripted_input_method "$REPO_ROOT" "$APP_BUNDLE"
 
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."

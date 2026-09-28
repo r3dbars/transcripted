@@ -27,6 +27,20 @@ force-installed by Sparkle so existing users recover from a regression.
   launch (and again after a model switch or wake) instead of on first use, so
   there is no "warming up" wait. A meeting started before they finish loading
   records right away and the models catch up in the background.
+- With the new Mac mic recorder turned on, meetings and dictation skip an
+  AirPods (or other Bluetooth headset) mic and record your Mac's own mic
+  instead, even when "Use Mac-selected microphone" is on, so AirPods keep
+  playing clean audio. To record through the AirPods mic on purpose, pick
+  "Same as macOS Sound settings" in the new Microphone setting below.
+- With the Mac mic recorder on, Settings has one "Microphone" picker for
+  dictation and meetings: Automatic (skips AirPods for your Mac's own mic), a
+  specific mic recorded whenever it's connected, or "Same as macOS Sound
+  settings" to record AirPods on purpose. It replaces Faster Bluetooth
+  dictation (still shown with Apple voice processing, which the recorder
+  can't use), its mic picker, and meetings' "Use Mac-selected microphone". A
+  mic picked under Faster Bluetooth dictation carries over if that toggle was
+  on. The Settings section is now called Microphone, with the recorder on or
+  off.
 
 ## [1.1.50] - 2026-07-14
 

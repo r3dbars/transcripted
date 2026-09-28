@@ -15,6 +15,21 @@ final class CapturePillController {
     var onRemind: ((MeetingPromptDetector.Candidate) -> Void)?
     var onExpired: ((MeetingPromptDetector.Candidate) -> Void)?
 
+    /// Asks from the notch island instead of the pill when Settings ›
+    /// Dictation window is Notch island. Timing and callbacks are unchanged.
+    weak var island: NotchIslandCallPromptPresenting? {
+        didSet {
+            island?.callActionHandler = { [weak self] action in
+                switch action {
+                case .callRecord: self?.record()
+                case .callDismiss: self?.dismiss(notify: true)
+                case .callRemind: self?.remind()
+                default: break
+                }
+            }
+        }
+    }
+
     deinit {
         dismissTask?.cancel()
         countdownTask?.cancel()
@@ -36,6 +51,16 @@ final class CapturePillController {
 
         representedCandidate = candidate
         let timeoutSeconds = max(1, Int(ceil(timeout)))
+        if let island, DictationOverlayPresentationPreferences.mode() == .notchIsland {
+            island.updateCallPrompt(NotchIslandCallPromptContent(
+                title: candidate.suggestedTranscriptTitle ?? candidate.title,
+                detail: detailOverride ?? candidate.detail,
+                secondsLeft: timeoutSeconds
+            ))
+            scheduleDismiss(timeout: timeout)
+            scheduleCountdown(seconds: timeoutSeconds)
+            return true
+        }
         pillView.update(candidate: candidate, timeoutSeconds: timeoutSeconds, detailOverride: detailOverride)
         panel.onCancel = { [weak self] in self?.dismiss(notify: true) }
         panel.onDefault = { [weak self] in self?.record() }
@@ -63,6 +88,7 @@ final class CapturePillController {
         let candidate = representedCandidate
         representedCandidate = nil
         panel?.orderOut(nil)
+        island?.updateCallPrompt(nil)
 
         if notify, let candidate {
             onDismiss?(candidate)
@@ -119,12 +145,14 @@ final class CapturePillController {
         countdownTask = Task { @MainActor [weak self] in
             var secondsRemaining = max(1, seconds)
             self?.pillView?.updateCountdown(secondsRemaining: secondsRemaining)
+            self?.island?.updateCallPromptSeconds(secondsRemaining)
 
             while secondsRemaining > 1 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
                 secondsRemaining -= 1
                 self?.pillView?.updateCountdown(secondsRemaining: secondsRemaining)
+                self?.island?.updateCallPromptSeconds(secondsRemaining)
             }
         }
     }

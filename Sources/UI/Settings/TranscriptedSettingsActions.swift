@@ -10,5 +10,5 @@ struct TranscriptedSettingsActions {
     /// Drops files still waiting to be handed to the import flow.
     let cancelPendingAudioImports: () -> Void
     let sendFeedback: () -> Void
-    let sendDiagnosticEvent: () -> String?
+    let sendDiagnosticEvent: () async -> String?
 }

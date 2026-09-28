@@ -5,6 +5,9 @@ import TranscriptedCaptureKit
 struct CLIContextDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
+    /// Writing day files. Empty when meetings or dictations were pointed at
+    /// specific folders without `--writing-dir` (see CaptureLibraryResolver).
+    let writingDirs: [URL]
 
     var meetingsDir: URL {
         meetingDirs[0]
@@ -14,20 +17,23 @@ struct CLIContextDirectories {
         dictationDirs[0]
     }
 
-    init(meetingsDir: URL, dictationsDir: URL) {
+    init(meetingsDir: URL, dictationsDir: URL, writingDir: URL? = nil) {
         self.meetingDirs = [meetingsDir]
         self.dictationDirs = [dictationsDir]
+        self.writingDirs = writingDir.map { [$0] } ?? []
     }
 
-    init(meetingDirs: [URL], dictationDirs: [URL]) {
+    init(meetingDirs: [URL], dictationDirs: [URL], writingDirs: [URL] = []) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.writingDirs = writingDirs
     }
 
     static func resolve(
         dataDir: String?,
         meetingsDir: String?,
         dictationsDir: String?,
+        writingDir: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil
@@ -36,19 +42,21 @@ struct CLIContextDirectories {
             dataDir: dataDir,
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
+            writingDir: writingDir,
             environment: environment,
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
         return CLIContextDirectories(
             meetingDirs: resolved.meetingDirs,
-            dictationDirs: resolved.dictationDirs
+            dictationDirs: resolved.dictationDirs,
+            writingDirs: resolved.writingDirs
         )
     }
 }
 
 struct CLIContextPathOptions: ParsableArguments {
-    @Option(name: .long, help: "Shared context directory containing both meetings and dictations.")
+    @Option(name: .long, help: "Shared context directory containing meetings, dictations, and writing.")
     var dataDir: String?
 
     @Option(name: .long, help: "Meetings transcript directory.")
@@ -57,8 +65,16 @@ struct CLIContextPathOptions: ParsableArguments {
     @Option(name: .long, help: "Dictations transcript directory.")
     var dictationsDir: String?
 
+    @Option(name: .long, help: "Writing directory (Writing_<date>.md day files). Required to include writing when --meetings-dir or --dictations-dir is set.")
+    var writingDir: String?
+
     var resolved: CLIContextDirectories {
-        CLIContextDirectories.resolve(dataDir: dataDir, meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        CLIContextDirectories.resolve(
+            dataDir: dataDir,
+            meetingsDir: meetingsDir,
+            dictationsDir: dictationsDir,
+            writingDir: writingDir
+        )
     }
 }
 
@@ -83,10 +99,29 @@ enum CLIContextStore {
         })
     }
 
+    static func listWritingDays(in directories: CLIContextDirectories, count: Int, dateFrom: String?, dateTo: String?) -> [CLIWritingDaySummary] {
+        let days = loadWritingDays(from: directories.writingDirs).filter { day in
+            matches(date: day.payload.date, dateFrom: dateFrom, dateTo: dateTo)
+        }
+
+        return Array(days.sorted { $0.datetime > $1.datetime }.prefix(count).map {
+            CLIWritingDaySummary(
+                filename: $0.filename,
+                date: $0.payload.date,
+                datetime: $0.datetime,
+                entryCount: $0.payload.entries.count,
+                wordCount: $0.payload.wordCount,
+                acceptedWordCount: $0.payload.acceptedWordCount,
+                titles: $0.payload.entries.map(\.title),
+                sourceApps: Array(Set($0.payload.entries.map(\.sourceAppName))).sorted()
+            )
+        })
+    }
+
     static func recent(in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?) -> [CLIContextItem] {
         var items: [CLIContextItem] = []
 
-        if kind != .dictation {
+        if kind.includes(.meeting) {
             items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 return CLIContextItem(
@@ -105,7 +140,7 @@ enum CLIContextStore {
             })
         }
 
-        if kind != .meeting {
+        if kind.includes(.dictation) {
             items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
@@ -126,6 +161,10 @@ enum CLIContextStore {
             })
         }
 
+        if kind.includes(.writing) {
+            items.append(contentsOf: writingItems(in: directories, dateFrom: dateFrom, dateTo: dateTo) { _ in true })
+        }
+
         return Array(items.sorted { $0.datetime > $1.datetime }.prefix(count))
     }
 
@@ -133,7 +172,7 @@ enum CLIContextStore {
         let normalizedQuery = query.lowercased()
         var items: [CLIContextItem] = []
 
-        if kind != .dictation {
+        if kind.includes(.meeting) {
             items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 if let speaker, !meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(speaker) }) {
@@ -163,7 +202,7 @@ enum CLIContextStore {
             })
         }
 
-        if kind != .meeting, speaker == nil {
+        if kind.includes(.dictation), speaker == nil {
             items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
@@ -185,6 +224,14 @@ enum CLIContextStore {
                         delivery: entry.delivery
                     )
                 }
+            })
+        }
+
+        // Writing has no speakers, so a speaker filter skips it like dictations.
+        if kind.includes(.writing), speaker == nil {
+            items.append(contentsOf: writingItems(in: directories, dateFrom: dateFrom, dateTo: dateTo) { entry in
+                entry.title.localizedCaseInsensitiveContains(normalizedQuery)
+                    || entry.text.localizedCaseInsensitiveContains(normalizedQuery)
             })
         }
 
@@ -211,14 +258,68 @@ enum CLIContextStore {
             throw ValidationError("Invalid meeting filename: \(filename)")
         }
 
+        // Only a meeting reads as a meeting: dictation and writing day files
+        // share folders with meetings in the flat shared-folder layout.
         guard let markdownURL,
               let content = CaptureMarkdown.readBoundedContents(of: markdownURL),
-              CaptureMarkdown.looksLikeCaptureMarkdown(markdownURL),
-              !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
+              CaptureMarkdown.captureKind(of: markdownURL) == .meeting else {
             throw ValidationError("Meeting not found: \(filename)")
         }
 
         return content
+    }
+
+    struct WritingRead {
+        let markdown: String
+        let date: String
+        let entries: [CLIClientWritingEntry]
+    }
+
+    static func readWritingDocument(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> WritingRead {
+        let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
+        var invalidPathRequested = false
+        var markdownURL: URL?
+        for directory in directories.writingDirs {
+            switch CLIPathSecurity.resolveReadableFile(named: requestedName, in: directory) {
+            case .valid(let safeURL):
+                markdownURL = safeURL
+            case .missing:
+                continue
+            case .invalid:
+                invalidPathRequested = true
+            }
+            if markdownURL != nil { break }
+        }
+
+        if invalidPathRequested && markdownURL == nil {
+            throw ValidationError("Invalid writing filename: \(filename)")
+        }
+
+        guard let markdownURL,
+              CaptureMarkdown.captureKind(of: markdownURL) == .writingDay,
+              let (payload, content) = loadWritingDay(at: markdownURL) else {
+            throw ValidationError("Writing not found: \(filename)")
+        }
+
+        if let entryId {
+            guard let entry = payload.entries.first(where: { $0.id == entryId }) else {
+                throw ValidationError("Writing entry not found: \(entryId)")
+            }
+
+            let markdown = """
+            # \(entry.title)
+
+            Captured: \(entry.createdAt)
+            Source app: \(entry.sourceAppName)
+            Words: \(entry.wordCount)
+            Accepted words: \(entry.acceptedWordCount)
+
+            \(entry.text)
+            """
+            return WritingRead(markdown: markdown, date: payload.date, entries: [entry])
+        }
+
+        return WritingRead(markdown: content, date: payload.date, entries: payload.entries)
     }
 
     struct DictationRead {
@@ -310,6 +411,12 @@ enum CLIContextStore {
         let payload: CLIAgentDictationDay
     }
 
+    private struct WritingDayRecord {
+        let filename: String
+        let datetime: String
+        let payload: CLIAgentWritingDay
+    }
+
     private static func loadMeetings(from directories: [URL]) -> [MeetingRecord] {
         deduplicating(directories.flatMap { loadMeetings(from: $0) }, by: \.filename)
     }
@@ -320,6 +427,9 @@ enum CLIContextStore {
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
                   !filename.hasPrefix("Dictations_"),
+                  // A writing day file has frontmatter too; in the flat
+                  // shared-folder layout it must not surface as a meeting.
+                  CaptureMarkdown.captureKind(of: url) != .writingDay,
                   // One read per meeting: the transcript parse and the title
                   // extraction below both work off this same content. Reading
                   // it once here also means the title comes from the
@@ -370,6 +480,78 @@ enum CLIContextStore {
                 entries: day.entries,
                 payload: day.payload
             )
+        }
+    }
+
+    private static func loadWritingDays(from directories: [URL]) -> [WritingDayRecord] {
+        deduplicating(directories.flatMap { loadWritingDays(from: $0) }, by: \.filename)
+    }
+
+    private static func loadWritingDays(from directory: URL) -> [WritingDayRecord] {
+        safeMarkdownFiles(in: directory).compactMap { url in
+            guard CaptureMarkdown.captureKind(of: url) == .writingDay,
+                  let (payload, _) = loadWritingDay(at: url) else { return nil }
+            return WritingDayRecord(
+                filename: url.deletingPathExtension().lastPathComponent,
+                datetime: payload.entries.last?.createdAt ?? "\(payload.date)T00:00:00+0000",
+                payload: payload
+            )
+        }
+    }
+
+    private static func loadWritingDay(at url: URL) -> (payload: CLIAgentWritingDay, content: String)? {
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
+              let parsed = CaptureMarkdownParser.parseWritingDay(from: content, markdownURL: url) else { return nil }
+
+        let payload = CLIAgentWritingDay(
+            version: "1.0",
+            captureType: parsed.captureType,
+            date: parsed.date,
+            markdownFilename: parsed.markdownFilename,
+            entryCount: parsed.entryCount,
+            wordCount: parsed.wordCount,
+            acceptedWordCount: parsed.acceptedWordCount,
+            entries: parsed.entries.map { entry in
+                CLIClientWritingEntry(
+                    id: entry.id,
+                    createdAt: entry.createdAt,
+                    title: entry.title,
+                    text: entry.text,
+                    sourceAppName: entry.sourceAppName,
+                    sourceAppBundleId: entry.sourceAppBundleId,
+                    wordCount: entry.wordCount,
+                    characterCount: entry.characterCount,
+                    acceptedWordCount: entry.acceptedWordCount
+                )
+            }
+        )
+        return (payload, content)
+    }
+
+    /// Writing entries as context items, filtered by day and by `include`.
+    private static func writingItems(
+        in directories: CLIContextDirectories,
+        dateFrom: String?,
+        dateTo: String?,
+        include: (CLIClientWritingEntry) -> Bool
+    ) -> [CLIContextItem] {
+        loadWritingDays(from: directories.writingDirs).flatMap { day -> [CLIContextItem] in
+            guard matches(date: day.payload.date, dateFrom: dateFrom, dateTo: dateTo) else { return [] }
+            return day.payload.entries.filter(include).map { entry in
+                CLIContextItem(
+                    kind: .writing,
+                    title: entry.title,
+                    filename: day.filename,
+                    entryId: entry.id,
+                    date: day.payload.date,
+                    datetime: entry.createdAt,
+                    preview: String(entry.text.prefix(220)),
+                    wordCount: entry.wordCount,
+                    speakers: nil,
+                    sourceAppName: entry.sourceAppName,
+                    delivery: nil
+                )
+            }
         }
     }
 

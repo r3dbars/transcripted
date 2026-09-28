@@ -54,6 +54,11 @@ final class MeetingPromptDetector {
     /// Returns false when the Settings toggle is off. This keeps late monitor
     /// callbacks quiet after the user disables auto call detection.
     var isMicInputPromptEnabled: (() -> Bool)?
+    /// Bundle IDs of the running apps. Reads off the main thread, because a
+    /// slow LaunchServices reply here froze the app for 5+ seconds in 1.1.66.
+    var runningBundleIDsProvider: () async -> Set<String> = {
+        await RunningApplicationsReader.bundleIdentifiers()
+    }
     /// Window titles of the running browsers in the given bundle families,
     /// used only to classify a browser mic as a call or not. Defaults to the
     /// Accessibility reader; unit tests inject fixed titles.
@@ -500,9 +505,9 @@ final class MeetingPromptDetector {
     private func evaluate(forceCalendarRefresh: Bool = false) async {
         await refreshCalendarEventSnapshots(force: forceCalendarRefresh)
 
+        // Off the main thread: reading bundle IDs can block on LaunchServices.
+        let runningBundleIDs = await runningBundleIDsProvider()
         let now = Date()
-        let runningApplications = NSWorkspace.shared.runningApplications
-        let runningBundleIDs = Set(runningApplications.compactMap(\.bundleIdentifier))
         let frontmostBundleID = frontmostBundleIDProvider()
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
@@ -638,17 +643,20 @@ final class MeetingPromptDetector {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.handleWorkspaceApplicationNotification(notification)
+                    guard let app else { return }
+                    // Off the main thread: a just-launched app's first
+                    // bundle ID read can block on LaunchServices.
+                    let bundleIdentifier = await RunningApplicationsReader.bundleIdentifier(of: app)
+                    self?.handleWorkspaceApplication(bundleIdentifier: bundleIdentifier)
                 }
             }
         }
     }
 
-    private func handleWorkspaceApplicationNotification(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleIdentifier = app.bundleIdentifier,
+    private func handleWorkspaceApplication(bundleIdentifier: String?) {
+        guard let bundleIdentifier,
               let provider = provider(forBundleIdentifier: bundleIdentifier),
               provider.supportsNativeRuntimePrompt else { return }
 

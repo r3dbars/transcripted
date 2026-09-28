@@ -146,6 +146,12 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Short model name for a saved transcript's `transcription_engine` id,
+    /// or nil for an id this build doesn't know.
+    static func shortTitle(forTranscriptionEngineIdentifier identifier: String) -> String? {
+        allCases.first { $0.transcriptionEngineIdentifier == identifier }?.shortTitle
+    }
+
     var transcriptionEngineIdentifier: String {
         switch self {
         case .parakeetTDTv2:

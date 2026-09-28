@@ -45,6 +45,8 @@ TVM_MIN_FREE_GB="${TVM_MIN_FREE_GB:-60}"
 TVM_GUEST_USER="${TVM_GUEST_USER:-admin}"
 TVM_GUEST_PASS="${TVM_GUEST_PASS:-admin}"
 TVM_BOOT_TIMEOUT="${TVM_BOOT_TIMEOUT:-300}"
+# Seconds approve-download waits for a download prompt that isn't drawn yet.
+TVM_PROMPT_WAIT="${TVM_PROMPT_WAIT:-60}"
 # 1 = allow `up --vnc` on open (unencrypted) Wi-Fi. See cmd_up.
 TVM_ALLOW_VNC_ON_OPEN_WIFI="${TVM_ALLOW_VNC_ON_OPEN_WIFI:-0}"
 # Bump when GUEST_PREP changes; first-run rebuilds an older clean snapshot.
@@ -110,6 +112,8 @@ Inside the guest:
                             click Open inside the prompt's window over VNC (or press Return
                             while it's in front). Otherwise clears the quarantine flag and
                             exits 3, so the bypass is never mistaken for a user's path
+  windows                   the guest's window list: screen width, front window's app,
+                            and the download prompt's box if one is showing
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
   wait-event NAME [--timeout S] [--new]
                             wait until the app logs event NAME in events.jsonl
@@ -851,11 +855,14 @@ cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "n
 # still on, and refuse if it would reject the app: a broken notarization must
 # fail here, not slip through. Every click and key press is aimed at the
 # prompt's own window, checked in the guest each time, and stops as soon as
-# the app is up. Clearing the quarantine flag is only the last resort; it
-# exits $BYPASS_EXIT so the report can't call it a user's path.
+# the app is up. "Up" needs proof from the app itself (a new app_launched in
+# its events.jsonl), not just its process: macOS starts the process before it
+# asks and holds it until Open (run 5 skipped the click because of that).
+# Clearing the quarantine flag is only the last resort; it exits
+# $BYPASS_EXIT so the report can't call it a user's path.
 BYPASS_EXIT=3
 cmd_approve_download() {
-  local vm="$1" try windows box points front
+  local vm="$1" try=1 waited=0 baseline windows box points front rc
   guest_user_bash "$vm" '
 set -euo pipefail
 if ! verdict="$(spctl --assess --type execute -vv /Applications/Transcripted.app 2>&1)"; then
@@ -864,61 +871,95 @@ if ! verdict="$(spctl --assess --type execute -vv /Applications/Transcripted.app
   exit 1
 fi
 printf "Gatekeeper: %s\n" "$verdict"' || return 1
-  if app_running "$vm" 1; then
-    echo "Transcripted is already running; no download prompt to approve"
-    return 0
-  fi
+  baseline="$(launch_count "$vm")"
   if ! vnc_session_alive "$vm"; then
     log "no screen access (up --vnc); clearing the quarantine flag instead of clicking Open (no user does this)"
   else
-    for try in 1 2 3; do
-      if (( try > 1 )) && app_running "$vm" 1; then
+    while (( try <= 3 )); do
+      if (( try > 1 )) && app_started "$vm" 1 strict "$baseline"; then
         echo "download prompt approved over VNC (the app took a while to start)"
         return 0
       fi
-      if ! windows="$(prompt_windows "$vm")" || [[ "$windows" != *"screen "* ]]; then
+      if ! windows="$(prompt_windows "$vm")" || ! grep -q '^screen [0-9]' <<<"$windows"; then
         log "warning: can't read the guest's window list, so not clicking blind"
-        printf '%s\n' "$windows" | sed 's/^/[tvm]   /' >&2
+        printf '%s\n' "$windows" | printable | sed 's/^/[tvm]   /' >&2
         break
       fi
+      echo "window list: $(tr '\n' ';' <<<"$windows" | printable)"
       points="$(sed -n 's/^screen //p' <<<"$windows")"
       box="$(sed -n 's/^prompt //p' <<<"$windows" | head -n 1)"
-      front="$(sed -n 's/^front //p' <<<"$windows")"
+      front="$(sed -n 's/^front //p' <<<"$windows" | printable)"
       if [[ -z "$box" ]]; then
-        if app_running "$vm" 15; then
-          echo "Transcripted started with no download prompt on screen (Gatekeeper didn't ask)"
+        (( waited )) && { log "warning: the download prompt went away but Transcripted didn't start (front: ${front:-?})"; break; }
+        # The prompt may not be drawn yet: wait for it or a new launch,
+        # whichever comes first.
+        waited=1
+        rc=0
+        app_started "$vm" "$TVM_PROMPT_WAIT" either "$baseline" || rc=$?
+        if (( rc == 0 )); then
+          echo "Transcripted started and no download prompt is showing"
+          return 0
+        elif (( rc == 2 )); then
+          echo "the download prompt showed up late"
+          continue
+        fi
+        # No prompt came at all: an app that launched before this step (and
+        # isn't held, since nothing is asking) is simply already running.
+        if app_started "$vm" 1 strict 0; then
+          echo "Transcripted is already running (it launched before this step) and no download prompt showed up in ${TVM_PROMPT_WAIT}s"
           return 0
         fi
-        log "warning: no download prompt on screen and Transcripted isn't running (front: ${front:-?})"
+        log "warning: no download prompt on screen and Transcripted didn't start (front: ${front:-?})"
         break
       fi
       if (( try < 3 )); then
         # The first click on a prompt that isn't in front may only bring it forward.
-        if (cmd_vnc "$vm" click-default-button --within "${box// /,}" --points-wide "$points") && app_running "$vm" 15; then
+        if (cmd_vnc "$vm" click-default-button --within "${box// /,}" --points-wide "$points") && app_started "$vm" 30 strict "$baseline"; then
           echo "download prompt approved: clicked Open over VNC, like a user (try $try)"
           return 0
         fi
       elif [[ "$front" == CoreServicesUIAgent ]]; then
-        if (cmd_vnc "$vm" key return) && app_running "$vm" 15; then
+        if (cmd_vnc "$vm" key return) && app_started "$vm" 30 strict "$baseline"; then
           echo "download prompt approved: pressed Return (Open is the default button)"
           return 0
         fi
       else
         log "warning: the download prompt isn't in front (${front:-?} is), so not pressing Return"
       fi
+      try=$((try + 1))
     done
     log "warning: could not get past the download prompt over VNC; clearing the quarantine flag instead (no user does this)"
   fi
+  # End the process macOS is holding behind the prompt, and make sure it's
+  # gone, so what starts next is a fresh, unquarantined launch.
   guest_user_bash "$vm" '
 xattr -dr com.apple.quarantine /Applications/Transcripted.app
+if pgrep -x Transcripted >/dev/null; then
+  pkill -x Transcripted || true
+  for _ in 1 2 3 4 5; do pgrep -x Transcripted >/dev/null || break; sleep 1; done
+  if pgrep -x Transcripted >/dev/null; then pkill -9 -x Transcripted || true; sleep 2; fi
+  if pgrep -x Transcripted >/dev/null; then echo "the held Transcripted process would not quit" >&2; exit 1; fi
+  echo "ended the Transcripted process held behind the prompt"
+fi
 killall CoreServicesUIAgent 2>/dev/null || true
-open -a /Applications/Transcripted.app'
-  if app_running "$vm" 30; then
+open -a /Applications/Transcripted.app' || die "could not clear the way for a fresh launch"
+  if app_started "$vm" 60 lenient "$baseline"; then
     echo "download prompt BYPASSED: quarantine flag cleared (fallback, not a user's path)"
     return "$BYPASS_EXIT"
   fi
   die "Transcripted did not start after the download prompt"
 }
+
+# How many app_launched events the app has logged so far (0 before its first
+# real launch).
+launch_count() {
+  local n
+  n="$(guest_user_bash "$1" 'f="$HOME/'"$APP_SUPPORT_REL"'/logs/events.jsonl"; n=0; [ -f "$f" ] && n=$(grep -cF "\"event\":\"app_launched\"" "$f" || true); echo "${n:-0}"' || true)"
+  [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 0
+}
+
+# Keep guest text from writing terminal control codes on the host.
+printable() { tr -d '\000-\010\013-\037\177'; }
 
 # What's on the guest's screen, from macOS's window list (no Accessibility
 # grant needed for owners and bounds). Prints "screen <width in points>",
@@ -949,9 +990,28 @@ function run() {
   return out.join("\n");
 }'
 
-# app_running VM SECONDS: wait up to SECONDS for the Transcripted process.
-app_running() {
-  guest_run "$1" bash -c 'for _ in $(seq 1 "$1"); do pgrep -x Transcripted >/dev/null && exit 0; sleep 1; done; exit 1' tvm "$2"
+# app_started VM SECONDS MODE BASELINE: wait up to SECONDS for Transcripted to
+# be really running: its process exists, it has logged more than BASELINE
+# app_launched events, and no download prompt is on screen. MODE strict: the
+# window list must be readable. lenient (after the quarantine fallback): an
+# unreadable list is fine. either: also return 2 as soon as a prompt shows.
+app_started() {
+  guest_user_bash "$1" '
+f="$HOME/'"$APP_SUPPORT_REL"'/logs/events.jsonl"
+for _ in $(seq 1 "$1"); do
+  running=0; prompt=0; readable=0; launched=0
+  pgrep -x Transcripted >/dev/null && running=1
+  windows="$(osascript -l JavaScript -e "$2" 2>/dev/null || true)"
+  printf "%s\n" "$windows" | grep -q "^prompt " && prompt=1
+  printf "%s\n" "$windows" | grep -q "^screen [0-9]" && readable=1
+  [ "$3" = either ] && [ "$prompt" = 1 ] && exit 2
+  [ -f "$f" ] && launched=$(grep -cF "\"event\":\"app_launched\"" "$f" || true)
+  if [ "$running" = 1 ] && [ "${launched:-0}" -gt "$4" ] && [ "$prompt" = 0 ]; then
+    { [ "$readable" = 1 ] || [ "$3" = lenient ]; } && exit 0
+  fi
+  sleep 1
+done
+exit 1' "$2" "$PROMPT_WINDOWS_JS" "$3" "$4"
 }
 
 cmd_logs() {
@@ -1240,7 +1300,7 @@ cmd_first_run() {
   # prompt and does not start until it is approved, so photograph the prompt
   # first, approve it, and only then wait for the app.
   step "launch" optional bash "$self" --vm "$TVM_VM" launch
-  step "wait for the download prompt" optional sleep 10
+  step "wait for the download prompt, then read the window list" optional bash -c 'sleep 10; bash "$1" --vm "$2" windows' _ "$self" "$TVM_VM"
   step "screenshot: download prompt" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-download-prompt.png"
   step "Gatekeeper check, then approve the download prompt" bypassable bash "$self" --vm "$TVM_VM" approve-download
   step "launch again" optional bash "$self" --vm "$TVM_VM" launch
@@ -1337,7 +1397,7 @@ main() {
     save) cmd_save "$vm" "$@" ;;
     restore) cmd_restore "$vm" "$@" ;;
     first-run) cmd_first_run ;;
-    exec|sh|install-app|launch|quit|approve-download|logs|cli|play|say|wait-event)
+    exec|sh|install-app|launch|quit|approve-download|windows|logs|cli|play|say|wait-event)
       need_tart
       protect_snapshot "$vm"
       vm_running "$vm" || die "$vm is not running. Run: up"
@@ -1348,6 +1408,7 @@ main() {
         launch) cmd_launch "$vm" ;;
         quit) cmd_quit "$vm" ;;
         approve-download) cmd_approve_download "$vm" ;;
+        windows) prompt_windows "$vm" | printable ;;
         logs) cmd_logs "$vm" "$@" ;;
         cli) cmd_cli "$vm" "$@" ;;
         play) cmd_play "$vm" "$@" ;;

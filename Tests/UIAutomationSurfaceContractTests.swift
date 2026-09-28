@@ -46,6 +46,18 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
     ].contains { contractSource($0).contains(needle) }
 }
 
+// The Writing tab: its page plus the views under Sources/UI/Settings/Writing/.
+private func writingSurfaceContractContains(_ needle: String) -> Bool {
+    [
+        "Sources/UI/Settings/Pages/WritingSettingsPage.swift",
+        "Sources/UI/Settings/Writing/WritingIntroView.swift",
+        "Sources/UI/Settings/Writing/WritingDemoView.swift",
+        "Sources/UI/Settings/Writing/WritingSetupFlowView.swift",
+        "Sources/UI/Settings/Writing/WritingEverydayView.swift",
+        "Sources/UI/Settings/Writing/WritingSettingsSection.swift",
+    ].contains { contractSource($0).contains(needle) }
+}
+
 func testUIAutomationSurfaceContract() {
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
@@ -116,7 +128,7 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(title)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(visibleTitle)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),
@@ -135,7 +147,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
-            "transcripted.menubar.primary.paste-last-dictation",
         ] {
             assertTrue(
                 contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
@@ -147,7 +158,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ] {
             assertTrue(
@@ -221,18 +231,24 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
+            "Button(\"Today\")",
+            "appDelegate.menuOpenPage(.today)",
+            ".keyboardShortcut(\"1\", modifiers: .command)",
             "Button(\"Meetings\")",
             "appDelegate.menuOpenPage(.home)",
-            ".keyboardShortcut(\"1\", modifiers: .command)",
+            ".keyboardShortcut(\"2\", modifiers: .command)",
             "Button(\"Dictations\")",
             "appDelegate.menuOpenPage(.dictations)",
-            ".keyboardShortcut(\"2\", modifiers: .command)",
+            ".keyboardShortcut(\"3\", modifiers: .command)",
+            "Button(\"Writing\")",
+            "appDelegate.menuOpenPage(.writing)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
             "Button(\"Speakers\")",
             "appDelegate.menuOpenPage(.people)",
-            ".keyboardShortcut(\"3\", modifiers: .command)",
+            ".keyboardShortcut(\"5\", modifiers: .command)",
             "Button(\"Agent\")",
             "appDelegate.menuOpenPage(.connectAgent)",
-            ".keyboardShortcut(\"4\", modifiers: .command)",
+            ".keyboardShortcut(\"6\", modifiers: .command)",
             "Button(\"Find Speaker",
             "appDelegate.menuFindSpeaker()",
             ".keyboardShortcut(\"f\", modifiers: .command)",
@@ -241,10 +257,12 @@ func testUIAutomationSurfaceContract() {
         }
 
         for requiredPageHook in [
-            "case .home: return \"1\"",
-            "case .dictations: return \"2\"",
-            "case .people: return \"3\"",
-            "case .connectAgent: return \"4\"",
+            "case .today: return \"1\"",
+            "case .home: return \"2\"",
+            "case .dictations: return \"3\"",
+            "case .writing: return \"4\"",
+            "case .people: return \"5\"",
+            "case .connectAgent: return \"6\"",
             "return \"\\(title)  ⌘\\(key)\"",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
@@ -291,8 +309,10 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         for pageCase in [
+            "case today",
             "case home",
             "case dictations",
+            "case writing",
             "case general",
             "case people",
             "case connectAgent",
@@ -311,6 +331,7 @@ func testUIAutomationSurfaceContract() {
             ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
             ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
             ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            ("WritingSettingsPage", "Sources/UI/Settings/Pages/WritingSettingsPage.swift"),
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("\(typeName)(")
@@ -756,6 +777,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.section.privacy",
             "transcripted.settings.general.keyboard-shortcuts",
             "transcripted.settings.general.bluetooth-dictation",
+            "transcripted.settings.general.microphone",
             "transcripted.settings.general.auto-send",
             "transcripted.settings.general.model",
             "transcripted.settings.general.corrections",
@@ -886,6 +908,71 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("modelProgressLabelMinimumWidth")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityLabel(Text(status))"),
             "onboarding/local-model progress labels should stay stable, tabular, and accessible"
+        )
+    }
+
+    runSuite("UI automation surface contract - Writing tab controls stay mapped") {
+        for identifier in [
+            "transcripted.settings.page.writing",
+            "transcripted.settings.writing.intro.next",
+            "transcripted.settings.writing.intro.back",
+            "transcripted.settings.writing.intro.set-up",
+            "transcripted.settings.writing.intro.demo",
+            "transcripted.settings.writing.setup.save-my-writing",
+            "transcripted.settings.writing.setup.autocomplete",
+            "transcripted.settings.writing.setup.continue",
+            "transcripted.settings.writing.setup.back",
+            "transcripted.settings.writing.setup.cancel",
+            "transcripted.settings.writing.setup.scope.all",
+            "transcripted.settings.writing.setup.scope.picked",
+            "transcripted.settings.writing.setup.more-apps",
+            "transcripted.settings.writing.setup.turn-on",
+            "transcripted.settings.writing.status",
+            "transcripted.settings.writing.edit-setup",
+            "transcripted.settings.writing.pause",
+            "transcripted.settings.writing.resume",
+            "transcripted.settings.writing.keyboard.turn-on",
+            "transcripted.settings.writing.screen-recording.allow",
+            "transcripted.settings.writing.entry",
+            "transcripted.settings.writing.settings.save-my-writing",
+            "transcripted.settings.writing.settings.autocomplete",
+            "transcripted.settings.writing.settings.personalized",
+            "transcripted.settings.writing.settings.model",
+            "transcripted.settings.writing.settings.storage",
+            "transcripted.settings.writing.delete-all",
+            "transcripted.settings.writing.delete-all.confirm",
+        ] {
+            assertTrue(writingSurfaceContractContains(identifier), "\(identifier) should stay attached to a Writing tab control")
+        }
+
+        // The page routes intro -> setup -> everyday from the model's screen,
+        // and the shell only hands it the controller and the recording check.
+        let page = contractSource("Sources/UI/Settings/Pages/WritingSettingsPage.swift")
+        assertTrue(
+            page.contains("case let .intro(page):")
+                && page.contains("case let .setup(step):")
+                && page.contains("case .everyday:"),
+            "the Writing page should route the intro pages, setup steps and everyday view"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("controller: writingController")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("meetingSession.isCaptureSessionActive")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("sttRouter.isRecording"),
+            "the shell should pass the Writing page its controller and the recording check, nothing more"
+        )
+
+        // Screen Recording can make macOS ask Transcripted to quit and reopen,
+        // so the ask never happens while anything records.
+        let model = contractSource("Sources/Writing/WritingSettingsModel.swift")
+        assertTrue(
+            model.contains("if choices.autocomplete, !controller.screenRecordingGranted, !isCaptureBusy() {")
+                && model.contains("guard !isCaptureBusy() else {"),
+            "every Screen Recording request should wait while a meeting or dictation records"
+        )
+        assertTrue(
+            writingSurfaceContractContains("WritingPrimaryButton(")
+                && contractSource("Sources/UI/Settings/Writing/WritingComponents.swift").contains("LibraryTokens.minimumHitTarget"),
+            "Writing tab actions should keep the 40pt hit target"
         )
     }
 
@@ -1038,18 +1125,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             tokens.contains("enum Font")
                 && tokens.contains("static let rowTitlePrimary")
-                && tokens.contains("static let headerTitle"),
+                && tokens.contains("static let headerStatus"),
             "MenuTokens should own the menubar's type roles so views never reach for a raw NSFont literal"
         )
         assertTrue(
             actionRow.contains("MenuTokens.Font.rowTitlePrimary")
                 && actionRow.contains("MenuTokens.Font.rowTitleUtility")
-                && header.contains("MenuTokens.Font.headerTitle"),
+                && header.contains("MenuTokens.Font.headerStatus"),
             "menubar rows and header should read their fonts from MenuTokens.Font"
         )
         assertFalse(
             actionRow.contains("NSFont.systemFont(ofSize: 12.5")
-                || header.contains("NSFont.systemFont(ofSize: 15.5"),
+                || header.contains("NSFont.systemFont(ofSize: 11.5"),
             "menubar labels should not re-inline raw NSFont sizes now that MenuTokens.Font owns them"
         )
         assertTrue(

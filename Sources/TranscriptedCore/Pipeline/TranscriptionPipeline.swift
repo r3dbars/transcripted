@@ -46,6 +46,7 @@ extension Transcription {
 
         do {
             let duration = try Self.longestAudioDuration(micURL: micURL, systemURL: systemURL)
+            MeetingPipelineTimings.current?.recordRecordingLength(seconds: duration)
 
             onProgress?(0.0)
 
@@ -884,6 +885,7 @@ extension Transcription {
 
             var micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
             let duration = try Self.audioDuration(at: micURL)
+            MeetingPipelineTimings.current?.recordRecordingLength(seconds: duration)
             guard micSamples.count >= 16000 else {
                 throw PipelineError.recordingTooShort(duration: Double(micSamples.count) / 16000.0)
             }

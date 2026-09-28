@@ -9,13 +9,15 @@ Tool: [Tart](https://tart.run) on Apple Silicon (Apple's Virtualization.framewor
 underneath). Script: `scripts/vm/transcripted-vm.sh`. Screen driver:
 `scripts/vm/vnc.py`.
 
-Status: written 2026-09-23. Four real runs on a Mac on 2026-09-24. Setup, the
+Status: written 2026-09-23. Five real runs on a Mac on 2026-09-24. Setup, the
 clean snapshot, boot, VNC, install and launch all worked. On runs 1 and 2 the
 VM died on the first screenshot after Transcripted launched: Apple's VNC
 server crashed tart when a new VNC client connected. Run 3 kept one VNC
 connection and stayed up, but macOS Setup Assistant covered the desktop the
 whole time. Run 4 reached a clear desktop, but the "downloaded from the
-Internet" prompt stayed open, so the app never started. Tart's VNC port is
+Internet" prompt stayed open, so the app never started. Run 5 had the tools
+to click Open but skipped it, because macOS had already started the app's
+process behind the prompt and that passed for "running". Tart's VNC port is
 also open to the network. All of that is handled below. "What the real runs showed" at the bottom has the details and
 what is still unconfirmed.
 
@@ -110,6 +112,12 @@ what is still unconfirmed.
   click only brought the prompt forward it tries again, then presses Return,
   but only while the prompt is the front window. Before every retry it checks
   whether the app already started, so a slow start never gets a second click.
+  "Started" needs proof from the app: a new `app_launched` in its
+  events.jsonl, with the process up and no prompt showing. macOS starts the
+  process before it asks and holds it until Open, so the process alone proves
+  nothing. If no prompt is showing yet, it waits up to a minute for either
+  the prompt or the app. The report's approve step prints each window list it
+  saw, and `windows` prints it any time.
   Without screen access, a readable window list, or a prompt that answers, it
   falls back to clearing the quarantine flag. That exits 3, and first-run
   reports it as "ok via bypass", never as plain ok.
@@ -301,6 +309,17 @@ Found and fixed:
   prompt already on screen stayed, and launching again only brought it
   forward, so the app never started. `approve-download` now clicks Open over
   VNC, which is also what a user does.
+- **Run 5 never clicked Open.** Its approve step said "Transcripted is
+  already running" and stopped, because macOS starts the app's process as
+  soon as it's opened and holds it behind the prompt, so `pgrep` found it.
+  The prompt stayed up for the whole run. "Running" now needs the app's own
+  `app_launched` event and no prompt in the window list, and the quarantine
+  fallback ends the held process (and checks it's gone) before relaunching. Run 5 otherwise went cleanly: no
+  Setup Assistant, Gatekeeper "accepted, Notarized Developer ID", one VNC
+  session for the full 10 minutes, and tart exited normally.
+- **The Terminal window was back on run 5's screen** ("Restored session"),
+  although the snapshot prep closes it. It sits behind the prompt and
+  doesn't block anything, but where it comes from isn't known yet.
 - **The VNC check said ok on a wildcard bind.** `vnc-check` now fails when
   the port answers on a network address. On the second run it answered on
   Wi-Fi, a second network interface and IPv6, with the Mac's firewall off.
@@ -320,10 +339,12 @@ Found and fixed:
 Still to confirm:
 
 - Whether one long-lived VNC connection survives Transcripted's launch (runs
-  3 and 4 never got the app past the download prompt).
+  3 to 5 never got the app past the download prompt).
+- Whether the guest's window list can be read from `tart exec` (run 5 never
+  got that far; first-run's "read the window list" step shows it).
 - That clicking Open over VNC starts the app (the report says whether it
   clicked, pressed Return or fell back).
-- Whether `screencapture` works from inside the guest. Run 4 had a clear
+- Whether `screencapture` works from inside the guest. Runs 4 and 5 had a clear
   desktop and it still failed ("could not create image from display"),
   probably because the guest command has no Screen Recording permission.
 - Which Command keysym the VNC server wants (Super or Meta).

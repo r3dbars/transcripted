@@ -141,7 +141,7 @@ When the issue is vague, classify it before editing:
 - Release, updates, Homebrew, Sentry release metadata, dSYMs, or public download
   truth: `docs/release-packaging.md`, `docs/sparkle-updates.md`, and `docs/ops-credentials.md`
 - GitHub automation, issue runner, templates, or review packets:
-  `WORKFLOW.md`, `docs/agent-issue-orchestration.md`, `.github/`, and `docs/agent-closeout.md`
+  `WORKFLOW.md`, `.github/`, and `docs/agent-closeout.md`
 
 ## Highest-Value Local Docs
 
@@ -184,7 +184,6 @@ When the issue is vague, classify it before editing:
 
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
-- `archive/backend-beta-worker/*`
 - older cloud/API references in comments or outdated docs
 
 ## When To Update Docs

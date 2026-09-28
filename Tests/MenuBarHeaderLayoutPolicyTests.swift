@@ -1,19 +1,27 @@
 import CoreGraphics
 
 func testMenuBarHeaderLayoutPolicy() {
-    runSuite("MenuBarHeaderLayoutPolicy keeps ready warnings below the status row") {
-        let statusBottom: CGFloat = 22 + 14
-        let warningTop = MenuBarHeaderLayoutPolicy.warningTop(isReady: true) - 1
+    runSuite("MenuBarHeaderLayoutPolicy keeps warnings below the status line") {
+        let recordingWarningTop = MenuBarHeaderLayoutPolicy.warningTop(isReady: true, showsStatus: true) - 1
+        assertTrue(
+            recordingWarningTop >= MenuBarHeaderLayoutPolicy.statusRowHeight,
+            "a warning while recording should start below the status line"
+        )
 
+        let warmupWarningTop = MenuBarHeaderLayoutPolicy.warningTop(isReady: false, showsStatus: true) - 1
         assertTrue(
-            warningTop > statusBottom,
-            "ready warning text should start below the Ready status row"
+            warmupWarningTop >= MenuBarHeaderLayoutPolicy.detailTop + 24,
+            "a warning during warmup should start below the warmup detail text"
         )
-        assertTrue(
-            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: true)
-                >= warningTop + MenuBarHeaderLayoutPolicy.warningTextHeight,
-            "ready warning header should reserve enough vertical space"
-        )
+
+        for (isReady, isRecording) in [(true, false), (true, true), (false, false)] {
+            let top = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady, showsStatus: !isReady || isRecording)
+            assertTrue(
+                MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: isReady, hasWarning: true, isRecording: isRecording)
+                    >= top + MenuBarHeaderLayoutPolicy.warningTextHeight,
+                "the header should reserve room for the whole warning (ready: \(isReady), recording: \(isRecording))"
+            )
+        }
     }
 
     runSuite("MenuBarHeaderLayoutPolicy shows the header only when it has something to say") {
@@ -27,23 +35,15 @@ func testMenuBarHeaderLayoutPolicy() {
             MenuBarHeaderLayoutPolicy.recordingIntrinsicHeight,
             "an active meeting recording must make the header visible"
         )
-        assertEqual(
-            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: true, isRecording: true),
-            MenuBarHeaderLayoutPolicy.readyWarningIntrinsicHeight,
-            "a warning while recording should keep the taller warning layout"
+        assertTrue(
+            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: true)
+                < MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: true, isRecording: true),
+            "a warning on its own should not reserve space for a status line"
         )
-    }
-
-    runSuite("MenuBarHeaderLayoutPolicy preserves existing non-ready heights") {
         assertEqual(
             MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: false, hasWarning: false),
-            78,
-            "non-ready header without warnings should keep its old height"
-        )
-        assertEqual(
-            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: false, hasWarning: true),
-            110,
-            "non-ready header with warnings should keep its old height"
+            MenuBarHeaderLayoutPolicy.nonReadyIntrinsicHeight,
+            "warmup should show its status, progress, and detail"
         )
     }
 }

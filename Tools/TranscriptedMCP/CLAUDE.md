@@ -1,6 +1,6 @@
 # TranscriptedMCP
 
-Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting and dictation data from Claude Desktop or any MCP-compatible client.
+Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting, dictation, and writing data from Claude Desktop or any MCP-compatible client.
 
 It is read-only, independent from the app target, and builds its own SQLite index from saved artifacts on disk.
 
@@ -16,6 +16,7 @@ Default locations when no custom capture library is configured:
 
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations`
+- writing: `~/Library/Application Support/Transcripted/captures/writing` (the app creates it; the server never does)
 - index: `~/Library/Application Support/Transcripted/cache`
 
 Legacy fallback:
@@ -25,15 +26,20 @@ Legacy fallback:
 
 Path overrides:
 
-- `TRANSCRIPTED_DATA_DIR` — shared meetings + dictations directory
+- `TRANSCRIPTED_DATA_DIR` — shared meetings + dictations + writing directory
 - `TRANSCRIPTED_MEETINGS_DIR` — meetings directory override
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
+- `TRANSCRIPTED_WRITING_DIR` — writing directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
-When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
-`dictations/` subfolders, the server uses those subfolders automatically. In
-that mode the SQLite index also defaults to the shared root unless
-`TRANSCRIPTED_INDEX_DIR` is set.
+When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/`,
+`dictations/`, or `writing/` subfolders, the server uses those subfolders
+automatically. Otherwise every kind reads the root itself, and files are told
+apart by filename prefix and `capture_type` (a `Writing_` file there is never a
+meeting). In that mode the SQLite index also defaults to the shared root unless
+`TRANSCRIPTED_INDEX_DIR` is set. With a meetings or dictations override and no
+writing override, no writing folder is read, so per-kind test harnesses can't
+reach the real one.
 
 ## Package Layout
 
@@ -50,6 +56,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct handler; the tool bodies themselves live in the `ToolHandlers+*.swift` files below |
 | `ToolHandlers+Meetings.swift` | `list_meetings` / `read_meeting` handlers |
 | `ToolHandlers+Dictations.swift` | `list_dictations` / `read_dictation` handlers |
+| `ToolHandlers+Writing.swift` | `list_writing` / `read_writing` handlers (same shape as the dictation pair) |
 | `ToolHandlers+Search.swift` | `search` / `search_context` / `recent_context` / `who_is` handlers |
 | `ToolHandlers+Rollups.swift` | `recap` / `list_action_items` / `list_decisions` / `digest` handlers |
 | `ToolHandlers+Receipts.swift` | `decisions` / `commitments` / `open_questions` / `search_meetings` WS2.3 receipt-API handlers; they share a common `handleReceiptQuery` tail |
@@ -58,11 +65,12 @@ that mode the SQLite index also defaults to the shared root unless
 | `RecentMeetingsWidgetBuilder.swift` | Builds the recent-meetings widget model from the local capture library, reusing the same read-tool data access rather than re-plumbing it |
 | `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations; routes `lexical`/`semantic`/`hybrid` search modes |
 | `TranscriptIndex+Schema.swift` | Declarative DDL: table, FTS5 virtual table, trigger, and index definitions for the index database, split out of `TranscriptIndex.swift` |
+| `TranscriptIndex+Writing.swift` | Writing day indexing and queries (`writing_days` / `writing_entries` + FTS), kept out of the `TranscriptIndex.swift` hotspot |
 | `SQLiteHelpers.swift` | Shared free-function SQLite plumbing used by both `TranscriptIndex` and `EmbeddingStore`'s independent connections |
 | `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
 | `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
 | `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
-| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
+| `TranscriptLoader.swift` | Loads markdown meeting transcripts, dictation day files, and writing day files from disk and classifies each file's kind (writing first, so it never falls into the meeting default); parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
@@ -87,6 +95,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `ProcessStartupTests.swift` | Launches the built executable and verifies a real MCP `initialize` round trip over stdio |
 | `RecentMeetingsWidgetTests.swift` | Widget-model and builder coverage for the `show_recent_meetings` MCP Apps surface |
 | `AudioDirectoryNamingTests.swift` | Retained-audio directory naming/resolution coverage |
+| `WritingToolTests.swift` | Writing day files: never indexed as meetings in the flat shared folder, list/read/search/recent, status counts, telemetry kind |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -99,9 +108,11 @@ All tools are read-only.
 | `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
 | `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
+| `list_writing` | List saved writing days (`Writing_<date>.md`) with counts, accepted words, source apps, and titles |
+| `read_writing` | Read one writing day, one entry by `entry_id`, or a paged window via `offset`/`limit` |
 | `search` | Search meeting transcript content (lexical / semantic / hybrid via `mode`, default hybrid) |
-| `search_context` | Search across meetings, dictations, or both (same `mode` options) |
-| `recent_context` | Get a mixed recent feed of meetings and dictations |
+| `search_context` | Search across meetings, dictations, writing, or all (same `mode` options; writing is full-text only) |
+| `recent_context` | Get a mixed recent feed of meetings, dictations, and writing |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
 | `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
@@ -147,6 +158,7 @@ The SQLite index keeps separate records for:
 - structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
 - dictation day files
 - dictation entry search rows
+- writing day files and writing entry search rows (`writing_days`, `writing_entries` + FTS5; schema v6)
 
 Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from legacy meeting artifacts (an inline summary or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. Current app capture does not create new AI summaries. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 

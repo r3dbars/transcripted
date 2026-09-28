@@ -9,6 +9,7 @@ struct CaptureLibraryMigrationItem: Equatable {
         case meetingTranscript
         case meetingAudioDirectory
         case dictationTranscript
+        case writingTranscript
     }
 
     let kind: Kind
@@ -88,10 +89,12 @@ struct CaptureLibraryMigrationPlanner {
     func libraryHasCaptures(at library: URL) -> Bool {
         let meetings = meetingsDirectory(in: library)
         let dictations = dictationsDirectory(in: library)
+        let writing = writingDirectory(in: library)
 
         if !markdownFiles(in: meetings).isEmpty { return true }
         if !directoryContents(of: audioDirectory(in: meetings)).isEmpty { return true }
         if !markdownFiles(in: dictations).isEmpty { return true }
+        if !markdownFiles(in: writing).isEmpty { return true }
         return false
     }
 
@@ -133,6 +136,14 @@ struct CaptureLibraryMigrationPlanner {
         let destinationDictations = dictationsDirectory(in: destination)
         for dayFile in markdownFiles(in: dictationsDirectory(in: source)) {
             plan(.dictationTranscript, from: dayFile, into: destinationDictations)
+        }
+
+        // Writing day files follow the dictation rules exactly: same collision
+        // skip, and Move keeps an original that changed after its copy (today's
+        // file gains entries while the user keeps typing).
+        let destinationWriting = writingDirectory(in: destination)
+        for dayFile in markdownFiles(in: writingDirectory(in: source)) {
+            plan(.writingTranscript, from: dayFile, into: destinationWriting)
         }
 
         return CaptureLibraryMigrationPlan(itemsToCopy: itemsToCopy, skippedExisting: skippedExisting)
@@ -267,11 +278,15 @@ struct CaptureLibraryMigrationPlanner {
     }
 
     private func meetingsDirectory(in library: URL) -> URL {
-        library.appendingPathComponent("meetings", isDirectory: true)
+        FileManager.meetingsDirectory(in: library)
     }
 
     private func dictationsDirectory(in library: URL) -> URL {
-        library.appendingPathComponent("dictations", isDirectory: true)
+        FileManager.dictationsDirectory(in: library)
+    }
+
+    private func writingDirectory(in library: URL) -> URL {
+        FileManager.writingDirectory(in: library)
     }
 
     private func audioDirectory(in meetings: URL) -> URL {

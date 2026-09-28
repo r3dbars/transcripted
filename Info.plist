@@ -8,6 +8,8 @@
 	<string>Transcripted</string>
 	<key>CFBundleIconFile</key>
 	<string>Transcripted</string>
+	<key>CFBundleIconName</key>
+	<string>Transcripted</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.justinbetker.draft</string>
 	<key>CFBundleName</key>
@@ -15,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.62</string>
+	<string>1.1.66</string>
 	<key>CFBundleVersion</key>
-	<string>1.1.62</string>
+	<string>1.1.66</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
@@ -46,6 +48,8 @@
 	<string>phc_zQu8kX7TpsuVFqjrmPaK4XXpoSuuxSMrvzpP8cZTS63o</string>
 	<key>TranscriptedPostHogHost</key>
 	<string>https://us.i.posthog.com</string>
+	<key>TranscriptedSentryAppHangTrackingEnabled</key>
+	<true/>
 	<key>TranscriptedSentryDSN</key>
 	<string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
 	<key>TranscriptedSentryEnvironment</key>

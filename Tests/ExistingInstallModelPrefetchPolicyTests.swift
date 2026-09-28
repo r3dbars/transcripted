@@ -38,6 +38,14 @@ func testExistingInstallModelPrefetchPolicy() {
             source.contains("await self.meetingSession.prepareModels(showLoadingUI: false)"),
             "launch warmup should also load the meeting models quietly, not just dictation"
         )
+        assertTrue(
+            source.contains("let dictationWarmup = Task(priority: .userInitiated)"),
+            "the dictation model warms at user priority so Core ML isn't compiled on efficiency cores"
+        )
+        assertTrue(
+            source.contains("runtimeReadinessTask = Task(priority: .utility)"),
+            "the pass (and so the meeting models) warms at utility so launch-at-login doesn't spend full CPU"
+        )
     }
 
     runSuite("ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals — requires durable evidence") {
@@ -196,6 +204,22 @@ func testExistingInstallModelPrefetchPolicy() {
         assertTrue(
             ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
             "saved dictation or meeting notes should count as existing content"
+        )
+    }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — writing day files alone do not count") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("writing", isDirectory: true)
+                .appendingPathComponent("Writing_2026-09-25.md", isDirectory: false)
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "Writing doesn't use the speech model, so writing day files alone must not trigger its prefetch"
         )
     }
 

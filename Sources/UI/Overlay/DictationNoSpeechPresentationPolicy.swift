@@ -1,11 +1,19 @@
 import Foundation
 
 enum DictationNoSpeechPresentationPolicy {
+    /// `silentMicName` is set when the mic sent audio that was all exact
+    /// zeros (a muted mic, not a quiet room), so the message can say so.
     static func message(
         trigger: String,
         reason: DictationEmptyTranscriptionReason = .noSpeech,
-        shortcutMode: DictationShortcutMode? = nil
+        shortcutMode: DictationShortcutMode? = nil,
+        silentMicName: String? = nil
     ) -> String {
+        if reason == .noSpeech, let silentMicName {
+            let name = silentMicName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let mic = name.isEmpty ? "Your microphone" : name
+            return "\(mic) sent only silence. If it has a mute button or switch, turn it off, or pick another mic in Settings."
+        }
         if reason == .recordingTooShort {
             // A quick tap closes like a cancel before reaching this copy, so the
             // press was long enough and the mic delivered too little audio.
@@ -13,6 +21,9 @@ enum DictationNoSpeechPresentationPolicy {
         }
         if reason == .modelFailure {
             return "The local speech model failed. Try again, or switch transcription models in Settings."
+        }
+        if reason == .otherLanguage {
+            return "This came out in a language your Mac isn't set up for, so it wasn't pasted. If it's right, choose \(DictationHeldTextActionCopy.pasteAnywayTitle)."
         }
         if reason == .audioNeedsRecovery {
             return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
@@ -34,4 +45,9 @@ enum DictationNoSpeechPresentationPolicy {
 /// same import as Capture → Transcribe Audio File on that recording.
 enum DictationSavedAudioActionCopy {
     static let transcribeTitle = "Transcribe It"
+}
+
+/// The button on the wrong-language message. It pastes the held-back text.
+enum DictationHeldTextActionCopy {
+    static let pasteAnywayTitle = "Paste Anyway"
 }

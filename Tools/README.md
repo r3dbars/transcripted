@@ -6,7 +6,7 @@
 
 - `TranscriptedCaptureKit/` — shared library for capture-library resolution and capture-Markdown parsing, used by the CLI and MCP packages
 - `TranscriptedCLI/` — local context, offline transcription, and offline diarization CLI
-- `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
+- `TranscriptedMCP/` — read-only MCP server for saved meetings, dictations, and writing
 - `TranscriptedQA/` — artifact validation and QA CLI
 - `SpeakerEvalHarness/` — headless AMI speaker-naming eval harness for diarization, embedding, clustering, and cross-meeting match sweeps
 - `TranscriptedLab/` — native experiment workbench plus `transcripted-lab` CLI; orchestrates the real speaker, transcription, dictation, and QA lanes and writes comparable regression reports

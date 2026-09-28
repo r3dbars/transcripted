@@ -54,6 +54,18 @@ func testSTTRouterPolicy() {
         assertFalse(model.shortTitle == TranscriptionModelChoice.parakeetTDTv3.shortTitle)
     }
 
+    runSuite("Saved transcript engine ids map back to short model names") {
+        for model in TranscriptionModelChoice.allCases {
+            assertEqual(
+                TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: model.transcriptionEngineIdentifier),
+                model.shortTitle,
+                "Home shows \(model.shortTitle) for transcripts it made"
+            )
+        }
+        assertNil(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: "future_engine_local"),
+                  "an unknown id shows no label rather than a wrong one")
+    }
+
     runSuite("STTRouter policy — Parakeet routes to the parakeet engine") {
         let model: TranscriptionModelChoice = .parakeetTDTv3
 

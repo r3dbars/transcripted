@@ -291,7 +291,7 @@ enum MeetingArtifactRenamer {
                 to: targetTranscriptURL.lastPathComponent,
                 displayTitle: renamedMeetingTitle
             ) {
-                try rewritten.write(to: sourceSummaryURL, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rewritten, to: sourceSummaryURL)
                 FileManager.default.restrictFileToOwnerOnly(at: sourceSummaryURL)
             }
             try fileManager.moveItem(at: sourceSummaryURL, to: targetSummaryURL)

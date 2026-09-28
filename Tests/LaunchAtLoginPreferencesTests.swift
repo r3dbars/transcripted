@@ -1,6 +1,45 @@
 import Foundation
 
 func testLaunchAtLoginPreferences() {
+    runSuite("LaunchWindowPolicy opens Home on a manual launch only") {
+        assertTrue(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "opening the app yourself should show the main window"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: true, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "a start at login should stay quietly in the menu bar"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: false, isAutomatedLaunch: false
+            ),
+            "unfinished setup shows the setup window instead"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: true
+            ),
+            "launch harnesses must not get a window"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 20, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "an untagged launch right after login still counts as a login start"
+        )
+        assertTrue(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: nil, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "an unknown login time falls back to the launch tag"
+        )
+    }
+
     runSuite("LaunchAtLoginPreferences defaults to off until the user chooses otherwise") {
         let suiteName = "LaunchAtLoginPreferencesTests.default.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

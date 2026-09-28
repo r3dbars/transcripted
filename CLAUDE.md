@@ -104,7 +104,7 @@ bash scripts/dev/linux-checks.sh --only pin             # just the checks whose 
 bash scripts/dev/agent-preflight.sh origin/main         # which macOS checks the diff needs
 ```
 
-- `--strict-tools` is the CI mode. `repo-hygiene` CI runs most of the same checks inline, so a red result there usually reproduces here.
+- `repo-hygiene` CI runs the same script (`--strict-tools`), so a red result there reproduces locally.
 - `python3 scripts/dev/check-source-pins.py --changed-only` mirrors the Swift tests that read
   source as text (see "Known traps") for the files you changed. It covers most pins, not all:
   pins it can't resolve statically are skipped, so it can say "broken" with confidence but not
@@ -114,8 +114,8 @@ bash scripts/dev/agent-preflight.sh origin/main         # which macOS checks the
 ## Build-system shape
 
 - `build.sh` is the **authoritative app build**, using raw `swiftc`. It must not compile `Sources/TranscriptedCore/` directly into the app target — Core enters the app via the prebuilt static archive from `build-deps.sh`.
-- `Package.swift` exists only for `TranscriptedCore` package tests and smoke coverage. The linker pulls `deps-libs/libExternalDeps.a` (external-only) plus binary frameworks under `deps-frameworks/` (FluidAudio, ESpeakNG, MLX et al.) via `#filePath`-relative `-I`/`-L`/`-F` flags so it works under `swift test` and Xcode SPM alike.
-- The app-build path keeps `libDraftDeps.a` (legacy-named archive containing FluidAudio + MLX + deps + TranscriptedCore objects) separate from the SPM path's `libExternalDeps.a`.
+- `Package.swift` exists only for `TranscriptedCore` package tests and smoke coverage. The linker pulls `deps-libs/libExternalDeps.a` (external-only) plus binary frameworks under `deps-frameworks/` (FluidAudio, ESpeakNG et al.) via `#filePath`-relative `-I`/`-L`/`-F` flags so it works under `swift test` and Xcode SPM alike.
+- The app-build path keeps `libDraftDeps.a` (legacy-named archive containing FluidAudio + deps + TranscriptedCore objects) separate from the SPM path's `libExternalDeps.a`.
 
 ## High-level architecture
 
@@ -189,7 +189,6 @@ A release is not complete just because a DMG exists. For in-app Sparkle updates 
 
 Treat as reference, not current runtime truth:
 
-- `archive/backend-beta-worker/`
 - references to `Sources/Text/` or `Sources/Style/` in older docs
 
 `.claude/` is NOT historical: it holds the live `transcripted-qa` skill plus the `humanize`, `tests`, and `push` slash commands that Claude Code loads in this repo.

@@ -14,8 +14,12 @@
 // bundle, so this is a genuine resource invariant (no unused/surprise cues ship) — it
 // checks the real filesystem, not source text.
 //
-// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Feedback submit paths stay
-// silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Stop click plays on Stop"
+// suite reads DictationSessionController.swift as TEXT and pins that the stop cue is
+// queued once, before the transcription task, so it acknowledges Stop without waiting
+// on paste. The "Start click answers the key press" suite pins that the fast path
+// queues the start cue before the mic start task, and that it plays once per session.
+// The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
 // `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
@@ -52,15 +56,57 @@ func testDictationSounds() {
         assertTrue(UISoundPreferences.isEnabled(), "explicit true should enable sounds")
     }
 
+    runSuite("UISoundPreferences reads the Mac's interface-sounds switch") {
+        let suiteName = "DictationSoundsTests.systemInterfaceSounds"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "test defaults suite should open")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(0, forKey: "com.apple.sound.uiaudio.enabled")
+        assertFalse(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "0 turns interface sounds off")
+
+        defaults.set(1, forKey: "com.apple.sound.uiaudio.enabled")
+        assertTrue(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "1 keeps interface sounds on")
+    }
+
     runSuite("AppSoundPlayer uses expected bundled files only") {
-        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the delivered chime")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.wav", "start cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.wav", "stop cue file")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the stop click")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "dictation-cancelled.wav", "cancel cue uses the bundled soft cue, never a system sound")
-        assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, TranscriptedConstants.dictationClickCueVolumeMultiplier, "start cue volume")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.volumeMultiplier, TranscriptedConstants.dictationClickCueVolumeMultiplier, "stop cue volume matches start")
+        assertTrue(abs(TranscriptedConstants.overlayCueVolume * TranscriptedConstants.dictationClickCueVolumeMultiplier - 0.49) < 0.001, "clicks play at about 49%")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.noSpeechCueVolumeMultiplier, "no speech cue volume")
+        assertEqual(AppSoundPlayer.Cue.menuHover.bundledFileName, "menu-hover.wav", "menu hover tick file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuHover.volumeMultiplier < TranscriptedConstants.dictationClickCueVolumeMultiplier,
+            "the hover tick stays quieter than the dictation clicks"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuHover.followsSystemInterfaceSounds, "hover tick follows the Mac's interface-sounds switch")
+        assertEqual(AppSoundPlayer.Cue.menuRowHover.bundledFileName, "menu-row-hover.wav", "menu row hover tick file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuRowHover.volumeMultiplier < AppSoundPlayer.Cue.menuHover.volumeMultiplier,
+            "the rows tick softer than the buttons"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuRowHover.followsSystemInterfaceSounds, "row tick follows the Mac's interface-sounds switch")
+        assertEqual(AppSoundPlayer.Cue.menuPress.bundledFileName, "menu-press.wav", "menu press click file")
+        assertTrue(
+            AppSoundPlayer.Cue.menuPress.volumeMultiplier < TranscriptedConstants.dictationClickCueVolumeMultiplier,
+            "the press click stays quieter than the dictation clicks"
+        )
+        assertTrue(AppSoundPlayer.Cue.menuPress.followsSystemInterfaceSounds, "press click follows the Mac's interface-sounds switch")
+        assertFalse(AppSoundPlayer.Cue.dictationStart.followsSystemInterfaceSounds, "dictation clicks keep the app's own sound switch only")
+    }
+
+    runSuite("AppSoundPlayer drops cues that are a second stale") {
+        assertFalse(AppSoundPlayer.isStale(requestedAt: 100, now: 100), "immediate cue plays")
+        assertFalse(AppSoundPlayer.isStale(requestedAt: 100, now: 100.9), "cue under a second late still plays")
+        assertTrue(AppSoundPlayer.isStale(requestedAt: 100, now: 101), "cue a full second late is dropped")
+        assertTrue(AppSoundPlayer.isStale(requestedAt: 100, now: 104), "cue stuck behind a slow device is dropped")
     }
 
     runSuite("Bundled sound files are exactly the active cue set") {
@@ -77,10 +123,14 @@ func testDictationSounds() {
         assertEqual(
             soundFiles,
             [
+                "README.md",
                 "dictation-cancelled.wav",
-                "dictation-delivered.m4a",
-                "dictation-start.mp3",
+                "dictation-start.wav",
+                "dictation-stop.wav",
                 "meeting-transcript-complete.mp3",
+                "menu-hover.wav",
+                "menu-press.wav",
+                "menu-row-hover.wav",
             ],
             "Resources/Sounds is copied wholesale, so unused surprise cues should not ship"
         )
@@ -96,6 +146,43 @@ func testDictationSounds() {
         UISoundPreferences.setEnabled(false)
         AppSoundPlayer.shared.play(.dictationStart)
         AppSoundPlayer.shared.play(.meetingTranscriptComplete, respectingPreferences: false)
+    }
+
+    runSuite("Stop click plays once the mic stops, before transcription and paste") {
+        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let afterMicStop = sourceSlice(
+            in: controller,
+            from: "await appState.sttRouter.stopRecording()\n            stopTiming.micStoppedAt",
+            to: "stopTiming.snapshotStartedAt = CFAbsoluteTimeGetCurrent()"
+        )
+        assertTrue(
+            afterMicStop.contains("AppSoundPlayer.shared.play(.dictationStop)"),
+            "the stop click must play after the mic stops (so speakers can't leak it into the take) and before the snapshot and transcription"
+        )
+        assertEqual(
+            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,
+            1,
+            "Stop is the only end-of-take click; no second chime after paste"
+        )
+    }
+
+    runSuite("Start click answers the key press on the fast path, once") {
+        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let fastPathBeforeMicStart = sourceSlice(
+            in: controller,
+            from: "case .skipLoadingAndStartRecording:",
+            to: "recordingStartRetryTask = Task"
+        )
+        assertTrue(
+            fastPathBeforeMicStart.contains("DictationStartCuePolicy.playsOnKeyPress(")
+                && fastPathBeforeMicStart.contains("playStartCueOnce()"),
+            "the start click must be queued before the mic start task, so it doesn't wait on the mic"
+        )
+        assertEqual(
+            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStart)").count - 1,
+            1,
+            "every start click goes through playStartCueOnce, so a session never clicks twice"
+        )
     }
 
     runSuite("Feedback submit paths stay silent") {

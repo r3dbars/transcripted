@@ -58,7 +58,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func present(page: TranscriptedSettingsPage = .home, source: String = "unknown") {
+    func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page

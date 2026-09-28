@@ -1,0 +1,337 @@
+import Foundation
+
+func testNotchIslandPresentation() {
+    runSuite("NotchIslandPresentation is empty with nothing going on") {
+        let layout = notchLayout()
+        assertTrue(layout.isEmpty, "an idle Mac shows no island")
+        assertFalse(layout.showsEdgeProgress, "no progress edge while idle")
+    }
+
+    runSuite("NotchIslandPresentation shows a listening dictation on both wings") {
+        let layout = notchLayout(dictation: listening())
+        assertEqual(layout.left, [.symbol(.mic, .accent), .text("Listening", .title)])
+        assertEqual(layout.right, [.dictationBars(count: 9), .live(.dictationTimer, .secondary)])
+        assertNil(layout.drop, "listening does not open the drop-down by itself")
+
+        let hovered = notchLayout(dictation: listening(), expanded: true)
+        assertEqual(
+            hovered.drop,
+            .dictationTarget(appName: "Notes", microphone: "MacBook Pro Microphone"),
+            "a hover says where the words go and which mic hears them"
+        )
+        assertFalse(hovered.dropIsSticky, "a hover drop-down closes when the pointer leaves")
+    }
+
+    runSuite("NotchIslandPresentation keeps the key-down beat to a dot") {
+        let layout = notchLayout(dictation: NotchIslandDictationContent(phase: .starting))
+        assertEqual(layout.left, [.accentDot])
+        assertEqual(layout.right, [])
+    }
+
+    runSuite("NotchIslandPresentation counts down the dictation cap on the right wing") {
+        var content = listening()
+        content.notice = DictationSessionCapWarningPolicy.notice(remainingSeconds: 28, shortcutMode: .pushToTalk)
+        let layout = notchLayout(dictation: content)
+        assertEqual(layout.left, [.symbol(.mic, .accent), .text("Listening", .title)])
+        assertEqual(layout.right, [.dictationBars(count: 9), .text("28s left", .warning)])
+    }
+
+    runSuite("NotchIslandPresentation shows the Esc confirm prompt as a warning") {
+        var content = listening()
+        content.notice = "Press Esc again to discard"
+        let layout = notchLayout(dictation: content)
+        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Press Esc again to discard", .warning)])
+        assertEqual(layout.right, [.dictationBars(count: 9)])
+    }
+
+    runSuite("NotchIslandPresentation shows loading with a ring only for a real number") {
+        let waiting = notchLayout(dictation: NotchIslandDictationContent(
+            phase: .loading(title: "Warming up", detail: "Starts when ready.", progress: nil)
+        ))
+        assertEqual(waiting.left, [.spinner, .text("Warming up", .title)])
+        assertEqual(waiting.right, [])
+
+        let downloading = notchLayout(dictation: NotchIslandDictationContent(
+            phase: .loading(title: "Downloading", detail: "Once only.", progress: 0.42)
+        ))
+        assertEqual(downloading.left, [.loadingRing, .text("Downloading", .title)])
+        assertEqual(downloading.right, [.live(.loadingPercent, .secondary)])
+
+        let hovered = notchLayout(
+            dictation: NotchIslandDictationContent(phase: .loading(title: "Warming up", detail: "Starts when ready.", progress: nil)),
+            expanded: true
+        )
+        assertEqual(hovered.drop, .dictationLoading(title: "Warming up", detail: "Starts when ready."))
+    }
+
+    runSuite("NotchIslandPresentation shows writing and the landed text") {
+        let writing = notchLayout(dictation: NotchIslandDictationContent(phase: .writing))
+        assertEqual(writing.left, [.dots, .text("Writing", .title)])
+        assertEqual(writing.right, [.shimmer])
+        assertNil(notchLayout(dictation: NotchIslandDictationContent(phase: .writing), expanded: true).drop,
+                  "nothing to offer while the words are written")
+
+        let pasted = notchLayout(dictation: NotchIslandDictationContent(phase: .success(title: "Pasted")))
+        assertEqual(pasted.left, [.symbol(.check, .accent), .text("Pasted", .title)])
+    }
+
+    runSuite("NotchIslandPresentation opens a dictation message by itself until it is closed") {
+        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again")
+        let content = NotchIslandDictationContent(phase: .message(message))
+        let layout = notchLayout(dictation: content)
+        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Dictation", .title)])
+        assertEqual(layout.drop, .dictationMessage(message))
+        assertTrue(layout.dropIsSticky, "a message opens the drop-down by itself")
+
+        let key = NotchIslandPresentation.stickyKey(dictation: content, meeting: nil, callPrompt: nil)
+        assertEqual(key, "dictation-message:Mic didn't start.")
+        let closed = notchLayout(dictation: content, collapsedStickyKey: key)
+        assertNil(closed.drop, "a closed message stays closed")
+        let reopened = notchLayout(dictation: content, expanded: true, collapsedStickyKey: key)
+        assertEqual(reopened.drop, .dictationMessage(message), "a hover or click reopens it")
+    }
+
+    runSuite("NotchIslandPresentation labels each kind of dictation message") {
+        let cases: [(NotchIslandDictationContent.Message.Tone, String, String, NotchIslandSymbol)] = [
+            (.error, "Something broke", "Dictation", .warning),
+            (.noSpeech, "No speech heard", "No speech", .warning),
+            (.notice, "Pasted, press Return to send", "Pasted", .clipboard),
+            (.notice, "Copied. Press ⌘V to paste.", "Copied", .clipboard),
+            (.saved, "Saved to your dictations", "Saved", .saved),
+        ]
+        for (tone, text, label, symbol) in cases {
+            let message = NotchIslandDictationContent.Message(tone: tone, text: text, actionTitle: nil)
+            assertEqual(NotchIslandPresentation.messageLabel(message), label, "\(text) should read \(label)")
+            let layout = notchLayout(dictation: NotchIslandDictationContent(phase: .message(message)))
+            assertEqual(layout.left.first, .symbol(symbol, tone == .error || tone == .noSpeech ? .warning : .accent))
+        }
+    }
+
+    runSuite("NotchIslandPresentation shows the words of a dictation that didn't paste") {
+        let message = NotchIslandDictationContent.Message(
+            tone: .notice,
+            text: "Not pasted",
+            actionTitle: "Paste",
+            preview: "send me the notes",
+            dismissSeconds: 15
+        )
+        assertEqual(NotchIslandPresentation.messageLabel(message), "Not pasted")
+        let content = NotchIslandDictationContent(phase: .message(message))
+        let layout = notchLayout(dictation: content)
+        assertEqual(layout.left, [.symbol(.clipboard, .accent), .text("Not pasted", .title)])
+        assertEqual(layout.drop, .dictationMessage(message), "the words and the Paste button open by themselves")
+
+        var next = message
+        next.preview = "a different take"
+        assertTrue(
+            NotchIslandPresentation.stickyKey(dictation: content, meeting: nil, callPrompt: nil)
+                != NotchIslandPresentation.stickyKey(dictation: NotchIslandDictationContent(phase: .message(next)), meeting: nil, callPrompt: nil),
+            "closing one missed paste doesn't keep the next one closed"
+        )
+    }
+
+    runSuite("NotchIslandPresentation splits a dictation over a live meeting") {
+        let layout = notchLayout(dictation: listening(), meeting: recording())
+        assertEqual(layout.left, [.recordingDot, .live(.meetingTimer, .title)], "the meeting keeps the left wing")
+        assertEqual(layout.right, [.symbol(.mic, .accent), .dictationBars(count: 6)], "dictation takes the right")
+    }
+
+    runSuite("NotchIslandPresentation shows the call prompt with one Record") {
+        let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
+        let open = notchLayout(callPrompt: prompt)
+        assertEqual(open.left, [.symbol(.video, .accent), .text("Call", .title)])
+        assertEqual(open.drop, .callPrompt(title: "Zoom call", detail: "Record this meeting?"))
+        assertTrue(open.dropIsSticky)
+        assertEqual(open.right, [.live(.callSeconds, .secondary)], "the drop-down has the Record button, so the wing just counts")
+
+        let key = NotchIslandPresentation.stickyKey(dictation: nil, meeting: nil, callPrompt: prompt)
+        let closed = notchLayout(callPrompt: prompt, collapsedStickyKey: key)
+        assertNil(closed.drop)
+        assertEqual(closed.right, [.chip("Record", .destructive, .callRecord)], "closed, the wing offers Record")
+    }
+
+    runSuite("NotchIslandPresentation holds a prompt while a dictation runs") {
+        let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
+        let layout = notchLayout(dictation: listening(), callPrompt: prompt)
+        assertNil(layout.drop, "the call prompt waits until the words land")
+        assertEqual(layout.left, [.symbol(.mic, .accent), .text("Listening", .title)])
+    }
+
+    runSuite("NotchIslandPresentation shows a recording meeting and its notes") {
+        let plain = notchLayout(meeting: recording())
+        assertEqual(plain.left, [.recordingDot, .live(.meetingTimer, .title)])
+        assertEqual(plain.right, [.meetingMeters])
+        assertEqual(
+            notchLayout(meeting: recording(), expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false)
+        )
+
+        var micOnly = recording()
+        micOnly.callAudioNote = .off
+        assertEqual(notchLayout(meeting: micOnly).right, [.chip("Mic only", .warning, .meetingCallAudio)])
+        assertEqual(
+            notchLayout(meeting: micOnly, expanded: true).right,
+            [.text("Mic only", .warning)],
+            "with the drop-down open the chip becomes a label"
+        )
+
+        var callAudioOn = recording()
+        callAudioOn.callAudioNote = .onForNextMeeting
+        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio on", .secondary)])
+
+        var unverified = recording()
+        unverified.systemAudioUnverified = true
+        unverified.callAudioNote = .off
+        assertEqual(notchLayout(meeting: unverified).right, [.text("Audio unverified", .warning)])
+    }
+
+    runSuite("NotchIslandPresentation opens meeting warnings by itself") {
+        var meeting = recording()
+        meeting.prompt = NotchIslandMeetingContent.Prompt(
+            title: "No audio detected",
+            detail: "No mic or system audio for 5 minutes.",
+            countdown: "Ends in 30s",
+            primaryTitle: "End & Transcribe",
+            secondaryTitle: "Keep Recording",
+            tertiaryTitle: nil
+        )
+        let open = notchLayout(meeting: meeting)
+        assertEqual(open.drop, .meetingPrompt(meeting.prompt!))
+        assertTrue(open.dropIsSticky)
+
+        let key = NotchIslandPresentation.stickyKey(dictation: nil, meeting: meeting, callPrompt: nil)
+        let closed = notchLayout(meeting: meeting, collapsedStickyKey: key)
+        assertNil(closed.drop)
+        assertEqual(closed.right, [.symbol(.warning, .warning), .meetingMeters], "a closed warning leaves a mark on the wing")
+
+        var nextSecond = meeting
+        nextSecond.prompt?.countdown = "Ends in 29s"
+        assertEqual(
+            NotchIslandPresentation.stickyKey(dictation: nil, meeting: nextSecond, callPrompt: nil),
+            key,
+            "a ticking countdown is the same warning, so a closed one stays closed"
+        )
+    }
+
+    runSuite("NotchIslandPresentation shows the missed-call nudge with nothing recording") {
+        let meeting = NotchIslandMeetingContent(
+            phase: .none,
+            prompt: NotchIslandMeetingContent.Prompt(
+                title: "That Zoom call wasn't recorded",
+                detail: "About 20 minutes.",
+                countdown: "",
+                primaryTitle: "Got It",
+                secondaryTitle: "Don't show again",
+                tertiaryTitle: nil
+            )
+        )
+        let layout = notchLayout(meeting: meeting)
+        assertEqual(layout.left, [.symbol(.video, .accent), .text("Meeting", .title)])
+        assertEqual(layout.drop, .meetingPrompt(meeting.prompt!))
+    }
+
+    runSuite("NotchIslandPresentation finishes a meeting") {
+        let preparing = notchLayout(meeting: NotchIslandMeetingContent(phase: .preparing(title: "Starting meeting…", detail: "Checking permissions and audio")))
+        assertEqual(preparing.left, [.spinner, .text("Starting meeting…", .title)])
+
+        let transcribing = notchLayout(meeting: NotchIslandMeetingContent(phase: .transcribing(progress: 0.42, detail: "42%")))
+        assertEqual(transcribing.left, [.transcriptionRing, .text("Transcribing", .title)])
+        assertEqual(transcribing.right, [.text("42%", .secondary)])
+        assertTrue(transcribing.showsEdgeProgress, "progress runs along the lower edge")
+
+        let saved = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")))
+        assertEqual(saved.left, [.symbol(.check, .accent), .text("Saved", .title)])
+        assertEqual(saved.right, [.chip("Open", .plain, .meetingOpen)])
+        let savedOpen = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")), expanded: true)
+        assertEqual(savedOpen.drop, .meetingSaved(title: "Weekly sync"))
+        assertEqual(savedOpen.right, [.text("Open", .secondary)])
+
+        let failed = NotchIslandMeetingContent(phase: .error(title: "Microphone didn't start", message: "Check your input device.", canOpen: false))
+        let error = notchLayout(meeting: failed)
+        assertEqual(error.left, [.symbol(.warning, .warning), .text("Meeting not saved", .title)])
+        assertEqual(error.drop, .meetingError(title: "Microphone didn't start", message: "Check your input device.", canOpen: false))
+        assertTrue(error.dropIsSticky)
+    }
+
+    runSuite("NotchIslandPresentation lingers on the dictation that just landed") {
+        let insert = NotchIslandRecentInsert(title: "Pasted", text: "Ship the notch island today")
+        let layout = notchLayout(recentInsert: insert)
+        assertEqual(layout.left, [.symbol(.check, .accent), .text("Pasted", .title)])
+        assertEqual(layout.right, [.text("5 words", .secondary)])
+        assertEqual(
+            notchLayout(recentInsert: insert, expanded: true).drop,
+            .justInserted(text: "Ship the notch island today", words: 5)
+        )
+        assertEqual(notchLayout(recentInsert: NotchIslandRecentInsert(title: "Pasted", text: "Hi")).right, [.text("1 word", .secondary)])
+        assertEqual(notchLayout(recentInsert: NotchIslandRecentInsert(title: "Pasted", text: nil)).right, [])
+    }
+
+    runSuite("NotchIslandPresentation never offers a button twice") {
+        let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record?", secondsLeft: 12)
+        var micOnly = recording()
+        micOnly.callAudioNote = .off
+        let layouts = [
+            notchLayout(callPrompt: prompt),
+            notchLayout(meeting: micOnly, expanded: true),
+            notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: nil)), expanded: true),
+        ]
+        for layout in layouts {
+            assertTrue(layout.drop != nil)
+            let chips = (layout.left + layout.right).filter {
+                if case .chip = $0 { return true }
+                return false
+            }
+            assertTrue(chips.isEmpty, "with the drop-down open the wings only report status")
+        }
+    }
+
+    runSuite("NotchIslandPresentation formats timers and counts words") {
+        assertEqual(NotchIslandPresentation.timerText(0), "0:00")
+        assertEqual(NotchIslandPresentation.timerText(65), "1:05")
+        assertEqual(NotchIslandPresentation.timerText(3725), "1:02:05")
+        assertEqual(NotchIslandPresentation.timerText(-3), "0:00")
+        assertEqual(NotchIslandPresentation.wordCount("  two\nwords  "), 2)
+        assertEqual(NotchIslandPresentation.wordCount(nil), 0)
+    }
+
+    runSuite("NotchIslandAction routes each tap to its owner") {
+        assertEqual(NotchIslandAction.dictationStop.owner, .dictation)
+        assertEqual(NotchIslandAction.dictationDismissMessage.owner, .dictation)
+        assertEqual(NotchIslandAction.copyLastDictation.owner, .island)
+        assertEqual(NotchIslandAction.pasteLastDictation.owner, .island)
+        assertEqual(NotchIslandAction.meetingCallAudio.owner, .meeting)
+        assertEqual(NotchIslandAction.meetingOpen.owner, .meeting)
+        assertEqual(NotchIslandAction.callRecord.owner, .callPrompt)
+        assertEqual(NotchIslandAction.callRemind.owner, .callPrompt)
+    }
+}
+
+private func notchLayout(
+    dictation: NotchIslandDictationContent? = nil,
+    meeting: NotchIslandMeetingContent? = nil,
+    callPrompt: NotchIslandCallPromptContent? = nil,
+    recentInsert: NotchIslandRecentInsert? = nil,
+    expanded: Bool = false,
+    collapsedStickyKey: String? = nil
+) -> NotchIslandLayout {
+    NotchIslandPresentation.layout(
+        dictation: dictation,
+        meeting: meeting,
+        callPrompt: callPrompt,
+        recentInsert: recentInsert,
+        expanded: expanded,
+        collapsedStickyKey: collapsedStickyKey
+    )
+}
+
+private func listening() -> NotchIslandDictationContent {
+    NotchIslandDictationContent(
+        phase: .listening,
+        targetAppName: "Notes",
+        microphoneName: "MacBook Pro Microphone"
+    )
+}
+
+private func recording() -> NotchIslandMeetingContent {
+    NotchIslandMeetingContent(phase: .recording, duration: 754)
+}

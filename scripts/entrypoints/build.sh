@@ -24,6 +24,10 @@ SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || pri
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
+# Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
+LLAMA_SERVER_BINARY="deps-tools/llama-server"
+BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
+KEYBOARD_ENTITLEMENTS="config/entitlements/keyboard.plist"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_MODULE_ROOT="deps-modules"
@@ -80,7 +84,7 @@ ensure_deps_ready() {
     local current_digest
     local stamp_digest
 
-    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ] && [ -x "$LLAMA_SERVER_BINARY" ]; then
         newest_input="$(newest_dependency_input)"
         build_stamp="$(deps_build_stamp_info)"
 
@@ -123,6 +127,7 @@ ensure_deps_ready() {
     echo "  $WHISPERKIT_MODULE"
     echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
+    echo "  $LLAMA_SERVER_BINARY"
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1
@@ -289,7 +294,6 @@ actions = report.get("content", {}).get("primaryActions", {})
 for key, expected in {
     "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
     "startMeeting": ("Record Meeting", "transcripted.menubar.primary.start-meeting"),
-    "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
 }.items():
     expected_title, expected_identifier = expected
     row = actions.get(key) or {}
@@ -303,12 +307,16 @@ for key in ("startDictation", "startMeeting"):
     row = actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
+# The two buttons show short titles; check what is on screen too.
+for key, expected_display in {"startMeeting": "Record", "startDictation": "Dictate"}.items():
+    row = actions.get(key) or {}
+    if row.get("displayTitle") != expected_display:
+        errors.append(f"{key} shows {row.get('displayTitle')!r}, expected {expected_display!r}")
 
 utility_actions = report.get("content", {}).get("utilityActions", {})
 for key, expected in {
     "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
     "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
-    "settings": ("Settings…", "transcripted.menubar.utility.settings"),
     "quit": ("Quit", "transcripted.menubar.utility.quit"),
 }.items():
     expected_title, expected_identifier = expected
@@ -319,7 +327,7 @@ for key, expected in {
         errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
     if not row.get("isVisible"):
         errors.append(f"{key} row was hidden")
-for key in ("openTranscripted", "settings", "quit"):
+for key in ("openTranscripted", "quit"):
     row = utility_actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
@@ -359,9 +367,9 @@ PY
 sign_embedded_code() {
     local sign_hash="$1"
     local framework_path
-    local metallib_path
     local nested_code_path
     local helper_path
+    local input_method_path
 
     while IFS= read -r -d '' nested_code_path; do
         codesign --force --sign "$sign_hash" "$nested_code_path"
@@ -378,14 +386,19 @@ sign_embedded_code() {
         codesign --force --sign "$sign_hash" "$framework_path"
     done
 
-    for metallib_path in "$APP_BUNDLE"/Contents/MacOS/*.metallib; do
-        [ -f "$metallib_path" ] || continue
-        codesign --force --sign "$sign_hash" "$metallib_path"
-    done
-
     for helper_path in "$APP_BUNDLE"/Contents/Helpers/*; do
         [ -f "$helper_path" ] || continue
         codesign --force --sign "$sign_hash" "$helper_path"
+    done
+
+    # The Writing keyboard is a nested input-method bundle with no nested code
+    # of its own. Signing is inside-out, so it's signed here, before the outer
+    # app. With no keyboard bundle this loop does nothing.
+    for input_method_path in "$APP_BUNDLE/Contents/Library/Input Methods"/*.app; do
+        [ -d "$input_method_path" ] || continue
+        codesign --force --sign "$sign_hash" \
+            --entitlements "$KEYBOARD_ENTITLEMENTS" \
+            "$input_method_path"
     done
 }
 
@@ -400,6 +413,12 @@ bundle_mcp_server() {
 
     cp "$MCP_BINARY" "$BUNDLED_MCP_BINARY"
     chmod 755 "$BUNDLED_MCP_BINARY"
+}
+
+# Writing's inference helper. sign_embedded_code's Helpers loop signs it.
+bundle_llama_server() {
+    cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
+    chmod 755 "$BUNDLED_LLAMA_SERVER"
 }
 
 echo "Building Transcripted..."
@@ -501,9 +520,14 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
-bundle_mcp_server
+# Light + dark app icon for macOS 26 (Assets.car); Transcripted.icns stays the fallback
+source "$ENTRYPOINT_DIR/lib/compile-app-icon.sh"
+compile_app_icon "$APP_BUNDLE"
 
-# Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
+bundle_mcp_server
+bundle_llama_server
+
+# Unified dependencies (FluidAudio + WhisperKit)
 echo "Dependencies found"
 
 # Shared frameworks/linker/source arguments — single source of truth with
@@ -514,12 +538,6 @@ if [ "$TRANSCRIPTED_LAB_BUILD" = "1" ]; then
     echo "LAB BUILD: compiling in the lab control channel (-D TRANSCRIPTED_LAB_CONTROL). Local use only; never distribute this app."
     APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_LAB_CONTROL)
 fi
-
-# Bundle Metal libraries if present
-# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
-for metallib in deps-libs/*.metallib; do
-    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
-done
 
 # ESpeakNG.framework is only present on FluidAudio < 0.15 deps builds.
 [ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
@@ -532,6 +550,11 @@ cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
 
 source "$ENTRYPOINT_DIR/lib/bundle-cli.sh"
 bundle_transcripted_cli "$REPO_ROOT" "$APP_BUNDLE"
+
+# Writing keyboard (IMKit input method). Built before the nested-code signing
+# step so it is signed inside-out with the rest of the app.
+source "$ENTRYPOINT_DIR/lib/bundle-input-method.sh"
+bundle_transcripted_input_method "$REPO_ROOT" "$APP_BUNDLE"
 
 # Compile
 echo "Compiling..."

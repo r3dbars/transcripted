@@ -9,7 +9,7 @@ import Foundation
 //   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio + MLX + deps + TranscriptedCore)
+//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio + deps + TranscriptedCore)
 //   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
@@ -35,7 +35,7 @@ let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 // Each split-out test target is its own xctest bundle, so every target repeats
 // the same deps-frameworks/deps-modules/deps-libs flags the old single target
 // used — @testable import TranscriptedCore transitively re-exports
-// FluidAudio/MLX module interfaces in every target that imports it, and each
+// FluidAudio module interfaces in every target that imports it, and each
 // target's xctest binary needs to resolve those symbols at link time.
 let coreTestUnsafeSwiftFlags: [String] = [
     "-F", "\(repoRoot)/deps-frameworks",
@@ -102,11 +102,19 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        // Objective-C exception catcher for the few AVFoundation calls that
+        // raise instead of returning an error (see AudioTapInstallGuard). It
+        // lives inside Sources/TranscriptedCore so the deps staleness digest
+        // and the CI deps cache key, which both hash that tree, cover it.
+        .target(
+            name: "TranscriptedObjCSupport",
+            path: "Sources/TranscriptedCore/ObjCSupport"
+        ),
         .target(
             name: "TranscriptedCore",
-            dependencies: [],
+            dependencies: ["TranscriptedObjCSupport"],
             path: "Sources/TranscriptedCore",
-            exclude: ["CLAUDE.md"],
+            exclude: ["CLAUDE.md", "ObjCSupport"],
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "\(repoRoot)/deps-frameworks",
@@ -134,6 +142,61 @@ let package = Package(
                 .linkedFramework("Network"),
                 .linkedFramework("ScreenCaptureKit"),
             ]
+        ),
+        // Writing's pure policy layer, ported from Tilde's TildeCore
+        // (docs/writing-plan.md). Foundation-only and dependency-free, so it
+        // takes none of the deps flags above. build.sh compiles these same
+        // files straight into the app module; this target exists so the
+        // ported Tilde tests can run under `swift test`.
+        .target(
+            name: "TranscriptedWritingCore",
+            path: "Sources/TranscriptedWriting/Core"
+        ),
+        // Writing's app runtime, ported from Tilde's TildeApp minus its UI and
+        // lifecycle (docs/writing-plan.md, "Where the code goes"): the socket
+        // server and peer auth, the llama-server host, the model manager,
+        // Screen Memory, personal history, the outcome-ledger readers and the
+        // keyboard installer. build.sh compiles these files straight into the
+        // app module too, so their Core import is guarded with
+        // `#if canImport(TranscriptedWritingCore)`. Nothing starts it yet; the
+        // bridge in Sources/Writing/ will.
+        .target(
+            name: "TranscriptedWritingRuntime",
+            dependencies: ["TranscriptedWritingCore"],
+            path: "Sources/TranscriptedWriting/Runtime",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("Carbon"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ScreenCaptureKit"),
+                .linkedFramework("Security"),
+                .linkedFramework("Vision"),
+            ]
+        ),
+        // Tilde's TildeCoreTests (Core/) and TildeAppTests (Runtime/), ported
+        // per docs/writing-port-ledger.md. Swift Testing (`import Testing`),
+        // not XCTest; dependency-free like its targets, so no deps flags.
+        .testTarget(
+            name: "TranscriptedWritingTests",
+            dependencies: [
+                "TranscriptedWritingCore",
+                "TranscriptedWritingRuntime",
+                "TranscriptedKeyboard",
+            ],
+            path: "Tests/TranscriptedWritingTests"
+        ),
+        // Writing's IMKit keyboard, ported from Tilde's InlineGhostIME. The
+        // shipped bundle is built by scripts/entrypoints/lib/bundle-input-method.sh,
+        // which compiles these files together with Core into one module; this
+        // target exists so the keyboard's tests can run under `swift test`.
+        // Info.plist is the bundle's, stamped by that script, not a resource.
+        .executableTarget(
+            name: "TranscriptedKeyboard",
+            dependencies: ["TranscriptedWritingCore"],
+            path: "Sources/TranscriptedKeyboard",
+            exclude: ["Info.plist"],
+            linkerSettings: [.linkedFramework("InputMethodKit")]
         ),
     ] + coreTestTargets
 )

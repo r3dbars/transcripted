@@ -596,7 +596,9 @@ def _fake_vnc_server(events: list[str], conns: list[socket.socket],
     Every pixel's value is the number of key/pointer events so far, so a
     screenshot shows whether it was taken after the input. `mode` (changeable
     while running): "split" sends each frame one row per message, "resize"
-    (once) answers a request with only a resize to 2x2, "stall" answers nothing.
+    (once) answers a request with only a resize to 2x2, "stall" answers nothing,
+    "button" shows a fixed 400x250 screen with a blue Open button centred at
+    (230, 131) instead.
     """
     import threading
     mode = {} if mode is None else mode
@@ -621,8 +623,8 @@ def _fake_vnc_server(events: list[str], conns: list[socket.socket],
             recv_exact(conn, 1)
             conn.sendall(b"\x00\x00\x00\x00")
             recv_exact(conn, 1)
-            conn.sendall(struct.pack(">HH", 4, 2) + bytes(16) + struct.pack(">I", 4) + b"fake")
-            size, inputs = [4, 2], [0]
+            size, inputs = ([400, 250] if mode.get("button") else [4, 2]), [0]
+            conn.sendall(struct.pack(">HH", *size) + bytes(16) + struct.pack(">I", 4) + b"fake")
             while True:
                 try:
                     (kind,) = recv_exact(conn, 1)
@@ -644,6 +646,12 @@ def _fake_vnc_server(events: list[str], conns: list[socket.socket],
                         conn.sendall(struct.pack(">BxHHHHHi", 0, 1, 0, 0, 2, 2, -223))
                         continue
                     width, height = size
+                    if mode.get("button"):
+                        white, accent = bytes([245, 245, 245, 0]), bytes([255, 132, 10, 0])
+                        frame = b"".join(white * 210 + accent * 40 + white * 150 if 125 <= y < 137 else white * 400
+                                         for y in range(250))
+                        conn.sendall(struct.pack(">BxHHHHHi", 0, 1, 0, 0, width, height, 0) + frame)
+                        continue
                     pixel = bytes([inputs[0] % 256] * 3 + [0])
                     rows = [(row, 1) for row in range(height)] if mode.get("split") else [(0, height)]
                     for top, count in rows:

@@ -59,3 +59,27 @@ enum LaunchAtLoginNoticePolicy {
         return needsApproval ? needsApprovalText : nil
     }
 }
+
+/// Whether a fresh launch opens the main window. Opening the app yourself
+/// (Dock, Finder, Spotlight) shows Home so it's clear the app is running; a
+/// start at login stays quietly in the menu bar. Unfinished setup shows its
+/// own window instead, and our launch harnesses never get a window.
+enum LaunchWindowPolicy {
+    /// macOS doesn't always tag a login-item start (SMAppService items and
+    /// apps it reopens at login can arrive untagged), so a launch this soon
+    /// after the user logged in counts as a login start too.
+    static let loginStartWindowSeconds: TimeInterval = 120
+
+    static func shouldOpenMainWindow(
+        launchedAsLoginItem: Bool,
+        secondsSinceLogin: TimeInterval?,
+        onboardingCompleted: Bool,
+        isAutomatedLaunch: Bool
+    ) -> Bool {
+        guard onboardingCompleted, !launchedAsLoginItem, !isAutomatedLaunch else { return false }
+        if let secondsSinceLogin, secondsSinceLogin < loginStartWindowSeconds {
+            return false
+        }
+        return true
+    }
+}

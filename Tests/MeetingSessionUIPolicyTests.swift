@@ -319,7 +319,7 @@ func testMeetingSessionUIPolicy() {
         )
         guard let start = source.range(of: "private func startMeetingFromMenu()"),
               let end = source.range(
-                of: "private func pasteLastDictationFromMenu()",
+                of: "private func openSettingsFromMenu(",
                 range: start.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "menu meeting action should remain present")

@@ -38,6 +38,9 @@ enum MeetingInputDeviceSelectionReason: String {
     /// The chosen mic could not start or stopped delivering audio, so this
     /// recording moved to the built-in mic instead of failing.
     case builtInFallbackAfterFailure
+    /// The host named a specific mic (`Audio.meetingPreferredInputDeviceUID`)
+    /// and it is connected, so it is recorded instead of the macOS input.
+    case userChosenInput
 }
 
 struct MeetingInputDeviceSelection: Equatable {
@@ -65,6 +68,7 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
         mode: MeetingInputDeviceSelectionMode = .automatic,
+        preferredInputID: AudioDeviceID? = nil,
         lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         selection(
@@ -72,6 +76,7 @@ enum MeetingInputDeviceSelectionPolicy {
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
             mode: mode,
+            preferredInputID: preferredInputID,
             lidClosed: lidClosed
         )
     }
@@ -119,7 +124,8 @@ enum MeetingInputDeviceSelectionPolicy {
         requestedOutcome: CaptureRouteStabilizationOutcome
     ) -> CaptureRouteStabilizationOutcome {
         switch selectionReason {
-        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput, .builtInFallbackAfterFailure:
+        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput, .builtInFallbackAfterFailure,
+             .userChosenInput:
             // An unapplied explicit choice must not become a nil selection
             // that lets route readiness accept the node's previous device.
             return .switchFailed
@@ -175,6 +181,7 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
         mode: MeetingInputDeviceSelectionMode = .automatic,
+        preferredInputID: AudioDeviceID? = nil,
         lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         guard mode == .automatic else {
@@ -183,6 +190,20 @@ enum MeetingInputDeviceSelectionPolicy {
                 selectedInput: defaultInput,
                 defaultOutput: defaultOutput,
                 reason: .preservedDefaultInput
+            )
+        }
+
+        if let chosenInput = usableChosenInput(
+            preferredInputID,
+            from: availableInputs,
+            defaultInput: defaultInput,
+            lidClosed: lidClosed
+        ) {
+            return MeetingInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: chosenInput,
+                defaultOutput: defaultOutput,
+                reason: .userChosenInput
             )
         }
 
@@ -260,6 +281,27 @@ enum MeetingInputDeviceSelectionPolicy {
             defaultInput: selectedInput,
             lidClosed: lidClosed
         )
+    }
+
+    /// The host's chosen mic, when it's connected and differs from the macOS
+    /// input. A Bluetooth headset never counts (recording one is what drops it
+    /// into call mode), and neither does a closed MacBook's own mic, which
+    /// records silence. Otherwise automatic selection runs as usual.
+    private static func usableChosenInput(
+        _ preferredInputID: AudioDeviceID?,
+        from availableInputs: [MeetingAudioDevice],
+        defaultInput: MeetingAudioDevice,
+        lidClosed: Bool
+    ) -> MeetingAudioDevice? {
+        guard let preferredInputID,
+              preferredInputID != defaultInput.id,
+              let chosen = availableInputs.first(where: { $0.id == preferredInputID }),
+              chosen.inputChannelCount > 0,
+              !isBluetoothHeadsetInput(chosen),
+              !(lidClosed && isLidMicrophone(chosen)) else {
+            return nil
+        }
+        return chosen
     }
 
     private static func shouldAvoidBluetoothHeadsetInput(
@@ -388,6 +430,7 @@ enum MeetingInputDeviceLookup {
     /// the candidates (the default stays, since it may be all that's left).
     static func preferredInputSelection(
         mode: MeetingInputDeviceSelectionMode,
+        preferredInputUID: String? = nil,
         excludingDeviceID: AudioDeviceID? = nil
     ) throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
@@ -409,11 +452,18 @@ enum MeetingInputDeviceLookup {
             inputChannelCount: 0
         )
 
+        // An excluded chosen mic is already gone from the candidates, so a
+        // replacement lands on the automatic pick.
+        let preferredInputID = preferredInputUID.flatMap { uid in
+            availableInputs.first { (try? $0.id.readString(kAudioDevicePropertyDeviceUID)) == uid }?.id
+        }
+
         return MeetingInputDeviceSelectionPolicy.selectionForMeetingStart(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
             mode: mode,
+            preferredInputID: preferredInputID,
             lidClosed: MacLidState.isClosed()
         )
     }
@@ -628,7 +678,8 @@ extension Audio {
         if selection == nil {
             do {
                 selection = try MeetingInputDeviceLookup.preferredInputSelection(
-                    mode: meetingInputDeviceSelectionModeForCurrentRecording
+                    mode: meetingInputDeviceSelectionModeForCurrentRecording,
+                    preferredInputUID: meetingPreferredInputDeviceUIDForCurrentRecording
                 )
             } catch {
                 AppLogger.audioMic.warning("Meeting input selection unavailable", [
@@ -649,6 +700,7 @@ extension Audio {
                 mode: meetingInputDeviceSelectionModeForCurrentRecording
             )
         }
+        recordAttemptedMeetingSelectionReason(selection.reason)
 
         var stabilizationOutcome = CaptureRouteStabilizationOutcome.notNeeded
         let stabilizationAlreadyAttempted = meetingRouteStabilizationOutcomeValue != CaptureRouteStabilizationOutcome.notNeeded.rawValue

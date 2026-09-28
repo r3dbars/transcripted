@@ -56,14 +56,70 @@ enum DictationPreferredInputPolicy {
 /// Bluetooth headset mic without touching the macOS input. When the automatic
 /// pick is steering away from a headset, a mic the user chose wins. On a Mac
 /// with no built-in mic (Mac mini, Mac Studio), a wired or USB mic still beats
-/// the headset. When macOS input is already a non-Bluetooth mic, it is followed.
+/// the headset. When macOS input is already a non-Bluetooth mic, it is
+/// followed, unless the user picked a specific mic in Settings
+/// (`chosenInputAlwaysWins`), which is then recorded whatever macOS has.
 enum PinnedDictationInputPolicy {
-    /// The engine path only hurts when it would open a Bluetooth headset that
-    /// is the macOS input while we record a different mic. Everywhere else it
-    /// binds the same device we'd pin, so the proven engine path is kept.
-    static func recorderIsNeeded(for selection: DictationInputDeviceSelection) -> Bool {
+    /// The recorder is needed when the engine would open a Bluetooth headset
+    /// that is the macOS input while we record a different mic, and for a mic
+    /// the user picked over a safe macOS input (the engine only ever records
+    /// the macOS input, so only the recorder can reach it).
+    ///
+    /// It is also used for a plain built-in or wired mic, for speed. On the
+    /// same Mac the recorder delivered the first audio in about 70ms where
+    /// the engine took about 190ms, with an engine tail past 500ms. A
+    /// Bluetooth headset that is itself the recorded mic, and aggregate,
+    /// virtual or unknown inputs, keep the engine path. So does a mic whose
+    /// speed-only takes kept coming out empty (`PinnedDictationSpeedPath`).
+    static func recorderIsNeeded(
+        for selection: DictationInputDeviceSelection,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        if recorderIsRequired(for: selection) { return true }
+        return recorderIsFasterPath(for: selection.selectedInput) && !speedPathIsOff(selection.selectedInput)
+    }
+
+    /// Only the recorder can record this selection without touching a
+    /// Bluetooth headset or while honoring a picked mic.
+    static func recorderIsRequired(for selection: DictationInputDeviceSelection) -> Bool {
         selection.didOverrideDefault
-            && DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            && (selection.reason == .userChosenInput
+                || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth")
+    }
+
+    /// The recorder was used for this selection only because it is faster,
+    /// so its takes are scored by `PinnedDictationSpeedPath`.
+    static func recorderIsSpeedOnly(for selection: DictationInputDeviceSelection) -> Bool {
+        !recorderIsRequired(for: selection) && recorderIsFasterPath(for: selection.selectedInput)
+    }
+
+    static func recorderIsFasterPath(for input: DictationAudioDevice) -> Bool {
+        switch DictationInputDeviceSelectionPolicy.deviceClass(for: input) {
+        case "built_in", "external":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether idle warmup and readiness recovery skip the engine. Both open
+    /// the macOS input through AVAudioEngine, so they never run while that
+    /// input is a Bluetooth headset (a missing selection, from an unreadable
+    /// route, counts as one). Otherwise the engine is skipped whenever the
+    /// recorder will record the mic, since that start never touches it: a
+    /// key press that waited on the warmup was only slower. After a fallback
+    /// to the engine it is warmed again until the recorder next starts, so a
+    /// repeat fallback isn't also a cold start.
+    static func skipsEngineWarmup(
+        for selection: DictationInputDeviceSelection?,
+        afterEngineFallback: Bool,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        guard let selection else { return true }
+        if DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" {
+            return true
+        }
+        return !afterEngineFallback && recorderIsNeeded(for: selection, speedPathIsOff: speedPathIsOff)
     }
 
     /// Inputs to rank when re-picking after `excluded` died or went silent.
@@ -87,17 +143,36 @@ enum PinnedDictationInputPolicy {
         automatic: DictationInputDeviceSelection,
         availableInputs: [DictationAudioDevice],
         preferredUID: String?,
+        chosenInputAlwaysWins: Bool = false,
         lidClosed: Bool = false
     ) -> DictationInputDeviceSelection {
-        guard mayReplace(automatic) else { return automatic }
+        let chosen = preferredUID.flatMap { preferredUID in
+            availableInputs.first(where: {
+                $0.uid == preferredUID
+                    && $0.inputChannelCount > 0
+                    && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
+                    && !(lidClosed && DictationInputDeviceSelectionPolicy.isLidMicrophone($0))
+            })
+        }
 
-        if let preferredUID,
-           let chosen = availableInputs.first(where: {
-               $0.uid == preferredUID
-                   && $0.inputChannelCount > 0
-                   && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
-                   && !(lidClosed && DictationInputDeviceSelectionPolicy.isLidMicrophone($0))
-           }) {
+        guard mayReplace(automatic) else {
+            // Following a safe macOS input, or the headset on purpose. Only a
+            // mic picked in Settings replaces the first.
+            guard chosenInputAlwaysWins,
+                  automatic.reason == .defaultIsSafe,
+                  let chosen,
+                  chosen.id != automatic.defaultInput.id else {
+                return automatic
+            }
+            return DictationInputDeviceSelection(
+                defaultInput: automatic.defaultInput,
+                selectedInput: chosen,
+                defaultOutput: automatic.defaultOutput,
+                reason: .userChosenInput
+            )
+        }
+
+        if let chosen {
             return DictationInputDeviceSelection(
                 defaultInput: automatic.defaultInput,
                 selectedInput: chosen,
@@ -149,6 +224,8 @@ enum DictationInputDeviceSelectionReason: String {
     case noBuiltInFallbackAvailable
     case preferredUserChosenForBluetoothHeadset
     case preferredExternalForBluetoothHeadset
+    /// A mic picked in Settings, recorded over a non-Bluetooth macOS input.
+    case userChosenInput
 }
 
 struct DictationInputDeviceSelection: Equatable {
@@ -447,10 +524,14 @@ enum DictationInputDeviceBindingPolicy {
     /// Poll an already-issued route command. Reissuing the setter on every
     /// stale read can restart a slow driver's transition indefinitely.
     /// The probe must honor its remaining timeout, including native work.
+    ///
+    /// The probe reads back the device ID the route command just set, so it
+    /// passes almost at once. The real settle is `initialDelayNanoseconds`,
+    /// which the caller picks with `initialSettleDelay(for:)`.
     @MainActor
     static func waitForBinding<Value>(
         timeoutNanoseconds: UInt64 = TranscriptedConstants.audioInputBindingSettleTimeout,
-        initialDelayNanoseconds: UInt64 = TranscriptedConstants.audioRecoveryDelay,
+        initialDelayNanoseconds: UInt64 = 0,
         pollIntervalNanoseconds: UInt64 = TranscriptedConstants.dictationReadinessPollInterval,
         now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
@@ -485,6 +566,15 @@ enum DictationInputDeviceBindingPolicy {
                 delay = max(1, pollIntervalNanoseconds)
             }
         }
+    }
+
+    /// Moving AUHAL off a Bluetooth headset that is the macOS input is the
+    /// AirPods call-mode path (#1784), so it keeps the 300ms settle before
+    /// the engine starts. Any other override starts right away.
+    static func initialSettleDelay(for selection: DictationInputDeviceSelection) -> UInt64 {
+        DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth"
+            ? TranscriptedConstants.audioRecoveryDelay
+            : 0
     }
 
     /// Returns whether a route command was issued. A changed route must be

@@ -284,6 +284,66 @@ func makeDictationDayJSON(
     """
 }
 
+typealias WritingFixtureEntry = (
+    id: String, captured: String, heading: String, sourceApp: String, bundleId: String?,
+    words: Int, characters: Int, acceptedWords: Int, text: String
+)
+
+/// Two entries in the writing day-file contract shape; the first is the
+/// contract example verbatim, the second omits `Bundle ID:`.
+let sampleWritingEntries: [WritingFixtureEntry] = [
+    (
+        "writing-20260925-104211-387-4f2a9c1e", "2026-09-25T15:42:11.387Z",
+        "10:42 AM - Pushing the launch to Thursday so QA", "Slack", "com.tinyspeck.slackmacgap",
+        14, 71, 3, "Pushing the launch to Thursday so QA can finish the AirPods pass."
+    ),
+    (
+        "writing-20260925-160501-002-0b1c2d3e", "2026-09-25T16:05:01.002Z",
+        "11:05 AM - Draft the pricing note for Friday", "Notes", nil,
+        7, 38, 0, "Draft the pricing note for Friday review"
+    ),
+]
+
+/// Writing day file in the phase 3 contract shape (`Writing_<date>.md`).
+func makeWritingDayMarkdown(
+    date: String = "2026-09-25",
+    entries: [WritingFixtureEntry] = sampleWritingEntries
+) -> String {
+    let sections = entries.map { entry -> String in
+        var lines = [
+            "## \(entry.heading)",
+            "",
+            "Entry ID: `\(entry.id)`",
+            "Captured: \(entry.captured)",
+            "Source app: \(entry.sourceApp)",
+        ]
+        if let bundleId = entry.bundleId {
+            lines.append("Bundle ID: `\(bundleId)`")
+        }
+        lines.append(contentsOf: [
+            "Words: \(entry.words)",
+            "Characters: \(entry.characters)",
+            "Accepted words: \(entry.acceptedWords)",
+            "",
+            entry.text,
+        ])
+        return lines.joined(separator: "\n")
+    }
+    return """
+    ---
+    title: "Writing for \(date)"
+    date: \(date)
+    capture_type: writing_day
+    format_version: 1
+    ---
+
+    # Writing for \(date)
+
+    \(sections.joined(separator: "\n\n"))
+
+    """
+}
+
 func makeTempDir() -> URL {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

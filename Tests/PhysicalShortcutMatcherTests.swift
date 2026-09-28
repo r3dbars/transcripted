@@ -208,4 +208,30 @@ func testPhysicalShortcutMatcher() {
             "left Option staying down must not activate a released right-side bound key"
         )
     }
+
+    runSuite("PhysicalShortcutMatcher — shared hands-free modifier fires on press unless mid-typing") {
+        assertTrue(
+            PhysicalShortcutMatcher.firesSharedModifierOnPress(secondsSinceLastTypedKey: 30, isDictating: false),
+            "a Right Option tap after a pause starts on press, not on release"
+        )
+        assertTrue(
+            PhysicalShortcutMatcher.firesSharedModifierOnPress(secondsSinceLastTypedKey: .infinity, isDictating: false),
+            "nothing typed since launch"
+        )
+        assertTrue(
+            PhysicalShortcutMatcher.firesSharedModifierOnPress(
+                secondsSinceLastTypedKey: PhysicalShortcutMatcher.typingWindowForModifierCombos,
+                isDictating: false
+            ),
+            "the window edge counts as a pause"
+        )
+        assertFalse(
+            PhysicalShortcutMatcher.firesSharedModifierOnPress(secondsSinceLastTypedKey: 0.2, isDictating: false),
+            "mid-typing, Right Option is likely a combo like Option+E, so it waits for release"
+        )
+        assertFalse(
+            PhysicalShortcutMatcher.firesSharedModifierOnPress(secondsSinceLastTypedKey: 30, isDictating: true),
+            "a press during a dictation stops and pastes it, which a combo can't undo, so it waits for release"
+        )
+    }
 }

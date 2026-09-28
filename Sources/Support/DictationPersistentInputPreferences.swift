@@ -17,8 +17,44 @@ enum DictationPersistentInputPreferences {
         let previousUID: String
     }
 
-    static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+    /// Off while the Mac mic recorder handles dictation (`recorderReplacesToggle`):
+    /// it records the Mac's own mic without switching the macOS input, and the
+    /// one Settings "Microphone" choice (`MicrophoneChoicePreferences`)
+    /// replaces this toggle, so the controller puts back any input it
+    /// switched. The stored toggle is kept for a Mac that turns the recorder
+    /// off again, or picks Apple voice processing.
+    static func isEnabled(
+        userDefaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        isStoredOn(userDefaults: userDefaults)
+            && !recorderReplacesToggle(userDefaults: userDefaults, environment: environment)
+    }
+
+    /// The saved toggle itself, whatever the recorder is doing.
+    static func isStoredOn(userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: enabledKey)
+    }
+
+    /// The recorder is on and dictation can use it. Apple voice processing
+    /// only exists on the engine path, so with it chosen dictation never uses
+    /// the recorder, and this toggle's Mac-wide switch is still the only thing
+    /// keeping it off an AirPods mic.
+    static func recorderReplacesToggle(
+        userDefaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        PinnedMicrophoneCapturePreferences.isEnabled(userDefaults: userDefaults, environment: environment)
+            && !MicrophoneProcessingPreferences.isVoiceProcessingEnabled(userDefaults: userDefaults)
+    }
+
+    /// Tells the controller to re-read `isEnabled()` after something it
+    /// depends on changed outside this file (the mic processing mode).
+    static func effectiveStateMayHaveChanged() {
+        NotificationCenter.default.post(
+            name: .dictationPersistentInputPreferenceChanged,
+            object: nil
+        )
     }
 
     static func setEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {

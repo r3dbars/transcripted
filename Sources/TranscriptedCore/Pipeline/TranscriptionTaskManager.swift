@@ -124,6 +124,9 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var speakerNamingRequest: SpeakerNamingRequest? = nil
     @Published public var lastSavedTranscriptURL: URL? = nil
     @Published public private(set) var lastSavedTranscriptTaskId: UUID? = nil
+    /// Where the most recent saved transcript's job spent its time; nil when
+    /// the save did not come from a timed pipeline run.
+    public private(set) var lastPipelineTimings: MeetingPipelineTimings.Snapshot? = nil
     @Published public var lastSavedTitle: String? = nil
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
@@ -395,21 +398,24 @@ public class TranscriptionTaskManager: ObservableObject {
                     self.publishNonFailureStatus(.transcribing(progress: 0.0))
                 }
 
-                let transcriptURL = try await self.transcribeWithSpeakerIdentification(
-                    micURL: micURL,
-                    systemURL: systemURL,
-                    outputFolder: outputFolder,
-                    taskId: task.id,
-                    healthInfo: task.healthInfo,
-                    splitLocalSpeakers: task.splitLocalSpeakers,
-                    meetingTitle: task.meetingTitle,
-                    recordingDate: task.recordingDate,
-                    languageSelection: task.languageSelection
-                )
+                let timings = MeetingPipelineTimings()
+                let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
+                    try await self.transcribeWithSpeakerIdentification(
+                        micURL: micURL,
+                        systemURL: systemURL,
+                        outputFolder: outputFolder,
+                        taskId: task.id,
+                        healthInfo: task.healthInfo,
+                        splitLocalSpeakers: task.splitLocalSpeakers,
+                        meetingTitle: task.meetingTitle,
+                        recordingDate: task.recordingDate,
+                        languageSelection: task.languageSelection
+                    )
+                }
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: task.id) else { return }
-                    self.publishTranscriptSaved(from: transcriptURL, taskId: task.id)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: task.id, timings: timings.snapshot())
                     self.handleTaskCompletion(taskId: task.id)
                 }
 
@@ -731,18 +737,21 @@ public class TranscriptionTaskManager: ObservableObject {
                     self.publishNonFailureStatus(.transcribing(progress: 0.0))
                 }
 
-                let transcriptURL = try await self.transcribeImportedAudio(
-                    audioURL: audioURL,
-                    outputFolder: outputFolder,
-                    taskId: taskId,
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate,
-                    languageSelection: languageSelection
-                )
+                let timings = MeetingPipelineTimings()
+                let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
+                    try await self.transcribeImportedAudio(
+                        audioURL: audioURL,
+                        outputFolder: outputFolder,
+                        taskId: taskId,
+                        meetingTitle: meetingTitle,
+                        recordingDate: recordingDate,
+                        languageSelection: languageSelection
+                    )
+                }
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
-                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId, timings: timings.snapshot())
                     self.handleTaskCompletion(taskId: taskId)
                 }
             } catch {
@@ -1340,7 +1349,14 @@ public class TranscriptionTaskManager: ObservableObject {
         displayStatus = status
     }
 
-    func publishTranscriptSaved(from transcriptURL: URL, taskId: UUID? = nil) {
+    func publishTranscriptSaved(
+        from transcriptURL: URL,
+        taskId: UUID? = nil,
+        timings: MeetingPipelineTimings.Snapshot? = nil
+    ) {
+        // Set before the status publishes so a host reading it on
+        // `.transcriptSaved` sees this save's timings, never a previous one's.
+        lastPipelineTimings = timings
         populateSavedMetadata(from: transcriptURL, taskId: taskId)
         publishNonFailureStatus(.transcriptSaved)
         scheduleStatusReset(delay: 4)
@@ -2187,18 +2203,21 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         do {
-            let transcriptURL = try await transcribeWithSpeakerIdentification(
-                micURL: failed.micAudioURL,
-                systemURL: failed.systemAudioURL,
-                outputFolder: outputFolder,
-                taskId: failedId,
-                healthInfo: Self.retryHealthInfo(for: failed),
-                splitLocalSpeakers: failed.splitLocalSpeakers,
-                meetingTitle: failed.meetingTitle,
-                recordingDate: failed.recordingDate ?? failed.timestamp,
-                sourceFailedTranscriptionId: failedId,
-                languageSelection: failed.languageSelection
-            )
+            let timings = MeetingPipelineTimings()
+            let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
+                try await transcribeWithSpeakerIdentification(
+                    micURL: failed.micAudioURL,
+                    systemURL: failed.systemAudioURL,
+                    outputFolder: outputFolder,
+                    taskId: failedId,
+                    healthInfo: Self.retryHealthInfo(for: failed),
+                    splitLocalSpeakers: failed.splitLocalSpeakers,
+                    meetingTitle: failed.meetingTitle,
+                    recordingDate: failed.recordingDate ?? failed.timestamp,
+                    sourceFailedTranscriptionId: failedId,
+                    languageSelection: failed.languageSelection
+                )
+            }
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
 
@@ -2244,7 +2263,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 // `.error(oldMessage)` on top of a retry that just succeeded.
                 // Every other success path already publishes before it
                 // decrements; this was the sole inversion.
-                self.publishTranscriptSaved(from: transcriptURL, taskId: failedId)
+                self.publishTranscriptSaved(from: transcriptURL, taskId: failedId, timings: timings.snapshot())
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 return true

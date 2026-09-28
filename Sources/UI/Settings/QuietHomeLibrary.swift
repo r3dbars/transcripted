@@ -81,7 +81,7 @@ struct QuietHomeHeader: View {
                     Button(action: onAttention) {
                         Text(attentionTitle)
                             .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.accent)
+                            .foregroundStyle(LibraryTokens.attention)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("transcripted.home.attention.link")
@@ -569,6 +569,9 @@ struct QuietMeetingExpansion: View {
             let minutes = max(1, Int((end.timeIntervalSince(start) / 60).rounded()))
             parts.append("\(minutes) min")
         }
+        if let modelName = item.transcriptionModelName {
+            parts.append(modelName)
+        }
         return parts.joined(separator: "  ·  ")
     }
 
@@ -1014,5 +1017,12 @@ extension View {
     /// currently-open Home meeting expansion.
     func homeBackgroundTapCatcher(onTap: @escaping () -> Void) -> some View {
         modifier(HomeBackgroundTapCatcherModifier(onTap: onTap))
+    }
+}
+
+extension RecentMeetingItem {
+    /// The speech model that made this transcript, e.g. "Parakeet V3".
+    var transcriptionModelName: String? {
+        transcriptionEngine.flatMap(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier:))
     }
 }

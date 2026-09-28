@@ -41,6 +41,13 @@ class ParakeetEngine: ObservableObject {
     /// Set while dictation records through the pinned-device recorder
     /// (ParakeetPinnedMicrophone.swift) instead of this engine.
     var pinnedDictationRecording: ParakeetPinnedDictationRecording?
+    /// Set when a pinned start fell back to this engine, cleared when the
+    /// recorder next starts. Keeps engine warmup on in between
+    /// (`PinnedDictationInputPolicy.skipsEngineWarmup`).
+    var pinnedDictationFellBackToEngine = false
+    /// The last stopped take the pinned recorder made only for speed, until
+    /// its transcript scores it (`PinnedDictationSpeedPath`).
+    var pendingPinnedSpeedPathTake: PinnedDictationSpeedPathTake?
     /// The meeting-minted claim on its live mic stream, or `nil` when
     /// dictation owns its own mic path. Replaces the former bare
     /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's
@@ -66,6 +73,9 @@ class ParakeetEngine: ObservableObject {
     let pendingSamplesLock = NSLock()
     var pendingSamples = RecordedAudioTimeline()
     var lastAudioSampleAt: CFAbsoluteTime = 0
+    /// When the first audio buffer of this dictation arrived. Guarded by
+    /// `pendingSamplesLock`; a recovery restart keeps the original value.
+    var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
     nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
@@ -159,6 +169,14 @@ class ParakeetEngine: ObservableObject {
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
     var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
+    /// The last take's mic delivered audio, but every sample was exactly
+    /// zero: what a hardware-muted mic sends. Reset at each recording start.
+    var lastRecordingWasDigitalSilence: Bool { didReceiveAudioSamples && !didReceiveNonZeroAudioSamples }
+    /// Arrival time of this dictation's first audio buffer, for the
+    /// press-to-first-sound timing. Nil until audio arrives.
+    func firstAudioSampleTime() -> CFAbsoluteTime? {
+        pendingSamplesLock.withLock { firstAudioSampleAt }
+    }
 
     func receivedAudioSamples(since observationTime: CFAbsoluteTime) -> Bool {
         pendingSamplesLock.withLock {
@@ -908,6 +926,7 @@ class ParakeetEngine: ObservableObject {
         )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                initialDelayNanoseconds: DictationInputDeviceBindingPolicy.initialSettleDelay(for: selection),
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false
@@ -1028,7 +1047,9 @@ class ParakeetEngine: ObservableObject {
             )
             guard startWorkIsCurrent() else { throw CancellationError() }
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
+            // A route change after the format read makes installTap raise an
+            // Objective-C exception; the guard turns it into a failed start.
+            try AudioTapInstallGuard.run(operation: "dictation_start") { inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
                 guard startCancellationState.canDeliverSamples else { return }
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -1049,6 +1070,7 @@ class ParakeetEngine: ObservableObject {
                     self.didReceiveAudioSamples = true
                     if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
                     self.lastAudioSampleAt = sampleArrivalTime
+                    if self.firstAudioSampleAt == nil { self.firstAudioSampleAt = sampleArrivalTime }
                     self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
                     var droppedSeconds = 0.0
                     let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
@@ -1111,7 +1133,7 @@ class ParakeetEngine: ObservableObject {
                     guard startCancellationState.canDeliverSamples else { return }
                     self?.audioLevel = normalized
                 }
-            }
+            } }
             guard startWorkIsCurrent() else { throw CancellationError() }
             stageTimings["audio_tap_install_ms"] = Self.elapsedMilliseconds(since: tapInstallStartedAt)
 
@@ -1794,6 +1816,9 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
+            if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+                firstAudioSampleAt = nil
+            }
         }
         if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
             return pinnedStarted

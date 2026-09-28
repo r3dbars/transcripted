@@ -1,5 +1,8 @@
 import CryptoKit
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 /// Which saved meetings a dictionary correction would still change.
 struct DictionaryPastMeetingScan: Equatable, Sendable {
@@ -604,14 +607,8 @@ enum DictionaryPastMeetingFix {
     }
 
     private static func writePreservingCreationDate(_ text: String, to url: URL, fileManager: FileManager) throws {
-        let creationDate = (try? fileManager.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
-        try text.write(to: url, atomically: true, encoding: .utf8)
+        try TranscriptFileRewrite.write(text, to: url, fileManager: fileManager)
         fileManager.restrictFileToOwnerOnly(at: url)
-        // The new modification date is kept on purpose so Home's cache and the
-        // agent index see the change.
-        if let creationDate {
-            try? fileManager.setAttributes([.creationDate: creationDate], ofItemAtPath: url.path)
-        }
     }
 
     static func sha256(_ text: String) -> String {

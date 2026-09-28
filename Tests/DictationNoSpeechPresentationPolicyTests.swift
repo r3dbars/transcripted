@@ -45,6 +45,29 @@ func testDictationNoSpeechPresentationPolicy() {
         )
     }
 
+    runSuite("DictationNoSpeechPresentationPolicy names a mic that sent only silence") {
+        let muted = DictationNoSpeechPresentationPolicy.message(
+            trigger: "physical_key",
+            shortcutMode: .pushToTalk,
+            silentMicName: "BEACN Mic"
+        )
+        assertEqual(
+            muted,
+            "BEACN Mic sent only silence. If it has a mute button or switch, turn it off, or pick another mic in Settings.",
+            "all-zero audio is a muted mic, not a quiet speaker, so say which mic and what to check"
+        )
+        assertFalse(muted.contains("Hold the dictation key"), "they held the key; the mic is the problem")
+        assertTrue(
+            DictationNoSpeechPresentationPolicy.message(trigger: "menu", silentMicName: "  ").hasPrefix("Your microphone sent only silence."),
+            "a blank device name still reads naturally"
+        )
+        assertEqual(
+            DictationNoSpeechPresentationPolicy.message(trigger: "menu", reason: .recordingTooShort, silentMicName: "BEACN Mic"),
+            DictationNoSpeechPresentationPolicy.message(trigger: "menu", reason: .recordingTooShort),
+            "only plain no-speech takes the silent-mic copy"
+        )
+    }
+
     runSuite("DictationNoSpeechPresentationPolicy separates too-short recordings from silence") {
         let message = DictationNoSpeechPresentationPolicy.message(
             trigger: "menu",

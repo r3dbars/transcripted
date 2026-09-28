@@ -461,7 +461,7 @@ extension TranscriptionTaskManager {
 
                 if !didFinalize {
                     do {
-                        try originalTranscriptData.write(to: resolvedURL, options: .atomic)
+                        try TranscriptFileRewrite.write(originalTranscriptData, to: resolvedURL)
                         FileManager.default.restrictToOwnerOnly(atPath: resolvedURL.path)
                     } catch {
                         AppLogger.speakers.error("Speaker naming transcript rollback failed", [

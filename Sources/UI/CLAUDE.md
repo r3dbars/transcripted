@@ -22,6 +22,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts, plus the "Transcribe It" button title on messages about a saved recording (it runs the same import as Capture → Transcribe Audio File on that file)
 - `Overlay/DictationOverlayPlacementPolicy.swift` — pure geometry for the dictation overlay: AX-rect-to-Cocoa conversion, screen selection, and target-rect validation
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
+- `Overlay/DictationStartCuePolicy.swift` — decides whether the start click plays on key press (built-in or wired mic) or waits until recording starts (a headset, any input that could be one, or a mic `PinnedDictationSpeedPath` moved back to the engine)
 - `Overlay/DictationSessionCapWarningPolicy.swift` — the live "28s left" countdown the listening pill shows in the last 30 seconds before the 5-minute dictation cap, worded for push-to-talk vs hands-free
 - `Overlay/DictationQueuedStartPolicy.swift` — a dictation shortcut press while the last take is still transcribing is remembered and starts when that take finishes (up to 2 s), instead of being refused
 - `Overlay/DictationStartActivation.swift` — optional foreground-activation handshake (and focus restore) tried after a background microphone start fails; a recovery attempt, not a mic-readiness signal
@@ -44,6 +45,11 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions (including the saved and error pills' Open, which reveals the meeting on the Meetings page); detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 - `Overlay/CapturePillController.swift` — owns the non-activating detected-meeting capture pill panel (the Record / Not now / Remind prompt): presentation, countdown and auto-dismiss timing, and its event monitor
 - `Overlay/CapturePillPlacementPolicy.swift` — pure geometry for positioning the detected-meeting capture pill on the screen under the mouse
+- `Overlay/NotchIslandController.swift` — the opt-in Notch island (Settings › Dictation window › Notch island): one black shape that grows out of the MacBook notch, or hangs from the top edge of a display without one, and carries dictation, meetings, and the call-detected prompt. `FloatingOverlayController`, `MeetingOverlayController`, and `CapturePillController` keep their state machines, timers, and actions; in island mode they skip their own panels and push plain snapshots here, and the island routes taps back to them. It picks the screen under the pointer and keeps it while shown. Motion runs in Core Animation: the panel is built at launch (`prewarm`), opens at a fixed envelope size (`NotchIslandGeometry.envelope`) and never resizes mid-animation, and a continuous-corner mask layer springs out of the notch (or swells from a small nub at the top edge of a display without one) while the content blurs in; the wings ride the same spring when the island resizes. Mouse monitors make the envelope click-through everywhere except over the island and drive hover. It opens its drop-down on hover (0.12 s in, 0.38 s out) and by itself for messages and prompts (a click closes those until something new needs saying), and lingers ~2.6 s on a finished dictation with Copy / Paste again
+- `Overlay/NotchIslandPresentation.swift` — Foundation-pure rules for what the island shows: the two wings and the drop-down for every dictation, meeting, and call-prompt state. A live meeting keeps the left wing while a dictation takes the right; the call prompt waits while a dictation runs; with a drop-down open the wings only report status, so no button shows twice
+- `Overlay/NotchIslandGeometry.swift` — pure geometry: notch detection from the screen's safe area and top areas, content-sized wings (equal around the camera in notch mode), the 460 pt drop-down, the grow/shrink frames, the fixed envelope window, and a screen-width clamp; plus `NotchIslandMotion` (the grow/edge/shrink springs, fades and blur timing)
+- `Overlay/NotchIslandView.swift` — AppKit drawing for the island (wings, level bars, meters, rings, the drop-down's rows and buttons); no SwiftUI hosting
+- `Overlay/NotchIslandPanel.swift` — borderless non-activating panel at the status-bar level, excluded from screen capture (so screenshots can't show the island; review changes by rendering `NotchIslandView` offscreen), never key, and allowed to sit over the menu bar
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -58,17 +64,18 @@ into a taller loading or error state.
 
 ### MenuBar/
 
-- `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
+- `MenuBar/MenuBarActionRowView.swift` — AppKit control backing the two side-by-side buttons (`.button` size: short title, shortcut only when it fits, detail as tooltip) and the utility rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarGlyph.swift` — the menu bar status item icon: the app icon's speech bubble with the hidden T, drawn in code as a template image (outline when idle, filled while dictating, filled with a dot while a meeting records); geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup; "Starting…"/"Saving…" around it)
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings (clickable when they have a fix to open), and the red "Recording" state while a meeting records
+- `MenuBar/MenuBarHeaderView.swift` — popover header with no title: hidden entirely when idle and ready; shows a status line for warmup, a transcript being made, and starting/saving a meeting (a steady recording has no line: the red Stop button with its timer says it), plus hotkey warnings (clickable when they have a fix to open)
 - `MenuBar/MenuBarMeetingCapturePhase.swift` — Foundation-pure starting/recording/saving phase of a live meeting capture, used by the popover header, the meeting row, and the status item's right-click menu
-- `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access, or the macOS Fn key conflict)
+- `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access); the macOS Fn key conflict is kept out of the menu and shown in Settings > Shortcuts instead
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
-- `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
-- `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
+- `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (Paste Last Dictation keeps its shortcut but has no row)
+- `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate"); the full title stays the accessibility label
+- `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 
@@ -112,12 +119,15 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button styles, `SettingsStatusCard`, permission status rows) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection, plus the ⌘F Home find-focus token
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (today, home, dictations, writing, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts (⌘1 Today through ⌘6 Agent, Writing on ⌘4), plus `WritingSidebarNewBadge` (the defaults key the Writing page sets to drop the sidebar's "New" badge); Meetings keeps the `home` raw value so automation ids and analytics `page_id` stay stable; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Today/Meetings/Dictations/Writing/Speakers/Agent), and the row view with its optional trailing "New" badge (Writing, until setup finishes); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
+- `Settings/TodayPresentation.swift` — Foundation-pure Today numbers and copy: today/this-week counts, the seven-day tape marks (`TodayTapeBuilder`), and the Recent context merge
+- `Settings/TodayViewModel.swift` — loads the Today snapshot off-main from the cached meeting index, the dictation day files, and the `Writing_<date>.md` day files; local files only
+- `Settings/Pages/TodaySettingsPage.swift` — the Today page: a one-sentence header for the picked day (with a per-app writing breakdown), the seven-day week strip top right, the picked day as three lanes (meetings, dictation, writing) with a hover/click preview card under them (after the Context app's Days view), and the paged Recent context list
 - `Settings/TranscriptedSettingsView.swift` — main settings view; still owns every Home side effect (delete/rename/copy/retranscribe, the shared root alert, undo staging, analytics) even after the Home page view moved out, partly because several pieces are pinned in place by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
-- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (`AboutSettingsPage.swift`, `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift`); model, shortcut, permission, and reporting editors are injected into General's cards by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (`AboutSettingsPage.swift`, `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift`, `WritingSettingsPage.swift`); model, shortcut, permission, and reporting editors are injected into General's cards by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
 This is a summary of `Settings/`. `Sources/UI/Settings/CLAUDE.md` has the full per-file list, including the small presentation/policy helpers.
 
@@ -158,8 +168,8 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The main window is content-first: the sidebar leads with Meetings, Dictations,
-Speakers, and Agent; the sidebar gear opens one combined scrolling settings
+The main window is content-first: the sidebar leads with Today, then Meetings,
+Dictations, Writing, Speakers, and Agent, and the window opens on Today; the sidebar gear opens one combined scrolling settings
 page in the content pane (the General/Storage/About tab strip was removed —
 everything is found by scrolling). Meetings
 (the `.home` page case) is the meetings surface — a page title with one status
@@ -240,6 +250,8 @@ Relevant direct coverage:
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillFinishPresentationTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
+- `Tests/NotchIslandPresentationTests.swift`
+- `Tests/NotchIslandGeometryTests.swift`
 - `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
@@ -248,5 +260,6 @@ Relevant direct coverage:
 - `Tests/SpeakerReviewPresentationGateTests.swift`
 - `Tests/SpeakerVoiceRowPresentationTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
+- `Tests/TodayPresentationTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation
