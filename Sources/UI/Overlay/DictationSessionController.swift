@@ -1468,6 +1468,8 @@ class DictationSessionController: ObservableObject {
                 case .offerPasteAnyway:
                     // Probably a wrong-language guess, but the check can be
                     // wrong, so the text is one press away and the audio stays.
+                    // Unreachable: decide() saw this text, and nothing between
+                    // it and here (all synchronous, on the main actor) clears it.
                     guard let heldText = appState.sttRouter.heldBackDictationText else { break }
                     let heldRecovery = self.stoppedAudioRecovery
                     let heldSaveContext = self.dictationContext()

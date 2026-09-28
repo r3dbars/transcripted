@@ -59,6 +59,8 @@ func testDictationEmptyTranscriptPolicy() {
         let heardNothing = decide(.audioNeedsRecovery, saved: true)
         assertEqual(heardNothing.action, .offerSavedRecording(remindAtLaunch: true),
                     "audio the model heard nothing in keeps its launch reminder")
+        assertFalse(heardNothing.discardsSavedRecording,
+                    "audio the model heard nothing in must be kept: deleting it here loses the user's recording")
     }
 
     runSuite("Audio that needs recovery with no saved WAV offers the checkpoint retry") {
@@ -69,6 +71,17 @@ func testDictationEmptyTranscriptPolicy() {
     runSuite("Anything else just says why") {
         assertEqual(decide(.modelFailure, saved: false).action, .showMessage, "a model failure with nothing saved")
         assertEqual(decide(.otherLanguage).action, .showMessage, "a language guess with nothing held and nothing saved")
+    }
+
+    runSuite("Only silence or a too-short take drops the saved audio") {
+        for reason in [DictationEmptyTranscriptionReason.modelFailure, .audioNeedsRecovery, .otherLanguage] {
+            for saved in [true, false] {
+                assertFalse(decide(reason, saved: saved).discardsSavedRecording,
+                            "\(reason.rawValue) keeps its audio for another try")
+            }
+        }
+        assertTrue(decide(.noSpeech).discardsSavedRecording, "silence isn't kept")
+        assertTrue(decide(.recordingTooShort).discardsSavedRecording, "a too-short take isn't kept")
     }
 
     runSuite("Only a mis-tap counts as cancelled") {
