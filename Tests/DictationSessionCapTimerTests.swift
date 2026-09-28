@@ -55,6 +55,15 @@ func testDictationSessionCapTimer() async {
 
         assertEqual(fake.clock, 1_000 + 300, "the cap still lands 300 seconds after recording began")
     }
+
+    await runSuite("Part-second waits round up, so the timer never wakes just short of the cap") {
+        let fake = CapTimerFake(capSeconds: 300)
+        fake.clock = 1_000 + 0.25  // the task starts a quarter second in
+        await DictationSessionCapTimer.run(fake.steps())
+
+        assertTrue(fake.clock >= 1_000 + 300, "it only returns once the cap is reached")
+        assertTrue(fake.clock < 1_000 + 300 + 0.001, "and not meaningfully after it")
+    }
 }
 
 // MARK: - Fake
