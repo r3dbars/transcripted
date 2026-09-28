@@ -1322,66 +1322,67 @@ class DictationSessionController: ObservableObject {
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
-            if !appState.sttRouter.isRecordingModelLoaded {
-                stopTiming.modelWaitStartedAt = CFAbsoluteTimeGetCurrent()
-                appState.logger.log("DICTATION | waiting for voice model before transcribe…")
-                self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
-                let modelWaitDeadline = ProcessInfo.processInfo.systemUptime
-                    + TranscriptedConstants.modelLoadWaitBudget
-                modelWait: while !appState.sttRouter.isRecordingModelLoaded,
-                    ProcessInfo.processInfo.systemUptime < modelWaitDeadline {
-                    guard !Task.isCancelled,
-                          self.isDictating,
-                          self.currentDictationSessionID == taskSessionID else { return }
-                    self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
-                    switch appState.sttRouter.recordingModelDownloadState {
-                    case .failed:
-                        // The concurrent load already failed — surface the
-                        // error now instead of waiting out the full budget.
-                        break modelWait
-                    case .notLoaded, .cached:
-                        // Nothing is loading the model; kick (or join) the
-                        // deduped initialization instead of waiting for
-                        // another caller to do it.
-                        appState.sttRouter.requestRecordingModelInitialization()
-                        await appState.sttRouter.waitForRecordingModelLoadProgress(until: modelWaitDeadline)
-                    case .downloading, .loading, .ready:
-                        await appState.sttRouter.waitForRecordingModelLoadProgress(until: modelWaitDeadline)
-                    }
-                }
-                guard !Task.isCancelled, self.isDictating,
-                      self.currentDictationSessionID == taskSessionID else { return }
-                guard appState.sttRouter.isRecordingModelLoaded else {
-                    appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
-                        let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
-                        overlayController.showError(
-                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
-                            actionTitle: savedAudioAction.title,
-                            action: savedAudioAction.action
-                        )
-                    } else {
-                        overlayController.showError(
-                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
-                        )
-                    }
-                    ProductFrictionTelemetry.track(
-                        surface: .dictation,
-                        stage: "dictation_transcribe",
-                        result: .blocked,
-                        failureKind: "model_not_ready",
-                        elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                        routeShape: self.dictationAnalyticsProperties()["route_shape"],
-                        modelState: "not_ready"
-                    )
-                    isDictating = false
-                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
-                    return
-                }
-                stopTiming.modelReadyAt = CFAbsoluteTimeGetCurrent()
-            } else {
+            let modelWait = await DictationPostStopModelWait.run(
+                DictationPostStopModelWait.Steps(
+                    isCurrent: {
+                        !Task.isCancelled
+                            && self.isDictating
+                            && self.currentDictationSessionID == taskSessionID
+                    },
+                    isModelLoaded: { appState.sttRouter.isRecordingModelLoaded },
+                    modelState: { appState.sttRouter.recordingModelDownloadState },
+                    requestModelInitialization: { appState.sttRouter.requestRecordingModelInitialization() },
+                    waitForProgress: { deadline in
+                        await appState.sttRouter.waitForRecordingModelLoadProgress(until: deadline)
+                    },
+                    waitStarted: {
+                        appState.logger.log("DICTATION | waiting for voice model before transcribe…")
+                        self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
+                    },
+                    stillWaiting: {
+                        self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
+                    },
+                    uptime: { ProcessInfo.processInfo.systemUptime },
+                    now: { CFAbsoluteTimeGetCurrent() },
+                    budget: TranscriptedConstants.modelLoadWaitBudget
+                )
+            )
+            switch modelWait.outcome {
+            case .alreadyLoaded:
                 stopTiming.modelWaitStartedAt = stopTiming.micStoppedAt
                 stopTiming.modelReadyAt = stopTiming.micStoppedAt
+            case .ready:
+                stopTiming.modelWaitStartedAt = modelWait.marks.waitStartedAt
+                stopTiming.modelReadyAt = modelWait.marks.readyAt
+            case .abandoned:
+                return
+            case .unavailable:
+                stopTiming.modelWaitStartedAt = modelWait.marks.waitStartedAt
+                appState.logger.log("DICTATION | voice model failed to load for transcription")
+                if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                    let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
+                    overlayController.showError(
+                        DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
+                        actionTitle: savedAudioAction.title,
+                        action: savedAudioAction.action
+                    )
+                } else {
+                    overlayController.showError(
+                        DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+                    )
+                }
+                ProductFrictionTelemetry.track(
+                    surface: .dictation,
+                    stage: "dictation_transcribe",
+                    result: .blocked,
+                    failureKind: "model_not_ready",
+                    elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    routeShape: self.dictationAnalyticsProperties()["route_shape"],
+                    modelState: "not_ready"
+                )
+                isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
+                return
             }
             overlayController.state = .drafting
             overlayController.resizePanelToCompact()
