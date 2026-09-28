@@ -10,9 +10,12 @@ Support root:
 
 Users can point the capture library at a different folder in Settings via the
 `transcriptSaveLocation` preference. When the current library still has saved
-meetings or dictations, Settings offers to copy those captures to the new
-folder before switching. The copy never deletes originals and skips destination
-name collisions instead of overwriting. App-owned state, cache, logs, and temp
+meetings, dictations, or writing, Settings offers to move or copy those captures
+to the new folder before switching. Both skip destination name collisions instead of
+overwriting. Copy never deletes originals. Move copies first, switches the
+library, then sends each copied original to the Trash only if its copy exists
+and the original hasn't changed since it was copied; anything else stays in
+the old folder. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
 ## Dictation
@@ -25,6 +28,36 @@ Dictation artifacts live under:
 `DictationStoragePaths.transcriptsFolder` points directly at the dictations
 folder. There is no extra `transcripts/` subdirectory in the current app
 layout.
+
+## Writing
+
+Saved writing lives under:
+
+- root: `<capture-library>/writing/`
+- runtime output: one Markdown file per local day, like `Writing_2026-09-25.md`.
+  The format is in `docs/capture-format.md` ("Writing day files").
+
+The main app writes these day files, never the keyboard. The folder is created
+0700 and each file 0600. `FileManager.writingSupportDir` resolves the folder
+(`FileManager.writingDirectory(in:)` for a library other than the current one),
+and `mcp-directories.json` lists it as `writingDirectory`. That key is optional:
+manifests written before Writing lack it and get rewritten once with it, and
+tools that predate it ignore it. Choosing a new capture library prepares
+`writing/` next to `meetings/` and `dictations/`, and Move and Copy carry
+`writing/*.md` with the same collision and changed-since-copy rules as
+dictation day files.
+
+App-owned Writing state stays under Application Support when the capture
+library moves:
+
+- state root: `~/Library/Application Support/Transcripted/writing/`, holding
+  the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
+  `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
+  ported; accepted text is saved only by Save my writing), and the encrypted
+  `Personal History/`
+- models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
+  excluded from backup
+- diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`
 
 ## Meetings
 
@@ -57,6 +90,7 @@ App-owned meeting state is stored separately under:
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - queued import journals: `~/Library/Application Support/Transcripted/state/imported_transcription_queue/`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
+- dictionary-fix backups: `~/Library/Application Support/Transcripted/state/dictionary-fix-backups/` (one folder per "Fix them" from the Corrections list: the original text of each meeting it changed plus a `receipt.json`; kept 3 days so Undo survives a relaunch, pruned at launch, and dropped when the meeting is deleted from Home). Backups follow the meeting's file name, so renaming a fixed meeting drops its Undo at the next launch; the prune is skipped while the meetings folder is missing (for example on an unmounted drive)
 
 Claude Desktop integration installs the bundled read-only MCP helper under:
 
@@ -87,6 +121,7 @@ App-side observability output currently lives under:
 
 - debug log: `~/Library/Application Support/Transcripted/logs/debug.log`
 - events: `~/Library/Application Support/Transcripted/logs/events.jsonl`
+- Writing diagnostics: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`
 
 The embedded `TranscriptedCore` logger also writes JSONL under the same logs
 directory:

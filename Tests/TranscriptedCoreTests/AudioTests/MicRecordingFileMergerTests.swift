@@ -214,6 +214,45 @@ final class MicRecordingFileMergerTests: XCTestCase {
         XCTAssertEqual(average(of: merged.samples, range: 1_800..<3_000), 0.6, accuracy: 0.02)
     }
 
+    func testHeaderOnlyRecoverySegmentStillMergesAtFullFidelity() throws {
+        // Stop can land after a recovery lists its segment but before the
+        // first frame. Nothing was lost, so the sources must not be kept.
+        let primaryURL = temporaryDirectory.appendingPathComponent("primary.wav")
+        let recoveryURL = temporaryDirectory.appendingPathComponent("recovery.wav")
+
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        do {
+            // What a recovery writer leaves when it is closed before its first frame.
+            let format = try XCTUnwrap(AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false
+            ))
+            let file = try AVAudioFile(
+                forWriting: recoveryURL,
+                settings: format.settings,
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
+            )
+            file.close()
+        }
+        XCTAssertEqual(try WAVHeaderRepair.probe(at: recoveryURL).dataActualSize, 0)
+
+        let outcome = try MicRecordingFileMerger.merge(
+            primaryURL: primaryURL,
+            segments: [
+                MicRecordingSegment(url: primaryURL),
+                MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1)
+            ]
+        )
+
+        XCTAssertEqual(outcome.skippedSegments, 0)
+        XCTAssertEqual(outcome.appendedSegments, 1)
+        XCTAssertTrue(outcome.isFullFidelity)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: primaryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryURL.path))
+        let merged = try AudioResampler.loadWAV(url: try XCTUnwrap(outcome.url))
+        XCTAssertEqual(average(of: merged.samples, range: 200..<1_400), 0.3, accuracy: 0.02)
+    }
+
     func testMergeThrowsWhenNoSegmentContributesAudio() throws {
         let primaryURL = temporaryDirectory.appendingPathComponent("primary.wav")
         let recoveryURL = temporaryDirectory.appendingPathComponent("recovery.wav")

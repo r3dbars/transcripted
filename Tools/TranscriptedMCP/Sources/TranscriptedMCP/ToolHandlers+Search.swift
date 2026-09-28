@@ -35,7 +35,7 @@ func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
 
 // MARK: - search_context
 
-func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
+func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL], writingDirs: [URL] = []) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue,
           !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return invalidAgentCaptureQueryInputResult("Missing required parameter: query")
@@ -61,7 +61,7 @@ func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, me
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
-        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
+        return try contextEmptyResult(kind: kind, meetingDirs: meetingDirs, dictationDirs: dictationDirs, writingDirs: writingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -77,7 +77,7 @@ func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, me
 
 // MARK: - recent_context
 
-func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
+func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL], writingDirs: [URL] = []) throws -> CallTool.Result {
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
@@ -87,7 +87,7 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
     hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if result.items.isEmpty {
-        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
+        return try contextEmptyResult(kind: kind, meetingDirs: meetingDirs, dictationDirs: dictationDirs, writingDirs: writingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -158,16 +158,36 @@ private func hydrateMeetingTitles<T>(
     }
 }
 
+/// Empty payload for the mixed-context tools. A writing-only query reports the
+/// writing folder and counts; everything else keeps the mixed payload, with the
+/// writing folder added only when the query covered writing.
+private func contextEmptyResult(
+    kind: ContextKind,
+    meetingDirs: [URL],
+    dictationDirs: [URL],
+    writingDirs: [URL],
+    index: TranscriptIndex
+) throws -> CallTool.Result {
+    if kind == .writing {
+        return try emptyResult(scope: .writing, searchedDirectories: writingDirs, index: index)
+    }
+    let searched = meetingDirs + dictationDirs + (kind.includes(.writing) ? writingDirs : [])
+    return try emptyResult(scope: .mixed, searchedDirectories: searched, index: index)
+}
+
 private func artifactKind(for kinds: [ContextKind]) -> String {
-    let set = Set(kinds)
-    if set.contains(.meeting), set.contains(.dictation) {
+    let set = Set(kinds).subtracting([.all])
+    guard set.count == 1, let only = set.first else {
         return "mixed"
     }
-    if set.contains(.meeting) {
+    switch only {
+    case .meeting:
         return "meeting"
-    }
-    if set.contains(.dictation) {
+    case .dictation:
         return "dictation"
+    case .writing:
+        return "writing"
+    case .all:
+        return "mixed"
     }
-    return "mixed"
 }

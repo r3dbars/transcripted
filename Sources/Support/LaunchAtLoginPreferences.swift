@@ -43,3 +43,43 @@ enum LaunchAtLoginPreferences {
         onboardingCompleted && !hasExplicitChoice && !hasAppliedDefault
     }
 }
+
+/// What the Launch at login row says inline when it can't do its job. A
+/// tooltip hid both cases: a failed switch just flipped back, and a login item
+/// waiting on macOS approval shows On but never launches, which quietly
+/// breaks meeting detection.
+enum LaunchAtLoginNoticePolicy {
+    static let needsApprovalText =
+        "Transcripted is off in System Settings > Login Items, so it won't open at login. Turn it on there, or switch this off."
+
+    static func notice(needsApproval: Bool, failureMessage: String?) -> String? {
+        if let failureMessage, !failureMessage.isEmpty {
+            return failureMessage
+        }
+        return needsApproval ? needsApprovalText : nil
+    }
+}
+
+/// Whether a fresh launch opens the main window. Opening the app yourself
+/// (Dock, Finder, Spotlight) shows Home so it's clear the app is running; a
+/// start at login stays quietly in the menu bar. Unfinished setup shows its
+/// own window instead, and our launch harnesses never get a window.
+enum LaunchWindowPolicy {
+    /// macOS doesn't always tag a login-item start (SMAppService items and
+    /// apps it reopens at login can arrive untagged), so a launch this soon
+    /// after the user logged in counts as a login start too.
+    static let loginStartWindowSeconds: TimeInterval = 120
+
+    static func shouldOpenMainWindow(
+        launchedAsLoginItem: Bool,
+        secondsSinceLogin: TimeInterval?,
+        onboardingCompleted: Bool,
+        isAutomatedLaunch: Bool
+    ) -> Bool {
+        guard onboardingCompleted, !launchedAsLoginItem, !isAutomatedLaunch else { return false }
+        if let secondsSinceLogin, secondsSinceLogin < loginStartWindowSeconds {
+            return false
+        }
+        return true
+    }
+}

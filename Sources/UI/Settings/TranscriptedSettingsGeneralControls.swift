@@ -143,6 +143,27 @@ struct GeneralTitleLabel: View {
     }
 }
 
+/// Shown under the dictation window picker while Notch island is picked.
+struct NotchIslandScreenSharingRow: View {
+    @AppStorage(NotchIslandPreferences.visibleInScreenSharingKey)
+    private var visibleInScreenSharing = false
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Show island in screen sharing",
+            isOn: $visibleInScreenSharing,
+            help: visibleInScreenSharing
+                ? "The island shows in screen sharing, recordings, and screenshots."
+                : "The island is hidden from screen sharing, recordings, and screenshots.",
+            info: GeneralInfo(
+                title: "Show island in screen sharing",
+                message: "Off keeps the island out of screen sharing, screen recordings, and screenshots, so people watching your screen never see what you dictate. Turn it on to demo it or capture it in a screenshot."
+            ),
+            automationIdentifier: "transcripted.settings.general.island-screen-sharing"
+        )
+    }
+}
+
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool
@@ -182,13 +203,13 @@ struct DictationOverlayModeRow: View {
     @Binding var selection: DictationOverlayPresentationMode
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 GeneralTitleLabel(
                     title: "Dictation window",
                     info: GeneralInfo(
                         title: "Dictation window",
-                        message: "Choose how Transcripted shows live dictation. Near text box uses the full window beside the focused field. Mini cursor uses a tiny waveform that follows your pointer."
+                        message: "Choose how Transcripted shows live dictation. Near text box uses the full window beside the focused field. Mini cursor uses a tiny waveform that follows your pointer. Notch island grows out of the MacBook notch, or hangs from the top of other displays, and shows meetings and call prompts too."
                     )
                 )
 
@@ -197,9 +218,6 @@ struct DictationOverlayModeRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .layoutPriority(1)
-
-            Spacer(minLength: 10)
 
             HStack(alignment: .top, spacing: 10) {
                 ForEach(DictationOverlayPresentationMode.allCases) { mode in
@@ -210,17 +228,17 @@ struct DictationOverlayModeRow: View {
                     )
                 }
             }
-            .frame(maxWidth: 374, alignment: .trailing)
-        .help(selection.detail)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Dictation window options"))
-        .accessibilityValue(Text(selection.title))
-        .accessibilityHint(Text("Choose one of two dictation window styles."))
-        .accessibilityIdentifier("transcripted.settings.general.dictation-window.options")
+            .fixedSize(horizontal: false, vertical: true)
+            .help(selection.detail)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Dictation window options"))
+            .accessibilityValue(Text(selection.title))
+            .accessibilityHint(Text("Choose one of three dictation window styles."))
+            .accessibilityIdentifier("transcripted.settings.general.dictation-window.options")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(minHeight: 124)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -256,8 +274,8 @@ private struct DictationOverlayModeChoice: View {
             copyContent
         }
         .padding(10)
-        .frame(width: 182, alignment: .topLeading)
-        .frame(minHeight: 112, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(minHeight: 112, maxHeight: .infinity, alignment: .topLeading)
         .background(cardBackground)
         .overlay(cardStroke)
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -317,6 +335,8 @@ private struct DictationOverlayModePreview: View {
                 NearTextOverlayPreview()
             case .cursorMini:
                 MiniCursorOverlayPreview()
+            case .notchIsland:
+                NotchIslandOverlayPreview()
             }
         }
         .frame(height: 46)
@@ -387,6 +407,44 @@ private struct MiniCursorOverlayPreview: View {
                         .frame(width: 50, height: 14)
                 }
         }
+    }
+}
+
+/// A menu bar with the island hanging from it: the mic on one side of the
+/// camera, the live waveform on the other.
+private struct NotchIslandOverlayPreview: View {
+    var body: some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 9)
+
+            HStack(spacing: 0) {
+                HStack(spacing: 3) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(Color.accentColor)
+                    Text("Listening")
+                        .font(.system(size: 6.5, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                }
+                .frame(width: 42, alignment: .leading)
+
+                Color.clear.frame(width: 24)
+
+                MiniWaveformBars(barCount: 8, activeIndex: 5)
+                    .frame(width: 42, height: 10, alignment: .trailing)
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(
+                UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9, style: .continuous)
+                    .fill(Color.black)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
 

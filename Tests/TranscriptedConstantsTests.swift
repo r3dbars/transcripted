@@ -26,6 +26,14 @@ func testTranscriptedConstants() async {
             "fallback restore should still return the user's clipboard promptly when no paste consumer reads it"
         )
         assertTrue(
+            TranscriptedConstants.dictationAutoEnterDelay <= 60_000_000,
+            "Auto Enter follows a proven paste, so its settle stays short"
+        )
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreDelay >= 20_000_000,
+            "a proven paste still gets a margin before the user's clipboard comes back"
+        )
+        assertTrue(
             TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,
             "auto-enter should stay tuned for a fast opt-in stop path"
         )
@@ -39,6 +47,30 @@ func testTranscriptedConstants() async {
         assertTrue(
             TranscriptedConstants.noSpeechDismissDelay < TranscriptedConstants.errorDismissDelay,
             "no-speech recovery should still dismiss faster than regular error states"
+        )
+    }
+
+    runSuite("TranscriptedConstants stretches overlay messages for reading time") {
+        let base = TranscriptedConstants.errorDismissDelay
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 20),
+            base,
+            "a short line keeps the flat base delay"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 100),
+            100 * TranscriptedConstants.messageDwellPerCharacter,
+            "a two-line message gets reading time instead of vanishing after 2.5 seconds"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: base, characterCount: 10_000),
+            TranscriptedConstants.messageDwellMaximum,
+            "a very long message still goes away on its own"
+        )
+        assertEqual(
+            TranscriptedConstants.messageDismissDelay(base: TranscriptedConstants.clipboardNoticeDismissDelay, characterCount: 0),
+            TranscriptedConstants.clipboardNoticeDismissDelay,
+            "the longer clipboard-notice base is never shortened"
         )
     }
 

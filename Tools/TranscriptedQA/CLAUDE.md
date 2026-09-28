@@ -4,19 +4,19 @@ QA testing suite for Transcripted. `Package.swift`, files under `Sources/Transcr
 
 The current package is intentionally small:
 
-### Package Root (1 file)
+### Package Root
 
 | File | Purpose |
 |------|---------|
 | `Package.swift` | Swift package manifest for the standalone QA CLI |
 
-### Root (1 file)
+### Root
 
 | File | Purpose |
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (16 files)
+### Commands/
 
 | File | Purpose |
 |------|---------|
@@ -32,29 +32,30 @@ The current package is intentionally small:
 | `SpeakerStats.swift` | Speaker-recognition lifeline report: funnel, graduation, precision, and 30-day trends from `speaker_match_outcomes` |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `SparkleUpdateSmoke.swift` | No-publish fake-state Sparkle update UI smoke for update-available and downloading menu surfaces |
-| `ValidateAll.swift` | Run all validators: transcripts, dictations, DB, logs, health |
+| `ValidateAll.swift` | Run all validators: transcripts, dictations, writing, DB, logs, health |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
 | `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
 | `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
 
-### Generators/ (1 file)
+### Generators/
 
 | File | Purpose |
 |------|---------|
 | `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
 
-### Validators/ (6 files)
+### Validators/
 
 | File | Purpose |
 |------|---------|
 | `DictationValidator.swift` | Dictation day markdown evidence and metadata checks |
+| `WritingValidator.swift` | Writing day (`Writing_<date>.md`) contract checks: capture type, date, format version, entry IDs, Captured times, 2-character minimum, accepted words, owner-only file/folder modes. No folder or no writing files means no results (writing is opt-in); details never echo text |
 | `HealthChecker.swift` | System health: disk space, model files, DB existence |
 | `LogValidator.swift` | Log file parsing and error pattern detection |
 | `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
 | `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
 | `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
 
-### Utilities/ (5 files)
+### Utilities/
 
 | File | Purpose |
 |------|---------|
@@ -64,7 +65,7 @@ The current package is intentionally small:
 | `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
 | `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
 
-### Models/ (1 file)
+### Models/
 
 | File | Purpose |
 |------|---------|
@@ -80,6 +81,11 @@ The current package is intentionally small:
 | `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `SparkleUpdateSmokeTests.swift` | package-level coverage for fake-state Sparkle update UI smoke evaluation |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing and `ValidationReport` exit-code behavior |
+| `WritingValidatorTests.swift` | writing validator pass/fail fixtures, writing-path resolution, transcript validator skipping writing files |
+| `ImportedAudioSmokeTests.swift` | runs the deterministic imported-audio smoke and checks it passes and writes evidence |
+| `ImportedAudioNativeSmokeTests.swift` | native imported-audio smoke report exit codes (incomplete vs all-pass) |
+| `LegacyCaptureDirectoriesContractTests.swift` | drift guard for the legacy Draft / legacy-shared capture-directory layout in `QADataDirectories.resolve` |
+| `SpeakerStatsTests.swift` | speaker-stats funnel, precision, graduation, and window metrics |
 
 ## Usage
 
@@ -153,4 +159,4 @@ For agent and automation use, the JSON form also includes:
 - Error messages are human-readable for CLI output
 - Defaults follow the app-selected capture library from `mcp-directories.json` or `transcriptSaveLocation`; QA scans the current and existing legacy fallback capture directories while state and logs stay under the app-owned `~/Library/Application Support/Transcripted/` root
 - If current Transcripted capture paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
-- `--path` overrides the meetings capture directory only; use `--dictations-path`, `--state-dir`, and `--log-path` when validating unusual layouts
+- `--path` overrides the meetings capture directory only; use `--dictations-path`, `--writing-path`, `--state-dir`, and `--log-path` when validating unusual layouts. With `--path`, writing is inferred only from a `writing/` folder beside a `meetings` path or inside the given root

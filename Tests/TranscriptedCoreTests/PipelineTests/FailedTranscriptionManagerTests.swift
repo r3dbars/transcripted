@@ -437,11 +437,11 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(failure.isRetryable)
     }
 
-    func testFailedTranscriptionRetryabilityKeepsContentEmptyFailuresPermanent() {
-        // The other half of the policy: when the audio genuinely holds nothing,
-        // retrying can only spend inference time reproducing the same failure.
+    func testFailedTranscriptionRetryabilityKeepsTooShortFailuresPermanent() {
+        // The other half of the policy: when the recording is too short to hold
+        // anything, retrying can only spend inference time reproducing the
+        // same failure.
         for message in [
-            "No speech detected",
             "Recording too short",
             "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
         ] {
@@ -451,6 +451,47 @@ final class FailedTranscriptionManagerTests: XCTestCase {
                 errorMessage: message
             )
             XCTAssertFalse(failure.isRetryable, "\(message) should stay permanent")
+        }
+    }
+
+    func testNoSpeechFailuresOfferRetryForSavedAudio() {
+        // "No speech found" judges the words, not the audio. Short answers the
+        // old pipeline dropped, voices the diarizer missed, or a different
+        // model can all turn the same saved audio into a transcript, so the
+        // row offers Try again. The silence probe still hides it when the
+        // saved files hold no sound at all.
+        let typed = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "No speech detected",
+            errorKind: .noSpeechDetected
+        )
+        XCTAssertTrue(typed.isRetryable)
+
+        for message in ["No speech detected", "Retry failed: No speech detected", "No speech was found in that saved audio."] {
+            let legacy = FailedTranscription(
+                micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+                systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+                errorMessage: message
+            )
+            XCTAssertTrue(legacy.isRetryable, "\(message) should offer retry on legacy rows too")
+        }
+
+        XCTAssertTrue(PipelineErrorKind.noSpeechDetected.offersRetryForSavedAudio)
+        XCTAssertFalse(PipelineErrorKind.recordingTooShort.offersRetryForSavedAudio)
+        XCTAssertFalse(
+            PipelineErrorKind.noSpeechDetected.isRetryable,
+            "the in-flight error is still not transient; only the saved row offers another pass"
+        )
+    }
+
+    func testOffersRetryForSavedAudioMatchesTheOldRuleForEveryOtherKind() {
+        for kind in PipelineErrorKind.allCases where kind != .noSpeechDetected {
+            XCTAssertEqual(
+                kind.offersRetryForSavedAudio,
+                kind.isRetryable || kind.describesRecoverableSource,
+                "\(kind.rawValue) should keep its previous saved-row retry verdict"
+            )
         }
     }
 
@@ -532,7 +573,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
 
         XCTAssertNil(decoded.errorKind, "legacy rows without the errorKind key must decode to nil, not fail or default")
         XCTAssertEqual(decoded.errorMessage, "No speech detected")
-        XCTAssertFalse(decoded.isRetryable, "decoded legacy entry should still classify via the string fallback")
+        XCTAssertTrue(decoded.isRetryable, "decoded legacy no-speech entry should classify via the string fallback and offer retry")
     }
 
     func testFailedTranscriptionManagerLoadsLegacyQueueFileWithoutErrorKind() throws {

@@ -66,6 +66,12 @@ extension AudioObjectID {
         try read(kAudioDevicePropertyTransportType, defaultValue: UInt32(kAudioDeviceTransportTypeUnknown))
     }
 
+    /// Reads `kAudioDevicePropertyDeviceIsAlive`. Throws when the object is
+    /// gone, e.g. a device unplugged or disconnected during sleep.
+    func readIsAlive() throws -> Bool {
+        try read(kAudioDevicePropertyDeviceIsAlive, defaultValue: UInt32(0)) != 0
+    }
+
     /// Reads the device's scalar volume for the requested scope.
     /// Returns the hardware value only; this never writes or adjusts volume.
     func readVolumeScalar(scope: AudioObjectPropertyScope) throws -> Float32 {

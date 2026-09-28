@@ -59,7 +59,8 @@ while kill -0 "$pipeline" 2>/dev/null; do
   if [ $((now - quiet_since)) -lt "$quiet_after" ] || [ "$samples" -ge "$max_samples" ]; then
     continue
   fi
-  for pid in $(pgrep -x xctest || true); do
+  # Only this account's xctest: on a shared Mac, never sample someone else's.
+  for pid in $(pgrep -u "$(id -u)" -x xctest || true); do
     samples=$((samples + 1))
     file="$out_dir/xctest-$pid-sample-$samples.txt"
     {

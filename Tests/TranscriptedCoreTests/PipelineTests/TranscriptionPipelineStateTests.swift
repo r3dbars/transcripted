@@ -210,7 +210,7 @@ final class TranscriptionPipelineStateTests: XCTestCase {
     func testPipelineErrorIdentifiesUnusableMicrophoneAudioWithoutUserData() {
         XCTAssertEqual(
             PipelineError.microphoneAudioUnusable.localizedDescription,
-            "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
+            "Microphone audio was not usable. Open the Meetings page to retry the saved meeting."
         )
     }
 

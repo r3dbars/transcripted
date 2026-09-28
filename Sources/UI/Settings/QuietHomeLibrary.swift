@@ -81,7 +81,7 @@ struct QuietHomeHeader: View {
                     Button(action: onAttention) {
                         Text(attentionTitle)
                             .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.accent)
+                            .foregroundStyle(LibraryTokens.attention)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("transcripted.home.attention.link")
@@ -203,6 +203,10 @@ struct QuietWorkingRow: View {
     /// the live timer instead of a spinner. Stop stays in the menu bar and
     /// the recording overlay — Home only reflects the state.
     var recordingElapsed: String? = nil
+    /// Plain-language reason under a failed row.
+    var detail: String? = nil
+    /// Shows Open on a saved row: expands that meeting in the list.
+    var onOpen: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -242,9 +246,24 @@ struct QuietWorkingRow: View {
                                 .foregroundStyle(LibraryTokens.ink3)
                         }
                     }
+                    if let detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(LibraryTokens.ink2)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("transcripted.home.activity.detail")
+                    }
                 }
             }
             Spacer()
+            if recordingElapsed == nil, let onOpen {
+                Button("Open", action: onOpen)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Show this meeting's transcript")
+                    .accessibilityIdentifier("transcripted.home.activity.open")
+            }
             if recordingElapsed == nil, let onCancel {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.plain)
@@ -549,6 +568,9 @@ struct QuietMeetingExpansion: View {
         if let start = item.startDate, let end = item.endDate, end > start {
             let minutes = max(1, Int((end.timeIntervalSince(start) / 60).rounded()))
             parts.append("\(minutes) min")
+        }
+        if let modelName = item.transcriptionModelName {
+            parts.append(modelName)
         }
         return parts.joined(separator: "  ·  ")
     }
@@ -995,5 +1017,12 @@ extension View {
     /// currently-open Home meeting expansion.
     func homeBackgroundTapCatcher(onTap: @escaping () -> Void) -> some View {
         modifier(HomeBackgroundTapCatcherModifier(onTap: onTap))
+    }
+}
+
+extension RecentMeetingItem {
+    /// The speech model that made this transcript, e.g. "Parakeet V3".
+    var transcriptionModelName: String? {
+        transcriptionEngine.flatMap(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier:))
     }
 }

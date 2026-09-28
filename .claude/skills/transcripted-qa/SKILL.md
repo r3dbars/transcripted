@@ -128,7 +128,7 @@ JSON sidecar validators were removed — the app never wrote those formats.
 
 ### Tier 3 — Log & Crash Analysis
 
-Read `~/Library/Logs/Transcripted/app.jsonl` directly. Check for:
+Read `~/Library/Application Support/Transcripted/logs/app.jsonl` directly. Check for:
 - Any `error` level entries — quote the message and subsystem
 - Concentration of errors in one subsystem (indicates a specific area is broken)
 - Timestamp gaps > 60 seconds between consecutive entries (may indicate crash or hang)
@@ -266,19 +266,19 @@ When a tier fails:
 
 ### Fix Loop Guardrails
 - Max 3 fix attempts per failure
-- NEVER modify `Audio.swift` or `SystemAudioCapture.swift` without asking the user — these are audio thread files
+- NEVER modify the audio-thread files under `Sources/TranscriptedCore/Audio/` (`Audio.swift`, `CoreAudioSystemAudioCapture.swift`, `CoreAudioTapBufferRing.swift`, `AudioFileManager.swift`, `AudioLevelMonitor.swift`, `RealtimeAGC.swift`, `SCKAudioCapture.swift`) without asking the user
 - If you can't fix it in 3 attempts, report it as unresolved and move on
 
 ## Key File Locations
 
 | Artifact | Path |
 |----------|------|
-| Transcripts | ~/Documents/Transcripted/*.md |
-| Speaker DB | ~/Documents/Transcripted/speakers.sqlite |
-| Stats DB | ~/Documents/Transcripted/stats.sqlite |
-| Failed queue | ~/Documents/Transcripted/failed_transcriptions.json |
-| Speaker clips | ~/Documents/Transcripted/speaker_clips/ |
-| App logs | ~/Library/Logs/Transcripted/app.jsonl |
+| Transcripts | ~/Library/Application Support/Transcripted/captures/meetings/ (or the relocated capture library; see docs/storage-paths.md) |
+| Speaker DB | ~/Library/Application Support/Transcripted/state/speakers.sqlite |
+| Stats DB | ~/Library/Application Support/Transcripted/state/stats.sqlite |
+| Failed queue | ~/Library/Application Support/Transcripted/state/failed_transcriptions.json |
+| Speaker clips | ~/Library/Application Support/Transcripted/tmp/recordings/speaker_clips/ |
+| App logs | ~/Library/Application Support/Transcripted/logs/app.jsonl |
 | Crash reports | ~/Library/Logs/DiagnosticReports/ |
 | CLI tool | Tools/TranscriptedQA/ |
 

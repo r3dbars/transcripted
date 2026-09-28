@@ -17,6 +17,8 @@ class TranscriptedAppState: ObservableObject {
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
     let runtimeDiagnostics = RuntimeDiagnostics()
+    /// Writing's autocomplete runtime. Idle until `initialize()` starts it.
+    let writingController = WritingController()
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.
@@ -129,6 +131,11 @@ class TranscriptedAppState: ObservableObject {
         if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
         }
+        // Writing runs once its setup is done and a feature is on (or behind
+        // the debug default); the Writing tab starts and stops it after that.
+        if !Self.isLaunchSmokeMode {
+            writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
+        }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
         runtimeDiagnostics.setActiveWorkProvider { [weak self] in
@@ -179,6 +186,7 @@ class TranscriptedAppState: ObservableObject {
     /// (file descriptors, audio hardware, Metal contexts, Carbon hotkeys) must be checked
     /// and restored here. ParakeetEngine handles its own wake via NSWorkspace observer.
     func handleSystemWake() async {
+        writingController.handleSystemWake()
         let result = await wakeRecoveryCoordinator.handleSystemWake {
             self.logger.log("WAKE | system wake detected — running recovery checks")
         }
@@ -224,6 +232,7 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
+        writingController.stop()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -274,6 +283,13 @@ class TranscriptedAppState: ObservableObject {
             return
         }
 
+        // The pass runs at `.utility` so launch-at-login, wake and model
+        // switches don't spend full CPU on the meeting models. Only the
+        // dictation model step runs at `.userInitiated`, in its own task:
+        // at utility macOS can run Core ML compilation on the efficiency
+        // cores, most launches in PostHog took 5s+ to warm, and a dictation
+        // pressed in that window waited on it. Awaiting a task escalates it
+        // to the waiter's priority, so the split has to go this way round.
         runtimeReadinessTask = Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
@@ -288,7 +304,14 @@ class TranscriptedAppState: ObservableObject {
             repeat {
                 self.runtimeReadinessRerunRequested = false
                 guard !Task.isCancelled, !self.isShutDown else { return }
-                await self.sttRouter.initializeSelectedModelInBackground()
+                let dictationWarmup = Task(priority: .userInitiated) { @MainActor [weak self] in
+                    await self?.sttRouter.initializeSelectedModelInBackground()
+                }
+                await withTaskCancellationHandler {
+                    await dictationWarmup.value
+                } onCancel: {
+                    dictationWarmup.cancel()
+                }
                 guard !Task.isCancelled, !self.isShutDown else { return }
                 if #available(macOS 14.0, *), !self.meetingSession.areMeetingModelsWarm {
                     await self.meetingSession.prepareModels(showLoadingUI: false)

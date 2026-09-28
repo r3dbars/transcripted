@@ -116,6 +116,14 @@ func testMeetingStartFailureClassifier() {
         )
         assertEqual(
             MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start. Try quitting and reopening Transcripted.",
+                stage: "microphone_tap_raised"
+            ),
+            "mic_unavailable",
+            "a caught installTap raise stays a mic failure so failure_kind is unchanged"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
                 from: "System Audio permission is required.",
                 stage: "system_audio"
             ),

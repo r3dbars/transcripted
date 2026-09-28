@@ -32,15 +32,15 @@ func testFocusOrderContract() {
             "popover Tab order should be primary actions then utility actions"
         )
 
-        // Every major action stays reachable in the loop. (Quiet-library
-        // redesign: the window opens via the Open Transcripted utility row.)
+        // Every major action stays reachable in the loop. (Slim menu:
+        // Settings lives inside Open Transcripted, so it has no row.)
         assertTrue(
             FocusOrderContract.isReachable(
                 [
                     "transcripted.menubar.primary.start-dictation",
                     "transcripted.menubar.primary.start-meeting",
                     "transcripted.menubar.utility.open-transcripted",
-                    "transcripted.menubar.utility.settings",
+                    "transcripted.menubar.utility.check-updates",
                     "transcripted.menubar.utility.quit",
                 ],
                 in: FocusOrderContract.menuBarPopoverOrder
@@ -51,8 +51,10 @@ func testFocusOrderContract() {
         assertTrue(
             FocusOrderContract.isReachable(
                 [
+                    "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
                     "transcripted.settings.sidebar.dictations",
+                    "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
                     "transcripted.settings.sidebar.connect-agent",
                 ],
@@ -133,18 +135,25 @@ func testFocusOrderContract() {
             sidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
         )
+        assertTrue(
+            sidebarSource.contains("pages: [.today, .home, .dictations, .writing, .people, .connectAgent]"),
+            "the sidebar's primary rows should list the pages in the focus order the contract pins"
+        )
 
-        // The four primary navigation pages the contract orders must still exist.
-        for pageCase in ["case home", "case dictations", "case people", "case connectAgent"] {
+        // The six primary navigation pages the contract orders must still exist.
+        for pageCase in ["case today", "case home", "case dictations", "case writing", "case people", "case connectAgent"] {
             assertTrue(
                 pagesSource.contains(pageCase),
                 "\(pageCase) should stay in the settings navigation surface the focus order depends on"
             )
         }
+        // The primary pages are the ones with a ⌘ shortcut, in page order.
         assertEqual(
-            FocusOrderContract.settingsSidebarOrder.count,
-            4,
-            "settings sidebar focus order should cover the four primary navigation pages"
+            FocusOrderContract.settingsSidebarOrder,
+            TranscriptedSettingsPage.allCases
+                .filter { $0.navigationShortcutKey != nil }
+                .map(\.automationIdentifier),
+            "settings sidebar focus order should cover the six primary navigation pages in ⌘1–⌘6 order"
         )
     }
 }

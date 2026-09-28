@@ -5,27 +5,51 @@ import TranscriptedCore
 
 @MainActor
 enum TranscriptedSupportActions {
-    static func sendFeedback(appState: TranscriptedAppState) {
-        SupportEmailDispatcher.open(feedbackEmailURL(appState: appState))
+    /// True while Email Support gathers diagnostics, so a double click
+    /// can't open two drafts.
+    private static var isPreparingFeedback = false
+
+    static func sendFeedback(appState: TranscriptedAppState) async {
+        guard !isPreparingFeedback else { return }
+        isPreparingFeedback = true
+        defer { isPreparingFeedback = false }
+        SupportEmailDispatcher.open(await feedbackEmailURL(appState: appState))
     }
 
-    static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {
-        let snapshot = diagnosticsSnapshot(appState: appState)
+    /// The last diagnostic event sent this session. Email Support includes
+    /// it for an hour so the email and the event can be matched up; after
+    /// that it is probably about something else.
+    private static var lastDiagnosticReport: (id: String, sentAt: Date)?
+    private static let diagnosticReportEmailWindow: TimeInterval = 60 * 60
+
+    static var lastDiagnosticReportID: String? {
+        guard let report = lastDiagnosticReport,
+              Date().timeIntervalSince(report.sentAt) < diagnosticReportEmailWindow else { return nil }
+        return report.id
+    }
+
+    static func sendDiagnosticEvent(appState: TranscriptedAppState) async -> String? {
+        let snapshot = await diagnosticsSnapshot(appState: appState)
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)
 
         AnalyticsReporter.track("support_diagnostic_event_sent")
-        return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        let eventID = CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
+        if let eventID {
+            lastDiagnosticReport = (id: eventID, sentAt: Date())
+        }
+        return eventID
     }
 
-    static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {
+    static func feedbackEmailURL(appState: TranscriptedAppState) async -> URL? {
         FeedbackIssueBuilder.emailURL(
             rawLogLines: [],
-            diagnostics: diagnosticsText(appState: appState)
+            diagnostics: await diagnosticsText(appState: appState),
+            diagnosticReportID: lastDiagnosticReportID
         )
     }
 
-    static func diagnosticsText(appState: TranscriptedAppState) -> String {
-        SupportDiagnosticsBundle.text(snapshot: diagnosticsSnapshot(appState: appState))
+    static func diagnosticsText(appState: TranscriptedAppState) async -> String {
+        SupportDiagnosticsBundle.text(snapshot: await diagnosticsSnapshot(appState: appState))
     }
 
     static var appVersionDescription: String {
@@ -44,7 +68,17 @@ enum TranscriptedSupportActions {
         }
     }
 
-    private static func diagnosticsSnapshot(appState: TranscriptedAppState) -> SupportDiagnosticsSnapshot {
+    private static func diagnosticsSnapshot(appState: TranscriptedAppState) async -> SupportDiagnosticsSnapshot {
+        // The model-cache walk and the reliability log read touch disk (the
+        // cache holds many CoreML files, the log can be ~10 MB), so they run
+        // off the main thread. Everything else here is cheap in-memory state.
+        let diskFields = await Task.detached(priority: .userInitiated) {
+            (
+                storage: ModelCacheInventory.snapshot().diagnosticsFields,
+                reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries()
+            )
+        }.value
+
         let meetingState: String
         let meetingRecording: Bool
         let meetingDurationBucket: String
@@ -84,7 +118,7 @@ enum TranscriptedSupportActions {
             calendarGranted: TranscriptedPermissionAccess.isGranted(.calendar),
             audioRoute: appState.sttRouter.dictationAudioRouteAnalyticsContext,
             runtime: appState.runtimeDiagnostics.currentAnalyticsContext(),
-            storage: ModelCacheInventory.snapshot().diagnosticsFields,
+            storage: diskFields.storage,
             meetingState: meetingState,
             meetingRecording: meetingRecording,
             meetingDurationBucket: meetingDurationBucket,
@@ -92,7 +126,7 @@ enum TranscriptedSupportActions {
             speakerReviewPending: speakerReviewPending,
             queuedMeetingCount: queuedMeetingCount,
             meetingShortcut: meetingShortcut,
-            reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries(),
+            reliabilityPackets: diskFields.reliabilityPackets,
             recentLogLines: [],
             installUUID: InstallIdentity.id(),
             buildRevision: AnalyticsRuntimeConfiguration.buildRevision(),
@@ -141,6 +175,8 @@ enum TranscriptedSupportActions {
             return "finishing"
         case .transcriptSaved:
             return "transcript_saved"
+        case .discardedAccidentalStart:
+            return "discarded_accidental_start"
         case .failed:
             return "failed"
         }

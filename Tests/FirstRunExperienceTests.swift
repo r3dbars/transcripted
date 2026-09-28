@@ -88,6 +88,26 @@ func testFirstRunExperience() {
         assertEqual(recording.subtitle, "", "recording row should stay quiet — the red tone and timer carry the state")
     }
 
+    runSuite("FirstRunExperience.meetingAction — says Saving and disables Stop after Stop") {
+        let saving = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: true,
+            isSaving: true
+        )
+        assertEqual(saving.title, "Saving Meeting…", "the row should say the audio is being saved instead of offering Stop again")
+        assertFalse(saving.isEnabled, "a second click while saving would do nothing, so the row should be disabled")
+        assertEqual(saving.subtitle, "", "the saving row should stay quiet")
+
+        let notRecording = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: false,
+            isSaving: true
+        )
+        assertEqual(notRecording.title, "Record Meeting", "isSaving alone should not change the idle row")
+    }
+
     runSuite("FirstRunExperience.meetingAction — exposes retry copy after meeting tool failure") {
         let failed = FirstRunExperience.meetingAction(
             dictationReady: true,
@@ -117,7 +137,20 @@ func testFirstRunExperience() {
         let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
 
         assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
-        assertEqual(state.subtitle, "Try again to retry local voice setup", "failed dictation row should explain retry behavior")
+        assertEqual(state.subtitle, "Voice setup failed. Try again", "failed dictation row should explain retry behavior")
+    }
+
+    runSuite("FirstRunExperience.dictationAction — offers Stop while dictating") {
+        let state = FirstRunExperience.dictationAction(for: .ready, isDictating: true)
+
+        assertEqual(state.title, "Stop Dictation", "a Start row that does nothing mid-dictation was a dead click")
+        assertTrue(state.isEnabled, "stop must stay clickable")
+        assertEqual(state.subtitle, "", "the stop row needs no subtitle")
+        assertEqual(
+            FirstRunExperience.dictationAction(for: .ready).title,
+            "Start Dictation",
+            "idle keeps the start row"
+        )
     }
 
     runSuite("FirstRunExperience.meetingAction — stays enabled while meetings load in the background") {
@@ -173,8 +206,8 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "On demand", "not-loaded model state should be presented as intentional lazy loading")
         assertTrue(
-            card.detail.contains("out of memory"),
-            "not-loaded model detail should explain the lightweight launch behavior"
+            card.detail.contains("isn't on this Mac yet"),
+            "not-loaded model detail should say the model still needs downloading"
         )
         assertTrue(
             card.detail.contains("One-time ~600 MB download"),
@@ -222,9 +255,10 @@ func testFirstRunExperience() {
         let card = FirstRunExperience.modelCard(for: .ready)
 
         assertTrue(
-            card.detail.contains("outside app updates"),
+            card.detail.contains("app updates don't download it again"),
             "ready model card should explain that future app updates do not redownload the model"
         )
+        assertNil(card.progress, "a ready model has no progress, so the Settings card can hide")
     }
 
     runSuite("FirstRunExperience.modelCard — distinguishes cached files from loaded model") {
@@ -232,7 +266,7 @@ func testFirstRunExperience() {
 
         assertEqual(card.status, "Cached", "cached model card should not look like a missing download")
         assertTrue(
-            card.detail.contains("load them into memory"),
+            card.detail.contains("loads into memory"),
             "cached model copy should explain that dictation still loads the files on first use"
         )
         assertNil(card.progress, "cached files should not show fake download progress")
@@ -272,6 +306,27 @@ func testFirstRunExperience() {
         assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
     }
 
+    runSuite("FirstRunExperience.modelCard — Apple Speech shows its own errors, not framework text") {
+        let language = FirstRunExperience.modelCard(
+            for: .failed("Apple Speech can't transcribe your Mac's language (Finnish) yet. Choose another model in Settings."),
+            model: .appleSpeech
+        )
+        assertTrue(language.detail.contains("Finnish"), "Apple Speech's own message names the fix")
+
+        let raw = FirstRunExperience.modelCard(
+            for: .failed("The operation couldn't be completed. (NSURLErrorDomain error -1009.)"),
+            model: .appleSpeech
+        )
+        assertFalse(raw.detail.contains("NSURLErrorDomain"), "raw download errors stay out of the card")
+        assertTrue(raw.detail.contains("Try Again"), "the card names the retry button Apple Speech gets")
+
+        let loading = FirstRunExperience.modelCard(for: .loading, model: .appleSpeech)
+        assertFalse(loading.detail.contains("has the model files"), "Apple Speech may still need to download")
+
+        let parakeet = FirstRunExperience.modelCard(for: .failed("anything"), model: .parakeetTDTv3)
+        assertTrue(parakeet.detail.contains("Retry Download"), "other models keep their copy")
+    }
+
     runSuite("FirstRunOnboardingPolishContract — protects first-run polish targets") {
         assertTrue(
             FirstRunOnboardingPolishContract.minimumHitTarget >= 40,
@@ -293,5 +348,34 @@ func testFirstRunExperience() {
             FirstRunOnboardingPolishContract.bodyCopyLineLimit <= 3,
             "first-run cards should keep short copy from wrapping into tall blocks"
         )
+    }
+
+    runSuite("FirstRunExperience.onboardingDoneModelPresentation — Done only says You're set once the model is on this Mac") {
+        for state in [ParakeetModelState.ready, .cached] {
+            let done = FirstRunExperience.onboardingDoneModelPresentation(for: state)
+            assertEqual(done.headline, "You're set.", "a ready or cached model should keep the plain Done headline")
+            assertNil(done.statusLine, "a ready model needs no status line")
+            assertNil(done.progress, "a ready model needs no progress bar")
+        }
+
+        let downloading = FirstRunExperience.onboardingDoneModelPresentation(for: .downloading(progress: 0.42))
+        assertEqual(downloading.headline, "Almost set.", "a downloading model should not read as done")
+        assertTrue(downloading.statusLine?.contains("42% complete") == true, "the status line should show download progress")
+        assertTrue(downloading.progress != nil, "a download should show a progress bar")
+        assertTrue(downloading.detail?.contains("keeps going after you click Done") == true, "people should know they can close setup")
+        assertFalse(downloading.isFailed, "a download in progress is not a failure")
+
+        let notLoaded = FirstRunExperience.onboardingDoneModelPresentation(for: .notLoaded)
+        assertEqual(notLoaded.headline, "Almost set.", "a model that hasn't started yet is not ready either")
+        assertTrue(notLoaded.statusLine?.hasPrefix("Getting ") == true, "the not-started line should say the model is being readied")
+
+        let loading = FirstRunExperience.onboardingDoneModelPresentation(for: .loading)
+        assertTrue(loading.statusLine?.contains("Almost ready") == true, "loading should say it's almost ready")
+
+        let failed = FirstRunExperience.onboardingDoneModelPresentation(for: .failed("boom"))
+        assertTrue(failed.isFailed, "a failed load should be marked as failed")
+        assertEqual(failed.headline, "Almost set.", "a failed model should not read as done")
+        assertTrue(failed.detail?.contains("Transcription section in Settings") == true, "a failed load should say where to retry")
+        assertFalse(failed.detail?.contains("boom") == true, "raw engine errors should not reach setup")
     }
 }

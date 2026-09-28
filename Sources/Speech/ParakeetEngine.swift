@@ -38,6 +38,16 @@ class ParakeetEngine: ObservableObject {
     var audioStopTask: Task<Void, Never>?
     var audioStopInProgress: Bool { audioStopTask != nil }
     var inputTapInstalled = false
+    /// Set while dictation records through the pinned-device recorder
+    /// (ParakeetPinnedMicrophone.swift) instead of this engine.
+    var pinnedDictationRecording: ParakeetPinnedDictationRecording?
+    /// Set when a pinned start fell back to this engine, cleared when the
+    /// recorder next starts. Keeps engine warmup on in between
+    /// (`PinnedDictationInputPolicy.skipsEngineWarmup`).
+    var pinnedDictationFellBackToEngine = false
+    /// The last stopped take the pinned recorder made only for speed, until
+    /// its transcript scores it (`PinnedDictationSpeedPath`).
+    var pendingPinnedSpeedPathTake: PinnedDictationSpeedPathTake?
     /// The meeting-minted claim on its live mic stream, or `nil` when
     /// dictation owns its own mic path. Replaces the former bare
     /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's
@@ -58,13 +68,16 @@ class ParakeetEngine: ObservableObject {
         didSet { recordedSamplesRevision &+= 1 }
     }
     var preservingRecordingAcrossRecovery = false
-    private nonisolated(unsafe) var nativeSampleRate: Double = 48000
-    private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
+    nonisolated(unsafe) var nativeSampleRate: Double = 48000
+    nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     let pendingSamplesLock = NSLock()
     var pendingSamples = RecordedAudioTimeline()
-    private var lastAudioSampleAt: CFAbsoluteTime = 0
+    var lastAudioSampleAt: CFAbsoluteTime = 0
+    /// When the first audio buffer of this dictation arrived. Guarded by
+    /// `pendingSamplesLock`; a recovery restart keeps the original value.
+    var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
-    private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
+    nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
     private var microphoneSharingObserver: AnyCancellable?
@@ -156,6 +169,14 @@ class ParakeetEngine: ObservableObject {
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
     var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
+    /// The last take's mic delivered audio, but every sample was exactly
+    /// zero: what a hardware-muted mic sends. Reset at each recording start.
+    var lastRecordingWasDigitalSilence: Bool { didReceiveAudioSamples && !didReceiveNonZeroAudioSamples }
+    /// Arrival time of this dictation's first audio buffer, for the
+    /// press-to-first-sound timing. Nil until audio arrives.
+    func firstAudioSampleTime() -> CFAbsoluteTime? {
+        pendingSamplesLock.withLock { firstAudioSampleAt }
+    }
 
     func receivedAudioSamples(since observationTime: CFAbsoluteTime) -> Bool {
         pendingSamplesLock.withLock {
@@ -419,6 +440,14 @@ class ParakeetEngine: ObservableObject {
         guard !isShuttingDown else { return }
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
+        if usesPinnedDictationMicrophone() {
+            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
+            if skipsEngineWarmup {
+                markPinnedDictationInputReady()
+                return
+            }
+        }
         var admissionOwner = currentAudioEngineQueueOwnerToken()
         guard prewarmAdmission.begin(owner: admissionOwner) else {
             // Join the existing probe instead of returning immediately: the
@@ -560,6 +589,14 @@ class ParakeetEngine: ObservableObject {
         guard !Task.isCancelled else { return }
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
+        if usesPinnedDictationMicrophone() {
+            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
+            if skipsEngineWarmup {
+                markPinnedDictationInputReady()
+                return
+            }
+        }
 
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -593,12 +630,12 @@ class ParakeetEngine: ObservableObject {
         installAudioEngineConfigObserverIfNeeded()
 
         if microphoneSharingObserver == nil {
-            microphoneSharingObserver = ZoomMicrophoneSharingMonitor.shared.$isZoomRunning
+            microphoneSharingObserver = CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning
                 .removeDuplicates()
-                .sink { [weak self] isZoomRunning in
-                    guard isZoomRunning else { return }
+                .sink { [weak self] isCallAppRunning in
+                    guard isCallAppRunning else { return }
                     Task { @MainActor [weak self] in
-                        await self?.shareMicrophoneWithZoomIfNeeded()
+                        await self?.shareMicrophoneWithCallAppIfNeeded()
                     }
                 }
         }
@@ -889,6 +926,7 @@ class ParakeetEngine: ObservableObject {
         )
         do {
             settledSnapshotResult = try await DictationInputDeviceBindingPolicy.waitForBinding(
+                initialDelayNanoseconds: DictationInputDeviceBindingPolicy.initialSettleDelay(for: selection),
                 isCurrent: {
                     self.ownsAudioEngineQueue(operationOwner)
                         && isEngineWorkCurrent?() != false
@@ -1009,7 +1047,9 @@ class ParakeetEngine: ObservableObject {
             )
             guard startWorkIsCurrent() else { throw CancellationError() }
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
+            // A route change after the format read makes installTap raise an
+            // Objective-C exception; the guard turns it into a failed start.
+            try AudioTapInstallGuard.run(operation: "dictation_start") { inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
                 guard startCancellationState.canDeliverSamples else { return }
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -1030,6 +1070,7 @@ class ParakeetEngine: ObservableObject {
                     self.didReceiveAudioSamples = true
                     if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
                     self.lastAudioSampleAt = sampleArrivalTime
+                    if self.firstAudioSampleAt == nil { self.firstAudioSampleAt = sampleArrivalTime }
                     self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
                     var droppedSeconds = 0.0
                     let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
@@ -1092,7 +1133,7 @@ class ParakeetEngine: ObservableObject {
                     guard startCancellationState.canDeliverSamples else { return }
                     self?.audioLevel = normalized
                 }
-            }
+            } }
             guard startWorkIsCurrent() else { throw CancellationError() }
             stageTimings["audio_tap_install_ms"] = Self.elapsedMilliseconds(since: tapInstallStartedAt)
 
@@ -1202,9 +1243,9 @@ class ParakeetEngine: ObservableObject {
         return currentAudioEngineQueueOwnerToken()
     }
 
-    private func shareMicrophoneWithZoomIfNeeded() async {
+    private func shareMicrophoneWithCallAppIfNeeded() async {
         guard !isShuttingDown,
-              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
               sharedMeetingMicClaim == nil,
               isRecording,
               !audioStartInProgress,
@@ -1216,13 +1257,13 @@ class ParakeetEngine: ObservableObject {
         guard usesVoiceProcessing,
               ownsAudioEngineQueue(owner),
               !isShuttingDown,
-              ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
               sharedMeetingMicClaim == nil,
               isRecording,
               !audioStartInProgress,
               !audioStopInProgress else { return }
         // Reuse the owned recovery path so already-spoken audio survives the
-        // VPIO -> regular-input transition when Zoom opens during dictation.
+        // VPIO -> regular-input transition when a call app opens during dictation.
         await recoverForMicrophoneSharing()
     }
 
@@ -1457,6 +1498,19 @@ class ParakeetEngine: ObservableObject {
             AppLogger.transcription.info("PARAKEET | system wake detected, dictation borrowing meeting mic, skipping teardown")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake_shared_meeting_mic_skipped",
                 message: "System woke from sleep while dictation was borrowing the meeting microphone; meeting capture owns wake recovery")
+            return
+        }
+
+        // A pinned dictation ends at wake like an engine one, keeping what
+        // was heard for the recovery prompt, but without touching the engine:
+        // tearing that down here would bind the default input.
+        if let pinnedDictationRecording {
+            interruptPinnedDictationRecording(pinnedDictationRecording, reason: "system_wake")
+            AppLogger.transcription.info("PARAKEET | system wake detected, pinned dictation interrupted")
+            return
+        }
+        if !isRecording, usesPinnedDictationMicrophone() {
+            deferPinnedDictationInputReadinessAfterWake()
             return
         }
 
@@ -1762,6 +1816,12 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
+            if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+                firstAudioSampleAt = nil
+            }
+        }
+        if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
+            return pinnedStarted
         }
 
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
@@ -1929,10 +1989,10 @@ class ParakeetEngine: ObservableObject {
                 inputRate: snapshot.hwFormat.sampleRate,
                 outputRate: snapshot.outputFormat.sampleRate
             )
-            ZoomMicrophoneSharingMonitor.shared.refresh()
+            CallAppMicrophoneSharingMonitor.shared.refresh()
             let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
                 requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-                    && !ZoomMicrophoneSharingMonitor.shared.isZoomRunning,
+                    && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
                 selection: snapshot.selection
             )
             if voiceProcessingDecision == .deferredForSplitBluetoothOutput {
@@ -2176,11 +2236,11 @@ class ParakeetEngine: ObservableObject {
 
         isRecording = true
         markFormatReadyAndPublish()
-        // Zoom can launch while the worker is starting the graph. Recheck
+        // A call app can launch while the worker is starting the graph. Recheck
         // after start admission finishes; the launch observer cannot recover
         // a graph still owned by an in-flight start.
         Task { @MainActor [weak self] in
-            await self?.shareMicrophoneWithZoomIfNeeded()
+            await self?.shareMicrophoneWithCallAppIfNeeded()
         }
         AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
@@ -2306,6 +2366,14 @@ class ParakeetEngine: ObservableObject {
             await restorePendingSystemInputAfterRecording(
                 ownedBy: pendingRestoreOwner,
                 operation: "stop_recording_idle"
+            )
+            return
+        }
+        if pinnedDictationRecording != nil {
+            await stopPinnedDictationRecording()
+            await restorePendingSystemInputAfterRecording(
+                ownedBy: pendingRestoreOwner,
+                operation: "stop_recording_pinned"
             )
             return
         }
@@ -2999,6 +3067,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3041,6 +3110,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         let didReplaceBlockedGraph = cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3079,6 +3149,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
+        discardPinnedDictationRecording()
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
@@ -3189,6 +3260,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicClaim = nil
         isShuttingDown = true
+        discardPinnedDictationRecording()
         microphoneSharingObserver?.cancel()
         microphoneSharingObserver = nil
         inputDeviceRefreshMailbox.close()

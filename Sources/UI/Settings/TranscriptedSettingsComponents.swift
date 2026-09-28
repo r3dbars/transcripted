@@ -435,11 +435,11 @@ struct PermissionStatusRow: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } else if granted {
-                        Text("Previously verified; not a live permission status.")
+                        Text("Worked last time we checked.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Not verified. Silence alone doesn't tell us whether access is allowed.")
+                        Text("Not checked yet. Play some audio in another app, then check again.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -473,7 +473,9 @@ struct PermissionStatusRow: View {
     }
 
     private var systemAudioMigrationDisclosure: some View {
-        DisclosureGroup("Switch to audio-only access") {
+        // Shown to anyone without a confirmed grant, most of whom never had
+        // the old screen-and-audio permission, so it's framed as setup steps.
+        DisclosureGroup("How to turn it on") {
             Text(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions)
                 .font(.caption)
                 .foregroundStyle(.secondary)

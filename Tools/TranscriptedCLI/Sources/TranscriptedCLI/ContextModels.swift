@@ -5,6 +5,12 @@ enum CLIContextKind: String, ExpressibleByArgument, Codable {
     case all
     case meeting
     case dictation
+    case writing
+
+    /// Whether a query scoped to `self` covers artifacts of `kind`.
+    func includes(_ kind: CLIContextKind) -> Bool {
+        self == .all || self == kind
+    }
 }
 
 struct CLIAgentTranscript: Codable {
@@ -88,6 +94,87 @@ struct CLIClientDictationEntry: Codable {
         case sourceAppBundleId = "source_app_bundle_id"
         case wordCount = "word_count"
         case characterCount = "character_count"
+    }
+}
+
+/// Parsed writing day file (`Writing_<date>.md`).
+struct CLIAgentWritingDay: Codable {
+    let version: String
+    let captureType: String
+    let date: String
+    let markdownFilename: String
+    let entryCount: Int
+    let wordCount: Int
+    let acceptedWordCount: Int
+    let entries: [CLIClientWritingEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case captureType = "capture_type"
+        case date
+        case markdownFilename = "markdown_filename"
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case acceptedWordCount = "accepted_word_count"
+        case entries
+    }
+}
+
+struct CLIClientWritingEntry: Codable {
+    let id: String
+    let createdAt: String
+    let title: String
+    let text: String
+    let sourceAppName: String
+    let sourceAppBundleId: String?
+    let wordCount: Int
+    let characterCount: Int
+    let acceptedWordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt = "created_at"
+        case title, text
+        case sourceAppName = "source_app_name"
+        case sourceAppBundleId = "source_app_bundle_id"
+        case wordCount = "word_count"
+        case characterCount = "character_count"
+        case acceptedWordCount = "accepted_word_count"
+    }
+}
+
+struct CLIWritingDaySummary: Codable {
+    let filename: String
+    let date: String
+    let datetime: String
+    let entryCount: Int
+    let wordCount: Int
+    let acceptedWordCount: Int
+    let titles: [String]
+    let sourceApps: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, titles
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case acceptedWordCount = "accepted_word_count"
+        case sourceApps = "source_apps"
+    }
+}
+
+/// `read-writing --json` output. Separate from `CLIReadMarkdownDocument`
+/// because writing entries carry `accepted_word_count` and no `delivery`.
+struct CLIReadWritingDocument: Codable {
+    let kind: CLIContextKind
+    let filename: String
+    let entryId: String?
+    let markdown: String
+    let date: String
+    let entries: [CLIClientWritingEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, filename, markdown, date, entries
+        case entryId = "entry_id"
     }
 }
 

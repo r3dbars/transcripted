@@ -75,9 +75,16 @@ func testDictationSessionCap() {
             to: "private func overlayStateName"
         )
         assertTrue(
-            timeoutBody.contains("title: \"Long dictation\"")
-                && timeoutBody.contains("30 seconds left"),
+            timeoutBody.contains("self?.showSessionCapCountdown("),
             "the session cap should warn before it auto-finalizes"
+        )
+        assertFalse(
+            timeoutBody.contains("showLoadingState("),
+            "the warning must keep the pill listening, not swap it for a loading card"
+        )
+        assertFalse(
+            timeoutBody.contains("Release the key"),
+            "hands-free people have no key to release"
         )
         assertTrue(
             timeoutBody.contains("let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false"),
@@ -102,10 +109,16 @@ func testDictationSessionCap() {
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
         assertTrue(
-            finalizeBody.contains("\"Saved to Markdown. Paste it now, or use Paste Last Dictation later.\"")
+            finalizeBody.contains("\"Saved to Markdown. Paste it now, or press \\(pasteLastShortcut) later.\"")
+                && finalizeBody.contains("PhysicalDictationTriggerPreferences.pasteLastDictationBinding()")
                 && finalizeBody.contains("actionTitle: \"Paste It\"")
                 && finalizeBody.contains("pasteWithClipboardRestore(text)"),
             "the cap save-only path should keep a visible Paste It recovery action"
+        )
+        assertTrue(
+            finalizeBody.contains("overlayController.showSavedNotice(")
+                && !finalizeBody.contains("overlayController.showError(\n                \"Saved to Markdown"),
+            "a successful save at the cap is good news, so it must not show as \"Dictation issue\" with a warning triangle"
         )
         let headerBody = try? String(
             contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)

@@ -9,9 +9,17 @@ Tool: [Tart](https://tart.run) on Apple Silicon (Apple's Virtualization.framewor
 underneath). Script: `scripts/vm/transcripted-vm.sh`. Screen driver:
 `scripts/vm/vnc.py`.
 
-Status: written 2026-09-23 and dry-run tested on Linux against a fake `tart`
-and a real VNC server. **Not yet run on a Mac.** The "Check on first real run"
-list at the bottom is what the first run has to confirm.
+Status: written 2026-09-23. Five real runs on a Mac on 2026-09-24. Setup, the
+clean snapshot, boot, VNC, install and launch all worked. On runs 1 and 2 the
+VM died on the first screenshot after Transcripted launched: Apple's VNC
+server crashed tart when a new VNC client connected. Run 3 kept one VNC
+connection and stayed up, but macOS Setup Assistant covered the desktop the
+whole time. Run 4 reached a clear desktop, but the "downloaded from the
+Internet" prompt stayed open, so the app never started. Run 5 had the tools
+to click Open but skipped it, because macOS had already started the app's
+process behind the prompt and that passed for "running". Tart's VNC port is
+also open to the network. All of that is handled below. "What the real runs showed" at the bottom has the details and
+what is still unconfirmed.
 
 ## How it works
 
@@ -28,12 +36,47 @@ list at the bottom is what the first run has to confirm.
 - Every test run clones the snapshot (`new`). APFS clones take seconds and
   almost no disk. A clone has its own fresh TCC (permissions) database, fresh
   preferences, and no app data.
-- `up` boots the clone with Tart's built-in VNC server, which is expected to
-  listen only on 127.0.0.1 (Tart hands out a `127.0.0.1` URL with a random
-  password; the first real run confirms the bind with `lsof`). `vnc.py` only
-  connects to loopback. Input sent over VNC
-  arrives as virtual keyboard and mouse hardware, so it can click the system
-  permission prompts that ignore synthetic clicks from inside the guest.
+- `up` boots the clone headless: commands run in it, but there's no screen
+  access and no VNC port. `up --vnc` turns on Tart's built-in VNC server for
+  runs that need the screen. Input sent over VNC arrives as virtual keyboard
+  and mouse hardware, so it can click the system permission prompts that
+  ignore synthetic clicks from inside the guest.
+- **One VNC connection per boot.** On both real runs, tart crashed (SIGTRAP,
+  an assertion in `-[_VZVNCServer _setupVirtualMachineAccessor]` inside
+  Apple's Virtualization framework) the first time a new VNC client connected
+  after Transcripted launched. So `up --vnc` starts one `vnc.py serve`
+  session that connects once and stays connected until the VM stops.
+  `screenshot`, `click`, `type` and `key` all go through that session's local
+  socket, never a new connection. If the session ends, they say so instead
+  of reconnecting. Its log is `~/.transcripted-vm/logs/<vm>.vnc.log`.
+- **With `--vnc`, the VNC port is open to the network.** Tart hands out a
+  `127.0.0.1` URL, but its VNC server (Apple's private `_VZVNCServer`)
+  listens on every interface, and Tart has no option to change that. A
+  `sandbox-exec` lockdown was tried on the Mac and didn't close it. It has a
+  random password, but VNC only uses the first 8 characters (about 17 bits
+  here), so someone on the same network could guess it. So: VNC is off
+  unless asked for, `up --vnc` is refused on open or unencrypted Wi-Fi
+  (override `TVM_ALLOW_VNC_ON_OPEN_WIFI=1`), and first-run shuts the VM down
+  when it's done. The one real fix is a Mac setting: the macOS firewall set
+  to block incoming connections for tart. That's Justin's call. `vnc-check`
+  dials the port on each of the Mac's own addresses, IPv4 and IPv6, and
+  fails if a VNC server answers there. It reads the `RFB` greeting, so a bare
+  TCP handshake doesn't count, and only the VMs' own vmnet subnet
+  (192.168.64.0/24 by default) is exempt. The macOS firewall doesn't filter
+  the Mac's own connections, so with the firewall on the check can fail even
+  though neighbors are blocked (it errs safe). Run `vnc-check` before
+  launching the app: it opens short-lived connections of its own.
+- **After login, `up` waits for the desktop (the Dock).** If macOS Setup
+  Assistant is showing its own screens instead, `up` records what it was and
+  closes it, because no app opens while it's up. The result is in
+  `~/.transcripted-vm/run/<vm>.setup`, and first-run puts it in the report.
+  The snapshot prep also marks Setup Assistant as done for the image's build.
+- `up` starts Tart through `scripts/vm/supervise.py`, which puts it in its
+  own session so it doesn't die with the command that started it, keeps the
+  Mac from idle-sleeping while the VM runs, and writes how Tart ended (exit
+  status or signal) to `~/.transcripted-vm/logs/<vm>.log`. The previous
+  boot's log is kept as `<vm>.prev.log`. `diagnose` collects that plus host
+  sleep/wake, crash reports, disk, and the guest's own shutdown cause.
 - Commands run inside the guest through `tart exec` (guest agent, no network)
   or SSH as a fallback.
 - A host folder (`share`) is mounted in the guest at
@@ -59,6 +102,25 @@ list at the bottom is what the first run has to confirm.
   internet" dialog shows, then copied to `/Applications`. It switches
   analytics and crash reporting off first, so test runs don't pollute the real
   PostHog funnel or Sentry. Pass `--keep-telemetry` to leave them on.
+- The app doesn't start until that prompt is approved. `approve-download`
+  first asks Gatekeeper (`spctl --assess`) with the flag still on and fails
+  if Gatekeeper would reject the app, so a broken notarization shows up here.
+  Then it clicks the prompt's Open button over the VNC session, like a user.
+  It reads the guest's window list first (no Accessibility grant needed) and
+  only clicks a blue default button inside the prompt's own window
+  (CoreServicesUIAgent); `click-default-button --dry-run` shows where. If the
+  click only brought the prompt forward it tries again, then presses Return,
+  but only while the prompt is the front window. Before every retry it checks
+  whether the app already started, so a slow start never gets a second click.
+  "Started" needs proof from the app: a new `app_launched` in its
+  events.jsonl, with the process up and no prompt showing. macOS starts the
+  process before it asks and holds it until Open, so the process alone proves
+  nothing. If no prompt is showing yet, it waits up to a minute for either
+  the prompt or the app. The report's approve step prints each window list it
+  saw, and `windows` prints it any time.
+  Without screen access, a readable window list, or a prompt that answers, it
+  falls back to clearing the quarantine flag. That exits 3, and first-run
+  reports it as "ok via bypass", never as plain ok.
 
 ## What a VM can and can't test
 
@@ -95,11 +157,20 @@ bash scripts/vm/transcripted-vm.sh first-run
 ```
 
 It runs `doctor`, `install-tart` (pinned Tart, checksum + signature checked)
-and `golden` (the long download). Then it boots a fresh clone with host audio
-off, installs the latest release, launches it and takes two screenshots. Along
-the way it records the facts listed under "Check on first real run" below:
-Tart's flags, the guest user, the VNC bind and handshake, and the audio
-devices the guest sees. The report and screenshots land in
+and `golden` (the long download). The last two skip work that's already done,
+so running it again is quick. When this script's snapshot prep has changed
+since the snapshot was made, it rebuilds the snapshot from the downloaded
+image, which takes a few minutes and downloads nothing big. Then it:
+
+- boots a fresh clone with screen access and host audio off
+- records who can reach the VNC port and Gatekeeper's status in the guest
+- installs the latest release
+- photographs the "downloaded from the Internet" prompt, asks Gatekeeper,
+  approves the prompt, and waits for the app to start
+- checks whether screenshots work from inside the guest (`screencapture`)
+- watches the VM for 5 minutes, runs `diagnose`, and shuts it down
+
+Each step in the report has a timestamp. The report and screenshots land in
 `~/.transcripted-vm/reports/first-run-<time>/`. If a required step fails, the
 run stops there, and the report still says which step failed and why. `purge`
 deletes the reports too, so copy them out first.
@@ -116,8 +187,10 @@ bash scripts/vm/transcripted-vm.sh golden
 
 ```bash
 V="bash scripts/vm/transcripted-vm.sh"
-$V reset                          # fresh clone of the clean snapshot, booted
+$V reset --vnc                    # fresh clone of the clean snapshot, booted, screen on
 $V install-app --latest           # or --version 1.1.61, or --dmg path/to/Transcripted-1.1.62.dmg
+$V launch
+$V approve-download               # or click Open on the "downloaded from the Internet" prompt
 $V launch
 $V screenshot /tmp/tvm.png        # look, then click what a user would click
 $V click 720 450
@@ -132,8 +205,9 @@ is two). Names may only use letters, digits, `.`, `_` and `-`.
 
 ## New-user test plan
 
-Each scenario starts with `reset --audio` unless it says otherwise, because
-recording and the mic prompt need a mic device in the guest. **Before every
+Each scenario starts with `reset --vnc --audio` unless it says otherwise,
+because the prompts need the screen, and recording and the mic prompt need a
+mic device in the guest. **Before every
 `--audio` run, set the Mac's input to the built-in mic** (System Settings >
 Sound > Input) so AirPods are never touched. Take a screenshot before every
 click.
@@ -162,7 +236,7 @@ click.
    second model download.
 6. **Sparkle update.** From 1.1.61, Check for Updates once the appcast lists
    the new version.
-7. **Onboarding screens only** (plain `reset`, no host audio). First launch,
+7. **Onboarding screens only** (`reset --vnc`, no host audio). First launch,
    Gatekeeper, the onboarding copy and layout, and the call-audio prompt. Stop
    before anything records.
 
@@ -171,6 +245,9 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 
 ## Driving it from an agent
 
+- Screen commands need `up --vnc` or `reset --vnc`, and they all share the
+  boot's one VNC session. Don't point another VNC viewer at the port: a new
+  connection is what crashed tart.
 - Coordinates are screen pixels in the screenshot (display is 1440x900 by
   default, `TVM_DISPLAY`). Use `screenshot --shrink 2` for a smaller image and
   double the coordinates you read off it.
@@ -190,26 +267,86 @@ lines) and keep private data out, per `docs/test-automation-strategy.md`.
 - `exec` runs as the logged-in `admin` user, so `open`, `say` and `~` behave
   like a real user's.
 
-## Check on first real run
+## What the real runs showed
 
-These are assumptions the script makes that nobody has confirmed on a Mac yet:
+Four runs on 2026-09-24 on Justin's MacBook Pro: repo `65f196ce`, `84d5df95`,
+`7b3c7ff5` and `bec8525c`.
 
-- The pinned Tart 2.37.0 download URL and sha256 are right (checked from
-  Linux on 2026-09-23; `install-tart` dies safely if not).
-- Tart 2.37.0 accepts `--no-clipboard`, `--no-audio`, `--vnc-experimental` and
-  `--no-graphics` together. `up` checks `tart run --help` for each flag and
-  stops with a clear error if one is missing.
-- Under `--no-audio` the guest still has a silent speaker (Tart's source says
-  so), so scenario 7's call-audio prompt and `play` work.
-- Tart's `--vnc-experimental` prints a `vnc://` URL the script can read, and
-  `vnc.py` can authenticate to it.
-- `tart exec` works against the vanilla image. If not, SSH is used, which may
-  trigger a Local Network prompt on the host.
-- The script's background `tart run` survives after the command that started
-  it returns. If the VM dies when the command ends, run `up` as a background
-  task.
-- Tart's VNC server listens only on 127.0.0.1
-  (`lsof -nP -iTCP -sTCP:LISTEN | grep -i tart`).
+Confirmed:
+
+- The pinned Tart 2.37.0 download, checksum and signature, and the pinned
+  macOS 26.6.2 image (one layer needed a retry after "network connection
+  lost"; Tart retried it).
+- Tart accepts `--no-clipboard`, `--no-audio`, `--vnc-experimental` and
+  `--no-graphics` together, prints a `vnc://` URL, and `vnc.py` can log in
+  and take a screenshot.
+- `tart exec` works against the vanilla image.
+- Installing 1.1.62 from GitHub releases into the guest, and `open`.
+- The Mac session could run the whole thing as one background command.
+- One VNC connection held for the whole boot (run 3): no tart crash, the VM
+  stayed up 10 minutes, and every screenshot went over that one connection.
+- Gatekeeper in the guest reports "assessments disabled", and
+  `spctl --assess` accepts the release as "Notarized Developer ID".
+- `du` reports about 100 GB for `~/.transcripted-vm`. Most of that is APFS
+  clones (image cache, base, clean snapshot, test clone) that share blocks,
+  so the real disk use is much lower. `df` before and after is the honest
+  number.
+
+Found and fixed:
+
+- **The VM died right after Transcripted launched, on both runs.** The
+  first run's log said nothing, so `supervise.py` was added to log how tart
+  ends. The second run's log said SIGTRAP, and the Mac's crash reports
+  (`tart-2026-09-23-215938.ips`, `tart-2026-09-24-011443.ips`) show the same
+  assertion both times: `-[_VZVirtualMachineAccessor addAccessorObserver:]`
+  called from `-[_VZVNCServer _setupVirtualMachineAccessor]`, on the first new
+  VNC connection after the app launched. That's Apple's VNC server, not the
+  app. Fixed by keeping one VNC connection per boot (see "How it works").
+- **`app_launched` never came** because the app was waiting behind the
+  "downloaded from the Internet" prompt. first-run now photographs and
+  approves the prompt before it waits.
+- **Clearing the quarantine flag didn't close the prompt (run 4).** The
+  prompt already on screen stayed, and launching again only brought it
+  forward, so the app never started. `approve-download` now clicks Open over
+  VNC, which is also what a user does.
+- **Run 5 never clicked Open.** Its approve step said "Transcripted is
+  already running" and stopped, because macOS starts the app's process as
+  soon as it's opened and holds it behind the prompt, so `pgrep` found it.
+  The prompt stayed up for the whole run. "Running" now needs the app's own
+  `app_launched` event and no prompt in the window list, and the quarantine
+  fallback ends the held process (and checks it's gone) before relaunching. Run 5 otherwise went cleanly: no
+  Setup Assistant, Gatekeeper "accepted, Notarized Developer ID", one VNC
+  session for the full 10 minutes, and tart exited normally.
+- **The Terminal window was back on run 5's screen** ("Restored session"),
+  although the snapshot prep closes it. It sits behind the prompt and
+  doesn't block anything, but where it comes from isn't known yet.
+- **The VNC check said ok on a wildcard bind.** `vnc-check` now fails when
+  the port answers on a network address. On the second run it answered on
+  Wi-Fi, a second network interface and IPv6, with the Mac's firewall off.
+  `--lockdown` (a `sandbox-exec` profile) didn't change that, so it was
+  removed, and VNC is now off unless `up --vnc` asks for it.
+- **The Cirrus image reopens a Terminal window from its own build** at every
+  login. The snapshot prep now closes it and stops windows coming back.
+- **Setup Assistant covered the desktop on run 3** with its "Update Mac
+  Automatically" screen, from boot to shutdown. No Finder, no Dock, so
+  Transcripted never showed and in-guest `screencapture` failed. Runs 1 and 2
+  (older snapshot prep) reached the desktop, so the trigger is in the
+  rebuilt snapshot, but which change set it off isn't known. Two fixes: the
+  prep marks Setup Assistant done for the build (and no longer deletes the
+  login window's per-Mac settings file), and `up` closes Setup Assistant if
+  it still shows (see "How it works").
+
+Still to confirm:
+
+- Whether one long-lived VNC connection survives Transcripted's launch (runs
+  3 to 5 never got the app past the download prompt).
+- Whether the guest's window list can be read from `tart exec` (run 5 never
+  got that far; first-run's "read the window list" step shows it).
+- That clicking Open over VNC starts the app (the report says whether it
+  clicked, pressed Return or fell back).
+- Whether `screencapture` works from inside the guest. Runs 4 and 5 had a clear
+  desktop and it still failed ("could not create image from display"),
+  probably because the guest command has no Screen Recording permission.
 - Which Command keysym the VNC server wants (Super or Meta).
 - Whether `tart exec` lands as root or as `admin` (the script handles both).
 - Transcripted's system audio prompt appears in the guest, and the process tap

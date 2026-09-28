@@ -1073,11 +1073,18 @@ def self_test() -> int:
         ['{"timestamp":"2026-06-07T00:00:01Z","level":"warn","message":"timeout during gate"}'],
         datetime(2026, 6, 7, tzinfo=timezone.utc),
     )
+    # debug.log lines carry only a local wall-clock time, and the classifier
+    # resolves them against the gate start in the machine's local timezone.
+    # Build the "one second before the gate" clock from that same local zone so
+    # this fixture stays stale under any TZ (a literal like "11:59:59" is only
+    # before a 00:00Z gate west of UTC, which made the self-test fail in UTC CI).
+    undated_since = datetime(2026, 6, 7, tzinfo=timezone.utc)
+    local_before_gate = (undated_since - timedelta(seconds=1)).astimezone()
     undated_log_item = classify_log_tail(
         "debug.log",
         Path("/tmp/debug.log"),
-        ["[11:59:59.000] warning before gate but no date"],
-        datetime(2026, 6, 7, tzinfo=timezone.utc),
+        [f"[{local_before_gate:%H:%M:%S}.000] warning before gate but no date"],
+        undated_since,
     )
     debug_since = datetime(2026, 6, 7, 12, 0, tzinfo=timezone.utc)
     local_debug_time = (debug_since + timedelta(seconds=1)).astimezone()

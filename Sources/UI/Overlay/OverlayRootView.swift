@@ -147,7 +147,8 @@ final class OverlayRootView: NSView {
 
         let showLoading = state == .loading
         let showMessage = state == .drafting && !errorMessage.isEmpty
-        let isNotice = showMessage && messageTone == .notice
+        let isNotice = showMessage && messageTone != .error
+        let isSavedNotice = showMessage && messageTone == .saved
         let showContent = showLoading || showMessage
 
         // Update header
@@ -159,6 +160,7 @@ final class OverlayRootView: NSView {
             successTitle: successTitle,
             isError: showMessage && !isNotice,
             isNotice: isNotice,
+            isSavedNotice: isSavedNotice,
             isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(
                 isListening: state == .listening,
@@ -188,6 +190,7 @@ final class OverlayRootView: NSView {
                 errorActionTitle: errorActionTitle,
                 onErrorAction: onErrorAction,
                 isNotice: isNotice,
+                isSavedNotice: isSavedNotice,
                 onErrorDismiss: onErrorDismiss
             )
         }

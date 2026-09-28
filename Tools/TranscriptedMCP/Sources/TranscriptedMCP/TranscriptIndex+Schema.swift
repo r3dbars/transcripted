@@ -96,6 +96,60 @@ extension TranscriptIndex {
             END
         """)
 
+        // Writing day files (`Writing_<date>.md`), shaped like the dictation
+        // tables above: one row per day file, one row per entry, plus FTS5 over
+        // the entry text/title/app so search_context can reach writing.
+        exec("""
+            CREATE TABLE IF NOT EXISTS writing_days (
+                filename TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                markdown_filename TEXT NOT NULL,
+                entry_count INTEGER NOT NULL,
+                word_count INTEGER NOT NULL,
+                accepted_word_count INTEGER NOT NULL DEFAULT 0,
+                json_modified_at REAL NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS writing_entries (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                entry_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                source_app_name TEXT NOT NULL,
+                source_app_bundle_id TEXT,
+                word_count INTEGER NOT NULL,
+                character_count INTEGER NOT NULL,
+                accepted_word_count INTEGER NOT NULL DEFAULT 0,
+                text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS writing_entries_fts USING fts5(
+                text, title, source_app_name,
+                content='writing_entries', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS writing_entries_ai AFTER INSERT ON writing_entries BEGIN
+                INSERT INTO writing_entries_fts(rowid, text, title, source_app_name)
+                VALUES (new.rowid, new.text, new.title, new.source_app_name);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS writing_entries_ad AFTER DELETE ON writing_entries BEGIN
+                INSERT INTO writing_entries_fts(writing_entries_fts, rowid, text, title, source_app_name)
+                VALUES ('delete', old.rowid, old.text, old.title, old.source_app_name);
+            END
+        """)
+
         exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS utterances_fts USING fts5(
                 text, speaker_name,
@@ -200,6 +254,9 @@ extension TranscriptIndex {
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_days_date ON dictation_days(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_filename ON dictation_entries(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_created_at ON dictation_entries(created_at)")
+        exec("CREATE INDEX IF NOT EXISTS idx_writing_days_date ON writing_days(date)")
+        exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_filename ON writing_entries(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_created_at ON writing_entries(created_at)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")

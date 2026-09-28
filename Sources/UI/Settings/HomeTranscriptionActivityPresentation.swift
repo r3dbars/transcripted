@@ -86,7 +86,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 progress: nil,
                 transcriptURL: nil
             )
-        case .idle:
+        case .idle, .discardedAccidentalStart:
+            // A discarded accidental start saved nothing and failed nothing,
+            // so Home shows whatever the session itself is doing.
             break
         }
 

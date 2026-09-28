@@ -1,5 +1,7 @@
 # Reliability hardening audit — 2026-09-15
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Status: implemented; final local automated gate passed; not release-ready.
 
 Integration PR: https://github.com/r3dbars/transcripted/pull/1740. Hosted CI and
@@ -160,10 +162,12 @@ audio, failed-import retries, and clipboard ownership protection remain required
   The injected Show Audio target fires in the component. Corrected recovery
   text matches the actual Capture -> Transcribe Audio File menu command.
   This is not live panel, Finder, ASR, Accessibility or hardware proof. See
-  `.agent-review/visuals/reliability-2026-09-15/README.md`. Final generic recovery
+  `.agent-review/visuals/reliability-2026-09-15/README.md` (removed 2026-09-25;
+  still in git history at `73f4fa6`). Final generic recovery
   and missing-recovery copy was re-rendered at source `bd873f0a`; older images
   are explicitly labeled historical. Safe-Quit and Retry Saving fixtures are in
-  `.agent-review/visuals/termination-quit/README.md`; the injected retry action
+  `.agent-review/visuals/termination-quit/README.md` (also removed; same
+  history); the injected retry action
   fires, but the fixture does not exercise an actual driver or storage failure.
 - R10 callback-arrival/binding-ownership follow-up: 147/147 focused assertions.
   Independent review required an asynchronous bounded wait when notification

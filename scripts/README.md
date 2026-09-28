@@ -54,6 +54,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up
+- `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--reroute` (from `.github/workflows/mac-runner-sweep.yml`) re-runs on hosted any run stuck behind a Mac that went quiet; `--self-test` checks the rules
+- `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `rebuild`, `uninstall` the service that runs each Mac CI job in a fresh throwaway Tart VM, plus the VM-side fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/download_icsi.sh` — fetch the gitignored ICSI meeting-corpus audio/RTTM subset (research-use license; speakers recur heavily across meetings)
 - `scripts/download_voxceleb_sample.sh` — stream a capped-size VoxCeleb1 identity sample and build multi-identity sessions for the speaker-DB test, gitignored
@@ -73,6 +75,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
+- `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
@@ -82,11 +85,18 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/stt-shootout/run.sh` — speech-to-text model shootout on an Apple Silicon Mac: runs Parakeet V3 (the app's model) and other on-device models over an hour-long human-captioned video and reports speed, latency, peak memory, and word error rate; see `scripts/stt-shootout/README.md`
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
+## Linux checks (no Swift toolchain)
+
+- `bash scripts/dev/linux-checks.sh` — runs every check that works on Linux without Swift (agent contract self-tests, syntax, build-source lists, duplicate declarations, analytics/telemetry/privacy gates, the strict release-health fixture gate for the current `Info.plist` version, an explicit list of `scripts/ops` + `scripts/release` `--self-test`s and script test suites, Swift source-pin mirror). Prints `PASS`/`FAIL`/`SKIP` per check with elapsed time and the exact command to re-run it; exits non-zero on any failure. Writes only under gitignored `build/` (mostly `build/linux-checks/`; `nightly-security-check.py` also writes `build/privacy-leak-sweep-nightly.json`). Flags: `--quick`, `--only <substring>`, `--list`, `--verbose`, `--strict-tools` (the CI mode: missing ruby/`origin/main` fails instead of skipping, and the tag-dependent strict release-health gate runs only when the branch touches `Info.plist`, `docs/appcast.xml`, `Casks/**`, `Tests/Fixtures/release-health-*`, or `scripts/ops/nightly-security-check.py`). Every script in its lists is a required PR check: to add a new `--self-test` or test suite, append it to `SELF_TEST_SCRIPTS` / `PY_TEST_SUITES` / `RB_TEST_SUITES` in the script
+- `scripts/dev/check-source-pins.py` — static Linux mirror of the Swift fast tests that read repo files as text and assert `contains`/`range(of:)` on literals; reports pins whose needle went missing (or a forbidden needle that appeared) with the test `file:line`, and fails when a pinned file was deleted or renamed. Conservative: anything it cannot resolve is counted and skipped, including mutated `var`s, assertions inside `#if`, and assertions under an `if`/`guard` that reads the same file. `--changed-only [base]` limits to pins whose target or test changed (default `origin/main`; falls back to the whole tree when the ref is missing); `--verbose` lists unresolved reasons; `--self-test`
+- `scripts/dev/check-telemetry-keys.py` — fails when an allowlisted analytics property or Sentry tag key contains a sensitive-key fragment the sanitizers drop (mirrors `PayloadSanitizationCore.shouldDrop`, Sentry's `explicitlySafeKeys`); `--self-test`
+
 ## Clean test VM
 
 - `scripts/vm/transcripted-vm.sh` — build and drive a throwaway macOS 26 VM (Tart) for new-user and upgrade tests without touching the host's data or permissions; see `docs/clean-vm-testing.md`
 - `scripts/vm/test-transcripted-vm.sh` — guard tests for the VM script's delete paths (hostile VM names, `TVM_HOME`, the clean snapshot, `purge`); no Tart needed, runs in repo-hygiene
-- `scripts/vm/vnc.py` — dependency-free VNC client the VM script uses for screenshots, clicks and typing (clicks macOS permission prompts)
+- `scripts/vm/vnc.py` — dependency-free VNC client the VM script uses for screenshots, clicks and typing (clicks macOS permission prompts); `serve` holds the one VNC connection per boot
+- `scripts/vm/supervise.py` — starts `tart run` in its own session, keeps the Mac awake while it runs, and logs how it ended (the VM script's `up` uses it)
 
 ## Operational health probes
 
@@ -137,7 +147,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json`
-  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.58.json --write-report build/nightly-security-report.json`
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json` (use the fixture that matches `CFBundleShortVersionString` in `Info.plist`; an older fixture fails the gate on purpose, and `.agents/test-matrix.yml` names the current one)
   - Live release-surface gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces`
   - Sentry release gate: `python3 scripts/ops/nightly-security-check.py --sentry-release-health`
   - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`
@@ -184,15 +194,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
 - `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
   - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
-- `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`
-  - Usage: `ruby scripts/ops/agent-todo-runner.rb --watch`
-  - Reads `WORKFLOW.md` and watches issues labeled `agent todo` or `agent in progress`
-- `scripts/ops/agent-todo-launchagent.sh` — install, restart, inspect, or remove the macOS background watcher
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
-  - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, release-health fixture checks, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
@@ -216,8 +217,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - JSON usage: `scripts/ops/speaker-naming-simulator.py --json`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
 - `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
-- `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
-  - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state
   - Usage: `python3 scripts/ops/generate-nightly-digest.py --open`
   - Self-test: `python3 scripts/ops/generate-nightly-digest.py --self-test`
@@ -226,16 +225,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
     - `/Users/redbars/Delance/transcripted-nightly-digest-latest.html`
     - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.json`
     - `/Users/redbars/Delance/transcripted-nightly-digest-latest.json`
-- `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
-  - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
-  - Writes:
-    - `build/codex-memory-index/transcripted-codex-index.json`
-    - `build/codex-memory-index/transcripted-codex-stats.json`
-    - `build/codex-memory-index/transcripted-codex-followups.json`
-    - `build/codex-memory-index/transcripted-paperclip-task-seeds.json`
-    - `build/codex-memory-index/transcripted-codex-digest.md`
-  - Optional: `--limit 200` to scan only the newest 200 session files while iterating
-  - Optional: `--mlx-summarize --mlx-model <model-id>` to generate local intent summaries through an MLX OpenAI-compatible endpoint
+
 
 ## Rule of thumb
 

@@ -51,6 +51,10 @@ final class TranscriptionQueueCoordinator {
         let promptTelemetryProperties: [String: String]?
         let promptRecordingStartedAt: Date?
         var importedRecoverySession: ImportedTranscriptionQueueJournalSession?
+        /// Wall-clock length of the live session, from Record to Stop. Core
+        /// uses it so short files from a long meeting whose capture broke are
+        /// never mistaken for an accidental start. Nil for imports.
+        var sessionLength: TimeInterval?
 
         /// Snapshot of People-in-the-room at enqueue for recorded jobs.
         /// Imports stay `false` (system-channel).
@@ -157,7 +161,8 @@ final class TranscriptionQueueCoordinator {
         languageSelection: TranscriptionLanguageSelection = .automatic,
         sttModel: TranscriptionModelChoice? = nil,
         promptTelemetryProperties: [String: String]? = nil,
-        promptRecordingStartedAt: Date? = nil
+        promptRecordingStartedAt: Date? = nil,
+        sessionLength: TimeInterval? = nil
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             id: UUID(),
@@ -176,7 +181,8 @@ final class TranscriptionQueueCoordinator {
             stoppedAudioRecovery: nil,
             promptTelemetryProperties: promptTelemetryProperties,
             promptRecordingStartedAt: promptRecordingStartedAt,
-            importedRecoverySession: nil
+            importedRecoverySession: nil,
+            sessionLength: sessionLength
         )
 
         return enqueue(job)
@@ -403,7 +409,8 @@ final class TranscriptionQueueCoordinator {
                 meetingTitle: meetingTitle,
                 splitLocalSpeakers: splitLocalSpeakers,
                 recordingDate: recordingDate,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                sessionLength: job.sessionLength
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             controller.taskManager.startImportedTranscription(

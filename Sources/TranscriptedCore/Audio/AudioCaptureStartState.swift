@@ -5,6 +5,10 @@ public enum AudioCaptureStartFailureStage: String, Equatable, Sendable {
     case microphoneGraph = "microphone_graph"
     case systemAudio = "system_audio"
     case microphoneFile = "microphone_file"
+    /// `installTap` raised and `AudioTapInstallGuard` caught it (a mic format
+    /// change mid-start). Kept apart from `microphoneGraph` so the field can
+    /// tell caught crashes from ordinary graph failures.
+    case microphoneTapRaised = "microphone_tap_raised"
     case unknown = "unknown"
 }
 

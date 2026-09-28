@@ -22,6 +22,10 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     // focused retry) returned no words. This is not proof that speech occurred;
     // it is a reason to retain the WAV for a user-controlled import/retry.
     case audioNeedsRecovery = "audio_needs_recovery"
+    // A multilingual model returned text in a writing system none of this
+    // person's languages use (DictationLanguageScriptPolicy). Not pasted
+    // unasked: the message offers Paste Anyway, and the audio is kept.
+    case otherLanguage = "other_language"
 
     var analyticsEventName: String {
         switch self {
@@ -33,6 +37,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "dictation_transcription_failed"
         case .audioNeedsRecovery:
             return "dictation_audio_needs_recovery"
+        case .otherLanguage:
+            return "dictation_other_language"
         }
     }
 
@@ -46,6 +52,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "dictation_transcription_failed"
         case .audioNeedsRecovery:
             return "dictation_audio_needs_recovery"
+        case .otherLanguage:
+            return "dictation_other_language"
         }
     }
 
@@ -59,6 +67,8 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "Dictation transcription model failed"
         case .audioNeedsRecovery:
             return "Captured dictation audio needs a retry"
+        case .otherLanguage:
+            return "Dictation came out in a language this Mac doesn't use"
         }
     }
 
@@ -76,11 +86,31 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
             return "model_failure"
         case .audioNeedsRecovery:
             return "audio_needs_recovery"
+        case .otherLanguage:
+            return "other_language"
         }
     }
 
     var shouldDiscardStoppedAudioRecovery: Bool {
         self == .noSpeech || self == .recordingTooShort
+    }
+
+    /// Longest press of the dictation shortcut that can be a mis-tap.
+    static let accidentalStartMaximumPress: TimeInterval = 1.5
+
+    /// A dictation released within `accidentalStartMaximumPress` that captured
+    /// under a second of audio is a mis-tap of the shortcut, not a failed
+    /// dictation. The overlay treats it like a cancel (no error text) and
+    /// friction telemetry counts it as `cancelled`, not `give_up`. Its
+    /// analytics event name is unchanged so existing counts stay comparable.
+    ///
+    /// The press length matters: `recordingTooShort` is also what a stalled
+    /// microphone produces (no samples after a long press), and that is a real
+    /// failure the person needs to see.
+    func isAccidentalStart(pressDuration: TimeInterval) -> Bool {
+        self == .recordingTooShort
+            && pressDuration >= 0
+            && pressDuration < Self.accidentalStartMaximumPress
     }
 }
 
@@ -125,10 +155,14 @@ enum ParakeetShortAudioGate {
         resampledSampleCount: Int,
         errorMessage: String
     ) -> ParakeetTranscriptionDecision? {
-        guard shouldTreatFailureAsShortAudio(
-            sampleCount: resampledSampleCount,
-            errorMessage: errorMessage
-        ) else {
+        // Enough audio means the error is a real model failure, whatever its
+        // text says. Reporting it as "too short" discarded a full dictation's
+        // audio instead of keeping it for recovery.
+        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(resampledSampleCount),
+              shouldTreatFailureAsShortAudio(
+                sampleCount: resampledSampleCount,
+                errorMessage: errorMessage
+              ) else {
             return nil
         }
 

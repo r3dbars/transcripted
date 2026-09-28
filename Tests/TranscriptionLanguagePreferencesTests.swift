@@ -23,13 +23,22 @@ func testTranscriptionLanguagePreferences() {
             for model in TranscriptionModelChoice.allCases {
                 assertEqual(
                     TranscriptionLanguagePreferences.effectiveLanguageCode(for: model, userDefaults: defaults),
-                    model.isWhisper ? "fi" : "auto"
+                    model.supportsMeetingLanguageChoice ? "fi" : "auto"
                 )
                 assertEqual(TranscriptionLanguagePreferences.preferredLanguageCode(userDefaults: defaults), "fi")
             }
             assertEqual(
                 TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3, userDefaults: defaults),
                 "fi"
+            )
+            assertEqual(
+                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .appleSpeech, userDefaults: defaults),
+                "fi",
+                "Apple Speech honors a saved meeting language"
+            )
+            assertEqual(
+                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .parakeetTDTv3, userDefaults: defaults),
+                "auto"
             )
             assertEqual(TranscriptionLanguagePreferences.displayName(for: "fi"), "Finnish")
         }

@@ -433,6 +433,8 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
                 capture.stopSync()
             case .systemWake:
                 XCTFail("a stream stop is not a system wake")
+            case .fellBehind:
+                XCTFail("ScreenCaptureKit capture never reports an overflow reconnect")
             case .recoveryAbandoned:
                 abandoned.fulfill()
             case .gap:

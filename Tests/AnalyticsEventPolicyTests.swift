@@ -8,8 +8,10 @@
 // APP_SOURCES, so the meeting-prompt telemetry call-site counts are counted as text instead of
 // exercised; Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift lives
 // in a separate SPM package never linked into this runner, so its allowedProperties literal is
-// parsed as text to cross-check against the app-side allowlist. If you refactor any of these,
-// keep the grepped strings/counts in sync with the source.
+// parsed as text to cross-check against the app-side allowlist;
+// Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift depends on the people
+// database and is not in APP_SOURCES either, so its reason raw values are read as text. If you
+// refactor any of these, keep the grepped strings/counts in sync with the source.
 
 import Foundation
 
@@ -896,6 +898,15 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy closes a dictation start dropped for a key combo") {
+        let dropped = AnalyticsEventPolicy.policy(forEvent: "dictation_start_dropped_for_modifier_combo")
+        assertEqual(
+            (dropped?.allowedProperties ?? Set<String>()).sorted(),
+            ["duration_bucket", "trigger"],
+            "a start dropped because right Option became a combo needs its own terminal event, with only coarse fields"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy keeps the dictation attempt denominator whole") {
         let requested = AnalyticsEventPolicy.policy(forEvent: "dictation_start_requested")
         let started = AnalyticsEventPolicy.policy(forEvent: "dictation_started")
@@ -909,7 +920,7 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             (started?.allowedProperties ?? Set<String>()).subtracting(allowed).sorted(),
-            ["start_latency_bucket"],
+            ["start_latency_bucket", "start_latency_ms"],
             "dropping a field the success event has would make the two uncomparable in a funnel; start latency is the only field a request cannot know yet"
         )
         assertTrue(
@@ -996,7 +1007,12 @@ func testAnalyticsEventPolicy() {
                 "cleanup_enabled": "true",
                 "copy_reason": "focus_changed",
                 "decode_bucket": "250_499ms",
+                "decode_latency_ms": "420",
                 "delivery": "pasted",
+                "first_sound_latency_bucket": "100_249ms",
+                "first_sound_latency_ms": "200",
+                "mac_chip": "m2_pro",
+                "memory_gb_bucket": "16gb",
                 "mic_stop_bucket": "lt_100ms",
                 "model_wait_bucket": "lt_100ms",
                 "outcome": "completed",
@@ -1009,6 +1025,8 @@ func testAnalyticsEventPolicy() {
                 "stop_to_done_ms": "742",
                 "stop_to_paste_bucket": "500_999ms",
                 "stop_to_paste_ms": "621",
+                "stop_to_paste_latency_ms": "620",
+                "stt_model": "parakeet-tdt-v3",
                 "target_confirmation_mode": "clipboard_read_only",
                 "trigger": "physical_key",
                 "word_count_bucket": "10_49",
@@ -1025,6 +1043,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["decode_bucket"], "250_499ms", "bucketed model work should survive")
         assertEqual(sanitized["copy_reason"], "focus_changed", "normalized copy reason should survive")
         assertEqual(sanitized["word_count_bucket"], "10_49", "coarse word count should survive")
+        assertEqual(sanitized["decode_latency_ms"], "420", "10 ms decode timing should survive for per-model percentiles")
+        assertEqual(sanitized["stop_to_paste_latency_ms"], "620", "10 ms stop-to-paste timing should survive")
+        assertEqual(sanitized["first_sound_latency_ms"], "200", "10 ms key-to-first-sound timing should survive")
+        assertEqual(sanitized["first_sound_latency_bucket"], "100_249ms", "bucketed key-to-first-sound timing should survive")
+        assertEqual(sanitized["stt_model"], "parakeet-tdt-v3", "the speech model id should survive")
+        assertEqual(sanitized["mac_chip"], "m2_pro", "the coarse chip family should survive")
+        assertEqual(sanitized["memory_gb_bucket"], "16gb", "the coarse memory bucket should survive")
         assertNil(sanitized["stop_to_paste_ms"], "raw stop-to-paste milliseconds should stay local")
         assertNil(sanitized["stop_to_done_ms"], "raw stop pipeline milliseconds should stay local")
         assertNil(sanitized["chars"], "raw character counts should stay local")
@@ -1332,6 +1357,60 @@ func testAnalyticsEventPolicy() {
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy keeps coarse speaker finalization failure reasons") {
+        let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
+        let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
+        let allowedKeys = speakerFinalizationFailed?.allowedProperties ?? []
+        let reasons = analyticsSpeakerFinalizationReasonRawValues()
+
+        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+        for key in ["finalization_reason", "review_mode", "is_retry"] {
+            assertEqual(allowedKeys.contains(key), true, "\(key) should be allowlisted for speaker finalization failures")
+            assertEqual(meetingFailed?.allowedProperties.contains(key), false, "\(key) belongs to speaker finalization failures only")
+        }
+
+        for reason in reasons {
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                ["finalization_reason": reason],
+                allowedKeys: allowedKeys
+            )
+            assertEqual(sanitized["finalization_reason"], reason, "\(reason) should reach analytics unchanged")
+        }
+
+        for reviewMode in ["save", "review_later"] {
+            for isRetry in ["true", "false"] {
+                let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                    ["review_mode": reviewMode, "is_retry": isRetry],
+                    allowedKeys: allowedKeys
+                )
+                assertEqual(sanitized["review_mode"], reviewMode, "\(reviewMode) review mode should reach analytics")
+                assertEqual(sanitized["is_retry"], isRetry, "retry flag should reach analytics")
+            }
+        }
+
+        let freeText = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "finalization_reason": "Could not save Private Person",
+                "review_mode": "Private Person review",
+            ],
+            allowedKeys: allowedKeys
+        )
+        assertNil(freeText["finalization_reason"], "free-text reasons must never leave the device")
+        assertNil(freeText["review_mode"], "free-text review modes must never leave the device")
+
+        let unrelated = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "finalization_reason": "name_rewrite_failed",
+                "review_mode": "save",
+                "is_retry": "true",
+            ],
+            allowedKeys: meetingFailed?.allowedProperties ?? []
+        )
+        assertNil(unrelated["finalization_reason"], "unrelated events should not carry the speaker finalization reason")
+        assertNil(unrelated["review_mode"], "unrelated events should not carry the review mode")
+        assertNil(unrelated["is_retry"], "unrelated events should not carry the retry flag")
+    }
+
     runSuite("AnalyticsEventPolicy allows speaker review funnel events without names") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_shown")
         let submitted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_submitted")
@@ -1529,6 +1608,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(shown?.allowedProperties.contains("app_signal"), true, "prompt shown should keep coarse app signal")
         assertEqual(shown?.allowedProperties.contains("route_ready"), true, "prompt shown should preserve route readiness")
         assertEqual(shown?.allowedProperties.contains("missing_permission"), true, "prompt shown should preserve missing-permission buckets")
+        for policy in [shown, dismissed, recorded, suppressed] {
+            assertEqual(
+                policy?.allowedProperties.contains("call_evidence"),
+                true,
+                "\(policy?.name ?? "prompt event") should say what convinced the detector it was a call"
+            )
+        }
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
         assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
         assertEqual(dismissed?.allowedProperties.contains("cooldown_reason"), true, "prompt dismiss should preserve cooldown reason")
@@ -1689,8 +1775,8 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            4,
-            "app-level outcomes should cover dismiss, expiry, remind-later, and pre-prompt suppression exactly once"
+            3,
+            "app-level outcomes should cover dismiss, expiry, and remind-later exactly once; suppressions send only meeting_prompt_suppressed"
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),
@@ -1753,6 +1839,23 @@ private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: Stri
         searchRange = range.upperBound..<haystack.endIndex
     }
     return count
+}
+
+/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
+/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
+private func analyticsSpeakerFinalizationReasonRawValues() -> [String] {
+    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
+    guard let start = source.range(of: "public enum SpeakerFinalizationFailureReason"),
+          let end = source.range(of: "static func classify", range: start.upperBound..<source.endIndex) else {
+        return []
+    }
+    return source[start.upperBound..<end.lowerBound].split(separator: "\n").compactMap { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("case ") else { return nil }
+        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
+        guard quoted.count >= 3 else { return nil }
+        return String(quoted[1])
+    }
 }
 
 private func documentedAnalyticsEvents() -> [String] {

@@ -261,10 +261,8 @@ final class UIAutomationSmokeRunner {
         let menuRequiredIDs = [
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
-            "transcripted.menubar.primary.paste-last-dictation",
-            "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.settings",
+            "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.quit",
         ]
         let menuMaxDepth = 12
@@ -287,7 +285,7 @@ final class UIAutomationSmokeRunner {
 
         let menuObserved = observedElements(for: menuRequiredIDs, inspector: appInspector, maxDepth: menuMaxDepth)
         let disabledMenuIDs = menuObserved
-            .filter { ["transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.open-transcripted", "transcripted.menubar.utility.settings", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
+            .filter { ["transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.open-transcripted", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
             .filter { $0.isEnabled != true }
             .compactMap(\.identifier)
         if !disabledMenuIDs.isEmpty {
@@ -346,14 +344,17 @@ final class UIAutomationSmokeRunner {
         }
 
         let settingsSidebarIDs = [
+            "transcripted.settings.sidebar.today",
             "transcripted.settings.sidebar.home",
             "transcripted.settings.sidebar.dictations",
+            "transcripted.settings.sidebar.writing",
             "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
             "transcripted.settings.sidebar.settings-toggle",
         ]
+        // Open Transcripted lands on Today; Meetings is checked from the sidebar below.
         let homeIDs = [
-            "transcripted.home.find.toggle",
+            "transcripted.today.page",
         ]
 
         guard waitUntil(timeout: timeout, condition: {
@@ -362,26 +363,38 @@ final class UIAutomationSmokeRunner {
         }) else {
             builder.add(.fail(
                 "settings-home",
-                "Home settings surface is visible",
+                "Today opens as the first page",
                 target: "Transcripted Settings",
-                detail: "Settings Home did not expose expected sidebar and Home controls.",
+                detail: "The window did not open on Today with the expected sidebar rows.",
                 observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
             ))
             return builder.build()
         }
         builder.add(.pass(
             "settings-home",
-            "Home settings surface is visible",
+            "Today opens as the first page",
             target: "Transcripted Settings",
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
         let primaryPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
             (
+                id: "settings-meetings",
+                title: "Meetings settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.home",
+                requiredIDs: ["transcripted.home.find.toggle"]
+            ),
+            (
                 id: "settings-dictations",
                 title: "Dictations settings surface is visible",
                 triggerID: "transcripted.settings.sidebar.dictations",
                 requiredIDs: ["transcripted.settings.page.dictations"]
+            ),
+            (
+                id: "settings-writing",
+                title: "Writing settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.writing",
+                requiredIDs: ["transcripted.settings.page.writing"]
             ),
             (
                 id: "settings-speakers",
@@ -817,20 +830,11 @@ struct MenuBarAuditRow: Equatable {
             minimumHitSize: 40
         ),
         MenuBarAuditRow(
-            rowNumber: 29,
-            title: "Audit row 29: Paste Last Dictation menu action is visible and 40pt",
-            targets: [
-                MenuBarAuditTarget("transcripted.menubar.primary.paste-last-dictation", requiresEnabled: nil),
-            ],
-            minimumHitSize: 40
-        ),
-        MenuBarAuditRow(
             rowNumber: 31,
             title: "Audit row 31: menu utility actions are visible, enabled, and 40pt",
             targets: [
-                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
                 MenuBarAuditTarget("transcripted.menubar.utility.open-transcripted"),
-                MenuBarAuditTarget("transcripted.menubar.utility.settings"),
+                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
                 MenuBarAuditTarget("transcripted.menubar.utility.quit"),
             ],
             minimumHitSize: 40

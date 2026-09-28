@@ -476,17 +476,26 @@ extension SpeakerDatabase {
     /// These are typically noise from AHC over-splitting one speaker into multiple clusters.
     /// Safe to call after each transcription — only prunes stale orphans, never recent profiles.
     public func pruneWeakProfiles() {
+        pruneWeakProfiles(protecting: [])
+    }
+
+    /// Same as `pruneWeakProfiles()`, but also keeps `protectedIds`: profiles an open
+    /// speaker review still points at. A review can stay open longer than the one hour
+    /// age cutoff, and pruning its profile made the eventual Save fail.
+    public func pruneWeakProfiles(protecting protectedIds: Set<UUID>) {
         queue.sync {
-            pruneWeakProfilesImpl()
+            pruneWeakProfilesImpl(protecting: protectedIds)
         }
     }
 
-    private func pruneWeakProfilesImpl() {
+    private func pruneWeakProfilesImpl(protecting reviewProtectedIds: Set<UUID>) {
         guard isDatabaseOpen else { return }
         // Only prune profiles created more than 1 hour ago — don't prune profiles from
         // the current recording that are about to be named in the speaker naming flow.
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
-        let protectedIds = persistedReviewClipSpeakerIds().sorted { $0.uuidString < $1.uuidString }
+        let protectedIds = persistedReviewClipSpeakerIds()
+            .union(reviewProtectedIds)
+            .sorted { $0.uuidString < $1.uuidString }
         let protectedClause: String
         if protectedIds.isEmpty {
             protectedClause = ""

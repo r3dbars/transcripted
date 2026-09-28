@@ -7,6 +7,7 @@ struct TranscriptValidator {
         "parakeet_v2_local",
         "whisper_large_v3_turbo_local",
         "whisper_large_v3_local",
+        "apple_speech_local",
         "parakeet_ultra_local",
     ]
 
@@ -37,7 +38,11 @@ struct TranscriptValidator {
 
             let yaml = YAMLParser(content: content)
 
-            if yaml.value(for: "capture_type") == "meeting_summary" {
+            // Summary sidecars and writing day files (which share the folder in
+            // the flat shared layout) aren't transcripts; WritingValidator
+            // covers writing.
+            if yaml.value(for: "capture_type") == "meeting_summary"
+                || yaml.value(for: "capture_type") == "writing_day" {
                 continue
             }
 

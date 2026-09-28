@@ -189,8 +189,10 @@ func testTranscriptedPermissionAccess() async {
 
     runSuite("Audio-only migration copy — names both macOS sections") {
         assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("System Audio Recording Only"), "guide must name narrow grant")
-        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("turn that broader permission off"), "guide must explain removing old access")
-        assertTrue(TranscriptedPermissionKind.systemAudioRecordingSummary.contains("no screen access needed"), "new onboarding should explain narrow access")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("That's all meetings need."), "guide must say meetings only need the narrow grant")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("only for Writing's autocomplete"), "guide must say the broader grant is only for Writing's autocomplete")
+        assertFalse(TranscriptedPermissionKind.systemAudioRecordingMigrationInstructions.contains("turn that broader permission off"), "guide must not tell autocomplete users to remove the grant it needs")
+        assertTrue(TranscriptedPermissionKind.systemAudioRecordingSummary.contains("meetings never need screen access"), "onboarding should say meetings need audio access only")
     }
     // Exercise the actual Settings/onboarding action, including its external
     // handoff. Request-only helper tests cannot catch a dead Review button.
@@ -212,10 +214,9 @@ func testTranscriptedPermissionAccess() async {
                     openSystemSettings: { opened.append($0) }
                 )
                 let expectedGranted = status == .authorized || (status == .notDetermined && promptResult)
-                let freshlyGranted = status == .notDetermined && promptResult
                 assertEqual(granted, expectedGranted, "the action should preserve the authorization result")
                 assertEqual(requests, status == .notDetermined ? 1 : 0, "only undetermined access should request permission")
-                assertEqual(opened, freshlyGranted ? [] : [microphoneSettings], "Review and blocked access should open Microphone Settings exactly once; a fresh grant should stay in-app")
+                assertEqual(opened, status == .notDetermined ? [] : [microphoneSettings], "Review and blocked access should open Microphone Settings exactly once; a fresh answer to the macOS prompt, Allow or Don't Allow, should stay in-app")
             }
         }
     }
@@ -245,12 +246,40 @@ func testTranscriptedPermissionAccess() async {
                 let freshlyGranted = status == .notDetermined && promptResult
                 assertEqual(granted, alreadyGranted || freshlyGranted, "the action should preserve the authorization result")
                 assertEqual(requests, status == .notDetermined ? 1 : 0, "only undetermined access should request permission")
-                assertEqual(opened, freshlyGranted ? [] : [calendarSettings], "Review and blocked access should open Calendar Settings exactly once; a fresh grant should stay in-app")
+                assertEqual(opened, status == .notDetermined ? [] : [calendarSettings], "Review and blocked access should open Calendar Settings exactly once; a fresh answer to the macOS prompt, Allow or Don't Allow, should stay in-app")
                 if alreadyGranted {
                     assertEqual(activations, 0, "Review should go straight to Settings without activating an in-app prompt")
                 }
             }
         }
+    }
+
+    let accessibilitySettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    for onboarding in [true, false] {
+    for trusted in [true, false] {
+        for promptShown in [true, false] {
+            await runSuite("Accessibility permission action — onboarding \(onboarding), trusted \(trusted), prompt shown before \(promptShown)") {
+                var opened: [String] = []
+                var prompts = 0
+                let granted = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                    for: .accessibility,
+                    firstAccessibilityAskShowsPromptOnly: onboarding,
+                    isAccessibilityTrusted: { trusted },
+                    hasShownAccessibilityPrompt: { promptShown },
+                    promptForAccessibility: { prompts += 1 },
+                    openSystemSettings: { opened.append($0) }
+                )
+                assertEqual(granted, trusted, "the action should report the current trust state")
+                assertEqual(prompts, trusted ? 0 : 1, "only an untrusted app should ask macOS to show its prompt")
+                let firstAsk = onboarding && !trusted && !promptShown
+                assertEqual(
+                    opened,
+                    firstAsk ? [] : [accessibilitySettings],
+                    "only onboarding's first Grant shows the macOS prompt alone; Settings rows always open the pane, since macOS may not prompt a user who lost trust after an update"
+                )
+            }
+        }
+    }
     }
 
     let knownKey = "systemAudioRecordingPermissionKnown"

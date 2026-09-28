@@ -28,15 +28,60 @@ settings-side agent connection flow.
   `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
   by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Home/Dictations/Speakers/Agent); all configuration lives
+  content section (Today/Meetings/Dictations/Writing/Speakers/Agent); the
+  Writing row carries a quiet trailing "New" badge until
+  `WritingSidebarNewBadge.dismissedDefaultsKey` is set. All configuration lives
   on one combined scrolling settings page reached from the sidebar gear — the
   old General/Storage/About tab strip was removed, and `.storage`/`.about`
   (like the earlier `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
   aliases) were deleted from `TranscriptedSettingsPage`.
-- `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
-  disclosure rows, headings, and info popovers.
+- `TranscriptedSettingsGeneralControls.swift` - `SettingsCard` and its
+  label, control/toggle/action rows, the dictation overlay mode picker, and
+  the `GeneralInfo` ⓘ popovers.
+- `TranscriptedSettingsComponents.swift` - shared page pieces:
+  `persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button
+  styles, `SettingsStatusCard`, permission status rows, and the hotkey
+  recorder container.
+- `TranscriptedSettingsPage.swift` - the sidebar page enum. `.today` is first
+  and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
+  automation ids, analytics `page_id`, and source pins stay stable. Then
+  Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6. Also holds
+  `WritingSidebarNewBadge`, whose defaults key the Writing page sets when
+  setup finishes.
+- `TodayPresentation.swift` / `TodayViewModel.swift` /
+  `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
+  rolling seven-day tape, and Recent context all come from local capture
+  files: the cached meeting index (`RecentMeetingsScanner.loadSearchIndex`),
+  the dictation day files (`DictationTranscriptStore.savedDictationDayCounts`),
+  and Save my writing's `Writing_<date>.md` files (`TodayWritingParser`).
+  Picking a day in the week strip retitles the header and swaps in that
+  day's numbers (`TodayTapeBuilder.dayStats`). Writing bars are estimated
+  from word count, since the files keep only the first keystroke; a writing
+  click opens its day file until the Writing tab lands.
+  No network, no new analytics event (only `settings_action_clicked` action
+  ids). Meeting clicks reuse the pill's `requestHomeRevealMeeting` path;
+  dictation clicks open Dictations. The tape copies the Context app's Days
+  view (week cells with mini lines, full day below, 6 AM to midnight) and
+  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`).
+- `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
+  page plus the ⌘F Home find-focus token.
+- `TranscriptedSettingsActions.swift` - app-level closures injected into the
+  shell (start dictation/meeting, import audio, feedback, diagnostics).
+- `TranscriptedSettingsWindowController.swift` /
+  `TranscriptedOnboardingWindowController.swift` - AppKit windows hosting the
+  settings shell and onboarding view.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
   model choices, custom corrections, and Auto Enter apps.
+- `DictionaryPastMeetingsLine.swift` - the quiet "Also in N past meetings. Fix them" line
+  under a correction in the Corrections sheet, plus its main-actor model
+  (debounced background count, a confirm with the count before the first
+  write, Fix, Undo/Try again). While a row's edit is being recounted the line
+  keeps its last state with Fix disabled, so typing doesn't make it jump.
+  Fix results are keyed by row id, so editing a
+  correction keeps its Undo, and reload from the on-disk backups after a
+  relaunch. A recent fix whose correction was edited away is listed under
+  the corrections with its own Undo. The file work lives in
+  `Sources/UI/Shared/DictionaryPastMeetingFix.swift`.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   and the Advanced disclosure.
@@ -51,22 +96,68 @@ settings-side agent connection flow.
   `RecentMeetingsScanner.loadSearchIndex`, reuses unchanged rows on rebuild,
   and resolves audio only for the matches it shows. Timed by the Home
   recent-captures benchmark.
-- `HomeView.swift` - Home canvas components (Meetings-title header with stats line,
-  attention pills, capture list sections), recent capture rows, preview,
-  feedback, failed meeting recovery, and retained-audio controls.
+- `HomeView.swift` - `HomeViewModel` plus Home building blocks: day-grouped
+  list and capture-list sections, row action buttons/menus, search field,
+  scan-warning card, inline failed-meeting row (retry/retained audio),
+  feedback sheet, and the preview/attention models.
+- `QuietHomeLibrary.swift` - quiet-library Meetings components (2026-08
+  redesign): header sentence, meeting/working rows, and the in-place
+  expansion with speaker labels and naming.
+- `QuietDictationLibrary.swift` - the matching per-entry Dictations rows and
+  expansion.
+- `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color
+  palette shared by the Home expansion.
+- `HomeMeetingPreviewFormatter.swift` - transcript preview content and staged
+  speaker-correction/naming plans.
+- Foundation-pure Home policy/copy helpers (fast-testable, no SwiftUI):
+  `HomeSearchMatching.swift` (list filter + in-transcript find),
+  `HomeRootAlertPolicy.swift` (single alert presenter routing +
+  `HomeActionFailureCopy`), `HomeDeleteConfirmationPolicy.swift`,
+  `HomeScanWarningPolicy.swift`, `HomeTranscriptionActivityPresentation.swift`
+  and `HomeTranscriptionActivityCopy.swift`,
+  `HomeFailedMeetingInlinePresentation.swift`,
+  `FailedMeetingRecoveryPresentation.swift` (retry availability), and
+  `SettingsRecentCaptureRefreshPolicy.swift` (when pages refresh captures).
+- Plain-words failure copy: `AgentSetupFailureCopy.swift` (Agent page) and
+  `SettingsActionFailureCopy.swift` (Settings actions).
+- `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` -
+  meeting-only language picker and Mac-selected-mic toggle rows.
+- `HotkeyRecorderAppKitView.swift` - AppKit shortcut recorder.
+- `OnboardingAbandonmentReasonPolicy.swift` - maps an onboarding exit to its
+  telemetry abandonment reason.
 - `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps; permission refresh is event-driven and never uses a repeating ScreenCaptureKit probe
   (welcome, permissions, done), single path, no use-case branching or agent
   setup — agent connection now lives only in `AgentConnectionSettingsPage.swift`.
+  The Done screen watches `STTRouter` and says "Almost set." with the model's
+  download progress until the voice model is on this Mac. After a Don't Allow
+  on the microphone, the permissions step offers "Skip for now" so people can
+  still reach file import; the Done screen then says the mic is off.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
-- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
+  held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
+  its header names the meeting. When the recording started with a calendar event
+  (same window as the record-this-meeting pop-up),
+  its invitees show as one-click name buttons on each row and lead the name
+  list, and a 1:1 pre-fills the one remote voice
+  (`MeetingInviteeSuggestionPolicy`). Suggestions only; the user still saves.
+- `SpeakerReviewPresentationGate.swift` - Foundation-pure rule for when the
+  speaker review window may appear (waits for Stop while a meeting records).
+- `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow
+  menu, and name-suggestion policies for the voice-to-name rows.
+- `SpeakerNameAutocompleteField.swift` - SwiftUI wrapper over the naming
+  sheet's `NSComboBox` autocomplete.
+- `RetainedDataSourceComboBox.swift` - `NSComboBox` subclass that keeps its
+  data source alive (fixes a dangling `assign` data-source crash).
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
-  `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, and
-  `StorageSettingsPage.swift`). Model, shortcut, and privacy editors still
-  live behind General disclosures. New settings pages should land here as
+  `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`,
+  `StorageSettingsPage.swift`, `TodaySettingsPage.swift`, and
+  `WritingSettingsPage.swift`, which hosts the Writing intro, setup, and
+  everyday views from `Sources/UI/Settings/Writing/`). Model, shortcut, and privacy editors are
+  injected into General's cards as closures. New settings pages should land here as
   their own file instead of growing the shell. `HomeSettingsPage.swift` owns
   the header, scan-warning/activity rows, search field, and day-grouped
   meeting list rendering (including the expanded-row preview and inline

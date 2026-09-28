@@ -5,11 +5,15 @@ private struct CaptureDirectoryManifest: Decodable {
     let captureLibraryDirectory: String
     let meetingsDirectory: String
     let dictationsDirectory: String
+    /// Optional: app builds from before Writing never write it. When absent,
+    /// the writing folder is `<captureLibraryDirectory>/writing`.
+    let writingDirectory: String?
 }
 
 private struct ConfiguredCaptureDirectories {
     let meetings: URL
     let dictations: URL
+    let writing: URL
     let source: CaptureLibraryResolutionSource
 }
 
@@ -24,10 +28,14 @@ public enum CaptureLibraryResolutionSource: String, Codable, Sendable {
     case defaultCaptures = "default"
 }
 
-/// Resolved capture-library locations for meetings and dictations.
+/// Resolved capture-library locations for meetings, dictations, and writing.
 public struct ResolvedCaptureDirectories {
     public let meetingDirs: [URL]
     public let dictationDirs: [URL]
+    /// Writing day files (`Writing_<date>.md`). Empty when meetings or
+    /// dictations were overridden per kind without a writing override (see
+    /// `resolve`), or when a caller builds this value by hand without one.
+    public let writingDirs: [URL]
     /// Set when resolution used an explicit shared data directory
     /// (a `--data-dir` style argument or `TRANSCRIPTED_DATA_DIR`).
     public let sharedDataRoot: URL?
@@ -40,12 +48,14 @@ public struct ResolvedCaptureDirectories {
     public init(
         meetingDirs: [URL],
         dictationDirs: [URL],
+        writingDirs: [URL] = [],
         sharedDataRoot: URL? = nil,
         resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
         legacyFallbackAppended: Bool = false
     ) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.writingDirs = writingDirs
         self.sharedDataRoot = sharedDataRoot
         self.resolutionSource = resolutionSource
         self.legacyFallbackAppended = legacyFallbackAppended
@@ -56,19 +66,24 @@ public struct ResolvedCaptureDirectories {
 ///
 /// Resolution order:
 /// 1. explicit shared data dir argument, then `TRANSCRIPTED_DATA_DIR`
-///    (uses `meetings/` + `dictations/` subfolders when either exists)
+///    (uses `meetings/` + `dictations/` + `writing/` subfolders when any of
+///    them exists; otherwise every kind reads the shared root itself)
 /// 2. explicit per-kind argument, then `TRANSCRIPTED_MEETINGS_DIR` /
-///    `TRANSCRIPTED_DICTATIONS_DIR`
+///    `TRANSCRIPTED_DICTATIONS_DIR` / `TRANSCRIPTED_WRITING_DIR`. A kind
+///    without an override falls through to the rules below, except writing:
+///    with a meetings or dictations override and no writing override, no
+///    writing folder is read at all
 /// 3. the app-selected capture library (`mcp-directories.json` manifest, then
 ///    the `transcriptSaveLocation` preference)
 /// 4. the default Transcripted captures folders, followed by legacy Draft
 ///    exports and `~/Documents/Transcripted` when those contain capture
-///    Markdown
+///    Markdown (meetings and dictations only; writing has no legacy location)
 public enum CaptureLibraryResolver {
     public static func resolve(
         dataDir: String? = nil,
         meetingsDir: String? = nil,
         dictationsDir: String? = nil,
+        writingDir: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil
@@ -79,18 +94,25 @@ public enum CaptureLibraryResolver {
             let sharedURL = URL(fileURLWithPath: sharedPath)
             let sharedMeetings = sharedURL.appendingPathComponent("meetings", isDirectory: true)
             let sharedDictations = sharedURL.appendingPathComponent("dictations", isDirectory: true)
+            let sharedWriting = sharedURL.appendingPathComponent("writing", isDirectory: true)
             if fileManager.fileExists(atPath: sharedMeetings.path)
-                || fileManager.fileExists(atPath: sharedDictations.path) {
+                || fileManager.fileExists(atPath: sharedDictations.path)
+                || fileManager.fileExists(atPath: sharedWriting.path) {
                 return ResolvedCaptureDirectories(
                     meetingDirs: [sharedMeetings],
                     dictationDirs: [sharedDictations],
+                    writingDirs: [sharedWriting],
                     sharedDataRoot: sharedURL,
                     resolutionSource: .envDataDir
                 )
             }
+            // Flat shared folder: every kind reads the root. Readers tell the
+            // kinds apart by filename prefix and `capture_type`, so a
+            // `Writing_` file here must never be treated as a meeting.
             return ResolvedCaptureDirectories(
                 meetingDirs: [sharedURL],
                 dictationDirs: [sharedURL],
+                writingDirs: [sharedURL],
                 sharedDataRoot: sharedURL,
                 resolutionSource: .envDataDir
             )
@@ -104,6 +126,7 @@ public enum CaptureLibraryResolver {
         let defaultCaptures = transcriptedRoot.appendingPathComponent("captures", isDirectory: true)
         let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
         let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
+        let defaultWriting = defaultCaptures.appendingPathComponent("writing", isDirectory: true)
 
         let legacy = legacyCaptureDirectories(homeDirectory: home)
         let legacyDraftMeetings = legacy.draftMeetings
@@ -118,6 +141,10 @@ public enum CaptureLibraryResolver {
             ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsOverride = dictationsDir.map(URL.init(fileURLWithPath:))
             ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
+        // Empty values are ignored (as for TRANSCRIPTED_DATA_DIR) so an exported
+        // but blank variable can't resolve to the process working directory.
+        let writingOverride = writingDir.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+            ?? environment["TRANSCRIPTED_WRITING_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 
         let meetingDirs = meetingsOverride.map { [$0] }
             ?? appConfigured.map {
@@ -145,12 +172,30 @@ public enum CaptureLibraryResolver {
                 legacyCandidates: [legacyDraftDictations, legacyShared],
                 fileManager: fileManager
             )
+        // Writing is new with this app generation, so there is no Draft-era or
+        // `~/Documents/Transcripted` location to fall back to.
+        //
+        // Unlike meetings and dictations, writing does not fall through to the
+        // app library when the caller pointed other kinds at specific folders
+        // (`--meetings-dir`, TRANSCRIPTED_DICTATIONS_DIR, ...) without naming a
+        // writing folder: everything the user typed is the most personal thing
+        // in the library, and harnesses that isolate meetings and dictations
+        // this way must not pick up the real writing folder by accident. Pass
+        // a writing folder explicitly to include it in that mode.
+        let writingDirs: [URL]
+        if let writingOverride {
+            writingDirs = [writingOverride]
+        } else if meetingsOverride != nil || dictationsOverride != nil {
+            writingDirs = []
+        } else {
+            writingDirs = [appConfigured?.writing ?? defaultWriting]
+        }
 
-        // When only one kind is overridden, the other still resolves through
+        // When only some kinds are overridden, the others still resolve through
         // the manifest/preference/default chain; report the override tier as
-        // the winning rule since it took precedence for the kind it covers.
+        // the winning rule since it took precedence for the kinds it covers.
         let resolutionSource: CaptureLibraryResolutionSource
-        if meetingsOverride != nil || dictationsOverride != nil {
+        if meetingsOverride != nil || dictationsOverride != nil || writingOverride != nil {
             resolutionSource = .envKindDirs
         } else if let appConfigured {
             resolutionSource = appConfigured.source
@@ -165,6 +210,7 @@ public enum CaptureLibraryResolver {
         return ResolvedCaptureDirectories(
             meetingDirs: meetingDirs,
             dictationDirs: dictationDirs,
+            writingDirs: writingDirs,
             sharedDataRoot: nil,
             resolutionSource: resolutionSource,
             legacyFallbackAppended: legacyFallbackAppended
@@ -257,7 +303,26 @@ public enum CaptureLibraryResolver {
             return nil
         }
 
-        return ConfiguredCaptureDirectories(meetings: meetings, dictations: dictations, source: .appManifest)
+        // The writing key is optional (older app builds don't write it), but a
+        // present one gets the same validation as the other kinds: an unsafe or
+        // misplaced writing path rejects the whole manifest, not just that key.
+        let writing: URL
+        if let rawWriting = manifest.writingDirectory {
+            guard let validated = validatedConfiguredDirectory(rawWriting, homeDirectory: home),
+                  isManifestDirectory(validated, named: "writing", under: captureLibrary) else {
+                return nil
+            }
+            writing = validated
+        } else {
+            writing = captureLibrary.appendingPathComponent("writing", isDirectory: true)
+        }
+
+        return ConfiguredCaptureDirectories(
+            meetings: meetings,
+            dictations: dictations,
+            writing: writing,
+            source: .appManifest
+        )
     }
 
     private static func appPreferenceCaptureDirectories(homeDirectory home: URL) -> ConfiguredCaptureDirectories? {
@@ -278,6 +343,7 @@ public enum CaptureLibraryResolver {
             return ConfiguredCaptureDirectories(
                 meetings: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
                 dictations: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
+                writing: captureLibrary.appendingPathComponent("writing", isDirectory: true),
                 source: .appPreference
             )
         }

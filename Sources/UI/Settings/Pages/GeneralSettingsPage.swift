@@ -7,7 +7,7 @@ import SwiftUI
 /// Card-based layout (2026-08 settings restyle): every setting is an
 /// always-visible row inside a rounded card — no disclosures to hunt through.
 /// Rows carry at most a few words; the explanation for each setting lives in
-/// its ⓘ info popover. Sections: Dictation, Bluetooth microphone, Send after
+/// its ⓘ info popover. Sections: Dictation, Microphone, Send after
 /// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy.
 struct GeneralSettingsPage<
     ShortcutEditor: View,
@@ -21,6 +21,10 @@ struct GeneralSettingsPage<
 >: View {
     @Binding var launchAtLoginEnabled: Bool
     let launchAtLoginStatus: String
+    /// Inline line under the switch when it failed or macOS is waiting for
+    /// approval in Login Items. Nil when launch at login is working.
+    let launchAtLoginNotice: String?
+    let onOpenLoginItems: () -> Void
     @Binding var showTranscriptedInDock: Bool
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
@@ -60,12 +64,16 @@ struct GeneralSettingsPage<
                     help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
                     info: GeneralInfo(
                         title: "Sounds",
-                        message: "Short sounds when dictation starts, finishes, or hears no speech."
+                        message: "A click when dictation starts, another when you press Stop, and a soft drop if it hears no speech."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 DictationOverlayModeRow(selection: $dictationOverlayMode)
+
+                if dictationOverlayMode == .notchIsland {
+                    NotchIslandScreenSharingRow()
+                }
 
                 GeneralToggleRow(
                     title: "Clean up pasted text",
@@ -82,7 +90,7 @@ struct GeneralSettingsPage<
             }
             .accessibilityIdentifier("transcripted.settings.section.dictation")
 
-            SettingsCardLabel(text: "Bluetooth microphone")
+            SettingsCardLabel(text: "Microphone")
                 .padding(.top, 16)
             SettingsCard {
                 bluetoothMicEditor()
@@ -130,7 +138,7 @@ struct GeneralSettingsPage<
                     title: "Corrections",
                     info: GeneralInfo(
                         title: "Corrections",
-                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to dictations and meeting transcripts."
+                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to new dictations and meetings. If the mistake is in past meetings too, you can fix those from the list."
                     ),
                     automationIdentifier: "transcripted.settings.general.corrections"
                 ) {
@@ -170,8 +178,35 @@ struct GeneralSettingsPage<
                         title: "Launch at login",
                         message: "Opens Transcripted after you sign in, so shortcuts and meeting detection are ready without opening it yourself."
                     ),
-                    automationIdentifier: "transcripted.settings.general.launch-at-login"
+                    automationIdentifier: "transcripted.settings.general.launch-at-login",
+                    showsDivider: launchAtLoginNotice == nil
                 )
+
+                if let launchAtLoginNotice {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(launchAtLoginNotice)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button("Open Login Items") {
+                                onOpenLoginItems()
+                            }
+                            .buttonStyle(.link)
+                            .accessibilityIdentifier("transcripted.settings.general.launch-at-login.open-login-items")
+                        }
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+                    .overlay(alignment: .bottom) {
+                        Divider()
+                    }
+                }
 
                 GeneralToggleRow(
                     title: "Show in Dock",

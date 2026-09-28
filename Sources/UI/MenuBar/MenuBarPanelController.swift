@@ -3,6 +3,7 @@
 
 import AppKit
 import Combine
+import TranscriptedCore
 
 struct MenuBarLaunchUISmokeReport: Codable, Equatable {
     let appLaunched: Bool
@@ -23,7 +24,6 @@ final class MenuBarPanelController: NSViewController {
     private let dismissPopover: () -> Void
     private let openSettingsWindow: (TranscriptedSettingsPage) -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
-    private let textPaster = ClipboardRestoringTextPaster()
 
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -53,15 +53,20 @@ final class MenuBarPanelController: NSViewController {
         scheduledRefreshTask?.cancel()
     }
 
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        contentView?.menuWillAppear()
+    }
+
     override func loadView() {
         let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
         content.appState = appState
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
-        content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
-        content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.home) }
+        content.headerView.onWarningAction = { [weak self] action in self?.handleShortcutWarningAction(action) }
+        // Opens on Today; keeps the "home" action id so the menu_action series stays continuous.
+        content.utilityActionsView.onOpenTranscripted = { [weak self] in self?.openSettingsFromMenu(.today, actionID: "home") }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
-        content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.general) }
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
@@ -70,10 +75,7 @@ final class MenuBarPanelController: NSViewController {
         setupSubscriptions()
     }
 
-    func refresh(
-        forcePasteRowVisible: Bool = false,
-        allowUpdateRefresh: Bool = true
-    ) {
+    func refresh(allowUpdateRefresh: Bool = true) {
         scheduledRefreshTask?.cancel()
         scheduledRefreshTask = nil
 
@@ -83,26 +85,43 @@ final class MenuBarPanelController: NSViewController {
 
         let warmupStatus = appState.meetingSession.warmupStatus
         let isMeetingRecording = appState.meetingSession.isCaptureSessionActive
+        let capturePhase = MenuBarMeetingCapturePhase.resolve(appState.meetingSession.state)
         let modelState = appState.sttRouter.modelDownloadState
-        let dictationState = FirstRunExperience.dictationAction(for: modelState)
+        let dictationState = FirstRunExperience.dictationAction(
+            for: modelState,
+            isDictating: appState.sttRouter.isRecording
+        )
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus,
-            isRecording: isMeetingRecording
+            isRecording: isMeetingRecording,
+            isSaving: capturePhase == .saving
         )
         let updatePresentation = menuUpdatePresentation(
             for: appState.sparkleUpdater.updateStatus,
             availableUpdateDownloadsAutomatically: appState.sparkleUpdater.availableUpdateDownloadsAutomatically
         )
         let updateActionEnabled = updateActionEnabled(for: appState.sparkleUpdater.updateStatus)
+        let updateDetail = updateRowDetail(
+            for: appState.sparkleUpdater.updateStatus,
+            presentationDetail: updatePresentation.detail
+        )
+        // While the update waits on a recording, drop the "Restart" button
+        // label: the row can't be pressed yet, and its detail says why.
+        let updateIsWaiting = !updateActionEnabled && updateDetail != updatePresentation.detail
+        let updateTrailing = updateIsWaiting ? nil : updatePresentation.trailingText
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            hotkeyError: HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil,
-            isMeetingRecording: isMeetingRecording
+            // Shown even with dictation shortcuts off: the meeting and
+            // paste shortcuts need the same event tap.
+            shortcutWarning: shortcutWarningPresentation(),
+            isMeetingRecording: isMeetingRecording,
+            transcribingStatus: meetingTranscribingStatus(),
+            capturePhase: capturePhase
         )
 
-        // While a meeting records, the row's trailing slot shows the live
+        // While a meeting records, the button's trailing slot shows the live
         // elapsed timer instead of the start shortcut.
         content.primaryActionsView.update(
             dictationTrailing: appState.contextCapture.dictationShortcutDisplay,
@@ -111,21 +130,14 @@ final class MenuBarPanelController: NSViewController {
                 : appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
-            pasteDetail: pasteDetail(for: latestDictation),
-            pasteEnabled: latestDictation != nil,
-            isMeetingRecording: isMeetingRecording,
-            // A disabled "no saved dictation yet" row is an empty state
-            // advertising itself — hide paste until it has content.
-            // `forcePasteRowVisible` overrides this so launch smoke automation
-            // can assert on the row regardless of saved-dictation state.
-            showPasteLastDictation: forcePasteRowVisible || latestDictation != nil
+            isMeetingRecording: isMeetingRecording
         )
 
         content.updateProminentUpdate(
             symbolName: updatePresentation.symbolName,
             title: updatePresentation.title,
-            detail: updatePresentation.detail,
-            trailingText: updatePresentation.trailingText,
+            detail: updateDetail,
+            trailingText: updateTrailing,
             tone: updatePresentation.tone,
             isVisible: updatePresentation.isProminent,
             isEnabled: updateActionEnabled
@@ -135,8 +147,8 @@ final class MenuBarPanelController: NSViewController {
         content.utilityActionsView.update(
             updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
-            updateDetail: updatePresentation.detail,
-            updateVersion: updatePresentation.trailingText,
+            updateDetail: updateDetail,
+            updateVersion: updateTrailing,
             updateTone: updatePresentation.tone,
             updateEnabled: updateActionEnabled,
             showUpdateRow: !updatePresentation.isProminent
@@ -159,7 +171,7 @@ final class MenuBarPanelController: NSViewController {
         launchToInteractiveMs: Double? = nil
     ) -> MenuBarLaunchUISmokeReport {
         loadViewIfNeeded()
-        refresh(forcePasteRowVisible: true, allowUpdateRefresh: false)
+        refresh(allowUpdateRefresh: false)
         return MenuBarLaunchUISmokeReport(
             appLaunched: true,
             statusItemExists: statusItemExists,
@@ -174,7 +186,9 @@ final class MenuBarPanelController: NSViewController {
                 ),
                 updateCallout: MenuBarActionRowSmokeSnapshot(
                     title: "",
+                    displayTitle: "",
                     detail: "",
+                    toolTip: "",
                     trailingText: "",
                     automationIdentifier: "",
                     isVisible: false,
@@ -224,6 +238,19 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+        // Keeps the header's "Transcribing 42%" current while the popover is
+        // open. Progress moves often, so collapse it to whole percents and
+        // skip when the popover is closed (refresh() runs on every open).
+        appState.meetingSession.$displayStatus
+            .map { MeetingPillFinishPresentation.percent(progress: $0.progress) }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.isViewLoaded, self.view.window != nil else { return }
+                self.scheduleRefresh()
+            }
+            .store(in: &subscriptions)
+
         appState.contextCapture.$dictationShortcutDisplay
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
@@ -265,6 +292,38 @@ final class MenuBarPanelController: NSViewController {
 
     }
 
+    private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
+        MenuBarShortcutWarningPresentation.resolve(
+            hotkeyError: appState.contextCapture.hotkeyError,
+            accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
+            functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),
+                systemAction: PhysicalDictationTriggerPreferences.functionKeySystemAction()
+            )
+        )
+    }
+
+    private func handleShortcutWarningAction(_ action: MenuBarShortcutWarningPresentation.Action) {
+        trackMenuAction("shortcut_warning_open_accessibility")
+        dismissPopover()
+        switch action {
+        case .openAccessibilitySettings:
+            TranscriptedPermissionAccess.openSettings(for: .accessibility)
+        }
+    }
+
+    /// "Transcribing 42%" while a meeting transcript is being made, else nil.
+    private func meetingTranscribingStatus() -> String? {
+        let session = appState.meetingSession
+        guard case .transcribing = session.state else { return nil }
+        // `menuStatus` shows no percent for the idle, saved and failed
+        // values (0 or 1), so every status can pass straight through.
+        return MeetingPillFinishPresentation.menuStatus(
+            progress: session.displayStatus.progress,
+            queuedCount: session.queuedTranscriptionCount
+        )
+    }
+
     private func scheduleRefresh() {
         guard scheduledRefreshTask == nil else { return }
         scheduledRefreshTask = Task { @MainActor [weak self] in
@@ -276,12 +335,17 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func prepareForClose() {
-        textPaster.restorePendingClipboardNow()
         contentView?.scrollToTop()
     }
 
     private func startDictationFromMenu() {
         guard let session = appState.contextCapture.sessionController else { return }
+        if appState.sttRouter.isRecording {
+            trackMenuAction("stop_dictation")
+            dismissPopover()
+            session.stopDictationAndPaste(trigger: .menu)
+            return
+        }
         trackMenuAction("start_dictation")
         let sourceApp = resolvedSourceApp()
         dismissPopover()
@@ -307,21 +371,6 @@ final class MenuBarPanelController: NSViewController {
                 await meetingSession.startRecording(trigger: .menu)
             }
         }
-    }
-
-    private func pasteLastDictationFromMenu() {
-        trackMenuAction("paste_last_dictation")
-        guard let latestText = DictationTranscriptStore.latestSavedText() else {
-            PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)
-            return
-        }
-
-        let sourceApp = resolvedSourceApp()
-        let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
-        dismissPopover()
-        sourceApp?.activate(options: [])
-        let outcome = textPaster.paste(latestText, target: pasteTarget)
-        PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 
     private func openSettingsFromMenu(_ page: TranscriptedSettingsPage, actionID: String? = nil) {
@@ -416,7 +465,7 @@ final class MenuBarPanelController: NSViewController {
                 return (
                     "arrow.down.circle",
                     "Preparing Update",
-                    "Transcripted will ask you to restart when \(version) is ready",
+                    "Downloading \(version)",
                     nil,
                     .standard,
                     false
@@ -428,14 +477,14 @@ final class MenuBarPanelController: NSViewController {
                 "Update available: \(version)",
                 "A new version is ready to install",
                 "Install",
-                .warning,
+                .standard,
                 true
             )
         case .downloading(let version):
             return (
                 "arrow.down.circle",
                 "Preparing Update",
-                "Transcripted will ask you to restart when \(version) is ready",
+                "Downloading \(version)",
                 nil,
                 .standard,
                 false
@@ -446,7 +495,7 @@ final class MenuBarPanelController: NSViewController {
                 "Restart to Update",
                 "Version \(version) downloaded",
                 "Restart",
-                .warning,
+                .standard,
                 true
             )
         }
@@ -465,12 +514,29 @@ final class MenuBarPanelController: NSViewController {
         }
     }
 
+    private var updateBlockedReason: UpdateBlockedReason? {
+        UpdateBlockedReason.current(
+            isRecording: appState.meetingSession.isRecording
+                || appState.meetingSession.isCaptureSessionActive
+                || appState.sttRouter.isRecording,
+            isTranscribing: appState.meetingSession.hasRuntimeDiagnosticsWork || appState.sttRouter.isTranscribing,
+            isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
+        )
+    }
+
     private var isCaptureActiveForUpdateSafety: Bool {
-        appState.meetingSession.isRecording
-            || appState.meetingSession.hasRuntimeDiagnosticsWork
-            || appState.meetingSession.isSpeakerReviewPending
-            || appState.sttRouter.isRecording
-            || appState.sttRouter.isTranscribing
+        updateBlockedReason != nil
+    }
+
+    /// The disabled row says what it's waiting on instead of just greying out.
+    private func updateRowDetail(
+        for status: SparkleUpdaterController.UpdateStatus,
+        presentationDetail: String
+    ) -> String {
+        UpdateActionSafetyPolicy.blockedDetail(
+            state: updateActionSafetyState(for: status.state),
+            reason: updateBlockedReason
+        ) ?? presentationDetail
     }
 
     private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
@@ -501,33 +567,5 @@ final class MenuBarPanelController: NSViewController {
         case .readyToInstall:
             return .readyToInstall
         }
-    }
-
-    private func pasteDetail(for entry: SavedDictationEntry?) -> String {
-        guard let entry else {
-            return "No saved dictation yet."
-        }
-
-        let collapsed = entry.text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
-
-        guard !collapsed.isEmpty else {
-            return "Paste the newest saved dictation."
-        }
-
-        return shortenedPreview(for: collapsed, limit: 40)
-    }
-
-    private func shortenedPreview(for text: String, limit: Int) -> String {
-        let normalized = text
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        guard normalized.count > limit else {
-            return normalized
-        }
-        let truncated = normalized.prefix(max(0, limit - 1)).trimmingCharacters(in: .whitespaces)
-        return "\(truncated)…"
     }
 }

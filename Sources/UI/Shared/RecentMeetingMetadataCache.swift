@@ -49,6 +49,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // search learned speaker names miss once and get reparsed, instead of
     // leaving those meetings unfindable by name.
     var speakerNames: [String] = []
+    // Required on decode too: payloads written before rows showed the speech
+    // model (and imports were listed by import time) miss once and reparse.
+    var transcriptionEngine: String = ""
+    var importedAt: Date? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -67,6 +71,8 @@ extension CachedRecentMeetingMetadata {
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
         self.systemAudioSignalVerified = item.systemAudioSignalVerified
         self.speakerNames = item.speakerNames
+        self.transcriptionEngine = item.transcriptionEngine ?? ""
+        self.importedAt = item.importedAt
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -84,7 +90,9 @@ extension CachedRecentMeetingMetadata {
                 ? RecentMeetingAudioHealth(micBoostPromptOutcome: audioHealthMicBoostOutcome)
                 : nil,
             systemAudioSignalVerified: systemAudioSignalVerified,
-            speakerNames: speakerNames
+            speakerNames: speakerNames,
+            transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
+            importedAt: importedAt
         )
     }
 }
@@ -345,7 +353,15 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         }
         sqlite3_finalize(selectStmt)
 
-        let missing = paths.filter { !fileManager.fileExists(atPath: $0) }
+        // A cancelled Home refresh stops statting here. Rows found missing so
+        // far are still dropped; the rest wait for the next prune.
+        var missing: [String] = []
+        for path in paths {
+            if Task.isCancelled { break }
+            if !fileManager.fileExists(atPath: path) {
+                missing.append(path)
+            }
+        }
         guard !missing.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
@@ -381,6 +397,14 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         lastPruneAt = now
         lock.unlock()
 
-        return pruneMissingPaths(fileManager: fileManager)
+        let removed = pruneMissingPaths(fileManager: fileManager)
+        if Task.isCancelled {
+            // A cancelled prune stopped partway; let the next refresh finish it
+            // instead of waiting out the interval.
+            lock.lock()
+            if lastPruneAt == now { lastPruneAt = nil }
+            lock.unlock()
+        }
+        return removed
     }
 }

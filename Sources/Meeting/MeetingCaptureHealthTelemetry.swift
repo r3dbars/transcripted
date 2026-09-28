@@ -10,6 +10,45 @@ enum MeetingCaptureHealthTelemetry {
             : outcome
     }
 
+    /// Recording length for a stop the app did not ask for. By the time
+    /// capture reports that stop, its timer has already reset the mirrored
+    /// duration to 0, so every such stop used to report `lt_10s`. Fall back
+    /// to wall-clock time since the recording started.
+    static func unexpectedStopDurationSeconds(
+        mirroredDuration: TimeInterval,
+        recordingStartedAt: Date?,
+        now: Date
+    ) -> TimeInterval {
+        guard let recordingStartedAt else { return mirroredDuration }
+        return max(mirroredDuration, now.timeIntervalSince(recordingStartedAt))
+    }
+
+    /// System-audio status for a stop snapshot. When capture stopped
+    /// underneath the controller, it has already reset the live status to
+    /// `unknown`, which would hide a real failure; use what the controller
+    /// saw at the moment capture stopped instead.
+    static func stopSnapshotSystemAudioStatus<Status: Equatable>(
+        live: Status,
+        atCaptureStop: Status?,
+        unknown: Status
+    ) -> Status {
+        guard live == unknown, let atCaptureStop else { return live }
+        return atCaptureStop
+    }
+
+    /// Degradation warning for a stop snapshot. The controller clears its
+    /// warning the moment capture stops, so an unexpected stop falls back to
+    /// the warning it held at that moment. A degrading warning from that
+    /// moment wins: the status reset that follows can raise a fresh
+    /// "unverified" warning that would otherwise hide a real interruption.
+    static func stopSnapshotDegradationWarning(
+        live: MeetingSystemAudioDegradationWarning?,
+        atCaptureStop: MeetingSystemAudioDegradationWarning?
+    ) -> MeetingSystemAudioDegradationWarning? {
+        if let atCaptureStop, atCaptureStop.degradesSavedCapture { return atCaptureStop }
+        return live ?? atCaptureStop
+    }
+
     struct HealthFacts {
         let captureQuality: String
         let audioGaps: Int

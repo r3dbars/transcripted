@@ -8,6 +8,19 @@ struct HomeRecentCaptureBenchmark {
         let runRoot = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
             .appendingPathComponent("build/home-recent-capture-benchmark", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        // Harnesses must not touch real user state. Loading resolves the capture
+        // library through `transcriptedCaptureLibraryDir`, which rewrites
+        // mcp-directories.json, and the loader's default metadata cache is a
+        // `static let` whose path is fixed at first access. Point the whole
+        // app-owned container at this run's scratch folder before anything
+        // touches storage, so neither lands in ~/Library/Application Support/Transcripted.
+        let containerRoot = runRoot.appendingPathComponent("container", isDirectory: true).standardizedFileURL
+        setenv("TRANSCRIPTED_CONTAINER_DIR", containerRoot.path, 1)
+        guard fileManager.transcriptedMCPDirectoriesManifestURL.standardizedFileURL.path.hasPrefix(containerRoot.path + "/") else {
+            throw BenchmarkError.configuration("TRANSCRIPTED_CONTAINER_DIR override did not take effect; refusing to touch the real app-support container")
+        }
+
         let captureRoot = runRoot.appendingPathComponent("captures", isDirectory: true)
         let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
         let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -48,14 +61,19 @@ struct HomeRecentCaptureBenchmark {
             loadDurations.append(elapsed)
         }
 
-        let cancellationStart = DispatchTime.now()
-        let task = Task {
+        // Cancel a load that is already scanning, the way Home cancels a
+        // refresh the user outran. A `Task` made here would inherit the main
+        // actor and not start until awaited, by which point it is already
+        // cancelled and never scans, so detach it and let it get going first.
+        let task = Task.detached {
             await RecentCaptureLoader.load(
                 dictationLimit: configuration.visibleLimit + 1,
                 meetingLimit: configuration.visibleLimit + 1,
                 includeDictationCounts: true
             )
         }
+        try await Task.sleep(nanoseconds: 5_000_000)
+        let cancellationStart = DispatchTime.now()
         task.cancel()
         _ = await task.value
         let cancellationDuration = milliseconds(since: cancellationStart)

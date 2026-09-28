@@ -19,6 +19,9 @@ extension Notification.Name {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
+    /// Watched so the Done screen can say the voice model is still
+    /// downloading instead of "You're set." while it isn't.
+    @ObservedObject var sttRouter: STTRouter
 
     static let preferredSize = NSSize(width: 640, height: 560)
 
@@ -31,14 +34,23 @@ struct PermissionsOnboardingView: View {
     @State private var systemAudioProbeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult?
     @State private var systemAudioRequestTask: Task<Void, Never>?
     @State private var calendarGranted = false
+    // macOS never asks twice. After a Don't Allow the row says so and its
+    // button opens System Settings instead of reading "Grant".
+    @State private var micBlocked = false
+    @State private var calendarBlocked = false
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
     @State private var didTrackAbandonment = false
     @State private var pendingSystemSettingsHandoff = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
+    // After a Don't Allow on the microphone, setup used to be a dead end even
+    // though importing files needs no mic. Skipping only reaches Done; it
+    // doesn't change what the app can record.
+    @State private var skippedMicrophone = false
 
-    init(onComplete: @escaping () -> Void) {
+    init(sttRouter: STTRouter, onComplete: @escaping () -> Void) {
+        _sttRouter = ObservedObject(wrappedValue: sttRouter)
         self.onComplete = onComplete
         _currentStepIndex = State(initialValue: PermissionsOnboardingPreferences.resumeStepIndex())
     }
@@ -60,12 +72,31 @@ struct PermissionsOnboardingView: View {
         case .permissions:
             return "Continue"
         case .done:
-            return "Open Transcripted"
+            // "Open Transcripted" read like a second app launch; this just
+            // closes setup and shows the menu bar.
+            return "Done"
         }
     }
 
+    private var canFinishSetup: Bool {
+        hasRequiredPermissions || skippedMicrophone
+    }
+
     private var primaryButtonDisabled: Bool {
-        (currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions
+        switch currentStep {
+        case .welcome:
+            return false
+        case .permissions:
+            return !hasRequiredPermissions
+        case .done:
+            return !canFinishSetup
+        }
+    }
+
+    /// Offered only once macOS won't ask for the microphone again.
+    private var secondaryButtonTitle: String? {
+        guard currentStep == .permissions, micBlocked, !micGranted else { return nil }
+        return "Skip for now"
     }
 
     var body: some View {
@@ -73,8 +104,10 @@ struct PermissionsOnboardingView: View {
             canGoBack: currentStepIndex > 0,
             primaryTitle: primaryButtonTitle,
             primaryDisabled: primaryButtonDisabled,
+            secondaryTitle: secondaryButtonTitle,
             onBack: goBack,
-            onNext: goNextOrComplete
+            onNext: goNextOrComplete,
+            onSecondary: skipMicrophone
         ) {
             stepContent
                 .id(currentStep)
@@ -124,6 +157,8 @@ struct PermissionsOnboardingView: View {
                 ),
                 systemAudioChecking: systemAudioRequestTask != nil,
                 calendarGranted: calendarGranted,
+                micBlocked: micBlocked,
+                calendarBlocked: calendarBlocked,
                 onSystemAudioSettings: {
                     pendingSystemSettingsHandoff = true
                     TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
@@ -132,8 +167,25 @@ struct PermissionsOnboardingView: View {
             )
         case .done:
             DoneStage(
+                modelPresentation: FirstRunExperience.onboardingDoneModelPresentation(
+                    for: sttRouter.modelDownloadState,
+                    model: sttRouter.selectedModel,
+                    isLocallyInstalled: Self.isLocalModelInstalled(sttRouter.selectedModel)
+                ),
+                microphoneMissing: !micGranted,
+                onOpenMicrophoneSettings: {
+                    pendingSystemSettingsHandoff = true
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                },
+                functionKeyWarning: Self.functionKeyWarning,
                 dictationShortcutDisplay: Self.dictationShortcutDisplay,
-                meetingShortcutDisplay: Self.meetingShortcutDisplay
+                meetingShortcutDisplay: Self.meetingShortcutDisplay,
+                shortcutsNeedAccessibility: !accessibilityGranted,
+                willOpenAtLogin: LaunchAtLoginPreferences.shouldApplyDefaultEnable(
+                    hasExplicitChoice: LaunchAtLoginPreferences.hasExplicitChoice(),
+                    hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(),
+                    onboardingCompleted: true
+                )
             )
         }
     }
@@ -147,6 +199,21 @@ struct PermissionsOnboardingView: View {
         return PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.handsFreeBinding()
         )
+    }
+
+    /// Fn is the default push-to-talk key, and on a Mac where the macOS Fn
+    /// setting was never changed it also opens emoji or switches input. Say
+    /// so here, so the menu bar's warning isn't the first people hear of it.
+    private static var functionKeyWarning: String? {
+        guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
+        return PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
+        )
+    }
+
+    private static func isLocalModelInstalled(_ model: TranscriptionModelChoice) -> Bool {
+        guard let variant = model.parakeetVariant, variant.isLocalInstallOnly else { return true }
+        return ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
     }
 
     private static var meetingShortcutDisplay: String {
@@ -171,6 +238,22 @@ struct PermissionsOnboardingView: View {
         }
     }
 
+    private func skipMicrophone() {
+        guard currentStep == .permissions, !micGranted else { return }
+        AnalyticsReporter.track(
+            "onboarding_primary_cta_clicked",
+            properties: [
+                "cta": "skip_microphone",
+                "cta_type": "secondary",
+                "flow_elapsed_bucket": flowElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
+                "step_elapsed_bucket": stepElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
+                "step_id": currentStep.analyticsID,
+            ]
+        )
+        skippedMicrophone = true
+        goNext()
+    }
+
     private func goNextOrComplete() {
         guard !primaryButtonDisabled else { return }
         trackPrimaryCTAClicked()
@@ -192,6 +275,8 @@ struct PermissionsOnboardingView: View {
         systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         systemAudioState = TranscriptedPermissionAccess.systemAudioRecordingStatus()
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
+        micBlocked = TranscriptedPermissionAccess.microphoneAccessBlocked()
+        calendarBlocked = TranscriptedPermissionAccess.calendarAccessBlocked()
         // A live audio check still belongs to the explicit button, never
         // window activation or polling.
 
@@ -208,7 +293,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func completeOnboarding() {
-        guard hasRequiredPermissions else { return }
+        guard canFinishSetup else { return }
         stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
@@ -275,7 +360,10 @@ struct PermissionsOnboardingView: View {
 
         pendingSystemSettingsHandoff = true
         Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+                for: kind,
+                firstAccessibilityAskShowsPromptOnly: true
+            )
             checkAllPermissions(trackChanges: false)
         }
     }
@@ -388,23 +476,29 @@ private struct OnboardingWindowShell<Content: View>: View {
     let canGoBack: Bool
     let primaryTitle: String
     let primaryDisabled: Bool
+    let secondaryTitle: String?
     let onBack: () -> Void
     let onNext: () -> Void
+    let onSecondary: () -> Void
     let content: Content
 
     init(
         canGoBack: Bool,
         primaryTitle: String,
         primaryDisabled: Bool,
+        secondaryTitle: String?,
         onBack: @escaping () -> Void,
         onNext: @escaping () -> Void,
+        onSecondary: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
         self.canGoBack = canGoBack
         self.primaryTitle = primaryTitle
         self.primaryDisabled = primaryDisabled
+        self.secondaryTitle = secondaryTitle
         self.onBack = onBack
         self.onNext = onNext
+        self.onSecondary = onSecondary
         self.content = content()
     }
 
@@ -421,8 +515,10 @@ private struct OnboardingWindowShell<Content: View>: View {
                 canGoBack: canGoBack,
                 primaryTitle: primaryTitle,
                 primaryDisabled: primaryDisabled,
+                secondaryTitle: secondaryTitle,
                 onBack: onBack,
-                onNext: onNext
+                onNext: onNext,
+                onSecondary: onSecondary
             )
         }
         .background(LibraryTokens.contentBackground)
@@ -433,8 +529,10 @@ private struct NavBar: View {
     let canGoBack: Bool
     let primaryTitle: String
     let primaryDisabled: Bool
+    let secondaryTitle: String?
     let onBack: () -> Void
     let onNext: () -> Void
+    let onSecondary: () -> Void
 
     var body: some View {
         HStack {
@@ -453,6 +551,21 @@ private struct NavBar: View {
             .accessibilityIdentifier("transcripted.onboarding.nav.back")
 
             Spacer()
+
+            if let secondaryTitle {
+                Button {
+                    onSecondary()
+                } label: {
+                    Text(secondaryTitle)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: LibraryTokens.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("transcripted.onboarding.nav.secondary")
+            }
 
             Button {
                 onNext()
@@ -500,7 +613,7 @@ private struct WelcomeStage: View {
                     .frame(maxWidth: 380)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Audio and transcripts stay on this Mac. Nothing is uploaded.")
+                Text("Audio and transcripts never leave this Mac. Anonymous usage stats and crash reports help us fix bugs; turn them off in Settings.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink3)
                     .multilineTextAlignment(.center)
@@ -522,8 +635,12 @@ private struct PermissionsStage: View {
     let systemAudioPresentation: TranscriptedPermissionKind.SystemAudioOnboardingPresentation
     let systemAudioChecking: Bool
     let calendarGranted: Bool
+    let micBlocked: Bool
+    let calendarBlocked: Bool
     let onSystemAudioSettings: () -> Void
     let onRequest: (TranscriptedPermissionKind) -> Void
+
+    private static let blockedNote = " macOS won't ask again, so turn it on in System Settings."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -540,18 +657,20 @@ private struct PermissionsStage: View {
             VStack(spacing: 0) {
                 QuietPermissionRow(
                     title: "Microphone",
-                    summary: "Needed to hear you, for dictation and your side of meetings.",
+                    summary: "Needed to hear you, for dictation and your side of meetings."
+                        + (micBlocked ? Self.blockedNote : ""),
                     icon: "mic.fill",
                     granted: micGranted,
                     isRequired: true,
-                    automationIdentifier: "transcripted.onboarding.permissions.microphone"
+                    automationIdentifier: "transcripted.onboarding.permissions.microphone",
+                    actionTitle: micBlocked ? "Open Settings" : nil
                 ) { onRequest(.microphone) }
 
                 divider
 
                 QuietPermissionRow(
-                    title: "Paste-back",
-                    summary: "Pastes dictation into the app you're using. Without it, dictations copy to the clipboard instead.",
+                    title: "Keyboard shortcuts and paste-back",
+                    summary: "Needed for the shortcuts and for pasting into other apps. Without it, start from the menu bar and dictations copy to the clipboard.",
                     icon: "hand.raised.fill",
                     granted: accessibilityGranted,
                     isRequired: false,
@@ -576,11 +695,13 @@ private struct PermissionsStage: View {
 
                 QuietPermissionRow(
                     title: "Calendar",
-                    summary: "Reminds you a few minutes before scheduled meetings.",
+                    summary: "Reminds you to record a few minutes before scheduled meetings."
+                        + (calendarBlocked ? Self.blockedNote : ""),
                     icon: "calendar",
                     granted: calendarGranted,
                     isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.calendar"
+                    automationIdentifier: "transcripted.onboarding.permissions.calendar",
+                    actionTitle: calendarBlocked ? "Open Settings" : nil
                 ) { onRequest(.calendar) }
             }
 
@@ -675,43 +796,157 @@ private struct QuietPermissionButtonStyle: ButtonStyle {
 // MARK: - Done
 
 private struct DoneStage: View {
+    let modelPresentation: OnboardingDoneModelPresentation
+    /// Setup was skipped after a Don't Allow on the microphone.
+    let microphoneMissing: Bool
+    let onOpenMicrophoneSettings: () -> Void
+    let functionKeyWarning: String?
     let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
+    /// Every global shortcut rides an event tap that needs Accessibility, so
+    /// listing them to someone who skipped it would promise keys that do nothing.
+    let shortcutsNeedAccessibility: Bool
+    /// Finishing setup registers the login item once; say so before macOS
+    /// shows its "Login Item added" notice.
+    let willOpenAtLogin: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             VStack(spacing: 20) {
-                Text("You're set.")
+                Text(microphoneMissing ? "Almost set." : modelPresentation.headline)
                     .font(LibraryTokens.title)
                     .foregroundStyle(.primary)
-                Text(dictationShortcutDisplay == nil
-                    ? "One shortcut to remember."
-                    : "Two shortcuts to remember.")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
 
-                VStack(spacing: 0) {
-                    if let dictationShortcutDisplay {
-                        ShortcutRow(
-                            label: "Dictate",
-                            shortcut: dictationShortcutDisplay,
-                            detail: "Tap to start, tap again to stop and paste."
-                        )
-                        Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+                if microphoneMissing {
+                    microphoneMissingNotice
+                } else if shortcutsNeedAccessibility {
+                    Text("Shortcuts start working once Accessibility is on. Until then, start dictation and meetings from the menu bar.")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    shortcutList
+                    if let functionKeyWarning {
+                        functionKeyNotice(functionKeyWarning)
                     }
-                    ShortcutRow(
-                        label: "Record a meeting",
-                        shortcut: meetingShortcutDisplay,
-                        detail: "Start or stop from anywhere."
-                    )
                 }
-                .frame(maxWidth: 400)
-                .padding(.top, 6)
+
+                if modelPresentation.statusLine != nil {
+                    modelStatus
+                }
+
+                if willOpenAtLogin {
+                    Text("Opens at login so it can catch your meetings. Change it in Settings.")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 48)
+    }
+
+    private var microphoneMissingNotice: some View {
+        VStack(spacing: 8) {
+            Text("Dictation and meetings need the microphone. Until it's on, you can still transcribe audio and video files with + on the Meetings page.")
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Microphone Settings", action: onOpenMicrophoneSettings)
+                .buttonStyle(QuietPermissionButtonStyle())
+                .accessibilityIdentifier("transcripted.onboarding.done.open-microphone-settings")
+        }
+    }
+
+    private func functionKeyNotice(_ warning: String) -> some View {
+        VStack(spacing: 6) {
+            Text(warning)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Keyboard Settings") {
+                PhysicalDictationTriggerPreferences.openKeyboardSettings()
+            }
+            .buttonStyle(.plain)
+            .font(LibraryTokens.meta)
+            .foregroundStyle(LibraryTokens.accent)
+            .accessibilityIdentifier("transcripted.onboarding.done.open-keyboard-settings")
+        }
+    }
+
+    private var modelStatus: some View {
+        VStack(spacing: 6) {
+            if let statusLine = modelPresentation.statusLine {
+                HStack(spacing: 6) {
+                    if modelPresentation.isFailed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(LibraryTokens.attention)
+                    }
+                    Text(statusLine)
+                        .font(LibraryTokens.rowTitle)
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            if let progress = modelPresentation.progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(LibraryTokens.accent)
+                    .frame(maxWidth: 260)
+                    .accessibilityIdentifier("transcripted.onboarding.done.model-progress")
+            }
+
+            if let detail = modelPresentation.detail {
+                Text(detail)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: 400)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("transcripted.onboarding.done.model-status")
+    }
+
+    @ViewBuilder
+    private var shortcutList: some View {
+        Text(dictationShortcutDisplay == nil
+            ? "One shortcut to remember."
+            : "Two shortcuts to remember.")
+            .font(LibraryTokens.meta)
+            .foregroundStyle(LibraryTokens.ink2)
+
+        VStack(spacing: 0) {
+            if let dictationShortcutDisplay {
+                ShortcutRow(
+                    label: "Dictate",
+                    shortcut: dictationShortcutDisplay,
+                    detail: "Tap to start, tap again to stop and paste."
+                )
+                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+            }
+            ShortcutRow(
+                label: "Record a meeting",
+                shortcut: meetingShortcutDisplay,
+                detail: "Start or stop from anywhere."
+            )
+        }
+        .frame(maxWidth: 400)
+        .padding(.top, 6)
     }
 }
 

@@ -16,6 +16,10 @@ public enum DisplayStatus: Equatable {
     // Completion states
     case transcriptSaved                 // Complete — transcript saved
     case failed(message: String)         // Error state
+    /// A live recording so short and empty that it was an accidental start.
+    /// Its audio was deleted and no failed row was kept; hosts treat this
+    /// like a cancel, not a failure.
+    case discardedAccidentalStart
 
     /// Computed progress value (0.0 to 1.0) for UI progress bar
     public var progress: Double {
@@ -31,7 +35,7 @@ public enum DisplayStatus: Equatable {
             return 0.97
         case .transcriptSaved:
             return 1.0
-        case .failed:
+        case .failed, .discardedAccidentalStart:
             return 0.0
         }
     }
@@ -51,6 +55,8 @@ public enum DisplayStatus: Equatable {
             return "Saved"
         case .failed(let message):
             return message
+        case .discardedAccidentalStart:
+            return "Too short to save"
         }
     }
 
@@ -65,6 +71,8 @@ public enum DisplayStatus: Equatable {
             return "checkmark.circle.fill"
         case .failed:
             return "exclamationmark.triangle.fill"
+        case .discardedAccidentalStart:
+            return "xmark.circle"
         }
     }
 

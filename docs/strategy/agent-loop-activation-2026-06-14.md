@@ -1,5 +1,7 @@
 # Agent Loop Activation — deep dive (2026-06-14)
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Scope: is the capture -> agent -> answer -> return loop actually good today, where is it
 shallow, and what's the next leap. Grounded in the source, not the pitch.
 

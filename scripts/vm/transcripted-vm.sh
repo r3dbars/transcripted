@@ -27,6 +27,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VNC_PY="$SCRIPT_DIR/vnc.py"
+SUPERVISE_PY="$SCRIPT_DIR/supervise.py"
 
 TVM_HOME="${TVM_HOME:-$HOME/.transcripted-vm}"
 # Tart 2.37.0, checked 2026-09-23. Bump both together.
@@ -44,6 +45,12 @@ TVM_MIN_FREE_GB="${TVM_MIN_FREE_GB:-60}"
 TVM_GUEST_USER="${TVM_GUEST_USER:-admin}"
 TVM_GUEST_PASS="${TVM_GUEST_PASS:-admin}"
 TVM_BOOT_TIMEOUT="${TVM_BOOT_TIMEOUT:-300}"
+# Seconds approve-download waits for a download prompt that isn't drawn yet.
+TVM_PROMPT_WAIT="${TVM_PROMPT_WAIT:-60}"
+# 1 = allow `up --vnc` on open (unencrypted) Wi-Fi. See cmd_up.
+TVM_ALLOW_VNC_ON_OPEN_WIFI="${TVM_ALLOW_VNC_ON_OPEN_WIFI:-0}"
+# Bump when GUEST_PREP changes; first-run rebuilds an older clean snapshot.
+GOLDEN_PREP_VERSION=3
 TVM_RELEASES_URL="${TVM_RELEASES_URL:-https://github.com/r3dbars/transcripted/releases}"
 TVM_RELEASES_API="${TVM_RELEASES_API:-https://api.github.com/repos/r3dbars/transcripted/releases/latest}"
 
@@ -74,13 +81,23 @@ One-time setup (host):
 
 Each test run:
   new                       fresh clone of the clean snapshot (deletes old clone)
-  up [--audio] [--window]   boot the clone. Host audio is OFF unless --audio (see the doc
-                            before using it: it opens the Mac's default mic).
-                            --window = normal Tart window instead of VNC
-  reset [--audio]           down + delete + new + up in one go
+  up [--vnc] [--audio] [--window]
+                            boot the clone headless (commands only, no screen access).
+                            --vnc = also turn on the screen (screenshot/click/type/key).
+                            Tart's VNC port then listens on EVERY network interface
+                            (password-protected; Tart can't limit it), so it's refused on
+                            open Wi-Fi. Keep the VM down when you're done.
+                            --audio = pass the Mac's default mic/speakers through (see the
+                            doc first: it opens the Mac's default mic).
+                            --window = normal Tart window instead
+  reset [--vnc] [--audio]   down + delete + new + up in one go
   down                      shut the clone down
   rm                        delete the clone
   status                    VMs, IP, transport, VNC (password hidden)
+  vnc-check                 fail if other machines on the network can reach the VNC port
+  soak [SECONDS]            watch the VM for SECONDS (default 300); fail if it stops
+  diagnose                  why did the VM stop? Tart's exit line, host sleep/wake,
+                            crash reports, disk, and the guest's shutdown cause
   save <snapshot>           keep the stopped clone as a named snapshot
   restore <snapshot>        replace the clone with a copy of a snapshot
 
@@ -91,6 +108,12 @@ Inside the guest:
                             install Transcripted like a user would (DMG -> /Applications).
                             Analytics + crash reports are switched off unless --keep-telemetry
   launch | quit             open or quit Transcripted
+  approve-download          get past the "downloaded from the Internet" prompt like a user:
+                            click Open inside the prompt's window over VNC (or press Return
+                            while it's in front). Otherwise clears the quarantine flag and
+                            exits 3, so the bypass is never mistaken for a user's path
+  windows                   the guest's window list: screen width, front window's app,
+                            and the download prompt's box if one is showing
   logs [N]                  last N lines of the app's events.jsonl + app.jsonl
   wait-event NAME [--timeout S] [--new]
                             wait until the app logs event NAME in events.jsonl
@@ -100,9 +123,11 @@ Inside the guest:
   say "<text>"              speak text through the guest speakers
   share                     print the host folder shared into the guest
 
-Screen (VNC, real virtual keyboard/mouse):
+Screen (needs up --vnc; real virtual keyboard/mouse over ONE VNC session per boot):
   screenshot <out.png> [--shrink N]
   click X Y [--double] [--button right]
+  click-default-button [--dry-run] [--within X,Y,W,H --points-wide N]
+                            click the blue default button (e.g. Open), optionally only inside one window
   move X Y | drag X1 Y1 X2 Y2 | scroll X Y up|down
   type "<text>"
   key <combo...>            e.g. key cmd-q   key return   key cmd-shift-4
@@ -166,6 +191,7 @@ share_dir() { echo "$TVM_HOME/share/$1"; }
 log_file() { echo "$TVM_HOME/logs/$1.log"; }
 vnc_file() { echo "$TVM_HOME/run/$1.vnc"; }
 transport_file() { echo "$TVM_HOME/run/$1.transport"; }
+setup_file() { echo "$TVM_HOME/run/$1.setup"; }
 
 # ----------------------------------------------------------------------------
 # Tart binary (pinned, lives in $TVM_HOME)
@@ -240,6 +266,7 @@ cmd_doctor() {
     log "tart: not installed (run install-tart)"
   fi
   if python3 "$VNC_PY" --self-test >/dev/null; then log "vnc driver: ok"; else log "vnc driver self-test failed"; ok=0; fi
+  if python3 "$SUPERVISE_PY" --self-test >/dev/null; then log "tart helper: ok"; else log "tart helper self-test failed"; ok=0; fi
   if (( ok )); then log "doctor: ok"; else die "doctor found problems above"; fi
 }
 
@@ -346,43 +373,169 @@ guest_user_bash() {
 # ----------------------------------------------------------------------------
 # VM lifecycle
 
+pid_file() { echo "$TVM_HOME/run/$1.pid"; }
+vnc_sock_file() { echo "$TVM_HOME/run/$1.vncsock"; }
+vnc_pid_file() { echo "$TVM_HOME/run/$1.vncpid"; }
+vnc_log_file() { echo "$TVM_HOME/logs/$1.vnc.log"; }
+
+# A socket file alone isn't a session: serve may have been killed without cleaning up.
+vnc_session_alive() {
+  local pid
+  [[ -S "$(vnc_sock_file "$1")" ]] || return 1
+  pid="$(cat "$(vnc_pid_file "$1")" 2>/dev/null || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+# Stop waiting as soon as the tart process is gone, and say how it ended.
+tart_alive_or_die() {
+  local vm="$1" pid
+  pid="$(cat "$(pid_file "$vm")" 2>/dev/null || true)"
+  if [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null; then return 0; fi
+  tail -n 5 "$(log_file "$vm")" 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
+  die "$vm stopped while booting; run: diagnose"
+}
+
 wait_for_guest() {
   local vm="$1" deadline=$((SECONDS + TVM_BOOT_TIMEOUT)) found
   log "waiting for $vm to boot (up to ${TVM_BOOT_TIMEOUT}s)"
   rm -f "$(transport_file "$vm")"
   until guest_ip "$vm" 5 >/dev/null; do
+    tart_alive_or_die "$vm"
     (( SECONDS < deadline )) || die "$vm never got an IP; see $(log_file "$vm")"
     sleep 3
   done
   until found="$(detect_transport "$vm" 2>/dev/null)"; do
+    tart_alive_or_die "$vm"
     (( SECONDS < deadline )) || die "$vm booted but neither tart exec nor ssh answers"
     sleep 3
   done
   echo "$found" >"$(transport_file "$vm")"
   # The vanilla image auto-logs-in the admin user; wait for that GUI session.
   until [[ "$(guest_run "$vm" stat -f %Su /dev/console 2>/dev/null)" == "$TVM_GUEST_USER" ]]; do
+    tart_alive_or_die "$vm"
     (( SECONDS < deadline )) || die "$vm is up but $TVM_GUEST_USER never logged in to the desktop"
     sleep 3
   done
+  close_setup_assistant "$vm"
   log "$vm is up via $found at $(guest_ip "$vm")"
 }
 
+# macOS can put Setup Assistant's own screens over the desktop at login (run 3
+# on the Mac: "Update Mac Automatically"). Nothing else opens while it's up, so
+# wait for the Dock, and if Setup Assistant shows instead, record it and close
+# it. Prints desktop-ready, gave-up or desktop-not-ready as its last line.
+SETUP_GUARD='
+closed=0
+for _ in $(seq 1 45); do
+  pid="$(pgrep -x "Setup Assistant" | head -n 1)"
+  if [ -n "$pid" ]; then
+    echo "setup-assistant running: $(ps -o user=,args= -p "$pid" 2>/dev/null)"
+    if [ "$closed" -ge 3 ]; then echo "gave-up: it keeps coming back"; exit 0; fi
+    if pkill -x "Setup Assistant"; then closed=$((closed + 1)); echo "closed it"; else echo "could not close it"; fi
+    sleep 3
+    continue
+  fi
+  if pgrep -x Dock >/dev/null; then
+    sleep 3
+    pgrep -x "Setup Assistant" >/dev/null || { echo "desktop-ready (closed Setup Assistant $closed times)"; exit 0; }
+    continue
+  fi
+  sleep 2
+done
+echo "desktop-not-ready: no Dock after 90s"
+'
+
+close_setup_assistant() {
+  local vm="$1" out file
+  file="$(setup_file "$vm")"
+  out="$(guest_run "$vm" bash -c "$SETUP_GUARD" 2>&1 || true)"
+  printf '%s\n' "$out" >"$file"
+  case "$out" in
+    *"closed it"*) log "macOS Setup Assistant was covering the desktop after login; closed it (see $file)" ;;
+  esac
+  case "$out" in
+    *desktop-ready*) ;;
+    *) log "warning: the desktop never came up clear, so apps may not open (see $file)" ;;
+  esac
+}
+
+# Tart's VNC server (Virtualization.framework's private _VZVNCServer) listens
+# on every network interface and Tart has no option to change that. Its
+# password is random, but VNC only uses the first 8 characters. So VNC is off
+# unless a run needs the screen, and never on open Wi-Fi.
+refuse_open_wifi() {
+  [[ "$(uname -s)" == Darwin && "$TVM_ALLOW_VNC_ON_OPEN_WIFI" != 1 ]] || return 0
+  local mode
+  mode="$(system_profiler SPAirPortDataType -json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+for entry in data.get("SPAirPortDataType", []):
+    for iface in entry.get("spairport_airport_interfaces", []):
+        current = iface.get("spairport_current_network_information")
+        if current:
+            print(current.get("spairport_security_mode", "unknown"))
+' 2>/dev/null || true)"
+  case "$mode" in
+    *none*|*owe*|*wep*|*open*)
+      die "this Mac is on open Wi-Fi ($mode). Tart's VNC port would be reachable by anyone on it, so up --vnc is refused. Use a private network, or set TVM_ALLOW_VNC_ON_OPEN_WIFI=1 if you accept that." ;;
+  esac
+  return 0
+}
+
+# One VNC connection for the VM's whole life. Apple's VNC server crashed
+# tart (assertion in -[_VZVNCServer _setupVirtualMachineAccessor]) when a new
+# client connected after Transcripted launched, on both real runs, so screen
+# commands never reconnect: they go through this session's local socket.
+start_vnc_session() {
+  local vm="$1" url="$2" sock
+  sock="$(vnc_sock_file "$vm")"
+  rm -f "$sock"
+  (umask 077; : >"$(vnc_log_file "$vm")")
+  TVM_VNC_URL="$url" python3 "$SUPERVISE_PY" --name "VNC session" --log "$(vnc_log_file "$vm")" \
+    --pidfile "$(vnc_pid_file "$vm")" -- python3 "$VNC_PY" --socket "$sock" serve >/dev/null \
+    || die "the VNC session did not start; see $(vnc_log_file "$vm")"
+  local deadline=$((SECONDS + 30))
+  until [[ -S "$sock" ]]; do
+    if (( SECONDS >= deadline )) || grep -q "VNC session exited\|VNC session was stopped" "$(vnc_log_file "$vm")" 2>/dev/null; then
+      tail -n 5 "$(vnc_log_file "$vm")" 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
+      die "the VNC session did not connect; see $(vnc_log_file "$vm")"
+    fi
+    sleep 0.5
+  done
+}
+
 cmd_up() {
-  local vm="$1" window=0 audio=0
+  local vm="$1" window=0 audio=0 vnc=0
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --vnc) vnc=1 ;;
       --window) window=1 ;;
       --audio) audio=1 ;;
       *) die "up: unknown option $1" ;;
     esac
     shift
   done
+  (( ! (vnc && window) )) || die "pick one of --vnc and --window"
   need_tart
   protect_snapshot "$vm"
   vm_exists "$vm" || die "no VM named $vm. Run: new"
-  if vm_running "$vm"; then log "$vm is already running"; return 0; fi
+  if vm_running "$vm"; then
+    if (( vnc )) && ! vnc_session_alive "$vm"; then
+      die "$vm is already running without a VNC session; run down first, then up --vnc"
+    fi
+    log "$vm is already running"
+    return 0
+  fi
+  if (( vnc )); then
+    refuse_open_wifi
+    log "VNC on: its port is reachable from this network, guarded only by a weak password. Use it on a network you trust, and run down when done."
+  fi
   mkdir -p "$(share_dir "$vm")"
+  rm -f "$(vnc_file "$vm")" "$(vnc_sock_file "$vm")"
   # No clipboard sharing: host clipboard contents must not leak into paste-back tests.
   local args=(run "$vm" --no-clipboard --dir "tvm:$(share_dir "$vm")")
   if (( audio )); then
@@ -391,11 +544,11 @@ cmd_up() {
     # Guest still gets a silent speaker, so call-audio capture can be tested.
     args+=(--no-audio)
   fi
-  if (( window )); then
-    rm -f "$(vnc_file "$vm")"
-  else
+  if (( vnc )); then
     # --no-graphics stops Tart from also opening Screen Sharing on the host.
     args+=(--vnc-experimental --no-graphics)
+  elif (( ! window )); then
+    args+=(--no-graphics)
   fi
   # Fail clearly if this Tart build lacks a flag we rely on.
   local help_text flag
@@ -404,18 +557,29 @@ cmd_up() {
     [[ "$flag" == --* && "$flag" != --dir ]] || continue
     [[ "$help_text" == *"$flag"* ]] || die "this Tart ($("$TART" --version 2>/dev/null)) has no 'run $flag'; expected Tart $TVM_TART_VERSION"
   done
-  log "booting $vm"
-  (umask 077; nohup "$TART" "${args[@]}" >"$(log_file "$vm")" 2>&1 </dev/null &
-   echo $! >"$TVM_HOME/run/$vm.pid")
-  if (( ! window )); then
+  log "booting $vm$( (( vnc )) && echo " with screen access (VNC)")"
+  # Keep the previous boot's log: after a VM dies, it says how.
+  local vm_log
+  vm_log="$(log_file "$vm")"
+  if [[ -f "$vm_log" ]]; then mv -f "$vm_log" "${vm_log%.log}.prev.log"; fi
+  (umask 077; : >"$vm_log")
+  # supervise.py starts tart in its own session (so a tool that kills the
+  # caller's process group or tree cannot take the VM with it), keeps the Mac
+  # from idle-sleeping, and logs exactly how tart ended.
+  python3 "$SUPERVISE_PY" --log "$vm_log" --pidfile "$(pid_file "$vm")" -- "$TART" "${args[@]}" >/dev/null \
+    || die "tart did not start; see $vm_log"
+  if (( vnc )); then
     local deadline=$((SECONDS + 60)) url=""
     until [[ -n "$url" ]]; do
-      url="$(grep -Eo 'vnc://[^[:space:]"]+' "$(log_file "$vm")" 2>/dev/null | tail -1 | sed 's/[.,]*$//' || true)"
+      url="$(grep -Eo 'vnc://[^[:space:]"]+' "$vm_log" 2>/dev/null | tail -1 | sed 's/[.,]*$//' || true)"
       [[ -n "$url" ]] && break
-      (( SECONDS < deadline )) || die "Tart never printed a VNC URL; see $(log_file "$vm")"
+      tart_alive_or_die "$vm"
+      (( SECONDS < deadline )) || die "Tart never printed a VNC URL; see $vm_log"
       sleep 1
     done
     (umask 077; echo "$url" >"$(vnc_file "$vm")")
+    start_vnc_session "$vm" "$url"
+    log "screen access on. Tart's VNC port listens on every network interface (password-protected; vnc-check shows who can reach it). Run down when you're done."
   fi
   wait_for_guest "$vm"
 }
@@ -429,7 +593,8 @@ cmd_down() {
   else
     log "$vm is not running"
   fi
-  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$TVM_HOME/run/$vm.pid"
+  # The VNC session exits by itself when tart's VNC server goes away.
+  rm -f "$(vnc_file "$vm")" "$(transport_file "$vm")" "$(pid_file "$vm")" "$(vnc_pid_file "$vm")"
 }
 
 cmd_rm() {
@@ -499,7 +664,8 @@ cmd_status() {
     echo "vm:        $vm (running)"
     echo "ip:        $(guest_ip "$vm" 2 || echo unknown)"
     echo "transport: $(cat "$(transport_file "$vm")" 2>/dev/null || echo unknown)"
-    echo "vnc:       $(sed -E 's#(vnc://:)[^@]*@#\1***@#' "$(vnc_file "$vm")" 2>/dev/null || echo none)"
+    echo "vnc:       $(sed -E 's#(vnc://:)[^@]*@#\1***@#' "$(vnc_file "$vm")" 2>/dev/null || echo "off (up --vnc turns it on)")"
+    echo "screen:    $(vnc_session_alive "$vm" && echo "VNC session open" || echo "no VNC session")"
     echo "share:     $(share_dir "$vm") (guest: $GUEST_SHARE)"
   else
     echo "vm:        $vm (not running)"
@@ -536,6 +702,28 @@ S defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload
 S defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
 defaults -currentHost write com.apple.screensaver idleTime 0
 osascript -e "set volume output volume 35" >/dev/null 2>&1 || true
+# The Cirrus image reopens a Terminal window from its own build at every
+# login. Close it and stop apps and windows coming back after a restart.
+killall Terminal 2>/dev/null || true
+rm -rf "$HOME/Library/Saved Application State/com.apple.Terminal.savedState"
+defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
+defaults write com.apple.loginwindow TALLogoutSavesState -bool false
+defaults write com.apple.loginwindow LoginwindowLaunchesRelaunchApps -bool false
+defaults -currentHost write com.apple.loginwindow TALAppsToRelaunchAtLogin -array
+# Mark Setup Assistant as done for this build, so it does not show its own
+# screens at login ("Update Mac Automatically" covered the desktop on run 3).
+echo "setup assistant before prep: $(defaults read com.apple.SetupAssistant 2>&1 | tr -s " \n" " " | cut -c1-800)"
+build="$(sw_vers -buildVersion)"
+version="$(sw_vers -productVersion)"
+defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string "$build"
+defaults write com.apple.SetupAssistant LastSeenCloudProductVersion -string "$version"
+defaults write com.apple.SetupAssistant GestureMovieSeen -string none
+for key in DidSeeCloudSetup DidSeeSiriSetup DidSeePrivacy DidSeeScreenTime DidSeeAppearanceSetup \
+  DidSeeAccessibility DidSeeTrueTonePrivacy DidSeeTouchIDSetup DidSeeActivationLock DidSeeApplePaySetup \
+  DidSeeiCloudLoginForStorageServices DidSeeSyncSetup DidSeeSyncSetup2 DidSeeIntelligence DidSeeTermsOfAddress; do
+  defaults write com.apple.SetupAssistant "$key" -bool true
+done
+gatekeeper="$(spctl --status 2>&1 || true)"
 mkdir -p "$HOME/tvm-fixtures"
 cd "$HOME/tvm-fixtures"
 say -v Samantha -o call-a.aiff "Hi, thanks for joining. Can you give me a quick update on the launch plan?" || say -o call-a.aiff "Hi, thanks for joining."
@@ -548,12 +736,12 @@ done
 [ -z "$leftovers" ] || { echo "golden image is not clean:$leftovers" >&2; exit 1; }
 marker_tmp="$(mktemp)"
 cat >"$marker_tmp" <<JSON
-{"purpose":"transcripted-clean-test-vm","image":"$TVM_IMAGE","macos":"$(sw_vers -productVersion)","build":"$(sw_vers -buildVersion)","prepared_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+{"purpose":"transcripted-clean-test-vm","image":"$TVM_IMAGE","macos":"$(sw_vers -productVersion)","build":"$(sw_vers -buildVersion)","prep":$TVM_PREP,"gatekeeper":"$gatekeeper","prepared_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
 S cp "$marker_tmp" "$TVM_MARKER"
 S chmod 644 "$TVM_MARKER"
 rm -f "$marker_tmp"
-echo "guest prep ok: macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+echo "guest prep ok: macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)), Gatekeeper: $gatekeeper"
 '
 
 cmd_golden() {
@@ -562,6 +750,8 @@ cmd_golden() {
   need_tart
   if vm_exists "$TVM_GOLDEN" && (( ! force )); then
     log "clean snapshot $TVM_GOLDEN already exists (golden --force rebuilds it)"
+    [[ "$(cat "$TVM_HOME/golden.prep" 2>/dev/null)" == "$GOLDEN_PREP_VERSION" ]] \
+      || log "note: it was prepared by an older version of this script; golden --force brings it up to date (no big download)"
     return 0
   fi
   if ! vm_exists "$TVM_BASE"; then
@@ -577,7 +767,7 @@ cmd_golden() {
   "$TART" set "$TVM_GOLDEN" --cpu "$TVM_CPU" --memory "$TVM_MEMORY_MB" --display "$TVM_DISPLAY"
   ALLOW_GOLDEN=1
   cmd_up "$TVM_GOLDEN"
-  guest_user_bash "$TVM_GOLDEN" "TVM_PASS=$(printf '%q' "$TVM_GUEST_PASS") TVM_MARKER=$(printf '%q' "$GUEST_MARKER") TVM_IMAGE=$(printf '%q' "$TVM_IMAGE"); $GUEST_PREP"
+  guest_user_bash "$TVM_GOLDEN" "TVM_PASS=$(printf '%q' "$TVM_GUEST_PASS") TVM_MARKER=$(printf '%q' "$GUEST_MARKER") TVM_IMAGE=$(printf '%q' "$TVM_IMAGE") TVM_PREP=$GOLDEN_PREP_VERSION; $GUEST_PREP"
   log "shutting the clean snapshot down; it is never booted again"
   guest_run "$TVM_GOLDEN" bash -c "if sudo -n true 2>/dev/null; then sudo shutdown -h now; else printf '%s\n' $(printf '%q' "$TVM_GUEST_PASS") | sudo -S -p '' shutdown -h now; fi" >/dev/null 2>&1 || true
   local deadline=$((SECONDS + 120))
@@ -585,6 +775,7 @@ cmd_golden() {
   cmd_down "$TVM_GOLDEN"
   rm -rf "$(share_dir "$TVM_GOLDEN")"
   ALLOW_GOLDEN=0
+  echo "$GOLDEN_PREP_VERSION" >"$TVM_HOME/golden.prep"
   log "clean snapshot ready: $TVM_GOLDEN. Next: new, then up"
 }
 
@@ -658,6 +849,171 @@ fi
 cmd_launch() { guest_user_bash "$1" 'open -a /Applications/Transcripted.app && echo launched'; }
 cmd_quit() { guest_user_bash "$1" 'pkill -x Transcripted && echo quit || echo "not running"'; }
 
+# Get past macOS's "downloaded from the Internet" prompt the way a user does:
+# click its Open button over the VNC session (virtual mouse), or press Return
+# since Open is the default button. Ask Gatekeeper first, while the flag is
+# still on, and refuse if it would reject the app: a broken notarization must
+# fail here, not slip through. Every click and key press is aimed at the
+# prompt's own window, checked in the guest each time, and stops as soon as
+# the app is up. "Up" needs proof from the app itself (a new app_launched in
+# its events.jsonl), not just its process: macOS starts the process before it
+# asks and holds it until Open (run 5 skipped the click because of that).
+# Clearing the quarantine flag is only the last resort; it exits
+# $BYPASS_EXIT so the report can't call it a user's path.
+BYPASS_EXIT=3
+cmd_approve_download() {
+  local vm="$1" try=1 waited=0 baseline windows box points front rc
+  guest_user_bash "$vm" '
+set -euo pipefail
+if ! verdict="$(spctl --assess --type execute -vv /Applications/Transcripted.app 2>&1)"; then
+  printf "%s\n" "$verdict"
+  echo "Gatekeeper REJECTS this app; a real user could not open it. Leaving the prompt alone." >&2
+  exit 1
+fi
+printf "Gatekeeper: %s\n" "$verdict"' || return 1
+  baseline="$(launch_count "$vm")"
+  if ! vnc_session_alive "$vm"; then
+    log "no screen access (up --vnc); clearing the quarantine flag instead of clicking Open (no user does this)"
+  else
+    while (( try <= 3 )); do
+      if (( try > 1 )) && app_started "$vm" 1 strict "$baseline"; then
+        echo "download prompt approved over VNC (the app took a while to start)"
+        return 0
+      fi
+      if ! windows="$(prompt_windows "$vm")" || ! grep -q '^screen [0-9]' <<<"$windows"; then
+        log "warning: can't read the guest's window list, so not clicking blind"
+        printf '%s\n' "$windows" | printable | sed 's/^/[tvm]   /' >&2
+        break
+      fi
+      echo "window list: $(tr '\n' ';' <<<"$windows" | printable)"
+      points="$(sed -n 's/^screen //p' <<<"$windows")"
+      box="$(sed -n 's/^prompt //p' <<<"$windows" | head -n 1)"
+      front="$(sed -n 's/^front //p' <<<"$windows" | printable)"
+      if [[ -z "$box" ]]; then
+        (( waited )) && { log "warning: the download prompt went away but Transcripted didn't start (front: ${front:-?})"; break; }
+        # The prompt may not be drawn yet: wait for it or a new launch,
+        # whichever comes first.
+        waited=1
+        rc=0
+        app_started "$vm" "$TVM_PROMPT_WAIT" either "$baseline" || rc=$?
+        if (( rc == 0 )); then
+          echo "Transcripted started and no download prompt is showing"
+          return 0
+        elif (( rc == 2 )); then
+          echo "the download prompt showed up late"
+          continue
+        fi
+        # No prompt came at all: an app that launched before this step (and
+        # isn't held, since nothing is asking) is simply already running.
+        if app_started "$vm" 1 strict 0; then
+          echo "Transcripted is already running (it launched before this step) and no download prompt showed up in ${TVM_PROMPT_WAIT}s"
+          return 0
+        fi
+        log "warning: no download prompt on screen and Transcripted didn't start (front: ${front:-?})"
+        break
+      fi
+      if (( try < 3 )); then
+        # The first click on a prompt that isn't in front may only bring it forward.
+        if (cmd_vnc "$vm" click-default-button --within "${box// /,}" --points-wide "$points") && app_started "$vm" 30 strict "$baseline"; then
+          echo "download prompt approved: clicked Open over VNC, like a user (try $try)"
+          return 0
+        fi
+      elif [[ "$front" == CoreServicesUIAgent ]]; then
+        if (cmd_vnc "$vm" key return) && app_started "$vm" 30 strict "$baseline"; then
+          echo "download prompt approved: pressed Return (Open is the default button)"
+          return 0
+        fi
+      else
+        log "warning: the download prompt isn't in front (${front:-?} is), so not pressing Return"
+      fi
+      try=$((try + 1))
+    done
+    log "warning: could not get past the download prompt over VNC; clearing the quarantine flag instead (no user does this)"
+  fi
+  # End the process macOS is holding behind the prompt, and make sure it's
+  # gone, so what starts next is a fresh, unquarantined launch.
+  guest_user_bash "$vm" '
+xattr -dr com.apple.quarantine /Applications/Transcripted.app
+if pgrep -x Transcripted >/dev/null; then
+  pkill -x Transcripted || true
+  for _ in 1 2 3 4 5; do pgrep -x Transcripted >/dev/null || break; sleep 1; done
+  if pgrep -x Transcripted >/dev/null; then pkill -9 -x Transcripted || true; sleep 2; fi
+  if pgrep -x Transcripted >/dev/null; then echo "the held Transcripted process would not quit" >&2; exit 1; fi
+  echo "ended the Transcripted process held behind the prompt"
+fi
+killall CoreServicesUIAgent 2>/dev/null || true
+open -a /Applications/Transcripted.app' || die "could not clear the way for a fresh launch"
+  if app_started "$vm" 60 lenient "$baseline"; then
+    echo "download prompt BYPASSED: quarantine flag cleared (fallback, not a user's path)"
+    return "$BYPASS_EXIT"
+  fi
+  die "Transcripted did not start after the download prompt"
+}
+
+# How many app_launched events the app has logged so far (0 before its first
+# real launch).
+launch_count() {
+  local n
+  n="$(guest_user_bash "$1" 'f="$HOME/'"$APP_SUPPORT_REL"'/logs/events.jsonl"; n=0; [ -f "$f" ] && n=$(grep -cF "\"event\":\"app_launched\"" "$f" || true); echo "${n:-0}"' || true)"
+  [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 0
+}
+
+# Keep guest text from writing terminal control codes on the host.
+printable() { tr -d '\000-\010\013-\037\177'; }
+
+# What's on the guest's screen, from macOS's window list (no Accessibility
+# grant needed for owners and bounds). Prints "screen <width in points>",
+# "front <owner of the frontmost window>", and "prompt X Y W H" for each
+# window of CoreServicesUIAgent, which draws the download prompt.
+prompt_windows() {
+  guest_user_bash "$1" 'osascript -l JavaScript -e "$1"' "$PROMPT_WINDOWS_JS" 2>&1
+}
+PROMPT_WINDOWS_JS='
+ObjC.import("CoreGraphics");
+function run() {
+  var list = $.CGWindowListCopyWindowInfo(1 | 16, 0);
+  var wins = list ? ObjC.deepUnwrap(ObjC.castRefToObject(list)) || [] : [];
+  if (!wins.length) return "no windows";
+  var wide = 0;
+  try { wide = $.CGDisplayBounds($.CGMainDisplayID()).size.width; } catch (e) {}
+  if (!(wide > 0)) wide = $.CGDisplayPixelsWide($.CGMainDisplayID());
+  var skip = ["Window Server", "Dock", "SystemUIServer", "Control Center", "Spotlight", "Notification Center", "WindowManager", "TextInputMenuAgent"];
+  var out = ["screen " + Math.round(wide)], front = "";
+  wins.forEach(function (w) {
+    var owner = w.kCGWindowOwnerName || "", layer = w.kCGWindowLayer, b = w.kCGWindowBounds || {};
+    var ours = owner === "CoreServicesUIAgent";
+    if (layer < 0 || (layer >= 24 && !ours) || skip.indexOf(owner) >= 0 || !(b.Width > 40 && b.Height > 40)) return;
+    if (!front) front = owner;
+    if (ours) out.push("prompt " + [b.X, b.Y, b.Width, b.Height].map(Math.round).join(" "));
+  });
+  out.push("front " + (front || "-"));
+  return out.join("\n");
+}'
+
+# app_started VM SECONDS MODE BASELINE: wait up to SECONDS for Transcripted to
+# be really running: its process exists, it has logged more than BASELINE
+# app_launched events, and no download prompt is on screen. MODE strict: the
+# window list must be readable. lenient (after the quarantine fallback): an
+# unreadable list is fine. either: also return 2 as soon as a prompt shows.
+app_started() {
+  guest_user_bash "$1" '
+f="$HOME/'"$APP_SUPPORT_REL"'/logs/events.jsonl"
+for _ in $(seq 1 "$1"); do
+  running=0; prompt=0; readable=0; launched=0
+  pgrep -x Transcripted >/dev/null && running=1
+  windows="$(osascript -l JavaScript -e "$2" 2>/dev/null || true)"
+  printf "%s\n" "$windows" | grep -q "^prompt " && prompt=1
+  printf "%s\n" "$windows" | grep -q "^screen [0-9]" && readable=1
+  [ "$3" = either ] && [ "$prompt" = 1 ] && exit 2
+  [ -f "$f" ] && launched=$(grep -cF "\"event\":\"app_launched\"" "$f" || true)
+  if [ "$running" = 1 ] && [ "${launched:-0}" -gt "$4" ] && [ "$prompt" = 0 ]; then
+    { [ "$readable" = 1 ] || [ "$3" = lenient ]; } && exit 0
+  fi
+  sleep 1
+done
+exit 1' "$2" "$PROMPT_WINDOWS_JS" "$3" "$4"
+}
+
 cmd_logs() {
   local vm="$1" lines="${2:-40}"
   [[ "$lines" =~ ^[0-9]+$ ]] || die "logs takes a line count"
@@ -714,13 +1070,173 @@ exit 1' "$name" "$timeout" "$new"
 }
 
 # ----------------------------------------------------------------------------
+# Health checks
+
+# Tart's VNC server listens on every interface; prove whether other machines
+# can actually connect by dialing the port on each of this Mac's own network
+# addresses (the same local address a neighbor would hit).
+cmd_vnc_check() {
+  local vm="$1" url port
+  url="$(cat "$(vnc_file "$vm")" 2>/dev/null)" || die "no VNC port for $vm (boot it with: up --vnc)"
+  port="${url##*:}"
+  port="${port%%/*}"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "could not read the VNC port from the saved URL"
+  python3 - "$port" <<'VNCCHECK'
+import ipaddress, plistlib, socket, subprocess, sys
+
+port = int(sys.argv[1])
+
+def listing(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True).stdout
+    except OSError:
+        return None
+
+out = listing(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fcn"])
+if out is None:
+    sys.exit("FAIL: lsof is missing, so the VNC listener cannot be checked")
+listens = sorted({line[1:] for line in out.splitlines() if line.startswith("n")})
+owners = sorted({line[1:] for line in out.splitlines() if line.startswith("c")})
+if not listens:
+    sys.exit(f"FAIL: nothing listens on VNC port {port}")
+print(f"port {port} listens on: {', '.join(listens)} (process: {', '.join(owners) or '?'})")
+loopback_only = all(addr.rsplit(":", 1)[0] in ("127.0.0.1", "[::1]", "localhost") for addr in listens)
+
+# The private network Tart's VMs sit on (vmnet shared mode). Only the VMs can
+# reach it, so an answer there is not exposure. Everything else counts,
+# including other bridges (Thunderbolt Bridge, Internet Sharing).
+vm_net = ipaddress.ip_network("192.168.64.0/24")
+try:
+    with open("/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist", "rb") as handle:
+        prefs = plistlib.load(handle)
+    vm_net = ipaddress.ip_network(f"{prefs['Shared_Net_Address']}/{prefs['Shared_Net_Mask']}", strict=False)
+except (OSError, KeyError, ValueError, plistlib.InvalidFileException):
+    pass
+
+# (interface, address) for every address this Mac has, IPv4 and IPv6,
+# leaving out loopback and IPv6 link-local.
+addresses = []
+iface = "?"
+for line in (listing(["ifconfig"]) or listing(["ip", "-o", "addr", "show"]) or "").splitlines():
+    parts = line.split()
+    if not parts:
+        continue
+    if not line[0].isspace():
+        iface = parts[1] if parts[0].rstrip(":").isdigit() else parts[0].rstrip(":")
+    for family in ("inet", "inet6"):
+        if family in parts[:-1]:
+            raw = parts[parts.index(family) + 1].split("/")[0].split("%")[0]
+            try:
+                address = ipaddress.ip_address(raw)
+            except ValueError:
+                continue
+            if address.is_loopback or address.is_link_local:
+                continue
+            if (iface, address) not in addresses:
+                addresses.append((iface, address))
+
+def vnc_answers(host):
+    # A completed TCP handshake is not enough: a sandbox may refuse the
+    # connection only after the kernel accepted it. Count it as reachable
+    # only when a VNC server actually says hello ("RFB 003.008").
+    try:
+        with socket.create_connection((str(host), port), timeout=1.5) as conn:
+            conn.settimeout(2)
+            hello = b""
+            while len(hello) < 4:
+                chunk = conn.recv(12)
+                if not chunk:
+                    break
+                hello += chunk
+            return hello.startswith(b"RFB ")
+    except OSError:
+        return False
+
+if not vnc_answers("127.0.0.1"):
+    sys.exit("FAIL: the VNC server does not answer even from this Mac, so nothing else can be proven")
+print("from this Mac (127.0.0.1): VNC answers")
+exposed = []
+tested = 0
+for name, address in addresses:
+    vm_network = address in vm_net
+    hit = vnc_answers(address)
+    where = "the VMs' private network" if vm_network else "the network"
+    print(f"from {where} ({name} {address}): {'VNC ANSWERS' if hit else 'no answer'}")
+    if not vm_network:
+        tested += 1
+        if hit:
+            exposed.append(str(address))
+if exposed:
+    sys.exit("FAIL: other machines on the network can reach the VM's VNC port. Tart has no setting to "
+             "limit it. It's password-protected; keep the VM down when idle and never use --vnc on shared Wi-Fi.")
+if not loopback_only and not tested:
+    sys.exit("FAIL: VNC listens on every interface and this Mac has no network address to test against")
+print("ok: only this Mac can reach the VNC port" + ("" if loopback_only else " (it listens on every interface, but connections from the network get no VNC answer)"))
+VNCCHECK
+}
+
+cmd_soak() {
+  local vm="$1" seconds="${2:-300}" started=$SECONDS
+  [[ "$seconds" =~ ^[0-9]+$ ]] || die "soak takes a number of seconds"
+  vm_running "$vm" || die "$vm is not running"
+  while (( SECONDS - started < seconds )); do
+    sleep 10
+    if ! vm_running "$vm"; then
+      echo "$vm stopped after about $((SECONDS - started))s of watching ($(date -u +%H:%M:%SZ))"
+      tail -n 5 "$(log_file "$vm")" 2>/dev/null || true
+      return 1
+    fi
+  done
+  echo "$vm still running after ${seconds}s"
+}
+
+# Everything that could explain a VM that stopped. Never fails.
+cmd_diagnose() {
+  local vm="$1" pid
+  set +e
+  echo "== $vm: $(vm_state "$vm" || true) ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+  pid="$(cat "$(pid_file "$vm")" 2>/dev/null)"
+  if [[ -n "$pid" ]]; then
+    kill -0 "$pid" 2>/dev/null && echo "tart pid $pid is alive" || echo "tart pid $pid is gone"
+  fi
+  echo; echo "== VM log, this boot (last lines; a [tvm] line says how tart ended)"
+  tail -n 30 "$(log_file "$vm")" 2>/dev/null || echo "(none)"
+  echo; echo "== VNC session log"
+  tail -n 10 "$(vnc_log_file "$vm")" 2>/dev/null || echo "(none)"
+  echo; echo "== VM log, previous boot"
+  tail -n 15 "$(dirname "$(log_file "$vm")")/$vm.prev.log" 2>/dev/null || echo "(none)"
+  echo; echo "== host sleep/wake, most recent"
+  pmset -g log 2>/dev/null | grep -E '^[0-9-]+ [0-9:]+ [+-][0-9]+[[:space:]]+(Sleep|Wake|DarkWake)[[:space:]]' | tail -n 10 || echo "(pmset log not readable)"
+  echo; echo "== host disk"
+  df -h "$TVM_HOME" 2>/dev/null
+  echo; echo "== host crash reports for tart or Virtualization (last 2 days)"
+  find "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports -maxdepth 1 -mtime -2 \
+    \( -iname '*tart*' -o -iname '*virtualization*' \) 2>/dev/null | tail -n 10
+  echo; echo "== host log for tart and the VM process (last 30 min)"
+  log show --last 30m --style compact \
+    --predicate 'process == "tart" OR process BEGINSWITH "com.apple.Virtualization"' 2>&1 | tail -n 40
+  echo; echo "== host firewall"
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>&1
+  if vm_running "$vm"; then
+    echo; echo "== guest"
+    guest_user_bash "$vm" '
+echo "uptime: $(uptime)"
+echo "memory: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB, $(memory_pressure 2>/dev/null | tail -n 1)"
+log show --last boot --style compact --predicate "eventMessage CONTAINS \"shutdown cause\"" 2>/dev/null | tail -n 3
+echo "crash/panic reports:"; ls -t /Library/Logs/DiagnosticReports "$HOME/Library/Logs/DiagnosticReports" 2>/dev/null | head -n 15' 2>&1
+  fi
+  set -e
+  return 0
+}
+
+# ----------------------------------------------------------------------------
 # First real run: one command that does setup plus a smoke run, collects the
-# hardware facts the doc lists under "Check on first real run", and writes a
+# hardware facts the doc lists under "What the first real run showed", and writes a
 # report. Each step runs as its own invocation so one failure still leaves a
 # useful report. Host audio stays off throughout.
 
 cmd_first_run() {
-  local self="$SCRIPT_DIR/transcripted-vm.sh" stamp dir report failed=0
+  local self="$SCRIPT_DIR/transcripted-vm.sh" stamp dir report failed=0 bypassed=0
   export TVM_HOME TVM_VM
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   dir="$TVM_HOME/reports/first-run-$stamp"
@@ -735,15 +1251,24 @@ cmd_first_run() {
   step() {
     local title="$1" required="$2"; shift 2
     log "first-run: $title"
-    local out rc=0
+    local out rc=0 result
     out="$("$@" 2>&1)" || rc=$?
+    if [[ $rc == 0 ]]; then
+      result=ok
+    elif [[ "$required" == bypassable && $rc == "$BYPASS_EXIT" ]]; then
+      # It worked, but not the way a user gets there; never report it as plain ok.
+      result="ok via bypass (not a user's path)"
+      bypassed=1
+      rc=0
+    else
+      result="FAILED (exit $rc)"
+    fi
     {
       echo
-      echo "## $title: $([[ $rc == 0 ]] && echo ok || echo "FAILED (exit $rc)")"
+      echo "## $title: $result ($(date -u +%H:%M:%SZ))"
       echo
       echo '```'
-      printf '%s
-' "$out" | tail -n 60
+      printf '%s\n' "$out" | tail -n 60
       echo '```'
     } >>"$report"
     if (( rc != 0 )); then
@@ -757,26 +1282,54 @@ cmd_first_run() {
   step "install Tart $TVM_TART_VERSION" required bash "$self" install-tart || return 1
   need_tart
   step "tart run flags" optional bash -c '"$1" --version; "$1" run --help | grep -E -- "--(no-clipboard|no-audio|vnc-experimental|no-graphics|dir)"' _ "$TART"
-  step "build clean snapshot (slow)" required bash "$self" golden || return 1
-  step "boot a fresh clone (no host audio)" required bash "$self" --vm "$TVM_VM" reset || return 1
+  if [[ "$(cat "$TVM_HOME/golden.prep" 2>/dev/null)" == "$GOLDEN_PREP_VERSION" ]]; then
+    step "build clean snapshot (slow the first time)" required bash "$self" golden || return 1
+  else
+    step "build clean snapshot (slow the first time; rebuilt because the prep changed)" required bash "$self" golden --force || return 1
+  fi
+  step "boot a fresh clone with screen access (no host audio)" required bash "$self" --vm "$TVM_VM" reset --vnc || return 1
   step "status" optional bash "$self" --vm "$TVM_VM" status
+  step "macOS setup screens after login (closed if they covered the desktop)" optional cat "$(setup_file "$TVM_VM")"
   step "guest user and transport" optional bash "$self" --vm "$TVM_VM" exec -- bash -c 'echo "user=$(id -un) uid=$(id -u) console=$(stat -f %Su /dev/console) macOS=$(sw_vers -productVersion)"; ls /Volumes/"My Shared Files" 2>&1; system_profiler SPAudioDataType 2>/dev/null | grep -E "^ {8}[^ ].*:$" || true'
-  step "VNC server bind (expect 127.0.0.1 only)" optional bash -c 'lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i tart || echo "no tart listener found"'
+  step "VNC reachable from the network? (Tart can't prevent it; this records who can reach it)" optional bash "$self" --vm "$TVM_VM" vnc-check
+  step "Gatekeeper in the guest" optional bash "$self" --vm "$TVM_VM" exec -- bash -c 'spctl --status; cat /Users/Shared/transcripted-test-vm.json 2>/dev/null'
   step "VNC handshake" optional bash "$self" --vm "$TVM_VM" info
   step "screenshot: desktop" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/01-desktop.png"
-  step "install latest Transcripted" required bash "$self" --vm "$TVM_VM" install-app --latest || return 1
+  step "install latest Transcripted (marked as downloaded)" required bash "$self" --vm "$TVM_VM" install-app --latest || return 1
+  # A downloaded app opens behind macOS's "downloaded from the Internet"
+  # prompt and does not start until it is approved, so photograph the prompt
+  # first, approve it, and only then wait for the app.
   step "launch" optional bash "$self" --vm "$TVM_VM" launch
-  step "app_launched event" optional bash "$self" --vm "$TVM_VM" wait-event app_launched --timeout 120
-  step "screenshot: after launch" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-after-launch.png"
+  step "wait for the download prompt, then read the window list" optional bash -c 'sleep 10; bash "$1" --vm "$2" windows' _ "$self" "$TVM_VM"
+  step "screenshot: download prompt" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/02-download-prompt.png"
+  step "Gatekeeper check, then approve the download prompt" bypassable bash "$self" --vm "$TVM_VM" approve-download
+  step "launch again" optional bash "$self" --vm "$TVM_VM" launch
+  step "app_launched event" optional bash "$self" --vm "$TVM_VM" wait-event app_launched --timeout 180
+  step "screenshot: first screen" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/03-first-screen.png"
   step "app logs" optional bash "$self" --vm "$TVM_VM" logs 20
+  # Could screenshots come from inside the guest instead of VNC? Records
+  # whether screencapture works there without a Screen Recording grant.
+  step "guest screencapture (test)" optional bash -c '
+    bash "$1" --vm "$2" exec -- bash -c "screencapture -x /tmp/tvm-sc.png && ls -l /tmp/tvm-sc.png && cp /tmp/tvm-sc.png \"$3/guest-screencapture.png\"" &&
+    cp "$4/guest-screencapture.png" "$5/06-guest-screencapture.png"' _ "$self" "$TVM_VM" "$GUEST_SHARE" "$(share_dir "$TVM_VM")" "$dir"
+  # Last time the VM died a few minutes after launch; watch it for a while.
+  step "VM stays up for 5 minutes" optional bash "$self" --vm "$TVM_VM" soak 300
+  step "screenshot: after 5 minutes" optional bash "$self" --vm "$TVM_VM" screenshot "$dir/04-after-5-min.png"
+  step "diagnose (how the VM is doing, or why it stopped)" optional bash "$self" --vm "$TVM_VM" diagnose
   step "shut down" optional bash "$self" --vm "$TVM_VM" down
 
   {
     echo
-    echo "## Result: $([[ $failed == 0 ]] && echo "all steps ok" || echo "some optional steps failed")"
+    if (( failed )); then
+      echo "## Result: some optional steps failed$( (( bypassed )) && echo ", and the download prompt was BYPASSED, not approved like a user")"
+    elif (( bypassed )); then
+      echo "## Result: steps ok, but the download prompt was BYPASSED, not approved like a user"
+    else
+      echo "## Result: all steps ok"
+    fi
     echo
     echo "Screenshots: $dir"
-    echo "Look at 02-after-launch.png: the Gatekeeper dialog or onboarding should be on screen."
+    echo "02-download-prompt.png should show macOS's \"downloaded from the Internet\" prompt; 03-first-screen.png should show Transcripted's first screen; 06-guest-screencapture.png exists only if in-guest screenshots work."
   } >>"$report"
   log "first-run finished; report: $report"
   echo "$report"
@@ -787,10 +1340,15 @@ cmd_first_run() {
 
 cmd_vnc() {
   local vm="$1"; shift
-  local url_file
-  url_file="$(vnc_file "$vm")"
-  [[ -s "$url_file" ]] || die "no VNC URL for $vm (boot it with: up, not up --window)"
-  TVM_VNC_URL="$(cat "$url_file")" python3 "$VNC_PY" "$@"
+  local sock
+  sock="$(vnc_sock_file "$vm")"
+  if ! vnc_session_alive "$vm"; then
+    [[ -s "$(vnc_file "$vm")" ]] || die "no screen access for $vm (boot it with: up --vnc)"
+    tail -n 3 "$(vnc_log_file "$vm")" 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
+    die "the VNC session for $vm has ended (it never reconnects: that crashed tart). Run: diagnose"
+  fi
+  # Never connect directly: only the one session talks to Apple's VNC server.
+  env -u TVM_VNC_URL TVM_VNC_SOCKET="$sock" python3 "$VNC_PY" "$@"
 }
 
 # ----------------------------------------------------------------------------
@@ -833,10 +1391,13 @@ main() {
     rm) cmd_rm "$vm" ;;
     reset) need_tart; cmd_reset "$vm" "$@" ;;
     status) cmd_status "$vm" ;;
+    vnc-check) cmd_vnc_check "$vm" ;;
+    soak) need_tart; cmd_soak "$vm" "$@" ;;
+    diagnose) need_tart; cmd_diagnose "$vm" ;;
     save) cmd_save "$vm" "$@" ;;
     restore) cmd_restore "$vm" "$@" ;;
     first-run) cmd_first_run ;;
-    exec|sh|install-app|launch|quit|logs|cli|play|say|wait-event)
+    exec|sh|install-app|launch|quit|approve-download|windows|logs|cli|play|say|wait-event)
       need_tart
       protect_snapshot "$vm"
       vm_running "$vm" || die "$vm is not running. Run: up"
@@ -846,6 +1407,8 @@ main() {
         install-app) cmd_install_app "$vm" "$@" ;;
         launch) cmd_launch "$vm" ;;
         quit) cmd_quit "$vm" ;;
+        approve-download) cmd_approve_download "$vm" ;;
+        windows) prompt_windows "$vm" | printable ;;
         logs) cmd_logs "$vm" "$@" ;;
         cli) cmd_cli "$vm" "$@" ;;
         play) cmd_play "$vm" "$@" ;;
@@ -854,7 +1417,7 @@ main() {
       esac
       ;;
     share) cmd_share "$vm" ;;
-    screenshot|click|move|drag|scroll|type|key|info) cmd_vnc "$vm" "$command" "$@" ;;
+    screenshot|click|click-default-button|move|drag|scroll|type|key|info) cmd_vnc "$vm" "$command" "$@" ;;
     *) usage >&2; die "unknown command: $command" ;;
   esac
 }

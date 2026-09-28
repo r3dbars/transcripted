@@ -28,16 +28,24 @@ func testQuitConfirmationPreferences() {
 
         assertEqual(
             presentation.title,
-            "Meeting work is still running",
-            "alert title should cover recording and background transcription work"
+            "A meeting is still recording",
+            "alert title should say plainly that a live recording is running"
         )
         assertTrue(
-            presentation.message.contains("Keep Transcripted open"),
-            "alert should offer the safe path of keeping the app open"
+            presentation.message.contains("Transcripted stays open"),
+            "alert should say Stop Recording keeps the app open instead of quitting"
         )
         assertTrue(
-            presentation.message.contains("save the audio and quit"),
-            "alert should explain that quit preserves retry audio"
+            presentation.message.contains("Meetings page"),
+            "alert should point at the Meetings page, the sidebar's real name"
+        )
+        assertFalse(
+            presentation.message.contains("Home"),
+            "alert should not name a Home page the sidebar doesn't have"
+        )
+        assertFalse(
+            ActiveMeetingQuitConfirmationPolicy.backgroundPresentation.message.contains("Home"),
+            "background alert should not name a Home page the sidebar doesn't have"
         )
         assertEqual(
             presentation.keepRecordingTitle,
@@ -46,8 +54,8 @@ func testQuitConfirmationPreferences() {
         )
         assertEqual(
             presentation.stopAndTranscribeTitle,
-            "Stop & Transcribe",
-            "middle path should keep the app open and make a transcript"
+            "Stop Recording",
+            "middle path stops the meeting and keeps the app open, so it should not read like a quit"
         )
         assertEqual(
             presentation.saveAudioAndQuitTitle,

@@ -242,6 +242,57 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertEqual(snapshot.systemAudioPeak, "1.00000")
     }
 
+    // MARK: - Mic backend in the pipeline snapshot
+
+    func testPipelineSnapshotReportsEngineBackendWithoutPinnedCapture() {
+        let audio = makeAudio()
+
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+
+        XCTAssertEqual(snapshot.micBackend, "av_audio_engine")
+        XCTAssertNil(snapshot.pinnedMicrophoneDiagnostics)
+        XCTAssertEqual(snapshot.privacySafeContext["mic_backend"], "av_audio_engine")
+        XCTAssertNil(snapshot.privacySafeContext["pinned_mic_restart_bucket"])
+    }
+
+    func testPipelineSnapshotReportsPinnedBackendAndItsCounts() {
+        let audio = makeAudio()
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+        // Hardware-free capture: never prepared or started, so no HAL object
+        // is touched and every counter is zero.
+        let capture = PinnedMicrophoneCapture(
+            deviceID: 0,
+            hardwareHooks: .init(
+                prepare: { _ in format },
+                start: { _ in },
+                stop: {},
+                currentFormat: { _ in format },
+                isAlive: { _ in true }
+            ),
+            clock: { 100 }
+        )
+        audio.withAudioGraphLock { audio.pinnedMicrophoneCapture = capture }
+        defer {
+            audio.withAudioGraphLock { audio.pinnedMicrophoneCapture = nil }
+            capture.stop()
+        }
+
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+        let context = snapshot.privacySafeContext
+
+        XCTAssertEqual(snapshot.micBackend, "pinned_ioproc")
+        XCTAssertEqual(snapshot.pinnedMicrophoneDiagnostics, capture.diagnostics)
+        XCTAssertEqual(context["mic_backend"], "pinned_ioproc")
+        XCTAssertEqual(context["pinned_mic_restart_count"], "0")
+        XCTAssertEqual(context["pinned_mic_gap_count"], "0")
+        XCTAssertEqual(context["pinned_mic_padded_seconds"], "0")
+        XCTAssertEqual(context["pinned_mic_dropped_callback_count"], "0")
+        XCTAssertEqual(context["pinned_mic_restart_bucket"], "0")
+        XCTAssertEqual(context["pinned_mic_gap_bucket"], "0")
+        XCTAssertEqual(context["pinned_mic_padded_bucket"], "0")
+        XCTAssertEqual(context["pinned_mic_dropped_callback_bucket"], "0")
+    }
+
     // MARK: - prepareForNewRecordingStart side effects
 
     func testPrepareForNewRecordingStartBumpsSessionGenerationAndClearsHealthCounters() {

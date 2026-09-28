@@ -3,6 +3,9 @@
 
 import AppKit
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 extension Notification.Name {
     static let dictationTranscriptDidSave = Notification.Name("Transcripted.DictationTranscriptDidSave")
@@ -95,7 +98,12 @@ enum DictationTranscriptStore {
 
         var scannedPaths = Set<String>()
         for file in files where isDictationDayFile(file) {
-            if Task.isCancelled { break }
+            // Return before the prune below: a cancelled scan only saw some of
+            // the day files, and pruning to those would throw away every other
+            // file's cached stats and force the next refresh to reparse them.
+            if Task.isCancelled {
+                return DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+            }
             guard let signature = DictationFileStatsCache.Signature(url: file) else { continue }
             scannedPaths.insert(signature.path)
             let stats = statsCache.stats(for: signature) {
@@ -110,6 +118,47 @@ enum DictationTranscriptStore {
         statsCache.prune(keeping: scannedPaths)
 
         return DictationTranscriptCounts(total: total, today: todayCount, totalWords: totalWords)
+    }
+
+    /// Entry and word counts per day file on or after `since`, keyed by the
+    /// day's start. Reads through the same stats cache as
+    /// `savedDictationCounts`, and never prunes it (this sees only part of the
+    /// library). Backs the Today page.
+    static func savedDictationDayCounts(
+        directory: URL? = nil,
+        since: Date,
+        calendar: Calendar = .current
+    ) -> [(day: Date, entries: Int, words: Int)] {
+        let folder = directory ?? DictationStoragePaths.transcriptsFolder
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.timeZone = calendar.timeZone
+        parser.dateFormat = "yyyy-MM-dd"
+        let earliest = calendar.startOfDay(for: since)
+
+        var result: [(day: Date, entries: Int, words: Int)] = []
+        for file in files where isDictationDayFile(file) {
+            if Task.isCancelled { return [] }
+            let stamp = file.deletingPathExtension().lastPathComponent.dropFirst(dictationDayPrefix.count)
+            guard let parsed = parser.date(from: String(stamp)) else { continue }
+            let day = calendar.startOfDay(for: parsed)
+            guard day >= earliest,
+                  let signature = DictationFileStatsCache.Signature(url: file) else { continue }
+            let stats = statsCache.stats(for: signature) {
+                fileStats(in: file)
+            }
+            result.append((day: day, entries: stats.entries, words: stats.words))
+        }
+        return result.sorted { $0.day < $1.day }
     }
 
     static func resetSavedDictationCountsCacheForTesting() {
@@ -207,7 +256,7 @@ enum DictationTranscriptStore {
             } else {
                 let header = headerPreface(in: content)
                 let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
                 return .rewrote(url: url, originalContent: content, newContent: rebuilt)
             }
@@ -231,13 +280,13 @@ enum DictationTranscriptStore {
             try DictationTranscriptMutationLock.withLock {
                 let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
                 if current == newContent || current.isEmpty {
-                    try originalContent.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(originalContent, to: url)
                 } else {
                     let removedSections = missingSections(from: originalContent, comparedTo: newContent)
                     guard !removedSections.isEmpty else { return }
                     let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
                         + "\n\n" + removedSections.joined(separator: "\n\n") + "\n"
-                    try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(rebuilt, to: url)
                 }
                 FileManager.default.restrictFileToOwnerOnly(at: url)
             }
@@ -260,7 +309,7 @@ enum DictationTranscriptStore {
                     guard !oldSections.isEmpty else { return }
                     let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
                         + "\n\n" + oldSections.joined(separator: "\n\n") + "\n"
-                    try rebuilt.write(to: originalURL, atomically: true, encoding: .utf8)
+                    try TranscriptFileRewrite.write(rebuilt, to: originalURL)
                     try? FileManager.default.removeItem(at: trashedURL)
                 } else {
                     try FileManager.default.moveItem(at: trashedURL, to: originalURL)
@@ -311,7 +360,7 @@ enum DictationTranscriptStore {
             } else {
                 let header = headerPreface(in: content)
                 let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
             }
         }

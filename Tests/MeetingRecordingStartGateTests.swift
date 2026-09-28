@@ -144,7 +144,7 @@ func testMeetingRecordingStartGate() async {
     runSuite("MeetingPermissionCopy — keeps system-audio copy aligned with the meeting gate") {
         assertEqual(
             MeetingRecordingStartGate.systemAudioRecordingSummary,
-            "For the other side of calls, videos, and meetings. Audio only — no screen access needed.",
+            "For the other side of calls, videos, and meetings. Audio only — meetings never need screen access.",
             "shared summary copy should explain why system audio recording matters"
         )
         assertEqual(

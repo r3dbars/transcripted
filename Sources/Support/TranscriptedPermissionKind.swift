@@ -70,16 +70,16 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .microphone:
             return "For dictation and your side of meetings."
         case .accessibility:
-            return "For shortcuts and paste-back."
+            return "For shortcuts, paste-back, and spotting calls in your browser."
         case .systemAudioRecording:
             return Self.systemAudioRecordingSummary
         case .calendar:
-            return "Optional. Shows meeting prompts from synced calendars."
+            return "Optional. Reminds you to record a few minutes before scheduled meetings."
         }
     }
 
     static var systemAudioRecordingSummary: String {
-        "For the other side of calls, videos, and meetings. Audio only — no screen access needed."
+        "For the other side of calls, videos, and meetings. Audio only — meetings never need screen access."
     }
 
     struct SystemAudioOnboardingPresentation {
@@ -111,7 +111,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     }
 
     static var systemAudioRecordingMigrationInstructions: String {
-        "In System Settings → Privacy & Security → Screen & System Audio Recording, enable Transcripted under System Audio Recording Only. If you previously allowed Screen & System Audio Recording, turn that broader permission off. Quit and reopen Transcripted if macOS asks. Play audio in another app, then check this permission again. Silence cannot distinguish a quiet Mac from denied access. Your existing recordings are unchanged."
+        "In System Settings → Privacy & Security → Screen & System Audio Recording, enable Transcripted under System Audio Recording Only. That's all meetings need. The broader Screen & System Audio Recording permission is only for Writing's autocomplete, so if you allowed it before and don't use autocomplete, you can turn it off. Quit and reopen Transcripted if macOS asks. Play audio in another app, then check this permission again. Silence cannot distinguish a quiet Mac from denied access. Your existing recordings are unchanged."
     }
 
     var actionButtonTitle: String {

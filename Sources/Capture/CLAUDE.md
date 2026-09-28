@@ -24,6 +24,7 @@
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
 - Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
+- A modifier-only hands-free key that other shortcuts also use (right Option vs Option-M) fires on press, so the hold isn't added to every start. If a key was typed in the last second it waits for release instead, and if another key goes down while it's held the detector sends `.comboInterrupted` and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`)
 - Accessibility-backed trigger registration failures surface through `hotkeyError` so the menubar can explain why dictation trigger capture is unavailable
 
 ## Guardrails
@@ -45,6 +46,7 @@ bash run-tests.sh
 Manual checks:
 
 - hands-free dictation hotkey starts and stops dictation
+- right Option then M (or typing é with right Option+E) does not leave a dictation running
 - push-to-talk starts dictation on press and stops/pastes on release
 - paste-last-dictation uses its configured shortcut without depending on dictation shortcuts being enabled
 - meeting hotkey toggles meeting capture

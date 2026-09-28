@@ -16,12 +16,13 @@ enum MeetingImportPublisher {
         outputDirectory: URL,
         title: String,
         captureID: UUID,
-        date: Date = Date()
+        date: Date = Date(),
+        plainFilename: Bool = false
     ) throws -> MeetingImportReceipt {
         try publish(
             markdown: markdown, normalizedAudioURL: normalizedAudioURL,
             outputDirectory: outputDirectory, title: title, captureID: captureID,
-            date: date, beforeCommit: {}
+            date: date, plainFilename: plainFilename, beforeCommit: {}
         )
     }
 
@@ -35,6 +36,34 @@ enum MeetingImportPublisher {
         title: String,
         captureID: UUID,
         date: Date,
+        plainFilename: Bool = false,
+        beforeCommit: () throws -> Void
+    ) throws -> MeetingImportReceipt {
+        // A plain name (just the title) is tried first when asked for. If that
+        // name is already taken, fall back to the unique title + capture ID
+        // name instead of failing or replacing anything.
+        let stems = fileStems(title: title, captureID: captureID, date: date, plain: plainFilename)
+        for (index, stem) in stems.enumerated() {
+            do {
+                return try publish(
+                    markdown: markdown, normalizedAudioURL: normalizedAudioURL,
+                    outputDirectory: outputDirectory, stem: stem, captureID: captureID,
+                    beforeCommit: beforeCommit
+                )
+            } catch let error as NSError
+                where index < stems.count - 1 && error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
+                continue
+            }
+        }
+        throw failure("Could not choose a meeting file name.", code: EEXIST)
+    }
+
+    private static func publish(
+        markdown: String,
+        normalizedAudioURL: URL?,
+        outputDirectory: URL,
+        stem: String,
+        captureID: UUID,
         beforeCommit: () throws -> Void
     ) throws -> MeetingImportReceipt {
         try Task.checkCancellation()
@@ -53,7 +82,6 @@ enum MeetingImportPublisher {
         let rootFD = try openDirectory(root.path)
         defer { Darwin.close(rootFD) }
 
-        let stem = fileStem(title: title, captureID: captureID, date: date)
         let transcriptName = stem + ".md"
         let archiveName = stem + "_audio"
         let stagingName = ".transcripted-import-\(UUID().uuidString.lowercased()).tmp"
@@ -157,12 +185,22 @@ enum MeetingImportPublisher {
         )
     }
 
-    private static func fileStem(title: String, captureID: UUID, date: Date) -> String {
+    private static func fileStems(title: String, captureID: UUID, date: Date, plain: Bool) -> [String] {
+        let safeTitle = safeFileTitle(title)
+        let unique = "\(safeTitle)_\(captureID.uuidString.lowercased())"
+        guard plain else { return ["\(dateStamp(date)) \(unique)"] }
+        return [safeTitle, unique]
+    }
+
+    private static func dateStamp(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        return formatter.string(from: date)
+    }
 
+    private static func safeFileTitle(_ title: String) -> String {
         var unsafe = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:"))
         // Foundation includes Unicode format characters in controlCharacters.
         // Keep the joiners required by emoji and scripts such as Persian.
@@ -178,8 +216,9 @@ enum MeetingImportPublisher {
             guard candidate.decomposedStringWithCanonicalMapping.utf8.count <= 96 else { break }
             bounded = candidate
         }
-        let safeTitle = bounded.isEmpty ? "Meeting" : bounded
-        return "\(formatter.string(from: date)) \(safeTitle)_\(captureID.uuidString.lowercased())"
+        // A plain name must never be hidden or be "." / "..".
+        let visible = String(bounded.drop(while: { $0 == "." || $0 == " " }))
+        return visible.isEmpty ? "Meeting" : visible
     }
 
     private static func openDirectory(_ path: String, relativeTo parent: Int32? = nil) throws -> Int32 {

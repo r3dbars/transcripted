@@ -1,6 +1,45 @@
 import Foundation
 
 func testLaunchAtLoginPreferences() {
+    runSuite("LaunchWindowPolicy opens Home on a manual launch only") {
+        assertTrue(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "opening the app yourself should show the main window"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: true, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "a start at login should stay quietly in the menu bar"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: false, isAutomatedLaunch: false
+            ),
+            "unfinished setup shows the setup window instead"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 3_600, onboardingCompleted: true, isAutomatedLaunch: true
+            ),
+            "launch harnesses must not get a window"
+        )
+        assertFalse(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: 20, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "an untagged launch right after login still counts as a login start"
+        )
+        assertTrue(
+            LaunchWindowPolicy.shouldOpenMainWindow(
+                launchedAsLoginItem: false, secondsSinceLogin: nil, onboardingCompleted: true, isAutomatedLaunch: false
+            ),
+            "an unknown login time falls back to the launch tag"
+        )
+    }
+
     runSuite("LaunchAtLoginPreferences defaults to off until the user chooses otherwise") {
         let suiteName = "LaunchAtLoginPreferencesTests.default.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -86,6 +125,31 @@ func testLaunchAtLoginPreferences() {
         assertFalse(
             LaunchAtLoginPreferences.hasExplicitChoice(userDefaults: defaults),
             "applying the default must not masquerade as an explicit user choice"
+        )
+    }
+
+    runSuite("LaunchAtLoginNoticePolicy shows problems inline instead of in a tooltip") {
+        assertNil(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: false, failureMessage: nil),
+            "a working login item should show no inline line"
+        )
+        assertEqual(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: true, failureMessage: nil),
+            LaunchAtLoginNoticePolicy.needsApprovalText,
+            "a login item waiting on macOS approval should say so, since the switch still reads On"
+        )
+        assertTrue(
+            LaunchAtLoginNoticePolicy.needsApprovalText.contains("Login Items"),
+            "the approval line should name where to go"
+        )
+        assertEqual(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: true, failureMessage: "Couldn't change it."),
+            "Couldn't change it.",
+            "a failed change is the newer news and wins over the approval line"
+        )
+        assertNil(
+            LaunchAtLoginNoticePolicy.notice(needsApproval: false, failureMessage: ""),
+            "an empty failure message should not show an empty line"
         )
     }
 }
