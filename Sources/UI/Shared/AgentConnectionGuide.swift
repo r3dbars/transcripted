@@ -30,6 +30,12 @@ enum AgentConnectionGuide {
         DictationStoragePaths.transcriptsFolder
     }
 
+    /// `<capture-library>/writing/`. The pure path form, so building a prompt
+    /// never creates the folder for people who don't use Writing.
+    static var writingFolder: URL {
+        FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
+    }
+
     static var codexInboxFolder: URL {
         FileManager.default.transcriptedAppSupportDir
             .appendingPathComponent("CodexInbox", isDirectory: true)
@@ -115,6 +121,9 @@ enum AgentConnectionGuide {
         Dictations:
         - \(dictationsFolder.path)
 
+        Writing:
+        - \(writingFolder.path)
+
         Use these files as the source of truth.
 
         Good first asks:
@@ -122,7 +131,7 @@ enum AgentConnectionGuide {
         - Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today.
 
         Rules:
-        - Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files.
+        - Prefer Transcripted direct tools when available; otherwise search meetings, dictations, and writing together from files.
         - Cite filenames, dates, speakers, and timestamps when useful.
         - For relative dates like today or yesterday, state the exact dates searched.
         - If a direct tool fails, fall back to the folders.
@@ -202,6 +211,7 @@ enum AgentConnectionGuide {
         - Setup prompt file: \(setupPath)
         - Meetings: \(meetingsFolder.path)
         - Dictations: \(dictationsFolder.path)
+        - Writing: \(writingFolder.path)
         - State file: \(inboxPath)/state.json
         - Pending folder: \(inboxPath)/pending
         - Processed folder: \(inboxPath)/processed
@@ -298,6 +308,9 @@ enum AgentConnectionGuide {
 
         Dictations:
         \(dictationsFolder.path)
+
+        Writing:
+        \(writingFolder.path)
         """
     }
 
@@ -335,6 +348,7 @@ enum AgentConnectionGuide {
         Use Transcripted's local Markdown meetings as the source of truth:
         - Meetings: \(meetingsFolder.path)
         - Dictations: \(dictationsFolder.path)
+        - Writing: \(writingFolder.path)
 
         Rules:
         - Process only new unprocessed meetings unless the user asks for backfill.

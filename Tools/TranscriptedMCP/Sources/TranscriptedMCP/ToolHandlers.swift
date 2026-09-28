@@ -446,7 +446,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_writing",
-                description: "List saved writing days: what the user typed with the Transcripted keyboard, one Writing_<date> file per day, with entry counts, source apps, and recent titles. Use read_writing with a returned filename for the text.",
+                description: "List saved writing days: what the user wrote with the Transcripted keyboard, one Writing_<date> file per day, with entry counts, source apps, and recent titles. Use read_writing with a returned filename for the text.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -499,7 +499,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search_context",
-                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you typed.",
+                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you wrote.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([

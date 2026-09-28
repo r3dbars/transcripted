@@ -47,7 +47,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
-        for page in [TranscriptedSettingsPage.today, .general, .people, .connectAgent] {
+        for page in [TranscriptedSettingsPage.today, .writing, .general, .people, .connectAgent] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .none,
@@ -125,7 +125,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — force does not bypass page gating") {
         let now = Date(timeIntervalSinceReferenceDate: 20)
 
-        for page in [TranscriptedSettingsPage.today, .general, .people, .connectAgent] {
+        for page in [TranscriptedSettingsPage.today, .writing, .general, .people, .connectAgent] {
             assertFalse(
                 SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
                     for: page,
@@ -172,17 +172,42 @@ func testSettingsRecentCaptureRefreshPolicy() {
         assertEqual(TranscriptedSettingsPage.allCases.first, .today, "Today should lead the page list")
         assertEqual(TranscriptedSettingsPage.today.navigationShortcutKey, "1", "Today should own ⌘1")
         assertEqual(TranscriptedSettingsPage.home.navigationShortcutKey, "2", "Meetings should move to ⌘2")
-        assertEqual(TranscriptedSettingsPage.connectAgent.navigationShortcutKey, "5", "Agent should move to ⌘5")
+        assertEqual(TranscriptedSettingsPage.dictations.navigationShortcutKey, "3", "Dictations keeps ⌘3")
+        assertEqual(TranscriptedSettingsPage.writing.navigationShortcutKey, "4", "Writing takes ⌘4, right after Dictations")
+        assertEqual(TranscriptedSettingsPage.people.navigationShortcutKey, "5", "Speakers should move to ⌘5")
+        assertEqual(TranscriptedSettingsPage.connectAgent.navigationShortcutKey, "6", "Agent should move to ⌘6")
+        assertEqual(TranscriptedSettingsPage.general.navigationShortcutKey, nil, "the gear-gated settings page has no Go shortcut")
         assertEqual(TranscriptedSettingsPage.home.rawValue, "home", "Meetings keeps the home raw value for automation ids and analytics")
         assertEqual(TranscriptedSettingsPage.home.analyticsValue, "home", "Meetings analytics page id should stay home")
         assertEqual(TranscriptedSettingsPage.today.automationIdentifier, "transcripted.settings.sidebar.today", "Today sidebar automation id")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
         assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
+        assertEqual(TranscriptedSettingsPage.writing.title, "Writing", "Writing page title")
+        assertEqual(TranscriptedSettingsPage.writing.systemImage, "keyboard.fill", "Writing uses a filled symbol like the other sidebar rows")
+        assertEqual(TranscriptedSettingsPage.writing.automationIdentifier, "transcripted.settings.sidebar.writing", "Writing sidebar automation id")
+        assertEqual(TranscriptedSettingsPage.writing.analyticsValue, "writing", "Writing analytics page id")
+        assertEqual(TranscriptedSettingsPage.writing.navigationHelp, "Writing  ⌘4", "Writing row tooltip names its shortcut")
         assertEqual(
             Set(TranscriptedSettingsPage.allCases.map(\.rawValue)).count,
             TranscriptedSettingsPage.allCases.count,
             "settings page raw values should stay unique for selection persistence"
         )
+    }
+
+    runSuite("WritingSidebarNewBadge shows New on Writing until setup dismisses it") {
+        assertEqual(
+            WritingSidebarNewBadge.dismissedDefaultsKey,
+            "WritingSidebarNewBadgeDismissed",
+            "the Writing page sets this key when setup finishes, so it must not drift"
+        )
+        assertTrue(WritingSidebarNewBadge.isShown(for: .writing, dismissed: false), "Writing shows New before setup")
+        assertFalse(WritingSidebarNewBadge.isShown(for: .writing, dismissed: true), "New goes away once dismissed")
+        for page in TranscriptedSettingsPage.allCases where page != .writing {
+            assertFalse(
+                WritingSidebarNewBadge.isShown(for: page, dismissed: false),
+                "\(page.rawValue) should never show the Writing badge"
+            )
+        }
     }
 
     runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — allows the first passive refresh") {

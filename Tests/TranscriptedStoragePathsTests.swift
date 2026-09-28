@@ -14,18 +14,57 @@ func testTranscriptedStoragePaths() {
         return attributes?[.posixPermissions] as? NSNumber
     }
 
-    let originalManifestURL = FileManager.default.transcriptedMCPDirectoriesManifestURL
-    let originalManifestExists = FileManager.default.fileExists(atPath: originalManifestURL.path)
-    let originalManifestData = try? Data(contentsOf: originalManifestURL)
-    defer {
-        if originalManifestExists, let originalManifestData {
-            try? FileManager.default.createPrivateDirectory(at: originalManifestURL.deletingLastPathComponent())
-            try? originalManifestData.write(to: originalManifestURL, options: [.atomic])
-            FileManager.default.restrictFileToOwnerOnly(at: originalManifestURL)
-        } else {
-            try? FileManager.default.removeItem(at: originalManifestURL)
+    /// Modification time and size, never the contents: the real manifest holds
+    /// the user's capture-library paths.
+    func fingerprint(of url: URL) -> String? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
         }
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
+        let size = (attributes[.size] as? NSNumber)?.intValue
+        return "mtime=\(modified.map { String($0) } ?? "?") size=\(size.map { String($0) } ?? "?")"
     }
+
+    // Harnesses must not touch real user state. The suites that go through
+    // `setCaptureLibraryURL` or the `transcriptedCaptureLibraryDir` getter rewrite
+    // mcp-directories.json at `transcriptedMCPDirectoriesManifestURL`, which follows
+    // the `TRANSCRIPTED_CONTAINER_DIR` container override that run-tests.sh exports
+    // as a throwaway folder. Suites that call the writer directly pass their own
+    // temp `manifestURL`. If the override is missing, stop here rather than write
+    // (and "restore") ~/Library/Application Support/Transcripted/mcp-directories.json.
+    let realManifestURL = (
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+    )
+        .appendingPathComponent("Transcripted", isDirectory: true)
+        .appendingPathComponent("mcp-directories.json", isDirectory: false)
+        .standardizedFileURL
+    let realManifestBefore = fingerprint(of: realManifestURL)
+    let isolatedManifestURL = FileManager.default.transcriptedMCPDirectoriesManifestURL.standardizedFileURL
+
+    var manifestWritesAreIsolated = false
+    runSuite("Transcripted MCP directory manifest — test writes land in the test container, not the real one") {
+        guard let containerRaw = ProcessInfo.processInfo.environment["TRANSCRIPTED_CONTAINER_DIR"],
+              !containerRaw.isEmpty else {
+            assertTrue(
+                false,
+                "TRANSCRIPTED_CONTAINER_DIR must be exported by the test harness so manifest writes stay out of the real app-support container"
+            )
+            return
+        }
+        // Standardize so a `TMPDIR` trailing slash (→ `//`) can't break the prefix.
+        let container = URL(fileURLWithPath: containerRaw, isDirectory: true).standardizedFileURL.path
+        let underContainer = isolatedManifestURL.path.hasPrefix(container + "/")
+        let isRealManifest = isolatedManifestURL.path == realManifestURL.path
+
+        assertTrue(
+            underContainer,
+            "the manifest the storage helpers write should live under the test container, got \(isolatedManifestURL.path)"
+        )
+        assertFalse(isRealManifest, "the manifest the storage helpers write must not be the real one")
+        manifestWritesAreIsolated = underContainer && !isRealManifest
+    }
+    guard manifestWritesAreIsolated else { return }
 
     runSuite("FileManager.createPrivateDirectory — tightens existing directories to owner-only") {
         let directory = FileManager.default.temporaryDirectory
@@ -142,8 +181,8 @@ func testTranscriptedStoragePaths() {
         let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
         assertTrue(persisted, "test setup should persist a safe custom capture-library root")
 
-        let manifestURL = FileManager.default.transcriptedMCPDirectoriesManifestURL
-        guard let data = try? Data(contentsOf: manifestURL),
+        // The container-scoped manifest checked at the top of this file.
+        guard let data = try? Data(contentsOf: isolatedManifestURL),
               let manifest = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: data) else {
             assertTrue(false, "manifest should be readable JSON after setting a custom capture library")
             return
@@ -589,6 +628,14 @@ func testTranscriptedStoragePaths() {
             written,
             golden,
             "app writer output for the fixture's capture-library input should match the golden fixture exactly"
+        )
+    }
+
+    runSuite("Transcripted MCP directory manifest — the suites above left the real manifest untouched") {
+        assertEqual(
+            fingerprint(of: realManifestURL),
+            realManifestBefore,
+            "the real ~/Library/Application Support/Transcripted/mcp-directories.json should keep its mtime and size (nil = absent before and after)"
         )
     }
 }
