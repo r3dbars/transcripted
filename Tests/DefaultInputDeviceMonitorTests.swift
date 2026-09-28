@@ -325,9 +325,14 @@ func testDefaultInputDeviceMonitor() {
             }
         )
 
-        let submittedAt = Date()
-        dispatcher.submit(at: 123)
-        assertTrue(Date().timeIntervalSince(submittedAt) < 0.1,
+        // The lookup stays blocked until the test signals it, so a submit that
+        // awaited the HAL read would never come back.
+        let submitted = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            dispatcher.submit(at: 123)
+            submitted.signal()
+        }
+        assertTrue(submitted.wait(timeout: .now() + 5) == .success,
                    "listener-queue submission must not await a blocked HAL read")
         assertTrue(callback.wait(timeout: .now() + 2) == .success,
                    "a timed-out read must still notify route recovery")

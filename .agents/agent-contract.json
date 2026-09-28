@@ -166,7 +166,10 @@
       "owns": "Fast tests, package tests, deterministic smoke fixtures, and test contracts.",
       "invariants": [
         "Fast tests use convention discovery, not a hand-maintained manifest.",
-        "Skipped permission or hardware proof remains unknown."
+        "Skipped permission or hardware proof remains unknown.",
+        "A test checks a named promise through inputs and outputs; see Tests/README.md (Test rules).",
+        "No new tests that read Sources/ as text or assert on wall-clock time; check-test-shape.py enforces it.",
+        "A flaky suite is fixed or benched in Tests/quarantine.txt the same day."
       ],
       "manual_proof": []
     },

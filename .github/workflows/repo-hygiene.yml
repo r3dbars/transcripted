@@ -94,6 +94,28 @@ jobs:
         shell: bash
         run: python3 scripts/release/mark-appcast-critical.py --self-test
 
+      # Blocks NEW tests that read Sources/ as text or assert on wall-clock
+      # elapsed time; existing ones are grandfathered in
+      # .agents/test-shape-baseline.json, which can only shrink. Also
+      # validates Tests/quarantine.txt. Rules: Tests/README.md ("Test rules").
+      - name: Test shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dev/check-test-shape.py --self-test
+          python3 scripts/dev/check-test-shape.py
+          python3 scripts/dev/explain-missing-sources.py --self-test
+
+      # "Known traps" from CLAUDE.md that a script can check instead of an
+      # agent having to remember them: every Tools package runs in CI and has
+      # a test-matrix rule, and every root command is documented.
+      - name: Known traps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dev/check-known-traps.py --self-test
+          python3 scripts/dev/check-known-traps.py
+
       # Catches same-scope duplicate declarations (e.g. a symbol declared twice
       # by a bad git auto-merge) in seconds, so they fail here instead of 20
       # minutes into the macOS Swift build. --self-test guards the checker's own

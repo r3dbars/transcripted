@@ -65,8 +65,14 @@ mapped checks, and manual-proof boundaries for the files changed. Add
 `--symptom "short description"` when the failing area is unclear.
 
 Use `scripts/dev/agent-preflight.sh` to inspect the branch before editing or
-handing it off. Add `--run` to execute mapped checks sequentially and write the
-bounded result to `build/agent-proof.json`.
+handing it off. To run the mapped checks, use `bash check.sh`: it runs them
+sequentially, prints plain PASS/FAIL, and writes the bounded result to
+`build/agent-proof.json`. Tiers: `bash check.sh quick` (no Swift build),
+`full` (what Swift CI runs), `hardware` (real mic and paste-back).
+
+Writing or changing a test? Read "Test rules" in `Tests/README.md` first. New
+tests that read `Sources/` as text or assert on wall-clock time fail
+`scripts/dev/check-test-shape.py`.
 
 No Swift toolchain (Linux or cloud session)? Run `bash scripts/dev/linux-checks.sh`
 (see "Working without Swift" in `CLAUDE.md`), and never report a Swift change as

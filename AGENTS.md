@@ -103,12 +103,19 @@ boundaries.
 ## Build and test
 
 ```bash
+bash check.sh            # runs the checks your diff needs; tiers: quick, full, hardware
 bash build-deps.sh
 bash build.sh --no-open
 bash run-tests.sh
 bash run-integration-smoke.sh
 swift test
 ```
+
+`bash check.sh` picks the mapped checks for your diff from
+`.agents/test-matrix.yml`, runs them in order, and writes
+`build/agent-proof.json`. `bash check.sh quick` is the no-Swift subset,
+`full` mirrors Swift CI, and `hardware` runs the real mic, system audio and
+paste-back smokes.
 
 Rules. Use `.agents/test-matrix.yml` for the full path-to-verification map;
 these are the common minimums:
@@ -117,6 +124,8 @@ these are the common minimums:
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash build-deps.sh --force` and `bash run-integration-smoke.sh`.
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
+5. Tests follow the "Test rules" in `Tests/README.md`: a test checks a named promise through inputs and outputs, never reads `Sources/` as text, and never asserts on wall-clock elapsed time. `scripts/dev/check-test-shape.py` blocks new source-text and wall-clock tests; the grandfathered ones live in `.agents/test-shape-baseline.json`, which can only shrink.
+6. A flaky test gets fixed or benched in `Tests/quarantine.txt` the same day. Never retry until green.
 
 PR QA levels:
 
@@ -242,6 +251,7 @@ Rules:
 - `run-tests.sh` is a custom `swiftc` runner, not XCTest.
 - Root fast tests are discovered by convention: `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry function.
 - `Tests/TranscriptedCoreTests/` is a separate Swift Package target, run via `swift test` rather than `run-tests.sh`.
+- When a fast-test or smoke compile fails with "cannot find 'X' in scope", the runner now prints which `Sources/` file declares `X` and which hand-kept source list to add it to (`scripts/dev/explain-missing-sources.py`).
 
 ## Storage
 

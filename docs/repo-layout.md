@@ -22,6 +22,7 @@ wrapper at the root and keep the implementation under `scripts/`.
 Use these as the active command surface:
 
 ```bash
+bash check.sh
 bash scripts/dev/agent-preflight.sh
 bash build-deps.sh
 bash build.sh --no-open
@@ -46,6 +47,7 @@ swift test
 Command ownership:
 
 - `scripts/dev/agent-preflight.sh` — agent preflight and suggested verification map for the current branch
+- `check.sh` — thin root wrapper for the one-command check runner: the checks your diff needs by default, or the `quick`, `full`, and `hardware` tiers
 - `build-deps.sh` — thin root wrapper for the dependency build entrypoint
 - `build.sh` — thin root wrapper for the authoritative local app build; use `--no-open` for agent verification
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
