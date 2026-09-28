@@ -45,6 +45,9 @@ class ParakeetEngine: ObservableObject {
     /// recorder next starts. Keeps engine warmup on in between
     /// (`PinnedDictationInputPolicy.skipsEngineWarmup`).
     var pinnedDictationFellBackToEngine = false
+    /// The last stopped take the pinned recorder made only for speed, until
+    /// its transcript scores it (`PinnedDictationSpeedPath`).
+    var pendingPinnedSpeedPathTake: PinnedDictationSpeedPathTake?
     /// The meeting-minted claim on its live mic stream, or `nil` when
     /// dictation owns its own mic path. Replaces the former bare
     /// `sharedMeetingMicRecording: Bool` — see SharedMeetingMicClaim.swift's
@@ -166,6 +169,9 @@ class ParakeetEngine: ObservableObject {
     var inputDeviceName: String { cachedInputDeviceName }
     var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicClaim != nil }
     var hasReceivedAudioSamples: Bool { didReceiveAudioSamples }
+    /// The last take's mic delivered audio, but every sample was exactly
+    /// zero: what a hardware-muted mic sends. Reset at each recording start.
+    var lastRecordingWasDigitalSilence: Bool { didReceiveAudioSamples && !didReceiveNonZeroAudioSamples }
     /// Arrival time of this dictation's first audio buffer, for the
     /// press-to-first-sound timing. Nil until audio arrives.
     func firstAudioSampleTime() -> CFAbsoluteTime? {

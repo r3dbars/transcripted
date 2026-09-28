@@ -26,6 +26,14 @@ func testTranscriptedConstants() async {
             "fallback restore should still return the user's clipboard promptly when no paste consumer reads it"
         )
         assertTrue(
+            TranscriptedConstants.dictationAutoEnterDelay <= 60_000_000,
+            "Auto Enter follows a proven paste, so its settle stays short"
+        )
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreDelay >= 20_000_000,
+            "a proven paste still gets a margin before the user's clipboard comes back"
+        )
+        assertTrue(
             TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,
             "auto-enter should stay tuned for a fast opt-in stop path"
         )

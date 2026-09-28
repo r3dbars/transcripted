@@ -1,11 +1,19 @@
 import Foundation
 
 enum DictationNoSpeechPresentationPolicy {
+    /// `silentMicName` is set when the mic sent audio that was all exact
+    /// zeros (a muted mic, not a quiet room), so the message can say so.
     static func message(
         trigger: String,
         reason: DictationEmptyTranscriptionReason = .noSpeech,
-        shortcutMode: DictationShortcutMode? = nil
+        shortcutMode: DictationShortcutMode? = nil,
+        silentMicName: String? = nil
     ) -> String {
+        if reason == .noSpeech, let silentMicName {
+            let name = silentMicName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let mic = name.isEmpty ? "Your microphone" : name
+            return "\(mic) sent only silence. If it has a mute button or switch, turn it off, or pick another mic in Settings."
+        }
         if reason == .recordingTooShort {
             // A quick tap closes like a cancel before reaching this copy, so the
             // press was long enough and the mic delivered too little audio.
