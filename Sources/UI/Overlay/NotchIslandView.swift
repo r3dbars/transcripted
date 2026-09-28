@@ -138,6 +138,14 @@ final class NotchIslandButton: NSButton {
         needsLayout = true
     }
 
+    /// Takes the ring away for good (the person started answering).
+    func stopCountdown() {
+        countdownSeconds = nil
+        ring.removeAllAnimations()
+        ring.removeFromSuperlayer()
+        ringTrack.removeFromSuperlayer()
+    }
+
     func setCountdownPaused(_ paused: Bool) {
         guard countdownStarted, paused != countdownPaused else { return }
         countdownPaused = paused
@@ -715,8 +723,13 @@ final class NotchIslandDropView: NSView {
         countdownButton?.setCountdownPaused(paused)
     }
 
-    init(drop: NotchIslandDrop, live: NotchIslandLiveValues, targetIcon: NSImage?) {
+    /// The island's "Who was on this call?" view, kept alive by the
+    /// controller so typing and playback survive the drop-down being rebuilt.
+    private let speakerReviewView: NSView?
+
+    init(drop: NotchIslandDrop, live: NotchIslandLiveValues, targetIcon: NSImage?, speakerReviewView: NSView? = nil) {
         self.drop = drop
+        self.speakerReviewView = speakerReviewView
         super.init(frame: NSRect(x: 0, y: 0, width: NotchIslandGeometry.dropWidth, height: 10))
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -884,6 +897,21 @@ final class NotchIslandDropView: NSView {
                 button("Later", .plain, .callRemind),
                 button("Record", .destructive, .callRecord, symbol: "record.circle.fill"),
             ]))
+        case .meetingCallAudioAsk:
+            add(titleBlock(
+                "Only your mic is recording",
+                "Turn on call audio to hear everyone else. It starts with your next meeting; this one keeps recording.",
+                wrapsDetail: true
+            ))
+            add(buttonRow(leading: [], trailing: [
+                button("Mic only is fine", .plain, .meetingCallAudioDismiss),
+                button("Turn on call audio", .accent, .meetingCallAudio),
+            ]))
+        case .speakerReview:
+            if let speakerReviewView {
+                speakerReviewView.removeFromSuperview()
+                stack.addArrangedSubview(speakerReviewView)
+            }
         }
     }
 
@@ -1014,6 +1042,8 @@ final class NotchIslandView: NSView {
     private let leftWing = NotchIslandWingView(side: .leading)
     private let rightWing = NotchIslandWingView(side: .trailing)
     private var dropView: NotchIslandDropView?
+    /// Set by the controller while a speaker review is up.
+    var speakerReviewView: NSView?
     private let edge = NSView()
     private var rowHeight: CGFloat = NotchIslandGeometry.tabRowHeight
     private var notchWidth: CGFloat?
@@ -1087,7 +1117,7 @@ final class NotchIslandView: NSView {
             dropView?.removeFromSuperview()
             dropView = nil
             if let drop = layout.drop {
-                let view = NotchIslandDropView(drop: drop, live: live, targetIcon: targetAppIcon)
+                let view = NotchIslandDropView(drop: drop, live: live, targetIcon: targetAppIcon, speakerReviewView: speakerReviewView)
                 view.onAction = { [weak self] action in self?.onAction?(action) }
                 itemsView.addSubview(view)
                 dropView = view

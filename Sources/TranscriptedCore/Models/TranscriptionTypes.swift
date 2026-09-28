@@ -248,6 +248,10 @@ public struct SpeakerNamingRequest {
     /// Named, mature, undisputed profiles at request time — the sheet's
     /// "Transcripted recognizes N people automatically" payoff line.
     public let recognizedPeopleCount: Int
+    /// Names this meeting's voices were given automatically (confident
+    /// returning speakers), so a review can show them as already known
+    /// next to the voices it asks about. Display only; never re-saved.
+    public let recognizedSpeakerNames: [String]
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL?
@@ -263,6 +267,7 @@ public struct SpeakerNamingRequest {
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
+        recognizedSpeakerNames: [String] = [],
         transcriptURL: URL,
         transcriptId: UUID,
         systemAudioURL: URL,
@@ -278,6 +283,7 @@ public struct SpeakerNamingRequest {
         self.speakers = speakers
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount
+        self.recognizedSpeakerNames = recognizedSpeakerNames
         self.transcriptURL = transcriptURL
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL

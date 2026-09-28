@@ -326,6 +326,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.island = notchIsland
             capturePillController.island = notchIsland
+            // With the Notch island, a meeting whose call audio is off starts
+            // at once with just the mic, and the island asks about call audio
+            // while it records instead of a modal alert blocking the start.
+            meetingSession.systemAudioAccessPrompter = { [weak self] copy in
+                guard NotchIslandController.isSelected, let self else {
+                    return await MeetingSystemAudioAccessAlert.ask(copy)
+                }
+                self.meetingOverlayController.islandSkippedSystemAudioQuestion()
+                return .recordMicOnly
+            }
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
                     self?.meetingPromptRecordInFlight = true
@@ -637,6 +647,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             appState.contextCapture.onPasteLastDictation = { [weak self] in
                 self?.pasteLastDictationFromSettings()
+            }
+            SpeakerNamingSheet.shared.island = notchIsland
+            SpeakerNamingSheet.shared.onOpenTranscript = { [weak self] transcriptURL in
+                self?.settingsWindowController.revealMeeting(
+                    transcriptURL: transcriptURL,
+                    source: "meeting_overlay"
+                )
             }
             SpeakerNamingSheet.shared.observe(
                 taskManager: meetingSession.taskManager,
