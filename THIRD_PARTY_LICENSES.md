@@ -1,9 +1,9 @@
 # Third-Party Licenses
 
 Transcripted bundles the third-party components listed below — dynamic frameworks copied
-into the app bundle (`Sentry.framework`, `Sparkle.framework`) and
+into the app bundle (`Sentry.framework`, `Sparkle.framework`),
 libraries statically linked into the app binary (FluidAudio, swift-transformers,
-WhisperKit/ArgmaxCore). Versions are pinned in
+WhisperKit/ArgmaxCore), and a helper executable (llama.cpp's `llama-server`). Versions are pinned in
 `scripts/entrypoints/build-deps.sh`. The full license text for each component is
 reproduced verbatim from the pinned upstream revision.
 
@@ -14,7 +14,7 @@ reproduced verbatim from the pinned upstream revision.
 - [FluidAudio](#fluidaudio)
 - [swift-transformers](#swift-transformers)
 - [WhisperKit / ArgmaxCore](#whisperkit--argmaxcore)
-- [Dictation sounds (Pixabay)](#dictation-sounds-pixabay)
+- [llama.cpp (llama-server)](#llamacpp-llama-server)
 
 ---
 
@@ -671,13 +671,38 @@ SOFTWARE.
 
 ---
 
-## Dictation sounds (Pixabay)
+## llama.cpp (llama-server)
 
-- **Component:** `Resources/Sounds/dictation-start.caf` and `Resources/Sounds/dictation-stop.caf`
-- **Source:** "Button 5" and "Button 14" by skyscraper_seven on Pixabay, trimmed, faded and re-encoded for Transcripted (details in `Resources/Sounds/README.md`)
-- **License:** Pixabay Content License (https://pixabay.com/service/license-summary/)
+- **Component:** `Contents/Helpers/llama-server` (local text-model inference for Writing)
+- **Version:** the build shipped in Tilde 0.1.0 beta 1 (https://github.com/r3dbars/tilde/releases/tag/v0.1.0-beta.1), used unchanged and re-signed. The llama.cpp revision it was built from isn't recorded yet.
+- **Upstream:** https://github.com/ggml-org/llama.cpp
+- **License:** MIT
 
-These two files are **not** under Transcripted's MIT license. They ship inside the app under the
-Pixabay Content License, which allows using them in a product like this one but does not allow
-selling or redistributing them on their own, as standalone files. If you reuse Transcripted's code,
-don't reuse these two sounds outside it without checking that license first.
+llama.cpp itself redistributes third-party components (for example nlohmann/json, MIT), whose
+license texts ship in the upstream repository's `licenses/` directory.
+
+### License text
+
+```
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

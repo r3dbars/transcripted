@@ -48,7 +48,7 @@ final class AppSoundPlayer {
             case .dictationStop:
                 return TranscriptedConstants.dictationStopSoundFileName
             case .noSpeech, .dictationCancelled:
-                // Nothing was pasted, so these get their own soft drop.
+                // Nothing was pasted, so these get their own double click.
                 return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
@@ -68,14 +68,14 @@ final class AppSoundPlayer {
             case .noSpeech:
                 return TranscriptedConstants.noSpeechCueVolumeMultiplier
             case .menuHover:
-                // Barely there: 7% output, well under the 35% dictation clicks.
+                // Barely there: 7% output, well under the dictation clicks.
                 return 0.1
             case .menuRowHover:
                 // Quieter still (about 5%), so the rows sit a tier below the buttons.
                 return 0.07
             case .menuPress:
                 // A touch firmer than the hover ticks (about 10%), still well
-                // under the 35% dictation clicks.
+                // under the dictation clicks.
                 return 0.15
             case .dictationCancelled, .meetingTranscriptComplete:
                 return 1.0

@@ -99,10 +99,16 @@ meeting-input selection, file logging, failed-transcription persistence,
 recording archiving, stats, speaker reconciliation, transcript frontmatter, and
 transcript metadata.
 
+`Tests/TranscriptedWritingTests/` holds Writing's ported Tilde tests (Swift
+Testing, not XCTest) for `Sources/TranscriptedWriting/` and
+`Sources/TranscriptedKeyboard/`; run just those with
+`swift test --filter '^TranscriptedWritingTests\.'`.
+
 Use this when changing:
 
 - `Package.swift`
 - `Sources/TranscriptedCore/`
+- `Sources/TranscriptedWriting/` or `Sources/TranscriptedKeyboard/`
 - public core seams used by embedders
 
 ## Integration Smoke

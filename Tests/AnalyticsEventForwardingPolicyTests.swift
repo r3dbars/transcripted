@@ -50,7 +50,14 @@ func testAnalyticsEventForwardingPolicy() {
             ],
             "pinned_microphone_restarted": ["trigger": "stall"],
             "pinned_microphone_device_switched": ["reason": DictationInputDeviceSelectionReason.defaultIsSafe.rawValue],
-            "pinned_microphone_fell_back_to_engine": ["stage": "setup_timeout"],
+            "pinned_microphone_fell_back_to_engine": [
+                "stage": "empty_takes",
+                "input_channels": "1",
+                "input_rate_hz": "48000",
+                "restarts": "1",
+                "gaps": "4",
+                "dropped_callbacks": "0",
+            ],
             "pinned_microphone_silent_input": ["selected_input_class": "external", "action": "switched"],
         ]
 
@@ -128,7 +135,7 @@ func testAnalyticsEventForwardingPolicy() {
             )?.properties,
             ["restart_trigger": "unknown"]
         )
-        for stage in ["setup_timeout", "unavailable", "start_failed"] {
+        for stage in ["setup_timeout", "unavailable", "start_failed", "empty_takes"] {
             assertEqual(
                 AnalyticsEventForwardingPolicy.forwardedEvent(
                     engine: "parakeet", event: "pinned_microphone_fell_back_to_engine", context: ["stage": stage]
@@ -145,6 +152,38 @@ func testAnalyticsEventForwardingPolicy() {
             )?.properties,
             ["stage": "unknown"],
             "a raw error must not ride in the stage"
+        )
+        assertEqual(
+            AnalyticsEventForwardingPolicy.forwardedEvent(
+                engine: "parakeet",
+                event: "pinned_microphone_fell_back_to_engine",
+                context: [
+                    "stage": "empty_takes",
+                    "input_channels": "3",
+                    "input_rate_hz": "48000",
+                    "restarts": "0",
+                    "gaps": "2",
+                    "dropped_callbacks": "40",
+                ]
+            )?.properties,
+            [
+                "stage": "empty_takes",
+                "input_channels": "3",
+                "input_rate_hz": "48000",
+                "pinned_mic_restart_bucket": "0",
+                "pinned_mic_gap_bucket": "2_3",
+                "pinned_mic_dropped_callback_bucket": "10_plus",
+            ],
+            "the empty-takes fallback carries the last take's format and bucketed health"
+        )
+        assertEqual(
+            AnalyticsEventForwardingPolicy.forwardedEvent(
+                engine: "parakeet",
+                event: "pinned_microphone_fell_back_to_engine",
+                context: ["stage": "empty_takes", "input_channels": "999", "input_rate_hz": "47999", "gaps": "many"]
+            )?.properties,
+            ["stage": "empty_takes", "input_rate_hz": "other"],
+            "odd values are dropped or collapsed, never passed through"
         )
         assertEqual(
             AnalyticsEventForwardingPolicy.forwardedEvent(

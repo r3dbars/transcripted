@@ -10,6 +10,9 @@ private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager 
 struct QADataDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
+    /// Writing day folders. May be empty: writing is opt-in, and a per-kind
+    /// path override without `--writing-path` reads no writing folder.
+    let writingDirs: [URL]
     let stateDir: URL
     let logFilePath: String
 
@@ -33,6 +36,7 @@ struct QADataDirectories {
     init(
         meetingDirs: [URL],
         dictationDirs: [URL],
+        writingDirs: [URL] = [],
         stateDir: URL,
         logFilePath: String
     ) {
@@ -40,6 +44,7 @@ struct QADataDirectories {
         precondition(!dictationDirs.isEmpty, "QA requires at least one dictations directory")
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.writingDirs = writingDirs
         self.stateDir = stateDir
         self.logFilePath = logFilePath
     }
@@ -47,6 +52,7 @@ struct QADataDirectories {
     static func resolve(
         meetingsDir: String? = nil,
         dictationsDir: String? = nil,
+        writingDir: String? = nil,
         stateDir: String? = nil,
         logPath: String? = nil,
         fileManager: FileManager = .default,
@@ -96,11 +102,16 @@ struct QADataDirectories {
                 legacyShared: legacyShared
             )
             selectedBase = QADataDirectories(
-                meetingsDir: normalizedMeetings,
-                dictationsDir: resolveDictationsDirectory(
+                meetingDirs: [normalizedMeetings],
+                dictationDirs: [resolveDictationsDirectory(
                     explicit: dictationsDir,
                     meetingsDir: normalizedMeetings,
                     inferredBase: inferredBase,
+                    fileManager: fileManager
+                )],
+                writingDirs: resolveWritingDirectories(
+                    explicit: writingDir,
+                    meetingsDir: normalizedMeetings,
                     fileManager: fileManager
                 ),
                 stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? inferredBase.stateDir,
@@ -114,6 +125,7 @@ struct QADataDirectories {
             // current Transcripted Application Support root.
             let resolvedLibrary = CaptureLibraryResolver.resolve(
                 dictationsDir: dictationsDir,
+                writingDir: writingDir,
                 environment: environment,
                 fileManager: fileManager,
                 homeDirectory: home
@@ -129,9 +141,17 @@ struct QADataDirectories {
                 fileManager: fileManager
             )
 
+            // Writing is opt-in and WritingValidator skips a missing folder,
+            // so the resolved folder is kept whether or not it exists yet.
+            var seenWriting = Set<String>()
+            let resolvedWriting = resolvedLibrary.writingDirs
+                .map(\.standardizedFileURL)
+                .filter { seenWriting.insert($0.path).inserted }
+
             selectedBase = QADataDirectories(
                 meetingDirs: resolvedMeetings,
                 dictationDirs: resolvedDictations,
+                writingDirs: resolvedWriting,
                 stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? current.stateDir,
                 logFilePath: logPath ?? current.logFilePath
             )
@@ -201,6 +221,35 @@ struct QADataDirectories {
         return childDictations
     }
 
+    /// Writing for an explicit `--path`: `--writing-path` when given, else a
+    /// `writing` folder beside a `meetings` path or inside a fixture root, else
+    /// the path itself when it holds writing day files. Unlike dictations there
+    /// is no legacy layout to infer, and no folder means no writing checks.
+    private static func resolveWritingDirectories(
+        explicit writingDir: String?,
+        meetingsDir: URL,
+        fileManager: FileManager
+    ) -> [URL] {
+        if let writingDir, !writingDir.isEmpty {
+            return [URL(fileURLWithPath: writingDir).standardizedFileURL]
+        }
+
+        let standardized = meetingsDir.standardizedFileURL
+        let candidates = [
+            standardized.lastPathComponent == "meetings"
+                ? standardized.deletingLastPathComponent().appendingPathComponent("writing", isDirectory: true)
+                : nil,
+            standardized.appendingPathComponent("writing", isDirectory: true),
+        ].compactMap { $0 }
+        if let existing = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+            return [existing]
+        }
+
+        let holdsWriting = (try? fileManager.contentsOfDirectory(atPath: standardized.path))?
+            .contains { $0.hasPrefix(CaptureMarkdown.writingDayFilenamePrefix) && $0.hasSuffix(".md") } ?? false
+        return holdsWriting ? [standardized] : []
+    }
+
     private static func containsDictationDayMarkdown(in directory: URL, fileManager: FileManager) -> Bool {
         guard let files = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
             return false
@@ -260,6 +309,9 @@ struct PathOptions: ParsableArguments {
     @Option(name: .long, help: "Path to the dictations capture directory. Defaults follow the selected layout.")
     var dictationsPath: String?
 
+    @Option(name: .long, help: "Path to the writing capture directory (Writing_<date>.md). Defaults follow the selected layout; writing is skipped when no folder exists.")
+    var writingPath: String?
+
     @Option(name: .long, help: "Path to the state directory containing speakers.sqlite and stats.sqlite. Defaults follow the selected layout.")
     var stateDir: String?
 
@@ -267,7 +319,13 @@ struct PathOptions: ParsableArguments {
     var logPath: String?
 
     var resolved: QADataDirectories {
-        QADataDirectories.resolve(meetingsDir: path, dictationsDir: dictationsPath, stateDir: stateDir, logPath: logPath)
+        QADataDirectories.resolve(
+            meetingsDir: path,
+            dictationsDir: dictationsPath,
+            writingDir: writingPath,
+            stateDir: stateDir,
+            logPath: logPath
+        )
     }
 }
 

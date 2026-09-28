@@ -8,6 +8,17 @@ func testDictationStartCuePolicy() {
         assertTrue(DictationStartCuePolicy.playsOnKeyPress(recordedInput: usb), "USB mic")
     }
 
+    runSuite("Start click waits for recording on a mic moved back to the engine") {
+        let builtIn = DictationAudioDevice(id: 1, name: "MacBook Air Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usb = DictationAudioDevice(id: 2, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let onlyMacIsOff: (DictationAudioDevice) -> Bool = { $0.uid == "mac" }
+        assertFalse(
+            DictationStartCuePolicy.playsOnKeyPress(recordedInput: builtIn, speedPathIsOff: onlyMacIsOff),
+            "the engine opens the mic later, so the click keeps its old timing"
+        )
+        assertTrue(DictationStartCuePolicy.playsOnKeyPress(recordedInput: usb, speedPathIsOff: onlyMacIsOff), "other mics keep the early click")
+    }
+
     runSuite("Start click waits for recording on inputs that could be a headset") {
         let airPods = DictationAudioDevice(id: 3, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
         let bluetoothLE = DictationAudioDevice(id: 4, name: "Headset", transport: .bluetoothLE, inputChannelCount: 1)

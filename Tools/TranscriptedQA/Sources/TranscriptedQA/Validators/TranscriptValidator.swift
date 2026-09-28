@@ -38,7 +38,11 @@ struct TranscriptValidator {
 
             let yaml = YAMLParser(content: content)
 
-            if yaml.value(for: "capture_type") == "meeting_summary" {
+            // Summary sidecars and writing day files (which share the folder in
+            // the flat shared layout) aren't transcripts; WritingValidator
+            // covers writing.
+            if yaml.value(for: "capture_type") == "meeting_summary"
+                || yaml.value(for: "capture_type") == "writing_day" {
                 continue
             }
 

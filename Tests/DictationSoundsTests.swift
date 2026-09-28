@@ -72,14 +72,14 @@ func testDictationSounds() {
     }
 
     runSuite("AppSoundPlayer uses expected bundled files only") {
-        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.caf", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.caf", "stop cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.wav", "start cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationStop.bundledFileName, "dictation-stop.wav", "stop cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-cancelled.wav", "no speech must not reuse the stop click")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "dictation-cancelled.wav", "cancel cue uses the bundled soft cue, never a system sound")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, TranscriptedConstants.dictationClickCueVolumeMultiplier, "start cue volume")
         assertEqual(AppSoundPlayer.Cue.dictationStop.volumeMultiplier, TranscriptedConstants.dictationClickCueVolumeMultiplier, "stop cue volume matches start")
-        assertEqual(TranscriptedConstants.overlayCueVolume * TranscriptedConstants.dictationClickCueVolumeMultiplier, 0.35, "clicks play at 35%")
+        assertTrue(abs(TranscriptedConstants.overlayCueVolume * TranscriptedConstants.dictationClickCueVolumeMultiplier - 0.49) < 0.001, "clicks play at about 49%")
         assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.noSpeechCueVolumeMultiplier, "no speech cue volume")
         assertEqual(AppSoundPlayer.Cue.menuHover.bundledFileName, "menu-hover.wav", "menu hover tick file")
         assertTrue(
@@ -125,8 +125,8 @@ func testDictationSounds() {
             [
                 "README.md",
                 "dictation-cancelled.wav",
-                "dictation-start.caf",
-                "dictation-stop.caf",
+                "dictation-start.wav",
+                "dictation-stop.wav",
                 "meeting-transcript-complete.mp3",
                 "menu-hover.wav",
                 "menu-press.wav",

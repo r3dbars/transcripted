@@ -33,8 +33,12 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - keep analytics to allowlisted events and coarse buckets only (the reviewed
   exceptions are dictation and meeting speed timings, rounded to 10 ms; see below)
 - keep crash reporting separately user-controllable from anonymous analytics
-- keep Sentry automatic app-hang tracking off by default; modal macOS update,
-  permission, and confirmation dialogs can otherwise be misreported as hangs
+- Sentry automatic app-hang tracking is on in shipped builds (Info.plist
+  `TranscriptedSentryAppHangTrackingEnabled`), but only reports a main thread
+  stuck 5+ seconds, and `AppHangReportPolicy` drops any hang while a modal
+  popup is on screen (a modal run loop doesn't drain the main queue, so
+  those used to be misreported as hangs). The code default with no
+  Info.plist key stays off
 
 ## Current rollout checklist
 
@@ -72,9 +76,10 @@ references, meeting titles, speaker names, local paths, or user identifiers.
    simplification).
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive
    in PostHog.
-11. If intentionally testing Sentry app-hang tracking, launch locally with
-    `SENTRY_ENABLE_APP_HANG_TRACKING=true`. Do not enable it in release builds
-    without a specific review of modal dialog false positives.
+11. App-hang tracking is on in release builds (reviewed 2026-09-25, with the
+    popup filter). `SENTRY_ENABLE_APP_HANG_TRACKING=false` turns it off for a
+    local run. To check the popup filter, open a modal alert or open panel,
+    leave it up for 10+ seconds, and confirm no "App Hanging" event arrives.
 
 ## Allowlisted analytics events
 
@@ -186,6 +191,8 @@ allowlist.
 - `meeting_speaker_review_submitted`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
+- `writing_daily_counts`
+- `writing_setup_completed`
 
 ## Allowed property style
 
@@ -218,12 +225,30 @@ allowlist.
 - pinned-device mic rollout fields limited to `mic_backend`
   (`pinned_ioproc` / `av_audio_engine`), `selection_reason`,
   `selected_input_class`, `selection_overrode_default`, `start_latency_bucket`,
+  `restart_trigger`, `stage`, `action`, the meeting-only
+  `pinned_mic_padded_bucket`, and `pinned_mic_restart_bucket`,
+  `pinned_mic_gap_bucket`, and `pinned_mic_dropped_callback_bucket` on
+  meetings and on the dictation `empty_takes` fallback. That fallback (a
+  built-in or wired mic moved back to the engine after two empty held takes)
+  also carries `input_channels` (1-64) and `input_rate_hz` (a fixed rate set,
+  else `other`). The `dictation_pinned_microphone_*` events are forwarded from
+  local `EventReporter` events by `AnalyticsEventForwardingPolicy`, which
+  rebuilds every value from a fixed set; raw pinned counts and the mic's name
+  and UID stay in local logs
   `restart_trigger`, `stage`, `action`, and the meeting-only
   `pinned_mic_restart_bucket`, `pinned_mic_gap_bucket`,
   `pinned_mic_padded_bucket`, and `pinned_mic_dropped_callback_bucket`. The
   `dictation_pinned_microphone_*` events are forwarded from local
   `EventReporter` events by `AnalyticsEventForwardingPolicy`, which rebuilds
   every value from a fixed set; raw pinned counts stay in local logs
+- Writing analytics limited to `save_enabled`, `autocomplete_enabled`,
+  `app_scope` (`all` / `picked`), and `model_choice` (`gemma_e2b` /
+  `qwen_9b`) on `writing_setup_completed`, plus, on `writing_daily_counts`,
+  the previous local day's `suggestions_shown`, `suggestions_accepted`, and
+  `words_accepted_bucket`. `Sources/Writing/WritingAnalytics.swift` builds
+  them from the text-free outcome ledger summary, sends at most one daily
+  event, and skips a day with nothing shown or accepted. Never text, app
+  names, bundle IDs, or per-suggestion events
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
@@ -267,6 +292,10 @@ For each new or changed event:
   them, whole seconds); `recording_minutes` (whole minutes); plus `stt_model`,
   `mac_chip`, and `memory_gb_bucket`. `MeetingPipelineTimings` collects them in
   Core and `MeetingProcessingTelemetry` formats them. Durations and counts only
+- Writing usage is the fourth: `writing_daily_counts` carries the raw
+  `suggestions_shown` and `suggestions_accepted` totals for one whole local
+  day, read from the text-free outcome ledger. Accepted words go out only as
+  `words_accepted_bucket`, on the `word_count_bucket` boundaries
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and

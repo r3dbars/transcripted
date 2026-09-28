@@ -69,14 +69,28 @@ enum PinnedDictationInputPolicy {
     /// same Mac the recorder delivered the first audio in about 70ms where
     /// the engine took about 190ms, with an engine tail past 500ms. A
     /// Bluetooth headset that is itself the recorded mic, and aggregate,
-    /// virtual or unknown inputs, keep the engine path.
-    static func recorderIsNeeded(for selection: DictationInputDeviceSelection) -> Bool {
-        if selection.didOverrideDefault,
-           selection.reason == .userChosenInput
-            || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" {
-            return true
-        }
-        return recorderIsFasterPath(for: selection.selectedInput)
+    /// virtual or unknown inputs, keep the engine path. So does a mic whose
+    /// speed-only takes kept coming out empty (`PinnedDictationSpeedPath`).
+    static func recorderIsNeeded(
+        for selection: DictationInputDeviceSelection,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        if recorderIsRequired(for: selection) { return true }
+        return recorderIsFasterPath(for: selection.selectedInput) && !speedPathIsOff(selection.selectedInput)
+    }
+
+    /// Only the recorder can record this selection without touching a
+    /// Bluetooth headset or while honoring a picked mic.
+    static func recorderIsRequired(for selection: DictationInputDeviceSelection) -> Bool {
+        selection.didOverrideDefault
+            && (selection.reason == .userChosenInput
+                || DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth")
+    }
+
+    /// The recorder was used for this selection only because it is faster,
+    /// so its takes are scored by `PinnedDictationSpeedPath`.
+    static func recorderIsSpeedOnly(for selection: DictationInputDeviceSelection) -> Bool {
+        !recorderIsRequired(for: selection) && recorderIsFasterPath(for: selection.selectedInput)
     }
 
     static func recorderIsFasterPath(for input: DictationAudioDevice) -> Bool {
@@ -86,6 +100,26 @@ enum PinnedDictationInputPolicy {
         default:
             return false
         }
+    }
+
+    /// Whether idle warmup and readiness recovery skip the engine. Both open
+    /// the macOS input through AVAudioEngine, so they never run while that
+    /// input is a Bluetooth headset (a missing selection, from an unreadable
+    /// route, counts as one). Otherwise the engine is skipped whenever the
+    /// recorder will record the mic, since that start never touches it: a
+    /// key press that waited on the warmup was only slower. After a fallback
+    /// to the engine it is warmed again until the recorder next starts, so a
+    /// repeat fallback isn't also a cold start.
+    static func skipsEngineWarmup(
+        for selection: DictationInputDeviceSelection?,
+        afterEngineFallback: Bool,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        guard let selection else { return true }
+        if DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" {
+            return true
+        }
+        return !afterEngineFallback && recorderIsNeeded(for: selection, speedPathIsOff: speedPathIsOff)
     }
 
     /// Inputs to rank when re-picking after `excluded` died or went silent.

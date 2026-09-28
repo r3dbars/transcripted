@@ -81,6 +81,7 @@ private struct FirstRunReliabilityRuntimeState: Codable {
     let captureLibraryPath: String
     let meetingsPath: String
     let dictationsPath: String
+    let writingPath: String
     let cachePath: String
     let logsPath: String
     let temporaryPath: String
@@ -205,6 +206,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     let appState = TranscriptedAppState()
     let overlayController = FloatingOverlayController()
+    /// Carries dictation, meetings and the call prompt when Settings ›
+    /// Dictation window is Notch island; idle and hidden otherwise.
+    let notchIsland = NotchIslandController()
     let sessionController = DictationSessionController()
     /// Second non-activating panel for meeting mode (Lane C). Distinct from
     /// the dictation overlay so regressions to one can't break the other.
@@ -295,6 +299,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
         overlayController.setup(sttRouter: appState.sttRouter)
+        overlayController.island = notchIsland
+        notchIsland.lastDictationTextProvider = { [weak self] in
+            self?.sessionController.lastCompletedText
+        }
+        notchIsland.onPasteLastDictation = { [weak self] in
+            self?.pasteLastDictationFromSettings()
+        }
+        if NotchIslandController.isSelected {
+            notchIsland.prewarm()
+        }
         sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
@@ -310,6 +324,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 ).allowsDetectedMeetingPrompt
             }
             meetingOverlayController.setup(meetingSession: meetingSession)
+            meetingOverlayController.island = notchIsland
+            capturePillController.island = notchIsland
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
                     self?.meetingPromptRecordInFlight = true
@@ -762,6 +778,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WritingController.noteTerminationRequest()
         if duplicateInstanceShouldTerminateImmediately {
             return .terminateNow
         }
@@ -1203,6 +1220,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let captureLibraryURL = fileManager.transcriptedCaptureLibraryDir
         let meetingsURL = fileManager.meetingSupportDir
         let dictationsURL = fileManager.dictationSupportDir
+        let writingURL = fileManager.writingSupportDir
         let cacheURL = fileManager.transcriptedCacheDir
         let logsURL = fileManager.transcriptedLogsDir
         let temporaryURL = fileManager.transcriptedTemporaryDir
@@ -1235,6 +1253,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 captureLibraryPath: captureLibraryURL.path,
                 meetingsPath: meetingsURL.path,
                 dictationsPath: dictationsURL.path,
+                writingPath: writingURL.path,
                 cachePath: cacheURL.path,
                 logsPath: logsURL.path,
                 temporaryPath: temporaryURL.path,

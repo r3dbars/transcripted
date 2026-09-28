@@ -59,6 +59,17 @@ SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
 SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
 SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f11279531900173fb638d7d541320a7cbc00ed06bc}"
+# llama.cpp's llama-server, the local inference helper for Writing. Not built
+# here: it is the exact binary Tilde 0.1.0 beta 1 shipped, taken from
+# Tilde.app/Contents/Helpers/llama-server in the r3dbars/tilde GitHub release,
+# so Writing's suggestions come from the same inference build as Tilde's.
+# Two pins: the release zip, and the helper's code bytes with Tilde's Developer
+# ID signature removed (Transcripted's build re-signs it; see the llama-server
+# row in docs/writing-port-ledger.md). Tilde doesn't record which llama.cpp
+# commit or flags built it; decision 9 in docs/writing-plan.md tracks that.
+LLAMA_SERVER_TILDE_RELEASE="${LLAMA_SERVER_TILDE_RELEASE:-v0.1.0-beta.1}"
+LLAMA_SERVER_TILDE_ZIP_SHA256="${LLAMA_SERVER_TILDE_ZIP_SHA256:-12b7f14ae31abea7d5cecf236d2e4de3b0facad89fa580877dec391336b26a50}"
+LLAMA_SERVER_UNSIGNED_SHA256="${LLAMA_SERVER_UNSIGNED_SHA256:-3f6895ab8d077b02803761fb8cc254073d2c7b4006fbacbef4c844879333fffc}"
 
 source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
 
@@ -90,7 +101,8 @@ deps_are_ready() {
         || [ ! -f "$DEPS_MODULES/ArgumentParserToolInfo.swiftmodule/arm64-apple-macos.swiftmodule" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sentry.framework" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] \
-        || [ ! -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ]; then
+        || [ ! -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] \
+        || [ ! -x "$DEPS_TOOLS/llama-server" ]; then
         return 1
     fi
 
@@ -192,6 +204,43 @@ download_sentry_distribution() {
 
     rm -rf "$DEPS_FRAMEWORKS/Sentry.framework"
     ditto "$framework_src" "$DEPS_FRAMEWORKS/Sentry.framework"
+}
+
+# Fetch Tilde's release zip, lift llama-server out of it, strip Tilde's
+# signature, and install the bare helper as deps-tools/llama-server. build.sh
+# and build-beta.sh copy it to Contents/Helpers/ and sign it with the app.
+download_llama_server() {
+    local llama_root="$DEPS_BUILD/llama-server"
+    local tilde_zip="$llama_root/Tilde.zip"
+    local tilde_url="https://github.com/r3dbars/tilde/releases/download/${LLAMA_SERVER_TILDE_RELEASE}/Tilde.zip"
+    local helper_member="Tilde.app/Contents/Helpers/llama-server"
+    local unpacked_root="$llama_root/unpacked"
+    local unsigned_helper="$llama_root/llama-server"
+
+    echo "Downloading llama-server from Tilde $LLAMA_SERVER_TILDE_RELEASE..."
+    mkdir -p "$llama_root"
+    curl --fail --location --silent --show-error \
+        --connect-timeout 20 --max-time 180 --retry 2 --retry-delay 2 --retry-all-errors \
+        "$tilde_url" -o "$tilde_zip"
+    verify_download_sha256 "$tilde_zip" "$LLAMA_SERVER_TILDE_ZIP_SHA256" "Tilde $LLAMA_SERVER_TILDE_RELEASE release zip (llama-server source)"
+    unzip -q "$tilde_zip" "$helper_member" -d "$unpacked_root"
+
+    if [ ! -f "$unpacked_root/$helper_member" ]; then
+        echo "[build-deps] ERROR: $helper_member not found in Tilde $LLAMA_SERVER_TILDE_RELEASE"
+        exit 1
+    fi
+
+    # Tilde's Developer ID signature comes off a writable copy, so the second
+    # pin covers only the code bytes that ship.
+    cp "$unpacked_root/$helper_member" "$unsigned_helper"
+    chmod u+w "$unsigned_helper"
+    codesign --remove-signature "$unsigned_helper"
+    verify_download_sha256 "$unsigned_helper" "$LLAMA_SERVER_UNSIGNED_SHA256" "llama-server from Tilde $LLAMA_SERVER_TILDE_RELEASE (signature removed)"
+
+    mkdir -p "$DEPS_TOOLS"
+    rm -f "$DEPS_TOOLS/llama-server"
+    cp "$unsigned_helper" "$DEPS_TOOLS/llama-server"
+    chmod 755 "$DEPS_TOOLS/llama-server"
 }
 
 fetch_argmax_whisperkit_sources() {
@@ -414,6 +463,7 @@ if [ "${1:-}" != "--force" ] && deps_are_ready; then
     echo "              $DEPS_FRAMEWORKS/Sentry.framework"
     echo "              $DEPS_FRAMEWORKS/Sparkle.framework"
     echo "  tools:      $DEPS_TOOLS/sparkle/bin/generate_appcast"
+    echo "              $DEPS_TOOLS/llama-server"
     exit 0
 fi
 
@@ -755,6 +805,7 @@ fi
 
 download_sentry_distribution
 download_sparkle_distribution
+download_llama_server
 
 cd "$DRAFT_DIR"
 write_deps_build_stamp
@@ -806,5 +857,8 @@ ls "$DEPS_FRAMEWORKS/"
 echo ""
 echo "Sparkle tools:"
 ls "$DEPS_TOOLS/sparkle/bin"
+echo ""
+echo "llama-server (Tilde $LLAMA_SERVER_TILDE_RELEASE, signature removed):"
+ls -lh "$DEPS_TOOLS/llama-server"
 echo ""
 echo "Done. build.sh will detect these artifacts automatically."

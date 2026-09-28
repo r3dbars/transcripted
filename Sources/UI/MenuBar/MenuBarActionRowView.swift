@@ -385,7 +385,12 @@ final class MenuBarActionRowView: NSControl {
 
     override func accessibilityPerformPress() -> Bool {
         guard isEnabled else { return false }
-        onPress?()
+        // Answer the accessibility press first, then act. A row that opens a
+        // window or closes the popover would otherwise hold the caller past
+        // its accessibility timeout, so VoiceOver and the UI smoke would see
+        // a failed press even though the action ran.
+        let action = onPress
+        DispatchQueue.main.async { action?() }
         return true
     }
 

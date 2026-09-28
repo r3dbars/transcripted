@@ -42,6 +42,8 @@ Important entry points:
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
+- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde (`Core/` pure policy, `Runtime/` model, helper, socket, Screen Memory); compiled into the app module, tested under `swift test`. Plan: `docs/writing-plan.md`; file map: `docs/writing-port-ledger.md`
+- `TranscriptedKeyboard/` — Writing's IMKit input method, a separate bundle built by `scripts/entrypoints/lib/bundle-input-method.sh`; excluded from the app binary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 
 Historical planning docs were removed from the live tree so it reads like the

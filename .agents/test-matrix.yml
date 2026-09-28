@@ -78,6 +78,9 @@ rules:
       - "scripts/entrypoints/lib/bundle-cli.sh"
       - "scripts/entrypoints/build.sh"
       - "scripts/entrypoints/build-beta.sh"
+      - "Sources/TranscriptedKeyboard/**"
+      - "config/entitlements/**"
+      - "scripts/entrypoints/lib/bundle-input-method.sh"
     checks:
       - "bash -n scripts/entrypoints/lib/bundle-cli.sh"
       - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
@@ -87,6 +90,9 @@ rules:
       - "scripts/entrypoints/build.sh"
       - "scripts/entrypoints/lib/swiftc-app-args.sh"
       - "scripts/entrypoints/lib/deps-staleness.sh"
+      - "Sources/TranscriptedKeyboard/**"
+      - "config/entitlements/**"
+      - "scripts/entrypoints/lib/bundle-input-method.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 scripts/dev/check-build-source-lists.py"
@@ -242,7 +248,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.65.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.66.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"
@@ -370,6 +376,8 @@ rules:
       - "Package.swift"
       - "Sources/TranscriptedCore/**"
       - "Tests/TranscriptedCoreTests/**"
+      - "Sources/TranscriptedWriting/**"
+      - "Tests/TranscriptedWritingTests/**"
     checks:
       - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
@@ -472,6 +480,9 @@ rules:
       - "docs/sparkle-updates.md"
       - "Casks/**"
       - "docs/appcast.xml"
+      - "Sources/TranscriptedKeyboard/**"
+      - "config/entitlements/**"
+      - "scripts/entrypoints/lib/bundle-input-method.sh"
     checks:
       - "bash build-deps.sh --force"
       - "bash build.sh --no-open"

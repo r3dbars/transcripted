@@ -59,7 +59,12 @@ enum ExistingInstallModelPrefetchPolicy {
         at captureLibraryURL: URL,
         fileManager: FileManager = .default
     ) -> Bool {
-        ["dictations", "meetings"].contains { subdirectory in
+        // Writing day files deliberately don't count: Writing doesn't use the
+        // speech model, so a writing-only user shouldn't trigger its download.
+        [
+            FileManager.dictationsDirectoryName,
+            FileManager.meetingsDirectoryName,
+        ].contains { subdirectory in
             let directory = captureLibraryURL.appendingPathComponent(subdirectory, isDirectory: true)
             return directoryContainsDirectRegularFile(directory, fileManager: fileManager)
         }

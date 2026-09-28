@@ -39,8 +39,10 @@ enum BrowserWindowTitleReader {
         guard !families.isEmpty, AXIsProcessTrusted() else { return [] }
 
         let appFamilies = Set(families.map(MeetingPromptProvider.browserAppFamily(forBundleFamily:)))
-        let pids: [pid_t] = NSWorkspace.shared.runningApplications.compactMap { app in
-            guard app.activationPolicy == .regular,
+        // Bundle IDs are read off the main thread: that read can block on
+        // LaunchServices.
+        let pids: [pid_t] = await RunningApplicationsReader.applications().compactMap { app in
+            guard app.isRegularApp,
                   let bundleID = app.bundleIdentifier,
                   appFamilies.contains(where: { bundleID.matchesBundleFamily($0) }) else { return nil }
             return app.processIdentifier

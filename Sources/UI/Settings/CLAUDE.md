@@ -28,7 +28,9 @@ settings-side agent connection flow.
   `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
   by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Today/Meetings/Dictations/Speakers/Agent); all configuration lives
+  content section (Today/Meetings/Dictations/Writing/Speakers/Agent); the
+  Writing row carries a quiet trailing "New" badge until
+  `WritingSidebarNewBadge.dismissedDefaultsKey` is set. All configuration lives
   on one combined scrolling settings page reached from the sidebar gear — the
   old General/Storage/About tab strip was removed, and `.storage`/`.about`
   (like the earlier `.models`/`.shortcuts`/`.privacy`/`.beta`/`.support`
@@ -42,17 +44,25 @@ settings-side agent connection flow.
   recorder container.
 - `TranscriptedSettingsPage.swift` - the sidebar page enum. `.today` is first
   and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
-  automation ids, analytics `page_id`, and source pins stay stable.
+  automation ids, analytics `page_id`, and source pins stay stable. Then
+  Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6. Also holds
+  `WritingSidebarNewBadge`, whose defaults key the Writing page sets when
+  setup finishes.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
-  `Pages/TodaySettingsPage.swift` - the Today page. Counts, the rolling
-  seven-day tape, and Recent context all come from local capture files: the
-  cached meeting index (`RecentMeetingsScanner.loadSearchIndex`) and the
-  dictation day files (`DictationTranscriptStore.savedDictationDayCounts`).
+  `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
+  rolling seven-day tape, and Recent context all come from local capture
+  files: the cached meeting index (`RecentMeetingsScanner.loadSearchIndex`),
+  the dictation day files (`DictationTranscriptStore.savedDictationDayCounts`),
+  and Save my writing's `Writing_<date>.md` files (`TodayWritingParser`).
+  Picking a day in the week strip retitles the header and swaps in that
+  day's numbers (`TodayTapeBuilder.dayStats`). Writing bars are estimated
+  from word count, since the files keep only the first keystroke; a writing
+  click opens its day file until the Writing tab lands.
   No network, no new analytics event (only `settings_action_clicked` action
   ids). Meeting clicks reuse the pill's `requestHomeRevealMeeting` path;
   dictation clicks open Dictations. The tape copies the Context app's Days
   view (week cells with mini lines, full day below, 6 AM to midnight) and
-  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`).
+  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`).
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
   page plus the ⌘F Home find-focus token.
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the
@@ -127,7 +137,11 @@ settings-side agent connection flow.
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
   held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
-  its header names the meeting.
+  its header names the meeting. When the recording started with a calendar event
+  (same window as the record-this-meeting pop-up),
+  its invitees show as one-click name buttons on each row and lead the name
+  list, and a 1:1 pre-fills the one remote voice
+  (`MeetingInviteeSuggestionPolicy`). Suggestions only; the user still saves.
 - `SpeakerReviewPresentationGate.swift` - Foundation-pure rule for when the
   speaker review window may appear (waits for Stop while a meeting records).
 - `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow
@@ -140,7 +154,9 @@ settings-side agent connection flow.
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
   `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`,
   `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`,
-  `StorageSettingsPage.swift`, and `TodaySettingsPage.swift`). Model, shortcut, and privacy editors are
+  `StorageSettingsPage.swift`, `TodaySettingsPage.swift`, and
+  `WritingSettingsPage.swift`, which hosts the Writing intro, setup, and
+  everyday views from `Sources/UI/Settings/Writing/`). Model, shortcut, and privacy editors are
   injected into General's cards as closures. New settings pages should land here as
   their own file instead of growing the shell. `HomeSettingsPage.swift` owns
   the header, scan-warning/activity rows, search field, and day-grouped

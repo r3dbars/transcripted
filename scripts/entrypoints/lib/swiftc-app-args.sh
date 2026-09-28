@@ -12,7 +12,10 @@
 # Outputs (bash arrays — expand with "${ARR[@]}" so paths with spaces survive):
 #   APP_SWIFTC_LINK_ARGS — frameworks, libraries, and prebuilt-deps flags
 #   APP_SOURCE_FILES     — app sources (Sources/TranscriptedCore excluded;
-#                          Core links in via libDraftDeps.a, never directly)
+#                          Core links in via libDraftDeps.a, never directly.
+#                          Sources/TranscriptedKeyboard excluded too: the
+#                          Writing keyboard is its own IMKit executable, built
+#                          by lib/bundle-input-method.sh into Contents/Library)
 #   APP_SWIFTC_TAIL_ARGS — parse/target/rpath flags placed after the sources
 
 build_app_swiftc_args() {
@@ -71,7 +74,10 @@ build_app_swiftc_args() {
     local file
     while IFS= read -r -d '' file; do
         APP_SOURCE_FILES+=("$file")
-    done < <(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*' -print0 | sort -z)
+    done < <(find Sources -name '*.swift' \
+        -not -path 'Sources/TranscriptedCore/*' \
+        -not -path 'Sources/TranscriptedKeyboard/*' \
+        -print0 | sort -z)
 
     if [ "${#APP_SOURCE_FILES[@]}" -eq 0 ]; then
         echo "[swiftc-app-args] ERROR: no app sources found under Sources/" >&2

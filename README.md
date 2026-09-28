@@ -30,6 +30,10 @@ Markdown file on your Mac. Then you can ask Claude, or any AI, things like
   you were typing.
 - **Knows who's talking.** It splits the transcript by speaker. Name someone
   once and it'll suggest their name next time it hears them.
+- **Helps you write.** Autocomplete finishes your sentences, right where
+  you're typing. Press `Tab` to take the next word. It can also save what you
+  wrote, so your AI sees your notes and replies next to your meetings. Both
+  are optional, and you pick the apps.
 
 Everything becomes a text file with timestamps and speaker names. You can also
 drop in an audio or video file you already have.
@@ -100,6 +104,8 @@ Files are saved here by default. You can pick any folder in Settings.
 ~/Library/Application Support/Transcripted/captures/
 ```
 
+Meetings, dictations, and writing each get their own folder in there.
+
 ## Install
 
 You need an Apple Silicon Mac on macOS 26 or later.
@@ -114,6 +120,10 @@ brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
 brew install --cask transcripted
 ```
 
+Autocomplete downloads a model the first time you turn it on. The default,
+Gemma, needs about 3.4 GB of disk. The optional Qwen model takes 5.6 GB and
+needs a Mac with 16 GB of memory.
+
 ## Privacy
 
 - Your audio and transcripts never leave your Mac.
@@ -121,6 +131,9 @@ brew install --cask transcripted
 - The app sends anonymous crash reports and usage stats. They never include
   audio, transcripts, names, or file paths. You can turn both off in
   **Settings → Privacy**.
+- What you write stays on your Mac. The only thing Writing sends is anonymous
+  suggestion counts, never text, and the same usage stats switch turns them
+  off.
 
 Where everything is stored: [docs/storage-paths.md](docs/storage-paths.md).
 
@@ -136,6 +149,24 @@ Nothing. No account, no subscription.
 
 **Is there a command-line tool?**
 Yes. See the [CLI instructions](Tools/TranscriptedCLI/README.md).
+
+## Uninstall
+
+1. Quit Transcripted from the menu bar.
+2. If you set up Writing, go to **System Settings → Keyboard → Input
+   Sources** and remove Transcripted.
+3. Drag Transcripted out of Applications, or run
+   `brew uninstall --cask transcripted`.
+4. Delete the keyboard, if it's there:
+   `~/Library/Input Methods/Transcripted Keyboard.app`
+
+Your meetings, dictations, and writing stay where they are. To also delete the
+Writing model and Writing's app data, remove these folders:
+
+```text
+~/Library/Application Support/Transcripted/models/writing/
+~/Library/Application Support/Transcripted/writing/
+```
 
 ## For contributors
 

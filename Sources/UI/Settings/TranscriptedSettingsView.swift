@@ -14,15 +14,15 @@ struct TranscriptedSettingsView: View {
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogSink
+    private let writingController: WritingController
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
     @State private var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
-    @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
-    @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
-    @State private var launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
+    @State private var launchAtLogin = LaunchAtLoginController.currentState
+    @State private var launchAtLoginReadGeneration = 0
     @State private var launchAtLoginFailureMessage: String?
     @State private var showCorrectionsSheet = false
     /// Section id the combined settings page should scroll to on next render
@@ -116,6 +116,7 @@ struct TranscriptedSettingsView: View {
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
         self.appLogger = appState.logger
+        self.writingController = appState.writingController
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
@@ -449,6 +450,8 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
+        case .writing:
+            writingPage
         case .general:
             settingsPage
         case .people:
@@ -493,6 +496,11 @@ struct TranscriptedSettingsView: View {
                 case .dictation:
                     trackSettingsAction("today_open_recent_dictation", page: .today)
                     navigation.selectedPage = .dictations
+                case .writing:
+                    // No Writing page on main yet: open the day's file.
+                    if let dayFile = item.transcriptURL {
+                        NSWorkspace.shared.open(dayFile)
+                    }
                 }
             },
             onLoadMoreRecent: {
@@ -2071,12 +2079,12 @@ struct TranscriptedSettingsView: View {
     private var generalPage: some View {
         GeneralSettingsPage(
             launchAtLoginEnabled: Binding(
-                get: { launchAtLoginEnabled },
+                get: { launchAtLogin.isEnabled },
                 set: { updateLaunchAtLogin($0) }
             ),
-            launchAtLoginStatus: launchAtLoginStatus,
+            launchAtLoginStatus: launchAtLogin.statusDescription,
             launchAtLoginNotice: LaunchAtLoginNoticePolicy.notice(
-                needsApproval: launchAtLoginNeedsApproval,
+                needsApproval: launchAtLogin.needsApproval,
                 failureMessage: launchAtLoginFailureMessage
             ),
             onOpenLoginItems: {
@@ -2904,6 +2912,17 @@ struct TranscriptedSettingsView: View {
         AgentConnectionSettingsPage()
     }
 
+    private var writingPage: some View {
+        WritingSettingsPage(
+            controller: writingController,
+            isCaptureBusy: {
+                sttRouter.isRecording
+                    || meetingSession.isCaptureSessionActive
+                    || meetingSession.hasRuntimeDiagnosticsWork
+            }
+        )
+    }
+
     private var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
@@ -3190,6 +3209,10 @@ struct TranscriptedSettingsView: View {
             return .speakerReview
         case .connectAgent:
             return .agentSetup
+        case .writing:
+            // No discovery area for Writing yet; its page views still
+            // arrive as `settings_page_viewed` with page_id `writing`.
+            return nil
         case .general:
             // The combined settings page spans capture-library, update, and
             // permission surfaces; no single discovery area fits it.
@@ -3327,26 +3350,33 @@ struct TranscriptedSettingsView: View {
         showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     }
 
+    /// Runs on every app activation, so the status read stays off main. A
+    /// newer read or a toggle bumps the generation, so a stale reply is dropped.
     private func refreshLaunchAtLoginState() {
-        launchAtLoginEnabled = LaunchAtLoginController.isEnabled
-        launchAtLoginStatus = LaunchAtLoginController.statusDescription
-        launchAtLoginNeedsApproval = LaunchAtLoginController.needsApproval
-        launchAtLoginFailureMessage = nil
+        launchAtLoginReadGeneration += 1
+        let generation = launchAtLoginReadGeneration
+        Task { @MainActor in
+            let state = await LaunchAtLoginController.readState()
+            guard generation == launchAtLoginReadGeneration else { return }
+            launchAtLogin = state
+            launchAtLoginFailureMessage = nil
+        }
     }
 
     private func updateLaunchAtLogin(_ enabled: Bool) {
-        let previousValue = launchAtLoginEnabled
-        launchAtLoginEnabled = enabled
+        launchAtLoginReadGeneration += 1
+        let previousValue = launchAtLogin.isEnabled
+        launchAtLogin.isEnabled = enabled
         trackSettingsToggle("launch_at_login", enabled: enabled, page: .general)
 
         do {
             try LaunchAtLoginController.setEnabled(enabled)
             refreshLaunchAtLoginState()
         } catch {
-            launchAtLoginEnabled = previousValue
+            launchAtLogin.isEnabled = previousValue
             // Shown inline under the switch (it used to live only in the
             // tooltip); the raw error is captured to telemetry below.
-            launchAtLoginStatus = SettingsActionFailureCopy.launchAtLogin
+            launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin
             launchAtLoginFailureMessage = LaunchAtLoginController.isUnavailable
                 ? SettingsActionFailureCopy.launchAtLoginUnavailable
                 : SettingsActionFailureCopy.launchAtLogin
