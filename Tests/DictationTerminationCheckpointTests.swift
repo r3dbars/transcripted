@@ -134,7 +134,7 @@ func testDictationTerminationCheckpoint() async {
         let retryWait = retry.range(of: "await checkpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000)")
         let retryGate = retry.range(of: "self.stopFinalizationGate.reset()")
         let retryStop = retry.range(of: "self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)")
-        let unsavedAudio = controller.range(of: "if emptyReason == .audioNeedsRecovery {")
+        let unsavedAudio = controller.range(of: "case .offerCheckpointRetry:")
         let unsavedAudioRetry = controller.range(of: "showFailedCheckpointRecoveryError()",
                                                  range: (unsavedAudio?.upperBound ?? controller.startIndex)..<controller.endIndex)
 

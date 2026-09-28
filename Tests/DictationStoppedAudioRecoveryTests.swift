@@ -300,7 +300,21 @@ func testDictationStoppedAudioRecovery() {
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
-            assertTrue(source.contains("if emptyReason.shouldDiscardStoppedAudioRecovery"), "only real silence or too-short capture may discard stopped audio")
+            // Which reasons discard the audio is a behavior test now
+            // (DictationEmptyTranscriptPolicyTests); the controller must act on it.
+            assertTrue(source.contains("if emptyDecision.discardsSavedRecording"), "only real silence or too-short capture may discard stopped audio")
+            // Controller wiring the policy tests can't see: a mis-tap is judged by
+            // how long the key was held, and it closes like a cancel.
+            assertTrue(source.contains("pressDuration: stopTiming.requestedAt - sessionStartTime"),
+                       "a mis-tap is judged by how long the shortcut was held, not by how long transcription took")
+            if let closeLikeCancel = source.range(of: "case .closeLikeCancel:"),
+               let next = source.range(of: "case .showNoSpeechAndDismiss:", range: closeLikeCancel.upperBound..<source.endIndex) {
+                let body = source[closeLikeCancel.upperBound..<next.lowerBound]
+                assertTrue(body.contains("hideWithCancelAnimation()") && !body.contains("showError"),
+                           "a mis-tap hides the overlay like a cancel, with no error text")
+            } else {
+                assertTrue(false, "the controller must handle the mis-tap decision")
+            }
             assertTrue(
                 source.contains("let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)")
                     && source.contains("actionTitle: savedAudioAction.title"),

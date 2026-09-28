@@ -405,6 +405,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStoppedAudioRecovery.swift"
     "Sources/Dictation/DictationStopCheckpoint.swift"
     "Sources/Dictation/DictationPostStopModelWait.swift"
+    "Sources/Dictation/DictationEmptyTranscriptPolicy.swift"
     "Sources/Dictation/DictationStoppedAudioCheckpointSignal.swift"
     "Sources/Dictation/DictationTerminationAdmissionPolicy.swift"
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"
