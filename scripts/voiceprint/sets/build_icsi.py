@@ -405,8 +405,12 @@ def write_readme(path: Path, info: dict) -> None:
         "mics with hum). Harder than a clean one-mic-per-person recording, and closer to a laptop mic in a room.",
         "- Segment times come from dialogue-act annotation and forced alignment; they are not sample-exact, which is why the "
         "0.3 s guard exists. Unlabeled non-speech from other people (mic bumps, unmarked laughs) can still be in a few clips.",
-        "- Speakers are mostly non-native and native English-speaking researchers, mostly men (ICSI's population); female speakers "
+        "- Speakers are researchers and students, native and non-native English speakers, mostly men (ICSI's population); female speakers "
         f"are {info['female_speakers']} of {info['speakers']}.",
+        "- Bro008 is dropped: its annotation timeline has no coherent alignment with the mix (correlation near zero, lag "
+        "jumping between 4 and 6 s across the meeting), so labels cannot be trusted there.",
+        "- Unmiked participants (heard faintly, no headset channel; e.g. the person who set up the recording) count as "
+        "\"someone else talking\" for the 0.3 s guard but are never a clip speaker.",
         "- Clips are 16 kHz mono PCM16 exactly as recorded; nothing is normalized.",
         "- Speakers with too little clean single-speaker speech get few clips or none (listeners who mostly back-channel).",
         "",

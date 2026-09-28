@@ -48,6 +48,33 @@ def clean_only() -> list[str]:
         return []
 
 
+HUMAN_SETS = {"vox1o", "libri", "ami", "icsi"}
+MAX_MPS = 3
+
+
+def full_models() -> list[str]:
+    """Models that also get degraded audio (VP/logs/daemon.full, one model_id per line)."""
+    try:
+        return [l.strip() for l in (VP / "logs" / "daemon.full").read_text().splitlines() if l.strip()]
+    except Exception:
+        return []
+
+
+def tier(model: dict, set_name: str, cond: str, full: list[str]):
+    """Scheduling tier, lower first; None = don't run. Clean on the human sets for every
+    model, then call audio (opus12, noisy) for the contenders, then yodas clean, then
+    phone, then yodas call audio."""
+    human = set_name in HUMAN_SETS
+    is_full = model["model_id"] in full or model.get("baseline", False)
+    if cond == "clean":
+        return 0 if human else 2
+    if not is_full:
+        return None
+    if cond in ("opus12", "noisy"):
+        return 1 if human else 4
+    return 3 if human else 5
+
+
 def ready_models() -> list[dict]:
     out = []
     hold = held()
@@ -60,8 +87,10 @@ def ready_models() -> list[dict]:
             meta.setdefault("model_id", path.parent.name)
             if not any(meta["model_id"].startswith(h) for h in hold):
                 out.append(meta)
-    # Baselines first, then smaller models (faster feedback).
-    return sorted(out, key=lambda m: (not m.get("baseline", False), float(m.get("params_m") or 50)))
+    # Baselines first, then the contenders (daemon.full), then smaller models.
+    full = set(full_models())
+    return sorted(out, key=lambda m: (not m.get("baseline", False), m["model_id"] not in full,
+                                      float(m.get("params_m") or 50)))
 
 
 RUNTIMES = Path(__file__).resolve().parent / "runtimes"
@@ -131,6 +160,7 @@ def slots() -> int:
 def main() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
     running: dict[str, subprocess.Popen] = {}
+    running_device: dict[str, str] = {}
     attempts: dict[str, int] = {}
     done_count = 0
     while True:
@@ -148,28 +178,36 @@ def main() -> None:
         if not stop:
             pairs = ready_pairs()
             models = ready_models()
-            for cond_rank, cond in enumerate(CONDS):
-                for model in models:
-                    if cond != "clean" and any(model["model_id"].startswith(h) for h in clean_only()):
+            full = full_models()
+            for model in models:
+                for set_name, cond in pairs:
+                    key = f"{model['model_id']}__{set_name}__{cond}"
+                    if key in running or (LOGS / f"{key}.failed").exists():
                         continue
-                    for set_name, c in pairs:
-                        if c != cond:
-                            continue
-                        key = f"{model['model_id']}__{set_name}__{cond}"
-                        if key in running or (LOGS / f"{key}.failed").exists():
-                            continue
-                        if is_current(model, set_name, cond):
-                            continue
-                        pending.append((key, model["model_id"], set_name, cond))
-            while pending and len(running) < slots():
-                key, model_id, set_name, cond = pending.pop(0)
+                    t = tier(model, set_name, cond, full)
+                    if t is None or is_current(model, set_name, cond):
+                        continue
+                    pending.append((t, key, model, set_name, cond))
+            order = {m["model_id"]: i for i, m in enumerate(models)}
+            pending.sort(key=lambda p: (p[0], order[p[2]["model_id"]], p[3]))
+            mps_running = sum(1 for k in running if running_device.get(k) == "mps")
+            for t, key, model, set_name, cond in list(pending):
+                if len(running) >= slots():
+                    break
+                device = str(model.get("device", "cpu"))
+                if device == "mps" and mps_running >= MAX_MPS:
+                    continue
                 env = dict(os.environ, OMP_NUM_THREADS=str(THREADS), MKL_NUM_THREADS=str(THREADS),
                            VECLIB_MAXIMUM_THREADS=str(THREADS), HF_HUB_OFFLINE="1", TOKENIZERS_PARALLELISM="false",
                            TRANSCRIPTED_DISABLE_FILE_LOGGER="1")
                 log = open(LOGS / f"{key}.log", "w")
                 running[key] = subprocess.Popen(
-                    [str(PY), str(JOB), "--model", model_id, "--set", set_name, "--cond", cond, "--threads", str(THREADS)],
+                    [str(PY), str(JOB), "--model", model["model_id"], "--set", set_name, "--cond", cond, "--threads", str(THREADS)],
                     stdout=log, stderr=subprocess.STDOUT, env=env, cwd=str(REPO))
+                running_device[key] = device
+                if device == "mps":
+                    mps_running += 1
+                pending.remove((t, key, model, set_name, cond))
         status = {"time": time.strftime("%H:%M:%S"), "running": sorted(running), "pending": len(pending),
                   "done_this_run": done_count, "failed": sorted(p.stem for p in LOGS.glob("*.failed")),
                   "slots": slots(), "stopping": stop}

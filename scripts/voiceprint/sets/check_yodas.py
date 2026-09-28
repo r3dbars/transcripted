@@ -135,8 +135,8 @@ def main() -> int:
     spec.loader.exec_module(build)
     lines += ["", f"Probable unlabeled twins: pairs of differently-labeled sessions whose mean cosine across the two models is "
               f"{args.flag} or more. An earlier pass at this bar found {len(build.DROP_STRANGERS)} strangers to drop; they are "
-              f"listed in `DROP_STRANGERS` in the build script, so a rebuild is reproducible. This pass flags {len(flagged)} pairs "
-              f"(would drop {len(dropped)} more). Pruning with two candidate models removes a few hard negatives they would "
+              f"listed in `DROP_STRANGERS` in the build script, so a rebuild is reproducible. This pass flags {len(flagged)} pair(s) "
+              f"(would drop {len(dropped)} more; dropping shifts the mean-centering slightly, so a pair right at the bar can move across it). Pruning with two candidate models removes a few hard negatives they would "
               "have scored as strangers, which slightly flatters WeSpeaker and ECAPA on this set.", END]
     readme = VP / "sets" / "yodas" / "README.md"
     text = readme.read_text()

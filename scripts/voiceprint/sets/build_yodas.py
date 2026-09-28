@@ -415,7 +415,7 @@ def stage_yodas(args: argparse.Namespace) -> dict:
 
     stats = summarize(rows, plan, bank, group_names, why, failed, sorted(set(demoted)), trimmed, time.time() - t0)
     write_readme(set_dir / "README.md", stats)
-    (VP / "clips" / SET / "READY").write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
+    (out_dir / "READY").write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")  # clips/<set>/clean/READY
     (set_dir / "READY").write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")  # last
     log(f"yodas READY: {json.dumps({k: stats[k] for k in ('clips', 'targets', 'strangers', 'per_bucket')})}")
     return stats
@@ -479,8 +479,8 @@ evaluation only: never commit or upload these clips. Attribution belongs to the 
 * **Strangers:** {strangers} single-video speakers (`yodas:yd3-...`), {stranger_clips} clips,
   all `"stranger_only": true`. The pool was every bank identity that is not synthetic, not
   unreliable, not in a group, not in any unresolved maybe-same pair, and not one of the
-  {dropped_twins} probable twins dropped below ({stranger_pool} identities; the bank has fewer than
-  the 300 the plan asked for once those are excluded).
+  {dropped_twins} probable twins dropped below ({stranger_pool} identities). The plan asked for about
+  300 strangers; the bank has no more that pass every exclusion.
 * **Clips:** {clips} total, buckets 2 s / 4 s / 8 s = {per_bucket}. Up to 3 per (speaker,
   session, bucket), from different places (stratified over the session, never touching another clip
   of the session), 16 kHz mono PCM16, RMS at least -45 dBFS.

@@ -77,3 +77,102 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
         microAbsorb: 0.45,
         perSegmentSplit: 0.50, knownProfileConflict: 0.55)
 }
+
+// MARK: - Calibration files
+
+/// Why a thresholds calibration file could not be used. The message names the
+/// offending key but never a value or a path.
+public struct SpeakerEmbeddingThresholdsFileError: Error, LocalizedError, Equatable {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
+}
+
+/// Thresholds for a new voiceprint model come from a calibration file, so a
+/// candidate can be tested without code changes. The presets above never read one.
+///
+/// File format: one JSON object with all nine fields, in snake_case or camelCase:
+///
+///     {"match_one_segment": 0.70, "match_few_segments": 0.62, "match_many_segments": 0.55,
+///      "ghost_merge_floor": 0.55, "consolidation": 0.65, "absorb": 0.55, "micro_absorb": 0.45,
+///      "per_segment_split": 0.50, "known_profile_conflict": 0.55}
+///
+/// The same object may instead sit under a top-level `"thresholds"` key, next to
+/// provenance such as the model id and the false-accept rates it was matched to.
+/// Other keys are ignored. A missing field, or a value that is not a cosine in
+/// [-1, 1], is an error: a file never silently falls back to another model's bars.
+extension SpeakerEmbeddingThresholds: Codable {
+    enum CodingKeys: String, CodingKey {
+        case matchOneSegment, matchFewSegments, matchManySegments, ghostMergeFloor
+        case consolidation, absorb, microAbsorb, perSegmentSplit, knownProfileConflict
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func cosine(_ key: CodingKeys) throws -> Double {
+            let value = try container.decode(Double.self, forKey: key)
+            guard value.isFinite, value >= -1, value <= 1 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key, in: container,
+                    debugDescription: "\(key.stringValue) must be a cosine between -1 and 1")
+            }
+            return value
+        }
+        self.init(
+            matchOneSegment: try cosine(.matchOneSegment),
+            matchFewSegments: try cosine(.matchFewSegments),
+            matchManySegments: try cosine(.matchManySegments),
+            ghostMergeFloor: try cosine(.ghostMergeFloor),
+            consolidation: Float(try cosine(.consolidation)),
+            absorb: Float(try cosine(.absorb)),
+            microAbsorb: Float(try cosine(.microAbsorb)),
+            perSegmentSplit: Float(try cosine(.perSegmentSplit)),
+            knownProfileConflict: Float(try cosine(.knownProfileConflict)))
+    }
+
+    /// Reads a calibration file (format above).
+    public static func load(contentsOf url: URL) throws -> SpeakerEmbeddingThresholds {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw SpeakerEmbeddingThresholdsFileError("thresholds file could not be read")
+        }
+        return try decode(jsonData: data)
+    }
+
+    /// Parses a calibration file's bytes (format above).
+    public static func decode(jsonData: Data) throws -> SpeakerEmbeddingThresholds {
+        guard let object = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+            throw SpeakerEmbeddingThresholdsFileError("thresholds file is not a JSON object")
+        }
+        let body: Data
+        if let nested = object["thresholds"] {
+            guard let nestedObject = nested as? [String: Any],
+                  let nestedData = try? JSONSerialization.data(withJSONObject: nestedObject) else {
+                throw SpeakerEmbeddingThresholdsFileError("\"thresholds\" must be a JSON object")
+            }
+            body = nestedData
+        } else {
+            body = jsonData
+        }
+        let decoder = JSONDecoder()
+        // snake_case keys convert to the camelCase field names; camelCase keys pass through.
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(SpeakerEmbeddingThresholds.self, from: body)
+        } catch let DecodingError.keyNotFound(key, _) {
+            throw SpeakerEmbeddingThresholdsFileError("thresholds file is missing \(key.stringValue)")
+        } catch let DecodingError.dataCorrupted(context) {
+            throw SpeakerEmbeddingThresholdsFileError(context.debugDescription)
+        } catch let DecodingError.typeMismatch(_, context) {
+            let key = context.codingPath.last?.stringValue ?? "a field"
+            throw SpeakerEmbeddingThresholdsFileError("\(key) must be a number")
+        } catch let DecodingError.valueNotFound(_, context) {
+            let key = context.codingPath.last?.stringValue ?? "a field"
+            throw SpeakerEmbeddingThresholdsFileError("\(key) must be a number")
+        } catch {
+            throw SpeakerEmbeddingThresholdsFileError("thresholds file could not be parsed")
+        }
+    }
+}

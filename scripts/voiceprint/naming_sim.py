@@ -11,6 +11,8 @@ Python mirror of the app's speaker naming and measures:
   * naming work per meeting (type 3, pick 2, confirm 1, correct a suggestion 3, wrong silent name 10;
     same scoring as scripts/speaker_lab/naming_replay.py)
   * strangers (and first-time people) silently given someone's name
+  * look-alike pairs over the bar: held-out pairs (A, B) where one session of A clears the lineup
+    bar against B's two-session profile; world-free, so it catches risks the random meetings miss
 
 Contract: Tools/SpeakerEvalHarness/VOICEPRINT_BAKEOFF.md. Reads VP/sets/*/segments.jsonl and
 VP/emb/<model>/<set>__<cond>.npz; writes VP/results/naming/<model_id>.json and
@@ -66,8 +68,9 @@ condition, talk time and lineup mode, because the app ships one set of bars per 
         margin (0.10 lineup / 0.12 global). Clear-margin impostors are rare, so this max is noisy:
         a first version used only fully eligible impostors (0-2 per half) and a synthetic check
         then let a stranger at 0.50 through a 0.45 bar set on the other half.
-      - Safety margin, from the tail: fit an exponential tail to the top 1% of impostor-top
-        similarities (threshold u, scale beta = mean excess over u, k points) and put the bar where
+      - Safety margin, from the tail: fit an exponential tail to the top 2% (at least 25) of
+        impostor-top similarities (threshold u, scale beta = mean excess over u, k points; with only
+        10 points beta was +-30% and the two halves of one set disagreed by 0.3) and put the bar where
         the fit expects ONE impostor above it across 100 calibration halves' worth of impostor
         encounters: u + beta * ln(100 * k). Pooled over conditions and talk times, a std-based
         cushion measured how mixed the conditions were rather than the tail; beta only looks at
@@ -82,16 +85,20 @@ condition, talk time and lineup mode, because the app ships one set of bars per 
     both paths, so the two usually come out equal and the global path stays stricter through its
     5 confirmations and 0.12 margin.
   * Suggest bar F (the 4+-segment match floor): candidates are the model's own impostor-pair
-    quantiles at FAR 10%, 3%, 1%, 0.3%, 0.1%, 0.03% (session means, calibration speakers);
+    quantiles at FAR 10%, 3%, 1%, 0.3%, 0.1%, 0.03%, 0.01% (session means, calibration speakers);
     pick the one with the least naming work on the calibration split with zero wrong silent names
     (ties within 2% go to the stricter bar). Then the auto bars are re-calibrated at that F.
-  * Other cosine constants (1- and 2-3-segment floor offsets, maturity bonus, ambiguity gap,
-    write-back tiers 0.80/0.72, exemplar same-condition 0.80, negative-veto floor 0.80) use the
-    app's own porting method (SpeakerEmbeddingThresholds.eRes2Net): equal-false-accept remap of the
-    WeSpeaker value onto this model's impostor distribution, measured against the baseline's
-    embeddings on the same calibration speakers. With no baseline embeddings: WeSpeaker values.
-  * Fixed, as instructed: confirmations (5 global / 2 lineup), margins (0.12 / 0.10 / write-back
-    0.12), EMA weights, K=3 exemplars, recent lineup of 12.
+  * Every other cosine constant is carried over from the WeSpeaker value, linearly between the
+    model's and the baseline's median impostor and median genuine session-mean cosine (calibration
+    speakers, same sets and conditions): c' = imp_m + (c - imp_b) * scale, scale =
+    (gen_m - imp_m) / (gen_b - imp_b); differences (floor offsets for 1 and 2-3 segments, maturity
+    bonus, ambiguity gap) and the margins (0.12 global, 0.10 lineup, 0.12 write-back) are
+    multiplied by scale. Identity for the baseline. The app ported thresholds to ERes2Net by equal
+    false-accept rate on AMI, but on clean sets no WeSpeaker impostor pair reaches 0.70, so that
+    remap collapses every constant above 0.70 onto one value; the linear map has no such tail.
+    Scaling the margins keeps the rule and its meaning: un-centered x-vectors put every cosine in
+    0.95-1.0, where a 0.12 gap is impossible. `--fixed-margins` keeps 0.12/0.10 literally.
+  * Fixed: confirmations (5 global / 2 lineup), EMA weights, K=3 exemplars, recent lineup of 12.
 
 The baseline (model.json "baseline": true) is also scored with the app's production bars
 (0.70 floor, 0.80 lineup, 0.92 global) on both halves, as a reference.
@@ -99,16 +106,24 @@ The baseline (model.json "baseline": true) is also scored with the app's product
 ----------------------------------------------------------------------------------------------
 Meetings
 ----------------------------------------------------------------------------------------------
-  * AMI / ICSI (`--natural`): real sessions, grouped by series (ES2002a-d -> ES2002, Bmr001 -> Bmr),
-    in id order inside a group. Speaker halves are split by connected component of co-attendance
+  * AMI / ICSI (rows carry `group`, or the set name starts with ami/icsi): real sessions grouped by
+    series (`group`, else ES2002a-d -> ES2002, Bmr001 -> Bmr), in `session_order` / `date` / id
+    order inside a series. Speaker halves are split by connected component of co-attendance
     when no component holds more than 35% of speakers (AMI: whole series), else by speaker (ICSI).
   * Other sets: synthetic groups of 3-6 people meeting 4-8 times; each member attends as many
     meetings as they have sessions (a different session each time).
   * Strangers: `stranger_only` speakers, plus 20% of each half's multi-session speakers (or series)
-    held out and dropped once into random meetings. Every person's first meeting is also a
-    "first-time" voice. A silent name on either counts as a stranger wrongly named.
+    held out. Each appears once: dropped into a group meeting (at most 2 per meeting, about one per
+    two meetings) or, when there are more (yodas), in one-off calls of 2-4 strangers placed through
+    the timeline. Every person's first meeting is also a "first-time" voice. A silent name on
+    either counts as a stranger wrongly named.
   * Groups run staggered (about 3 series active at a time), a world holds <= 40 regulars, and
-    `--reps` reseeds the worlds (group composition, held-out strangers, which clip is "1 clip").
+    `--reps` (default 4) reseeds the worlds (group composition, held-out strangers, which clip is
+    "1 clip").
+  * Random worlds rarely put a look-alike pair in the worst position (B a confirmed regular on the
+    lineup, A walking in), so each fold also counts held-out look-alike pairs over the lineup bar:
+    B's profile from their first two sessions, any single session of A (all clips) against it,
+    ignoring margin and meeting membership. It over-counts on purpose.
   * Conditions: every `<set>__<cond>.npz` present, plus `mixed` (each person-meeting drawn from
     clean/opus12/phone/noisy) when all four exist. clean vs call-audio (opus12, phone, noisy, mixed)
     are reported separately.
@@ -152,9 +167,10 @@ CALL_CONDS = ("opus12", "phone", "noisy", "mixed")
 TALKS = ("1", "3", "all")
 MODES = ("recent", "invite")
 NATURAL_PREFIXES = ("ami", "icsi")
-FAR_GRID = (0.1, 0.03, 0.01, 0.003, 0.001, 0.0003)
+FAR_GRID = (0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001)
 FAR_START = 0.01
-TAIL_FRAC = 0.01     # impostor tops used to fit the tail: the top 1% (at least 10)
+TAIL_FRAC = 0.02     # impostor tops used to fit the tail: the top 2% (at least TAIL_MIN)
+TAIL_MIN = 25
 TAIL_REPS = 100      # the bar must hold for this many calibration halves' worth of impostors
 
 # App constants (WeSpeaker units), from TranscriptedCore/Speaker/*.swift.
@@ -229,50 +245,56 @@ class Bars:
                 for k, v in self.__dict__.items()}
 
 
-Remap = Callable[[float], float]
+@dataclass(frozen=True)
+class Geometry:
+    """Maps a WeSpeaker-unit cosine onto a model: linear between each model's median impostor and
+    median genuine session-mean cosine. Identity for the baseline (and when nothing is known)."""
+    imp: float = 0.0
+    gen: float = 1.0
+    base_imp: float = 0.0
+    base_gen: float = 1.0
+    note: str = "identity"
+
+    @property
+    def scale(self) -> float:
+        return (self.gen - self.imp) / (self.base_gen - self.base_imp)
+
+    def map(self, c: float) -> float:
+        return self.imp + (c - self.base_imp) * self.scale
+
+    def public(self) -> dict:
+        return {"model_median_impostor": round(self.imp, 4), "model_median_genuine": round(self.gen, 4),
+                "baseline_median_impostor": round(self.base_imp, 4), "baseline_median_genuine": round(self.base_gen, 4),
+                "scale": round(self.scale, 4), "note": self.note}
 
 
-def identity_remap(c: float) -> float:
-    return c
+IDENTITY = Geometry()
 
 
-def make_bars(floor: float, auto_lineup: float, auto_global: float, remap: Remap = identity_remap) -> Bars:
-    base = remap(APP["floor_many"])
-
-    def off(c: float) -> float:
-        return max(0.0, remap(c) - base)
-
+def make_bars(floor: float, auto_lineup: float, auto_global: float, geo: Geometry = IDENTITY,
+              fixed_margins: bool = False) -> Bars:
+    k = geo.scale
+    mk = 1.0 if fixed_margins else k
     return Bars(
         floor=floor,
-        floor_few=floor + off(APP["floor_few"]),
-        floor_one=floor + off(APP["floor_one"]),
-        bonus_immature=off(APP["floor_many"] + APP["bonus_immature"]),
-        bonus_young=off(APP["floor_many"] + APP["bonus_young"]),
-        separation=off(APP["floor_many"] + APP["separation"]),
+        floor_few=floor + (APP["floor_few"] - APP["floor_many"]) * k,
+        floor_one=floor + (APP["floor_one"] - APP["floor_many"]) * k,
+        bonus_immature=APP["bonus_immature"] * k,
+        bonus_young=APP["bonus_young"] * k,
+        separation=APP["separation"] * k,
         auto_lineup=auto_lineup,
         auto_global=max(auto_global, auto_lineup),
-        wb_confident=remap(APP["wb_confident"]),
-        wb_cautious=remap(APP["wb_cautious"]),
-        ex_same=remap(APP["ex_same"]),
-        veto_floor=remap(APP["veto_floor"]),
+        wb_confident=geo.map(APP["wb_confident"]),
+        wb_cautious=geo.map(APP["wb_cautious"]),
+        ex_same=geo.map(APP["ex_same"]),
+        veto_floor=geo.map(APP["veto_floor"]),
+        margin_lineup=APP["margin_lineup"] * mk,
+        margin_global=APP["margin_global"] * mk,
+        wb_margin=APP["wb_margin"] * mk,
     )
 
 
 APP_BARS = make_bars(APP["floor_many"], APP["auto_lineup"], APP["auto_global"])
-
-
-def far_remap(model_imp: np.ndarray, base_imp: np.ndarray) -> Remap:
-    """Equal-false-accept remap of a WeSpeaker cosine onto this model (the app's ERes2Net method)."""
-    base_sorted = np.sort(base_imp)
-    model_sorted = np.sort(model_imp)
-
-    def remap(c: float) -> float:
-        far = 1.0 - np.searchsorted(base_sorted, c, side="left") / len(base_sorted)
-        if far <= 0:
-            return float(model_sorted[-1] + 1e-4)
-        return float(np.quantile(model_sorted, 1.0 - far))
-
-    return remap
 
 
 # ---------------------------------------------------------------------------------------------
@@ -288,6 +310,8 @@ class SetInfo:
     stranger_only: set[str]
     dur: dict[str, float]
     natural: bool
+    group_of: dict[str, str] = field(default_factory=dict)     # session -> meeting series (from rows)
+    order_of: dict[str, tuple] = field(default_factory=dict)   # session -> sort key inside its series
 
 
 def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> SetInfo | None:
@@ -297,6 +321,8 @@ def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> S
     clips: dict[tuple[str, str], list[str]] = defaultdict(list)
     stranger: set[str] = set()
     dur: dict[str, float] = {}
+    group_of: dict[str, str] = {}
+    order_of: dict[str, tuple] = {}
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
@@ -305,6 +331,10 @@ def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> S
         dur[r["seg_id"]] = float(r.get("dur", r.get("bucket", 0)) or 0)
         if r.get("stranger_only"):
             stranger.add(r["speaker"])
+        if r.get("group"):
+            group_of[r["session"]] = str(r["group"])
+        if r.get("session_order") is not None or r.get("date"):
+            order_of[r["session"]] = (float(r.get("session_order", 0) or 0), str(r.get("date") or ""), r["session"])
     sessions_of: dict[str, set[str]] = defaultdict(set)
     speakers_of: dict[str, set[str]] = defaultdict(set)
     for spk, ses in clips:
@@ -313,10 +343,11 @@ def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> S
     for spk, ses in list(sessions_of.items()):
         if len(ses) < 2:
             stranger.add(spk)
-    natural = any(name == p or name.startswith(p + "_") or name.startswith(p + "-") for p in natural_prefixes)
+    natural = bool(group_of) or any(name == p or name.startswith(p + "_") or name.startswith(p + "-")
+                                    for p in natural_prefixes)
     return SetInfo(name, {k: sorted(v) for k, v in clips.items()},
                    {k: sorted(v) for k, v in sessions_of.items()},
-                   {k: sorted(v) for k, v in speakers_of.items()}, stranger, dur, natural)
+                   {k: sorted(v) for k, v in speakers_of.items()}, stranger, dur, natural, group_of, order_of)
 
 
 def components(pairs_by_session: dict[str, list[str]], nodes: Iterable[str]) -> list[list[str]]:
@@ -414,7 +445,13 @@ def stagger(groups: dict[str, list[Meeting]], rng: np.random.Generator, concurre
     return out
 
 
+MAX_DROPINS = 2  # strangers dropping into one group meeting; the rest meet in one-off calls
+
+
 def place_strangers(worlds: list[World], strangers: list[Attendee], rng: np.random.Generator) -> None:
+    """Each stranger appears once: a drop-in to a group meeting (at most MAX_DROPINS per meeting,
+    about one per two meetings), or, when there are more strangers than that, a one-off call of
+    2-4 strangers inserted at a random point in the timeline (yodas has ~120 strangers per half)."""
     if not worlds or not strangers:
         return
     per_world: list[list[Attendee]] = [[] for _ in worlds]
@@ -422,11 +459,20 @@ def place_strangers(worlds: list[World], strangers: list[Attendee], rng: np.rand
         per_world[i % len(worlds)].append(a)
     for w, pool in zip(worlds, per_world):
         n = len(w.meetings)
-        if not n or not pool:
-            continue
-        slots = rng.choice(n, len(pool), replace=len(pool) > n)
-        for a, s in zip(pool, slots):
-            w.meetings[int(s)].attendees.append(a)
+        n_drop = min(len(pool), (n + 1) // 2) if n else 0
+        load = Counter()
+        for a in pool[:n_drop]:
+            open_slots = [i for i in range(n) if load[i] < MAX_DROPINS]
+            i = open_slots[int(rng.integers(len(open_slots)))]
+            load[i] += 1
+            w.meetings[i].attendees.append(a)
+        rest = pool[n_drop:]
+        k = 0
+        while k < len(rest):
+            size = min(int(rng.integers(2, 5)), len(rest) - k)
+            call = Meeting(f"{w.wid}:oneoff{k}", "oneoff", list(rest[k:k + size]), frozenset())
+            w.meetings.insert(int(rng.integers(len(w.meetings) + 1)), call)
+            k += size
 
 
 def build_worlds(si: SetInfo, split_map: dict[str, int], split: int, rep: int, world_size: int = 40,
@@ -526,7 +572,7 @@ def _natural_worlds(si, S, split, rep, rng, world_size, hold_frac) -> list[World
             continue
         regs_here = [p for p in people if p in reg_set]
         if regs_here:
-            per_world[world_of[regs_here[0]]][group_key(ses)].append((ses, people))
+            per_world[world_of[regs_here[0]]][si.group_of.get(ses) or group_key(ses)].append((ses, people))
         else:
             orphan.append((ses, people))
     worlds: list[World] = []
@@ -534,15 +580,15 @@ def _natural_worlds(si, S, split, rep, rng, world_size, hold_frac) -> list[World
         groups: dict[str, list[Meeting]] = {}
         for g, items in groups_raw.items():
             roster = frozenset(p for _, ppl in items for p in ppl if p in reg_set)
-            groups[g] = [Meeting(f"{si.name}:{ses}", g, [Attendee(p, ses, p not in reg_set) for p in ppl], roster)
-                         for ses, ppl in sorted(items)]
+            items = sorted(items, key=lambda it: si.order_of.get(it[0], (0.0, "", it[0])))
+            groups[g] = [Meeting(ses, g, [Attendee(p, ses, p not in reg_set) for p in ppl], roster) for ses, ppl in items]
         worlds.append(World(si.name, split, rep, f"{si.name}/s{split}/r{rep}/w{wi}", stagger(groups, rng)))
     if not worlds and orphan:
         worlds.append(World(si.name, split, rep, f"{si.name}/s{split}/r{rep}/w0", []))
     for ses, people in orphan:  # sessions with only one-off people: drop them in as-is
         w = worlds[hnum("orphan", ses) % len(worlds)]
         w.meetings.insert(hnum("orphanpos", ses) % (len(w.meetings) + 1),
-                          Meeting(f"{si.name}:{ses}", group_key(ses), [Attendee(p, ses, True) for p in people], frozenset()))
+                          Meeting(ses, si.group_of.get(ses) or group_key(ses), [Attendee(p, ses, True) for p in people], frozenset()))
     strangers = [Attendee(p, _pick_session(si, p, rng), True) for p in sorted(held)]
     strangers = [strangers[i] for i in rng.permutation(len(strangers))]
     place_strangers(worlds, strangers, rng)
@@ -748,6 +794,7 @@ class RunResult:
     first_auto: Counter = field(default_factory=Counter)   # appearance index -> regulars, "never"
     elig: dict = field(default_factory=lambda: {"lineup": [], "global": []})  # fully eligible (diagnostic)
     wrong_top: list = field(default_factory=list)      # (similarity, average-based margin) of wrong top candidates
+    wrong_names: list = field(default_factory=list)    # one dict per wrong silent name (dataset speaker ids)
     seconds: float = 0.0
 
     def add(self, other: "RunResult") -> None:
@@ -756,6 +803,7 @@ class RunResult:
         for k in self.elig:
             self.elig[k].extend(other.elig[k])
         self.wrong_top.extend(other.wrong_top)
+        self.wrong_names.extend(other.wrong_names)
         self.seconds += other.seconds
 
 
@@ -914,6 +962,11 @@ def simulate(meetings: list[SimMeeting], bars: Bars, mode: str, events: bool = F
                         p.outc.append("auto")
                     else:
                         decision = "auto_wrong"
+                        res.wrong_names.append({
+                            "meeting": mi, "voice": v.person, "named_as": p.person, "similarity": round(mt["sim"], 4),
+                            "margin": None if mt["avg_second"] is None else round(mt["avg_top"] - mt["avg_second"], 4),
+                            "bar": round(bar, 4), "path": path, "confirmations": len(p.conf),
+                            "first_meeting": is_new, "stranger": v.stranger, "clips": v.nseg})
                         p.outc.append("auto")
                         correct(p, v)
                 elif right:
@@ -1030,7 +1083,10 @@ class Spec:
     meetings: list[SimMeeting]
 
 
-def impostor_scores(si: SetInfo, store: EmbStore, cond: str, speakers: set[str], cap: int = 200_000) -> np.ndarray:
+def pair_scores(si: SetInfo, store: EmbStore, cond: str, speakers: set[str],
+                cap: int = 200_000) -> tuple[np.ndarray, np.ndarray]:
+    """Cosines between session means (all clips) of the given speakers: (different people, same
+    person in different sessions)."""
     keys = [(s, ses) for (s, ses) in sorted(si.clips) if s in speakers]
     vecs, owners = [], []
     for s, ses in keys:
@@ -1039,16 +1095,52 @@ def impostor_scores(si: SetInfo, store: EmbStore, cond: str, speakers: set[str],
             vecs.append(v)
             owners.append(s)
     if len(vecs) < 2:
-        return np.zeros(0, dtype=np.float32)
+        return np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.float32)
     X = np.stack(vecs)
     S = X @ X.T
     iu = np.triu_indices(len(X), 1)
     own = np.array(owners)
-    mask = own[iu[0]] != own[iu[1]]
-    scores = S[iu][mask]
-    if len(scores) > cap:
-        scores = scores[rng_for("imp", si.name, cond).choice(len(scores), cap, replace=False)]
-    return scores.astype(np.float32)
+    same = own[iu[0]] == own[iu[1]]
+    flat = S[iu]
+    imp, gen = flat[~same], flat[same]
+    if len(imp) > cap:
+        imp = imp[rng_for("imp", si.name, cond).choice(len(imp), cap, replace=False)]
+    return imp.astype(np.float32), gen.astype(np.float32)
+
+
+def lookalike_pairs(si: SetInfo, store: EmbStore, cond: str, speakers: set[str], bar: float,
+                    top_n: int = 5) -> dict:
+    """World-free worst case at a bar: person B has a profile from their first two sessions (as
+    after two confirmations); does any single session of a different person A clear the bar
+    against it? Counts ordered pairs (A, B). Session means use all clips."""
+    means: dict[str, list[np.ndarray]] = defaultdict(list)
+    for spk in sorted(speakers):
+        for ses in si.sessions_of.get(spk, []):
+            v = store.sample(si.name, cond, si.clips[(spk, ses)])
+            if v is not None:
+                means[spk].append(v)
+    people = sorted(p for p in means if means[p])
+    owners = [p for p in people if len(means[p]) >= 2]
+    if not owners or len(people) < 2:
+        return {"pairs_checked": 0, "pairs_over_bar": 0, "worst": []}
+    P = np.stack([unit(np.mean(means[b][:2], axis=0)) for b in owners])
+    X = np.concatenate([np.stack(means[a]) for a in people])
+    who = np.array([a for a in people for _ in means[a]])
+    S = X @ P.T
+    over, worst = 0, []
+    for j, b in enumerate(owners):
+        col = S[:, j]
+        others = who != b
+        best: dict[str, float] = {}
+        for a, sim in zip(who[others], col[others]):
+            best[a] = max(best.get(a, -1.0), float(sim))
+        for a, sim in best.items():
+            if sim > bar:
+                over += 1
+            worst.append((sim, a, b))
+    worst.sort(reverse=True)
+    return {"pairs_checked": sum(len(people) - 1 for _ in owners), "pairs_over_bar": over,
+            "worst": [{"voice": a, "profile": b, "similarity": round(x, 4)} for x, a, b in worst[:top_n]]}
 
 
 def run_pool(specs: list[Spec], bars: Bars, events: bool = False) -> RunResult:
@@ -1070,28 +1162,28 @@ def tail_fit(sims: np.ndarray, tail_reps: float) -> dict | None:
     """
     if len(sims) < 50:
         return None
-    k = max(10, int(math.ceil(TAIL_FRAC * len(sims))))
+    k = max(TAIL_MIN, int(math.ceil(TAIL_FRAC * len(sims))))
     srt = np.sort(sims)
     u = float(srt[-(k + 1)])
     beta = max(float((srt[-k:] - u).mean()), 1e-4)
     return {"u": u, "beta": beta, "k": k, "bar": u + beta * math.log(tail_reps * k), "max": float(srt[-1])}
 
 
-def calibrate_auto(specs: list[Spec], floor: float, remap: Remap, tail_reps: float,
+def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, tail_reps: float, fixed_margins: bool,
                    max_iter: int = 6) -> tuple[float, float, list[dict]]:
     """Lowest safe auto bars (see module doc). Returns (A_L, A_G, trace)."""
     AL = AG = math.inf
     trace = []
     for it in range(max_iter):
-        bars = make_bars(floor, AL, AG, remap)
+        bars = make_bars(floor, AL, AG, geo, fixed_margins)
         r = run_pool(specs, bars, events=True)
         sims = np.array([x for x, _ in r.wrong_top]) if r.wrong_top else np.zeros(0)
         margins = np.array([m for _, m in r.wrong_top]) if r.wrong_top else np.zeros(0)
         tail = tail_fit(sims, tail_reps)
         # Zero-wrong bar: the highest impostor that tops the lineup by the path's margin, whatever
         # its confirmations (those depend on the run; the voice geometry doesn't).
-        clearL = sims[margins >= APP["margin_lineup"]]
-        clearG = sims[margins >= APP["margin_global"]]
+        clearL = sims[margins >= bars.margin_lineup]
+        clearG = sims[margins >= bars.margin_global]
         eL = float(clearL.max()) if len(clearL) else None
         eG = float(clearG.max()) if len(clearG) else None
         if tail is None:
@@ -1120,13 +1212,14 @@ def calibrate_auto(specs: list[Spec], floor: float, remap: Remap, tail_reps: flo
     return AL, AG, trace
 
 
-def calibrate(specs: list[Spec], imp: np.ndarray, remap: Remap, tail_reps: float) -> tuple[Bars, dict]:
-    grid = [(far, float(np.quantile(imp, 1 - far))) for far in FAR_GRID] if len(imp) else [(FAR_START, remap(APP["floor_many"]))]
+def calibrate(specs: list[Spec], imp: np.ndarray, geo: Geometry, tail_reps: float,
+              fixed_margins: bool = False) -> tuple[Bars, dict]:
+    grid = [(far, float(np.quantile(imp, 1 - far))) for far in FAR_GRID] if len(imp) else [(FAR_START, geo.map(APP["floor_many"]))]
     F0 = next((f for far, f in grid if far == FAR_START), grid[len(grid) // 2][1])
-    AL, AG, trace0 = calibrate_auto(specs, F0, remap, tail_reps)
+    AL, AG, trace0 = calibrate_auto(specs, F0, geo, tail_reps, fixed_margins)
     sweep = []
     for far, F in grid:
-        r = run_pool(specs, make_bars(F, AL, AG, remap))
+        r = run_pool(specs, make_bars(F, AL, AG, geo, fixed_margins))
         sweep.append({"far": far, "floor": round(F, 4), "work_per_meeting": round(r.counts["work"] / max(1, r.counts["meetings"]), 4),
                       "wrong_silent": r.counts["auto_wrong"], "wrong_suggestions": r.counts["suggest_wrong"],
                       "auto_named": r.counts["auto_ok"], "_work": r.counts["work"]})
@@ -1134,8 +1227,8 @@ def calibrate(specs: list[Spec], imp: np.ndarray, remap: Remap, tail_reps: float
     best = min(s["_work"] for s in ok)
     chosen = max((s for s in ok if s["_work"] <= best * 1.02), key=lambda s: s["floor"])
     F = chosen["floor"]
-    AL, AG, trace1 = calibrate_auto(specs, F, remap, tail_reps)
-    bars = make_bars(F, AL, AG, remap)
+    AL, AG, trace1 = calibrate_auto(specs, F, geo, tail_reps, fixed_margins)
+    bars = make_bars(F, AL, AG, geo, fixed_margins)
     for s in sweep:
         s.pop("_work")
     info = {"tail_reps": tail_reps, "tail_final": trace1[-1]["tail"],
@@ -1184,9 +1277,10 @@ class Options:
     conds: list[str] | None = None
     talks: tuple[str, ...] = TALKS
     modes: tuple[str, ...] = MODES
-    reps: int = 2
+    reps: int = 4
     world_size: int = 40
     tail_reps: float = TAIL_REPS
+    fixed_margins: bool = False
     natural: tuple[str, ...] = NATURAL_PREFIXES
     mixed: bool = True
 
@@ -1249,60 +1343,78 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
     folds = []
     rows = []
     for fold, (cal, test) in enumerate(((0, 1), (1, 0))):
-        imp_parts, base_parts, remap_pairs = [], [], []
+        imp_parts, anchor_m, anchor_b, anchor_pairs = [], ([], []), ([], []), []
         for s, si in sets.items():
             spk = {p for p, v in split_maps[s].items() if v == cal}
             for cond in conds_of[s]:
                 if cond == "mixed":
                     continue
-                sc = impostor_scores(si, store, cond, spk)
-                imp_parts.append(sc)
-                if base_store is not None and base_store.get(s, cond) is not None:
-                    bs = impostor_scores(si, base_store, cond, spk)
-                    if len(bs) and len(sc):
-                        base_parts.append(bs)
-                        remap_pairs.append(f"{s}__{cond}")
+                imp_m, gen_m = pair_scores(si, store, cond, spk)
+                imp_parts.append(imp_m)
+                if base_store is not None and base_store.get(s, cond) is not None and len(imp_m) and len(gen_m):
+                    imp_b, gen_b = pair_scores(si, base_store, cond, spk)
+                    if len(imp_b) and len(gen_b):
+                        anchor_m[0].append(imp_m)
+                        anchor_m[1].append(gen_m)
+                        anchor_b[0].append(imp_b)
+                        anchor_b[1].append(gen_b)
+                        anchor_pairs.append(f"{s}__{cond}")
         imp = np.concatenate(imp_parts) if imp_parts else np.zeros(0, np.float32)
         if is_baseline:
-            remap, remap_desc = identity_remap, "identity (this is the baseline)"
-        elif base_parts:
-            model_imp = np.concatenate([impostor_scores(sets[p.split("__")[0]], store, p.split("__")[1],
-                                                        {q for q, v in split_maps[p.split("__")[0]].items() if v == cal})
-                                        for p in remap_pairs])
-            remap, remap_desc = far_remap(model_imp, np.concatenate(base_parts)), f"equal-FAR vs {baseline_id} on {len(remap_pairs)} set/cond"
+            geo = Geometry(note="identity (this is the baseline)")
+        elif anchor_pairs:
+            med = lambda parts: float(np.median(np.concatenate(parts)))  # noqa: E731
+            geo = Geometry(med(anchor_m[0]), med(anchor_m[1]), med(anchor_b[0]), med(anchor_b[1]),
+                           f"linear vs {baseline_id} on {', '.join(anchor_pairs)}")
+            if not geo.scale > 0:
+                geo = Geometry(note=f"identity (no genuine/impostor gap vs {baseline_id})")
         else:
-            remap, remap_desc = identity_remap, "identity (no baseline embeddings on these sets)"
+            geo = Geometry(note="identity (no baseline embeddings on these sets)")
         cal_specs = specs[cal]
         if not cal_specs:
             continue
         log(f"{model_id}: fold {fold} calibrating on {len(cal_specs)} runs")
-        bars, info = calibrate(cal_specs, imp, remap, opts.tail_reps)
-        info["remap"] = remap_desc
-        info["remapped_constants"] = {str(k): round(remap(k), 4) for k in (0.70, 0.72, 0.74, 0.75, 0.78, 0.80, 0.85)}
+        bars, info = calibrate(cal_specs, imp, geo, opts.tail_reps, opts.fixed_margins)
+        info["geometry"] = geo.public()
         info["impostor_pairs"] = int(len(imp))
-        folds.append({"fold": fold, "calib_split": cal, "test_split": test, "bars": bars.public(), "calibration": info})
+        look = {}
+        for s_name, si in sets.items():
+            spk_test = {p for p, v in split_maps[s_name].items() if v == test}
+            for cond in conds_of[s_name]:
+                if cond != "mixed":
+                    look[f"{s_name}__{cond}"] = lookalike_pairs(si, store, cond, spk_test, bars.auto_lineup)
+        folds.append({"fold": fold, "calib_split": cal, "test_split": test, "bars": bars.public(), "calibration": info,
+                      "test_lookalikes": look,
+                      "test_lookalike_pairs_over_bar": sum(v["pairs_over_bar"] for v in look.values()),
+                      "test_lookalike_pairs_checked": sum(v["pairs_checked"] for v in look.values())})
         for split_name, split in (("calib", cal), ("test", test)):
             for sp in specs[split]:
                 r = simulate(sp.meetings, bars, sp.mode)
                 rows.append({"set": sp.set, "cond": sp.cond, "talk": sp.talk, "mode": sp.mode, "fold": fold,
-                             "split": split_name, "counts": dict(r.counts), "first_auto": dict(r.first_auto)})
+                             "split": split_name, "counts": dict(r.counts), "first_auto": dict(r.first_auto),
+                             "wrong_names": r.wrong_names})
+    rows = merge_rows(rows)
     app_rows = []
     if is_baseline:
         for split in (0, 1):
             for sp in specs[split]:
                 r = simulate(sp.meetings, APP_BARS, sp.mode)
                 app_rows.append({"set": sp.set, "cond": sp.cond, "talk": sp.talk, "mode": sp.mode, "fold": "app",
-                                 "split": f"half{split}", "counts": dict(r.counts), "first_auto": dict(r.first_auto)})
+                                 "split": f"half{split}", "counts": dict(r.counts), "first_auto": dict(r.first_auto),
+                                 "wrong_names": r.wrong_names})
+    app_rows = merge_rows(app_rows)
     out = {
         "model_id": model_id, "baseline": is_baseline, "family": meta.get("family"), "dim": meta.get("dim") or store.dim,
         "params_m": meta.get("params_m"), "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "inputs": input_fingerprint(store, list(sets)), "sets": {s: conds_of[s] for s in sets}, "splits": split_info,
         "options": {"talks": list(opts.talks), "modes": list(opts.modes), "reps": opts.reps, "world_size": opts.world_size,
-                    "tail_reps": opts.tail_reps},
+                    "tail_reps": opts.tail_reps, "fixed_margins": opts.fixed_margins},
         "policy": {"app_constants": APP, "cost": COST, "far_grid": FAR_GRID, "app_bars": APP_BARS.public()},
         "voices_dropped_missing_embeddings": dropped,
         "folds": folds,
         "pooled": pooled_views(rows, app_rows),
+        "wrong_silent_name_events": wrong_name_events(rows),
+        "app_bar_wrong_silent_name_events": wrong_name_events(app_rows),
         "rows": [finish_row(r) for r in rows],
         "app_bar_rows": [finish_row(r) for r in app_rows],
         "runtime_s": round(time.time() - t_start, 1),
@@ -1310,9 +1422,36 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
     return out
 
 
+def merge_rows(rows: list[dict]) -> list[dict]:
+    """Sum runs that share (set, cond, talk, mode, fold, split): worlds and reps become one row."""
+    keyf = ("set", "cond", "talk", "mode", "fold", "split")
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        k = tuple(r[f] for f in keyf)
+        if k not in out:
+            out[k] = {**{f: r[f] for f in keyf}, "counts": Counter(), "first_auto": Counter(), "wrong_names": []}
+        out[k]["counts"].update(r["counts"])
+        out[k]["first_auto"].update(r["first_auto"])
+        out[k]["wrong_names"].extend(r.get("wrong_names") or [])
+    return [{**v, "counts": dict(v["counts"]), "first_auto": dict(v["first_auto"])} for v in out.values()]
+
+
 def finish_row(r: dict) -> dict:
-    return {**{k: r[k] for k in ("set", "cond", "talk", "mode", "fold", "split")}, **derive(r["counts"], r["first_auto"]),
-            "counts": r["counts"], "first_auto_hist": r["first_auto"]}
+    out = {**{k: r[k] for k in ("set", "cond", "talk", "mode", "fold", "split")}, **derive(r["counts"], r["first_auto"]),
+           "counts": r["counts"], "first_auto_hist": r["first_auto"]}
+    if r.get("wrong_names"):
+        out["wrong_name_events"] = r["wrong_names"]
+    return out
+
+
+def wrong_name_events(rows: list[dict]) -> list[dict]:
+    """Every wrong silent name, with its run context. The same voice usually recurs across talk
+    times and lineup modes, so `distinct` groups by (split, fold, set, voice, named_as)."""
+    out = []
+    for r in rows:
+        for e in r.get("wrong_names") or []:
+            out.append({**{k: r[k] for k in ("split", "fold", "set", "cond", "talk", "mode")}, **e})
+    return out
 
 
 def pool(rows: list[dict], pred: Callable[[dict], bool]) -> dict | None:
@@ -1364,11 +1503,12 @@ def fmt(v, pct: bool = False, nd: int = 2) -> str:
 
 
 def first_auto_cell(p: dict | None) -> str:
-    if not p:
+    if not p or not p.get("regulars"):
         return "–"
     med = p["first_auto_median"]
     p90 = p["first_auto_p90"]
-    return f"{med if med is not None else 'never'} / {p90 if p90 is not None else 'never'}"
+    ever = 1 - (p.get("never_auto_share") or 0)
+    return f"{med if med is not None else 'never'} / {p90 if p90 is not None else 'never'} ({fmt(ever, pct=True)})"
 
 
 def write_summary(results_dir: Path, out_path: Path) -> str:
@@ -1384,7 +1524,8 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
              "both ways (2 folds), pooled over sets, talk times (1 / 3 / all clips) and lineup modes "
              "(calendar invite / 12 most recent). Clean = `clean`; call = opus12, phone, noisy and mixed.", "",
              "Ranked by the share of a regular's appearances named automatically from their 3rd meeting on, "
-             "among models with zero wrong silent names. **Wrong silent names must be 0.**", ""]
+             "among models with zero wrong silent names (then models with look-alike pairs over their bar, then "
+             "models with wrong names). **Wrong silent names must be 0.**", ""]
     if not docs:
         lines.append("No results yet.")
         text = "\n".join(lines) + "\n"
@@ -1394,13 +1535,20 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
     def key(d):
         t = d["pooled"]["test"]["all"] or {}
         wrong = (t.get("wrong_silent_names") or 0) + ((d["pooled"]["calib"]["all"] or {}).get("wrong_silent_names") or 0)
-        return (wrong > 0, -(t.get("auto_share_from_meeting3") or 0), t.get("work_per_meeting") or 99)
+        look = sum(f.get("test_lookalike_pairs_over_bar", 0) for f in d.get("folds", []))
+        return (wrong > 0, look > 0, -(t.get("auto_share_from_meeting3") or 0), t.get("work_per_meeting") or 99)
+
+    def worst_lookalikes(d) -> str:
+        items = [(w["similarity"], w["voice"], w["profile"], f["bars"]["auto_lineup"])
+                 for f in d.get("folds", []) for v in f.get("test_lookalikes", {}).values() for w in v["worst"]]
+        items = [x for x in sorted(items, reverse=True) if x[0] > x[3]]
+        return "; ".join(f"{a} as {b} {s:.3f} (bar {bar:.3f})" for s, a, b, bar in items[:3])
 
     docs.sort(key=key)
-    lines += ["| # | model | wrong silent names clean / call | strangers wrongly named | wrong suggestions | "
+    lines += ["| # | model | wrong silent names clean / call | look-alike pairs over bar | strangers wrongly named | wrong suggestions | "
               "auto from mtg 3+ clean | auto from mtg 3+ call | first auto median / p90 clean | first auto median / p90 call | "
               "work per meeting clean / call | coverage | bars fold 0; fold 1 (suggest / lineup / global) |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, d in enumerate(docs, 1):
         t = d["pooled"]["test"]
         cl, ca, al = t["clean"], t["call"], t["all"]
@@ -1411,8 +1559,13 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
         bars = "; ".join(f"{f['bars']['floor']:.2f} / {f['bars']['auto_lineup']:.2f} / {f['bars']['auto_global']:.2f}"
                          for f in d.get("folds", []))
         cov = f"{len(d['sets'])} sets, {sum(len(v) for v in d['sets'].values())} set×cond"
+        look_over = sum(f.get("test_lookalike_pairs_over_bar", 0) for f in d.get("folds", []))
+        look_n = sum(f.get("test_lookalike_pairs_checked", 0) for f in d.get("folds", []))
+        look = f"{look_over} / {look_n}" if look_n else "–"
+        if look_over:
+            look = f"**{look}**"
         lines.append(
-            f"| {i} | {name} | {wrong} | {fmt((al or {}).get('strangers_wrongly_named'))} | "
+            f"| {i} | {name} | {wrong} | {look} | {fmt((al or {}).get('strangers_wrongly_named'))} | "
             f"{fmt((al or {}).get('wrong_suggestions'))} ({fmt((al or {}).get('wrong_suggestion_rate'), pct=True)}) | "
             f"{fmt((cl or {}).get('auto_share_from_meeting3'), pct=True)} | {fmt((ca or {}).get('auto_share_from_meeting3'), pct=True)} | "
             f"{first_auto_cell(cl)} | {first_auto_cell(ca)} | "
@@ -1446,13 +1599,35 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
             cells = ["–" if not bm.get(m) else f"{fmt(bm[m]['auto_share_from_meeting3'], pct=True)} · {bm[m]['wrong_silent_names']}"
                      for m in ("invite", "recent")]
             lines.append(f"| {d['model_id']} | " + " | ".join(cells) + " |")
+    bad = [(d, e) for d in docs for e in d.get("wrong_silent_name_events", []) if e["split"] == "test"]
+    if bad:
+        lines += ["", "Wrong silent names on held-out speakers (one row per distinct voice → name; runs = how many "
+                  "cond × talk × mode runs repeated it):", "",
+                  "| model | set | voice | named as | similarity (max) | bar | lineup path | first meeting | runs |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        groups: dict[tuple, list[dict]] = defaultdict(list)
+        for d, e in bad:
+            groups[(d["model_id"], e["set"], e["voice"], e["named_as"])].append(e)
+        for (mid, st, voice, named), es in sorted(groups.items()):
+            lines.append(f"| {mid} | {st} | {voice} | {named} | {max(x['similarity'] for x in es):.3f} | "
+                         f"{min(x['bar'] for x in es):.3f} | {'/'.join(sorted({x['path'] for x in es}))} | "
+                         f"{'yes' if any(x['first_meeting'] for x in es) else 'no'} | {len(es)} |")
+    risky = [(d["model_id"], worst_lookalikes(d)) for d in docs if worst_lookalikes(d)]
+    if risky:
+        lines += ["", "Look-alike pairs over the lineup bar on held-out speakers (world-free worst case: B has a profile from two "
+                  "sessions, one session of A clears the bar against it):", ""]
+        lines += [f"- {mid}: {txt}" for mid, txt in risky]
     calib_wrong = [d["model_id"] for d in docs if (d["pooled"]["calib"]["all"] or {}).get("wrong_silent_names")]
     lines += ["", "Notes:",
               "- Work: type a name 3, pick an existing person 2, confirm a suggestion 1, correct a wrong suggestion 3, "
               "fix a wrong silent name 10.",
               "- A 'regular' has 3+ meetings; 'first auto' is the regular's own meeting number (3 is the earliest the "
-              "lineup ladder allows). 'never' = more than that share of regulars was never named silently.",
+              "lineup ladder allows); 'never' = more than that share of regulars was never named silently; the "
+              "percentage is the share of regulars named silently at least once.",
               "- Strangers wrongly named = silent names on one-off strangers or on anyone's first meeting.",
+              "- Look-alike pairs over bar = held-out (A, B) pairs where one session of A clears the lineup bar against B's "
+              "two-session profile (ignores the margin rule and who is in the meeting, so it over-counts; a nonzero value is "
+              "a wrong-name risk the random meetings may not have hit).",
               "- Bars: suggest floor (4+ segments) / lineup auto bar / global auto bar, in each model's own cosine units.",
               "- Coverage differs while embeddings land; compare models on the same coverage before drawing conclusions."]
     if calib_wrong:
@@ -1482,7 +1657,8 @@ def run_one(args: tuple[str, Options, bool]) -> tuple[str, str]:
     if out_path.exists() and not force:
         try:
             old = json.loads(out_path.read_text())
-            if old.get("inputs") == fp and old.get("options", {}).get("tail_reps") == opts.tail_reps:
+            if (old.get("inputs") == fp and old.get("options", {}).get("tail_reps") == opts.tail_reps
+                    and old.get("options", {}).get("fixed_margins", False) == opts.fixed_margins):
                 return model_id, "up to date"
         except Exception:
             pass
@@ -1506,10 +1682,12 @@ def main() -> int:
     ap.add_argument("--conds", help="comma-separated conditions (default: all present, plus mixed)")
     ap.add_argument("--talks", default=",".join(TALKS))
     ap.add_argument("--modes", default=",".join(MODES))
-    ap.add_argument("--reps", type=int, default=2, help="reseeded worlds per split")
+    ap.add_argument("--reps", type=int, default=4, help="reseeded worlds per split")
     ap.add_argument("--world-size", type=int, default=40)
     ap.add_argument("--tail-reps", type=float, default=TAIL_REPS,
                     help="auto bars must hold for this many calibration halves' worth of impostors (tail extrapolation)")
+    ap.add_argument("--fixed-margins", action="store_true",
+                    help="keep the app's margins at 0.12/0.10 in every model's units instead of scaling them")
     ap.add_argument("--jobs", type=int, default=2, help="models in parallel (max 2 heavy processes per agent)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--summary-only", action="store_true")
@@ -1521,7 +1699,8 @@ def main() -> int:
         opts = Options(sets=args.sets.split(",") if args.sets else None,
                        conds=args.conds.split(",") if args.conds else None,
                        talks=tuple(args.talks.split(",")), modes=tuple(args.modes.split(",")),
-                       reps=args.reps, world_size=args.world_size, tail_reps=args.tail_reps)
+                       reps=args.reps, world_size=args.world_size, tail_reps=args.tail_reps,
+                       fixed_margins=args.fixed_margins)
         models = args.models.split(",") if args.models else discover_models()
         if not models:
             log("no models with embeddings yet")

@@ -97,7 +97,7 @@ def main() -> int:
         "clips": len(ids), "failed": len(failed), "failed_examples": failed[:10],
         "seconds_audio": round(audio_s, 1), "seconds_compute": round(compute_s, 2),
         "ms_per_clip": round(1000 * compute_s / len(ids), 2), "load_s": round(load_s, 2),
-        "model_sig": signature, "set_sig": set_sig, "threads": args.threads, "device": getattr(embedder, "device", "cpu"),
+        "model_sig": signature, "set_sig": set_sig, "threads": args.threads, "device": str(getattr(embedder, "device", "cpu")),
         "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     (out_dir / f"{stem}.json").write_text(json.dumps(info, indent=1))

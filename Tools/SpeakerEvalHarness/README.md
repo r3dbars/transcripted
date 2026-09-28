@@ -312,6 +312,26 @@ fields may be added within a schema version. Renames or removals bump `schemaVer
   from a path, add a `ThresholdProfile` case in `Replay.swift` (and to `inferred(from:)`), and
   allow the embedder name in the driver. Everything downstream (cache, replay, scoring,
   report, timeline) is keyed by the variant name.
+- **Fused Core ML fingerprint model** (raw 16 kHz audio `[1, N]` -> embedding `[1, D]`, like
+  ERes2Net): no code. Core's `CoreMLSpeakerSegmentEmbedder` runs it, and `meeting-series`
+  takes it from flags, injected into `DiarizationService` for either backend, with the
+  run's throwaway speaker DB named `speakers_<id>.sqlite`:
+
+  ```bash
+  RUN_TAG=vp-<id> bash scripts/speaker_lab/run_set.sh <set> --backend nemotron \
+    --embedder-model <model.mlmodelc> --embedder-id <id> --embedder-dim <D> \
+    [--embedder-thresholds <thresholds.json>] [--embedder-window-s 10 --embedder-hop-s 5] \
+    [--embedder-pooling talk-time|equal]
+  ```
+
+  Accepted lengths come from the model's input shape (a range, enumerated lengths as
+  `scripts/voiceprint/convert_coreml.py` writes by default, or one fixed length); short
+  pieces are tiled up to the next accepted length, and on an enumerated model the window
+  must be one of its lengths (default: the longest up to 30 s). The
+  thresholds file holds the nine `SpeakerEmbeddingThresholds` fields (snake_case or
+  camelCase, optionally under `"thresholds"` beside provenance); without one the run
+  uses WeSpeaker's bars and says so. The model is probed before any meeting, and
+  `lab_result.json` records `embedder` and `embedderThresholds`.
 
 ## Automatic parameter research
 
@@ -449,6 +469,7 @@ hard-capped; there is no "download all of VoxCeleb" path.
 |---|---|
 | `Sources/speaker-eval-harness/main.swift` | wire models, helpers, command entry |
 | `Sources/speaker-eval-harness/Dump.swift` | `dump`: diarize one file per variant (backend × embedder) |
+| `Sources/speaker-eval-harness/LabVoiceprintEmbedder.swift` | `meeting-series --embedder-*`: load and probe a fused Core ML voiceprint model |
 | `Sources/speaker-eval-harness/Replay.swift` | `replay`: clusterer + speaker DB replay with threshold and fingerprint-update knobs |
 | `Sources/speaker-eval-harness/EmbeddingParity.swift` | `embedding-parity`: pyannote's offline WeSpeaker vs the online WeSpeaker embedder on the same segments |
 | `Sources/speaker-eval-harness/AutoResearch.swift` | frozen chronological ASK / SUGGEST / AUTO evaluator |

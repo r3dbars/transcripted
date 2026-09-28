@@ -215,14 +215,17 @@ class LadderOnHandBuiltMeetings(unittest.TestCase):
 
 
 class Helpers(unittest.TestCase):
-    def test_far_remap_is_identity_on_same_distribution_and_monotone(self) -> None:
-        x = np.random.default_rng(0).normal(0.3, 0.1, 50_000)
-        remap = ns.far_remap(x, x)
-        self.assertAlmostEqual(remap(0.5), 0.5, places=2)
-        y = x * 0.5
-        r2 = ns.far_remap(y, x)
-        self.assertAlmostEqual(r2(0.5), 0.25, places=2)
-        self.assertLess(r2(0.4), r2(0.5))
+    def test_geometry_carries_app_constants_between_impostor_and_genuine_medians(self) -> None:
+        self.assertEqual(ns.make_bars(0.7, 0.8, 0.92), ns.APP_BARS)
+        same = ns.Geometry(0.1, 0.7, 0.1, 0.7)
+        self.assertAlmostEqual(same.map(0.8), 0.8)
+        squeezed = ns.Geometry(0.95, 0.98, 0.1, 0.7)  # un-centered x-vector: everything near 1
+        bars = ns.make_bars(0.97, 0.99, 0.99, squeezed)
+        self.assertAlmostEqual(bars.margin_lineup, 0.10 * 0.05)
+        self.assertAlmostEqual(bars.floor_one - bars.floor, 0.15 * 0.05)
+        self.assertAlmostEqual(bars.wb_confident, 0.95 + 0.7 * 0.05)
+        fixed = ns.make_bars(0.97, 0.99, 0.99, squeezed, fixed_margins=True)
+        self.assertEqual(fixed.margin_global, 0.12)
 
     def test_group_keys(self) -> None:
         self.assertEqual(ns.group_key("ami:ES2002a"), "ES2002")
