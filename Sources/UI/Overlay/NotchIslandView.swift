@@ -708,7 +708,6 @@ final class NotchIslandDropView: NSView {
     private let stack = NSStackView()
     private var youLane: NotchIslandBarsView?
     private var callLane: NotchIslandBarsView?
-    private var countdownLabel: NSTextField?
     private var promptCountdownLabel: NSTextField?
     private var countdownButton: NotchIslandButton?
 
@@ -742,9 +741,9 @@ final class NotchIslandDropView: NSView {
 
     var fittingHeight: CGFloat { ceil(stack.fittingSize.height) }
 
-    func updateLive(_ live: NotchIslandLiveValues) {
-        countdownLabel?.stringValue = "Closes in \(max(1, live.callSecondsLeft))s"
-    }
+    /// Nothing in the drop-down reads a live value today: the call prompt's
+    /// countdown is the ring around Not now, which runs by itself.
+    func updateLive(_ live: NotchIslandLiveValues) {}
 
     /// A meeting prompt that only changed its "Ends in 12s" line is updated
     /// in place, so its buttons are not rebuilt under the pointer each second.
@@ -873,16 +872,16 @@ final class NotchIslandDropView: NSView {
             add(buttonRow(leading: [], trailing: trailing))
         case .callPrompt(let title, let detail):
             add(titleBlock(title, detail))
-            let countdown = NotchIslandPalette.label(
-                "Closes in \(max(1, live.callSecondsLeft))s",
-                font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-                color: NotchIslandPalette.secondaryText
-            )
-            countdownLabel = countdown
-            add(countdown)
+            // The countdown is a ring around Not now, like the dictation
+            // Dismiss ring; it pauses while the pointer is over the island.
+            let notNow = NotchIslandButton(title: "Not now", style: .plain)
+            notNow.onPress = { [weak self] in self?.onAction?(.callDismiss) }
+            notNow.setContentHuggingPriority(.required, for: .horizontal)
+            notNow.startCountdown(seconds: Double(max(1, live.callSecondsLeft)))
+            countdownButton = notNow
             add(buttonRow(leading: [], trailing: [
-                button("Not now", .plain, .callDismiss),
-                button("Remind me soon", .plain, .callRemind),
+                notNow,
+                button("Later", .plain, .callRemind),
                 button("Record", .destructive, .callRecord, symbol: "record.circle.fill"),
             ]))
         }

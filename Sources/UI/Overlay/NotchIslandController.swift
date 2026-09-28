@@ -14,6 +14,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var dictationActionHandler: ((NotchIslandAction) -> Void)?
     var meetingActionHandler: ((NotchIslandAction) -> Void)?
     var callActionHandler: ((NotchIslandAction) -> Void)?
+    var callHoverHandler: ((Bool) -> Void)?
     /// The meeting pill's own hover rules (the saved dwell) still apply.
     var meetingHoverHandler: ((Bool) -> Void)?
     /// Right-click menu while a meeting records (Keep Controls Visible,
@@ -531,6 +532,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard hovered != isHovered else { return }
         isHovered = hovered
         meetingHoverHandler?(hovered)
+        if callPrompt != nil { callHoverHandler?(hovered) }
         islandView?.setCountdownPaused(hovered)
         hoverTask?.cancel()
         hoverTask = Task { @MainActor [weak self] in

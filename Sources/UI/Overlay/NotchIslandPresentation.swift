@@ -253,6 +253,9 @@ struct NotchIslandLayout: Equatable {
 @MainActor
 protocol NotchIslandCallPromptPresenting: AnyObject {
     var callActionHandler: ((NotchIslandAction) -> Void)? { get set }
+    /// The pointer entered or left the island while the call prompt is up,
+    /// so the prompt's own timeout can pause with the ring around Not now.
+    var callHoverHandler: ((Bool) -> Void)? { get set }
     func updateCallPrompt(_ content: NotchIslandCallPromptContent?)
     func updateCallPromptSeconds(_ secondsLeft: Int)
 }
