@@ -47,7 +47,7 @@
     "Tests/RetainedDataSourceComboBoxTests.swift": 4,
     "Tests/RetranscribeLocalSpeakerPreferenceContractTests.swift": 4,
     "Tests/STTRouterPolicyTests.swift": 3,
-    "Tests/SentryEventPolicyTests.swift": 8,
+    "Tests/SentryEventPolicyTests.swift": 6,
     "Tests/SingleInstanceGuardTests.swift": 1,
     "Tests/StatusItemPresentationTests.swift": 5,
     "Tests/TestHelpers.swift": 8,

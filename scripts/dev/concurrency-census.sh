@@ -24,7 +24,7 @@ cd "$REPO_ROOT"
 mode="${1:-report}"
 case "$mode" in
     report|--check|--shrink) ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;;
     *) echo "Unknown argument: $mode" >&2; exit 2 ;;
 esac
 

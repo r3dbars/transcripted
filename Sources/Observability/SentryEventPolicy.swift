@@ -43,7 +43,9 @@ struct SentryEventPolicy: Equatable {
         return SentryPayloadSanitizer.sanitizeTags(tags)
     }
 
-    private static let allowedDiagnosticTagKeys: Set<String> = [
+    /// Internal (not private) so tests can check every key against the
+    /// sanitizer directly instead of parsing this file as text.
+    static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
         "app_active",
         "buffer_success_bucket",
