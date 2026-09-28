@@ -184,6 +184,33 @@ enum NotchIslandSpeakerReviewPolicy {
         visible && !hovered
     }
 
+    /// A list where everyone was recognized asks nothing, so it closes on its
+    /// own this long after it arrives, even if it is still waiting hidden
+    /// behind a dictation or the next meeting. It never holds on forever.
+    static let recognizedOnlyHardCapSeconds: Double = 120
+
+    /// How long a review may wait in all before it closes itself: only a
+    /// list with nobody to ask has a cap; a review that asks waits for answers.
+    static func hardCapSeconds(recognizedOnly: Bool) -> Double? {
+        recognizedOnly ? recognizedOnlyHardCapSeconds : nil
+    }
+
+    /// At the cap, a pointer over the island holds the close until it leaves.
+    static func hardCapClosesNow(hovered: Bool) -> Bool {
+        !hovered
+    }
+
+    /// The asked and recognized voices of one review, keyed for looking up
+    /// which voice an answer was about (so "Not Taylor?" corrections report
+    /// the recognized voice's match). An asked voice wins a key collision.
+    static func entriesByKey<Entry>(
+        asked: [Entry],
+        recognized: [Entry],
+        key: (Entry) -> String
+    ) -> [String: Entry] {
+        Dictionary((asked + recognized).map { (key($0), $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     // MARK: Recognized voices
 
     /// The hover offer on a voice Transcripted named by itself.

@@ -21,10 +21,43 @@ final class SpeakerRecognizedReviewPolicyTests: XCTestCase {
         )
     }
 
-    func testAReviewIsQueuedWhenEveryoneWasRecognized() {
-        XCTAssertTrue(SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 0, recognizedVoices: 2), "everyone recognized still shows who was on the call")
-        XCTAssertTrue(SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 1, recognizedVoices: 0))
-        XCTAssertFalse(SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 0, recognizedVoices: 0), "nobody to show, nothing to ask")
+    func testAReviewIsQueuedWhenEveryoneWasRecognizedAndTheIslandListsThem() {
+        XCTAssertTrue(
+            SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 0, recognizedVoices: 2, reviewListsRecognizedVoices: true),
+            "everyone recognized still shows who was on the call in the island"
+        )
+        XCTAssertTrue(SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 1, recognizedVoices: 0, reviewListsRecognizedVoices: true))
+        XCTAssertFalse(
+            SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 0, recognizedVoices: 0, reviewListsRecognizedVoices: true),
+            "nobody to show, nothing to ask"
+        )
+    }
+
+    func testWithoutTheIslandAMeetingWithNobodyToAskFinishesAtOnce() {
+        XCTAssertFalse(
+            SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 0, recognizedVoices: 3, reviewListsRecognizedVoices: false),
+            "the review window has nothing to show, so no review holds the meeting"
+        )
+        XCTAssertTrue(
+            SpeakerNamingPolicy.shouldQueueSpeakerReview(askedVoices: 2, recognizedVoices: 3, reviewListsRecognizedVoices: false),
+            "a voice to ask about still gets the window"
+        )
+    }
+
+    func testOnlyAReviewWithAskedVoicesAwaitsAnswers() {
+        func request(asked: [SpeakerNamingEntry], recognized: [SpeakerNamingEntry]) -> SpeakerNamingRequest {
+            SpeakerNamingRequest(
+                speakers: asked,
+                recognizedSpeakers: recognized,
+                transcriptURL: URL(fileURLWithPath: "/nonexistent/Call.md"),
+                transcriptId: UUID(),
+                systemAudioURL: URL(fileURLWithPath: "/nonexistent/system.wav"),
+                micAudioURL: nil,
+                onComplete: { _ in }
+            )
+        }
+        XCTAssertFalse(request(asked: [], recognized: [entry("1", name: "Taylor Wolf")]).asksAboutVoices)
+        XCTAssertTrue(request(asked: [entry("0", name: nil)], recognized: []).asksAboutVoices)
     }
 
     func testUncorrectedRecognizedVoicesAreNotSavedAgain() {

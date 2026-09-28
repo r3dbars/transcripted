@@ -247,11 +247,18 @@ public enum SpeakerNamingPolicy {
         )
     }
 
-    /// A meeting gets a review when a voice needs an answer, and also when
-    /// every voice was recognized, so the person always sees who was on the
-    /// call and can correct a wrong name.
-    public static func shouldQueueSpeakerReview(askedVoices: Int, recognizedVoices: Int) -> Bool {
-        askedVoices > 0 || recognizedVoices > 0
+    /// A meeting gets a review when a voice needs an answer. When the review
+    /// lists recognized voices (the Notch island's "who was on the call"), a
+    /// meeting where everyone was recognized gets one too, so the person sees
+    /// who was on the call and can correct a wrong name. The review window
+    /// has nothing to show for such a meeting, so without the island the
+    /// meeting finishes saving at once instead of holding a review nobody sees.
+    public static func shouldQueueSpeakerReview(
+        askedVoices: Int,
+        recognizedVoices: Int,
+        reviewListsRecognizedVoices: Bool
+    ) -> Bool {
+        askedVoices > 0 || (reviewListsRecognizedVoices && recognizedVoices > 0)
     }
 
     /// Which review rows go to the naming coordinator when a review closes.

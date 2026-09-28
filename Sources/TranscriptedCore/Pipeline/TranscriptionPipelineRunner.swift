@@ -780,9 +780,14 @@ extension TranscriptionTaskManager {
         // about, but the review lists them with a clip each so a wrong
         // auto-name can be corrected ("Not Taylor?") and land as a correction
         // on the lifeline. A meeting where everyone was recognized still gets
-        // this list.
+        // this list. Only the Notch island shows it; the review window never
+        // does, so without the island no clips are cut and a meeting with
+        // nobody to ask finishes saving at once.
+        let reviewListsRecognizedVoices = await MainActor.run {
+            self.reviewListsRecognizedVoicesProvider?() ?? false
+        }
         var recognizedEntries: [SpeakerNamingEntry] = []
-        if !autoAcceptedIds.isEmpty {
+        if reviewListsRecognizedVoices && !autoAcceptedIds.isEmpty {
             do {
                 let recognizedUtterances = result.systemUtterances.filter {
                     autoAcceptedIds.contains(String($0.speakerId))
@@ -826,7 +831,8 @@ extension TranscriptionTaskManager {
 
         if SpeakerNamingPolicy.shouldQueueSpeakerReview(
             askedVoices: namingEntries.count,
-            recognizedVoices: recognizedEntries.count
+            recognizedVoices: recognizedEntries.count,
+            reviewListsRecognizedVoices: reviewListsRecognizedVoices
         ) {
             // Seed knownPeople with existing named DB profiles so the sheet's combobox has
             // suggestions. Previously this was always empty — users typed blind.

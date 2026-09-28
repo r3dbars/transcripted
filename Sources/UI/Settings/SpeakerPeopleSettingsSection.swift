@@ -407,6 +407,90 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
+    /// A queued voice was given the name of a person already saved (an invitee
+    /// chip or a typed "Alice"), so it joins them instead of becoming a second
+    /// Alice. One transaction does what naming the voice and merging it would:
+    /// each queued row is named with a `user_manual` source, every reference
+    /// moves to the kept person, and each queued meeting records a confirmation
+    /// for them, the same as a `.merged` answer in the island or review window.
+    /// Transcripts roll back if the database step fails.
+    func mergePendingReviewItem(
+        _ item: SpeakerPendingReviewItem,
+        into target: SpeakerProfile,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        let sourceId = item.speakerId
+        let targetId = target.id
+        guard sourceId != targetId else {
+            completion?(false)
+            return
+        }
+        let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == sourceId }
+        let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
+        let reviewedRows = matchingReviewItems.map { reviewItem in
+            TranscriptSaver.DeferredSpeakerNameUpdate(
+                transcriptURL: reviewItem.transcriptURL,
+                dbId: sourceId,
+                diarizerSpeakerId: reviewItem.diarizerSpeakerId,
+                channel: reviewItem.channel
+            )
+        }
+        let confirmedTranscriptIds = matchingReviewItems.compactMap(\.transcriptId)
+        let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var didMerge = false
+            do {
+                let outcome = try SpeakerIdentityMutationService.apply(
+                    .mergeReviewedVoice(
+                        sourceId: sourceId,
+                        targetId: targetId,
+                        reviewedRows: reviewedRows,
+                        confirmedTranscriptIds: confirmedTranscriptIds
+                    ),
+                    speakerDB: speakerDatabase,
+                    directory: transcriptDirectory,
+                    clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
+                        onMergeCommitted: { sourceId, targetId in
+                            Self.promoteClipIfNeeded(
+                                from: sourceId,
+                                to: targetId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                            Self.deleteClips(
+                                for: sourceId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                        }
+                    )
+                )
+                if !outcome.succeeded {
+                    AppLogger.speakers.error("Queued voice merge into saved person failed", [
+                        "sourceId": sourceId.uuidString,
+                        "targetId": targetId.uuidString
+                    ])
+                }
+                didMerge = outcome.succeeded
+            } catch {
+                Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
+            }
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
+            DispatchQueue.main.async {
+                self?.applySnapshot(snapshot)
+                completion?(didMerge)
+            }
+        }
+    }
+
     /// "This is me" for a queued voice: assigns the shared owner identity
     /// (`SpeakerNameSelectionPolicy.ownerLabel`, "You") used consistently
     /// across Settings and the post-meeting naming sheet.
@@ -1555,7 +1639,7 @@ private struct SpeakerVoiceToNameRow: View {
             id: \.id,
             displayName: \.displayName
         ) {
-            model.merge(source: voice, into: existing) { didSave in
+            model.mergePendingReviewItem(group.representative, into: existing) { didSave in
                 isSaving = false
                 if didSave {
                     nameDraft = ""

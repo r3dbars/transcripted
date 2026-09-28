@@ -194,6 +194,17 @@ final class MeetingSessionController: ObservableObject {
     /// The quiet "Mic only" note on the recording pill, set for a recording
     /// that never built the system-audio tap. See `MeetingMicOnlyNotice`.
     @Published private(set) var micOnlyNotice: MeetingMicOnlyNotice?
+    /// The Notch island asks about call audio during this meeting: the start
+    /// recorded the mic only and asks while it records. Raised from the
+    /// start's outcome and tied to that start (`MeetingCallAudioAsk`).
+    @Published private(set) var asksAboutCallAudioWhileRecording = false
+    private var callAudioAsk = MeetingCallAudioAsk() {
+        didSet {
+            if asksAboutCallAudioWhileRecording != callAudioAsk.isAsking {
+                asksAboutCallAudioWhileRecording = callAudioAsk.isAsking
+            }
+        }
+    }
     @Published private(set) var artifactRecoveryAlert: MeetingArtifactRecoveryAlert?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
@@ -437,6 +448,17 @@ final class MeetingSessionController: ObservableObject {
         #endif
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
         state = newState
+        switch newState {
+        case .startingRecording, .recording:
+            callAudioAsk.meetingStateChanged(isStartingOrRecording: true)
+        default:
+            callAudioAsk.meetingStateChanged(isStartingOrRecording: false)
+        }
+    }
+
+    /// The island's call-audio ask was answered or dismissed.
+    func dismissCallAudioAsk() {
+        callAudioAsk.dismissed()
     }
 
     /// Reports a failure that is NOT about this session's own live capture
@@ -850,6 +872,14 @@ final class MeetingSessionController: ObservableObject {
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
         defer { startRecordingCallInFlight = false }
+        // The call-audio ask belongs to this start: a start that ends without
+        // recording drops it, so the next meeting never shows a stale one.
+        callAudioAsk.startAttemptBegan()
+        defer {
+            let isRecordingNow: Bool
+            if case .recording = state { isRecordingNow = true } else { isRecordingNow = false }
+            callAudioAsk.startAttemptEnded(recording: isRecordingNow)
+        }
         recordingSTTModel = sttRouter.selectedModel
         recordingLanguageSelection = TranscriptionLanguageSelection(
             rawValue: TranscriptionLanguagePreferences.effectiveLanguageCode(for: recordingSTTModel)
@@ -1202,6 +1232,9 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         MeetingMicOnlyChoicePreference.reconcile(isDenied: systemStatus == .denied, outcome: outcome)
+        // Raised from the outcome, not from inside the prompter, so a
+        // first-time macOS Don't Allow asks too. One ask per meeting.
+        callAudioAsk.accessResolved(outcome)
         // The status after any macOS box, so logs show the answer, not just
         // the state before the question.
         let systemStatusAfter = systemStatus == .authorized
@@ -3330,8 +3363,12 @@ final class MeetingSessionController: ObservableObject {
         transcriptionQueue.queuedTranscriptionJobs.count
     }
 
+    /// A speaker review is waiting on answers. The island's "who was on the
+    /// call" list for a meeting where everyone was recognized doesn't count:
+    /// nothing in it needs an answer, so it never blocks a failed-meeting
+    /// retry or defers an update install.
     var isSpeakerReviewPending: Bool {
-        taskManager.speakerNamingRequest != nil
+        taskManager.hasSpeakerReviewAwaitingAnswers
     }
 
     private var hasVisibleBackgroundTranscriptionWork: Bool {

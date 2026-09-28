@@ -181,6 +181,12 @@ public class TranscriptionTaskManager: ObservableObject {
     /// Called once per transcription run with the meeting's recording date; imported
     /// files never call it (their date can't name a meeting).
     public var lineupNamingProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerNamingPolicy.LineupRequest?)?
+    /// True when the speaker review lists voices that were named on their own
+    /// (the Notch island's "who was on the call"). Only then does the pipeline
+    /// cut a clip for each recognized voice and queue a review for a meeting
+    /// where everyone was recognized. Nil or false (the review window, Core-only
+    /// contexts, tests) finishes such a meeting at once, as before.
+    public var reviewListsRecognizedVoicesProvider: (@MainActor () -> Bool)?
 
     /// Scratch-directory mic placeholders minted for system-only failures,
     /// keyed by task. When the archive pass later mints a second placeholder
