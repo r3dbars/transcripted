@@ -17,7 +17,7 @@ the app plays it louder.
 
 All three were picked on the Dictation Sound Bench ("Hairline" start and stop,
 "Light switch" error) and rendered in code from the bench's synth: 44.1 kHz mono, 16-bit.
-The ticks are normalized to a 0.72 peak, the error to 0.36. Start and stop play at 35%
+The ticks are normalized to a 0.72 peak, the error to 0.36. Start and stop play at about 49%
 volume. They were made for Transcripted, so they are under the repo's MIT license.
 
 `meeting-transcript-complete.mp3` is the older cue for a finished meeting transcript.
