@@ -492,6 +492,11 @@ struct TranscriptedSettingsView: View {
                 case .dictation:
                     trackSettingsAction("today_open_recent_dictation", page: .today)
                     navigation.selectedPage = .dictations
+                case .writing:
+                    // No Writing page on main yet: open the day's file.
+                    if let dayFile = item.transcriptURL {
+                        NSWorkspace.shared.open(dayFile)
+                    }
                 }
             },
             onLoadMoreRecent: {

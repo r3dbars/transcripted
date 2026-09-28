@@ -15,7 +15,8 @@ struct TodaySnapshot: Sendable {
 
 /// Loads the Today snapshot off the main thread. Sources are the same local
 /// libraries Meetings and Dictations use: the cached meeting index
-/// (`RecentMeetingsScanner.loadSearchIndex`) and the dictation day files.
+/// (`RecentMeetingsScanner.loadSearchIndex`), the dictation day files, and
+/// Save my writing's day files.
 /// Nothing leaves the Mac.
 @MainActor
 final class TodayViewModel: ObservableObject {
@@ -26,6 +27,7 @@ final class TodayViewModel: ObservableObject {
     private var trailingRefreshTask: Task<Void, Never>?
     private var refreshGeneration = SupersessionEpoch()
     private var captureRefreshObserver: HomeCaptureRefreshObserver?
+    nonisolated(unsafe) private var writingObserver: NSObjectProtocol?
     private var lastRefreshStartedAt: Date?
     /// Only the shown page reacts to library changes; the settings view
     /// refreshes it again when it comes back.
@@ -52,6 +54,20 @@ final class TodayViewModel: ObservableObject {
                 self.refresh()
             }
         }
+        writingObserver = NotificationCenter.default.addObserver(
+            forName: .writingDayFileDidSave,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isShown else { return }
+                self.refresh()
+            }
+        }
+    }
+
+    deinit {
+        if let writingObserver { NotificationCenter.default.removeObserver(writingObserver) }
     }
 
     func setShown(_ shown: Bool) {
@@ -157,10 +173,13 @@ final class TodayViewModel: ObservableObject {
             .savedDictationDayCounts(since: lookbackStart, calendar: calendar)
             .map { TodayDictationDayFact(day: $0.day, entries: $0.entries, words: $0.words) }
         if Task.isCancelled { return nil }
+        let writing = loadWriting(since: lookbackStart, calendar: calendar)
+        if Task.isCancelled { return nil }
 
         let stats = TodayStatsBuilder.build(
             meetings: meetingFacts,
             dictationDays: dictationDays,
+            writing: writing.map(\.fact),
             now: now,
             calendar: calendar
         )
@@ -191,11 +210,28 @@ final class TodayViewModel: ObservableObject {
                 title: TodayRecentActivity.dictationTitle(text: entry.text, fallback: entry.title),
                 date: entry.createdAt,
                 durationSeconds: nil,
-                transcriptURL: nil
+                transcriptURL: nil,
+                preview: entry.text,
+                appName: entry.sourceAppName.isEmpty ? nil : entry.sourceAppName,
+                words: entry.text.split(whereSeparator: \.isWhitespace).count
             )
         }
+        let writingItems = writing.map { entry in
+            TodayRecentItem(
+                kind: .writing,
+                id: "writing-\(entry.fact.entryID)",
+                title: TodayWritingParser.title(for: entry.fact.text),
+                date: entry.fact.date,
+                durationSeconds: TodayWritingParser.estimatedSeconds(words: entry.fact.words),
+                transcriptURL: entry.file,
+                preview: entry.fact.text,
+                appName: entry.fact.appName,
+                words: entry.fact.words,
+                acceptedWords: entry.fact.acceptedWords
+            )
+        }.sorted { $0.date > $1.date }
         let tapeDays = TodayTapeBuilder.days(
-            captures: weekMeetings + dictationItems.filter { $0.date >= tapeStart },
+            captures: weekMeetings + dictationItems.filter { $0.date >= tapeStart } + writingItems.filter { $0.date >= tapeStart },
             now: now,
             calendar: calendar
         )
@@ -206,6 +242,7 @@ final class TodayViewModel: ObservableObject {
         let merged = TodayRecentActivity.merge(
             meetings: Array(recentMeetings),
             dictations: Array(recentDictations),
+            writing: Array(writingItems.prefix(recentLimit + 1)),
             limit: recentLimit + 1
         )
 
@@ -218,6 +255,39 @@ final class TodayViewModel: ObservableObject {
             builtAt: now
         )
         return (snapshot, meetingIndexByPath)
+    }
+
+    /// Writing entries from day files on or after `since`. Reads only the
+    /// `Writing_<date>.md` files in the capture library's `writing/` folder.
+    nonisolated private static func loadWriting(
+        since: Date,
+        calendar: Calendar
+    ) -> [(fact: TodayWritingFact, file: URL)] {
+        let folder = FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.calendar = calendar
+        parser.timeZone = calendar.timeZone
+        parser.dateFormat = "yyyy-MM-dd"
+        let firstDay = calendar.startOfDay(for: since)
+        var result: [(fact: TodayWritingFact, file: URL)] = []
+        for file in files {
+            let name = file.lastPathComponent
+            guard name.hasPrefix("Writing_"), name.hasSuffix(".md"),
+                  let day = parser.date(from: String(name.dropFirst(8).dropLast(3))),
+                  day >= firstDay,
+                  let contents = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            if Task.isCancelled { return [] }
+            result += TodayWritingParser.entries(fromDayFile: contents)
+                .filter { $0.date >= since }
+                .map { ($0, file) }
+        }
+        return result
     }
 
     nonisolated private static func durationSeconds(of item: RecentMeetingItem) -> Int? {
