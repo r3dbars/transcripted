@@ -59,8 +59,8 @@ Most of the `needs-seam` rows share a few owners:
   input device, read formats, VPIO) so the engine's ordering and ownership logic can run
   against a recording fake.
 - `Sources/Meeting/MeetingSessionController.swift` is read by 9 files. Smallest seams: move
-  `MeetingSessionController.FailedMeetingItem` to its own file (lets
-  `FailedMeetingPresentation.swift` compile in the runner), and extract
+  `FailedMeetingItem` to its own file (done in phase 2: `Sources/Meeting/FailedMeetingItem.swift`,
+  so `FailedMeetingPresentation.swift` now compiles in the runner), and extract
   `handleUnexpectedCaptureStop` and the retranscribe/preserve entry points behind a small
   capture protocol.
 
@@ -95,7 +95,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `DictationStoppedAudioRecoveryTests.swift` | `Meeting/MeetingSessionController.swift`, `Speech/ParakeetEngine.swift`, `Speech/STTRouter.swift`, `TranscriptedApp.swift`, `UI/Overlay/DictationSessionController.swift` | ~28 | Stop writes a private WAV checkpoint off the main actor before waiting on the model. External model errors keep usable audio. | needs-seam: dictation pipeline seam. |
 | `DictationTranscriptPersistenceTests.swift` | `UI/Overlay/DictationSessionController.swift` | 3 | Session-cap completion labels delivery and failure only after proof of save. | needs-seam: the policy is covered by "Session-cap completion labels a failed Markdown save as failed delivery"; the controller wiring needs the pipeline seam. |
 | `ExistingInstallModelPrefetchPolicyTests.swift` | `TranscriptedAppState.swift` | 5 | Models warm at launch unless `TRANSCRIPTED_LAZY_MODEL_WARMUP=1`. Meeting models warm too. Dictation warms at user priority, the pass at utility. | needs-seam: move the environment check and the two priorities into the compiled `ExistingInstallModelPrefetchPolicy`. |
-| `FailedMeetingPresentationTests.swift` | `Meeting/FailedMeetingPresentation.swift`, `Meeting/MeetingSessionController.swift`, `UI/Settings/FailedMeetingRecoveryPresentation.swift`, `UI/Settings/HomeView.swift`, `UI/Settings/TranscriptedSettingsView.swift` | ~19 | Skipped no-speech outcomes surface a visible error. Retry needs all audio while partial audio stays revealable. Retained WAVs read "raw audio kept". Retry counts show in metadata. Cleanup is a confirmed delete. | **converted (partial)**: the retry-readiness helper pin now calls `FailedMeetingRecoveryPresentation.retryDisabled`. Rest needs-seam: move `FailedMeetingItem` out of `MeetingSessionController` so `FailedMeetingPresentation.swift` compiles here. |
+| `FailedMeetingPresentationTests.swift` | `Meeting/MeetingSessionController.swift`, `UI/Settings/HomeView.swift`, `UI/Settings/TranscriptedSettingsView.swift` (was also `Meeting/FailedMeetingPresentation.swift`, `UI/Settings/FailedMeetingRecoveryPresentation.swift`) | ~19 | Skipped no-speech outcomes surface a visible error. Retry needs surviving audio while partial audio stays revealable. Retained WAVs read "raw audio kept". Retry counts show in metadata. Cleanup is a confirmed delete. | **converted (partial)**: the retry-readiness helper pin calls `FailedMeetingRecoveryPresentation.retryDisabled`, and (phase 2) every `FailedMeetingPresentation.swift` pin now builds rows through `FailedMeetingPresentation.item(from:)` from real files on disk. Rest needs-seam: the skipped no-speech pin needs the meeting capture protocol; the Home row and Settings cleanup pins need Home's row reveal/retry and delete wiring moved into a compiled presentation type. |
 | `FocusOrderContractTests.swift` | `UI/MenuBar/MenuBarActionRowView.swift`, `MenuBarContentView.swift`, `MenuBarPrimaryActionsView.swift`, `MenuBarUtilityActionsView.swift`, `UI/Settings/TranscriptedSettingsPage.swift`, `TranscriptedSettingsSidebar.swift` | 9 | Menu bar rows are focusable and chained in the declared order. Settings sidebar pages produce the declared identifiers in ⌘1–⌘5 order. | **converted (partial)**: page identifiers and order now come from `TranscriptedSettingsPage` (2 pin call sites out). Rest needs-seam: compile the menu bar row/section views and `SettingsSidebarSection` so `keyboardFocusableRows` and `primarySection` can be checked directly. |
 | `HomeFirstArtifactVisibilityTests.swift` | `UI/Overlay/MeetingOverlayRootView.swift`, `UI/Settings/HomeView.swift`, `Pages/HomeSettingsPage.swift`, `QuietDictationLibrary.swift`, `QuietHomeLibrary.swift`, `TranscriptedSettingsView.swift` | 10 | Dictation rows show Open file and "saved only" on a failed paste. Only active work spins. The meeting overlay says "Saved to Markdown". Copy for agent prefers the portable bundle. Old vague copy doesn't return. | needs-seam: move the row and overlay copy and the tone-to-icon choice into a compiled presentation type the views read. |
 | `HomeImportAudioActionTests.swift` | `UI/Settings/HomeView.swift`, `Pages/GeneralSettingsPage.swift`, `Pages/HomeSettingsPage.swift`, `TranscriptedSettingsView.swift` | 6 | Settings has a "Transcribe a file" row wired to `importAudioFile()`, and Home's empty meetings state offers the same route. | needs-seam: move the row and empty-state copy and identifiers into the compiled `HomeCaptureListCopy` and route the action through a compiled action table. |
@@ -150,3 +150,15 @@ screen-share table) across 8 files, and 19 behavior assertions were added:
   non-retryable, and silent audio (+2).
 - `ClipboardRestoringTextPasterTests.swift` and `OverlayScreenSharePrivacyTests.swift`: pins
   deleted where an existing behavior suite already covers them.
+
+## Phase 2: the FailedMeetingItem seam
+
+`FailedMeetingItem` moved out of `FailedMeetingStore.swift` (where the wave-2 audit had put it,
+aliased from `MeetingSessionController`) into `Sources/Meeting/FailedMeetingItem.swift`, nested
+under `FailedMeetingPresentation`. Both files are now in `APP_SOURCES`. That turned the three
+`FailedMeetingPresentation.swift` source reads in `FailedMeetingPresentationTests.swift` (10
+assertions) into seven behavior suites that write real audio files to a temp folder and check
+the row that comes back: a lone mic placeholder is revealable but not retry-ready, a missing mic
+file doesn't hide retry while system audio survives, WAVs (any case) read as raw audio only
+while they're on disk, and titles, retry counts, and a running retry show in the row. The
+file's source-text count went 6 -> 3 (baseline 501 -> 498).

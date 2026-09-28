@@ -24,7 +24,7 @@
     "Tests/DictationTerminationCheckpointTests.swift": 2,
     "Tests/DictationTranscriptPersistenceTests.swift": 1,
     "Tests/ExistingInstallModelPrefetchPolicyTests.swift": 2,
-    "Tests/FailedMeetingPresentationTests.swift": 6,
+    "Tests/FailedMeetingPresentationTests.swift": 3,
     "Tests/FocusOrderContractTests.swift": 10,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 6,
     "Tests/HomeImportAudioActionTests.swift": 4,
