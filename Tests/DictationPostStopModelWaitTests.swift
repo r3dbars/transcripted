@@ -66,6 +66,49 @@ func testDictationPostStopModelWait() async {
         assertEqual(fake.events.filter { $0 == "wait for progress" }.count, 1, "it stops waiting as soon as the session ends")
     }
 
+    await runSuite("A session that ends in the same wait the model loads is still abandoned") {
+        // The session check comes before the loaded check after the wait, so a
+        // dead session never goes on to transcribe.
+        let fake = ModelWaitFake(loaded: false, states: [.loading])
+        fake.loadsAfterWaits = 1
+        fake.sessionEndsAfterWaits = 1
+        let result = await DictationPostStopModelWait.run(fake.steps())
+
+        assertEqual(result.outcome, .abandoned, "a session that is gone must not transcribe even if the model just loaded")
+    }
+
+    await runSuite("A cached model gets its load kicked; a ready-but-not-loaded one is joined") {
+        let cached = ModelWaitFake(loaded: false, states: [.cached])
+        _ = await DictationPostStopModelWait.run(cached.steps())
+        assertEqual(cached.events.filter { $0 == "request load" }.count, 1, "a cached model still needs loading")
+
+        let ready = ModelWaitFake(loaded: false, states: [.ready])
+        _ = await DictationPostStopModelWait.run(ready.steps())
+        assertFalse(ready.events.contains("request load"), "a model already reporting ready is waited on, not re-requested")
+    }
+
+    await runSuite("The deadline comes from time since boot; the marks come from wall-clock time") {
+        // The router's waiter compares against systemUptime, so a deadline built
+        // from wall-clock time would never arrive.
+        let fake = ModelWaitFake(loaded: false, states: [.loading])
+        fake.wallClockOffset = 800_000_000
+        fake.loadsAfterWaits = 1
+        let result = await DictationPostStopModelWait.run(fake.steps())
+
+        assertEqual(fake.deadlinesSeen, [1_000 + fake.budget], "the deadline is uptime plus the budget")
+        assertTrue((result.marks.waitStartedAt ?? 0) >= 800_000_000, "the wait-start mark is wall-clock time")
+        assertTrue((result.marks.readyAt ?? 0) >= 800_000_000, "the ready mark is wall-clock time")
+    }
+
+    await runSuite("A wait that ends without a model still records when it started") {
+        let fake = ModelWaitFake(loaded: false, states: [.failed("model missing")])
+        let result = await DictationPostStopModelWait.run(fake.steps())
+
+        assertEqual(result.outcome, .unavailable, "the load failed")
+        assertNotNil(result.marks.waitStartedAt, "stop-latency telemetry still gets the wait start")
+        assertNil(result.marks.readyAt, "no ready mark without a model")
+    }
+
     await runSuite("The overlay is refreshed on every pass while waiting") {
         let fake = ModelWaitFake(loaded: false, states: [.loading])
         fake.loadsAfterWaits = 3
@@ -88,6 +131,9 @@ private final class ModelWaitFake {
     /// The session ends after this many progress waits; nil means it never does.
     var sessionEndsAfterWaits: Int?
     var clock: TimeInterval = 1_000
+    /// Added to the wall clock so tests can tell it apart from uptime.
+    var wallClockOffset: TimeInterval = 0
+    var deadlinesSeen: [TimeInterval] = []
     let budget: TimeInterval = 30
     private var waits = 0
 
@@ -109,6 +155,7 @@ private final class ModelWaitFake {
             requestModelInitialization: { [unowned self] in self.events.append("request load") },
             waitForProgress: { [unowned self] deadline in
                 self.events.append("wait for progress")
+                self.deadlinesSeen.append(deadline)
                 self.waits += 1
                 // Each wait takes 10 seconds of fake time, never past the deadline.
                 self.clock = min(self.clock + 10, deadline)
@@ -119,7 +166,7 @@ private final class ModelWaitFake {
             waitStarted: { [unowned self] in self.events.append("wait started") },
             stillWaiting: { [unowned self] in self.events.append("still waiting") },
             uptime: { [unowned self] in self.clock },
-            now: { [unowned self] in self.clock },
+            now: { [unowned self] in self.clock + self.wallClockOffset },
             budget: budget
         )
     }
