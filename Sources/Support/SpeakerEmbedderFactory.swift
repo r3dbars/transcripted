@@ -39,9 +39,26 @@ enum SpeakerEmbedderFactory {
     /// of the wrong dimension (e.g. a present-but-unloadable model must NOT route
     /// 256-d WeSpeaker vectors into the 192-d ERes2Net database). Kept here (not in
     /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
-    static func speakerDBURL(for embedder: (any SpeakerSegmentEmbedder)?) -> URL {
+    ///
+    /// The Nemotron diarization backend has no voiceprints of its own. With no
+    /// injected embedder, Core fills them with the pyannote pipeline's own offline
+    /// WeSpeaker model (`FluidOfflineWeSpeakerSegmentEmbedder`), the model every person
+    /// in `speakers.sqlite` was learned from, so Nemotron shares that database. The
+    /// YODAS3 speaker lab measured speaker-level cosine 0.986-0.995 against the
+    /// pyannote vectors on the same audio. Only the lab-only
+    /// `TRANSCRIPTED_NEMOTRON_EMBEDDER=online` override (FluidAudio's online WeSpeaker
+    /// conversion, a nearby but different space) gets its own database.
+    static func speakerDBURL(
+        for embedder: (any SpeakerSegmentEmbedder)?,
+        diarizationBackend: DiarizationBackend = .pyannote,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
         let state = FileManager.default.transcriptedStateDir
-        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: embedder?.identifier)
+        let onlineNemotronVoiceprints = diarizationBackend == .nemotron
+            && environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online"
+        let identifier = embedder?.identifier
+            ?? (onlineNemotronVoiceprints ? FluidWeSpeakerSegmentEmbedder.embedderIdentifier : nil)
+        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: identifier)
         return state.appendingPathComponent(name, isDirectory: false)
     }
 
@@ -49,7 +66,18 @@ enum SpeakerEmbedderFactory {
     /// (e.g. the Settings → People fallback). Resolves the embedder by actually
     /// loading it so the path agrees with what the meeting pipeline will use.
     static func activeSpeakerDBURL() -> URL {
-        speakerDBURL(for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()))
+        speakerDBURL(
+            for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()),
+            diarizationBackend: activeDiarizationBackend()
+        )
+    }
+
+    /// Core's backend for the hidden diarization switch (see DiarizationBackendPreferences).
+    static func activeDiarizationBackend() -> DiarizationBackend {
+        switch DiarizationBackendPreferences.effectiveChoice() {
+        case .pyannote: return .pyannote
+        case .nemotron: return .nemotron
+        }
     }
 
     /// First match wins: app bundle Resources, then the shared FluidAudio Models

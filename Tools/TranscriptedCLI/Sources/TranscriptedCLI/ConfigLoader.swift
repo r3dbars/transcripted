@@ -2,7 +2,8 @@ import ArgumentParser
 import Foundation
 
 /// JSON-decodable config for the supported OfflineDiarizerConfig parameters.
-/// Missing fields use FluidAudio defaults. Unknown keys are rejected so typos
+/// Missing fields use the FluidAudio 0.15.x defaults (see `DiarizerCompatibility`).
+/// `clusteringThreshold` is a cosine similarity (0.6 by default). Unknown keys are rejected so typos
 /// fail loudly instead of silently falling back to defaults.
 ///
 /// Every key here must map to a property on the OfflineDiarizerConfig exposed
@@ -68,10 +69,47 @@ struct DiarizeConfig: Codable {
 #if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
 
-extension DiarizeConfig {
-    func toOfflineDiarizerConfig() -> OfflineDiarizerConfig {
+/// FluidAudio 0.17 changed two things under the CLI's diarizer defaults and
+/// config files. These helpers keep what 0.15.x did (mirrors TranscriptedCore's
+/// `FluidAudioCompatibility`; the CLI does not always link Core).
+enum DiarizerCompatibility {
+    static let diarizerRepoPath = "FluidInference/speaker-diarization-coreml"
+
+    /// 0.15.x read `clusteringThreshold` as a cosine similarity and cut at
+    /// sqrt(2 - 2s); 0.17 reads that Euclidean distance directly.
+    static func clusteringDistance(fromCosineSimilarity similarity: Double) -> Double {
+        let clamped = min(1.0, max(-1.0, similarity))
+        return max(0, 2 - 2 * clamped).squareRoot()
+    }
+
+    /// 0.15.x's `OfflineDiarizerConfig.default`: the same community values, with
+    /// the cosine 0.6 threshold and independent (unconstrained) assignment.
+    static var legacyDefaultConfig: OfflineDiarizerConfig {
         var config = OfflineDiarizerConfig.default
-        if let value = clusteringThreshold { config.clusteringThreshold = value }
+        config.clusteringThreshold = clusteringDistance(fromCosineSimilarity: 0.6)
+        config.clustering.constrainedAssignment = false
+        return config
+    }
+
+    /// 0.17 pins the diarizer repo to one commit and deletes caches without a
+    /// matching revision marker, which every 0.15.x cache lacks. Resolve at `main`
+    /// as 0.15.x did. Call before loading diarizer models.
+    static func keepUnpinnedDiarizerCaches() {
+        var overrides = ModelRegistry.revisionOverrides
+        guard overrides[diarizerRepoPath] == nil else { return }
+        overrides[diarizerRepoPath] = "main"
+        ModelRegistry.revisionOverrides = overrides
+    }
+}
+
+extension DiarizeConfig {
+    /// `clusteringThreshold` in a config file stays a cosine similarity, as it
+    /// was under FluidAudio 0.15.x, and is converted to 0.17's cut distance here.
+    func toOfflineDiarizerConfig() -> OfflineDiarizerConfig {
+        var config = DiarizerCompatibility.legacyDefaultConfig
+        if let value = clusteringThreshold {
+            config.clusteringThreshold = DiarizerCompatibility.clusteringDistance(fromCosineSimilarity: value)
+        }
         if let value = Fa { config.Fa = value }
         if let value = Fb { config.Fb = value }
         if let value = windowDuration { config.windowDuration = value }

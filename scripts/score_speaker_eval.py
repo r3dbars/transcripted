@@ -3,8 +3,10 @@
 
 Separates two concerns:
 
-  * Diarizer quality   — per-file DER (pyannote.metrics, optimal per-file label
-    mapping). Independent of cross-meeting naming; isolates PyAnnote+WeSpeaker+VBx.
+  * Diarizer quality   — per-file DER (optimal per-file label mapping, pyannote.metrics
+    conventions; computed by speaker_eval_common.diarization_error, which matches
+    pyannote.metrics' DiarizationErrorRate to float precision without needing it
+    installed). Independent of cross-meeting naming.
 
   * Threshold quality  — fragmentation, false-merge, and the cross-meeting re-ID
     curve, derived from a global time-overlap matrix between the harness's
@@ -12,58 +14,78 @@ Separates two concerns:
     global participant IDs (FEE005, MEE006, ...). These are what the 0.88
     consolidation and 0.6 match thresholds actually move.
 
+The shared math lives in scripts/speaker_eval_common.py; scripts/score_speaker_lab.py
+builds the diarizer bake-off (raw vs pipeline DER, returning-speaker recognition) on
+the same helpers.
+
 Usage:
   score_speaker_eval.py --result <replay.json> --rttm-dir data/ami/rttm \
       [--collar 0.25] [--out-json out.json] [--out-md out.md]
 """
-import argparse, json, sys
-from collections import defaultdict
+import argparse
+import json
+import os
+import sys
 
-try:
-    from pyannote.core import Annotation, Segment
-    from pyannote.metrics.diarization import DiarizationErrorRate
-except Exception as e:  # pragma: no cover
-    print(f"error: pyannote.metrics required ({e})", file=sys.stderr); sys.exit(2)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from speaker_eval_common import (  # noqa: E402
+    build_overlap_matrix,
+    diarization_error,
+    identity_metrics,
+    overlap,
+    parse_rttm,
+)
 
-
-def parse_rttm(path):
-    """Return list of (start, end, speaker_global_id)."""
-    out = []
-    with open(path) as f:
-        for line in f:
-            p = line.split()
-            if not p or p[0] != "SPEAKER":
-                continue
-            start, dur, spk = float(p[3]), float(p[4]), p[7]
-            out.append((start, start + dur, spk))
-    return out
+__all__ = ["parse_rttm", "overlap", "build_overlap_matrix", "score_result", "format_md"]
 
 
-def overlap(a0, a1, b0, b1):
-    return max(0.0, min(a1, b1) - max(a0, b0))
+def score_result(result, rttm_dir, collar=0.25):
+    """Score one replay result dict. Returns the summary dict written by --out-json."""
+    per_meeting = []
+    meetings = []
+    for mr in result["meetings"]:
+        meeting = mr["meeting"]
+        ref = parse_rttm(f"{rttm_dir}/{meeting}.rttm")
+        hyp = [(a["start"], a["end"], a["dbProfile"]) for a in mr["assignments"]]
+        meetings.append((meeting, ref, hyp))
 
+        der = diarization_error(ref, hyp, collar=collar)
+        per_meeting.append({
+            "meeting": meeting,
+            "der": der["der"],
+            "miss": der["miss_rate"],
+            "false_alarm": der["false_alarm_rate"],
+            "confusion": der["confusion_rate"],
+            "ref_speakers": len(set(t for _, _, t in ref)),
+            "hyp_profiles": len(set(p for _, _, p in hyp)),
+        })
 
-def build_overlap_matrix(ref, hyp):
-    """seconds of ref/hyp co-occurrence, keyed [true_id][db_profile]."""
-    m = defaultdict(lambda: defaultdict(float))
-    # sort hyp by start for a light sweep
-    hyp = sorted(hyp, key=lambda x: x[0])
-    for (rs, re, tid) in ref:
-        for (hs, he, pid) in hyp:
-            if hs >= re:
-                break
-            ov = overlap(rs, re, hs, he)
-            if ov > 0:
-                m[tid][pid] += ov
-    return m
+    ident = identity_metrics(meetings)
+    fragmentation = ident["fragmentation"]
+    false_merge = ident["false_merge"]
 
+    # aggregate DER: mean of per-meeting DER (each meeting weighted equally)
+    tot_der = sum(p["der"] for p in per_meeting) / len(per_meeting) if per_meeting else None
 
-def annotation_from(segs):
-    ann = Annotation()
-    for i, (s, e, lbl) in enumerate(segs):
-        if e > s:
-            ann[Segment(s, e), i] = lbl
-    return ann
+    return {
+        "config": {"consolidationThreshold": result.get("consolidationThreshold"),
+                   "matchThreshold": result.get("matchThreshold"),
+                   "collar": collar},
+        "der": {"per_meeting": per_meeting, "mean_der": round(tot_der, 4) if tot_der is not None else None},
+        "fragmentation": {
+            "per_true_speaker": fragmentation,
+            "mean_profiles_per_person": round(sum(fragmentation.values()) / len(fragmentation), 3) if fragmentation else None,
+            "max_profiles_per_person": max(fragmentation.values()) if fragmentation else None,
+        },
+        "false_merge": {
+            "count": len(false_merge),
+            "profiles": false_merge,
+        },
+        "reid_curve_by_appearance": ident["reid_curve"],
+        "reid_detail": ident["reid_detail"],
+        "profiles_at_end": result.get("profilesAtEnd"),
+        "true_speakers": ident["true_speakers"],
+    }
 
 
 def main():
@@ -76,148 +98,17 @@ def main():
     ap.add_argument("--out-md")
     args = ap.parse_args()
 
-    result = json.load(open(args.result))
-    consolidation = result.get("consolidationThreshold")
-    match_thr = result.get("matchThreshold")
-
-    der_metric = DiarizationErrorRate(collar=args.collar, skip_overlap=False)
-
-    per_meeting = []
-    global_ref_time = defaultdict(float)   # true_id -> total ref seconds (this run)
-    global_overlap = defaultdict(lambda: defaultdict(float))  # true_id -> db_profile -> sec
-    # per-(meeting,true_id) dominant profile, used for the re-ID curve
-    meeting_dom = {}   # (meeting, true_id) -> (db_profile, covered_sec, ref_sec)
-    meeting_order = []
-
-    for mr in result["meetings"]:
-        meeting = mr["meeting"]
-        meeting_order.append(meeting)
-        ref = parse_rttm(f"{args.rttm_dir}/{meeting}.rttm")
-        hyp = [(a["start"], a["end"], a["dbProfile"]) for a in mr["assignments"]]
-
-        der = der_metric(annotation_from(ref), annotation_from(hyp), detailed=True)
-        total = der["total"] or 1.0
-        per_meeting.append({
-            "meeting": meeting,
-            "der": der["diarization error rate"],
-            "miss": der["missed detection"] / total,
-            "false_alarm": der["false alarm"] / total,
-            "confusion": der["confusion"] / total,
-            "ref_speakers": len(set(t for _, _, t in ref)),
-            "hyp_profiles": len(set(p for _, _, p in hyp)),
-        })
-
-        om = build_overlap_matrix(ref, hyp)
-        for tid, secs in om.items():
-            ref_sec = sum(e - s for s, e, t in ref if t == tid)
-            global_ref_time[tid] += ref_sec
-            dom_pid, dom_sec = (max(secs.items(), key=lambda kv: kv[1]) if secs else (None, 0.0))
-            meeting_dom[(meeting, tid)] = (dom_pid, dom_sec, ref_sec)
-            for pid, ov in secs.items():
-                global_overlap[tid][pid] += ov
-
-    # ---- fragmentation: distinct profiles holding >=10% of a person's speech ----
-    FRAG_MIN = 0.10
-    fragmentation = {}
-    for tid, profiles in global_overlap.items():
-        tot = global_ref_time[tid] or 1.0
-        frag = sum(1 for pid, ov in profiles.items() if ov / tot >= FRAG_MIN)
-        fragmentation[tid] = max(1, frag)
-
-    # ---- false-merge: profiles whose mass spans >=2 distinct true speakers ----
-    profile_to_true = defaultdict(lambda: defaultdict(float))
-    for tid, profiles in global_overlap.items():
-        for pid, ov in profiles.items():
-            profile_to_true[pid][tid] += ov
-    MERGE_MIN = 0.10
-    false_merge = {}
-    for pid, trues in profile_to_true.items():
-        tot = sum(trues.values()) or 1.0
-        n = sum(1 for tid, ov in trues.items() if ov / tot >= MERGE_MIN)
-        if n >= 2:
-            false_merge[pid] = sorted([t for t, ov in trues.items() if ov / tot >= MERGE_MIN])
-
-    # ---- global mapping: each true speaker -> the profile holding most of its speech
-    global_dom_profile = {}
-    for tid, profiles in global_overlap.items():
-        if profiles:
-            global_dom_profile[tid] = max(profiles.items(), key=lambda kv: kv[1])[0]
-
-    # ---- cross-meeting re-ID curve ----
-    # For each true speaker, anchor = dominant profile at their FIRST appearance.
-    # re-ID accuracy at appearance k = fraction of that session's speech assigned to anchor.
-    first_anchor = {}
-    reid_by_appearance = defaultdict(list)   # appearance_index (1-based) -> [accuracy...]
-    reid_detail = []
-    appearance_counter = defaultdict(int)
-    for meeting in meeting_order:
-        for tid in sorted(global_ref_time.keys()):
-            key = (meeting, tid)
-            if key not in meeting_dom:
-                continue
-            dom_pid, dom_sec, ref_sec = meeting_dom[key]
-            if ref_sec <= 0:
-                continue
-            appearance_counter[tid] += 1
-            k = appearance_counter[tid]
-            if k == 1:
-                first_anchor[tid] = dom_pid
-            anchor = first_anchor.get(tid)
-            # fraction of this session's speech assigned to the anchor profile
-            covered = sec_assigned(result, meeting, tid, anchor, args.rttm_dir)
-            acc = covered / ref_sec if ref_sec else 0.0
-            reid_by_appearance[k].append(acc)
-            reid_detail.append({"meeting": meeting, "true": tid, "appearance": k,
-                                "anchor": anchor, "dominant": dom_pid,
-                                "reid_accuracy": round(acc, 4)})
-
-    reid_curve = {str(k): round(sum(v) / len(v), 4) for k, v in sorted(reid_by_appearance.items())}
-
-    # aggregate DER: mean of per-meeting DER (each meeting weighted equally)
-    tot_der = sum(p["der"] for p in per_meeting) / len(per_meeting) if per_meeting else None
-
-    summary = {
-        "config": {"consolidationThreshold": consolidation, "matchThreshold": match_thr,
-                   "collar": args.collar},
-        "der": {"per_meeting": per_meeting, "mean_der": round(tot_der, 4) if tot_der is not None else None},
-        "fragmentation": {
-            "per_true_speaker": fragmentation,
-            "mean_profiles_per_person": round(sum(fragmentation.values()) / len(fragmentation), 3) if fragmentation else None,
-            "max_profiles_per_person": max(fragmentation.values()) if fragmentation else None,
-        },
-        "false_merge": {
-            "count": len(false_merge),
-            "profiles": false_merge,
-        },
-        "reid_curve_by_appearance": reid_curve,
-        "reid_detail": reid_detail,
-        "profiles_at_end": result.get("profilesAtEnd"),
-        "true_speakers": sorted(global_ref_time.keys()),
-    }
+    with open(args.result) as f:
+        result = json.load(f)
+    summary = score_result(result, args.rttm_dir, collar=args.collar)
 
     if args.out_json:
-        json.dump(summary, open(args.out_json, "w"), indent=2)
+        with open(args.out_json, "w") as f:
+            json.dump(summary, f, indent=2)
     print(format_md(summary))
     if args.out_md:
-        open(args.out_md, "w").write(format_md(summary))
-
-
-def sec_assigned(result, meeting, tid, anchor_pid, rttm_dir):
-    """Seconds of true speaker `tid`'s reference speech in `meeting` that overlap
-    hypothesis segments labeled `anchor_pid`."""
-    if anchor_pid is None:
-        return 0.0
-    ref = parse_rttm(f"{rttm_dir}/{meeting}.rttm")
-    ref = [(s, e) for (s, e, t) in ref if t == tid]
-    mr = next(m for m in result["meetings"] if m["meeting"] == meeting)
-    hyp = sorted([(a["start"], a["end"]) for a in mr["assignments"] if a["dbProfile"] == anchor_pid])
-    total = 0.0
-    for (rs, re) in ref:
-        for (hs, he) in hyp:
-            if hs >= re:
-                break
-            total += overlap(rs, re, hs, he)
-    return total
+        with open(args.out_md, "w") as f:
+            f.write(format_md(summary))
 
 
 def format_md(s):

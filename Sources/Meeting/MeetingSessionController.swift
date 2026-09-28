@@ -566,11 +566,15 @@ final class MeetingSessionController: ObservableObject {
         // default speakers.sqlite — so 256-d vectors can never land in the 192-d DB.
         let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
+        // Nemotron by default, with a hidden switch back to pyannote
+        // (DiarizationBackendPreferences). Read once here, so a change takes
+        // effect on the next launch.
+        let diarizationBackend = SpeakerEmbedderFactory.activeDiarizationBackend()
 
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
             transcripts: MeetingStoragePaths.transcriptsFolder,
-            speakerDB: SpeakerEmbedderFactory.speakerDBURL(for: segmentEmbedder),
+            speakerDB: SpeakerEmbedderFactory.speakerDBURL(for: segmentEmbedder, diarizationBackend: diarizationBackend),
             statsDB: MeetingStoragePaths.statsDatabase,
             failedQueue: MeetingStoragePaths.failedTranscriptionsFile,
             speakerClips: MeetingStoragePaths.speakerClipsFolder,
@@ -601,7 +605,7 @@ final class MeetingSessionController: ObservableObject {
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
         // When a segment embedder is present, the diarizer re-embeds each segment
         // with it (e.g. ERes2Net) before the speaker identity stack runs.
-        self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder)
+        self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder, backend: diarizationBackend)
 
         // Speaker store: app-owned SQLite file under state/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
@@ -676,6 +680,14 @@ final class MeetingSessionController: ObservableObject {
         // has not started yet — it has no entry in Core's `tasks` until then.
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
+        }
+        // Tuned for the backend picked at launch (MeetingSpeakerSeparation).
+        taskManager.speakerSeparationProvider = { recordingDate in
+            await MeetingSpeakerSeparation.resolve(backend: diarizationBackend, recordingStart: recordingDate)
+        }
+        // Expected people get named sooner (MeetingCalendarNaming).
+        taskManager.lineupNamingProvider = { recordingDate in
+            await MeetingCalendarNaming.lineupRequest(recordingStart: recordingDate)
         }
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in

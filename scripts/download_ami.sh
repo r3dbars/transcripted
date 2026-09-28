@@ -15,6 +15,8 @@
 # Usage:
 #   scripts/download_ami.sh                 # default: ES2002 a–d  (4 meetings, 1 group)
 #   scripts/download_ami.sh scale           # 8 scenario series   (~32 meetings, ~32 ids)
+#   scripts/download_ami.sh lab             # speaker lab set: scale + 4 Idiap (IS) + 4 TNO (TS) series,
+#                                           #   16 groups of 4 recurring people across 3 recording sites
 #   scripts/download_ami.sh full            # ALL scenario+non-scenario (~170 meetings, ~100h)
 #   scripts/download_ami.sh ES2002a ES2003a # explicit meeting ids
 #   AMI_SET=scale scripts/download_ami.sh   # same via env
@@ -22,6 +24,7 @@
 # Compute/footprint guide (Mix-Headset 16 kHz mono ≈ 1.7 MB/audio-min):
 #   default  4 meetings  ~230 MB   download minutes
 #   scale   32 meetings  ~1.8 GB   download ~tens of min on the Edinburgh mirror
+#   lab     96 meetings  ~5.2 GB   same, roughly triple
 #   full   ~170 meetings ~9–10 GB  download HOURS — gated heavy tier, do not run blind
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -40,6 +43,13 @@ case "$ARG" in
   es2002)  MEETINGS="ES2002a ES2002b ES2002c ES2002d" ;;
   # 8 train-split scenario series, 4 disjoint people each -> ~32 distinct recurring ids.
   scale)   MEETINGS="$(expand_series ES2002 ES2003 ES2005 ES2006 ES2007 ES2008 ES2009 ES2010)" ;;
+  # Speaker lab cross-call set: 12 Edinburgh (ES), 6 Idiap (IS) and 6 TNO (TS) series
+  # (24 groups x 4 sessions, all with pyannote RTTMs, no person in two groups), so
+  # returning-speaker recognition is measured across three rooms and mic setups, and the
+  # hill-climb lab gets enough independent groups for a 16 dev / 8 holdout split.
+  lab)     MEETINGS="$(expand_series ES2002 ES2003 ES2004 ES2005 ES2006 ES2007 ES2008 ES2009 \
+              ES2010 ES2011 ES2012 ES2013 IS1000 IS1001 IS1003 IS1004 IS1006 IS1007 \
+              TS3003 TS3004 TS3005 TS3006 TS3007 TS3008)" ;;
   # Everything pyannote ships RTTMs for (train+dev+test), scenario + non-scenario.
   full)    MEETINGS="$(for sp in train dev test; do \
               curl -fsSL "$LIST_BASE/$sp.meetings.txt"; done | tr '\n' ' ')" ;;

@@ -29,6 +29,7 @@ extension Transcription {
         systemURL: URL,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
+        speakerSeparation: SpeakerSeparationOptions? = nil,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
 
@@ -230,7 +231,8 @@ extension Transcription {
                     rawSegments = try await Self.diarizeSystemAudio(
                         samples: systemSamples,
                         diarization: diarization,
-                        hasMicTrack: micURL != nil && !micSamples.isEmpty
+                        hasMicTrack: micURL != nil && !micSamples.isEmpty,
+                        clusteringThreshold: speakerSeparation?.clusteringThreshold
                     )
                 } catch let error where Self.isExplicitNoSpeechError(error) {
                     // No mic track to carry the meeting. The diarizer's own
@@ -253,8 +255,18 @@ extension Transcription {
             // Rejected-sample vetoes for matching (empty until a correction records one).
             let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
             let speakerThresholds = diarization.activeSpeakerThresholds
+            // Split generously, then merge smartly (SpeakerSeparation.swift): only when
+            // the app turned it on for this meeting.
+            let separatedSegments = speakerSeparation.map { SpeakerSeparation.apply(rawSegments, options: $0) } ?? rawSegments
+            if speakerSeparation != nil {
+                AppLogger.transcription.info("Applied speaker separation", [
+                    "diarizer": "\(Set(rawSegments.map { $0.speakerId }).count)",
+                    "after": "\(Set(separatedSegments.map { $0.speakerId }).count)",
+                    "cap": speakerSeparation?.maxSpeakers.map { "\($0)" } ?? "none"
+                ])
+            }
             let speakerSegments = EmbeddingClusterer.postProcess(
-                segments: rawSegments,
+                segments: separatedSegments,
                 existingProfiles: existingProfiles,
                 pairwiseMergeThreshold: nil,
                 consolidationThreshold: speakerThresholds.consolidation,
@@ -1509,10 +1521,15 @@ extension Transcription {
     nonisolated static func diarizeSystemAudio(
         samples: [Float],
         diarization: any DiarizationEngine,
-        hasMicTrack: Bool
+        hasMicTrack: Bool,
+        clusteringThreshold: Double? = nil
     ) async throws -> [SpeakerSegment] {
         do {
-            return try await diarization.diarizeOffline(samples: samples, sampleRate: 16000)
+            return try await diarization.diarizeOffline(
+                samples: samples,
+                sampleRate: 16000,
+                clusteringThreshold: clusteringThreshold
+            )
         } catch {
             guard hasMicTrack, isExplicitNoSpeechError(error) else { throw error }
             AppLogger.transcription.info("System audio contained no speech; continuing with mic track")
