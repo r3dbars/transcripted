@@ -307,6 +307,10 @@ public struct SpeakerNamingRequest {
     }
 
     public let transcriptId: UUID
+
+    /// True when the review has voices to ask about. A request that only
+    /// lists recognized voices has nothing that needs an answer.
+    public var asksAboutVoices: Bool { !speakers.isEmpty }
 }
 
 /// A single speaker needing naming or confirmation

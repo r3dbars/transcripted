@@ -62,6 +62,10 @@ final class NotchIslandSpeakerReviewView: NSView {
     private var laterRemaining: TimeInterval = NotchIslandSpeakerReviewPolicy.laterSeconds
     private var laterStopped = false
     private var lingerTask: Task<Void, Never>?
+    /// Closes a list with nobody to ask after `recognizedOnlyHardCapSeconds`,
+    /// on screen or not, so it can't hold the review forever.
+    private var hardCapTask: Task<Void, Never>?
+    private var hardCapReached = false
     private var isHovered = false
     /// The island is showing this review (not waiting behind a dictation or
     /// a busy meeting). The controller reports it; until then it waits.
@@ -100,6 +104,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         rebuild()
         // The ring waits until the island reports the review on screen.
         if !isRecognizedOnly { trackShown() }
+        scheduleHardCap()
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(headerTitle)
@@ -124,6 +129,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     deinit {
         laterTask?.cancel()
         lingerTask?.cancel()
+        hardCapTask?.cancel()
     }
 
     override var isFlipped: Bool { true }
@@ -159,6 +165,11 @@ final class NotchIslandSpeakerReviewView: NSView {
         guard hovered != isHovered else { return }
         isHovered = hovered
         updateLaterClock()
+        if hardCapReached, !isFinished,
+           NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: hovered) {
+            finishLater()
+            return
+        }
         if isFinished {
             if hovered {
                 lingerTask?.cancel()
@@ -306,6 +317,22 @@ final class NotchIslandSpeakerReviewView: NSView {
         }
     }
 
+    // MARK: Hard cap
+
+    private func scheduleHardCap() {
+        guard let seconds = NotchIslandSpeakerReviewPolicy.hardCapSeconds(recognizedOnly: isRecognizedOnly) else {
+            return
+        }
+        hardCapTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, !self.isFinished else { return }
+            self.hardCapReached = true
+            if NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: self.isHovered) {
+                self.finishLater()
+            }
+        }
+    }
+
     /// Someone started answering: the review waits for them now.
     private func stopLaterCountdown() {
         guard !laterStopped else { return }
@@ -440,9 +467,12 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// One bucketed event per verdict, joining the matcher's confidence to
     /// the answer, exactly as the review window reports it.
     private func trackMatchOutcomes(_ updates: [SpeakerNameUpdate]) {
-        let entriesByKey = Dictionary(
-            request.speakers.map { ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0) },
-            uniquingKeysWith: { first, _ in first }
+        // Recognized voices too, so a "Not Taylor?" correction reports the
+        // match it overrode instead of an empty bucket.
+        let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(
+            asked: request.speakers,
+            recognized: request.recognizedSpeakers,
+            key: { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) }
         )
         for update in updates {
             guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else { continue }

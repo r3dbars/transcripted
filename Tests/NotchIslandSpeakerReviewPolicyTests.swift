@@ -218,4 +218,27 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertTrue(Policy.doneShowsSummary(recognizedOnly: true, updates: 1), "a correction gets the saved summary")
         assertTrue(Policy.doneShowsSummary(recognizedOnly: false, updates: 0), "a review that asked always sums up")
     }
+
+    runSuite("A who-was-on-the-call list closes itself even while hidden; a review that asks waits") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.hardCapSeconds(recognizedOnly: true), 120, "nothing to answer: about two minutes, on screen or not")
+        assertTrue(Policy.hardCapSeconds(recognizedOnly: false) == nil, "a review with voices to name waits for answers")
+        assertTrue(
+            (Policy.hardCapSeconds(recognizedOnly: true) ?? 0) > Policy.laterSeconds,
+            "the cap never cuts the on-screen Later ring short"
+        )
+        assertTrue(Policy.hardCapClosesNow(hovered: false), "nobody on it: it closes at the cap")
+        assertFalse(Policy.hardCapClosesNow(hovered: true), "the pointer on it holds the close until it leaves")
+    }
+
+    runSuite("A correction on a recognized voice reports that voice's match") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        struct Voice: Equatable { let key: String; let similarity: Double }
+        let asked = [Voice(key: "system_0", similarity: 0.61)]
+        let recognized = [Voice(key: "system_1", similarity: 0.93), Voice(key: "system_0", similarity: 0.99)]
+        let byKey = Policy.entriesByKey(asked: asked, recognized: recognized, key: \.key)
+        assertEqual(byKey["system_1"], Voice(key: "system_1", similarity: 0.93), "Not Taylor? finds the recognized voice")
+        assertEqual(byKey["system_0"], Voice(key: "system_0", similarity: 0.61), "an asked voice wins a shared key")
+        assertTrue(byKey["mic_1"] == nil)
+    }
 }

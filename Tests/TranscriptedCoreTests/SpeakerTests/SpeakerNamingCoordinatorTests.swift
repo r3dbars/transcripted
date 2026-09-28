@@ -299,6 +299,87 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalSystemURL.path))
     }
 
+    private func clipEntry(_ diarizerId: String, clipURL: URL, name: String?) -> SpeakerNamingEntry {
+        SpeakerNamingEntry(
+            id: UUID(),
+            diarizerSpeakerId: diarizerId,
+            channel: .system,
+            clipURL: clipURL,
+            sampleText: "hello",
+            currentName: name,
+            matchSimilarity: nil,
+            needsNaming: name == nil,
+            needsConfirmation: false,
+            sessionEmbedding: nil,
+            matchedProfileSnapshot: nil
+        )
+    }
+
+    @MainActor
+    func testCleanupPendingNamingRemovesRecognizedVoiceClipsToo() throws {
+        let harness = try makeHarness()
+        let askedClipURL = harness.paths.speakerClips.appendingPathComponent("asked.wav")
+        let recognizedClipURL = harness.paths.speakerClips.appendingPathComponent("recognized.wav")
+        try Data([1]).write(to: askedClipURL)
+        try Data([1]).write(to: recognizedClipURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [clipEntry("0", clipURL: askedClipURL, name: nil)],
+            recognizedSpeakers: [clipEntry("1", clipURL: recognizedClipURL, name: "Taylor Wolf")],
+            transcriptURL: harness.paths.transcripts.appendingPathComponent("Call.md"),
+            transcriptId: UUID(),
+            systemAudioURL: harness.paths.audioCaptures.appendingPathComponent("system.wav"),
+            micAudioURL: nil,
+            shouldRemoveTemporaryAudioOnCleanup: false,
+            onComplete: { _ in }
+        )
+
+        harness.manager.cleanupPendingNaming()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: askedClipURL.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: recognizedClipURL.path),
+            "a recognized voice's clip must not outlive its review"
+        )
+    }
+
+    @MainActor
+    func testOnlyReviewsWithVoicesToAskAboutAwaitAnswers() throws {
+        let harness = try makeHarness()
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("clip.wav")
+        func request(asked: [SpeakerNamingEntry], recognized: [SpeakerNamingEntry]) -> SpeakerNamingRequest {
+            SpeakerNamingRequest(
+                speakers: asked,
+                recognizedSpeakers: recognized,
+                transcriptURL: harness.paths.transcripts.appendingPathComponent("\(UUID().uuidString).md"),
+                transcriptId: UUID(),
+                systemAudioURL: harness.paths.audioCaptures.appendingPathComponent("system.wav"),
+                micAudioURL: nil,
+                shouldRemoveTemporaryAudioOnCleanup: false,
+                onComplete: { _ in }
+            )
+        }
+
+        XCTAssertFalse(harness.manager.hasSpeakerReviewAwaitingAnswers, "no review at all")
+
+        harness.manager.enqueueSpeakerNamingRequest(
+            request(asked: [], recognized: [clipEntry("1", clipURL: clipURL, name: "Taylor Wolf")])
+        )
+        XCTAssertNotNil(harness.manager.speakerNamingRequest)
+        XCTAssertFalse(
+            harness.manager.hasSpeakerReviewAwaitingAnswers,
+            "a who-was-on-the-call list has nothing to answer"
+        )
+
+        harness.manager.enqueueSpeakerNamingRequest(
+            request(asked: [clipEntry("0", clipURL: clipURL, name: nil)], recognized: [])
+        )
+        XCTAssertTrue(
+            harness.manager.hasSpeakerReviewAwaitingAnswers,
+            "a queued review with a voice to name still counts behind the list"
+        )
+    }
+
     @MainActor
     func testHandleNamingCompletePublishesSuccessAfterTranscriptRewrite() async throws {
         let harness = try makeHarness()
