@@ -147,3 +147,24 @@ func runDumpSet(_ args: [String]) async {
     }
     FileHandle.standardError.write(Data("[dump-set] \(tag) \(setDir.lastPathComponent) done\n".utf8))
 }
+
+// embedder-debug: print the offline WeSpeaker models' declared inputs/outputs.
+@available(macOS 26.0, *)
+func runEmbedderDebug(_ args: [String]) async {
+    do {
+        let models = try await OfflineDiarizerModels.load(from: OfflineDiarizerModels.defaultModelsDirectory())
+        for (name, model) in [("fbank", models.fbankModel), ("embedding", models.embeddingModel)] {
+            let d = model.modelDescription
+            for (k, v) in d.inputDescriptionsByName {
+                let c = v.multiArrayConstraint
+                print("\(name) input \(k): type=\(c.map { "\($0.dataType.rawValue)" } ?? "-") shape=\(c?.shape ?? []) enumerated=\(c?.shapeConstraint.enumeratedShapes ?? []) ranges=\(c?.shapeConstraint.sizeRangeForDimension ?? [])")
+            }
+            for (k, v) in d.outputDescriptionsByName {
+                let c = v.multiArrayConstraint
+                print("\(name) output \(k): type=\(c.map { "\($0.dataType.rawValue)" } ?? "-") shape=\(c?.shape ?? [])")
+            }
+        }
+    } catch {
+        die("debug failed: \(error)")
+    }
+}

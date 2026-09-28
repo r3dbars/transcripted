@@ -289,13 +289,20 @@ func runEmbeddingParity(_ args: [String]) async {
     let diarizeSeconds = Date().timeIntervalSince(t0)
     await service.cleanup()
 
-    // 2) The Nemotron backend's fallback voiceprint: FluidAudio's online WeSpeaker model.
-    FileHandle.standardError.write(Data("[parity] \(meeting): loading online WeSpeaker embedder...\n".utf8))
-    let embedder: FluidWeSpeakerSegmentEmbedder
+    // 2) The Nemotron backend's voiceprint: --candidate online (FluidAudio's online
+    //    WeSpeaker model, #1789) or offline (FluidOfflineWeSpeakerSegmentEmbedder: the
+    //    pyannote backend's own offline model files, the Nemotron default).
+    let candidate = (argValue("--candidate", in: args) ?? "online").lowercased()
+    FileHandle.standardError.write(Data("[parity] \(meeting): loading \(candidate) WeSpeaker embedder...\n".utf8))
+    let embedder: any SpeakerSegmentEmbedder
     do {
-        embedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: onlineModelsDir)
+        if candidate == "offline" {
+            embedder = try await FluidOfflineWeSpeakerSegmentEmbedder.load(directory: nil)
+        } else {
+            embedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: onlineModelsDir)
+        }
     } catch {
-        die("online WeSpeaker embedder failed to load: \(error.localizedDescription)")
+        die("\(candidate) WeSpeaker embedder failed to load: \(error.localizedDescription)")
     }
 
     // 3) Re-embed the same segments (same slicing as DiarizationService.reembed).
@@ -308,7 +315,9 @@ func runEmbeddingParity(_ args: [String]) async {
         let a = max(0, Int(segment.startTime * Double(sampleRate)))
         let b = min(samples.count, Int(segment.endTime * Double(sampleRate)))
         guard b > a,
-              let online = embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate),
+              let online = (embedder as? any ContextualSpeakerSegmentEmbedder)?
+                  .embed(audio: samples, sampleRate: sampleRate, startSample: a, endSample: b)
+                  ?? embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate),
               online.count == native.count else {
             onlineFailed += 1
             continue
@@ -427,7 +436,7 @@ func runEmbeddingParity(_ args: [String]) async {
         audioSeconds: parityRound(audioSeconds),
         labelSource: reference == nil ? "diarizer" : "rttm",
         nativeModel: "pyannote-offline-wespeaker",
-        onlineModel: FluidWeSpeakerSegmentEmbedder.embedderIdentifier,
+        onlineModel: candidate == "offline" ? "wespeaker-fluid-offline" : FluidWeSpeakerSegmentEmbedder.embedderIdentifier,
         minSegmentSeconds: minSeconds,
         pairRowsCap: parityPairRowsCap,
         segments: ParitySegmentCounts(

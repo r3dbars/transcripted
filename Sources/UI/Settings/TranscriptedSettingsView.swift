@@ -77,8 +77,6 @@ struct TranscriptedSettingsView: View {
     @State private var micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
     @State private var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-    @State private var speakerSeparationEnabled = SpeakerSeparationPreferences.isEnabled()
-    @State private var calendarNamingEnabled = CalendarNamingPreferences.isEnabled()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject private var homeViewModel = HomeViewModel()
@@ -2239,36 +2237,6 @@ struct TranscriptedSettingsView: View {
                     message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies when the meeting is transcribed."
                 ),
                 automationIdentifier: "transcripted.settings.general.people-in-room"
-            )
-
-            GeneralToggleRow(
-                title: "Separate voices on calls (beta)",
-                isOn: persistedSettingsBinding(
-                    $speakerSeparationEnabled,
-                    persist: { SpeakerSeparationPreferences.setEnabled($0) },
-                    track: { trackSettingsToggle("speaker_separation", enabled: $0, page: .general) }
-                ),
-                help: speakerSeparationEnabled ? "Fewer duplicate voices and fewer people blended together." : "Uses the standard voice separation.",
-                info: GeneralInfo(
-                    title: "Separate voices on calls",
-                    message: "Beta. Tells the people on a call apart more carefully: stray split-off voices join the person they sound like, and when your calendar has the invite, Transcripted expects about that many people. Applies when the meeting is transcribed."
-                ),
-                automationIdentifier: "transcripted.settings.general.speaker-separation"
-            )
-
-            GeneralToggleRow(
-                title: "Recognize people sooner (beta)",
-                isOn: persistedSettingsBinding(
-                    $calendarNamingEnabled,
-                    persist: { CalendarNamingPreferences.setEnabled($0) },
-                    track: { trackSettingsToggle("calendar_naming", enabled: $0, page: .general) }
-                ),
-                help: calendarNamingEnabled ? "Recognizes expected people after two meetings." : "Recognizes people after five confirmed meetings.",
-                info: GeneralInfo(
-                    title: "Recognize people sooner",
-                    message: "Beta. When a voice matches someone expected on the call, Transcripted names them silently after you've confirmed them in two meetings instead of five. Expected means on the calendar invite, or, for calls with no invite, someone you've talked with recently. Everyone else still needs five."
-                ),
-                automationIdentifier: "transcripted.settings.general.calendar-naming"
             )
 
             GeneralToggleRow(

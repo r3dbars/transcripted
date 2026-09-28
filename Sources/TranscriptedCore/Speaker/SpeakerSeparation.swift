@@ -12,8 +12,8 @@
 //   2. merge voices whose fingerprints are close
 //   3. if the calendar invite says how many people were on the call, fold the
 //      quietest voices until the count fits
-// Off by default. The app turns it on per meeting through
-// `TranscriptionTaskManager.speakerSeparationProvider`.
+// On for every meeting. The app picks the options per meeting through
+// `TranscriptionTaskManager.speakerSeparationProvider` (`tuned(for:invitedPeople:)`).
 
 import Foundation
 
@@ -52,6 +52,25 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
             mergeSimilarity: 0.6,
             maxSpeakers: maxSpeakers
         )
+    }
+
+    /// Settings for the Nemotron backend, picked in the speaker lab. Nemotron already
+    /// tells people apart well and has no clustering threshold, and a fingerprint
+    /// merge only cost it people, so: fold voices under 5 s, and cap at one voice
+    /// only when the invite is a one-on-one (a bigger invite's cap folded real people
+    /// who talked little).
+    public static func nemotronTuned(invitedPeople: Int?) -> SpeakerSeparationOptions {
+        SpeakerSeparationOptions(foldBelowSeconds: 5.0, maxSpeakers: invitedPeople == 1 ? 1 : nil)
+    }
+
+    /// The tuned settings for `backend`, capped from the invite size when there is one.
+    public static func tuned(for backend: DiarizationBackend, invitedPeople: Int?) -> SpeakerSeparationOptions {
+        switch backend {
+        case .nemotron:
+            return nemotronTuned(invitedPeople: invitedPeople)
+        case .pyannote:
+            return labTuned(maxSpeakers: invitedPeople.flatMap { speakerCap(invitedPeople: $0) })
+        }
     }
 
     /// Speaker cap from a calendar invite: the invited people (you excluded), plus

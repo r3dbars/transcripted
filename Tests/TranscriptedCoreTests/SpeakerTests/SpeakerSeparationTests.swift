@@ -105,4 +105,25 @@ final class SpeakerSeparationTests: XCTestCase {
         XCTAssertEqual(options.mergeSimilarity, 0.6)
         XCTAssertEqual(options.maxSpeakers, 4)
     }
+
+    func testNemotronFoldsTinyVoicesAndCapsOnlyOneOnOnes() {
+        let noInvite = SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: nil)
+        XCTAssertNil(noInvite.clusteringThreshold)
+        XCTAssertEqual(noInvite.foldBelowSeconds, 5.0)
+        XCTAssertNil(noInvite.mergeSimilarity)
+        XCTAssertNil(noInvite.maxSpeakers)
+        XCTAssertEqual(SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: 1).maxSpeakers, 1)
+        XCTAssertNil(SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: 5).maxSpeakers)
+    }
+
+    func testPyannoteKeepsTheLabSettingsWithTheInviteCap() {
+        XCTAssertEqual(
+            SpeakerSeparationOptions.tuned(for: .pyannote, invitedPeople: 3),
+            SpeakerSeparationOptions.labTuned(maxSpeakers: 4)
+        )
+        XCTAssertEqual(
+            SpeakerSeparationOptions.tuned(for: .pyannote, invitedPeople: nil),
+            SpeakerSeparationOptions.labTuned(maxSpeakers: nil)
+        )
+    }
 }

@@ -1,11 +1,12 @@
 // DiarizationService.swift
 // Offline speaker diarization through FluidAudio. Two backends (`DiarizationBackend`):
-//   - .pyannote (default): OfflineDiarizerManager, PyAnnote segmentation + WeSpeaker
-//     + VBx clustering. Unlimited speakers, ~15% DER on VoxConverse via CoreML.
-//   - .nemotron (experimental, opt-in): NVIDIA Nemotron 3 Diarization, up to 8
+//   - .nemotron (the app's default): NVIDIA Nemotron 3 Diarization, up to 8
 //     speakers at 10 ms resolution. Frame probabilities become exclusive turns via
 //     `NemotronTurnBuilder`; voiceprints come from the injected segment embedder or
-//     `FluidWeSpeakerSegmentEmbedder`, since Nemotron emits none.
+//     `FluidOfflineWeSpeakerSegmentEmbedder` (the pyannote path's own WeSpeaker
+//     model), since Nemotron emits none. If Nemotron can't load, pyannote stands in.
+//   - .pyannote: OfflineDiarizerManager, PyAnnote segmentation + WeSpeaker + VBx
+//     clustering. Unlimited speakers, ~15% DER on VoxConverse via CoreML.
 
 import Foundation
 @preconcurrency import FluidAudio
@@ -41,8 +42,15 @@ public enum DiarizationModelState: Equatable {
 public class DiarizationService: ObservableObject {
     @Published public var modelState: DiarizationModelState = .notLoaded
 
-    /// Which diarization model this service runs. Fixed for the service's lifetime.
+    /// Which diarization model this service was asked to run. Fixed for the service's lifetime.
     public nonisolated let backend: DiarizationBackend
+
+    /// The model actually loaded: `backend`, unless Nemotron failed to load (offline
+    /// on first use, a bad download) and pyannote stood in so meetings still get
+    /// speakers. Reset by `cleanup()`, so the next initialize tries Nemotron again.
+    /// Both paths embed with the same offline WeSpeaker model, so the speaker
+    /// database stays the same either way.
+    public private(set) var activeBackend: DiarizationBackend
 
     // Offline pipeline (PyAnnote) — for post-recording transcripts
     private var offlineDiarizerManager: OfflineDiarizerManager?
@@ -52,7 +60,7 @@ public class DiarizationService: ObservableObject {
     // The fallback embedder is loaded only when no `segmentEmbedder` was injected,
     // because Nemotron produces no voiceprints of its own.
     private var nemotronRunner: NemotronDiarizationRunner?
-    private var nemotronFallbackEmbedder: FluidWeSpeakerSegmentEmbedder?
+    private var nemotronFallbackEmbedder: (any SpeakerSegmentEmbedder)?
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
@@ -76,6 +84,7 @@ public class DiarizationService: ObservableObject {
         self.bundleProvider = bundleProvider
         self.segmentEmbedder = segmentEmbedder
         self.backend = backend
+        self.activeBackend = backend
         // Before any diarizer model loads: keep 0.15.x-era (and bundled) pyannote
         // caches valid under FluidAudio 0.17's pinned revision.
         FluidAudioCompatibility.keepUnpinnedDiarizerCaches()
@@ -105,7 +114,7 @@ public class DiarizationService: ObservableObject {
 
     /// Whether the active backend's models are in memory.
     private var backendModelsLoaded: Bool {
-        switch backend {
+        switch activeBackend {
         case .pyannote:
             return offlineDiarizerManager != nil
         case .nemotron:
@@ -151,7 +160,19 @@ public class DiarizationService: ObservableObject {
             case .pyannote:
                 try await initializeOffline()
             case .nemotron:
-                try await initializeNemotron()
+                do {
+                    try await initializeNemotron()
+                    activeBackend = .nemotron
+                } catch {
+                    let kind = ModelDownloadService.classifyError(error)
+                    AppLogger.transcription.warning("Nemotron diarizer failed to load; using pyannote", [
+                        "error": "\(error.localizedDescription)", "kind": kind.title
+                    ])
+                    nemotronRunner = nil
+                    nemotronFallbackEmbedder = nil
+                    try await initializeOffline()
+                    activeBackend = .pyannote
+                }
             }
 
             modelState = .ready
@@ -255,13 +276,24 @@ public class DiarizationService: ObservableObject {
 
         let runner = try await NemotronDiarizationRunner.load(presetName: presetName, bundleProvider: bundleProvider)
 
-        var fallbackEmbedder: FluidWeSpeakerSegmentEmbedder?
+        // Voiceprints come from the same offline WeSpeaker model the pyannote backend
+        // uses, so Nemotron turns match the people already in speakers.sqlite
+        // (FluidOfflineWeSpeakerSegmentEmbedder). TRANSCRIPTED_NEMOTRON_EMBEDDER=online
+        // (lab only) switches to #1789's online-model embedder for comparison.
+        var fallbackEmbedder: (any SpeakerSegmentEmbedder)?
         if segmentEmbedder == nil {
-            if let bundleDirectory = bundleProvider(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName) {
-                fallbackEmbedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: bundleDirectory)
+            if ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online" {
+                if let bundleDirectory = bundleProvider(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName) {
+                    fallbackEmbedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: bundleDirectory)
+                } else {
+                    fallbackEmbedder = try await ModelDownloadService.withRetry {
+                        try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: nil)
+                    }
+                }
             } else {
+                let bundled = bundleProvider("offline-diarizer-models")
                 fallbackEmbedder = try await ModelDownloadService.withRetry {
-                    try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: nil)
+                    try await FluidOfflineWeSpeakerSegmentEmbedder.load(directory: bundled)
                 }
             }
         }
@@ -272,7 +304,7 @@ public class DiarizationService: ObservableObject {
         AppLogger.transcription.info("Nemotron diarizer models loaded", [
             "backend": backend.rawValue,
             "preset": presetName,
-            "embedder": segmentEmbedder?.identifier ?? FluidWeSpeakerSegmentEmbedder.embedderIdentifier,
+            "embedder": segmentEmbedder?.identifier ?? fallbackEmbedder?.identifier ?? "none",
             "elapsed": elapsed
         ])
     }
@@ -293,7 +325,7 @@ public class DiarizationService: ObservableObject {
         sampleRate: Int,
         clusteringThreshold: Double?
     ) async throws -> [SpeakerSegment] {
-        if backend == .nemotron {
+        if await MainActor.run(body: { self.activeBackend }) == .nemotron {
             return try await diarizeWithNemotron(samples: samples, sampleRate: sampleRate)
         }
 
@@ -396,8 +428,13 @@ public class DiarizationService: ObservableObject {
             let a = max(0, Int(segment.startTime * Double(sampleRate)))
             let b = min(total, Int(segment.endTime * Double(sampleRate)))
             guard b > a else { return withoutEmbedding(segment) }
-            let slice = Array(samples[a..<b])
-            guard let emb = embedder.embed(samples: slice, sampleRate: sampleRate) else {
+            let embedding: [Float]?
+            if let contextual = embedder as? any ContextualSpeakerSegmentEmbedder {
+                embedding = contextual.embed(audio: samples, sampleRate: sampleRate, startSample: a, endSample: b)
+            } else {
+                embedding = embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate)
+            }
+            guard let emb = embedding else {
                 return withoutEmbedding(segment)
             }
             replaced += 1
@@ -513,6 +550,7 @@ public class DiarizationService: ObservableObject {
         sharedOfflineModels = nil
         nemotronRunner = nil
         nemotronFallbackEmbedder = nil
+        activeBackend = backend
         modelState = .notLoaded
     }
 

@@ -149,6 +149,9 @@ struct Main {
         case "dump-e2e":
             guard #available(macOS 26.0, *) else { die("dump-e2e requires macOS 26+") }
             await runDumpE2E(Array(args.dropFirst()))
+        case "embedder-debug":
+            guard #available(macOS 26.0, *) else { die("embedder-debug requires macOS 26+") }
+            await runEmbedderDebug(Array(args.dropFirst()))
         case "dump-set":
             guard #available(macOS 26.0, *) else { die("dump-set requires macOS 26+") }
             await runDumpSet(Array(args.dropFirst()))

@@ -380,6 +380,19 @@ func runMeetingSeries(_ args: [String]) async {
     // way the app does (SpeakerSeparationOptions.labTuned, capped by the invite size).
     // --separation nocap: same settings with no calendar cap.
     let separation = argValue("--separation", in: args) ?? "none"
+    // --backend pyannote|nemotron: which diarizer DiarizationService runs (#1789).
+    let backendRaw = (argValue("--backend", in: args) ?? DiarizationBackend.pyannote.rawValue).lowercased()
+    guard let backend = DiarizationBackend(rawValue: backendRaw) else { die("unknown --backend \(backendRaw)") }
+    // Fine-grained separation (overrides --separation when any is given):
+    //   --sep-threshold <cosine|none>  --sep-fold <seconds|none>  --sep-merge <cosine|none>
+    //   --sep-cap all|one|none   (all: invite size +1 on 3+; one: cap only one-person invites)
+    let sepFlags = ["--sep-threshold", "--sep-fold", "--sep-merge", "--sep-cap"].filter { args.contains($0) }
+    func sepNumber(_ flag: String) -> Double? {
+        guard let raw = argValue(flag, in: args), raw != "none" else { return nil }
+        guard let value = Double(raw) else { die("\(flag) wants a number or none") }
+        return value
+    }
+    let sepCapMode = argValue("--sep-cap", in: args) ?? "none"
     // --calendar-naming: install TranscriptionTaskManager.lineupNamingProvider with the
     // invite's display names (calendar.json), as the app does from EventKit.
     // --no-invite: same, but as if no meeting had an invite (random Zooms), so the
@@ -403,7 +416,7 @@ func runMeetingSeries(_ args: [String]) async {
         die("Parakeet load failed: \(error.localizedDescription)")
     }
     let engine = await MainActor.run { LabParakeetEngine(manager: asr) }
-    let diarization = await DiarizationService()
+    let diarization = await DiarizationService(backend: backend)
     await diarization.initialize()
     guard await MainActor.run(body: { diarization.isReady }) else { die("diarizer failed to initialize") }
 
@@ -459,7 +472,22 @@ func runMeetingSeries(_ args: [String]) async {
                 statsStore: LabStatsStore()
             )
             m.pipelineResultObserver = { box.set($0) }
-            if separation != "none" {
+            if !sepFlags.isEmpty {
+                let invited = labInvitedPeople(meetingDir: meetingDir)
+                let cap: Int?
+                switch sepCapMode {
+                case "all": cap = invited.flatMap { SpeakerSeparationOptions.speakerCap(invitedPeople: $0) }
+                case "one": cap = invited == 1 ? 1 : nil
+                default: cap = nil
+                }
+                let options = SpeakerSeparationOptions(
+                    clusteringThreshold: sepNumber("--sep-threshold"),
+                    foldBelowSeconds: sepNumber("--sep-fold"),
+                    mergeSimilarity: sepNumber("--sep-merge"),
+                    maxSpeakers: cap
+                )
+                m.speakerSeparationProvider = { _ in options }
+            } else if separation != "none" {
                 let cap = separation == "nocap" ? nil : labInvitedPeople(meetingDir: meetingDir).flatMap {
                     SpeakerSeparationOptions.speakerCap(invitedPeople: $0)
                 }
@@ -595,7 +623,8 @@ func runMeetingSeries(_ args: [String]) async {
             rows: rows, silentNames: silent, utterances: utterances,
             profilesAfter: speakerDB.allSpeakers().count
         )
-        out.speakerHint = [separation == "none" ? speakerHint : "separation-\(separation)",
+        out.speakerHint = ["backend-\(backend.rawValue)",
+                           !sepFlags.isEmpty ? "sep-" + args.joined(separator: " ") : (separation == "none" ? speakerHint : "separation-\(separation)"),
                            calendarNaming ? (noInvite ? "lineup-naming-no-invite" : "lineup-naming") : nil]
             .compactMap { $0 }.joined(separator: "+")
         out.speakerBoundsMin = bounds?.min

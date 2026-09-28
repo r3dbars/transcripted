@@ -9,28 +9,28 @@ func testDiarizationBackendPreferences() {
     }
     let envKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
 
-    runSuite("Diarization backend defaults to pyannote") {
+    runSuite("Diarization backend defaults to Nemotron") {
         let (d, s) = makeDefaults(); defer { d.removePersistentDomain(forName: s) }
-        assertEqual(DiarizationBackendPreferences.defaultChoice.rawValue, "pyannote", "default stays pyannote (unchanged behavior)")
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "pyannote", "no env, no UD -> default")
+        assertEqual(DiarizationBackendPreferences.defaultChoice.rawValue, "nemotron", "Nemotron is the default")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "nemotron", "no env, no UD -> default")
         assertEqual(DiarizationBackendPreferences.envKey, envKey, "env key is the documented one")
         assertEqual(DiarizationBackendPreferences.preferenceKey, "diarization-backend-preference", "defaults key is the documented one")
     }
 
     runSuite("Diarization backend honors the environment override") {
         let (d, s) = makeDefaults(); defer { d.removePersistentDomain(forName: s) }
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "nemotron"]).rawValue, "nemotron", "env nemotron")
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "NEMOTRON"]).rawValue, "nemotron", "uppercase is lowercased")
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "garbage"]).rawValue, "pyannote", "garbage env -> default")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "pyannote"]).rawValue, "pyannote", "env pyannote")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "PYANNOTE"]).rawValue, "pyannote", "uppercase is lowercased")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "garbage"]).rawValue, "nemotron", "garbage env -> default")
     }
 
     runSuite("Diarization backend persistence and env precedence") {
         let (d, s) = makeDefaults(); defer { d.removePersistentDomain(forName: s) }
-        DiarizationBackendPreferences.setPreferredChoice(.nemotron, userDefaults: d)
-        assertEqual(DiarizationBackendPreferences.preferredChoice(userDefaults: d).rawValue, "nemotron", "persisted preference")
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "nemotron", "no env -> UserDefaults wins")
-        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "pyannote"]).rawValue, "pyannote", "env overrides UserDefaults")
-        d.set("Nemotron", forKey: DiarizationBackendPreferences.preferenceKey)
-        assertEqual(DiarizationBackendPreferences.preferredChoice(userDefaults: d).rawValue, "nemotron", "defaults write with capitals still reads")
+        DiarizationBackendPreferences.setPreferredChoice(.pyannote, userDefaults: d)
+        assertEqual(DiarizationBackendPreferences.preferredChoice(userDefaults: d).rawValue, "pyannote", "persisted preference")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "pyannote", "no env -> UserDefaults wins")
+        assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "nemotron"]).rawValue, "nemotron", "env overrides UserDefaults")
+        d.set("Pyannote", forKey: DiarizationBackendPreferences.preferenceKey)
+        assertEqual(DiarizationBackendPreferences.preferredChoice(userDefaults: d).rawValue, "pyannote", "defaults write with capitals still reads")
     }
 }

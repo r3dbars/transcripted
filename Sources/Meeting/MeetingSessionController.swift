@@ -566,8 +566,9 @@ final class MeetingSessionController: ObservableObject {
         // default speakers.sqlite — so 256-d vectors can never land in the 192-d DB.
         let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
-        // Hidden, off-by-default switch (DiarizationBackendPreferences). Read once
-        // here, so a change takes effect on the next launch.
+        // Nemotron by default, with a hidden switch back to pyannote
+        // (DiarizationBackendPreferences). Read once here, so a change takes
+        // effect on the next launch.
         let diarizationBackend = SpeakerEmbedderFactory.activeDiarizationBackend()
 
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
@@ -680,11 +681,11 @@ final class MeetingSessionController: ObservableObject {
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
         }
-        // Off unless the speaker-separation flag is on (MeetingSpeakerSeparation).
+        // Tuned for the backend picked at launch (MeetingSpeakerSeparation).
         taskManager.speakerSeparationProvider = { recordingDate in
-            await MeetingSpeakerSeparation.resolve(recordingStart: recordingDate)
+            await MeetingSpeakerSeparation.resolve(backend: diarizationBackend, recordingStart: recordingDate)
         }
-        // Off unless the calendar-naming flag is on (MeetingCalendarNaming).
+        // Expected people get named sooner (MeetingCalendarNaming).
         taskManager.lineupNamingProvider = { recordingDate in
             await MeetingCalendarNaming.lineupRequest(recordingStart: recordingDate)
         }

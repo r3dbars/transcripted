@@ -126,6 +126,19 @@ class Bank:
         for a, b, *_ in json.load(open(self.dir / "maybe_same_person.json")):
             self.conflicts.add(frozenset((a, b)))
         self._files: dict[str, sf.SoundFile] = {}
+        music_path = self.dir / "music.jsonl"
+        self.music = [json.loads(line) for line in open(music_path)] if music_path.exists() else []
+
+    def music_clip(self, rng: np.random.Generator, seconds: float) -> np.ndarray:
+        """Real music (caption `[Music]` spans) for `seconds`, chaining clips as needed."""
+        out: list[np.ndarray] = []
+        need = int(seconds * SR)
+        while need > 0 and self.music:
+            m = self.music[int(rng.integers(len(self.music)))]
+            x = self.audio(m["video"], m["start"], m["end"])[:need]
+            out.append(x)
+            need -= len(x)
+        return np.concatenate(out) if out else np.zeros(int(seconds * SR), np.float32)
 
     def audio(self, video: str, start: float, end: float) -> np.ndarray:
         f = self._files.get(video)
@@ -295,6 +308,13 @@ FAMILIES = {
     "C": dict(remote=(6, 8), local=(0, 0), minutes=(20, 40), split=False),
     "D": dict(remote=(2, 4), local=(1, 2), minutes=(20, 30), split=True),
     "E": dict(remote=(3, 6), local=(0, 0), minutes=(20, 35), split=False),
+    # Stress-test families (plan phase 3): right at and past Nemotron's 8-speaker limit,
+    # hour-plus meetings, very short calls, and noisy calls.
+    "G8": dict(remote=(8, 8), local=(0, 0), minutes=(25, 40), split=False),
+    "G10": dict(remote=(9, 10), local=(0, 0), minutes=(25, 40), split=False),
+    "L": dict(remote=(3, 5), local=(0, 0), minutes=(60, 90), split=False),
+    "S": dict(remote=(1, 4), local=(0, 0), minutes=(1, 3), split=False),
+    "N": dict(remote=(3, 6), local=(0, 0), minutes=(15, 30), split=False),
 }
 
 
@@ -358,6 +378,66 @@ def plan_family(bank: Bank, family: str, rng: np.random.Generator) -> Plan:
         for p in rng.permutation([p for p in people if p.role == "remote"])[: 2]:
             p.device_after_switch = remote_device(rng)
     return Plan(people, total_s, stress, 0.22 if stress else 0.08, spec["split"])
+
+
+def add_noise_layer(bank: Bank, rng: np.random.Generator, people: list, system: np.ndarray, duration: float) -> list:
+    """Family N: the things that make real calls hard, none of them a participant.
+      music     a 20-40 s music intro (waiting room / screen share), and a quieter
+                15-30 s music bed under speech mid-call
+      babble    other people talking in the background of one remote participant's
+                open mic, through that participant's device
+      keyboard  typing clicks on another remote participant's open mic
+    Returns a description of what was added (for the answer key)."""
+    events = []
+    level = lambda x, db: x * (10 ** (db / 20) / (np.sqrt(np.mean(x * x)) + 1e-9))  # noqa: E731
+    def put(x, t0):
+        i0 = int(t0 * SR)
+        n = max(0, min(len(x), len(system) - i0))
+        system[i0:i0 + n] += x[:n]
+    intro = float(rng.uniform(20, 40))
+    put(level(bank.music_clip(rng, intro), float(rng.uniform(-22, -16))), 0.0)
+    events.append({"kind": "music_intro", "start": 0.0, "end": round(intro, 1)})
+    bed_t = float(rng.uniform(0.3, 0.7)) * duration
+    bed = float(rng.uniform(15, 30))
+    put(level(bank.music_clip(rng, bed), float(rng.uniform(-34, -28))), bed_t)
+    events.append({"kind": "music_bed", "start": round(bed_t, 1), "end": round(bed_t + bed, 1)})
+    remotes = [p for p in people if p.role == "remote"]
+    in_meeting = {p.identity for p in people}
+    others = [v for v in bank.voices.values() if v.identity not in in_meeting]
+    if remotes and len(others) >= 2:
+        host = remotes[int(rng.integers(len(remotes)))]
+        # Background talkers: two strangers' speech, continuous, well under the speaker.
+        chunks = []
+        for v in [others[int(i)] for i in rng.choice(len(others), 2, replace=False)]:
+            s0, e0 = v.spans[int(rng.integers(len(v.spans)))]
+            chunks.append(bank.audio(v.video, s0, min(e0, s0 + duration)))
+        n = int(duration * SR)
+        babble = np.zeros(n, np.float32)
+        for c in chunks:
+            reps = int(np.ceil(n / max(1, len(c))))
+            babble += np.tile(c, reps)[:n]
+        babble = level(babble, float(rng.uniform(-40, -34)))
+        # Through the host's device in 30 s pieces (open mic all meeting).
+        dev = host.device or remote_device(rng)
+        step = 30 * SR
+        for i in range(0, n, step):
+            put(dev.apply(babble[i:i + step]), i / SR)
+        events.append({"kind": "babble", "on": host.pid})
+        if len(remotes) >= 2:
+            typist = [p for p in remotes if p.pid != host.pid][0]
+            clicks = np.zeros(n, np.float32)
+            for _ in range(int(duration / 60 * 3)):  # ~3 typing bursts per minute
+                t = float(rng.uniform(0, max(1.0, duration - 6)))
+                for k in range(int(rng.uniform(15, 50))):
+                    j = int((t + k * rng.uniform(0.08, 0.2)) * SR)
+                    if j + 200 < n:
+                        clicks[j:j + 200] += (rng.standard_normal(200) * np.exp(-np.arange(200) / 30)).astype(np.float32)
+            clicks = level(clicks, float(rng.uniform(-38, -30))) if clicks.any() else clicks
+            dev2 = typist.device or remote_device(rng)
+            for i in range(0, n, step):
+                put(dev2.apply(clicks[i:i + step]), i / SR)
+            events.append({"kind": "keyboard", "on": typist.pid})
+    return events
 
 
 def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | None = None) -> dict:
@@ -470,6 +550,9 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
         d = int(float(rng.uniform(0.02, 0.08)) * SR)
         leak = np.pad(system, (d, 0))[: len(system)] * 10 ** (float(rng.uniform(-38, -28)) / 20)
         mic += fftconvolve(leak, room.rirs["p0"])[: len(mic)].astype(np.float32)
+    noise_events = []
+    if family == "N":
+        noise_events = add_noise_layer(bank, rng, people, system, duration)
     peak = max(np.abs(mic).max(), np.abs(system).max(), 1e-6)
     if peak > 0.98:
         mic *= 0.98 / peak
@@ -481,6 +564,7 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
     truth = {
         "meeting": out.name, "family": family, "seed": seed, "duration_s": round(duration, 2), "title": plan.title,
         "split_local_speakers": spec["split"], "echo_leak": bool(echo), "room": room.description,
+        "noise_events": noise_events,
         "participants": [{"pid": p.pid, "identity": p.identity, "voice": p.vid, "name": p.name, "role": p.role,
                           "channel": p.channel, "talk_s": round(p.talk_s, 1),
                           "device": p.device.to_json() if p.device else None,

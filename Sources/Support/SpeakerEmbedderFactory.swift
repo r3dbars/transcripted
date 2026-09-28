@@ -40,18 +40,24 @@ enum SpeakerEmbedderFactory {
     /// 256-d WeSpeaker vectors into the 192-d ERes2Net database). Kept here (not in
     /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
     ///
-    /// The experimental Nemotron diarization backend has no voiceprints of its own.
-    /// With no injected embedder, Core fills them with FluidAudio's *online* WeSpeaker
-    /// model, a different Core ML conversion than the offline pipeline that wrote
-    /// `speakers.sqlite`. Until the speaker lab shows the two agree, those vectors get
-    /// their own database so they can never pollute the saved people.
+    /// The Nemotron diarization backend has no voiceprints of its own. With no
+    /// injected embedder, Core fills them with the pyannote pipeline's own offline
+    /// WeSpeaker model (`FluidOfflineWeSpeakerSegmentEmbedder`), the model every person
+    /// in `speakers.sqlite` was learned from, so Nemotron shares that database. The
+    /// YODAS3 speaker lab measured speaker-level cosine 0.986-0.995 against the
+    /// pyannote vectors on the same audio. Only the lab-only
+    /// `TRANSCRIPTED_NEMOTRON_EMBEDDER=online` override (FluidAudio's online WeSpeaker
+    /// conversion, a nearby but different space) gets its own database.
     static func speakerDBURL(
         for embedder: (any SpeakerSegmentEmbedder)?,
-        diarizationBackend: DiarizationBackend = .pyannote
+        diarizationBackend: DiarizationBackend = .pyannote,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         let state = FileManager.default.transcriptedStateDir
+        let onlineNemotronVoiceprints = diarizationBackend == .nemotron
+            && environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online"
         let identifier = embedder?.identifier
-            ?? (diarizationBackend == .nemotron ? FluidWeSpeakerSegmentEmbedder.embedderIdentifier : nil)
+            ?? (onlineNemotronVoiceprints ? FluidWeSpeakerSegmentEmbedder.embedderIdentifier : nil)
         let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: identifier)
         return state.appendingPathComponent(name, isDirectory: false)
     }

@@ -501,6 +501,40 @@ def cmd_verify(args: argparse.Namespace) -> None:
             f.write(json.dumps(r) + "\n")
 
 
+# ---------------------------------------------------------------- music pass
+
+def cmd_music(args: argparse.Namespace) -> None:
+    """Real music for noisy-call stress tests: caption spans marked `[Music]` (at least
+    --min-seconds long, not overlapping any speech caption) in videos already decoded to
+    audio16k. Writes bank/<lang>/music.jsonl rows {video, start, end}."""
+    import pyarrow.parquet as pq
+
+    out_dir = ROOT / "bank" / args.lang
+    have = {p.stem for p in (out_dir / "audio16k").glob("*.flac")}
+    rows = []
+    for meta in sorted((ROOT / "raw" / args.lang / "metadata").glob("*.parquet")):
+        for r in pq.read_table(meta, columns=["id", "transcript"]).to_pylist():
+            if r["id"] not in have or not r["transcript"]:
+                continue
+            segs = json.loads(r["transcript"])
+            speech = [(x["start"] / 1000, (x["start"] + x.get("duration", 0)) / 1000) for x in segs
+                      if (x.get("text") or "").strip() and not CUE.match(x["text"].strip())]
+            for x in segs:
+                if (x.get("text") or "").strip().lower() not in ("[music]", "[música]", "(music)"):
+                    continue
+                a, b = x["start"] / 1000, (x["start"] + x.get("duration", 0)) / 1000
+                if b - a < args.min_seconds:
+                    continue
+                if any(sa < b and sb > a for sa, sb in speech):
+                    continue
+                rows.append({"video": r["id"], "start": round(a, 2), "end": round(b, 2)})
+    with open(out_dir / "music.jsonl", "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    total = sum(r["end"] - r["start"] for r in rows)
+    print(f"[music] {len(rows)} clips, {total / 60:.1f} min, from {len({r['video'] for r in rows})} videos")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -520,8 +554,11 @@ def main() -> None:
     v.add_argument("--min-minutes", type=float, default=10.0)
     v.add_argument("--max-bad-share", type=float, default=0.10)
     v.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) - 4))
+    mu = sub.add_parser("music")
+    mu.add_argument("--lang", default="en")
+    mu.add_argument("--min-seconds", type=float, default=6.0)
     args = ap.parse_args()
-    {"embed": cmd_embed, "select": cmd_select, "verify": cmd_verify}[args.cmd](args)
+    {"embed": cmd_embed, "select": cmd_select, "verify": cmd_verify, "music": cmd_music}[args.cmd](args)
 
 
 if __name__ == "__main__":
