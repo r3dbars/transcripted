@@ -1,10 +1,5 @@
-// Source-text pin: one assertion reads the literal text of
-// Sources/UI/Shared/AgentConnectionGuide.swift, checking that folderPathsText is declared
-// `static var` (computed) rather than `static let` (cached at first access). The file is
-// compiled here and every other suite below calls its real API, but a `var` and a `let` return
-// the identical string on this test's single read — only the declaration keyword proves the
-// folder copy stays live as the user relocates the capture library, and that has to come from
-// source, not from the call site. If you change this to a stored property, update the pin.
+// Every suite calls AgentConnectionGuide's real API. The folderPathsText suite relocates the
+// capture library between two reads, so a copy cached at first access fails it.
 
 import Foundation
 
@@ -185,15 +180,52 @@ func testAgentConnectionGuide() {
     }
 
     runSuite("AgentConnectionGuide.folderPathsText — stays computed from current storage paths") {
-        let source = readSourceFixture("Sources/UI/Shared/AgentConnectionGuide.swift")
-        let folderText = AgentConnectionGuide.folderPathsText
+        // Move the capture library between two reads. A copy cached at first
+        // access would still name the first folder after the user relocates it.
+        let fm = FileManager.default
+        let key = TranscriptedStoragePreferences.captureLibraryLocationKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        let root = URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent("build/agent-connection-guide-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let firstLibrary = root.appendingPathComponent("first-library", isDirectory: true)
+        let secondLibrary = root.appendingPathComponent("second-library", isDirectory: true)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            try? fm.removeItem(at: root)
+        }
+        for library in [firstLibrary, secondLibrary] {
+            try? fm.createDirectory(at: library, withIntermediateDirectories: true)
+        }
+
+        UserDefaults.standard.set(firstLibrary.path, forKey: key)
+        let firstMeetings = AgentConnectionGuide.meetingsFolder.path
+        let firstDictations = AgentConnectionGuide.dictationsFolder.path
+        let firstText = AgentConnectionGuide.folderPathsText
+
+        UserDefaults.standard.set(secondLibrary.path, forKey: key)
+        let secondMeetings = AgentConnectionGuide.meetingsFolder.path
+        let secondDictations = AgentConnectionGuide.dictationsFolder.path
+        let secondText = AgentConnectionGuide.folderPathsText
 
         assertTrue(
-            source.contains("static var folderPathsText"),
-            "folder path copy should be computed so relocated capture-library paths are reflected"
+            firstMeetings.hasPrefix(firstLibrary.path) && secondMeetings.hasPrefix(secondLibrary.path),
+            "test setup: the relocated capture library should be the one in use"
         )
-        assertTrue(folderText.contains(AgentConnectionGuide.meetingsFolder.path), "folder copy should include current meetings path")
-        assertTrue(folderText.contains(AgentConnectionGuide.dictationsFolder.path), "folder copy should include current dictations path")
+        assertTrue(firstText.contains(firstMeetings), "folder copy should include current meetings path")
+        assertTrue(firstText.contains(firstDictations), "folder copy should include current dictations path")
+        assertTrue(
+            secondText.contains(secondMeetings) && secondText.contains(secondDictations),
+            "folder path copy should follow a relocated capture library"
+        )
+        assertFalse(
+            secondText.contains(firstLibrary.path),
+            "folder path copy must not keep naming the old capture library after a move"
+        )
     }
 
     runSuite("AgentConnectionGuide bundled skills — files and manifest are versioned") {

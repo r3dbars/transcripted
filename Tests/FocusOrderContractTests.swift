@@ -3,9 +3,11 @@
 // The visual layout of a surface does not prove anything about the order the
 // focus ring travels through its controls. These checks pin the keyboard Tab
 // order so a UI sweep can't silently reshuffle it: a pure-logic half asserts the
-// FocusOrderContract is a well-formed loop, and a source half asserts the real
-// menu bar views join the key-view loop and attach their identifiers in that
-// same order. The source half greps text — it runs no UI.
+// FocusOrderContract is a well-formed loop and matches the identifiers and
+// ⌘ shortcuts the real TranscriptedSettingsPage cases produce, and a source
+// half asserts the real menu bar views and sidebar row join the key-view loop
+// and attach their identifiers in that same order. The source half greps
+// text — it runs no UI.
 
 import Foundation
 
@@ -119,29 +121,35 @@ func testFocusOrderContract() {
     }
 
     runSuite("Focus order contract - settings sidebar nav matches the declared order") {
-        let pagesSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsPage.swift")
-        let sidebarSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
+        // TranscriptedSettingsPage is compiled here, so check the identifiers
+        // the real pages produce instead of the text that builds them.
+        let producedIdentifiers = Set(TranscriptedSettingsPage.allCases.map(\.automationIdentifier))
+        for identifier in FocusOrderContract.settingsSidebarOrder {
+            assertTrue(
+                producedIdentifiers.contains(identifier),
+                "TranscriptedSettingsPage should keep producing the sidebar identifier \(identifier) the contract pins"
+            )
+        }
 
-        // The contract pins the produced identifiers: most pages interpolate
-        // `transcripted.settings.sidebar.<rawValue>`, connect-agent uses a
-        // bespoke literal, and the sidebar attaches them as the AX identifier.
-        assertTrue(
-            pagesSource.contains("transcripted.settings.sidebar.\\(rawValue)")
-                && pagesSource.contains("transcripted.settings.sidebar.connect-agent"),
-            "TranscriptedSettingsPage should keep producing the sidebar identifiers the contract pins"
+        // The five primary navigation pages are the ones with a ⌘1–⌘5 "Go"
+        // shortcut; in shortcut order they must be exactly the declared Tab order.
+        let shortcutOrder = TranscriptedSettingsPage.allCases
+            .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
+            .sorted { $0.key < $1.key }
+            .map(\.identifier)
+        assertEqual(
+            shortcutOrder,
+            FocusOrderContract.settingsSidebarOrder,
+            "the ⌘1–⌘5 navigation pages should stay in the settings navigation surface, in the declared focus order"
         )
+
+        // The sidebar row is a SwiftUI view this runner does not compile, so
+        // attaching the identifier is still a source-read assertion.
+        let sidebarSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
         assertTrue(
             sidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
         )
-
-        // The five primary navigation pages the contract orders must still exist.
-        for pageCase in ["case today", "case home", "case dictations", "case people", "case connectAgent"] {
-            assertTrue(
-                pagesSource.contains(pageCase),
-                "\(pageCase) should stay in the settings navigation surface the focus order depends on"
-            )
-        }
         assertEqual(
             FocusOrderContract.settingsSidebarOrder.count,
             5,

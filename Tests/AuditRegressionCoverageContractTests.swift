@@ -1,6 +1,13 @@
+// The pasteback suite runs the real ClipboardRestoringTextPaster. The other three suites still
+// read source as text: MeetingOverlayController, MenuBarPanelController, and
+// TranscriptionQueueCoordinator are not compiled into the fast runner (see
+// docs/testing-source-text-inventory.md for the seam each one needs).
+
+import AppKit
 import Foundation
 
-func testAuditRegressionCoverageContract() {
+@MainActor
+func testAuditRegressionCoverageContract() async {
     runSuite("AuditRegressionCoverageContract — meeting overlay duration updates are whole-second throttled") {
         let source = readSourceFixture("Sources/UI/Overlay/MeetingOverlayController.swift")
         assertTrue(
@@ -26,18 +33,59 @@ func testAuditRegressionCoverageContract() {
     }
 
     runSuite("AuditRegressionCoverageContract — pasteback focus changes downgrade to copied before Cmd+V") {
-        let source = readSourceFixture("Sources/Support/ClipboardRestoringTextPaster.swift")
-        assertTrue(
-            source.contains("!target.matchesCurrentFrontmostApp()"),
+        // Behavior: run the real paster against a private pasteboard with a
+        // captured target that is not the frontmost app and no time to activate.
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedAuditFocusDrift-\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.setString("synthetic original clipboard", forType: .string)
+        var dispatchedCommandV = false
+        let focusDrift = ClipboardRestoringTextPaster().paste(
+            "synthetic focus drift dictation",
+            target: DictationPasteTarget(processIdentifier: -1, bundleIdentifier: "invalid.test.focus-drift"),
+            activationWait: 0,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: { dispatchedCommandV = true; return true },
+            pasteConfirmed: { true }
+        )
+        assertFalse(
+            dispatchedCommandV,
             "pasteback must re-check the captured target app before dispatching Cmd+V"
         )
-        assertTrue(
-            source.contains("reason: .focusChanged"),
+        assertEqual(
+            focusDrift.copyReason,
+            .focusChanged,
             "focus drift should produce an honest copied result instead of a false pasted result"
         )
-        assertTrue(
-            source.contains("let dispatched = pasteDispatcher()") && source.contains("guard dispatched else"),
+        assertEqual(
+            pasteboard.string(forType: .string),
+            "synthetic focus drift dictation",
+            "a focus-drift fallback should leave the text on the clipboard for a manual paste"
+        )
+
+        // The dispatcher's own result is still the fallback seam: a Cmd+V
+        // that could not be posted becomes a copy, never a pasted claim.
+        let failedDispatchBoard = NSPasteboard(name: NSPasteboard.Name("TranscriptedAuditDispatchFailure-\(UUID().uuidString)"))
+        failedDispatchBoard.clearContents()
+        failedDispatchBoard.setString("synthetic original clipboard", forType: .string)
+        let failedDispatch = ClipboardRestoringTextPaster().paste(
+            "synthetic failed dispatch dictation",
+            pasteboard: failedDispatchBoard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: { false },
+            pasteConfirmed: { true }
+        )
+        assertEqual(
+            failedDispatch.copyReason,
+            .pasteEventCreationFailed,
             "the paste dispatch result must remain an explicit fallback seam"
+        )
+        assertEqual(
+            failedDispatchBoard.string(forType: .string),
+            "synthetic failed dispatch dictation",
+            "a failed dispatch should leave the text on the clipboard for a manual paste"
         )
     }
 
