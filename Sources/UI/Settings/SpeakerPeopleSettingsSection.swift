@@ -543,7 +543,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// `SpeakerReviewStack.reviewItemForRename`.
     func renameFromEveryone(_ profile: SpeakerProfile, to newName: String) {
         if let item = SpeakerReviewStack.reviewItemForRename(of: profile, in: reviewQueueItems) {
-            namePendingReviewItem(item, to: newName)
+            // Same as naming it on its card: a name one saved person already
+            // has adds the voice to them instead of making a second one.
+            if let existing = SpeakerNameSelectionPolicy.uniqueSavedPerson(
+                named: newName,
+                among: profiles,
+                excluding: profile.id,
+                id: \.id,
+                displayName: \.displayName
+            ) {
+                mergePendingReviewItem(item, into: existing)
+            } else {
+                namePendingReviewItem(item, to: newName)
+            }
         } else {
             rename(profile: profile, to: newName)
         }
