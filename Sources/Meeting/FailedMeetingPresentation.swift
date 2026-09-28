@@ -1,12 +1,14 @@
 import Foundation
+#if canImport(TranscriptedCore)
 import TranscriptedCore
+#endif
 
 enum FailedMeetingPresentation {
     static func item(
         from failed: FailedTranscription,
         isRetrying: Bool,
         usableAudio: FailedMeetingUsableAudio = .unknown
-    ) -> MeetingSessionController.FailedMeetingItem {
+    ) -> FailedMeetingItem {
         let failureKind = MeetingFailureKind.classify(errorKind: failed.errorKind, message: failed.errorMessage)
         let availableAudioURLs = audioURLs(for: failed)
         let hasRetryableAudioFiles = failed.audioFilesExist()
@@ -16,7 +18,7 @@ enum FailedMeetingPresentation {
             isRetryable: failed.isRetryable
         )
 
-        return MeetingSessionController.FailedMeetingItem(
+        return FailedMeetingItem(
             id: failed.id,
             timestamp: failed.timestamp,
             title: title(for: failed, fallback: copy.title),
