@@ -114,6 +114,8 @@ class FloatingOverlayController {
     /// error handler so closing the notice leaves the text on the clipboard.
     private var notPastedText: String?
     private var notPastedPasteHandler: (() -> Void)?
+    private var notPastedActionTitle = "Paste"
+    private var notPastedHint: String?
     private var notPastedKeyMonitor: Any?
     static let notPastedDismissSeconds: Double = 15
     var loadingElapsedSeconds: Int = 0 {
@@ -353,9 +355,10 @@ class FloatingOverlayController {
             phase = .message(.init(
                 tone: tone,
                 text: errorMessage,
-                actionTitle: notPastedText != nil ? "Paste" : errorActionTitle,
+                actionTitle: notPastedText != nil ? notPastedActionTitle : errorActionTitle,
                 preview: notPastedText,
-                dismissSeconds: notPastedText != nil ? Self.notPastedDismissSeconds : nil
+                dismissSeconds: notPastedText != nil ? Self.notPastedDismissSeconds : nil,
+                hint: notPastedText != nil ? notPastedHint : nil
             ))
         case .success:
             phase = .success(title: successTitle)
@@ -770,12 +773,46 @@ class FloatingOverlayController {
             showClipboardNotice(fallbackMessage)
             return
         }
-        showMessage("Not pasted", tone: .notice, notPasted: (text, paste))
+        showMessage("Not pasted", tone: .notice, notPasted: NotPastedNotice(
+            text: text,
+            actionTitle: "Paste",
+            hint: nil,
+            watchesForManualPaste: true,
+            action: paste
+        ))
+    }
+
+    /// Paste-back didn't run because the clipboard held something it couldn't
+    /// set aside, so the words were never put on it. The island shows them
+    /// with a Copy button (the one step that replaces what's on the
+    /// clipboard, only when asked). Other overlay modes keep the error.
+    func showClipboardBusyNotice(_ text: String, fallbackMessage: String, copy: @escaping () -> Void) {
+        guard isIslandMode else {
+            showError(fallbackMessage)
+            return
+        }
+        showMessage("Not pasted", tone: .notice, notPasted: NotPastedNotice(
+            text: text,
+            actionTitle: "Copy",
+            hint: "Your clipboard holds something too big to set aside.",
+            watchesForManualPaste: false,
+            action: copy
+        ))
+    }
+
+    private struct NotPastedNotice {
+        let text: String
+        let actionTitle: String
+        let hint: String?
+        let watchesForManualPaste: Bool
+        let action: () -> Void
     }
 
     private func clearNotPasted() {
         notPastedText = nil
         notPastedPasteHandler = nil
+        notPastedActionTitle = "Paste"
+        notPastedHint = nil
         if let notPastedKeyMonitor {
             NSEvent.removeMonitor(notPastedKeyMonitor)
             self.notPastedKeyMonitor = nil
@@ -811,14 +848,18 @@ class FloatingOverlayController {
         tone: MessageTone,
         actionTitle: String? = nil,
         action: (() -> Void)? = nil,
-        notPasted: (text: String, paste: () -> Void)? = nil
+        notPasted: NotPastedNotice? = nil
     ) {
         errorDismissTask?.cancel()
         clearNotPasted()
         if let notPasted {
             notPastedText = notPasted.text
-            notPastedPasteHandler = notPasted.paste
-            watchForManualPaste(of: notPasted.text)
+            notPastedPasteHandler = notPasted.action
+            notPastedActionTitle = notPasted.actionTitle
+            notPastedHint = notPasted.hint
+            if notPasted.watchesForManualPaste {
+                watchForManualPaste(of: notPasted.text)
+            }
         }
         loadingTimerTask?.cancel()
         loadingTimerTask = nil

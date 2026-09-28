@@ -1486,6 +1486,26 @@ func testClipboardRestoringTextPaster() async {
         assertTrue(asked.readBeforeAsk, "every Accessibility check comes after the read")
     }
 
+    runSuite("A dictation that didn't paste is offered back with its words") {
+        assertEqual(
+            TextPasteOutcome.copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed).notPastedOffer,
+            .onClipboard,
+            "words left on the clipboard are offered to paste"
+        )
+        assertEqual(
+            TextPasteOutcome.failed("synthetic busy clipboard", reason: .clipboardSnapshotIncomplete).notPastedOffer,
+            .clipboardBusy,
+            "a clipboard too big to set aside never got the words, so they're offered to copy"
+        )
+        assertEqual(TextPasteOutcome.pasted.notPastedOffer, nil, "a paste that landed offers nothing")
+        assertEqual(TextPasteOutcome.likelyPasted.notPastedOffer, nil, "a likely paste offers nothing")
+        assertEqual(
+            TextPasteOutcome.failed("synthetic write failure", reason: .temporaryClipboardWriteFailed).notPastedOffer,
+            nil,
+            "other failures keep their own message"
+        )
+    }
+
     runSuite("A focused element counts as somewhere text can't go only when it plainly can't take text") {
         // Claude's transcript: a page region, not editable, in no text box.
         assertTrue(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(

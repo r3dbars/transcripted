@@ -35,6 +35,28 @@ enum TextPasteFailureReason: String, Equatable {
     case unknown
 }
 
+/// How a dictation that didn't paste is handed back to the user.
+enum DictationNotPastedOffer: Equatable {
+    /// The words are on the clipboard: paste them where they go.
+    case onClipboard
+    /// The clipboard held something paste-back couldn't set aside, so the
+    /// words never went on it: offer to copy them.
+    case clipboardBusy
+}
+
+extension TextPasteOutcome {
+    var notPastedOffer: DictationNotPastedOffer? {
+        switch self {
+        case .copied:
+            return .onClipboard
+        case .failed(_, reason: .clipboardSnapshotIncomplete):
+            return .clipboardBusy
+        case .pasted, .likelyPasted, .failed:
+            return nil
+        }
+    }
+}
+
 enum TextPasteOutcome: Equatable {
     case pasted
     /// Cmd+V went out, the target stayed frontmost, and the borrowed clipboard
