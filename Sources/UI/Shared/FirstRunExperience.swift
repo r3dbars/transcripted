@@ -300,8 +300,8 @@ enum FirstRunExperience {
         isDictating: Bool = false
     ) -> MenuBarPrimaryActionState {
         if isDictating {
-            // Clicking "Start Dictation" mid-dictation did nothing; the
-            // right-click menu already offered Stop here.
+            // Clicking "Start Dictation" mid-dictation did nothing, so the
+            // button offers Stop here.
             return MenuBarPrimaryActionState(
                 title: "Stop Dictation",
                 symbolName: "stop.circle.fill",

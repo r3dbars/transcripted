@@ -56,6 +56,17 @@ public enum SpeakerIdentityMutationService {
         case rename(profileId: UUID, newName: String)
         /// Absorb `sourceId` into `targetId`, repointing every saved-transcript reference.
         case merge(sourceId: UUID, targetId: UUID)
+        /// A queued voice (Speakers › "Name these people") was given the name of a
+        /// person already saved, so it joins them. Same as `.merge`, plus what naming
+        /// the queued voice does: each reviewed row is named with a `user_manual`
+        /// source instead of staying `db_pending`, and each reviewed meeting records
+        /// a user confirmation for the kept person, all in the same transaction.
+        case mergeReviewedVoice(
+            sourceId: UUID,
+            targetId: UUID,
+            reviewedRows: [TranscriptSaver.DeferredSpeakerNameUpdate],
+            confirmedTranscriptIds: [UUID]
+        )
         /// Remove a profile's database link from every saved transcript that references it.
         /// When `matchedProfileSnapshot` is provided the profile is restored to that
         /// snapshot (a review verdict reverting to the previously-matched person);
@@ -137,6 +148,9 @@ public enum SpeakerIdentityMutationService {
         if case let .merge(sourceId, targetId) = intent, sourceId == targetId {
             throw MutationError.sameSourceAndTarget(profileId: sourceId)
         }
+        if case let .mergeReviewedVoice(sourceId, targetId, _, _) = intent, sourceId == targetId {
+            throw MutationError.sameSourceAndTarget(profileId: sourceId)
+        }
 
         return try TranscriptSaver.serializeTranscriptFileUpdate {
             switch intent {
@@ -149,6 +163,16 @@ public enum SpeakerIdentityMutationService {
                     speakerDB: speakerDB,
                     directory: directory,
                     clipSideEffects: clipSideEffects
+                )
+            case let .mergeReviewedVoice(sourceId, targetId, reviewedRows, confirmedTranscriptIds):
+                return try applyMerge(
+                    sourceId: sourceId,
+                    targetId: targetId,
+                    speakerDB: speakerDB,
+                    directory: directory,
+                    clipSideEffects: clipSideEffects,
+                    reviewedRows: reviewedRows,
+                    confirmedTranscriptIds: confirmedTranscriptIds
                 )
             case let .discard(profileId, matchedProfileSnapshot):
                 return try applyDiscard(
@@ -220,7 +244,9 @@ public enum SpeakerIdentityMutationService {
         targetId: UUID,
         speakerDB: any SpeakerStore,
         directory: URL,
-        clipSideEffects: ClipSideEffects
+        clipSideEffects: ClipSideEffects,
+        reviewedRows: [TranscriptSaver.DeferredSpeakerNameUpdate] = [],
+        confirmedTranscriptIds: [UUID] = []
     ) throws -> Outcome {
         // Mirrors SpeakerDatabase.mergeProfilesImpl's own merged-name rule so the transcript
         // rewrite (which must happen before the DB commit) uses the exact name the DB
@@ -257,8 +283,43 @@ public enum SpeakerIdentityMutationService {
         let sourceIdNeedle = "db_id: \"\(sourceId.uuidString)\""
         let targetIdReplacement = "db_id: \"\(targetId.uuidString)\""
 
-        let rewrites: [PlannedRewrite] = planned.map { entry in
+        // Reviewed rows (a queued voice named after a saved person) are named first,
+        // the way naming the queued voice would: the row must still match, and it
+        // gets the kept person's name with a `user_manual` source. A row that no
+        // longer matches, or whose transcript isn't in the library, fails the whole
+        // merge before anything is written.
+        var reviewedRowsByPath: [String: [TranscriptSaver.DeferredSpeakerNameUpdate]] = [:]
+        if !reviewedRows.isEmpty {
+            guard let resolvedName, reviewedRows.allSatisfy({ $0.dbId == sourceId }) else {
+                AppLogger.speakers.error("Reviewed voice merge has no name or a row for another profile", [
+                    "sourceId": sourceId.uuidString,
+                    "targetId": targetId.uuidString
+                ])
+                return failure()
+            }
+            let plannedPaths = Set(planned.map { Self.pathKey($0.url) })
+            for row in reviewedRows {
+                let key = Self.pathKey(row.transcriptURL)
+                guard plannedPaths.contains(key) else {
+                    AppLogger.speakers.error("Reviewed voice merge row is not in the transcript library", [
+                        "file": row.transcriptURL.lastPathComponent
+                    ])
+                    return failure()
+                }
+                reviewedRowsByPath[key, default: []].append(row)
+            }
+        }
+
+        var rewrites: [PlannedRewrite] = []
+        for entry in planned {
             var content = entry.content
+            if let rows = reviewedRowsByPath[Self.pathKey(entry.url)], let resolvedName {
+                for row in rows {
+                    guard TranscriptSaver.applyDeferredSpeakerName(in: &content, update: row, newName: resolvedName) else {
+                        return failure()
+                    }
+                }
+            }
             // With both profiles unnamed there is no rename to apply, so leave each
             // file's existing "Speaker N" placeholder alone and only repoint db_id.
             // Two placeholders in one file then share a db_id until the user names
@@ -273,19 +334,25 @@ public enum SpeakerIdentityMutationService {
                 )
             }
             content = content.replacingOccurrences(of: sourceIdNeedle, with: targetIdReplacement)
-            return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
+            rewrites.append(PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content))
         }
 
         guard let written = try writeAndTrackForRollback(rewrites) else {
             return failure()
         }
 
+        // One confirmation per reviewed meeting for the kept person, the same proof
+        // the review window and island record for a `.merged` answer.
+        let confirmations = Set(confirmedTranscriptIds).map {
+            SpeakerUserConfirmation(profileId: targetId, transcriptId: $0, kind: .merged)
+        }
         do {
             try speakerDB.performMutationBatch {
                 try speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
                 // Matches SpeakerNamingCoordinator's merge mutation: a merge is a resolved
                 // identity, not a dispute, so the target's dispute counter clears too.
                 speakerDB.resetDisputeCount(id: targetId)
+                try speakerDB.recordUserConfirmations(confirmations)
             }
         } catch {
             AppLogger.speakers.error("Speaker merge persistence failed; restoring transcripts", [
@@ -494,6 +561,12 @@ public enum SpeakerIdentityMutationService {
             ])
             return false
         }
+    }
+
+    /// Compares transcript locations the same way however they were spelled
+    /// (`/var` vs `/private/var`, `..` segments).
+    private static func pathKey(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     private static func failure() -> Outcome {

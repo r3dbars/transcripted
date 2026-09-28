@@ -7,6 +7,10 @@ func testPinnedDictationSpeedPath() {
     runSuite("Only takes that say something about the mic are scored") {
         assertEqual(PinnedDictationSpeedPath.outcome(text: "hello there", emptyReason: nil), .hadWords)
         assertEqual(PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .noSpeech), .empty, "nothing heard on a held key")
+        assertNil(
+            PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .noSpeech, micSentOnlyDigitalSilence: true),
+            "a muted mic sent zeros, so the recorder worked; unmuting shouldn't leave it on the slower path"
+        )
         assertEqual(
             PinnedDictationSpeedPath.outcome(text: nil, emptyReason: .audioNeedsRecovery),
             .empty,

@@ -1444,7 +1444,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:127",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:62",
       "risk": "Too low merges different people; too high splits one person into several speakers.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source. Units: cosine similarity. If #1789 (FluidAudio 0.17, where the config takes a distance) lands first, this must go through clusteringDistance(fromCosineSimilarity:) and the source moves to FluidAudioCompatibility.swift; see /mnt/project-files/hill-climb/merge-note-1789.md."
     },
@@ -1467,7 +1467,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:128",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:65",
       "risk": "Mis-tuned VBx reassigns turns to the wrong speaker; the grid found Fa is the biggest DER lever.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
     },
@@ -1490,7 +1490,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:129",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:66",
       "risk": "Too low over-splits speakers; too high collapses them.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
     },
@@ -1508,7 +1508,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:130",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:67",
       "risk": "The PyAnnote segmentation model is trained on 10s windows; shorter windows usually hurt accuracy.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1526,7 +1526,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:131",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:68",
       "risk": "Larger steps are faster but miss short turns; smaller steps cost time.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1544,7 +1544,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:132",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:69",
       "risk": "Bigger batches use more memory; too small is slower. Should not change results.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1567,7 +1567,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:134",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:71",
       "risk": "Too high drops short replies like 'yes'; too low creates noisy one-word speakers.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench. Live through LabKnobOverrides (Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift): the bench writes the request value into the JSON file named by TRANSCRIPTED_LAB_KNOBS_FILE under this exact id; the app and transcripted-cli read it once per process. Shipping a winner still means changing the default in source."
     },
@@ -1585,7 +1585,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:135",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:72",
       "risk": "Too high glues two people's turns together; too low chops one turn into fragments.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1603,7 +1603,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:136",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:73",
       "risk": "Too low marks noise as speech; too high misses quiet speech starts.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1621,7 +1621,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:137",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:74",
       "risk": "Too low ends turns early; too high runs turns into silence.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1639,7 +1639,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:138",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:75",
       "risk": "Too high drops short utterances before clustering.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1657,7 +1657,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:139",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:76",
       "risk": "Too high bridges real pauses between speakers.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1675,7 +1675,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:140",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:77",
       "risk": "Too few stops VBx before it converges (worse speaker assignment); more costs time on long meetings.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1693,7 +1693,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:141",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:78",
       "risk": "Looser tolerance is faster but can stop VBx early.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },
@@ -1708,7 +1708,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Services/DiarizationService.swift:133",
+      "source": "Sources/TranscriptedCore/Services/FluidAudioCompatibility.swift:70",
       "risk": "Including overlap blends two voices into one embedding and causes false merges.",
       "notes": "From the v2 DER grid search (16 Zoom meetings). transcripted-cli import-audio uses this same DiarizationService, so a seam here would be visible to the meeting-import bench."
     },

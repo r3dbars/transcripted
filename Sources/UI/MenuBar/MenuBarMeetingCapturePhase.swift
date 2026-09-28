@@ -33,14 +33,6 @@ enum MenuBarMeetingCapturePhase: Equatable {
         }
     }
 
-    /// The status-item right-click menu's meeting item.
-    var quickMenuTitle: String {
-        switch self {
-        case .starting, .recording: return "Stop Meeting"
-        case .saving: return "Saving Meeting…"
-        }
-    }
-
     /// Stop still works while the mic is engaging (it joins the pending
     /// start); once the audio is being saved there is nothing left to stop.
     var allowsStop: Bool {

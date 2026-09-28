@@ -193,6 +193,7 @@ func testMeetingRecordingStartGate() async {
         let name: String
         let isUndetermined: Bool
         var rememberedMicOnly = false
+        var remembersMicOnly = true
         let answers: [MeetingSystemAudioAccessChoice]
         let macOSAnswer: Bool?
         let expected: MeetingSystemAudioAccessFlow.Outcome
@@ -218,6 +219,15 @@ func testMeetingRecordingStartGate() async {
                  expected: .recordMicOnlyRemembered, expectedAsks: [], expectedRequests: 0, expectedSettingsOpens: 0),
         FlowCase(name: "never asked ignores a stale remembered choice", isUndetermined: true, rememberedMicOnly: true, answers: [.turnOn], macOSAnswer: true,
                  expected: .recordBothSides, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "island: denied asks again despite a remembered mic-only pick", isUndetermined: false, rememberedMicOnly: true, remembersMicOnly: false,
+                 answers: [.askWhileRecording], macOSAnswer: nil,
+                 expected: .recordMicOnlyAskingWhileRecording, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 0),
+        FlowCase(name: "island: never asked + Turn It On + Don't Allow is not remembered", isUndetermined: true, remembersMicOnly: false,
+                 answers: [.turnOn], macOSAnswer: false,
+                 expected: .recordMicOnlyAskingWhileRecording, expectedAsks: [.notYetAllowed], expectedRequests: 1, expectedSettingsOpens: 0),
+        FlowCase(name: "island: denied + mic only from the alert is not remembered", isUndetermined: false, remembersMicOnly: false,
+                 answers: [.recordMicOnly], macOSAnswer: nil,
+                 expected: .recordMicOnlyAskingWhileRecording, expectedAsks: [.denied], expectedRequests: 0, expectedSettingsOpens: 0),
     ]
 
     for flowCase in cases {
@@ -228,6 +238,7 @@ func testMeetingRecordingStartGate() async {
             let outcome = await MeetingSystemAudioAccessFlow.resolve(
                 isUndetermined: flowCase.isUndetermined,
                 rememberedMicOnly: flowCase.rememberedMicOnly,
+                remembersMicOnly: flowCase.remembersMicOnly,
                 ask: { copy in
                     asks.append(copy)
                     return flowCase.answers[min(asks.count - 1, flowCase.answers.count - 1)]
@@ -243,6 +254,17 @@ func testMeetingRecordingStartGate() async {
             assertEqual(requests, flowCase.expectedRequests, "\(flowCase.name): the macOS box only shows while the answer is still open")
             assertEqual(settingsOpens, flowCase.expectedSettingsOpens, "\(flowCase.name): Settings opens only when the macOS box can't help")
         }
+    }
+
+    runSuite("Mic-only choice — the island's ask-while-recording start is never remembered") {
+        let suiteName = "MeetingMicOnlyChoicePreferenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        MeetingMicOnlyChoicePreference.reconcile(isDenied: true, outcome: .recordMicOnlyAskingWhileRecording, defaults: defaults)
+        assertFalse(MeetingMicOnlyChoicePreference.isRemembered(defaults: defaults), "the next meeting asks about call audio again")
+        assertEqual(MeetingSystemAudioAccessFlow.Outcome.recordMicOnlyAskingWhileRecording.startDecision.capturesSystemAudio, false,
+                    "macOS said no, so the start records the mic alone")
     }
 
     runSuite("Mic-only choice — remembered only while macOS still says no") {

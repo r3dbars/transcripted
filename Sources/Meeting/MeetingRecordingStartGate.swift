@@ -231,6 +231,9 @@ struct MeetingSystemAudioAccessPromptCopy: Equatable {
 enum MeetingSystemAudioAccessChoice: String, Equatable {
     case turnOn = "turn_on"
     case recordMicOnly = "mic_only"
+    /// Not a choice by the user: the Notch island starts the meeting on the
+    /// mic and asks about call audio while it records, every meeting.
+    case askWhileRecording = "ask_while_recording"
 }
 
 /// Decides what "Turn It On" does. macOS shows its own allow box only while
@@ -249,12 +252,17 @@ enum MeetingSystemAudioAccessFlow {
         case turnOnWithoutMacOSAnswer = "turn_on_without_macos_answer"
         /// Mic only because the user already chose it after a denial.
         case recordMicOnlyRemembered = "mic_only_remembered"
+        /// Mic only for now while the island asks about call audio. Never
+        /// remembered: the next meeting asks again, since recording both
+        /// sides is the point of the app.
+        case recordMicOnlyAskingWhileRecording = "mic_only_asking_while_recording"
         case openedSettings = "opened_settings"
 
         var startDecision: MeetingRecordingStartDecision {
             switch self {
             case .recordBothSides: return .allowed
-            case .recordMicOnly, .recordMicOnlyRemembered, .recordMicOnlyBeforeMacOSAnswer:
+            case .recordMicOnly, .recordMicOnlyRemembered, .recordMicOnlyBeforeMacOSAnswer,
+                 .recordMicOnlyAskingWhileRecording:
                 return MeetingRecordingStartGate.micOnlyByChoice
             case .turnOnWithoutMacOSAnswer: return MeetingRecordingStartGate.turnOnWithoutMacOSAnswer
             case .openedSettings: return MeetingRecordingStartGate.systemAudioSettingsOpened()
@@ -264,16 +272,23 @@ enum MeetingSystemAudioAccessFlow {
 
     /// `isUndetermined` true = macOS hasn't asked yet. `requestAccess` shows
     /// the macOS box and returns the answer (nil = no answer).
+    /// `remembersMicOnly` false (the Notch island) never skips the question
+    /// for a remembered mic-only pick and never stores a new one.
     @MainActor
     static func resolve(
         isUndetermined: Bool,
         rememberedMicOnly: Bool = false,
+        remembersMicOnly: Bool = true,
         ask: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice,
         requestAccess: @MainActor () async -> Bool?,
         openSettings: @MainActor () -> Void
     ) async -> Outcome {
         if isUndetermined {
-            guard await ask(.notYetAllowed) == .turnOn else { return .recordMicOnlyBeforeMacOSAnswer }
+            switch await ask(.notYetAllowed) {
+            case .turnOn: break
+            case .recordMicOnly: return .recordMicOnlyBeforeMacOSAnswer
+            case .askWhileRecording: return .recordMicOnlyAskingWhileRecording
+            }
             switch await requestAccess() {
             case .some(true):
                 return .recordBothSides
@@ -281,19 +296,25 @@ enum MeetingSystemAudioAccessFlow {
                 // Don't Allow in the macOS box is the answer. Asking our own
                 // question again right after it reads as a loop (found on
                 // hardware), so record the mic and remember the choice.
-                return .recordMicOnly
+                return remembersMicOnly ? .recordMicOnly : .recordMicOnlyAskingWhileRecording
             case .none:
                 // No answer yet; the tap may still bring the box back.
                 return .turnOnWithoutMacOSAnswer
             }
-        } else if rememberedMicOnly {
+        } else if rememberedMicOnly && remembersMicOnly {
             // Don't pop a modal over the call on every meeting. Settings
             // says it's off and has the button to turn it on.
             return .recordMicOnlyRemembered
         }
-        guard await ask(.denied) == .turnOn else { return .recordMicOnly }
-        openSettings()
-        return .openedSettings
+        switch await ask(.denied) {
+        case .turnOn:
+            openSettings()
+            return .openedSettings
+        case .recordMicOnly:
+            return remembersMicOnly ? .recordMicOnly : .recordMicOnlyAskingWhileRecording
+        case .askWhileRecording:
+            return .recordMicOnlyAskingWhileRecording
+        }
     }
 }
 

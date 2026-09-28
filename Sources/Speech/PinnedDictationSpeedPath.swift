@@ -49,15 +49,20 @@ enum PinnedDictationSpeedPath {
     /// Too little audio from a recorder open past a mis-tap is empty only when
     /// almost none arrived: that is the "mic never delivers audio" failure,
     /// not a tap or a slow start.
+    ///
+    /// A mic that sent only exact zeros (a hardware mute switch) delivered
+    /// audio, so the recorder worked: that take says nothing about it either.
     static func outcome(
         text: String?,
         emptyReason: DictationEmptyTranscriptionReason?,
         heldSeconds: TimeInterval = 0,
-        audioSeconds: TimeInterval = 0
+        audioSeconds: TimeInterval = 0,
+        micSentOnlyDigitalSilence: Bool = false
     ) -> TakeOutcome? {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .hadWords
         }
+        if micSentOnlyDigitalSilence { return nil }
         switch emptyReason {
         case .noSpeech?, .audioNeedsRecovery?:
             return .empty

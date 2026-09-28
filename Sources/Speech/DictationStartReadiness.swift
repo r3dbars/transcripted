@@ -88,7 +88,7 @@ struct DictationStartReadinessProfile: Equatable {
 }
 
 enum DictationStartReadinessPolicy {
-    /// Trigger raw values (`DictationSessionController.DictationTrigger`) that
+    /// Trigger raw values (`DictationTrigger`) that
     /// can fire while another app owns the foreground. Raw strings rather than
     /// the enum itself so this policy stays free of the AppKit-bound
     /// controller and remains directly fast-testable.

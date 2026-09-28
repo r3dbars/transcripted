@@ -33,6 +33,7 @@ final class LlamaCompletionEngine: @unchecked Sendable {
     }
 
     private let baseURL: URL
+    private let accessKey: LlamaServerAccessKey?
     private let cleaner: CompletionOutputCleaner
     private let diagnostics: DiagnosticsLog
     private let productProfile: TildeProductProfile
@@ -40,11 +41,13 @@ final class LlamaCompletionEngine: @unchecked Sendable {
 
     init(
         baseURL: URL,
+        accessKey: LlamaServerAccessKey? = nil,
         diagnostics: DiagnosticsLog = .shared,
         transport: any LlamaCompletionStreamingTransport = URLSessionLlamaCompletionTransport(),
         productProfile: TildeProductProfile = .current
     ) {
         self.baseURL = baseURL
+        self.accessKey = accessKey
         self.diagnostics = diagnostics
         self.transport = transport
         self.productProfile = productProfile
@@ -175,6 +178,7 @@ final class LlamaCompletionEngine: @unchecked Sendable {
         urlRequest.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
         urlRequest.timeoutInterval = 8
+        accessKey?.authorize(&urlRequest)
 
         let stream = try await transport.open(request: urlRequest)
         guard stream.statusCode == 200 else {

@@ -241,7 +241,7 @@ Source: Tilde `f36f6562`. "Same" means a straight port, with only identities and
 | Owner-only Unix socket, one-instance lock, JSON lines v1, 16 KB max | Same, under Transcripted's app support |
 | Peer auth on both ends: same uid, expected signing identifier, matching non-empty Team ID | Same, with Transcripted's identities |
 | Request gates: helper health, Screen Memory, same field, scene lookup, sensitive scene, scene policy | Same |
-| `llama-server` helper, restart backoff, health probes, orphan reaping, scaffold prewarm | Same. **Change:** use a port other than Tilde's `17872`, so both can run during migration |
+| `llama-server` helper, restart backoff, health probes, orphan reaping, scaffold prewarm | Same. **Change:** use a port other than Tilde's `17872`, so both can run during migration. **Change:** a fresh API key per helper launch (`LLAMA_API_KEY` in the environment) and `--no-webui`, so other local processes and web pages can't query the helper |
 | Pinned Gemma/Qwen download: resume, retries, disk check, SHA-256 verify, excluded from backup | Same. **New:** adopt an already-verified Tilde model file instead of downloading again |
 | Model switch relaunches the app | **Change:** restart only the helper. Transcripted can't relaunch mid-meeting |
 | Setup window | **Replaced** by the Writing tab intro and setup above |

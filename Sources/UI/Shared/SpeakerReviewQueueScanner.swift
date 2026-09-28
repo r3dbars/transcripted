@@ -26,6 +26,10 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     let callCount: Int
     let profile: SpeakerProfile
     let sourceName: String
+    /// The meeting's length, for the per-call card in Speakers.
+    var meetingDurationSeconds: Int? = nil
+    /// Imported recordings have no calendar slot, so no invitees.
+    var isImported = false
 
     var id: String {
         [
@@ -56,6 +60,45 @@ struct SpeakerPendingVoiceGroup: Identifiable, Sendable {
     let sampleText: String?
 
     var id: UUID { representative.speakerId }
+}
+
+/// One call with voices still waiting for a name, for the "Name these
+/// people" cards in Speakers. A voice heard in several calls shows once,
+/// under the most recent one; naming it there names it everywhere.
+struct SpeakerPendingMeetingGroup: Identifiable, Sendable {
+    let transcriptURL: URL
+    let transcriptId: UUID?
+    let meetingTitle: String
+    let recordedAt: Date?
+    let fallbackDate: Date
+    let durationSeconds: Int?
+    let isImported: Bool
+    let voices: [SpeakerPendingVoiceGroup]
+
+    var id: String { SpeakerReviewSkippedCalls.key(transcriptId: transcriptId, transcriptURL: transcriptURL) }
+}
+
+/// Calls someone chose to skip in "Name these people". Saved, unlike the
+/// per-voice Skip, so a skipped call stays skipped after a restart; its
+/// voices stay reachable under Everyone.
+enum SpeakerReviewSkippedCalls {
+    static let defaultsKey = "speakerReviewSkippedCalls"
+    private static let limit = 500
+
+    static func key(transcriptId: UUID?, transcriptURL: URL) -> String {
+        transcriptId?.uuidString ?? transcriptURL.standardizedFileURL.path
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: defaultsKey) ?? [])
+    }
+
+    static func add(_ key: String, defaults: UserDefaults = .standard) {
+        var keys = defaults.stringArray(forKey: defaultsKey) ?? []
+        guard !keys.contains(key) else { return }
+        keys.append(key)
+        defaults.set(Array(keys.suffix(limit)), forKey: defaultsKey)
+    }
 }
 
 enum SpeakerReviewQueueScanner {
@@ -223,7 +266,9 @@ enum SpeakerReviewQueueScanner {
                 retainedAudioSample: fallback?.sample,
                 callCount: profile.callCount,
                 profile: profile,
-                sourceName: speaker.name
+                sourceName: speaker.name,
+                meetingDurationSeconds: meetingDuration,
+                isImported: document.values["imported_at"] != nil
             )
         }
 
@@ -258,6 +303,32 @@ enum SpeakerReviewQueueScanner {
                 representative: representative,
                 meetingCount: transcriptPaths.count,
                 sampleText: sampleText
+            )
+        }
+    }
+
+    /// Groups voices under the call they were last heard in, newest call
+    /// first (voices arrive newest-first from `groupedByVoice`).
+    static func groupedByMeeting(_ voices: [SpeakerPendingVoiceGroup]) -> [SpeakerPendingMeetingGroup] {
+        var order: [String] = []
+        var voicesByKey: [String: [SpeakerPendingVoiceGroup]] = [:]
+        for voice in voices {
+            let item = voice.representative
+            let key = SpeakerReviewSkippedCalls.key(transcriptId: item.transcriptId, transcriptURL: item.transcriptURL)
+            if voicesByKey[key] == nil { order.append(key) }
+            voicesByKey[key, default: []].append(voice)
+        }
+        return order.compactMap { key in
+            guard let groupVoices = voicesByKey[key], let item = groupVoices.first?.representative else { return nil }
+            return SpeakerPendingMeetingGroup(
+                transcriptURL: item.transcriptURL,
+                transcriptId: item.transcriptId,
+                meetingTitle: item.meetingTitle,
+                recordedAt: item.recordedAt,
+                fallbackDate: item.fallbackDate,
+                durationSeconds: item.meetingDurationSeconds,
+                isImported: item.isImported,
+                voices: groupVoices
             )
         }
     }

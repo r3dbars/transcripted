@@ -326,6 +326,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.island = notchIsland
             capturePillController.island = notchIsland
+            // With the Notch island, macOS's own allow box comes up at once the
+            // first time. After a denial the meeting starts on the mic and the
+            // island asks about call audio while it records, every meeting:
+            // recording both sides is the point, so mic only is never
+            // remembered as a choice.
+            meetingSession.systemAudioAccessAsksWhileRecording = { NotchIslandController.isSelected }
+            // The session raises the island's ask from the start's outcome
+            // (so a first-time macOS Don't Allow asks too); the prompter only
+            // answers the question.
+            meetingSession.systemAudioAccessPrompter = { copy in
+                guard NotchIslandController.isSelected else {
+                    return await MeetingSystemAudioAccessAlert.ask(copy)
+                }
+                if copy == .notYetAllowed { return .turnOn }
+                return .askWhileRecording
+            }
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
                     self?.meetingPromptRecordInFlight = true
@@ -637,6 +653,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             appState.contextCapture.onPasteLastDictation = { [weak self] in
                 self?.pasteLastDictationFromSettings()
+            }
+            SpeakerNamingSheet.shared.island = notchIsland
+            // Only the island lists voices named on their own ("who was on
+            // the call"), so only then does a meeting with nobody to ask get
+            // a review; the window has nothing to show for it.
+            meetingSession.taskManager.reviewListsRecognizedVoicesProvider = {
+                NotchIslandController.isSelected
+            }
+            SpeakerNamingSheet.shared.onOpenTranscript = { [weak self] transcriptURL in
+                self?.settingsWindowController.revealMeeting(
+                    transcriptURL: transcriptURL,
+                    source: "meeting_overlay"
+                )
             }
             SpeakerNamingSheet.shared.observe(
                 taskManager: meetingSession.taskManager,
@@ -1003,137 +1032,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
-        if statusItemClickWantsQuickMenu(NSApp.currentEvent) {
-            showStatusItemQuickMenu()
-            return
-        }
-
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             closePopover()
         } else {
             showMainPopover(relativeTo: button, popover: popover)
         }
-    }
-
-    /// Right-click (or control-click) on the status item opens the lean quick
-    /// menu; a plain left-click keeps opening the popover.
-    private func statusItemClickWantsQuickMenu(_ event: NSEvent?) -> Bool {
-        guard let event else { return false }
-        switch event.type {
-        case .rightMouseUp, .rightMouseDown:
-            return true
-        case .leftMouseUp, .leftMouseDown:
-            return event.modifierFlags.contains(.control)
-        default:
-            return false
-        }
-    }
-
-    private func showStatusItemQuickMenu() {
-        guard let statusItem else { return }
-
-        let menu = NSMenu()
-
-        // Same wording as the popover's meeting row, including while the
-        // mic is still engaging (Stop) and while the audio is being saved.
-        let meetingCapturePhase = MenuBarMeetingCapturePhase.resolve(appState.meetingSession.state)
-        let meetingItem = NSMenuItem(
-            title: meetingCapturePhase?.quickMenuTitle ?? "Record Meeting",
-            action: meetingCapturePhase?.allowsStop == false ? nil : #selector(quickMenuToggleMeeting),
-            keyEquivalent: ""
-        )
-        meetingItem.target = self
-        // Remember whether this item offered Stop or Record, so a menu left
-        // open while the meeting state changes can't do the opposite.
-        meetingItem.representedObject = meetingCapturePhase != nil
-        menu.addItem(meetingItem)
-
-        let dictationItem = NSMenuItem(
-            title: appState.sttRouter.isRecording ? "Stop Dictation" : "Start Dictation",
-            action: #selector(quickMenuToggleDictation),
-            keyEquivalent: ""
-        )
-        dictationItem.target = self
-        menu.addItem(dictationItem)
-
-        menu.addItem(.separator())
-
-        let homeItem = NSMenuItem(
-            title: "Open Transcripted",
-            action: #selector(quickMenuOpenHome),
-            keyEquivalent: ""
-        )
-        homeItem.target = self
-        menu.addItem(homeItem)
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(
-            title: "Quit Transcripted",
-            action: #selector(quickMenuQuit),
-            keyEquivalent: ""
-        )
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        // Standard status-item trick: attach the menu only for this click so
-        // the plain left-click action keeps opening the popover. Menu tracking
-        // runs synchronously inside performClick.
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
-    }
-
-    @objc private func quickMenuToggleDictation() {
-        let isRecording = appState.sttRouter.isRecording
-        trackQuickMenuAction(isRecording ? "quick_menu_stop_dictation" : "quick_menu_start_dictation")
-        if isRecording {
-            sessionController.stopDictationAndPaste(trigger: .menu)
-        } else {
-            startDictationFromSettings()
-        }
-    }
-
-    @objc private func quickMenuToggleMeeting(_ sender: NSMenuItem) {
-        if let offeredStop = sender.representedObject as? Bool,
-           offeredStop != appState.meetingSession.isCaptureSessionActive {
-            return
-        }
-        trackQuickMenuAction(
-            appState.meetingSession.isCaptureSessionActive ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
-        )
-        // The hotkey toggle ignores a meeting that is still starting, but this
-        // item already reads "Stop Meeting" then, so join the pending start
-        // and stop it the way the popover's Stop row does.
-        if #available(macOS 14.0, *), case .startingRecording = appState.meetingSession.state {
-            let meetingSession = appState.meetingSession
-            Task { await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton) }
-            return
-        }
-        menuToggleMeetingRecording()
-    }
-
-    @objc private func quickMenuOpenHome() {
-        trackQuickMenuAction("quick_menu_home")
-        showSettingsWindow(page: .today, source: "quick_menu")
-    }
-
-    @objc private func quickMenuQuit() {
-        trackQuickMenuAction("quick_menu_quit")
-        NSApplication.shared.terminate(nil)
-    }
-
-    private func trackQuickMenuAction(_ actionID: String) {
-        AnalyticsReporter.track(
-            "menu_bar_action_clicked",
-            properties: [
-                "action_id": actionID,
-                "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
-                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "paste_available": "unknown",
-            ]
-        )
     }
 
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
@@ -1145,8 +1049,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
-        // Right clicks must reach the action so togglePopover can route them
-        // to the quick menu; buttons only send left-ups by default.
+        // Right-click opens the same popover as a left-click; there is no
+        // separate right-click menu. Buttons only send left-ups by default.
         _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         installStatusItemUpdateBadge(on: button)
