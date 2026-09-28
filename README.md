@@ -178,7 +178,7 @@ bash build.sh --no-open
 bash run-tests.sh
 ```
 
-Start with [AGENT_START.md](AGENT_START.md) and
+Start with [AGENTS.md](AGENTS.md) and
 [CONTRIBUTING.md](CONTRIBUTING.md). Security reports:
 [SECURITY.md](SECURITY.md).
 

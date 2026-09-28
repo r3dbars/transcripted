@@ -9,7 +9,7 @@ Quick repo orientation before you jump in:
 - the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
   and `pre-draft-takeover-2026-04-06`
 - persisted app paths now default to Transcripted-named storage, though some helper names and standalone-tool fallbacks still reflect the Draft transition
-- coding agents should start with `AGENT_START.md`, then follow `AGENTS.md`
+- coding agents should start with `AGENTS.md`
 
 In public docs and user-facing copy, prefer concrete present-tense claims about
 what the product does today. The broader "audio as a context layer" thesis is

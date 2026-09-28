@@ -632,7 +632,6 @@ rules:
 
   - paths:
       - "README.md"
-      - "AGENT_START.md"
       - "AGENTS.md"
       - "CLAUDE.md"
       - "CONTRIBUTING.md"
@@ -650,8 +649,12 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/agent-context.py"
       - "scripts/dev/test-matrix-checks.py"
+      - "**/*.md"
+      - "scripts/dev/check-doc-paths.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-doc-paths.py --self-test"
+      - "python3 scripts/dev/check-doc-paths.py"
 
   # Root fast tests assert on the literal *content* of these non-Swift files
   # (readSourceFixture / repoFixtureURL / readObservabilityTestRepoTextFile), so

@@ -140,10 +140,8 @@ fi
 echo ""
 
 echo "Docs to trust first:"
-echo "- AGENT_START.md"
 echo "- AGENTS.md"
 echo "- docs/repo-layout.md"
-echo "- docs/agent-onboarding.md"
 echo "- nearest live CLAUDE.md for touched code"
 echo ""
 

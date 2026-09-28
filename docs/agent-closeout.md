@@ -63,3 +63,16 @@ Keep it short. Include:
 - checks run and whether they passed
 - blockers or decisions needed
 - one smallest next action
+
+## Lanes (local Codex runner)
+
+Codex is the final reviewer and merger; Claude is for risky reasoning. Mac local
+models and the Windows worker are cheap first-pass lanes for summaries,
+clustering, log triage, and draft work. For review, merge-room, and worker
+prompts on the local runner, include this lane contract, and use
+`~/.codex/bin/maestro-delegate` for non-Codex lanes, for example
+`maestro-delegate local --label pr-dedupe -- "..."`,
+`maestro-delegate windows --label review -- "..."`, or
+`maestro-delegate claude --label risk-review -- "..."`. A lane only counts as
+used if the closeout includes a real `MAESTRO_PROOF` path, output path, or pasted
+command output. If a lane is skipped, say why.
