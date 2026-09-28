@@ -1469,7 +1469,10 @@ class DictationSessionController: ObservableObject {
                     overlayController.showNoSpeechAndDismiss(
                         trigger: currentDictationTrigger.rawValue,
                         reason: emptyReason,
-                        shortcutMode: currentDictationShortcutMode
+                        shortcutMode: currentDictationShortcutMode,
+                        silentMicName: appState.sttRouter.lastRecordingWasDigitalSilence
+                            ? appState.sttRouter.inputDeviceName
+                            : nil
                     )
                 } else if emptyReason == .otherLanguage,
                           let heldText = appState.sttRouter.heldBackDictationText {
