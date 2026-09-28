@@ -612,16 +612,21 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             state: .stopping
         )
 
+        // Keep joins arriving for about a second. A broken owner that lets each
+        // join extend its deadline stays alive until the joins stop, so it
+        // returns only after all 40 were sent. The fixed 120 ms owner returns
+        // while joins are still arriving. Counting joins instead of timing the
+        // call keeps a loaded CI runner from turning this red.
+        let joinsToSend = 40
+        var joinsSent = 0
         let joinedRequestInjector = Task { @MainActor in
-            // Keep joins arriving for a full second. A broken owner that lets
-            // each join extend its deadline will remain alive past the bound
-            // below, while the fixed 120 ms owner has ample CI scheduler slack.
-            for _ in 0..<40 {
+            for _ in 0..<joinsToSend {
                 do {
                     try await Task.sleep(for: .seconds(0.025))
                 } catch {
                     return
                 }
+                joinsSent += 1
                 Task { @MainActor in
                     _ = await manager.recoverOrphanedRecordings(
                         in: paths.audioCaptures,
@@ -631,18 +636,21 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
                 }
             }
         }
-        let startedAt = ContinuousClock.now
         let recovered = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
             livenessWindow: livenessWindow,
             waitForRecentJournals: true
         )
-        let elapsed = startedAt.duration(to: ContinuousClock.now)
+        let joinsSentWhenOwnerReturned = joinsSent
         joinedRequestInjector.cancel()
         await joinedRequestInjector.value
 
         XCTAssertEqual(recovered, 0)
-        XCTAssertLessThan(elapsed, .seconds(0.5))
+        XCTAssertLessThan(
+            joinsSentWhenOwnerReturned,
+            joinsToSend,
+            "the owner must return on its own deadline while joins are still arriving"
+        )
         XCTAssertTrue(FileManager.default.fileExists(atPath: futureMicURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
     }

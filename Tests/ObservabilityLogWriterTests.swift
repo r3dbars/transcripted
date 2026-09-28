@@ -1,6 +1,7 @@
-// Source-text pins: EventFileWritePolicy, LockedFileAppender, ReliabilityPacketRecorder, and
-// ObservabilityTextRedactor are compiled into run-tests.sh's APP_SOURCES/shared source lists, so
-// most suites call them for real. A few assertions instead grep source as text because the file
+// Source-text pins: EventFileWritePolicy, LockedFileAppender, ReliabilityPacketRecorder,
+// ObservabilityLogFilePreparation, and ObservabilityTextRedactor are compiled into run-tests.sh's
+// APP_SOURCES/shared source lists, so most suites call them for real. A few assertions instead
+// grep source as text because the file
 // under test isn't compiled here at all: Sources/Observability/EventReporter.swift and
 // AppLogSink.swift have no seam in this runner, and Sources/TranscriptedApp.swift is
 // @MainActor/AppKit on top of that. The "avoid legacy FileHandle APIs" suite also greps
@@ -91,16 +92,44 @@ func testObservabilityLogWriter() {
     }
 
     runSuite("Observability file writers tighten pre-existing logs before appending") {
-        // EventReporter.swift is not compiled into the fast runner, so keep its
-        // restrict-before-append guarantee as a source-read assertion. The
-        // sequence itself lives in the shared ObservabilityLogFilePreparation
-        // helper; assert both the helper's restrict-before-open and that
-        // EventReporter routes through it.
-        let logPreparation = readObservabilityTestRepoTextFile("Sources/Observability/ObservabilityLogRotation.swift")
-        assertTrue(
-            logPreparation.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
+        // The restrict-before-open sequence lives in the shared, compiled
+        // ObservabilityLogFilePreparation helper, so run it for real: a
+        // pre-existing world-readable log must come back owner-only, with its
+        // earlier records intact, before the handle is handed out.
+        let fm = FileManager.default
+        let preparedRoot = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogPreparationTests-\(UUID().uuidString)", isDirectory: true)
+        let preparedLogURL = preparedRoot.appendingPathComponent("events.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: preparedRoot) }
+        try? fm.createDirectory(at: preparedRoot, withIntermediateDirectories: true)
+        fm.createFile(atPath: preparedLogURL.path, contents: Data("{\"earlier\":\"record\"}\n".utf8))
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: preparedLogURL.path)
+
+        var createdNewFile = false
+        var preparationErrors: [String] = []
+        let preparedHandle = ObservabilityLogFilePreparation.openPreparedHandle(
+            at: preparedLogURL,
+            onDirectoryError: { preparationErrors.append($0) },
+            onCreated: { createdNewFile = true },
+            onOpenError: { preparationErrors.append($0) }
+        )
+        let preparedPermissions = (try? fm.attributesOfItem(atPath: preparedLogURL.path))?[.posixPermissions] as? NSNumber
+        try? preparedHandle?.close()
+        assertNotNil(preparedHandle, "shared log-file preparation should hand back a writable handle for an existing log")
+        assertTrue(preparationErrors.isEmpty, "preparing an existing log should not report errors: \(preparationErrors)")
+        assertEqual(
+            preparedPermissions,
+            NSNumber(value: 0o600),
             "shared log-file preparation should chmod even pre-existing logs before opening"
         )
+        assertFalse(createdNewFile, "an existing log is tightened in place, not recreated")
+        assertEqual(
+            (try? String(contentsOf: preparedLogURL, encoding: .utf8)) ?? "",
+            "{\"earlier\":\"record\"}\n",
+            "tightening permissions must not drop records already in the log"
+        )
+
+        // EventReporter.swift is not compiled into the fast runner, so its use
+        // of the shared helper is still a source-read assertion.
         let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
         assertTrue(
             eventReporter.contains("ObservabilityLogFilePreparation.openPreparedHandle("),
@@ -110,7 +139,6 @@ func testObservabilityLogWriter() {
         // ReliabilityPacketRecorder is compiled into the fast runner, so exercise the
         // real append path: pre-create the JSONL world-readable (0o644), append a packet
         // through the shared test seam, then confirm the file is tightened to owner-only.
-        let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ReliabilityPacketPermissionsTests-\(UUID().uuidString)", isDirectory: true)
         let logURL = root.appendingPathComponent("reliability.jsonl", isDirectory: false)
         defer { try? fm.removeItem(at: root) }

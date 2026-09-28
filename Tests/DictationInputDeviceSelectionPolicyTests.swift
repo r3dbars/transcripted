@@ -1107,6 +1107,116 @@ func testDictationInputDeviceSelectionPolicy() {
         }
     }
 
+    runSuite("A real microphone passes the selection check; only no device (ID 0) is rejected") {
+        for id in [UInt32(1), UInt32(42), UInt32.max] {
+            let mic = device(id, "Shure MV7", .usb)
+            let selection = DictationInputDeviceSelection(defaultInput: mic, selectedInput: mic,
+                defaultOutput: nil, reason: .defaultIsSafe)
+            do {
+                let confirmed = try DictationInputDeviceBindingPolicy.requireSelection(selection)
+                assertEqual(confirmed, selection, "a real mic (ID \(id)) should come back unchanged")
+            } catch {
+                assertTrue(false, "a real mic (ID \(id)) must not be rejected, got \(error)")
+            }
+        }
+
+        let realDefault = device(7, "MacBook Pro Microphone", .builtIn)
+        let noDevice = device(0, "Unavailable input", .usb)
+        let pickedNothing = DictationInputDeviceSelection(defaultInput: realDefault, selectedInput: noDevice,
+            defaultOutput: nil, reason: .defaultIsSafe)
+        do {
+            _ = try DictationInputDeviceBindingPolicy.requireSelection(pickedNothing)
+            assertTrue(false, "a selection that points at no device must be rejected")
+        } catch {
+            assertEqual(error as? DictationInputDeviceBindingError, .selectionUnavailable,
+                "no selected device should fail closed even when macOS has a real default")
+        }
+    }
+
+    runSuite("A Bluetooth headset with a plain product name still counts as Bluetooth") {
+        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
+        for transport in [DictationAudioTransport.bluetooth, .bluetoothLE] {
+            let sonyInput = device(1, "WH-1000XM5", transport)
+            let sonyOutput = device(2, "WH-1000XM5", transport, inputChannels: 0)
+
+            assertEqual(DictationInputDeviceSelectionPolicy.deviceClass(for: sonyInput), "bluetooth",
+                "the transport alone should mark \(transport) as Bluetooth")
+
+            let selection = DictationInputDeviceSelectionPolicy.selection(
+                defaultInput: sonyInput,
+                defaultOutput: sonyOutput,
+                availableInputs: [sonyInput, macBookMic],
+                prefersBuiltInBluetoothInput: true
+            )
+            assertEqual(selection.selectedInput, macBookMic,
+                "a \(transport) headset without a headset-sounding name should still fall back to the Mac mic")
+            assertEqual(selection.reason, .preferredBuiltInForBluetoothHeadset,
+                "the fallback should be explained as a Bluetooth headset fallback")
+        }
+    }
+
+    runSuite("With the lid closed, an external mic the user chose is still the one used") {
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let blueYeti = DictationAudioDevice(id: 6, name: "Blue Yeti", transport: .usb, inputChannelCount: 1, uid: "yeti")
+        let shure = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+        let displayMic = DictationAudioDevice(id: 5, name: "Studio Display Microphone", transport: .usb, inputChannelCount: 1, uid: "display")
+
+        // No usable built-in mic, so the automatic fallback picks an external
+        // mic on its own ("Blue Yeti" sorts first). The user's choice must win.
+        let externalOnly = [airPodsInput, macMic, blueYeti, shure]
+        let noFallback = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: externalOnly,
+            prefersBuiltInBluetoothInput: true,
+            lidClosed: true
+        )
+        let chosenOverFallback = PinnedDictationInputPolicy.selection(
+            automatic: noFallback,
+            availableInputs: externalOnly,
+            preferredUID: "mv7",
+            lidClosed: true
+        )
+        assertEqual(chosenOverFallback.selectedInput, shure, "the chosen Shure wins over the automatic external pick with the lid closed")
+        assertEqual(chosenOverFallback.reason, .preferredUserChosenForBluetoothHeadset, "the pick should say it came from the user")
+
+        // The display mic is the automatic lid-closed pick; the chosen Shure still wins.
+        let withDisplay = [airPodsInput, macMic, displayMic, shure]
+        let displayPick = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsInput,
+            availableInputs: withDisplay,
+            prefersBuiltInBluetoothInput: true,
+            lidClosed: true
+        )
+        let chosenOverDisplay = PinnedDictationInputPolicy.selection(
+            automatic: displayPick,
+            availableInputs: withDisplay,
+            preferredUID: "mv7",
+            lidClosed: true
+        )
+        assertEqual(chosenOverDisplay.selectedInput, shure, "the chosen Shure wins over the display mic with the lid closed")
+
+        // macOS follows a safe display mic, and the chosen mic always wins.
+        let safeDefault = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: displayMic,
+            defaultOutput: nil,
+            availableInputs: withDisplay,
+            prefersBuiltInBluetoothInput: true,
+            lidClosed: true
+        )
+        let chosenOverSafe = PinnedDictationInputPolicy.selection(
+            automatic: safeDefault,
+            availableInputs: withDisplay,
+            preferredUID: "mv7",
+            chosenInputAlwaysWins: true,
+            lidClosed: true
+        )
+        assertEqual(chosenOverSafe.selectedInput, shure, "the chosen Shure wins over a safe macOS input with the lid closed")
+        assertEqual(chosenOverSafe.reason, .userChosenInput, "the pick over a safe input should be explicit")
+    }
+
 }
 
 private func device(

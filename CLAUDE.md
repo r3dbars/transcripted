@@ -35,6 +35,7 @@ When docs disagree, split the decision: `AGENTS.md` and `.agents/test-matrix.yml
 Common commands (thin root wrappers; implementations live under `scripts/entrypoints/`):
 
 ```bash
+bash check.sh                      # one command: the checks your diff needs (tiers: quick, full, hardware)
 bash build-deps.sh                 # build/refresh prebuilt deps under deps-libs/, deps-frameworks/, deps-modules/
 bash build.sh --no-open            # authoritative app build for non-interactive verification
 bash run-tests.sh                  # convention-discovered root fast tests
@@ -46,6 +47,8 @@ bash run-daily-audio-reliability.sh  # daily audio-reliability check harness
 swift test                         # Swift Package tests for TranscriptedCore seam only
 bash build-beta.sh '' <user>       # signed beta/distribution build; first arg is compatibility-only
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
+bash scripts/dev/concurrency-census.sh  # Swift 6 backlog: strict-concurrency warnings per Sources/ folder (typecheck only)
+python3 scripts/dev/mutation-probe.py Sources/<File>.swift --test "bash run-tests.sh --filter <TestFile>"  # which injected bugs no test catches
 ```
 
 Verification rules — a **condensed summary**, not a mirror. `.agents/test-matrix.yml` is the
@@ -69,6 +72,10 @@ change matches multiple rules, run the union:
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
 - Touched `Tools/SpeakerEvalHarness/**` or its `scripts/*speaker*`/`scripts/download_ami.sh` helpers → `bash build-deps.sh --force` + `swift build --package-path Tools/SpeakerEvalHarness` + the harness's compile/syntax checks (see `.agents/test-matrix.yml`)
 - Touched docs/agent files (`README.md`, `AGENT_START.md`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `WORKFLOW.md`, `docs/**`, `.agents/**`, `.github/**`) → `scripts/dev/agent-preflight.sh`
+
+### How to write a test
+
+Read "Test rules" in `Tests/README.md` before adding or changing a test. Short version: a test checks a named promise through inputs and outputs. It never reads `Sources/` as text and never asserts on wall-clock elapsed time. `scripts/dev/check-test-shape.py` (in `linux-checks.sh`, repo-hygiene CI, and the test matrix) fails on new ones; the grandfathered files are in `.agents/test-shape-baseline.json`, which only shrinks (`--shrink` after converting one). Flaky fast-test suites get fixed or benched in `Tests/quarantine.txt` the same day.
 
 ### Fast-test gotchas
 
@@ -197,15 +204,15 @@ Treat as reference, not current runtime truth:
 
 Each of these has cost a thread a red CI run or a wrong merge. Check them before pushing.
 
-- **Tests that read source as text.** About 40 root fast-test files (plus a few SPM tests) read production Swift, docs, scripts, `.agents/*.yml`, and `swift-ci.yml` as text and assert on exact fragments, often with indentation and line breaks baked in. Renaming a local, reordering arguments, reflowing a line, or editing a pinned doc can turn CI red. `python3 scripts/dev/check-source-pins.py --changed-only` catches most broken pins on Linux. Before editing a file, also run `grep -rlF '<repo-relative path>' Tests Tools/*/Tests` (and `grep -rl 'readParakeet' Tests` for the Parakeet files) and read the needles you might break. `Tests/OverlayScreenSharePrivacyTests.swift` scans every file under `Sources/UI`, so that grep won't find it. Several slice helpers return `""` when a marker is missing, so an `assertFalse(slice.contains(...))` can pass for the wrong reason after a rename. The most-pinned files: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`.
+- **Tests that read source as text.** New ones are blocked by `scripts/dev/check-test-shape.py`, but 59 grandfathered files remain (listed in `.agents/test-shape-baseline.json`). About 50 root fast-test files (plus a few SPM tests) read production Swift, docs, scripts, `.agents/*.yml`, and `swift-ci.yml` as text and assert on exact fragments, often with indentation and line breaks baked in. Renaming a local, reordering arguments, reflowing a line, or editing a pinned doc can turn CI red. `python3 scripts/dev/check-source-pins.py --changed-only` catches most broken pins on Linux. Before editing a file, also run `grep -rlF '<repo-relative path>' Tests Tools/*/Tests` (and `grep -rl 'readParakeet' Tests` for the Parakeet files) and read the needles you might break. `Tests/OverlayScreenSharePrivacyTests.swift` scans every file under `Sources/UI`, so that grep won't find it. Several slice helpers return `""` when a marker is missing, so an `assertFalse(slice.contains(...))` can pass for the wrong reason after a rename. The most-pinned files: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`.
 - **Telemetry keys are dropped by substring.** See "Observability and privacy" below. A key named `start_profile` was allowlisted and still never arrived, because "profile" contains "file".
 - **A clean text merge is not a working merge.** Git won't flag: a new enum case missing from another PR's exhaustive `switch`, two PRs each bumping the same literal count (4→5 twice should be 6), or one PR renaming a helper the other PR's new test calls. When two PRs touch the same file, build the merged result (CI on the merge) before trusting it. Prefer asserting against an explicit list over a literal count.
 - **"Dirty" on GitHub can be a criss-cross merge history, not a real conflict.** Merge current `main` into the PR (a merge commit; never force-push) and it often clears.
-- **Fast tests compile a hand-curated source list.** `build.sh` finds app sources itself, but `run-tests.sh` compiles only the files in its `APP_SOURCES` list (plus `scripts/entrypoints/lib/shared-smoke-sources.sh`). Splitting a helper into a new file that a fast test needs means adding it there too, or the fast tests fail with "cannot find in scope". `check-build-source-lists.py` only checks listed files exist, not that the list is complete.
-- **Fast tests assume `TZ=America/Chicago`.** CI sets it in `swift-ci.yml`; set it yourself when running `run-tests.sh` locally elsewhere.
+- **Fast tests compile a hand-curated source list.** `build.sh` finds app sources itself, but `run-tests.sh` compiles only the files in its `APP_SOURCES` list (plus `scripts/entrypoints/lib/shared-smoke-sources.sh`). Splitting a helper into a new file that a fast test needs means adding it there too, or the fast tests fail with "cannot find in scope". `check-build-source-lists.py` only checks listed files exist, not that the list is complete. When the compile fails, the runner now prints the `Sources/` file that declares each missing name and the list to add it to (`scripts/dev/explain-missing-sources.py`); the Parakeet lifecycle smoke inside `run-integration-smoke.sh` does the same for its own list.
+- **Fast tests assume `TZ=America/Chicago`.** `run-tests.sh` now defaults `TZ` to it when unset (CI also sets it in `swift-ci.yml`). `swift test` does not, so SPM tests must not depend on the local time zone.
 - **Harnesses must not touch real user state.** Automated launches go through `AutomatedLaunchEnvironment` (CI launches used to show up as real PostHog users). Scripts and labs must not write to the real capture library or prefs, and anything that deletes must validate the path is under the root it owns first.
 - **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device. If that default is AirPods, that bind flips them into call mode and garbles audio. This has caused every AirPods garble bug so far. Any new code that builds an engine or touches `inputNode` (wake rebuilds, recovery, prewarm, meeting mic capture) must say what happens when a Bluetooth headset is the default input; read `Sources/Speech/CLAUDE.md` first.
-- **Adding a Tools package** means giving it CI (a `swift test --package-path` step in `swift-ci.yml` like the four existing packages, or its own workflow like `transcripted-lab.yml`) and a rule in `.agents/test-matrix.yml`. Nothing fails if you forget either.
+- **Adding a Tools package** (now checked by `scripts/dev/check-known-traps.py`) means giving it CI (a `swift test --package-path` step in `swift-ci.yml` like the four existing packages, or its own workflow like `transcripted-lab.yml`) and a rule in `.agents/test-matrix.yml`. `check-known-traps.py` fails if either is missing; `SpeakerEvalHarness` is the one documented exception.
 
 ## Hotspots
 

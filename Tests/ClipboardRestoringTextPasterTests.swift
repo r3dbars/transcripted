@@ -4,8 +4,8 @@
 // Source-text pins: most suites below run the real ClipboardRestoringTextPaster against real or
 // fake NSPasteboards — genuine behavioral coverage. A few instead grep
 // Sources/Support/ClipboardRestoringTextPaster.swift as text: the AX messaging-timeout bound and
-// the CFGetTypeID cast guard inside FocusedTextPasteConfirmation.capture(), plus the absence of a
-// removed unattributed-read API. capture() calls AXUIElementCreateSystemWide for the live focused
+// the CFGetTypeID cast guard inside FocusedTextPasteConfirmation.capture(). capture() calls
+// AXUIElementCreateSystemWide for the live focused
 // UI element, which a headless unit test cannot construct, so there is no way to drive it and
 // observe the guard firing. One more suite ("ambiguous paste delivery...") greps
 // Sources/UI/Overlay/DictationSessionController.swift's stopDictationAndPaste instead — a
@@ -1749,17 +1749,12 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(restoredClipboard, existingClipboard, "the early exit should still give the user's clipboard back")
     }
 
-    runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
-        let source = try! String(
-            contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
-            encoding: .utf8
-        )
-        assertFalse(
-            source.contains("allowClipboardReadConfirmation")
-                || source.contains("selectedTargetStillFrontmost"),
-            "an unattributed pasteboard provider read must never count as a confirmed paste or enable Auto Enter"
-        )
-    }
+    // "Provider reads are not an Auto Enter confirmation API" used to be a
+    // source grep for two removed parameter names. The promise itself (an
+    // unattributed pasteboard read never counts as a confirmed paste or arms
+    // Auto Enter) is exercised by "a likely paste into a selected target never
+    // authorizes Auto Enter" and "a read with a silent AX source is a likely
+    // paste, not a confirmed one".
 
     await runSuite("ClipboardRestoringTextPaster.paste — unconfirmed slow consumers keep text copied") {
         let existingClipboard = "synthetic existing clipboard"

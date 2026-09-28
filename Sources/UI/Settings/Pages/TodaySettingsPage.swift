@@ -447,6 +447,7 @@ private struct TodayDayCard: View {
 }
 
 /// A small borderless arrow for the preview card.
+@MainActor
 private func arrowButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
     TodayArrowButton(systemImage: systemImage, label: label, action: action)
 }

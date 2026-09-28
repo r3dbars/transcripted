@@ -2,8 +2,9 @@
 // refreshStatusItemPresentation(), because that method is private on TranscriptedAppDelegate (@MainActor
 // NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
 // runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
-// for the glyph states and accessibility labels, and guards against a red or non-template treatment that
-// would make the always-visible capture icon alarming instead of quiet. The second suite is real behavioral
+// for the glyph states and accessibility labels, and guards against a red or stock-symbol treatment that
+// would make the always-visible capture icon alarming instead of quiet; its MenuBarGlyph checks render the
+// real images (template flag, neutral ink) instead of reading MenuBarGlyph.swift. The second suite is real behavioral
 // coverage: it renders every MenuBarGlyph into a bitmap and checks the silhouettes actually differ where
 // they are meant to. The third keeps MenuBarGlyphGeometry in step with the generator that draws the
 // committed SVGs in docs/assets/menu-bar-icon/. If you rename refreshStatusItemPresentation or the
@@ -46,11 +47,23 @@ func testStatusItemPresentation() {
             "the status item should launch showing the idle bubble, not a stock symbol"
         )
 
-        let glyphSource = readSourceFixture("Sources/UI/MenuBar/MenuBarGlyph.swift")
-        assertTrue(
-            glyphSource.contains("image.isTemplate = true") && !glyphSource.contains("systemRed"),
-            "menu bar glyphs should follow the menu bar appearance instead of baking in an attention color"
-        )
+        // MenuBarGlyph is compiled here: check the images it actually makes
+        // instead of grepping its source for isTemplate and systemRed.
+        for glyph in MenuBarGlyph.allCases {
+            assertTrue(
+                glyph.image(accessibilityDescription: "Transcripted").isTemplate,
+                "\(glyph) should follow the menu bar appearance instead of baking in an attention color"
+            )
+            let pixels = renderMenuBarGlyph(glyph)
+            var tintedPixels = 0
+            for offset in stride(from: 0, to: pixels.count, by: 4) where pixels[offset + 3] > 128 {
+                let red = Int(pixels[offset]), green = Int(pixels[offset + 1]), blue = Int(pixels[offset + 2])
+                if abs(red - green) > 8 || abs(red - blue) > 8 {
+                    tintedPixels += 1
+                }
+            }
+            assertEqual(tintedPixels, 0, "\(glyph) should draw in neutral ink, not an attention color")
+        }
     }
 
     runSuite("menu bar glyphs render distinct template silhouettes") {

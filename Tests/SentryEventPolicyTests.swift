@@ -489,20 +489,8 @@ func testSentryEventPolicy() {
         // code from either side, so check the two lists agree instead of
         // trusting that they do. `explicitlySafeKeys` is the intended escape
         // hatch when a key genuinely needs one.
-        let source = readSourceFixture("Sources/Observability/SentryEventPolicy.swift")
-        let setBody = sentrySourceSlice(
-            source,
-            from: "private static let allowedDiagnosticTagKeys: Set<String> = [",
-            to: "\n    ]"
-        )
-        let keys: [String] = setBody.split(separator: "\n").compactMap { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("\""), let name = trimmed.split(separator: "\"").first else {
-                return nil
-            }
-            return String(name)
-        }
-        assertTrue(keys.count > 50, "the allowlist should have parsed; got \(keys.count) keys")
+        let keys = SentryEventPolicy.allowedDiagnosticTagKeys.sorted()
+        assertTrue(keys.count > 50, "the allowlist should have more than 50 keys; got \(keys.count)")
 
         for key in keys {
             assertEqual(

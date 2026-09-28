@@ -22,6 +22,7 @@ wrapper at the root and keep the implementation under `scripts/`.
 Use these as the active command surface:
 
 ```bash
+bash check.sh
 bash scripts/dev/agent-preflight.sh
 bash build-deps.sh
 bash build.sh --no-open
@@ -46,6 +47,7 @@ swift test
 Command ownership:
 
 - `scripts/dev/agent-preflight.sh` — agent preflight and suggested verification map for the current branch
+- `check.sh` — thin root wrapper for the one-command check runner: the checks your diff needs by default, or the `quick`, `full`, and `hardware` tiers
 - `build-deps.sh` — thin root wrapper for the dependency build entrypoint
 - `build.sh` — thin root wrapper for the authoritative local app build; use `--no-open` for agent verification
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
@@ -129,6 +131,7 @@ Use these docs for these jobs:
 - `docs/qa-meeting-cross-app-crossover.md` — manual same-build meeting audio crossover test
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, UI, Sparkle update, packaged, corpus, corpus-compare, live, artifact, and synthetic audio passes
 - `docs/test-automation-strategy.md` — agent-first QA coverage map, gate strategy, and automation roadmap
+- `docs/mutation-testing.md` — how to run `scripts/dev/mutation-probe.py` to find assertions that never catch a bug, with the first real results
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract

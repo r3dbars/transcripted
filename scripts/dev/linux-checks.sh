@@ -190,6 +190,12 @@ if [ "$quick" = true ] && git rev-parse --verify -q origin/main >/dev/null 2>&1;
 else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
+check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
+check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
+check "missing-source explainer self-test" "python3 scripts/dev/explain-missing-sources.py --self-test"
+check "concurrency census self-test" "python3 scripts/dev/concurrency-census.py --self-test"
+check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-test"
+check "known traps (Tools CI wiring, root commands documented)" "python3 scripts/dev/check-known-traps.py"
 
 # ---------------------------------------------------------------- telemetry/privacy
 check "analytics emitters" "python3 scripts/dev/check-analytics-emitters.py"
@@ -292,6 +298,7 @@ SELF_TEST_SCRIPTS=(
     scripts/release/bump-release-version.py
     scripts/release/post-dmg-release-audit.py
     scripts/release/sentry-release-dry-run.py
+    scripts/dev/mutation-probe.py
 )
 PY_TEST_SUITES=(
     scripts/ops/test-native-smoke-isolation.py

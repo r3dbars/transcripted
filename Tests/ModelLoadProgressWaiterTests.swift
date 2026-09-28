@@ -10,10 +10,10 @@ func testModelLoadProgressWaiter() async {
         receiveSubscription: { _ in subscriptions += 1 },
         receiveCancel: { cancellations += 1 }
     ).eraseToAnyPublisher()
-    let start = ProcessInfo.processInfo.systemUptime
-    await ModelLoadProgressWaiter.wait(for: changes, until: start + 0.02)
-    assertTrue(ProcessInfo.processInfo.systemUptime - start < 1, "a stalled load must release its caller at the deadline")
-    assertEqual(cancellations, 1, "timeout removes observation")
+    // No change is ever sent here, so returning at all means the deadline
+    // released the caller; the cancellation shows the deadline path ran.
+    await ModelLoadProgressWaiter.wait(for: changes, until: ProcessInfo.processInfo.systemUptime + 0.02)
+    assertEqual(cancellations, 1, "a stalled load must release its caller at the deadline, and the timeout removes observation")
 
     let transition = Task { @MainActor in
         await ModelLoadProgressWaiter.wait(for: changes, until: ProcessInfo.processInfo.systemUptime + 60)

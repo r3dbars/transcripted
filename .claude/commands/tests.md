@@ -14,8 +14,13 @@ function, type, or behavior with the clearest test seam. Add 3-5 useful tests:
 - one failure or guardrail case
 - one regression case when the surrounding history shows a known bug
 
-Match the style of existing tests in this repo. Prefer behavior tests over
-implementation-detail tests.
+Match the style of existing tests in this repo. Follow "Test rules" in
+`Tests/README.md`: each test checks a named promise through inputs and outputs.
+
+Before writing, state the promise each test protects in one plain sentence and
+use it as the `runSuite` (or test) name. Draft from the promise and the public
+signature, not the function body. After writing, break the code on purpose
+(flip the condition, drop the call), confirm the test goes red, and restore it.
 
 ## Repo Test Rules
 
@@ -29,10 +34,14 @@ implementation-detail tests.
   `bash run-integration-smoke.sh`.
 - After Swift source changes, run `bash build.sh --no-open` and `bash run-tests.sh`.
 - For `Sources/Meeting/` or `Sources/TranscriptedCore/`, run `bash build-deps.sh --force` first.
-- Prefer behavior tests over new source-text assertions (`contains("...")` on a source file). Text pins break on harmless edits; see "Known traps" in `CLAUDE.md`.
+- Never read `Sources/` as text and never assert on wall-clock elapsed time.
+  `python3 scripts/dev/check-test-shape.py` fails on both. If the only way to
+  reach the behavior is a source-text check, stop and propose the seam instead
+  (pull the decision into a small function, inject a clock or a fake).
+- A flaky test gets fixed or benched in `Tests/quarantine.txt` the same day.
 - No Swift toolchain (Linux/cloud)? Write the test, say it's uncompiled, and let CI run it.
-- For tests-only changes, run the narrowest useful check first, then the repo
-  check that owns that test surface.
+- For tests-only changes, run the narrowest useful check first, then
+  `bash check.sh` for the rest of the mapped checks.
 
 ## Safety
 
