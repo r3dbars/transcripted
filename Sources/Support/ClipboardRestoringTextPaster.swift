@@ -1021,6 +1021,14 @@ final class ClipboardRestoringTextPaster {
             target?.matchesCurrentFrontmostApp() != false
         }
         let confirmPasteReceived = pasteConfirmed ?? {
+            // The text cannot have landed before the target read the borrowed
+            // clipboard, so don't ask over Accessibility until it has. Asking
+            // earlier can catch the target mid-paste, blocked on this main
+            // thread for the string: the AX call then blocks on the target
+            // until its timeouts expire (~100 ms) before the read can run.
+            if let temporaryProvider, !temporaryProvider.didProvideData {
+                return false
+            }
             if accessibilityConfirmation?.confirmationMode(
                 text,
                 clipboardWasRead: temporaryProvider?.didProvideData == true,

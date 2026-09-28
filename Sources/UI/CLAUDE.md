@@ -45,6 +45,11 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingOverlayController.swift` — owns the non-activating meeting panel lifecycle, session subscriptions, state presentation, rest/wake behavior, and recording-pill actions (including the saved and error pills' Open, which reveals the meeting on the Meetings page); detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
 - `Overlay/CapturePillController.swift` — owns the non-activating detected-meeting capture pill panel (the Record / Not now / Remind prompt): presentation, countdown and auto-dismiss timing, and its event monitor
 - `Overlay/CapturePillPlacementPolicy.swift` — pure geometry for positioning the detected-meeting capture pill on the screen under the mouse
+- `Overlay/NotchIslandController.swift` — the opt-in Notch island (Settings › Dictation window › Notch island): one black shape that grows out of the MacBook notch, or hangs from the top edge of a display without one, and carries dictation, meetings, and the call-detected prompt. `FloatingOverlayController`, `MeetingOverlayController`, and `CapturePillController` keep their state machines, timers, and actions; in island mode they skip their own panels and push plain snapshots here, and the island routes taps back to them. It picks the screen under the pointer and keeps it while shown. Motion runs in Core Animation: the panel is built at launch (`prewarm`), opens at a fixed envelope size (`NotchIslandGeometry.envelope`) and never resizes mid-animation, and a continuous-corner mask layer springs out of the notch (or swells from a small nub at the top edge of a display without one) while the content blurs in; the wings ride the same spring when the island resizes. Mouse monitors make the envelope click-through everywhere except over the island and drive hover. It opens its drop-down on hover (0.12 s in, 0.38 s out) and by itself for messages and prompts (a click closes those until something new needs saying), and lingers ~2.6 s on a finished dictation with Copy / Paste again
+- `Overlay/NotchIslandPresentation.swift` — Foundation-pure rules for what the island shows: the two wings and the drop-down for every dictation, meeting, and call-prompt state. A live meeting keeps the left wing while a dictation takes the right; the call prompt waits while a dictation runs; with a drop-down open the wings only report status, so no button shows twice
+- `Overlay/NotchIslandGeometry.swift` — pure geometry: notch detection from the screen's safe area and top areas, content-sized wings (equal around the camera in notch mode), the 460 pt drop-down, the grow/shrink frames, the fixed envelope window, and a screen-width clamp; plus `NotchIslandMotion` (the grow/edge/shrink springs, fades and blur timing)
+- `Overlay/NotchIslandView.swift` — AppKit drawing for the island (wings, level bars, meters, rings, the drop-down's rows and buttons); no SwiftUI hosting
+- `Overlay/NotchIslandPanel.swift` — borderless non-activating panel at the status-bar level, excluded from screen capture (so screenshots can't show the island; review changes by rendering `NotchIslandView` offscreen), never key, and allowed to sit over the menu bar
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -245,6 +250,8 @@ Relevant direct coverage:
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillFinishPresentationTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
+- `Tests/NotchIslandPresentationTests.swift`
+- `Tests/NotchIslandGeometryTests.swift`
 - `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
