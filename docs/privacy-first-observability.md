@@ -225,6 +225,16 @@ allowlist.
 - pinned-device mic rollout fields limited to `mic_backend`
   (`pinned_ioproc` / `av_audio_engine`), `selection_reason`,
   `selected_input_class`, `selection_overrode_default`, `start_latency_bucket`,
+  `restart_trigger`, `stage`, `action`, the meeting-only
+  `pinned_mic_padded_bucket`, and `pinned_mic_restart_bucket`,
+  `pinned_mic_gap_bucket`, and `pinned_mic_dropped_callback_bucket` on
+  meetings and on the dictation `empty_takes` fallback. That fallback (a
+  built-in or wired mic moved back to the engine after two empty held takes)
+  also carries `input_channels` (1-64) and `input_rate_hz` (a fixed rate set,
+  else `other`). The `dictation_pinned_microphone_*` events are forwarded from
+  local `EventReporter` events by `AnalyticsEventForwardingPolicy`, which
+  rebuilds every value from a fixed set; raw pinned counts and the mic's name
+  and UID stay in local logs
   `restart_trigger`, `stage`, `action`, and the meeting-only
   `pinned_mic_restart_bucket`, `pinned_mic_gap_bucket`,
   `pinned_mic_padded_bucket`, and `pinned_mic_dropped_callback_bucket`. The

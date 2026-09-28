@@ -357,8 +357,19 @@ func testClipboardRestoringTextPaster() async {
             )
             assertTrue(
                 source.contains("case .copied(let message, reason: _):")
-                    && source.contains("overlayController.showClipboardNotice(message)"),
+                    && source.contains("self.showNotPasted(text, message: message, overlayController: overlayController)")
+                    && source.contains("overlayController.showNotPastedNotice(text, fallbackMessage: message)"),
                 "copied fallbacks should use a calm clipboard notice instead of a warning"
+            )
+            // The island's Paste is offered only next to the words themselves,
+            // so a user can see whether an ambiguous paste already landed.
+            let overlaySource = try! String(
+                contentsOfFile: "Sources/UI/Overlay/FloatingOverlayController.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                overlaySource.contains("preview: notPastedText,"),
+                "the Not pasted notice shows the dictation it would paste"
             )
             assertFalse(
                 source.contains("pasteConfirmationUnavailable"),
@@ -1429,6 +1440,49 @@ func testClipboardRestoringTextPaster() async {
                 "paste-back should stop waiting after the activation timeout is exceeded"
             )
         }
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — never asks the target over Accessibility before it reads the clipboard") {
+        // A target mid-paste is blocked on our main thread for the string; an
+        // AX call to it then blocks until its timeouts (~100 ms) expire.
+        let asked = await MainActor.run { () -> (unread: Int, read: Int, readBeforeAsk: Bool) in
+            let unreadSource = CountingConfirmationSource()
+            let unreadPasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedNoEarlyAX-\(UUID().uuidString)"))
+            unreadPasteboard.clearContents()
+            _ = ClipboardRestoringTextPaster().paste(
+                "synthetic unread dictation",
+                pasteboard: unreadPasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                confirmationSource: { unreadSource },
+                targetIsFrontmost: { true },
+                retainClipboardForPasteRetry: false,
+                pasteConfirmationWait: 0.06
+            )
+
+            let readSource = CountingConfirmationSource()
+            let readPasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedLateAX-\(UUID().uuidString)"))
+            readPasteboard.clearContents()
+            _ = ClipboardRestoringTextPaster().paste(
+                "synthetic read dictation",
+                pasteboard: readPasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = readPasteboard.string(forType: .string)
+                    return true
+                },
+                confirmationSource: { readSource },
+                targetIsFrontmost: { true },
+                retainClipboardForPasteRetry: false,
+                pasteConfirmationWait: 0.06
+            )
+            return (unreadSource.asked, readSource.asked, readSource.askedBeforeRead == 0)
+        }
+        assertEqual(asked.unread, 0, "while nothing has read the clipboard, the text can't have landed, so Accessibility is never asked")
+        assertTrue(asked.read > 0, "once the target has read the clipboard, the paste is confirmed over Accessibility as before")
+        assertTrue(asked.readBeforeAsk, "every Accessibility check comes after the read")
     }
 
     await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — keeps neutral recovery text copied") {
@@ -2718,6 +2772,32 @@ func testClipboardRestoringTextPaster() async {
 }
 
 @MainActor
+/// Counts Accessibility confirmation checks and never confirms.
+private final class CountingConfirmationSource: ClipboardPasteConfirmationSource {
+    private(set) var asked = 0
+    private(set) var askedBeforeRead = 0
+
+    var canObservePaste: Bool { true }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? {
+        asked += 1
+        if !clipboardWasRead { askedBeforeRead += 1 }
+        return nil
+    }
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String] {
+        [:]
+    }
+}
+
 private final class SyntheticPasteTargetAdapter: ClipboardPasteConfirmationSource {
     enum EditorKind: String {
         case codex

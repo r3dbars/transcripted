@@ -1,21 +1,26 @@
 # Sounds
 
-`dictation-start.caf` plays the moment you press the dictation key, or once recording
-starts when the mic is a Bluetooth headset. It is made from "Button 5" by
-skyscraper_seven on Pixabay.
+`dictation-start.wav` plays the moment you press the dictation key, or once recording
+starts when the mic is a Bluetooth headset. It is a single 19 ms tick: a 3.2 kHz sine
+with a very fast decay, plus a 3 ms burst of high-passed noise for the edge.
 
-`dictation-stop.caf` plays once you press Stop and the mic has stopped, before transcription or paste.
-It is made from "Button 14" by skyscraper_seven on Pixabay.
+`dictation-stop.wav` plays once you press Stop and the mic has stopped, before
+transcription or paste. It is the same idea a step lower: a 20 ms 2.2 kHz tick, so stop
+reads as "got it" without sounding like a second start.
 
-Both clips were changed for Transcripted: the inaudible tail (below -80 dB) was
-trimmed (2.55s and 2.78s, down from 3.63s and 3.03s), a 5 ms fade-in and a 0.5s
-fade-out were added, and they were re-encoded as AAC in CAF. The app plays them
-at 35% volume. They are used under the Pixabay Content
-License (https://pixabay.com/service/license-summary/), not the repo's MIT license;
-see `THIRD_PARTY_LICENSES.md`.
+`dictation-cancelled.wav` is the "nothing was pasted" cue: a cancelled dictation, a
+mis-tap that was too short, or a take with no speech. Meetings play it too when a
+recording is cancelled or a queued meeting is discarded. It is a light-switch double
+click (an 80 ms pair of short clicks, each a high-passed noise snap over an 800 Hz tick
+and a 130 Hz body), rendered at half the peak level of the start and stop ticks because
+the app plays it louder.
 
-`dictation-cancelled.wav` and `meeting-transcript-complete.mp3` are the older cues
-for cancel/no-speech and a finished meeting transcript.
+All three were picked on the Dictation Sound Bench ("Hairline" start and stop,
+"Light switch" error) and rendered in code from the bench's synth: 44.1 kHz mono, 16-bit.
+The ticks are normalized to a 0.72 peak, the error to 0.36. Start and stop play at about 49%
+volume. They were made for Transcripted, so they are under the repo's MIT license.
+
+`meeting-transcript-complete.mp3` is the older cue for a finished meeting transcript.
 
 `menu-hover.wav` is the quiet tick when the pointer lands on Record, Dictate, or
 Restart to Update in the menu bar menu. It was made for Transcripted in code (a

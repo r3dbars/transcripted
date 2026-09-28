@@ -10,13 +10,17 @@ import Foundation
 /// Any other recorded input keeps the old timing, after recording starts.
 /// Opening a Bluetooth headset's own mic flips it into call mode, which cuts
 /// off a click already playing through it. Aggregate and virtual inputs can
-/// wrap a headset, and an input not seen yet could be one.
+/// wrap a headset, and an input not seen yet could be one. So does a mic
+/// moved back to the slower engine start (`PinnedDictationSpeedPath`).
 enum DictationStartCuePolicy {
-    static func playsOnKeyPress(recordedInput: DictationAudioDevice?) -> Bool {
+    static func playsOnKeyPress(
+        recordedInput: DictationAudioDevice?,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
         guard let recordedInput else { return false }
         switch DictationInputDeviceSelectionPolicy.deviceClass(for: recordedInput) {
         case "built_in", "external":
-            return true
+            return !speedPathIsOff(recordedInput)
         default:
             return false
         }
