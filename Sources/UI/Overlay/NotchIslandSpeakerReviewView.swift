@@ -716,8 +716,16 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
     // MARK: Answers
 
+    /// Answering a voice ends its clip, so the next one is ready to play.
+    private func stopClipIfPlaying() {
+        if SpeakerClipPlayback.isPlaying(entry.clipURL) {
+            SpeakerClipPlayback.stop()
+        }
+    }
+
     private func confirm() {
         onInteract?()
+        stopClipIfPlaying()
         answer = .confirmed
         isEditing = false
         rebuild()
@@ -747,6 +755,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
     private func pick(_ label: String) {
         onInteract?()
+        stopClipIfPlaying()
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if case .confirm(let suggested) = question,
@@ -863,32 +872,43 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
 // MARK: - Controls
 
-/// Play / pause for a voice clip. While the clip plays, a ring fills around
-/// the button; a full circle means the clip has finished.
+/// Play / pause for a voice clip: a round 30 pt face with the glyph on
+/// top. While the clip plays, a ring fills around it; a full circle means
+/// the clip has finished. A plain view rather than an NSButton so it stays
+/// exactly square (and so exactly round) inside the row's stack.
 @available(macOS 14.0, *)
 @MainActor
-final class NotchIslandClipButton: NSButton {
+final class NotchIslandClipButton: NSView {
     var onPress: (() -> Void)?
     private let clipURL: URL
+    private let glyph = NSImageView()
     private let track = CAShapeLayer()
     private let progressRing = CAShapeLayer()
     private var pollTimer: Timer?
     private var observer: NSObjectProtocol?
+    private var isPlaying = false
     private static let size: CGFloat = 30
 
     init(clipURL: URL) {
         self.clipURL = clipURL
         super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
-        isBordered = false
         wantsLayer = true
-        layer?.cornerRadius = Self.size / 2
         layer?.masksToBounds = false
-        imagePosition = .imageOnly
-        target = self
-        action = #selector(pressed)
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: Self.size).isActive = true
-        heightAnchor.constraint(equalToConstant: Self.size).isActive = true
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Self.size),
+            heightAnchor.constraint(equalToConstant: Self.size),
+        ])
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glyph)
+        NSLayoutConstraint.activate([
+            glyph.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 0.5),
+            glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
         for (shape, color) in [(track, NSColor(white: 1, alpha: 0.14)), (progressRing, NSColor.white)] {
             shape.fillColor = nil
             shape.strokeColor = color.cgColor
@@ -897,6 +917,8 @@ final class NotchIslandClipButton: NSButton {
             shape.isHidden = true
             layer?.addSublayer(shape)
         }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
         observer = NotificationCenter.default.addObserver(
             forName: SpeakerClipPlayback.stateDidChangeNotification,
             object: nil,
@@ -915,25 +937,54 @@ final class NotchIslandClipButton: NSButton {
         if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: Self.size, height: Self.size) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
 
     override func layout() {
         super.layout()
-        // A circle 4 pt outside the button, drawn from the top, clockwise.
-        let inset: CGFloat = -4
-        let rect = bounds.insetBy(dx: inset, dy: inset)
+        let side = min(bounds.width, bounds.height)
+        layer?.cornerRadius = side / 2
+        // The ring: a circle 4 pt outside the face, from the top, clockwise
+        // (y grows downward in this flipped view).
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let path = CGMutablePath()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = rect.width / 2
-        let top = isFlipped ? -CGFloat.pi / 2 : CGFloat.pi / 2
-        path.addArc(center: center, radius: radius, startAngle: top, endAngle: top + (isFlipped ? 2 : -2) * .pi, clockwise: !isFlipped)
-        track.path = path
-        progressRing.path = path
+        path.addArc(
+            center: center,
+            radius: side / 2 + 4,
+            startAngle: -.pi / 2,
+            endAngle: 1.5 * .pi,
+            clockwise: false
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         track.frame = bounds
         progressRing.frame = bounds
+        track.path = path
+        progressRing.path = path
+        CATransaction.commit()
     }
 
-    @objc private func pressed() {
+    override func mouseDown(with event: NSEvent) {
+        layer?.opacity = 0.8
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        layer?.opacity = 1
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        press()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        press()
+        return true
+    }
+
+    private func press() {
         onPress?()
         SpeakerClipPlayback.play(clipURL)
         sync()
@@ -941,10 +992,10 @@ final class NotchIslandClipButton: NSButton {
 
     private func sync() {
         let playing = SpeakerClipPlayback.isPlaying(clipURL)
-        let symbol = playing ? "pause.fill" : "play.fill"
-        image = NSImage(systemSymbolName: symbol, accessibilityDescription: playing ? "Pause" : "Play clip")?
+        isPlaying = playing
+        glyph.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 11, weight: .bold))
-        contentTintColor = playing ? .black : .white
+        glyph.contentTintColor = playing ? .black : .white
         layer?.backgroundColor = (playing ? NSColor.white : NotchIslandPalette.buttonPlain).cgColor
         setAccessibilityLabel(playing ? "Pause clip" : "Play clip")
         track.isHidden = !playing

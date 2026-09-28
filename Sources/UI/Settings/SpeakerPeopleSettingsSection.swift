@@ -190,10 +190,24 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     /// "Name these people": one card per call with voices still unnamed,
-    /// newest call first, minus calls someone skipped.
+    /// newest call first, minus calls someone skipped. Calls sent to the
+    /// back with Later go last, in the order they were sent.
     var pendingMeetingGroups: [SpeakerPendingMeetingGroup] {
-        SpeakerReviewQueueScanner.groupedByMeeting(pendingVoiceGroups)
+        let groups = SpeakerReviewQueueScanner.groupedByMeeting(pendingVoiceGroups)
             .filter { !skippedCallKeys.contains($0.id) }
+        guard !laterCallKeys.isEmpty else { return groups }
+        let later = Set(laterCallKeys)
+        let now = groups.filter { !later.contains($0.id) }
+        let back = laterCallKeys.compactMap { key in groups.first { $0.id == key } }
+        return now + back
+    }
+
+    /// Later on the top card: it goes to the back of the stack for now.
+    @Published private(set) var laterCallKeys: [String] = []
+
+    func sendCallToBack(_ group: SpeakerPendingMeetingGroup) {
+        laterCallKeys.removeAll { $0 == group.id }
+        laterCallKeys.append(group.id)
     }
 
     /// Skips a whole call. Its voices move to Everyone (still unnamed, still
@@ -981,25 +995,47 @@ struct SpeakerPeopleSettingsSection: View {
             let directoryCount = model.directoryCount
             let directoryProfiles = model.directoryProfiles
 
-            if !meetingGroups.isEmpty {
+            if let current = meetingGroups.first {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         LibrarySectionLabel(
-                            text: "Name these people",
-                            trailing: meetingGroups.count == 1 ? "1 call" : "\(meetingGroups.count) calls"
+                            text: "Review and name these people",
+                            trailing: meetingGroups.count == 1 ? "1 call left" : "\(meetingGroups.count) calls left"
                         )
 
-                        Text("One card per call. Play a clip, then tap a name from the invite or type one. It updates every meeting they're in.")
+                        Text("One call at a time. Play a clip, then tap a name from the invite or type one. It updates every meeting they're in.")
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(meetingGroups) { group in
-                            SpeakerCallReviewCard(group: group, model: model)
+                    // A stack of work: only the top call is open; the edges
+                    // of the next ones peek out underneath. When the top
+                    // call's voices are all named it drops out of the queue
+                    // and the next card springs up.
+                    VStack(spacing: 0) {
+                        SpeakerCallReviewCard(
+                            group: current,
+                            model: model,
+                            position: 1,
+                            total: meetingGroups.count
+                        )
+                        .id(current.id)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                        .zIndex(2)
+
+                        if meetingGroups.count > 1 {
+                            stackEdge(inset: 12, opacity: 1)
+                                .zIndex(1)
+                        }
+                        if meetingGroups.count > 2 {
+                            stackEdge(inset: 24, opacity: 0.6)
                         }
                     }
+                    .animation(.spring(response: 0.34, dampingFraction: 0.74), value: current.id)
                 }
                 .id(ScrollTarget.reviewQueue)
                 .accessibilityIdentifier("transcripted.speakers.inbox")
@@ -1046,6 +1082,28 @@ struct SpeakerPeopleSettingsSection: View {
             expandedPersonID = nil
             SpeakerClipPlayback.stop()
         }
+    }
+
+    /// The lower edge of a card waiting under the top one.
+    private func stackEdge(inset: CGFloat, opacity: Double) -> some View {
+        UnevenRoundedRectangle(
+            bottomLeadingRadius: LibraryTokens.radiusRaised,
+            bottomTrailingRadius: LibraryTokens.radiusRaised,
+            style: .continuous
+        )
+        .fill(LibraryTokens.raisedFill)
+        .overlay(
+            UnevenRoundedRectangle(
+                bottomLeadingRadius: LibraryTokens.radiusRaised,
+                bottomTrailingRadius: LibraryTokens.radiusRaised,
+                style: .continuous
+            )
+            .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
+        )
+        .frame(height: 8)
+        .padding(.horizontal, inset)
+        .opacity(opacity)
+        .accessibilityHidden(true)
     }
 
     private func everyoneTrailing(count: Int) -> String? {
@@ -1116,6 +1174,8 @@ private struct SpeakersEmptyStateView: View {
 private struct SpeakerCallReviewCard: View {
     let group: SpeakerPendingMeetingGroup
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    var position = 1
+    var total = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1130,6 +1190,17 @@ private struct SpeakerCallReviewCard: View {
                         .foregroundStyle(LibraryTokens.ink2)
                 }
                 Spacer(minLength: 0)
+                if total > 1 {
+                    Text("\(position) of \(total)")
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                    SpeakerQuietLinkButton(title: "Later") {
+                        model.sendCallToBack(group)
+                    }
+                    .help("Put this call at the back of the stack.")
+                    .accessibilityIdentifier("transcripted.speakers.call-review.later")
+                }
                 SpeakerQuietLinkButton(title: "Skip this call") {
                     model.skipCall(group)
                 }
