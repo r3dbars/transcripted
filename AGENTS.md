@@ -21,6 +21,7 @@ When sources disagree: current code wins for runtime behavior, this file and `.a
 - **CoreAudio real-time callbacks:** no I/O, locks, allocations, or ObjC calls inside them. Deep-copy buffers before any async hop. Session controllers and UI state are `@MainActor`; capture internals use `DispatchQueue` + `NSLock`.
 - **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device; if that's AirPods, they flip into call mode and the audio garbles. Every AirPods garble bug so far came from this. Any code that builds an engine or touches `inputNode` must say what happens with a Bluetooth headset as the default input. Read `Sources/Speech/CLAUDE.md` first.
 - **Harnesses never touch real user state.** Automated launches go through `AutomatedLaunchEnvironment`. Scripts, labs, and tests don't write to the real capture library or prefs. Anything that deletes checks the path is under the root it owns first. Use `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when running binaries directly.
+- **Owner's commit credit.** When an agent commits work for Justin, use `r3dbars <r3dbars@users.noreply.github.com>` as the Git author and committer. Do not add AI `Co-authored-by` trailers. Keep independent human contributors' credit intact. If a platform forces bot authorship, report that limitation instead of claiming the commit will show as `r3dbars`.
 
 ## Build and test
 

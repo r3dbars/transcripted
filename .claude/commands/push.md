@@ -7,7 +7,7 @@ Steps:
 4. Run `git log --oneline -3` to see recent commit message style
 5. Stage the relevant changed files (NOT untracked files unless they're clearly part of the work)
 6. Write a clear, concise commit message summarizing the changes
-7. End the commit message with the `Co-Authored-By:` trailer for the model actually running this session (don't copy an older model name)
+7. Follow the owner's commit-credit rule in `AGENTS.md`: verify the commit author and committer are `r3dbars <r3dbars@users.noreply.github.com>`, and do not add an AI `Co-authored-by` trailer. If the cloud platform forces bot authorship, report that before committing.
 8. Push to origin
 
 Git config for this repo is already set:
