@@ -7,6 +7,11 @@ time. Use it with `.agents/test-matrix.yml` and `.agents/qa-gates.yml`.
 
 `qa-gates.yml` answers: "This risk matters. What proof counts?"
 
+How to write a test (check a named promise through inputs and outputs, never
+read `Sources/` as text, never assert on wall-clock time) lives in "Test rules"
+in `Tests/README.md`; `scripts/dev/check-test-shape.py` enforces it. To run the
+checks for a change, use `bash check.sh`.
+
 ## Current Inventory
 
 As of 2026-06-06, the repo has these automated layers:

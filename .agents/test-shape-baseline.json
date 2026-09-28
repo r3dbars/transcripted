@@ -11,7 +11,7 @@
     "Tests/CrashReporterOptionsTests.swift": 1,
     "Tests/DeviceRecoveryPolicyTests.swift": 6,
     "Tests/DictationAudioRecoveryTests.swift": 2,
-    "Tests/DictationInputDeviceSelectionPolicyTests.swift": 2,
+    "Tests/DictationInputDeviceSelectionPolicyTests.swift": 4,
     "Tests/DictationLanguageScriptPolicyTests.swift": 2,
     "Tests/DictationQueuedStartPolicyTests.swift": 6,
     "Tests/DictationRecordingStartAttemptTests.swift": 2,
