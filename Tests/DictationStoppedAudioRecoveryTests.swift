@@ -229,27 +229,24 @@ func testDictationStoppedAudioRecovery() {
                 encoding: .utf8
             )
             guard let persistRange = source.range(of: "DictationStoppedAudioRecoveryStore.persist("),
-                  let modelWaitRange = source.range(of: "if !appState.sttRouter.isRecordingModelLoaded", range: persistRange.upperBound..<source.endIndex) else {
+                  let modelWaitRange = source.range(of: "DictationPostStopModelWait.run(", range: persistRange.upperBound..<source.endIndex) else {
                 assertTrue(false, "controller should persist stopped audio before the model wait")
                 return
             }
             assertTrue(persistRange.lowerBound < modelWaitRange.lowerBound, "durable checkpoint must precede the model failure boundary")
-            guard let snapshotRange = source.range(of: "snapshotRecordedSamplesForPersistence()"),
-                  let commitGuardRange = source.range(
-                    of: "DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(",
-                    range: snapshotRange.upperBound..<persistRange.lowerBound
-                  ) else {
-                assertTrue(false, "controller should revalidate session ownership after snapshot resampling and before persistence")
-                return
+            // The session re-check between snapshot and write, and writing the
+            // WAV off the main actor, are behavior tests now in
+            // DictationStopCheckpointTests.swift. The controller still has to
+            // give that stage the real ownership check.
+            if let isCurrent = source.range(of: "isCurrent: {"),
+               let nextStep = source.range(of: "stopMicrophone:", range: isCurrent.upperBound..<source.endIndex) {
+                let check = source[isCurrent.upperBound..<nextStep.lowerBound]
+                assertTrue(check.contains("DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(")
+                           && check.contains("taskCancelled: Task.isCancelled"),
+                           "the stop checkpoint's session check must be the stop task's cancellation plus session ownership")
+            } else {
+                assertTrue(false, "the controller must pass DictationStopCheckpoint a session check")
             }
-            assertTrue(
-                snapshotRange.lowerBound < commitGuardRange.lowerBound && commitGuardRange.lowerBound < persistRange.lowerBound,
-                "cancel/session guard must run after the detached snapshot and before recovery persistence"
-            )
-            assertTrue(
-                source.contains("let recovery = try await Task.detached(priority: .userInitiated)"),
-                "WAV encoding and disk writes must stay off the main actor"
-            )
             assertTrue(
                 source.contains("preparedRecording: stoppedRecordingSnapshot"),
                 "transcription should reuse the already-resampled stopped recording snapshot"
@@ -303,7 +300,21 @@ func testDictationStoppedAudioRecovery() {
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
-            assertTrue(source.contains("if emptyReason.shouldDiscardStoppedAudioRecovery"), "only real silence or too-short capture may discard stopped audio")
+            // Which reasons discard the audio is a behavior test now
+            // (DictationEmptyTranscriptPolicyTests); the controller must act on it.
+            assertTrue(source.contains("if emptyDecision.discardsSavedRecording"), "only real silence or too-short capture may discard stopped audio")
+            // Controller wiring the policy tests can't see: a mis-tap is judged by
+            // how long the key was held, and it closes like a cancel.
+            assertTrue(source.contains("pressDuration: stopTiming.requestedAt - sessionStartTime"),
+                       "a mis-tap is judged by how long the shortcut was held, not by how long transcription took")
+            if let closeLikeCancel = source.range(of: "case .closeLikeCancel:"),
+               let next = source.range(of: "case .showNoSpeechAndDismiss:", range: closeLikeCancel.upperBound..<source.endIndex) {
+                let body = source[closeLikeCancel.upperBound..<next.lowerBound]
+                assertTrue(body.contains("hideWithCancelAnimation()") && !body.contains("showError"),
+                           "a mis-tap hides the overlay like a cancel, with no error text")
+            } else {
+                assertTrue(false, "the controller must handle the mis-tap decision")
+            }
             assertTrue(
                 source.contains("let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)")
                     && source.contains("actionTitle: savedAudioAction.title"),

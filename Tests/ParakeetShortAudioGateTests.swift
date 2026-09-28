@@ -159,23 +159,7 @@ func testParakeetShortAudioGate() {
         assertNil(decision, "five seconds of audio that fails inference is a model failure, and its audio must be kept")
     }
 
-    runSuite("Dictation mis-taps close like a cancel, not an error") {
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        assertTrue(
-            source.contains("let isMisTap = emptyReason.isAccidentalStart(pressDuration: stopTiming.requestedAt - sessionStartTime)"),
-            "a mis-tap is judged by the reason and how long the shortcut was held"
-        )
-        assertTrue(
-            source.contains("result: isMisTap ? .cancelled : .giveUp"),
-            "friction telemetry must count a mis-tap as cancelled"
-        )
-        guard let branch = source.range(of: "if isMisTap {"),
-              let nextBranch = source.range(of: "} else if emptyReason.shouldDiscardStoppedAudioRecovery {", range: branch.upperBound..<source.endIndex) else {
-            assertTrue(false, "the mis-tap branch must come before the no-speech message branch")
-            return
-        }
-        let body = String(source[branch.upperBound..<nextBranch.lowerBound])
-        assertTrue(body.contains("hideWithCancelAnimation()"), "a mis-tap hides the overlay like a cancel")
-        assertFalse(body.contains("showNoSpeechAndDismiss"), "a mis-tap shows no error text")
-    }
+    // "Dictation mis-taps close like a cancel, not an error" is a behavior
+    // test now: "A quick, too-short press closes like a cancel and counts as
+    // cancelled" in DictationEmptyTranscriptPolicyTests.swift.
 }

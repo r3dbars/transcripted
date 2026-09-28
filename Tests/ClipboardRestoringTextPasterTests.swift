@@ -292,6 +292,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 20_000_000,
                 pasteConfirmationWait: 0.35
@@ -1485,6 +1486,95 @@ func testClipboardRestoringTextPaster() async {
         assertTrue(asked.readBeforeAsk, "every Accessibility check comes after the read")
     }
 
+    runSuite("A dictation that didn't paste is offered back with its words") {
+        assertEqual(
+            TextPasteOutcome.copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed).notPastedOffer,
+            .onClipboard,
+            "words left on the clipboard are offered to paste"
+        )
+        assertEqual(
+            TextPasteOutcome.failed("synthetic busy clipboard", reason: .clipboardSnapshotIncomplete).notPastedOffer,
+            .clipboardBusy,
+            "a clipboard too big to set aside never got the words, so they're offered to copy"
+        )
+        assertEqual(TextPasteOutcome.pasted.notPastedOffer, nil, "a paste that landed offers nothing")
+        assertEqual(TextPasteOutcome.likelyPasted.notPastedOffer, nil, "a likely paste offers nothing")
+        assertEqual(
+            TextPasteOutcome.failed("synthetic write failure", reason: .temporaryClipboardWriteFailed).notPastedOffer,
+            nil,
+            "other failures keep their own message"
+        )
+    }
+
+    runSuite("A focused element counts as somewhere text can't go only when it plainly can't take text") {
+        // Claude's transcript: a page region, not editable, in no text box.
+        assertTrue(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXGroup", valueIsSettable: false, hasEditableAncestor: false
+        ), "a page region outside any text box can't take a paste")
+        assertTrue(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXButton", valueIsSettable: false, hasEditableAncestor: false
+        ), "a plain button can't take a paste")
+        // Muse: a button inside the editable composer routes the paste in.
+        assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXButton", valueIsSettable: false, hasEditableAncestor: true
+        ), "anything inside an editable region may take the paste")
+        assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXGroup", valueIsSettable: true, hasEditableAncestor: false
+        ), "a group whose value can be set is an editor (contenteditable)")
+        assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXTextArea", valueIsSettable: false, hasEditableAncestor: false
+        ), "a text area is always somewhere text can go")
+        assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: nil, valueIsSettable: false, hasEditableAncestor: false
+        ), "an unknown focus never overrules a paste")
+        assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: "AXSomethingNew", valueIsSettable: false, hasEditableAncestor: false
+        ), "a role we don't know isn't treated as a dead end")
+    }
+
+    await runSuite("A quick clipboard read counts as a paste only when the focus could take text") {
+        func pasteWithImmediateRead(focus: FocusClaimConfirmationSource, pasteConfirmed: (@MainActor () -> Bool)? = nil) async -> TextPasteOutcome {
+            await MainActor.run {
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedFocusRefutes-\(UUID().uuidString)"))
+                pasteboard.clearContents()
+                pasteboard.setString("synthetic original clipboard", forType: .string)
+                let paster = ClipboardRestoringTextPaster()
+                let outcome = paster.paste(
+                    "synthetic dictation for a focus check",
+                    pasteboard: pasteboard,
+                    accessibilityTrusted: { true },
+                    requestAccessibilityTrust: {},
+                    pasteDispatcher: {
+                        _ = pasteboard.string(forType: .string)
+                        return true
+                    },
+                    confirmationSource: { focus },
+                    pasteConfirmed: pasteConfirmed,
+                    targetIsFrontmost: { true },
+                    restoreDelay: 5_000_000,
+                    fallbackRestoreDelay: 20_000_000,
+                    pasteConfirmationWait: 0.05
+                )
+                paster.cancelPendingClipboardRestore()
+                return outcome
+            }
+        }
+
+        let intoPage = await pasteWithImmediateRead(focus: FocusClaimConfirmationSource(clearlyNotTextEntry: true))
+        assertEqual(
+            intoPage,
+            .copied(ClipboardRestoringTextPaster.pasteNotConfirmedMessage, reason: .pasteNotConfirmed),
+            "an app that reads the clipboard with no text box focused did not paste"
+        )
+        let intoEditor = await pasteWithImmediateRead(focus: FocusClaimConfirmationSource(clearlyNotTextEntry: false))
+        assertEqual(intoEditor, .likelyPasted, "the same quick read into a place that takes text is still a likely paste")
+        let callerDecides = await pasteWithImmediateRead(
+            focus: FocusClaimConfirmationSource(clearlyNotTextEntry: true),
+            pasteConfirmed: { false }
+        )
+        assertEqual(callerDecides, .likelyPasted, "a caller that decides confirmation itself isn't overruled by the focus")
+    }
+
     await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — keeps neutral recovery text copied") {
         let originalClipboard = "synthetic cancel clipboard"
         let dictationText = "synthetic cancel retry"
@@ -1681,6 +1771,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.02
@@ -1726,6 +1817,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.35
@@ -2767,6 +2859,42 @@ func testClipboardRestoringTextPaster() async {
 }
 
 @MainActor
+/// A focus that can't observe a paste and makes no claim about taking text:
+/// what a Mac with nothing focused (a CI runner) looks like.
+private final class NeutralFocusConfirmationSource: ClipboardPasteConfirmationSource {
+    var canObservePaste: Bool { false }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? { nil }
+
+    func diagnosticsContext(clipboardReadAt: CFAbsoluteTime?, pasteDispatchedAt: CFAbsoluteTime) -> [String: String] { [:] }
+}
+
+/// A focus that never confirms but says whether it can take text.
+private final class FocusClaimConfirmationSource: ClipboardPasteConfirmationSource {
+    let clearlyNotTextEntry: Bool
+
+    init(clearlyNotTextEntry: Bool) {
+        self.clearlyNotTextEntry = clearlyNotTextEntry
+    }
+
+    var canObservePaste: Bool { false }
+    var focusIsClearlyNotTextEntry: Bool { clearlyNotTextEntry }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? { nil }
+
+    func diagnosticsContext(clipboardReadAt: CFAbsoluteTime?, pasteDispatchedAt: CFAbsoluteTime) -> [String: String] { [:] }
+}
+
 /// Counts Accessibility confirmation checks and never confirms.
 private final class CountingConfirmationSource: ClipboardPasteConfirmationSource {
     private(set) var asked = 0

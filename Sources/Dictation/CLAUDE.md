@@ -9,6 +9,9 @@
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session
 - `DictationStoppedAudioCheckpointSignal.swift` — marks checkpoint completion, with bounded cancellation-aware waits for Quit and retry admission; completion alone does not prove persistence
+- `DictationStopCheckpoint.swift` — the first stage of stopping a dictation: stop the mic, play the stop click, then write the private recovery WAV off the main actor before anything waits on the model, re-checking the session after each step. `DictationSessionController` runs it with the real router, sound and store; `Tests/DictationStopCheckpointTests.swift` runs it with fakes
+- `DictationPostStopModelWait.swift` — the second stage of stopping: after the checkpoint, wait for the voice model if it isn't loaded (kick a load nobody started, join one in flight, give up on a failed load right away, stop at the budget). Unlike the start path's wait it never retries a failed load, because the audio is already saved. Clock and router are injected; `Tests/DictationPostStopModelWaitTests.swift` runs it on a fake clock
+- `DictationEmptyTranscriptPolicy.swift` — what a take with no text does, first match wins: a mis-tap closes like a cancel; no speech shows the note and drops the audio; a wrong-language guess with held-back text offers Paste Anyway; a saved recording is offered again (audio the model heard nothing in keeps its launch reminder); unsaved audio that needs recovery offers the checkpoint retry; anything else just says why
 - `DictationTerminationAdmissionPolicy.swift` — prevents Quit, new capture, or consuming inference from discarding the only native recording when no durable WAV exists; fences same-session Retry Saving
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
@@ -72,6 +75,9 @@ Each section captures:
 
 - `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationStoppedAudioRecoveryTests.swift`
+- `Tests/DictationStopCheckpointTests.swift`
+- `Tests/DictationEmptyTranscriptPolicyTests.swift`
+- `Tests/DictationPostStopModelWaitTests.swift`
 - `Tests/DictationStoppedAudioInterleavingTests.swift`
 - `Tests/DictationTerminationCheckpointTests.swift`
 - `Tests/DictationTranscriptStoreTests.swift`

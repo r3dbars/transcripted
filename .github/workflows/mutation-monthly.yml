@@ -1,0 +1,80 @@
+name: Monthly mutation run
+
+# Breaks the dictation and meeting decision files on purpose, one operator at a
+# time, and reports which breaks no fast test catches
+# (scripts/dev/mutation-probe.py, docs/mutation-testing.md). Each surviving
+# mutant is a test gap, like the first run's `requireSelection` one, where
+# every real mic selection could fail and all fast tests stayed green.
+#
+# Report only: it never blocks a PR. Results land in the run summary and as a
+# `mutation-reports` artifact.
+#
+# Runs on the owner's Mac runner (transcripted-mac), not hosted macOS: a probe
+# compiles the fast tests once per mutant, which would cost hundreds of hosted
+# macOS minutes a month. It does nothing until that runner is set up (no
+# heartbeat variable), the same rule mac-runner-sweep.yml uses.
+
+on:
+  schedule:
+    - cron: "17 9 1 * *"   # 09:17 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-monthly
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: vars.MAC_RUNNER_HEARTBEAT != ''
+    runs-on: ["transcripted-mac"]
+    timeout-minutes: 240
+    env:
+      TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+      TZ: America/Chicago
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Probe the decision files
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p build/mutation
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "## Monthly mutation run" >> "$summary"
+          echo "" >> "$summary"
+          echo "A SURVIVED line is a break no fast test caught: a gap to close with a behavior test." >> "$summary"
+          probe() {
+            local file="$1" test="$2"
+            if [ ! -f "$file" ]; then
+              echo "- \`$file\`: not on this commit, skipped" >> "$summary"
+              return
+            fi
+            echo "" >> "$summary"
+            echo "### \`$file\`" >> "$summary"
+            echo '```' >> "$summary"
+            python3 scripts/dev/mutation-probe.py "$file" \
+              --test "bash run-tests.sh --filter $test" \
+              --max 12 \
+              --report "build/mutation/$(basename "$file" .swift).json" 2>&1 \
+              | tee -a build/mutation/run.log \
+              | grep -E 'SURVIVED|mutation score' >> "$summary" || true
+            echo '```' >> "$summary"
+          }
+          probe Sources/Speech/DictationInputDeviceSelectionPolicy.swift DictationInputDeviceSelectionPolicyTests
+          probe Sources/Speech/DictationReadinessWaitPolicy.swift DictationReadinessWaitPolicyTests
+          probe Sources/Dictation/DictationStopCheckpoint.swift DictationStopCheckpointTests
+          probe Sources/Dictation/DictationPostStopModelWait.swift DictationPostStopModelWaitTests
+          probe Sources/UI/Overlay/DictationStartAdmission.swift DictationStartAdmissionTests
+          probe Sources/Meeting/FailedMeetingPresentation.swift FailedMeetingPresentationTests
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports
+          path: build/mutation/
+          if-no-files-found: ignore

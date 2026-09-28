@@ -41,6 +41,13 @@ public final class LabProcessRunner: @unchecked Sendable {
         command.environment.forEach { environment[$0.key] = $0.value }
         process.environment = environment
 
+        // Exit is observed through terminationHandler, which Foundation calls
+        // on a background queue whatever thread launched the process. Not
+        // waitUntilExit(): from async code it can park on a run loop the exit
+        // never wakes, and hang once the child outlives the call.
+        let exit = LabProcessExit()
+        process.terminationHandler = { _ in exit.markExited() }
+
         let startedAt = Date()
         do {
             try process.run()
@@ -57,13 +64,13 @@ public final class LabProcessRunner: @unchecked Sendable {
               observedGroup == groupID || (observedGroup == -1 && errno == ESRCH) else {
             // Ownership failed: signal only our direct child, never its group.
             await stopOwnedProcesses(signalTarget: process.processIdentifier)
-            process.waitUntilExit()
+            await waitForExit(exit)
             throw LabRunnerError.processLaunch("Experiment did not receive an isolated process group.")
         }
 
         let deadline = ProcessInfo.processInfo.systemUptime + max(1, timeoutSeconds)
         var timedOut = false
-        while process.isRunning && !Task.isCancelled {
+        while !exit.hasExited && !Task.isCancelled {
             if ProcessInfo.processInfo.systemUptime >= deadline {
                 timedOut = true
                 break
@@ -73,7 +80,7 @@ public final class LabProcessRunner: @unchecked Sendable {
         if timedOut || Task.isCancelled || kill(-groupID, 0) == 0 {
             await stopOwnedProcesses(signalTarget: -groupID)
         }
-        process.waitUntilExit()
+        await waitForExit(exit)
         try Task.checkCancellation()
 
         try? stdoutHandle.synchronize()
@@ -102,6 +109,14 @@ public final class LabProcessRunner: @unchecked Sendable {
         if kill(signalTarget, 0) == 0 { _ = kill(signalTarget, SIGKILL) }
     }
 
+    /// Yields until the terminationHandler has run. The leader has already
+    /// been signalled by the time this is reached, so this is a short wait.
+    private func waitForExit(_ exit: LabProcessExit) async {
+        while !exit.hasExited {
+            await pause()
+        }
+    }
+
     private func pause() async {
         // Cleanup must still yield after cancellation; try? Task.sleep would
         // return immediately and spin while waiting for children to exit.
@@ -110,5 +125,23 @@ public final class LabProcessRunner: @unchecked Sendable {
                 continuation.resume()
             }
         }
+    }
+}
+
+/// Set once by Process.terminationHandler, read by the runner's async loops.
+private final class LabProcessExit: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited = false
+
+    var hasExited: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exited
+    }
+
+    func markExited() {
+        lock.lock()
+        exited = true
+        lock.unlock()
     }
 }
