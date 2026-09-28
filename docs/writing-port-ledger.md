@@ -162,10 +162,8 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 
 - Check with real files: Return, Tab, arrows and shortcuts break segments, so each Slack message or Notes paragraph becomes its own writing entry. Decide at the phase 3 checkpoint whether consecutive segments in one app should merge.
 - Narrowing the app scope doesn't retroactively remove already-stored encrypted personal history; replay filters by the exclusion list only.
-- Phase 6: `AgentConnectionGuide`'s file-fallback prompt lists the meetings and dictations folders only. Add the writing folder there (four places) and in its pinned tests.
-- Done in phase 4: user-visible runtime strings that said "Tilde" (outcome-ledger and runtime status text such as "reinstall Tilde", "Tilde held back…"). Rename them to Transcripted/Writing copy when the Writing tab lands, and update the tests that assert them.
 - Phase 2 cleanup: collapse `.preview9B` into a Qwen completion profile once nothing reads its preview identities.
-- Before rollout: the `llama-server` pin depends on `codesign --remove-signature` output staying byte-stable across toolchains (it fails closed). Provenance found 2026-09-25: `llama-server --version` reports `version: 0.2.0-dev (build 1, commit 2115b73)`, built with AppleClang 21.0.0 for Darwin arm64, static with system-only dependencies. Reproducible recipe: build `ggml-org/llama.cpp` at `2115b73` as a static Release with the Metal library embedded, then `strip -S -x`, and compare the unsigned code hash `3f6895ab…`. The exact CMake flags still need confirming. Once it matches, build-deps can build instead of fetching Tilde's zip.
+- Done: `llama-server` provenance is verified. A from-source rebuild of llama.cpp `2115b73` matches the pinned code hash exactly; see [llama-server-provenance.md](llama-server-provenance.md). The pin fails closed if a toolchain ever changes how `codesign --remove-signature` lays out bytes.
 
 ## Tests
 
