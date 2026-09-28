@@ -48,6 +48,7 @@ swift test                         # Swift Package tests for TranscriptedCore se
 bash build-beta.sh '' <user>       # signed beta/distribution build; first arg is compatibility-only
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
 bash scripts/dev/concurrency-census.sh  # Swift 6 backlog: strict-concurrency warnings per Sources/ folder (typecheck only)
+python3 scripts/dev/mutation-probe.py Sources/<File>.swift --test "bash run-tests.sh --filter <TestFile>"  # which injected bugs no test catches
 ```
 
 Verification rules — a **condensed summary**, not a mirror. `.agents/test-matrix.yml` is the

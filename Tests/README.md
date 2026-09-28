@@ -28,6 +28,8 @@ green when behavior breaks, and cost agents a CI run each time.
    tests from the spec (`.claude/agents/test-writer.md`).
 6. **Prove it can fail.** Before committing, break the code on purpose (flip
    the condition, drop the call) and watch the test go red.
+   `scripts/dev/mutation-probe.py` does this for a whole file and lists the
+   breaks no test catches (see `docs/mutation-testing.md`).
 7. **Synthetic is not real.** A fake-mic test never proves real microphone,
    Bluetooth, system audio, or paste-back behavior. Say which real check is
    still needed.
