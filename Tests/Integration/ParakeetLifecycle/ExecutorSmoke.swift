@@ -237,6 +237,27 @@ import FluidAudio
         await dispose(engine)
     }
 
+    @MainActor static func missingLocalModelNeverDownloads() async {
+        let fake = FakeFluidAudio.shared
+        await fake.reset()
+        ModelCacheInventory.reset()
+        let engine = ParakeetEngine()
+        await engine.prefetchModelFilesIfNeeded(variant: .ultra)
+        check(await fake.events.isEmpty, "prefetch never downloads a script-installed model")
+        check(engine.modelDownloadState == .notLoaded, "prefetch leaves a missing local model quietly not loaded")
+        await engine.initialize(variant: .ultra)
+        check(await fake.events.isEmpty, "a missing local install never downloads stock v3 in its place")
+        check(
+            engine.modelDownloadState == .failed(ParakeetLocalModelError.notInstalled.localizedDescription),
+            "a missing local install says it isn't installed"
+        )
+        check(engine.modelFilePrefetchTask == nil && engine.modelInitializationTask == nil,
+            "a missing local install leaves no model work behind")
+        check(engine.asrManager == nil && !engine.asrManagerReady, "nothing claims readiness")
+        await dispose(engine)
+        ModelCacheInventory.reset()
+    }
+
     @MainActor static func main() async {
         // A hard process deadline also covers accidental cycles in task.value.
         DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
@@ -251,6 +272,7 @@ import FluidAudio
         await staleManagerResult(fail: true)
         await watchdogRetry()
         await activeInferenceTeardown()
+        await missingLocalModelNeverDownloads()
         print("PASS: production Parakeet lifecycle executor (\(assertions) assertions)")
     }
 }

@@ -45,6 +45,7 @@ enum ActivationTelemetry {
     enum Surface: String {
         case onboarding
         case home
+        case today
         case homeRow = "home_row"
         case homeMenu = "home_menu"
         case homePreview = "home_preview"

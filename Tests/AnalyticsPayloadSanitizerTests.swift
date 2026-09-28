@@ -21,7 +21,7 @@ func testAnalyticsPayloadSanitizer() {
     }
 
     runSuite("Analytics taxonomy drops free text instead of forwarding redacted excerpts") {
-        for key in ["failure_kind", "failure_stage", "start_failure_stage", "trigger", "quality_reason", "capture_outcome", "selection_reason"] {
+        for key in ["failure_kind", "failure_stage", "start_failure_stage", "trigger", "quality_reason", "capture_outcome", "selection_reason", "finalization_reason", "review_mode"] {
             let safe = AnalyticsPayloadSanitizer.sanitizeProperties([key: "Confidential words /Users/example/private.txt"], allowedKeys: [key])
             assertNil(safe[key], "taxonomy values must be codes")
         }

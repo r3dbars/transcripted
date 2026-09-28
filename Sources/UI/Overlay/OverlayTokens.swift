@@ -18,6 +18,8 @@ enum OverlayTokens {
     static let panelCompactHeight: CGFloat = 42   // header bar only, no content area
     static let panelCursorMiniWidth: CGFloat = 118
     static let panelCursorMiniHeight: CGFloat = 34
+    /// The mini pill widens to this while it shows the Esc confirm prompt.
+    static let panelCursorMiniNoticeWidth: CGFloat = 196
     static let panelLoadingHeight: CGFloat = 100
     static let panelMinHeight: CGFloat     = 92
     static let panelActionErrorHeight: CGFloat = 122

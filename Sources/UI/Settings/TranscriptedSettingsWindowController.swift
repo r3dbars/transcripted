@@ -58,7 +58,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func present(page: TranscriptedSettingsPage = .home, source: String = "unknown") {
+    func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page
@@ -86,6 +86,15 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     func focusHomeFind(source: String) {
         present(page: .home, source: source)
         navigationModel.requestHomeFindFocus()
+    }
+
+    /// Opens the Meetings page and, when a transcript is given, expands that
+    /// meeting. Backs the meeting pill's Open button.
+    func revealMeeting(transcriptURL: URL?, source: String) {
+        present(page: .home, source: source)
+        if let transcriptURL {
+            navigationModel.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

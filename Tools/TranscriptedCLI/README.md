@@ -49,6 +49,10 @@ is missing or incomplete; they never silently build retrieval-only instead.
 # Save Markdown only in this exact directory (no extra meetings/ subfolder).
 "$CLI" import-audio memo.m4a --output-dir "$PWD/notes" --no-retain-audio --json
 
+# Name the note just "memo.md" (handy for Obsidian, which shows the file name
+# as the title). If memo.md already exists, the capture ID is added instead.
+"$CLI" import-audio memo.m4a --output-dir "$PWD/notes" --plain-filename
+
 # Number speakers without consulting saved voice profiles.
 "$CLI" import-audio interview.mp4 --no-speaker-identification --title "Interview"
 
@@ -68,6 +72,8 @@ is missing or incomplete; they never silently build retrieval-only instead.
   `TRANSCRIPTED_DATA_DIR` keeps its existing shared-directory semantics.
 - One Markdown meeting, with a unique capture UUID in its filename, canonical
   frontmatter, numbered/recognized speakers, and timestamped utterances.
+  `--plain-filename` names it just `<title>.md` instead, and only adds the
+  capture UUID when that name is already taken.
 - By default, a separate 16 kHz mono Float32 playback WAV under
   `audio/<transcript-stem>_audio/system_audio.wav`. It is normalized audio, not a
   byte-identical original or a lossless archive of every original channel.

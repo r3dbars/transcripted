@@ -10,7 +10,8 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         isRetrying: Bool,
         hasAudioFiles: Bool,
         detail: String,
-        usableAudio: FailedMeetingUsableAudio = .unknown
+        usableAudio: FailedMeetingUsableAudio = .unknown,
+        failureKind: MeetingFailureKind? = nil
     ) -> HomeFailedMeetingInlinePresentation {
         if isRetrying {
             return HomeFailedMeetingInlinePresentation(
@@ -33,9 +34,12 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
                 )
             }
 
+            // Say why it failed when that changes what to do first; a bare
+            // "Retry ready" sends people straight back into the same wall.
             return HomeFailedMeetingInlinePresentation(
                 statusText: "Retry ready",
-                inlineDetail: "Saved audio is still here. Try again will transcribe it.",
+                inlineDetail: failureKind.flatMap(retryReason(for:))
+                    ?? "Saved audio is still here. Try again will transcribe it.",
                 canShowRetryAction: true
             )
         }
@@ -53,5 +57,64 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
             inlineDetail: detail,
             canShowRetryAction: false
         )
+    }
+
+    /// Home's header line for the failed-meetings pile. A speaker-name failure
+    /// keeps the saved transcript, so a pile of only those must not read as
+    /// lost meetings.
+    static func attentionSummary(
+        failureKinds: [MeetingFailureKind]
+    ) -> (title: String, detail: String, onlySpeakerNamesMissing: Bool) {
+        let count = failureKinds.count
+        let onlySpeakerNamesMissing = !failureKinds.isEmpty && failureKinds.allSatisfy {
+            $0 == .speakerNameFinalizationFailed || $0 == .speakerFinalizationFailed
+        }
+        if onlySpeakerNamesMissing {
+            return (
+                title: count == 1 ? "1 meeting needs speaker names" : "\(count) meetings need speaker names",
+                detail: "The transcripts are saved. Try again to name the speakers.",
+                onlySpeakerNamesMissing: true
+            )
+        }
+        return (
+            title: count == 1 ? "1 meeting failed" : "\(count) meetings failed",
+            detail: count == 1
+                ? "Saved audio is waiting for review or retry."
+                : "\(count) saved recordings are waiting for review or retry.",
+            onlySpeakerNamesMissing: false
+        )
+    }
+
+    /// The one-line reason shown on a retry-ready row, in Home's own words
+    /// (the long failure copy is written for the pill and points at the Meetings page).
+    /// Nil keeps the generic saved-audio line: for these kinds, Try again is
+    /// the whole answer.
+    static func retryReason(for failureKind: MeetingFailureKind) -> String? {
+        switch failureKind {
+        case .systemAudioPermission:
+            return "Turn on System Audio Recording in System Settings first, then try again."
+        case .systemAudioPermissionCheckInconclusive:
+            return "Couldn't confirm call-audio access. Check System Audio Recording in System Settings, then try again."
+        case .microphonePermission:
+            return "Turn on Microphone access in System Settings first, then try again."
+        case .languageNeedsWhisperModel:
+            return "This meeting's language needs a Whisper model. Pick one under Model in Settings, then try again."
+        case .modelDownloadFailed, .modelNotLoaded:
+            return "The speech model wasn't ready. Try again once it has loaded."
+        case .microphoneAudioUnusable:
+            return "The mic had no usable signal. Try again to transcribe the call audio."
+        case .audioDeviceUnavailable:
+            return "The mic disconnected mid-meeting. Try again to transcribe what was saved."
+        case .stopTimeout:
+            return "The recording didn't close cleanly. Try again to transcribe what was saved."
+        case .savedBeforeQuit:
+            return "Saved when Transcripted quit. Try again to finish the transcript."
+        case .speakerNameFinalizationFailed, .speakerFinalizationFailed:
+            return "The transcript is saved, but the speaker names didn't save. Try again to rebuild it and name them."
+        case .saveFailed:
+            return "The transcript file couldn't be written. Check free disk space, then try again."
+        default:
+            return nil
+        }
     }
 }

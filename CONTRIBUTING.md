@@ -105,15 +105,19 @@ The codebase is organized around the current Transcripted app:
 
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
-| App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
-| Dictation capture and storage | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture, trigger routing, saved dictation transcripts |
-| Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
+| App entry + state | `Sources/` (top-level files) | app lifecycle, menubar wiring, shared app state |
+| Dictation | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture and STT, saved dictation transcripts, hotkey and trigger routing |
+| Meetings | `Sources/Meeting/` | meeting recording, model warmup, transcript flow, bridge into Core |
+| Shared meeting core | `Sources/TranscriptedCore/` | meeting/transcription library and agent artifacts |
 | UI | `Sources/UI/` | grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
-| Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
+| Accessibility | `Sources/Accessibility/` | focused-editor metadata, overlay placement, paste-back context |
+| Support | `Sources/Support/` | paths, permissions, preferences, paste, launch-at-login |
+| Observability | `Sources/Observability/` | logs, crash reporting, anonymous analytics, updates |
+| Reliability | `Sources/Reliability/` | wake/sleep recovery |
 
-Some internal folders still use `Draft` naming while the repo and product are
-being aligned publicly around Transcripted. Treat those as implementation
-details unless a change specifically affects compatibility paths.
+A few legacy `Draft` names remain (the `libDraftDeps.a` archive and migration
+paths for older installs). Treat those as implementation details unless a
+change specifically affects compatibility paths.
 
 For the canonical root and directory map, see `docs/repo-layout.md`.
 

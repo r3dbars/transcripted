@@ -66,6 +66,31 @@ final class CoreAudioTapBufferRingTests: XCTestCase {
         XCTAssertEqual(ring.dropped.load(ordering: .relaxed), 1)
     }
 
+    func testPopReportsTheHostTimeOfEachBuffer() {
+        let format = format()
+        let ring = CoreAudioTapBufferRing(format: format)
+        for (index, hostTime) in [UInt64(1_000), 2_000].enumerated() {
+            let input = buffer(format, value: Float(index))
+            withExtendedLifetime(input) { ring.push(input.audioBufferList, hostTime: hostTime) }
+        }
+        _ = ring.pop(format: format)
+        XCTAssertEqual(ring.lastPoppedHostTime, 1_000)
+        _ = ring.pop(format: format)
+        XCTAssertEqual(ring.lastPoppedHostTime, 2_000)
+    }
+
+    func testInputAfterFormatInvalidationIsDroppedWithoutLatchingOverflow() {
+        // Deep review B1: the consumer reconnects on a format change but
+        // ends system audio on an overflow, so the two must stay distinct.
+        let format = format()
+        let ring = CoreAudioTapBufferRing(format: format)
+        ring.formatInvalidated.store(true, ordering: .releasing)
+        push(ring, format, value: 1)
+        XCTAssertNil(ring.pop(format: format))
+        XCTAssertEqual(ring.dropped.load(ordering: .relaxed), 1)
+        XCTAssertFalse(ring.overflowed.load(ordering: .acquiring))
+    }
+
     func testStopWithoutPreparationIsIdempotentAndDoesNotAcquirePermission() {
         let capture = CoreAudioSystemAudioCapture()
         capture.stopSync()

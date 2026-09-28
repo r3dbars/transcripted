@@ -280,6 +280,13 @@ extension TranscriptionTaskManager {
         return savedURL
     }
 
+    nonisolated static func existingImportedAt(of transcriptURL: URL?) -> Date? {
+        guard let transcriptURL,
+              let raw = try? String(contentsOf: transcriptURL, encoding: .utf8),
+              let values = TranscriptFrontmatter.values(in: raw) else { return nil }
+        return TranscriptFrontmatter.importedAt(values: values)
+    }
+
     /// Transcribe an imported audio file through the system-audio speaker path.
     nonisolated func transcribeImportedAudio(
         audioURL: URL,
@@ -299,7 +306,8 @@ extension TranscriptionTaskManager {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             stableTranscriptId: taskId,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            importedAt: Date()
         )
     }
 
@@ -321,7 +329,8 @@ extension TranscriptionTaskManager {
         targetTranscriptURL: URL? = nil,
         archiveRecordingAudio: Bool = true,
         stableTranscriptId: UUID? = nil,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        importedAt: Date? = nil
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -514,9 +523,13 @@ extension TranscriptionTaskManager {
             micQueuedReviewIds: queuedMicReviewIds
         )
 
-        // Clean up speaker profiles without deleting IDs still referenced by pending review rows.
-        speakerDB.mergeDuplicates(protecting: protectedReviewProfileIds)
-        speakerDB.pruneWeakProfiles()
+        // Clean up speaker profiles without deleting IDs still referenced by pending review rows,
+        // this meeting's and any other review that is still open or queued. Merging or pruning a
+        // profile an open review points at made that review's Save fail later.
+        let cleanupProtectedProfileIds = protectedReviewProfileIds
+            .union(speakerReviewProfileProtection.protectedProfileIds)
+        speakerDB.mergeDuplicates(protecting: cleanupProtectedProfileIds)
+        speakerDB.pruneWeakProfiles(protecting: cleanupProtectedProfileIds)
 
         // Build diarizer-channel-qualified speaker key → persistent DB UUID mapping for YAML.
         // Keyed "system_0" / "mic_0" so mic and system speakers with the same diarizer
@@ -561,12 +574,19 @@ extension TranscriptionTaskManager {
             systemOutcome: result.systemAudioOutcome,
             healthInfo: healthInfo
         )
-        let formatOptions = await MainActor.run {
+        var formatOptions = await MainActor.run {
             self.resolvedTranscriptFormatOptions(
                 hasMicAudio: savedAudio.includesMicrophone,
+                // A mic-only meeting's silent stand-in track is kept for
+                // playback and re-transcribe, but it isn't a source.
                 hasSystemAudio: savedAudio.includesSystemAudio
+                    && savedAudio.healthInfo?.systemAudioSkippedByChoice != true
             )
         }
+        // An import is listed by when it was imported. Re-transcribing that
+        // file later keeps its original import time instead of dropping it.
+        formatOptions.importedAt = importedAt
+            ?? Self.existingImportedAt(of: targetTranscriptURL)
 
         let transcriptDate = recordingDate ?? Date()
         guard let savedURL = TranscriptSaver.saveTranscript(

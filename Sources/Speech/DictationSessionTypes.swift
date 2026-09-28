@@ -95,23 +95,29 @@ final class DictationSession: ObservableObject {
     enum StartPathDecision: Equatable {
         /// The recording model is already loaded — start the mic immediately.
         case immediate
-        /// The model isn't loaded, but its files are already on disk — open
-        /// the mic now and load the model concurrently.
+        /// The model isn't loaded yet (files cached, still loading, or still
+        /// downloading) — open the mic now and load the model concurrently.
+        /// The stop path checkpoints the audio and then waits for the model
+        /// before transcribing, so nothing said is lost to the wait.
         case concurrentWarmupThenImmediate
-        /// Neither is true — wait out the full warmup before opening the mic.
+        /// The last load failed — retry it and show a clear error before
+        /// opening the mic, instead of recording audio that can't be read.
         case fullWarmupRequired
 
         static func decide(
             isRecordingModelLoaded: Bool,
-            selectedModelFilesAvailableLocally: Bool
+            recordingModelLoadFailed: Bool
         ) -> StartPathDecision {
             if isRecordingModelLoaded {
                 return .immediate
             }
-            if selectedModelFilesAvailableLocally {
-                return .concurrentWarmupThenImmediate
+            if recordingModelLoadFailed {
+                return .fullWarmupRequired
             }
-            return .fullWarmupRequired
+            // Includes a first-run download: holding the start until the
+            // model lands made a brand-new user's first dictation wait (and
+            // a push-to-talk release cancel it) while ~600 MB downloaded.
+            return .concurrentWarmupThenImmediate
         }
     }
 }

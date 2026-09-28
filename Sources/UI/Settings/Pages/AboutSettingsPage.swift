@@ -13,6 +13,8 @@ struct AboutSettingsPage: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     let onTrackSettingsToggle: (String, Bool, TranscriptedSettingsPage?) -> Void
     let updateActionEnabled: (SparkleUpdaterController.UpdateStatus) -> Bool
+    /// What a disabled update button is waiting on, or nil when nothing blocks it.
+    let updateBlockedDetail: (SparkleUpdaterController.UpdateStatus) -> String?
     let onPerformUpdateAction: () -> Void
 
     let diagnosticsActionStatus: String?
@@ -41,7 +43,7 @@ struct AboutSettingsPage: View {
                     automationIdentifier: "transcripted.settings.about.version"
                 ) {
                     HStack(spacing: 8) {
-                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(aboutUpdateStatusTitle)")
+                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
                             .font(.caption)
                             .foregroundStyle(aboutUpdateStatusInkColor)
                             .lineLimit(1)
@@ -57,7 +59,7 @@ struct AboutSettingsPage: View {
                     title: "Automatic updates",
                     info: GeneralInfo(
                         title: "Automatic updates",
-                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically: it checks and downloads in the background, so all you do is restart."
+                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically (the default): it downloads new versions in the background, but not during a meeting, dictation, or on a phone hotspot or Low Data Mode, and installs them the next time you quit or restart Transcripted."
                     ),
                     automationIdentifier: "transcripted.settings.about.automatic-updates",
                     showsDivider: false
@@ -95,7 +97,7 @@ struct AboutSettingsPage: View {
                     title: "Something broken? Tell us.",
                     info: GeneralInfo(
                         title: "Support",
-                        message: "Email opens a prefilled message to help@transcripted.app — estimated reply within a day. Send Diagnostics shares a privacy-safe event so we can investigate; it needs crash reports on."
+                        message: "Email opens a prefilled message to help@transcripted.app. We usually reply within a day. Send Diagnostics sends a privacy-safe snapshot of how the app is doing (no transcripts, audio, or names). Send it first, then email us: the email carries the report ID so we can match them up. It needs Crash reports on."
                     ),
                     automationIdentifier: "transcripted.settings.about.support",
                     showsDivider: diagnosticsActionStatus != nil || diagnosticsDisabledReason != nil
@@ -133,7 +135,7 @@ struct AboutSettingsPage: View {
         case .noUpdateAvailable:
             return "Up to date"
         case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+            if sparkleUpdater.availableUpdateDownloadsAutomatically {
                 return "Preparing update (\(version))"
             }
             return "Update available (\(version))"
@@ -152,7 +154,7 @@ struct AboutSettingsPage: View {
             return LibraryTokens.ink2
         case .checking:
             return LibraryTokens.accent
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+        case .updateAvailable where sparkleUpdater.availableUpdateDownloadsAutomatically:
             return LibraryTokens.accent
         case .downloading:
             return LibraryTokens.accent
@@ -164,7 +166,7 @@ struct AboutSettingsPage: View {
     private var aboutUpdateButtonTitle: String {
         switch sparkleUpdater.updateStatus.state {
         case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+            if sparkleUpdater.availableUpdateDownloadsAutomatically {
                 return "Preparing Update…"
             }
             return "Install \(version)"
@@ -208,12 +210,14 @@ struct AboutSettingsPage: View {
 
     private var currentAutomaticUpdatePolicy: AutomaticUpdatePolicy {
         let settings = sparkleUpdater.automaticUpdateSettings
+        // Checks off wins: with no scheduled checks nothing downloads, even
+        // when the Info.plist default leaves the download flag on.
+        if !settings.automaticChecksEnabled { return .off }
         // Clamp downloads-enabled to .notify when Sparkle reports downloads
         // unavailable: the .download choice isn't offered in the menu then,
         // and checks are what actually still run.
         if settings.automaticDownloadsEnabled, settings.automaticDownloadsAllowed { return .download }
-        if settings.automaticChecksEnabled || settings.automaticDownloadsEnabled { return .notify }
-        return .off
+        return .notify
     }
 
     private var automaticUpdatePolicyBinding: Binding<AutomaticUpdatePolicy> {
@@ -255,6 +259,11 @@ struct AboutSettingsPage: View {
                     }
                     if !settings.automaticDownloadsEnabled {
                         onTrackSettingsToggle("automatic_update_downloads", true, .general)
+                    }
+                    // Also call it when only checks are off: the download flag
+                    // can already read true from the Info.plist default, and
+                    // this setter is what turns checks back on.
+                    if !settings.automaticDownloadsEnabled || !settings.automaticChecksEnabled {
                         sparkleUpdater.setAutomaticallyDownloadsUpdates(true)
                     }
                 }

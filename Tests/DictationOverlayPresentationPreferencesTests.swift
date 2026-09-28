@@ -31,6 +31,40 @@ func testDictationOverlayPresentationPreferences() {
         )
     }
 
+    runSuite("DictationOverlayPresentationPreferences persists notch island mode") {
+        let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DictationOverlayPresentationPreferences.setMode(.notchIsland, userDefaults: defaults)
+        assertEqual(
+            DictationOverlayPresentationPreferences.mode(userDefaults: defaults),
+            .notchIsland,
+            "notch island mode should persist"
+        )
+        assertEqual(
+            defaults.string(forKey: DictationOverlayPresentationPreferences.modeKey),
+            "notchIsland",
+            "the stored value is the raw case name, so it survives updates"
+        )
+    }
+
+    runSuite("NotchIslandPreferences keeps the island out of screen sharing unless turned on") {
+        let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            NotchIslandPreferences.visibleInScreenSharing(userDefaults: defaults),
+            "a shared screen must not show live dictation by default"
+        )
+        NotchIslandPreferences.setVisibleInScreenSharing(true, userDefaults: defaults)
+        assertTrue(NotchIslandPreferences.visibleInScreenSharing(userDefaults: defaults), "turning it on persists")
+        assertEqual(
+            NotchIslandPreferences.visibleInScreenSharingKey,
+            "notchIslandVisibleInScreenSharing",
+            "the Settings toggle and the island read the same key"
+        )
+    }
+
     runSuite("DictationOverlayPresentationPreferences falls back from unknown values") {
         let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -71,8 +105,34 @@ func testDictationOverlayPresentationPreferences() {
             "mini overlay mode should explain that it follows the pointer"
         )
         assertTrue(
-            DictationOverlayPresentationMode.cursorMini.detail.contains("Escape"),
+            DictationOverlayPresentationMode.cursorMini.detail.contains("Stop with your dictation shortcut"),
             "mini overlay mode should explain how to stop when the stop button is hidden"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("Esc cancels"),
+            "Esc throws the take away, so the copy must never say it stops"
+        )
+        assertFalse(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("shortcut or Escape"),
+            "Esc is not a second way to stop and paste"
+        )
+        assertEqual(
+            DictationOverlayPresentationMode.notchIsland.title,
+            "Notch island",
+            "island mode should match the settings card label"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.notchIsland.detail.contains("top of other displays"),
+            "island mode should say what happens on a display without a notch"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.notchIsland.detail.contains("Meetings use it too"),
+            "island mode changes the meeting pill as well, so the card has to say so"
+        )
+        assertEqual(
+            DictationOverlayPresentationMode.allCases,
+            [.nearText, .cursorMini, .notchIsland],
+            "the settings picker shows the three styles in this order"
         )
     }
 }

@@ -1,5 +1,7 @@
 # Transcripted 1.1.60 release evidence
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Release requested by the owner on 2026-09-16. Source includes the reliability
 changes merged through PR #1740 and the independently reviewed AirPods tap-format
 fix (e65523f8).

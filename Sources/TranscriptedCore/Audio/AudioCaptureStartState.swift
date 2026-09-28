@@ -5,6 +5,10 @@ public enum AudioCaptureStartFailureStage: String, Equatable, Sendable {
     case microphoneGraph = "microphone_graph"
     case systemAudio = "system_audio"
     case microphoneFile = "microphone_file"
+    /// `installTap` raised and `AudioTapInstallGuard` caught it (a mic format
+    /// change mid-start). Kept apart from `microphoneGraph` so the field can
+    /// tell caught crashes from ordinary graph failures.
+    case microphoneTapRaised = "microphone_tap_raised"
     case unknown = "unknown"
 }
 
@@ -16,6 +20,9 @@ public enum AudioCaptureStartFailureStage: String, Equatable, Sendable {
 /// a header-only mic WAV or a never-streaming system tap while the UI claims to
 /// be recording. Both latches keep capture in `.waiting` until the start
 /// deadline fails it and tears it down honestly.
+///
+/// A mic-only recording (`requiresSystemAudio: false`) never builds the
+/// system tap, so only the microphone side gates readiness and timeouts.
 public enum AudioCaptureStartState {
     public enum Outcome: Equatable {
         case waiting
@@ -29,17 +36,19 @@ public enum AudioCaptureStartState {
         micAudioStreaming: Bool,
         systemAudioFileURL: URL?,
         systemAudioStreaming: Bool,
-        errorMessage: String?
+        errorMessage: String?,
+        requiresSystemAudio: Bool = true
     ) -> Outcome {
         if let errorMessage, !errorMessage.isEmpty {
             return .failed(errorMessage)
         }
 
+        let systemAudioReady = !requiresSystemAudio
+            || (systemAudioFileURL != nil && systemAudioStreaming)
         if isRecording,
            micAudioFileURL != nil,
            micAudioStreaming,
-           systemAudioFileURL != nil,
-           systemAudioStreaming {
+           systemAudioReady {
             return .ready
         }
 
@@ -49,10 +58,15 @@ public enum AudioCaptureStartState {
     public static func timeoutFailureMessage(
         existingErrorMessage: String?,
         micAudioStreaming: Bool,
-        systemAudioStreaming: Bool
+        systemAudioStreaming: Bool,
+        requiresSystemAudio: Bool = true
     ) -> String {
         if let existingErrorMessage, !existingErrorMessage.isEmpty {
             return existingErrorMessage
+        }
+
+        guard requiresSystemAudio else {
+            return "Microphone capture did not become ready in time. Check your input device, then try again."
         }
 
         if !micAudioStreaming, systemAudioStreaming {
@@ -70,8 +84,12 @@ public enum AudioCaptureStartState {
 
     public static func timeoutFailureStage(
         micAudioStreaming: Bool,
-        systemAudioStreaming: Bool
+        systemAudioStreaming: Bool,
+        requiresSystemAudio: Bool = true
     ) -> AudioCaptureStartFailureStage {
+        guard requiresSystemAudio else {
+            return micAudioStreaming ? .unknown : .microphoneGraph
+        }
         if !micAudioStreaming, systemAudioStreaming {
             return .microphoneGraph
         }

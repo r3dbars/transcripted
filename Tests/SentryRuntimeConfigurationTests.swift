@@ -23,6 +23,18 @@ func testSentryRuntimeConfiguration() {
         )
     }
 
+    runSuite("SentryRuntimeConfiguration stays off for our own launch harnesses") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",
+        ]
+        for key in AutomatedLaunchEnvironment.keys {
+            assertNil(
+                SentryRuntimeConfiguration.dsn(environment: [key: "/tmp/report.json"], infoDictionary: info),
+                "\(key) launches must not report crashes under the release's name"
+            )
+        }
+    }
+
     runSuite("SentryRuntimeConfiguration rejects insecure DSNs and falls back to a secure source") {
         let info: [String: Any] = [
             SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",

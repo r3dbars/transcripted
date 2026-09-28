@@ -10,7 +10,6 @@ struct HomeMeetingPodcastPlayer: View {
     let audio: MeetingAudioAttachment
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
-    @State private var selectedPlaybackChoiceID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -99,13 +98,13 @@ struct HomeMeetingPodcastPlayer: View {
     }
 
     private var selectedPlaybackChoice: MeetingAudioPlaybackChoice? {
-        playback.activeChoice(for: audio) ?? audio.playbackChoice(id: selectedPlaybackChoiceID)
+        playback.activeChoice(for: audio) ?? playback.preferredChoice(for: audio)
     }
 
     private var selectedPlaybackChoiceBinding: Binding<String?> {
         Binding(
             get: { selectedPlaybackChoice?.id },
-            set: { selectedPlaybackChoiceID = $0 }
+            set: { playback.setPreferredChoiceID($0, for: audio) }
         )
     }
 }

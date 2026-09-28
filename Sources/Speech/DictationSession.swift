@@ -53,9 +53,15 @@ extension DictationSession {
     // MARK: - Recording start
 
     func startPathDecision(appState: TranscriptedAppState) -> StartPathDecision {
-        .decide(
+        let recordingModelLoadFailed: Bool
+        if case .failed = appState.sttRouter.recordingModelDownloadState {
+            recordingModelLoadFailed = true
+        } else {
+            recordingModelLoadFailed = false
+        }
+        return .decide(
             isRecordingModelLoaded: appState.sttRouter.isRecordingModelLoaded,
-            selectedModelFilesAvailableLocally: appState.sttRouter.selectedModelFilesAvailableLocally
+            recordingModelLoadFailed: recordingModelLoadFailed
         )
     }
 

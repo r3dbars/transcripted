@@ -35,7 +35,9 @@ enum FunctionKeySystemAction: Equatable {
     var title: String {
         switch self {
         case .notConfigured:
-            return "the macOS default"
+            // macOS only writes AppleFnUsageType once someone changes the
+            // setting, and its default is never Do Nothing.
+            return "emoji or input switching (the default)"
         case .doNothing:
             return "Do Nothing"
         case .changeInputSource:
@@ -51,9 +53,9 @@ enum FunctionKeySystemAction: Equatable {
 
     var conflictsWithBareFunctionKey: Bool {
         switch self {
-        case .doNothing, .notConfigured:
+        case .doNothing:
             return false
-        case .changeInputSource, .showEmojiAndSymbols, .startDictation, .unknown:
+        case .notConfigured, .changeInputSource, .showEmojiAndSymbols, .startDictation, .unknown:
             return true
         }
     }
@@ -192,6 +194,8 @@ enum PhysicalDictationTriggerPreferences {
     }
 
     static func functionKeySystemAction() -> FunctionKeySystemAction {
+        // Pick up a change made in System Settings while we were running.
+        CFPreferencesAppSynchronize(functionKeyUsageDomain)
         let value = CFPreferencesCopyAppValue(functionKeyUsageKey, functionKeyUsageDomain)
         if let number = value as? NSNumber {
             return functionKeySystemAction(rawValue: number.intValue)
@@ -229,6 +233,14 @@ enum PhysicalDictationTriggerPreferences {
         }
 
         return "Fn is also set to \(systemAction.title) in macOS. Set Keyboard > Press Fn/Globe key to Do Nothing."
+    }
+
+    /// System Settings > Keyboard, where "Press Fn/Globe key to" lives.
+    static let keyboardSettingsURL = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")
+
+    static func openKeyboardSettings() {
+        guard let keyboardSettingsURL else { return }
+        NSWorkspace.shared.open(keyboardSettingsURL)
     }
 
     static func displayString(for binding: PhysicalDictationTriggerBinding) -> String {
@@ -467,6 +479,29 @@ enum PhysicalDictationTriggerPreferences {
             return "\(displayString(for: binding)) is a macOS shortcut. Choose a different combination."
         }
         return nil
+    }
+
+    /// Why `binding` can't be saved for one shortcut when another shortcut
+    /// already uses it, or nil when it's free. The event tap routes a key to
+    /// the first matching action, so a shared key would silently make one of
+    /// the two shortcuts dead. `otherShortcuts` are the other actions' names
+    /// (as the Shortcuts rows show them) and current bindings.
+    static func duplicateReason(
+        for binding: PhysicalDictationTriggerBinding,
+        otherShortcuts: [(name: String, binding: PhysicalDictationTriggerBinding)]
+    ) -> String? {
+        let candidate = normalizedForComparison(binding)
+        guard let clash = otherShortcuts.first(where: { normalizedForComparison($0.binding) == candidate }) else {
+            return nil
+        }
+        return "\(displayString(for: binding)) is already used for \(clash.name). Choose a different key."
+    }
+
+    private static func normalizedForComparison(_ binding: PhysicalDictationTriggerBinding) -> PhysicalDictationTriggerBinding {
+        PhysicalDictationTriggerBinding(
+            keyCode: binding.keyCode,
+            modifiers: binding.modifiers & PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+        )
     }
 
     /// ⌘ (optionally with ⇧) plus one of these keys is system-wide editing,

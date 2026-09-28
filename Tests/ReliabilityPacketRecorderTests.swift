@@ -577,4 +577,39 @@ func testReliabilityPacketRecorder() {
         assertEqual(packet?.context["system_stream_present"], "true", "system stream presence is derived from system_file_present and must not be blanked upstream")
         assertNil(packet?.context["audio_device"], "raw device labels must still be dropped by the recorder's own allowlist")
     }
+
+    runSuite("ReliabilityPacketRecorder keeps the meeting mic backend and pinned health buckets, not raw counts") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-09-23T10:00:00.000Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_recording_stopped",
+            message: "Meeting recording stopped",
+            context: [
+                "mic_backend": "pinned_ioproc",
+                "pinned_mic_restart_bucket": "1",
+                "pinned_mic_gap_bucket": "2_3",
+                "pinned_mic_padded_bucket": "lt_1s",
+                "pinned_mic_dropped_callback_bucket": "0",
+                "pinned_mic_restart_count": "1",
+                "pinned_mic_gap_count": "3",
+                "pinned_mic_padded_seconds": "0",
+                "pinned_mic_dropped_callback_count": "0",
+                "reason": "overlay_stop_button",
+            ],
+            appVersion: "1.1.60",
+            osVersion: "Version 26.6.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertEqual(packet?.context["mic_backend"], "pinned_ioproc", "support packets should say which recorder captured the mic")
+        assertEqual(packet?.context["pinned_mic_restart_bucket"], "1", "pinned restarts should stay bucketed")
+        assertEqual(packet?.context["pinned_mic_gap_bucket"], "2_3", "pinned gaps should stay bucketed")
+        assertEqual(packet?.context["pinned_mic_padded_bucket"], "lt_1s", "pinned padding should stay bucketed")
+        assertEqual(packet?.context["pinned_mic_dropped_callback_bucket"], "0", "pinned dropped callbacks should stay bucketed")
+        for raw in ["pinned_mic_restart_count", "pinned_mic_gap_count", "pinned_mic_padded_seconds", "pinned_mic_dropped_callback_count"] {
+            assertNil(packet?.context[raw], "\(raw) is a raw count and stays in local logs")
+        }
+    }
 }

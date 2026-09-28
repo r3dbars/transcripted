@@ -62,6 +62,10 @@ enum MeetingPromptTelemetry {
         if let dismissStreak {
             properties["dismiss_streak_bucket"] = MeetingPromptCallTelemetry.dismissStreakBucket(dismissStreak)
         }
+        // What convinced the detector this was a call (a named tab, the
+        // browser also playing audio, just time on the mic...). Coarse enum,
+        // never the title itself.
+        properties["call_evidence"] = candidate.callEvidence.rawValue
         return properties
     }
 
@@ -136,6 +140,7 @@ enum MeetingPromptTelemetry {
 
     static func properties(for summary: MeetingPromptDetectedCallSummary) -> [String: String] {
         [
+            "app_signal": summary.appSignal,
             "duration_bucket": MeetingPromptCallTelemetry.durationBucket(for: summary.duration),
             "prompt_outcome": summary.promptOutcome.rawValue,
             "provider": summary.provider.rawValue,

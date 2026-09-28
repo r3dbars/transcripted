@@ -16,7 +16,10 @@ enum SentryRuntimeConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> String? {
-        firstValidHTTPSValue(
+        // Our launch harnesses run the same version string as the release, so
+        // their crashes and hangs would land in the release's crash watch.
+        guard !AutomatedLaunchEnvironment.isActive(environment: environment) else { return nil }
+        return firstValidHTTPSValue(
             environment[dsnEnvironmentKey],
             infoDictionary?[dsnInfoKey] as? String
         )

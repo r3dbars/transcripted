@@ -140,6 +140,8 @@ func testSentryPayloadSanitizer() {
     runSuite("SentryPayloadSanitizer.sanitizeCrashRuntimeTags exposes only reviewed workflow state") {
         let sanitized = SentryPayloadSanitizer.sanitizeCrashRuntimeTags([
             "last_event": "dictation_transcribing",
+            "build_revision": "0123456789ab",
+            "build_channel": "release",
             "session_kind": "dictation",
             "session_stage": "transcribing",
             "transcript_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
@@ -147,7 +149,9 @@ func testSentryPayloadSanitizer() {
         ])
 
         assertEqual(sanitized["last_event"], "dictation_transcribing", "last runtime event should be queryable as a crash tag")
-        assertEqual(Set(sanitized.keys), ["last_event"], "crash runtime tags should stay limited to one reviewed workflow dimension")
+        assertEqual(sanitized["build_revision"], "0123456789ab", "the exact build should be queryable as a crash tag")
+        assertEqual(sanitized["build_channel"], "release", "release vs local builds should be queryable as a crash tag")
+        assertEqual(Set(sanitized.keys), ["build_channel", "build_revision", "last_event"], "crash runtime tags should stay limited to the build plus one reviewed workflow dimension")
     }
 
     runSuite("SentryPayloadSanitizer.sanitizeTags still scrubs selector-enrichment values") {

@@ -31,6 +31,8 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     private var draining = false
     private var observedSignal = false
     private var finalizationFailed = false
+    private var stopOwnedFileURL: URL?
+    private var setupDiscardedFileURL: URL?
     private let beforeFinishForTesting: (() -> Void)?
     var hasFinalizationFailure: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
@@ -142,6 +144,35 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         guard !cancelled, !draining else { return }
         draining = true
         tailAdmission.begin(generation: 1)
+    }
+
+    /// Stop claims the WAV it resolved before handing it to the pipeline. Nil
+    /// when the setup already committed to discarding that file, even if it
+    /// is still on disk. Resolve outside this lock: it can wait on the
+    /// journal queue, and the capture consumer takes this lock per buffer.
+    func handOffRecordedFileToStop(_ resolvedURL: URL?) -> URL? {
+        guard let url = resolvedURL else { return nil }
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        if let discarded = setupDiscardedFileURL,
+           discarded.standardizedFileURL == url.standardizedFileURL {
+            return nil
+        }
+        stopOwnedFileURL = url
+        return url
+    }
+
+    /// An abandoned setup asks before it closes, cancels or deletes. False
+    /// means Stop already handed this file off, so Stop's finish-and-drain
+    /// owns the writer and the file; cancelling would drop the tail and
+    /// deleting would leave the pipeline a missing system track.
+    func mayDiscardAbandonedSetupFile(_ fileURL: URL) -> Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        if let owned = stopOwnedFileURL,
+           owned.standardizedFileURL == fileURL.standardizedFileURL {
+            return false
+        }
+        setupDiscardedFileURL = fileURL
+        return true
     }
 
     func enqueueFinishingBuffer(_ buffer: AVAudioPCMBuffer, writer: AVAudioFile,
@@ -374,19 +405,39 @@ extension Audio {
             throw AudioCaptureStaleSessionError()
         }
 
-        let preparedGraph = try makeReadyMeetingInputGraph(
+        // The pinned path records the selected mic through a Core Audio
+        // IOProc and never opens the macOS default input. nil means the
+        // AVAudioEngine graph below (switch off, voice processing, or an
+        // input the pinned recorder can't read).
+        let pinnedMicrophone = try preparePinnedMeetingMicrophoneIfEnabled(
             operation: "start_recording",
-            resetMeetingSelectionBeforeRetry: true,
             sessionGeneration: sessionGeneration
         )
+        var preparedGraph: PreparedMeetingInputGraph?
+        if pinnedMicrophone == nil {
+            preparedGraph = try makeReadyMeetingInputGraph(
+                operation: "start_recording",
+                resetMeetingSelectionBeforeRetry: true,
+                sessionGeneration: sessionGeneration,
+                dropsFailedPickOnRetry: true
+            )
+        }
         guard sessionIsCurrent() else {
             throw AudioCaptureStaleSessionError()
         }
-        let engine = preparedGraph.engine
-        let inputNode = preparedGraph.inputNode
-        let recordingFormat = preparedGraph.recordingFormat
-        let recordingSnapshot = preparedGraph.recordingSnapshot
-        recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
+        var recordingFormat: AVAudioFormat
+        var recordingSnapshot: AudioRecordingFormatSnapshot
+        if let pinnedMicrophone {
+            recordingFormat = pinnedMicrophone.recordingFormat
+            recordingSnapshot = pinnedMicrophone.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: pinnedMicrophone.deviceID)
+        } else if let preparedGraph {
+            recordingFormat = preparedGraph.recordingFormat
+            recordingSnapshot = preparedGraph.recordingSnapshot
+            recordRecordingStartCapturedInput(deviceID: preparedGraph.inputNode.auAudioUnit.deviceID)
+        } else {
+            throw AudioCaptureStaleSessionError()
+        }
 
         // When VPIO is off and software AGC is selected, run gain control in
         // the mic tap callback. Raw/off mode deliberately leaves it nil.
@@ -402,7 +453,15 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+        //
+        // A mic-only recording never builds the tap. Building one would ask
+        // macOS for System Audio Recording and record silence the user
+        // already said they don't want.
+        if !currentRecordingCapturesSystemAudio {
+            AppLogger.audioSystem.info("System audio capture skipped for a mic-only recording", [
+                "event": "system_audio_capture_skipped_mic_only"
+            ])
+        } else if let capture = makeSystemAudioCaptureForRecordingAttempt() {
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
@@ -445,6 +504,12 @@ extension Audio {
                 }
 
                 func cleanupAbandonedSetup() {
+                    // A Stop that lands mid-setup also abandons it. Once that
+                    // Stop has handed this WAV off, the file is the recording.
+                    guard captureAttempt.mayDiscardAbandonedSetupFile(fileURL) else {
+                        AppLogger.audioSystem.info("Stop owns the system audio file; setup leaves it to finalize")
+                        return
+                    }
                     let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
@@ -664,6 +729,7 @@ extension Audio {
                         return
                     }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
+                    guard captureAttempt.mayDiscardAbandonedSetupFile(fileURL) else { return }
                     let failedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
@@ -689,6 +755,31 @@ extension Audio {
                         strongSelf.error = SystemAudioCaptureFailureCopy.message(for: error)
                     }
                 }
+            }
+        }
+
+        // AirPods can flip to their call profile after the graph above was
+        // validated. Rebuild on the settled route before the mic file is
+        // sized for the old rate; installTap would otherwise have to refuse it.
+        // The pinned recorder keeps one format and resamples any later
+        // device format itself, so only the engine graph needs this.
+        if let unsettledGraph = preparedGraph {
+            let settledGraph = try settleMeetingInputGraphFormat(
+                unsettledGraph,
+                operation: "start_recording",
+                sessionGeneration: sessionGeneration
+            )
+            if settledGraph.engine !== unsettledGraph.engine {
+                preparedGraph = settledGraph
+                recordingFormat = settledGraph.recordingFormat
+                recordingSnapshot = settledGraph.recordingSnapshot
+                recordRecordingStartCapturedInput(deviceID: settledGraph.inputNode.auAudioUnit.deviceID)
+                refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+                AppLogger.audioMic.info("Mic input format after route settled", [
+                    "sampleRate": "\(recordingSnapshot.sampleRate)",
+                    "channels": "\(recordingSnapshot.channelCount)",
+                    "voiceProcessing": "\(voiceProcessingEnabled)"
+                ])
             }
         }
 
@@ -762,7 +853,8 @@ extension Audio {
             do {
                 journalSession = try recordingJournal.begin(
                     primaryMicURL: fileURL,
-                    languageSelection: languageSelectionForCurrentRecording
+                    languageSelection: languageSelectionForCurrentRecording,
+                    micOnlyByChoice: !currentRecordingCapturesSystemAudio
                 )
             } catch {
                 // The input tap is not installed yet. Close only the writer
@@ -801,32 +893,51 @@ extension Audio {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
-        try withAudioGraphLock {
-            guard sessionIsCurrent() else {
-                throw AudioCaptureStaleSessionError()
-            }
-            // Remove any existing tap (safety check)
-            tearDownInputTapSafely(
-                engine: engine,
-                inputNode: inputNode,
-                operation: "start_recording_install"
+        if let pinnedMicrophone {
+            try startPinnedMeetingMicrophone(
+                pinnedMicrophone,
+                writeContext: micWriteContext,
+                sessionGeneration: sessionGeneration
             )
-
-            // Install tap on microphone
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
-            }
-
-            do {
-                engine.prepare()
-                try engine.start()
-            } catch {
+        } else if let preparedGraph {
+            let engine = preparedGraph.engine
+            let inputNode = preparedGraph.inputNode
+            try withAudioGraphLock {
+                guard sessionIsCurrent() else {
+                    throw AudioCaptureStaleSessionError()
+                }
+                // Remove any existing tap (safety check)
                 tearDownInputTapSafely(
                     engine: engine,
                     inputNode: inputNode,
-                    operation: "start_recording_failed"
+                    operation: "start_recording_install"
                 )
-                throw error
+
+                try ensureMicTapFormatStillMatches(
+                    recordingFormat,
+                    on: inputNode,
+                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
+                    operation: "start_recording"
+                )
+                // Install tap on microphone. The route can still move after
+                // the check above; the guard makes that a failed start, not a crash.
+                try AudioTapInstallGuard.run(operation: "start_recording") {
+                    inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                        self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                    }
+                }
+
+                do {
+                    engine.prepare()
+                    try engine.start()
+                } catch {
+                    tearDownInputTapSafely(
+                        engine: engine,
+                        inputNode: inputNode,
+                        operation: "start_recording_failed"
+                    )
+                    throw error
+                }
             }
         }
 
@@ -855,7 +966,10 @@ extension Audio {
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
     func handleMicBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
         let sessionGeneration = writeContext.generation
-        guard sessionGeneration == recordingSessionGeneration else { return }
+        guard sessionGeneration == recordingSessionGeneration else {
+            handleMicStopTailBuffer(buffer, writeContext: writeContext)
+            return
+        }
         // Empty callbacks do not prove the input route can deliver audio. Let
         // the start gate and watchdog keep waiting for a real mic frame.
         guard buffer.frameLength > 0 else { return }
@@ -939,6 +1053,51 @@ extension Audio {
             }
         }
 
+        enqueueMicFileWrite(
+            bufferForAsyncUse,
+            retainedBytes: retainedBytes,
+            writeContext: writeContext
+        )
+    }
+
+    /// `Audio.stop()` advances the recording generation right away, but the
+    /// input tap is torn down later on a background queue, and until then it
+    /// keeps delivering audio the user spoke just before pressing Stop. Stop
+    /// holds this generation's write admission in `finishing` until the tap is
+    /// gone, so those buffers still reach this recording's file. The meter,
+    /// watchdog, and live host consumer are skipped: the session they report
+    /// on has already ended.
+    func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+        let sessionGeneration = writeContext.generation
+        guard buffer.frameLength > 0,
+              micAudioWriteBackpressure.isFinishing(generation: sessionGeneration),
+              let bufferForAsyncUse = deepCopyBuffer(buffer) else { return }
+
+        // Same tap thread as the rest of this recording, so RealtimeAGC's
+        // single-thread contract holds and the tail keeps the same loudness.
+        realtimeAGC?.process(buffer: bufferForAsyncUse)
+
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
+        guard micAudioWriteBackpressure.admit(
+            bytes: retainedBytes,
+            generation: sessionGeneration
+        ) == .accepted else { return }
+
+        enqueueMicFileWrite(
+            bufferForAsyncUse,
+            retainedBytes: retainedBytes,
+            writeContext: writeContext
+        )
+    }
+
+    /// Writes one admitted mic buffer on `micAudioFileQueue`. The caller has
+    /// already reserved `retainedBytes`; this releases them once the write ends.
+    private func enqueueMicFileWrite(
+        _ bufferForAsyncUse: AVAudioPCMBuffer,
+        retainedBytes: Int,
+        writeContext: MicPCMWriteContext
+    ) {
+        let sessionGeneration = writeContext.generation
         let backpressure = micAudioWriteBackpressure
         let monoFormat = writeContext.monoFormat
         let inputChannelCount = writeContext.inputChannelCount
@@ -974,7 +1133,7 @@ extension Audio {
     /// logs (rate-limited to the first few and the cap), and — when the cap is
     /// reached — stops the recording and surfaces the error. Once the cap is hit
     /// the writer drops every later buffer (the guard at the top of the
-    /// `micAudioFileQueue` block in `handleMicBuffer`), so without this terminal
+    /// `micAudioFileQueue` block in `enqueueMicFileWrite`), so without this terminal
     /// stop the recording keeps reporting `isRecording == true` and the duration
     /// timer keeps counting while no mic audio is being saved. The common
     /// full-disk cause is already caught by the 30s disk-space check in
@@ -1061,9 +1220,25 @@ extension Audio {
     /// file queue. Called after confirmed SCK recovery, before new buffers
     /// are accepted (writes are held until this returns).
     func writeSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+        systemAudioFileQueue.sync {
+            self.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+        }
+    }
+
+    /// Queues the pad behind the buffers already written and ahead of any
+    /// buffer the capture hands over after this call returns. Lets the
+    /// capture's own thread release the write-hold before its first new
+    /// buffer, without waiting for the disk.
+    func enqueueSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+        systemAudioFileQueue.async { [weak self] in
+            self?.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+        }
+    }
+
+    private func writeSystemRecoverySilencePadOnFileQueue(duration: TimeInterval, generation: UInt64) {
         let capped = min(max(0, duration), Self.maxSystemRecoverySilencePadSeconds)
         guard capped > 0 else { return }
-        systemAudioFileQueue.sync {
+        do {
             guard let attempt = self.systemAudioCaptureAttemptOwnership.current,
                   attempt.generation == generation,
                   let writer = attempt.writer else { return }
@@ -1304,14 +1479,22 @@ extension Audio {
 
     /// Updates systemAudioStatus based on the system-audio backend's error messages
     func updateSystemAudioStatus(fromError errorMessage: String?) {
-        guard isRecording else {
+        // A mic-only recording has no tap of its own. A late message from the
+        // previous meeting's tap must not mark it failed or reconnecting.
+        guard isRecording, currentRecordingCapturesSystemAudio else {
             systemAudioStatus = .unknown
             return
         }
 
         if let message = errorMessage {
             let normalizedMessage = message.lowercased()
-            if normalizedMessage.contains("reconnecting") {
+            // A terminal message can mention reconnecting ("...no audio
+            // buffers after reconnecting"), so failure wins. Classifying it
+            // as reconnecting hid a dead tap behind a status that never ends.
+            if normalizedMessage.contains("system audio failed") {
+                systemAudioStatus = .failed
+                systemAudioFailed = true
+            } else if normalizedMessage.contains("reconnecting") {
                 // ScreenCaptureKit owns the bounded restart and clears this
                 // state by publishing nil after the replacement stream starts.
                 systemAudioStatus = .reconnecting

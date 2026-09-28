@@ -554,6 +554,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     /// Get all stored speakers
     public func allSpeakers() -> [SpeakerProfile] {
+        // Safe inside performMutationBatch, which already runs on `queue`.
+        if isExecutingOnQueue { return allSpeakersImpl() }
         return queue.sync { allSpeakersImpl() }
     }
 
@@ -597,6 +599,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     /// Get a single speaker by ID
     public func getSpeaker(id: UUID) -> SpeakerProfile? {
+        // Safe inside performMutationBatch, which already runs on `queue`.
+        if isExecutingOnQueue { return getSpeakerImpl(id: id) }
         return queue.sync { getSpeakerImpl(id: id) }
     }
 

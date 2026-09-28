@@ -13,6 +13,7 @@ import TranscriptedCore
 struct HomeSettingsPage: View {
     @ObservedObject var homeViewModel: HomeViewModel
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
+    @State private var isAudioDropTargeted = false
 
     let capturesToday: Int
     let attentionTitle: String?
@@ -21,6 +22,7 @@ struct HomeSettingsPage: View {
     let homeExpandedMeetingID: String?
     let homeExpandedMeetingPreview: HomeMeetingPreview?
     let voiceProcessingEnabled: Bool
+    let micBoostHintsHiddenThrough: Date?
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
     let transcriptionActivity: HomeTranscriptionActivityPresentation?
@@ -37,8 +39,13 @@ struct HomeSettingsPage: View {
     let onRevealScanWarning: () -> Void
     let onDismissScanWarning: () -> Void
     let onCancelActivity: () -> Void
+    /// Expands a just-saved meeting in the list below (the working row's Open).
+    let onOpenSavedMeeting: (URL) -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
+    /// Audio or video files dropped anywhere on the page. The app filters out
+    /// unsupported files and waits for an active recording to stop.
+    let onDropAudioFiles: ([URL]) -> Void
     let onLoadMoreMeetings: () -> Void
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
@@ -82,7 +89,13 @@ struct HomeSettingsPage: View {
                     symbolName: activity.symbolName,
                     tone: activity.tone,
                     onCancel: transcriptionActivityIsCancellable ? onCancelActivity : nil,
-                    recordingElapsed: recordingElapsed
+                    recordingElapsed: recordingElapsed,
+                    // A failure says why right here instead of only "Needs
+                    // attention"; working and saved rows stay one line.
+                    detail: activity.tone == .caution ? activity.detail : nil,
+                    onOpen: activity.transcriptURL.map { transcriptURL in
+                        { onOpenSavedMeeting(transcriptURL) }
+                    }
                 )
                 .transition(.opacity)
             }
@@ -100,10 +113,36 @@ struct HomeSettingsPage: View {
                 .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: transcriptionActivity)
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in
+            let fileURLs = urls.filter(\.isFileURL)
+            guard !fileURLs.isEmpty else { return false }
+            onDropAudioFiles(fileURLs)
+            return true
+        } isTargeted: { targeted in
+            isAudioDropTargeted = targeted
+        }
+        .overlay {
+            if isAudioDropTargeted {
+                HomeAudioDropTargetOverlay()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isAudioDropTargeted)
     }
 
     private var isSearchingMeetings: Bool {
-        !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery)
+    }
+
+    private var meetingsEmptyMessage: String {
+        guard isSearchingMeetings else { return HomeCaptureListCopy.emptyMeetings }
+        // A pass over every meeting can take a moment on a big library;
+        // don't claim "no matches" before it has looked.
+        if homeViewModel.isSearchingMeetings {
+            return HomeCaptureListCopy.searchingMeetings
+        }
+        return HomeCaptureListCopy.noMeetingMatches
     }
 
     private var homeMeetingsListSection: some View {
@@ -126,7 +165,7 @@ struct HomeSettingsPage: View {
     private var homeMeetingsList: some View {
         HomeCaptureListSection(
             sections: meetingDaySections,
-            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
+            emptyMessage: meetingsEmptyMessage,
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
                 symbolName: "waveform",
                 title: "No meetings yet",
@@ -138,9 +177,15 @@ struct HomeSettingsPage: View {
                 secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
                 secondaryAction: onImportAudioFile
             ),
-            isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreMeetings,
+            // A background refresh of the recent slice shouldn't hide search
+            // results behind a spinner.
+            isLoading: isSearchingMeetings ? false : homeViewModel.isLoading,
+            isLoadingMore: isSearchingMeetings
+                ? homeViewModel.isSearchingMeetings && homeViewModel.canLoadMoreMeetingSearchResults
+                : homeViewModel.isLoadingMore,
+            canLoadMore: isSearchingMeetings
+                ? homeViewModel.canLoadMoreMeetingSearchResults
+                : homeViewModel.canLoadMoreMeetings,
             getID: { AnyHashable($0.id) },
             onLoadMore: onLoadMoreMeetings
         ) { item in
@@ -179,7 +224,9 @@ struct HomeSettingsPage: View {
                     menuItems: meetingRowMenuItems(meeting),
                     showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                         audioHealth: meeting.audioHealth,
-                        voiceProcessingPreferenceEnabled: voiceProcessingEnabled
+                        meetingDate: meeting.date,
+                        voiceProcessingPreferenceEnabled: voiceProcessingEnabled,
+                        hintsHiddenThrough: micBoostHintsHiddenThrough
                     )
                 )
             }
@@ -194,5 +241,31 @@ struct HomeSettingsPage: View {
                 audioAttachment: failedMeetingAudioAttachment(failedMeeting)
             )
         }
+    }
+}
+
+/// Shown over Home while files are dragged over it.
+private struct HomeAudioDropTargetOverlay: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(LibraryTokens.accent, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LibraryTokens.accent.opacity(0.08))
+            )
+            .overlay {
+                VStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 24, weight: .regular))
+                    Text("Drop to transcribe")
+                        .font(.headline)
+                    Text("Audio files and video recordings")
+                        .font(.caption)
+                        .foregroundStyle(LibraryTokens.ink2)
+                }
+                .foregroundStyle(LibraryTokens.accent)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }

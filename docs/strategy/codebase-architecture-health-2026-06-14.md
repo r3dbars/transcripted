@@ -1,5 +1,7 @@
 # Codebase Architecture Health — 2026-06-14
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Principal-engineer deep audit of Transcripted (`main`). Read-only pass: LOC sweep,
 structural reads of the heaviest files, git churn analysis, build/test-system review.
 Goal is velocity, not style: what structural stuff makes the next 6 months of feature

@@ -46,6 +46,11 @@ struct CorrectionDraftRow: Identifiable, Equatable {
         self.init(spoken: entry.spoken, replacement: entry.replacement)
     }
 
+    /// The dictionary rule this row saves as, or nil while it's still blank.
+    var dictionaryEntry: CustomDictionaryEntry? {
+        CustomDictionaryPreferences.entries(from: Self.rawText(from: [self])).first
+    }
+
     static func rows(from rawText: String) -> [CorrectionDraftRow] {
         let rows = CustomDictionaryPreferences.entries(from: rawText).map(CorrectionDraftRow.init(entry:))
         return rows.isEmpty ? [CorrectionDraftRow()] : rows

@@ -8,6 +8,10 @@ struct TranscriptedMCPDirectoriesManifest: Codable, Equatable {
     let captureLibraryDirectory: String
     let meetingsDirectory: String
     let dictationsDirectory: String
+    /// `<capture-library>/writing/`. Optional and additive within version 1:
+    /// manifests written before Writing lack the key and still decode, and
+    /// readers that predate it ignore it.
+    let writingDirectory: String?
     let updatedAt: String
 }
 
@@ -119,14 +123,16 @@ enum TranscriptedStoragePreferences {
         }
 
         let root = url.standardizedFileURL
-        let meetings = root.appendingPathComponent("meetings", isDirectory: true)
-        let dictations = root.appendingPathComponent("dictations", isDirectory: true)
+        let meetings = FileManager.meetingsDirectory(in: root)
+        let dictations = FileManager.dictationsDirectory(in: root)
+        let writing = FileManager.writingDirectory(in: root)
         let probe = root.appendingPathComponent(".transcripted-write-test-\(UUID().uuidString)", isDirectory: false)
 
         do {
             try fileManager.createPrivateDirectory(at: root)
             try fileManager.createPrivateDirectory(at: meetings)
             try fileManager.createPrivateDirectory(at: dictations)
+            try fileManager.createPrivateDirectory(at: writing)
             try Data().write(to: probe, options: [.atomic])
             fileManager.restrictFileToOwnerOnly(at: probe)
             try fileManager.removeItem(at: probe)
@@ -264,6 +270,11 @@ extension FileManager {
         transcriptedCaptureLibrarySubdirectory(Self.dictationsDirectoryName)
     }
 
+    /// <capture-library>/writing/ (Writing day files, `Writing_<YYYY-MM-dd>.md`)
+    var writingSupportDir: URL {
+        transcriptedCaptureLibrarySubdirectory(Self.writingDirectoryName)
+    }
+
     /// Sole source of truth for the `meetings` capture-library folder name.
     /// Both `meetingSupportDir` and `writeTranscriptedMCPDirectoriesManifestIfNeeded`
     /// read this constant so the two cannot drift apart.
@@ -273,6 +284,28 @@ extension FileManager {
     /// Both `dictationSupportDir` and `writeTranscriptedMCPDirectoriesManifestIfNeeded`
     /// read this constant so the two cannot drift apart.
     static let dictationsDirectoryName = "dictations"
+
+    /// Sole source of truth for the `writing` capture-library folder name.
+    /// Both `writingSupportDir` and `writeTranscriptedMCPDirectoriesManifestIfNeeded`
+    /// read this constant so the two cannot drift apart.
+    static let writingDirectoryName = "writing"
+
+    /// `<library>/meetings/` for any capture library, without creating it.
+    /// For code that works on a library other than the current one
+    /// (relocation planning, preparing a new folder).
+    static func meetingsDirectory(in captureLibrary: URL) -> URL {
+        captureLibrary.appendingPathComponent(meetingsDirectoryName, isDirectory: true)
+    }
+
+    /// `<library>/dictations/` for any capture library, without creating it.
+    static func dictationsDirectory(in captureLibrary: URL) -> URL {
+        captureLibrary.appendingPathComponent(dictationsDirectoryName, isDirectory: true)
+    }
+
+    /// `<library>/writing/` for any capture library, without creating it.
+    static func writingDirectory(in captureLibrary: URL) -> URL {
+        captureLibrary.appendingPathComponent(writingDirectoryName, isDirectory: true)
+    }
 
     private func transcriptedCaptureLibrarySubdirectory(_ name: String) -> URL {
         let url = transcriptedCaptureLibraryDir.appendingPathComponent(name, isDirectory: true)
@@ -303,18 +336,22 @@ extension FileManager {
     ) throws {
         let manifestURL = manifestURL ?? transcriptedMCPDirectoriesManifestURL
         let captureLibrary = captureLibraryURL.standardizedFileURL
-        // Reuses the same folder-name constants as `meetingSupportDir`/`dictationSupportDir`
-        // (rather than calling those computed properties directly) so this manifest write,
-        // which itself runs from inside `transcriptedCaptureLibraryDir`'s getter, can't
-        // recurse back into `transcriptedCaptureLibraryDir` through them.
-        let meetings = captureLibrary.appendingPathComponent(Self.meetingsDirectoryName, isDirectory: true)
-        let dictations = captureLibrary.appendingPathComponent(Self.dictationsDirectoryName, isDirectory: true)
+        // Reuses the same folder-name constants as `meetingSupportDir`/`dictationSupportDir`/
+        // `writingSupportDir` (rather than calling those computed properties directly) so this
+        // manifest write, which itself runs from inside `transcriptedCaptureLibraryDir`'s getter,
+        // can't recurse back into `transcriptedCaptureLibraryDir` through them.
+        let meetings = Self.meetingsDirectory(in: captureLibrary)
+        let dictations = Self.dictationsDirectory(in: captureLibrary)
+        let writing = Self.writingDirectory(in: captureLibrary)
 
+        // A manifest written before Writing has no `writingDirectory`, so it
+        // fails the last check and gets rewritten once with the key.
         if let existingData = try? Data(contentsOf: manifestURL),
            let existing = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: existingData),
            existing.captureLibraryDirectory == captureLibrary.path,
            existing.meetingsDirectory == meetings.path,
-           existing.dictationsDirectory == dictations.path {
+           existing.dictationsDirectory == dictations.path,
+           existing.writingDirectory == writing.path {
             restrictFileToOwnerOnly(at: manifestURL)
             return
         }
@@ -324,6 +361,7 @@ extension FileManager {
             captureLibraryDirectory: captureLibrary.path,
             meetingsDirectory: meetings.path,
             dictationsDirectory: dictations.path,
+            writingDirectory: writing.path,
             updatedAt: ISO8601DateFormatter().string(from: updatedAt)
         )
 

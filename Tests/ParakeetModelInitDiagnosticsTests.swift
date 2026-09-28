@@ -81,7 +81,7 @@ func testParakeetModelInitDiagnostics() async {
     }
 
     runSuite("Parakeet bundles must contain every required file of the requested version") {
-        for variant in ParakeetModelVariant.allCases {
+        for variant in ParakeetModelVariant.allCases where !variant.isLocalInstallOnly {
             let prefix = "/fixture/parakeet-models/\(variant.directoryName)/"
             let files = Set((variant.requiredModelDirectoryNames.map { "\($0)/coremldata.bin" }
                 + variant.requiredFileNames).map { prefix + $0 })
@@ -99,6 +99,98 @@ func testParakeetModelInitDiagnostics() async {
                 ))
             }
         }
+    }
+
+    runSuite("Local-install-only Parakeet models are never resolved from the app bundle") {
+        // FluidAudio would resolve a bundled Ultra folder to the bundled stock
+        // v3 sibling, so even a complete fixture must fail closed.
+        for variant in ParakeetModelVariant.allCases where variant.isLocalInstallOnly {
+            assertNil(ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+                resourcePath: "/fixture", variant: variant, fileExists: { _ in true }
+            ))
+        }
+        assertEqual(ParakeetModelVariant.allCases.filter(\.isLocalInstallOnly), [.ultra])
+    }
+
+    runSuite("Ultra only counts as loaded while its install marker survives the load") {
+        let directory = URL(fileURLWithPath: "/fixture/models/parakeet-ultra/parakeet-tdt-0.6b-v3")
+        let marker = directory.appendingPathComponent(ParakeetModelVariant.localInstallMarkerFileName).path
+        do {
+            try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
+                variant: .ultra, directory: directory, fileExists: { $0 == marker }
+            )
+        } catch {
+            assertTrue(false, "an intact Ultra install must load: \(error)")
+        }
+        var replacement: Error?
+        do {
+            try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
+                variant: .ultra, directory: directory, fileExists: { _ in false }
+            )
+        } catch {
+            replacement = error
+        }
+        assertEqual(replacement as? ParakeetLocalModelError, .replacedDuringLoad,
+            "a folder that lost its marker mid-load must not count as Ultra")
+        for variant in [ParakeetModelVariant.v2, .v3] {
+            do {
+                try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
+                    variant: variant, directory: directory, fileExists: { _ in false }
+                )
+            } catch {
+                assertTrue(false, "downloaded variants need no marker: \(error)")
+            }
+        }
+    }
+
+    runSuite("ParakeetLocalModelPolicy.parseVocabulary reads FluidAudio's v3 id-keyed vocabulary") {
+        let vocabulary = try? ParakeetLocalModelPolicy.parseVocabulary(
+            Data(#"{"0": "<unk>", "1": "▁the", "8191": "z"}"#.utf8)
+        )
+        assertEqual(vocabulary?[1], "▁the", "token ids map to their pieces")
+        assertEqual(vocabulary?[8191], "z", "the last v3 token id parses")
+        assertEqual(vocabulary?.count, 3, "every entry is kept")
+
+        for (label, json) in [
+            ("an array", #"["a", "b"]"#),
+            ("a non-numeric id", #"{"a": "b"}"#),
+            ("an empty vocabulary", "{}"),
+        ] {
+            var thrown: Error?
+            do {
+                _ = try ParakeetLocalModelPolicy.parseVocabulary(Data(json.utf8))
+            } catch {
+                thrown = error
+            }
+            assertEqual(thrown as? ParakeetLocalModelError, .loadFailed,
+                "\(label) is a broken install, reported as a load failure rather than a crash")
+        }
+    }
+
+    runSuite("ParakeetLocalModelLoader only opens files the Ultra install check requires") {
+        let required = Set(ParakeetModelVariant.ultra.requiredModelDirectoryNames + ParakeetModelVariant.ultra.requiredFileNames)
+        for name in ParakeetLocalModelPolicy.loadedFileNames {
+            assertTrue(required.contains(name),
+                "\(name) is loaded, so an install without it must not count as installed")
+        }
+        assertEqual(
+            Set(ParakeetLocalModelPolicy.loadedFileNames.filter { $0.hasSuffix(".mlmodelc") }),
+            Set(ParakeetModelVariant.ultra.requiredModelDirectoryNames),
+            "the loader opens exactly the four Core ML models the install check requires"
+        )
+        assertEqual(ParakeetLocalModelPolicy.jointFileName, ParakeetModelVariant.ultra.jointModelName,
+            "Ultra uses v3's joint model name")
+    }
+
+    runSuite("ParakeetLocalModelError text is path-free and names the right fix") {
+        let all = ParakeetLocalModelError.allCases
+        for error in all {
+            assertFalse(error.localizedDescription.contains("/"),
+                "\(error.reason) text reaches events, so it must not carry paths")
+        }
+        assertTrue(ParakeetLocalModelError.loadFailed.localizedDescription.contains("is installed"),
+            "a load failure must not tell the user the model is missing")
+        assertEqual(Set(all.map(\.reason)).count, all.count, "each failure has its own event reason")
     }
 
     runSuite("ParakeetModelInitDiagnostics.failureContext captures safe initialization details") {

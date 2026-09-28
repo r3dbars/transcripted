@@ -117,9 +117,30 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     // scalar-drop detection stay correct when the meeting input policy
     // overrides a Bluetooth headset to the built-in mic.
     public let capturedInputVolumeDuring: String
+    // The last Core Audio tap step that refused and its OSStatus code
+    // (`SystemAudioTapFailure`). "none" when nothing failed or the backend
+    // is not the process tap. Defaulted so existing fixtures keep compiling.
+    public var systemTapFailedStep: String = "none"
+    public var systemTapFailedStatus: String = "none"
+    // What the tap did to keep call audio alive this recording. Raw counts
+    // here; the app buckets them before anything leaves the device.
+    public var systemTap: SystemAudioTapDiagnostics = .empty
+    // Mic graph rebuilds because the input format moved (AirPods call
+    // profile), start and recovery combined.
+    public var micFormatRebuildCount: Int = 0
+    /// Which recorder captures the meeting mic: `pinnedMicBackend` while
+    /// `PinnedMicrophoneCapture` owns it, `engineMicBackend` otherwise. Always
+    /// one of those two strings. Defaulted so existing fixtures keep compiling.
+    public var micBackend: String = AudioPipelineDiagnosticsSnapshot.engineMicBackend
+    /// The pinned recorder's own health counts. Nil on the `AVAudioEngine`
+    /// path. Plain counters: no device identity rides along.
+    public var pinnedMicrophoneDiagnostics: PinnedMicrophoneCaptureDiagnostics? = nil
+
+    public static let pinnedMicBackend = PinnedMicrophoneCapture.diagnosticBackendName
+    public static let engineMicBackend = "av_audio_engine"
 
     public var privacySafeContext: [String: String] {
-        [
+        var context: [String: String] = [
             "buffer_success_bucket": bufferSuccessBucket,
             "captured_input_volume_before": capturedInputVolumeBefore,
             "captured_input_volume_during": capturedInputVolumeDuring,
@@ -136,6 +157,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "mic_processing": micProcessingLabel,
             "mic_processed_peak": micProcessedPeak,
             "mic_raw_peak": micRawPeak,
+            "mic_format_rebuilds": "\(micFormatRebuildCount)",
             "mic_recovering": boolString(micRecovering),
             "output_device_class": outputDeviceClass,
             "output_rate_hz": outputRateHz,
@@ -154,10 +176,61 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "system_output_rate_hz": systemOutputRateHz,
             "system_rate_hz": systemRateHz,
             "system_status": systemStatus,
+            "system_tap_status": systemTapFailedStatus,
+            "system_tap_step": systemTapFailedStep,
+            "system_end_reason": systemTap.endReason,
+            "system_format_reconnects": "\(systemTap.formatReconnects)",
+            "system_rebuild_retries": "\(systemTap.rebuildRetries)",
+            "system_silent_reconnects": "\(systemTap.silentReconnects)",
+            "system_silent_unresolved": boolString(systemTap.silentUnresolved),
+            "system_sleep_count": "\(systemTap.sleeps)",
+            "system_stall_reconnects": "\(systemTap.stallReconnects)",
+            "system_wake_reconnects": "\(systemTap.wakeReconnects)",
             "voice_processing": boolString(voiceProcessingRequested),
             "voice_processing_active": boolString(voiceProcessingActive),
             "voice_processing_start_fallback": voiceProcessingStartFallback,
+            "mic_backend": micBackend,
         ]
+        if let pinned = pinnedMicrophoneDiagnostics {
+            // Raw counts are for local diagnostics, like `gap_count` above;
+            // no off-device allowlist names them. The `_bucket` keys are the
+            // ones PostHog, Sentry tags, and support packets allow.
+            // Clamped so `Int(_:)` can never trap on a nonsense total.
+            let paddedSeconds = pinned.paddedSeconds.isFinite ? min(max(0, pinned.paddedSeconds), 1_000_000) : 0
+            context["pinned_mic_restart_count"] = "\(max(0, pinned.restarts))"
+            context["pinned_mic_gap_count"] = "\(max(0, pinned.gaps))"
+            context["pinned_mic_padded_seconds"] = "\(Int(paddedSeconds.rounded()))"
+            context["pinned_mic_dropped_callback_count"] = "\(max(0, pinned.droppedCallbacks))"
+            context["pinned_mic_restart_bucket"] = Self.countBucket(pinned.restarts)
+            context["pinned_mic_gap_bucket"] = Self.countBucket(pinned.gaps)
+            context["pinned_mic_padded_bucket"] = Self.paddedSecondsBucket(paddedSeconds)
+            context["pinned_mic_dropped_callback_bucket"] = Self.countBucket(pinned.droppedCallbacks)
+        }
+        return context
+    }
+
+    /// Same edges as the app's `AnalyticsReporter.countBucket`, which Core
+    /// cannot import.
+    static func countBucket(_ count: Int) -> String {
+        switch count {
+        case ..<1: return "0"
+        case 1: return "1"
+        case 2...3: return "2_3"
+        case 4...9: return "4_9"
+        default: return "10_plus"
+        }
+    }
+
+    /// Total silence the pinned recorder padded in. Sub-second edges matter:
+    /// a healthy recording pads nothing or a few short blips.
+    static func paddedSecondsBucket(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0" }
+        switch seconds {
+        case ..<1: return "lt_1s"
+        case ..<10: return "1_9s"
+        case ..<60: return "10_59s"
+        default: return "60s_plus"
+        }
     }
 
     private func boolString(_ value: Bool) -> String {
@@ -185,10 +258,20 @@ extension Audio {
         let currentCapturedInputDevice = currentInputDeviceID()
         let actualInputDevice = currentCapturedInputDevice ?? inputDevice
         let inputFormat = currentInputFormatSnapshot()
-        let systemFormat = systemAudioCapture?.audioFormat
+        // A mic-only recording has no tap. Don't report the previous
+        // meeting's backend, format, or buffer health as this one's.
+        let recordingSystemCapture = recordingSystemAudioCapture
+        let systemFormat = recordingSystemCapture?.audioFormat
         let signalSnapshot = signalDiagnosticsSnapshot
         let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
         let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
+        let tapCapture = recordingSystemCapture as? CoreAudioSystemAudioCapture
+        let tapFailure = tapCapture?.lastHardwareFailure ?? .none
+        let tapDiagnostics = tapCapture?.diagnostics ?? .empty
+        // Take the reference under the graph lock, then read the counters
+        // (a hop onto the capture's own queue) after releasing it.
+        let pinnedCapture = withAudioGraphLock { pinnedMicrophoneCapture }
+        let pinnedDiagnostics = pinnedCapture?.diagnostics
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -200,9 +283,9 @@ extension Audio {
             systemRateHz: Self.rateString(systemFormat?.sampleRate),
             inputChannels: Self.channelString(inputFormat?.channelCount),
             systemChannels: Self.channelString(systemFormat?.channelCount),
-            systemBackend: systemAudioCapture?.diagnosticBackendName ?? "none",
+            systemBackend: recordingSystemCapture?.diagnosticBackendName ?? "none",
             systemStatus: Self.statusName(overrideSystemAudioStatus ?? systemAudioStatus),
-            bufferSuccessBucket: Self.successRateBucket(systemAudioCapture?.bufferSuccessRate),
+            bufferSuccessBucket: Self.successRateBucket(recordingSystemCapture?.bufferSuccessRate),
             gapCount: recordingGaps.count,
             routeChangeCount: deviceSwitchCount,
             recoveryAttemptCount: recoveryAttemptCount,
@@ -227,7 +310,15 @@ extension Audio {
             defaultOutputVolumeDuring: routeVolumeDuring.defaultOutputVolume,
             defaultSystemOutputVolumeDuring: routeVolumeDuring.defaultSystemOutputVolume,
             capturedInputVolumeBefore: recordingStartCapturedInputVolume(matching: currentCapturedInputDevice),
-            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice)
+            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice),
+            systemTapFailedStep: tapFailure.step,
+            systemTapFailedStatus: tapFailure.status,
+            systemTap: tapDiagnostics,
+            micFormatRebuildCount: micFormatRebuildCount,
+            micBackend: pinnedCapture == nil
+                ? AudioPipelineDiagnosticsSnapshot.engineMicBackend
+                : AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
+            pinnedMicrophoneDiagnostics: pinnedDiagnostics
         )
     }
 

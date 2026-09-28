@@ -124,11 +124,21 @@ enum ModelCacheInventory {
     static func activeParakeetModelDirectory(
         variant: ParakeetModelVariant = .v3,
         fileManager: FileManager = .default,
-        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
+        localModelsDirectory: URL = defaultLocalModelsDirectory()
     ) -> URL? {
-        let candidate = fluidAudioModelsDirectory
-            .appendingPathComponent(variant.directoryName, isDirectory: true)
-            .standardizedFileURL
+        let candidate: URL
+        if let relativePath = variant.localInstallRelativePath {
+            // Local-install-only models never live in FluidAudio's shared
+            // cache, where the v3-named folder is the stock download.
+            candidate = localModelsDirectory
+                .appendingPathComponent(relativePath, isDirectory: true)
+                .standardizedFileURL
+        } else {
+            candidate = fluidAudioModelsDirectory
+                .appendingPathComponent(variant.directoryName, isDirectory: true)
+                .standardizedFileURL
+        }
 
         guard hasCompleteParakeetModel(at: candidate, variant: variant, fileManager: fileManager) else {
             return nil
@@ -361,6 +371,13 @@ enum ModelCacheInventory {
         applicationSupportDirectory()
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
+    }
+
+    /// Home of script-installed experimental models (Parakeet Ultra), kept
+    /// out of FluidAudio's cache so its downloads and cleanups never touch them.
+    static func defaultLocalModelsDirectory() -> URL {
+        FileManager.default.transcriptedAppSupportRootURL
+            .appendingPathComponent("models", isDirectory: true)
     }
 
     private static func defaultTranscriptedCacheDirectory() -> URL {

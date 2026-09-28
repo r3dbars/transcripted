@@ -177,7 +177,8 @@ final class FailedMeetingStore {
         meetingTitle: String?,
         recordingDate: Date? = nil,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) -> Bool {
         // A completion can win the main-actor race and be buffered before the
         // timeout continuation resumes. Use those finalized URLs as fallbacks
@@ -197,7 +198,8 @@ final class FailedMeetingStore {
             archiveAudio: false,
             clearRecordingJournalAfterPersistence: false,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
         guard preserved else {
             timedOutFinalizationHandoff.markPersistenceFailed(id: taskId)
@@ -228,7 +230,8 @@ final class FailedMeetingStore {
         recordingDate: Date? = nil,
         archiveAudio: Bool = true,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) -> Bool {
         let preserved = persistFailedMeetingForRetry(
             taskId: taskId,
@@ -239,7 +242,8 @@ final class FailedMeetingStore {
             recordingDate: recordingDate,
             archiveAudio: archiveAudio,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
         if preserved {
             publishRefresh()
@@ -373,7 +377,8 @@ final class FailedMeetingStore {
         archiveAudio: Bool,
         clearRecordingJournalAfterPersistence: Bool = true,
         splitLocalSpeakers: Bool = false,
-        languageSelection: TranscriptionLanguageSelection = .automatic
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
     ) -> Bool {
         taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
@@ -385,7 +390,8 @@ final class FailedMeetingStore {
             archiveAudio: archiveAudio,
             clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
             splitLocalSpeakers: splitLocalSpeakers,
-            languageSelection: languageSelection
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
         )
     }
 

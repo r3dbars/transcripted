@@ -82,7 +82,6 @@ enum MenuTokens {
         static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
         static let rowTrailingPrimary = NSFont.systemFont(ofSize: 10.5, weight: .medium)
         static let rowTrailingUtility = NSFont.systemFont(ofSize: 10, weight: .medium)
-        static let headerTitle = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
         static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
     }

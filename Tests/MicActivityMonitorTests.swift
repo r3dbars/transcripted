@@ -97,6 +97,30 @@ func testMicActivityMonitor() {
     // then re-checks it once back on `queue`. These cases cover the scenarios
     // that motivated the generation check.
 
+    runSuite("MicActivityMonitor.browserCallOutputBundleIDs — only a browser that is also on the mic") {
+        let processes: [(bundleID: String?, isRunningOutput: Bool)] = [
+            ("com.google.Chrome.helper", true),
+            ("com.apple.WebKit.GPU", true),
+            ("com.spotify.client", true),
+            ("com.google.Chrome.helper.renderer", false),
+        ]
+        assertEqual(
+            MicActivityMonitor.browserCallOutputBundleIDs(from: processes, micBundleIDs: ["com.google.Chrome.helper"]),
+            ["com.google.Chrome.helper"],
+            "Chrome playing audio while Chrome holds the mic corroborates a call; Safari and Spotify playing music do not"
+        )
+        assertEqual(
+            MicActivityMonitor.browserCallOutputBundleIDs(from: processes, micBundleIDs: []),
+            [],
+            "with no browser on the mic, browser playback never enters the confirmer"
+        )
+        assertEqual(
+            MicActivityMonitor.browserCallOutputBundleIDs(from: processes, micBundleIDs: ["us.zoom.xos"]),
+            [],
+            "a native app on the mic says nothing about browser playback"
+        )
+    }
+
     runSuite("MicActivityMonitor.SubscriptionOutcome — stores when still running the same start() cycle") {
         let outcome = MicActivityMonitor.SubscriptionOutcome.decide(
             isStarted: true,

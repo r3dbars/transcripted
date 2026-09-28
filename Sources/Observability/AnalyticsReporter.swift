@@ -226,11 +226,17 @@ enum AnalyticsRuntimeConfiguration {
     static let buildRevisionEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_REVISION"
     private static let localOverridesFileName = "observability-overrides.plist"
 
-    static func apiKey() -> String? {
-        firstNonEmpty(
-            ProcessInfo.processInfo.environment["POSTHOG_API_KEY"],
+    /// Nil for our own launch harnesses: otherwise every build would look like
+    /// a brand-new user who quit on the welcome screen.
+    static func apiKey(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String? {
+        guard !AutomatedLaunchEnvironment.isActive(environment: environment) else { return nil }
+        return firstNonEmpty(
+            environment["POSTHOG_API_KEY"],
             localOverrideValue(forKey: apiKeyInfoKey),
-            Bundle.main.object(forInfoDictionaryKey: apiKeyInfoKey) as? String
+            infoDictionary?[apiKeyInfoKey] as? String
         )
     }
 

@@ -11,7 +11,7 @@ import Foundation
 // stale mid-stop cue; those two cases collapse into "isRecording: false".
 
 func testMeetingMicBoostPromptPolicy() {
-    runSuite("MeetingMicBoostPromptPolicy does not offer unavailable VPIO while sharing with Zoom") {
+    runSuite("MeetingMicBoostPromptPolicy does not offer unavailable VPIO while a call app is on the mic") {
         assertFalse(MeetingMicBoostPromptPolicy.shouldPresent(
             isRecording: true,
             voiceProcessingPreferenceEnabled: false,
@@ -22,7 +22,20 @@ func testMeetingMicBoostPromptPolicy() {
             isPromptVisible: true,
             isRecording: true,
             microphoneSharingRequired: true
-        ), "Zoom launched after the prompt must prevent a stale VPIO action and needless capture gap")
+        ), "A caller that knows a call app is on the mic can still refuse a stale VPIO action")
+    }
+    runSuite("MeetingMicBoostPromptPolicy never offers the boost while the pinned Mac-mic recorder is recording") {
+        assertFalse(MeetingMicBoostPromptPolicy.shouldPresent(
+            isRecording: true,
+            voiceProcessingPreferenceEnabled: false,
+            currentOutcome: .notShown,
+            recordsThroughPinnedMicrophone: true
+        ), "Voice processing needs the engine path, which puts AirPods back in call mode")
+        assertFalse(MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: true,
+            isRecording: true,
+            recordsThroughPinnedMicrophone: true
+        ), "A prompt that outlived an engine-to-pinned switch must not turn voice processing on")
     }
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — presents only for fresh recordings with the preference off") {
         assertTrue(

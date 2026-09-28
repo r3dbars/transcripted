@@ -18,6 +18,12 @@ let enableTranscription = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_E
 // The app's shared meeting Core has a macOS 26 deployment target. Keep the
 // original macOS 14 retrieval/basic-ASR build available as a separate mode.
 let enableMeetingImport = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT"] == "1"
+// The copy bundled inside Transcripted.app must find frameworks only in the app
+// (its own @executable_path rpath), never in this checkout. A checkout rpath
+// ships the builder's home path and lets the build Mac's capability check pass
+// while a framework is missing for users.
+let bundledHelper = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_BUNDLED_HELPER"] == "1"
+let checkoutFrameworkRPath: [String] = bundledHelper ? [] : ["-Xlinker", "-rpath", "-Xlinker", depsFrameworksRoot]
 func prebuiltModulePath(_ name: String) -> String? {
     let candidates = [
         "\(depsModulesRoot)/\(name).swiftmodule/arm64-apple-macos.swiftmodule",
@@ -92,8 +98,7 @@ let package = Package(
                 .unsafeFlags([
                     "-F\(depsFrameworksRoot)",
                     "-L\(depsLibsRoot)",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", depsFrameworksRoot,
+                ] + checkoutFrameworkRPath + [
                     "-lDraftDeps",
                     "-lc++",
                 ]),

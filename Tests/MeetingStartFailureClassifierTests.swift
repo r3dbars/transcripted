@@ -116,6 +116,14 @@ func testMeetingStartFailureClassifier() {
         )
         assertEqual(
             MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start. Try quitting and reopening Transcripted.",
+                stage: "microphone_tap_raised"
+            ),
+            "mic_unavailable",
+            "a caught installTap raise stays a mic failure so failure_kind is unchanged"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
                 from: "System Audio permission is required.",
                 stage: "system_audio"
             ),
@@ -314,63 +322,6 @@ func testMeetingStartFailureClassifier() {
             ),
             "an acknowledged system warning should stay latched without reopening the prompt"
         )
-    }
-
-    runSuite("Unverified system audio offers access review without claiming denial") {
-        let unverified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
-            current: nil,
-            signalVerified: false,
-            shouldWarn: true,
-            isRecording: true
-        )
-        assertTrue(
-            unverified.map { MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: $0) } == true,
-            "an inconclusive silent preflight should have an actionable access check"
-        )
-        assertEqual(
-            unverified.map { MeetingSystemAudioDegradationCopy.detail(for: $0) },
-            "Mic is recording. Check access; restart if you change it.",
-            "uncertain silence must not be described as denied permission"
-        )
-        let failed = MeetingSystemAudioDegradationPolicy.next(
-            current: nil,
-            status: .failed,
-            isRecording: true
-        )
-        let interrupted = MeetingSystemAudioDegradationPolicy.next(
-            current: nil,
-            status: .reconnecting,
-            isRecording: true
-        )
-        let silent = MeetingSystemAudioDegradationPolicy.next(
-            current: nil,
-            status: .silent,
-            isRecording: true
-        )
-        assertTrue(
-            failed.map { MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: $0) } == true,
-            "a failed stream should let users inspect access without asserting denial"
-        )
-        assertEqual(
-            failed.map { MeetingSystemAudioDegradationCopy.detail(for: $0) },
-            "Mic records. If access changes, restart. This file may be partial.",
-            "checking settings cannot repair audio already missing from this recording"
-        )
-        let recoveredFailure = MeetingSystemAudioDegradationPolicy.next(
-            current: failed,
-            status: .healthy,
-            isRecording: true
-        )
-        assertTrue(
-            recoveredFailure.map { MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: $0) } == false,
-            "a restored stream should not ask the user to check a now-working permission"
-        )
-        for warning in [interrupted, silent] {
-            assertTrue(
-                warning.map { MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: $0) } == false,
-                "a transient interruption or ordinary silence should not suggest a permission change"
-            )
-        }
     }
 
     runSuite("Typed system-audio denial offers recovery without mislabeling silence") {

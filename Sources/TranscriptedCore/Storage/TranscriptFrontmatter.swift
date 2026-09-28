@@ -30,6 +30,25 @@ public enum TranscriptFrontmatter {
 
     private static let formatterQueue = DispatchQueue(label: "TranscriptedCore.TranscriptFrontmatter.formatters")
 
+    /// `imported_at` is an absolute UTC instant (ISO 8601, whole seconds),
+    /// unlike the local `date:`/`time:` pair.
+    private static let importedAtFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    public static func formatImportedAt(_ date: Date) -> String {
+        formatterQueue.sync { importedAtFormatter.string(from: date) }
+    }
+
+    /// When an imported file was transcribed, or nil for live meetings and
+    /// files saved before the key existed.
+    public static func importedAt(values: [String: String]) -> Date? {
+        guard let raw = values["imported_at"], !raw.isEmpty else { return nil }
+        return formatterQueue.sync { importedAtFormatter.date(from: raw) }
+    }
+
     public static func document(in raw: String) -> TranscriptFrontmatterDocument? {
         guard raw.hasPrefix("---\n"),
               let endRange = raw.range(

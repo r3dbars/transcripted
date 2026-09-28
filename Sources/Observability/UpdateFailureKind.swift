@@ -11,6 +11,11 @@ enum UpdateFailureKind: String {
     /// (`SURunningFromDiskImageError`). The user has to drag the app to
     /// Applications first; no retry will help.
     case runningFromDiskImage = "running_from_disk_image"
+    /// macOS App Translocation: the app was opened straight from Downloads
+    /// or a quarantined DMG, so it runs from a random read-only path
+    /// (`SURunningTranslocated`). Same fix as the disk image: move it to
+    /// Applications and reopen it.
+    case runningTranslocated = "running_translocated"
     case signatureFailed = "signature_failed"
     case sparkleBusy = "sparkle_busy"
     case unknown = "unknown"
@@ -18,12 +23,17 @@ enum UpdateFailureKind: String {
     /// Sparkle error codes (`SUErrors.h`) that carry a stable meaning without
     /// parsing localized text. Download-phase codes are handled after the
     /// underlying `NSURLError` check so a network cause keeps its own kind.
+    /// Every code here except the generic wrappers below is checked before the
+    /// localized text: Sparkle's own wording is not a stable signal (1003's
+    /// "opened from a read-only or a temporary location ... relaunch it" and
+    /// 1005's "running from the location it was downloaded to" used to read
+    /// as install or download failures).
     private static let sparkleCodeKinds: [Int: UpdateFailureKind] = [
         1000: .badAppcast,          // SUAppcastParseError
         1002: .badAppcast,          // SUAppcastError
         1003: .runningFromDiskImage, // SURunningFromDiskImageError
         1004: .badAppcast,          // SUResumeAppcastError
-        1005: .installFailed,       // SURunningTranslocated
+        1005: .runningTranslocated, // SURunningTranslocated
         2000: .downloadFailed,      // SUTemporaryDirectoryError
         2001: .downloadFailed,      // SUDownloadError
         3000: .installFailed,       // SUUnarchivingError
@@ -41,6 +51,11 @@ enum UpdateFailureKind: String {
         4010: .installFailed,       // SUAgentInvalidationError
         4012: .installFailed,       // SUInstallationWriteNoPermissionError
     ]
+
+    /// `SUDownloadError` and `SUInstallationError` wrap many different causes
+    /// (an appcast fetch, a download, a failed signature check under an
+    /// install), so a more specific nested code or their text wins over them.
+    private static let genericWrapperSparkleCodes: Set<Int> = [2001, 4005]
 
     static func isNoUpdate(_ error: Error?) -> Bool {
         guard let error else { return false }
@@ -101,12 +116,20 @@ enum UpdateFailureKind: String {
             }
         }
 
+        let sparkleCandidates = errorChain(startingAt: nsError)
+            .filter { $0.domain.lowercased().contains("sparkle") }
+
+        for candidate in sparkleCandidates where !genericWrapperSparkleCodes.contains(candidate.code) {
+            if let codeKind = sparkleCodeKinds[candidate.code] {
+                return codeKind
+            }
+        }
+
         if let textKind = classifyFromLocalizedText(nsError) {
             return textKind
         }
 
-        for candidate in errorChain(startingAt: nsError)
-        where candidate.domain.lowercased().contains("sparkle") {
+        for candidate in sparkleCandidates {
             if let codeKind = sparkleCodeKinds[candidate.code] {
                 return codeKind
             }

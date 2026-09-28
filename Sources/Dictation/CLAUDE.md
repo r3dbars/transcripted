@@ -13,6 +13,7 @@
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
 - `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
+- `DictationTranscriptPersistence.swift` — `DictationTranscriptPersistenceResult` (times the writer itself and carries the plain-words save-failure message), the session-publish guard (`DictationSessionCompletionPolicy`), and the cap-completion delivery/failure telemetry snapshot
 - `DictationStopFinalizationPolicy.swift` — chooses whether the Markdown save runs before or after the optional Auto Enter keystroke; the default is `saveBeforeAutoEnter`
 - `DictationStopBenchmarkRunner.swift` — env-gated in-app benchmark for stop-to-text, stop-to-saved, and stop-to-delivery timing on synthetic audio fixtures; its `production` variant also measures the real snapshot/resample and durable recovery-checkpoint path without touching the real clipboard or focused app
 
@@ -36,7 +37,11 @@ Stopped-audio recovery is intentionally bounded and local. Launch scans at most
 one pending metadata record for presentation, then `Show Audio` reveals the WAV
 in Finder. The operational recovery path is Transcripted's Capture menu ->
 Transcribe Audio File -> select that WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
-restart never deletes the checkpoint.
+restart never deletes the checkpoint. Closing a "Transcribe It" message (the launch
+reminder, or the one shown when a take's transcription came back empty) with X
+or Esc, not a timeout or a newer message, sets `dismissed` in its metadata: the launch reminder skips it
+(`pendingRecoveries(excludingDismissed: true)`), but the WAV stays and importers
+still find it. This stops an empty take from nagging on every launch.
 
 Empty ASR output is not automatically silence: after a focused retry, captured
 audio with measurable speech-like activity remains checkpointed and offers an

@@ -1,5 +1,7 @@
 # Strategy synthesis — what to do next (2026-06-14)
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 Capstone over three deep dives:
 
 - [agent-loop-activation-2026-06-14.md](agent-loop-activation-2026-06-14.md) — the moat (product)

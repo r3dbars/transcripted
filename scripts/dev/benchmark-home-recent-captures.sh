@@ -25,9 +25,13 @@ swiftc \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionLanguage.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
+  "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift" \
   "$ROOT_DIR/Sources/UI/Shared/MeetingAudioArchiveResolver.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentCaptureScanners.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentMeetingMetadataCache.swift" \
+  "$ROOT_DIR/Sources/UI/Settings/HomePresentation.swift" \
+  "$ROOT_DIR/Sources/UI/Settings/HomeSearchMatching.swift" \
+  "$ROOT_DIR/Sources/UI/Settings/HomeMeetingSearchIndex.swift" \
   -framework AppKit \
   -parse-as-library \
   -O \

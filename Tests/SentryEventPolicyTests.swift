@@ -326,6 +326,49 @@ func testSentryEventPolicy() {
         assertNil(tags["speaker_name"], "speaker names must stay out of Sentry tags")
     }
 
+    runSuite("SentryEventPolicy diagnosticTags keeps coarse speaker finalization failure reasons") {
+        let reasons = sentrySpeakerFinalizationReasonRawValues()
+        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+
+        for reason in reasons {
+            let tags = SentryEventPolicy.diagnosticTags(
+                forEngine: "meeting",
+                event: "speaker_finalization_failed",
+                context: [
+                    "failure_kind": "speaker_name_finalization_failed",
+                    "finalization_reason": reason,
+                    "is_retry": "true",
+                    "review_mode": "review_later",
+                ]
+            )
+            assertEqual(tags["finalization_reason"], reason, "\(reason) should reach Sentry unchanged")
+            assertEqual(tags["review_mode"], "review_later", "review mode should stay queryable")
+            assertEqual(tags["is_retry"], "true", "retry flag should stay queryable")
+        }
+
+        let freeText = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "speaker_finalization_failed",
+            context: [
+                "finalization_reason": "Could not save Private Person",
+                "review_mode": "Private Person review",
+            ]
+        )
+        assertEqual(freeText["finalization_reason"], "unknown", "free-text reasons never leave as an excerpt")
+        assertEqual(freeText["review_mode"], "unknown", "free-text review modes never leave as an excerpt")
+
+        let unrelated = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_transcript_skipped",
+            context: [
+                "finalization_reason": "name_rewrite_failed",
+                "is_retry": "true",
+                "review_mode": "save",
+            ]
+        )
+        assertTrue(unrelated.isEmpty, "events outside the Sentry allowlist should not carry speaker finalization tags")
+    }
+
     runSuite("SentryEventPolicy diagnosticTags keeps issue 500 volume-drop flags searchable") {
         let tags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",
@@ -572,6 +615,60 @@ func testSentryEventPolicy() {
             degradedRange!.lowerBound > noAudioRange!.lowerBound,
             "generic degraded-capture reporting must run only after timeout and no-audio terminals return"
         )
+    }
+
+    runSuite("Meeting failures stay splittable by mic backend without raw pinned counts") {
+        let context = [
+            "mic_backend": "pinned_ioproc",
+            "pinned_mic_restart_bucket": "2_3",
+            "pinned_mic_gap_bucket": "4_9",
+            "pinned_mic_padded_bucket": "1_9s",
+            "pinned_mic_dropped_callback_bucket": "1",
+            "pinned_mic_restart_count": "3",
+            "pinned_mic_gap_count": "6",
+            "pinned_mic_padded_seconds": "4",
+            "pinned_mic_dropped_callback_count": "1",
+            "audio_device": "Jane's AirPods Pro",
+        ]
+        for event in ["meeting_start_failed", "recording_stop_timeout", "meeting_recording_missing_audio", "meeting_capture_stopped_under_controller"] {
+            let tags = SentryEventPolicy.diagnosticTags(forEngine: "meeting", event: event, context: context)
+            assertEqual(tags["mic_backend"], "pinned_ioproc", "\(event) should say which recorder captured the mic")
+            assertEqual(tags["pinned_mic_restart_bucket"], "2_3", "\(event) keeps bucketed restarts")
+            assertEqual(tags["pinned_mic_gap_bucket"], "4_9", "\(event) keeps bucketed gaps")
+            assertEqual(tags["pinned_mic_padded_bucket"], "1_9s", "\(event) keeps bucketed padding")
+            assertEqual(tags["pinned_mic_dropped_callback_bucket"], "1", "\(event) keeps bucketed dropped callbacks")
+            assertNil(tags["pinned_mic_restart_count"], "raw counts stay local")
+            assertNil(tags["pinned_mic_gap_count"], "raw counts stay local")
+            assertNil(tags["pinned_mic_padded_seconds"], "raw padding stays local")
+            assertNil(tags["pinned_mic_dropped_callback_count"], "raw counts stay local")
+            assertNil(tags["audio_device"], "device names stay out of Sentry tags")
+        }
+
+        // The tag allowlist alone must not create new Sentry issues: the
+        // meeting start and stop successes stay local.
+        assertEqual(
+            SentryEventPolicy.diagnosticTags(forEngine: "meeting", event: "meeting_recording_stopped", context: context),
+            [:],
+            "a successful stop is not a Sentry event"
+        )
+    }
+}
+
+/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
+/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
+private func sentrySpeakerFinalizationReasonRawValues() -> [String] {
+    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
+    let enumBody = sentrySourceSlice(
+        source,
+        from: "public enum SpeakerFinalizationFailureReason",
+        to: "static func classify"
+    )
+    return enumBody.split(separator: "\n").compactMap { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("case ") else { return nil }
+        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
+        guard quoted.count >= 3 else { return nil }
+        return String(quoted[1])
     }
 }
 

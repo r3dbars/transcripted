@@ -16,7 +16,8 @@ extension ParakeetModelVariant {
     var fluidAudioVersion: AsrModelVersion {
         switch self {
         case .v2: return .v2
-        case .v3: return .v3
+        // Ultra keeps v3's architecture, tokenizer and Core ML contract.
+        case .v3, .ultra: return .v3
         }
     }
 }
@@ -59,8 +60,13 @@ extension ParakeetEngine {
         let generation = beginModelDownloadAttempt(progressTracker: progressTracker)
         let token = ParakeetModelWorkToken(variant: variant, generation: generation)
         let progressTarget = ParakeetModelDownloadProgressTarget(engine: self)
-        let task = Task.detached(priority: .utility) {
-            try await AsrModels.download(version: variant.fluidAudioVersion) { progress in
+        let task = Task<URL, Error>.detached(priority: .utility) {
+            // FluidAudio can only fetch stock v3; downloading here would load
+            // it under the local-only model's name.
+            guard !variant.isLocalInstallOnly else {
+                throw ParakeetLocalModelError.notInstalled
+            }
+            return try await AsrModels.download(version: variant.fluidAudioVersion) { progress in
                 let beginsNewStage: Bool
                 switch progress.phase {
                 case .listing:
@@ -300,7 +306,14 @@ extension ParakeetEngine {
                 failureStage = .downloadModels
                 loadSource = .download
                 let downloadedPath: URL
-                if let modelFilePrefetchTask {
+                if token.variant.isLocalInstallOnly {
+                    // Only a marked install counts; a remembered path can be stale.
+                    guard let localPath = ModelCacheInventory.activeParakeetModelDirectory(variant: token.variant) else {
+                        throw ParakeetLocalModelError.notInstalled
+                    }
+                    prefetchedModelPath = localPath
+                    downloadedPath = localPath
+                } else if let modelFilePrefetchTask {
                     AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
                     let generation = modelDownloadAttemptGeneration
                     downloadedPath = try await modelFilePrefetchTask.value
@@ -326,12 +339,25 @@ extension ParakeetEngine {
                 guard isCurrent(token) else { return }
                 modelDownloadState = .loading
                 AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
-                models = try await AsrModels.load(
-                    from: downloadedPath,
-                    version: token.variant.fluidAudioVersion,
-                    encoderComputeUnits: encoderComputeUnits
-                )
+                if token.variant.isLocalInstallOnly {
+                    // FluidAudio's loader would delete a local install that
+                    // fails to load and download stock v3 in its place.
+                    models = try await ParakeetLocalModelLoader.load(
+                        from: downloadedPath,
+                        encoderComputeUnits: encoderComputeUnits
+                    )
+                } else {
+                    models = try await AsrModels.load(
+                        from: downloadedPath,
+                        version: token.variant.fluidAudioVersion,
+                        encoderComputeUnits: encoderComputeUnits
+                    )
+                }
                 guard isCurrent(token) else { return }
+                try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
+                    variant: token.variant,
+                    directory: downloadedPath
+                )
                 loadSourceName = loadSource.rawValue
             }
 
@@ -341,6 +367,13 @@ extension ParakeetEngine {
                 try await manager.loadModels(models)
             } catch {
                 await manager.cleanup()
+                // An experimental local install that won't start is a setup
+                // state on one Mac: keep it out of Sentry, and keep raw
+                // Core ML text (which can carry file paths) off the card.
+                if token.variant.isLocalInstallOnly {
+                    AppLogger.transcription.warning("PARAKEET | local model didn't start: \(error.localizedDescription)")
+                    throw ParakeetLocalModelError.loadFailed
+                }
                 throw error
             }
             guard isCurrent(token) else {
@@ -362,6 +395,10 @@ extension ParakeetEngine {
             finishModelDownloadAttempt(generation: modelDownloadAttemptGeneration)
             modelFilePrefetchTask = nil
             prefetchedModelPath = nil
+            if let localError = error as? ParakeetLocalModelError {
+                handleLocalModelUnavailable(localError)
+                return
+            }
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
             AppLogger.transcription.error("PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -396,6 +433,8 @@ extension ParakeetEngine {
         if markCachedRuntimeModelIfAvailable() {
             return
         }
+        // Local-only models are installed by a script; there is nothing to fetch.
+        guard !variant.isLocalInstallOnly else { return }
 
         switch modelDownloadState {
         case .downloading, .cached, .loading, .ready:
@@ -458,9 +497,24 @@ extension ParakeetEngine {
         }
     }
 
+    /// An experimental script-installed model that is missing or won't load
+    /// is a setup state on one Mac, not an engine failure, so it stays out of
+    /// Sentry. Nothing is deleted: the user's install is left for a retry or
+    /// a reinstall.
+    private func handleLocalModelUnavailable(_ localError: ParakeetLocalModelError) {
+        modelDownloadState = .failed(localError.localizedDescription)
+        AppLogger.transcription.warning("PARAKEET | local model unavailable: \(localError.localizedDescription)")
+        EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "local_model_unavailable",
+            message: localError.localizedDescription,
+            context: ["reason": localError.reason])
+    }
+
     @discardableResult
     func markCachedRuntimeModelIfAvailable() -> Bool {
         guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory(variant: modelVariant) else {
+            if modelVariant.isLocalInstallOnly {
+                prefetchedModelPath = nil
+            }
             return false
         }
 

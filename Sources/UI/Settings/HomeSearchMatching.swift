@@ -4,28 +4,48 @@ import Foundation
 
 /// Foundation-pure matching for the Home meetings filter box.
 ///
-/// The Home meetings list filter matches the user's query against the
-/// already-loaded metadata for each recent meeting (title, generated title,
-/// summary text, and a derived date string) so filtering stays cheap and never
-/// reads transcript bodies off disk. The decision lives here so it can be
-/// fast-tested; `TranscriptedSettingsView` builds the field list and calls in.
+/// The Home meetings list filter matches the user's query against each
+/// meeting's metadata (title, a derived date string, and named speakers) so
+/// filtering stays cheap and never reads transcript bodies off disk. The
+/// decision lives here so it can be fast-tested; `HomeMeetingSearchIndex` and
+/// `TranscriptedSettingsView` call in.
 enum HomeMeetingListFilter {
     /// Returns true when every whitespace-separated token in `query` appears in
     /// at least one of `fields` (case- and diacritic-insensitive). An empty or
     /// whitespace-only query matches everything.
     static func matches(query: String, in fields: [String]) -> Bool {
-        let tokens = query
+        matches(tokens: tokens(in: query), haystack: haystack(for: fields))
+    }
+
+    /// The query split into the whitespace-separated tokens `matches` ANDs.
+    static func tokens(in query: String) -> [String] {
+        query
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
-        guard !tokens.isEmpty else { return true }
+    }
 
-        let haystack = fields.joined(separator: "\n")
-        return tokens.allSatisfy { token in
+    /// The single string `matches` searches for a set of fields. Callers that
+    /// match one row against many queries (the Home search index) build it
+    /// once per row.
+    static func haystack(for fields: [String]) -> String {
+        fields.joined(separator: "\n")
+    }
+
+    /// `matches(query:in:)` with the tokens and haystack prepared up front.
+    /// No tokens matches everything.
+    static func matches(tokens: [String], haystack: String) -> Bool {
+        tokens.allSatisfy { token in
             haystack.range(
                 of: token,
                 options: [.caseInsensitive, .diacriticInsensitive]
             ) != nil
         }
+    }
+
+    /// Everything a saved meeting row can be found by: title, date words, and
+    /// the named speakers. Metadata only, never the transcript body.
+    static func searchFields(for meeting: RecentMeetingItem) -> [String] {
+        [meeting.title, dateSearchText(for: meeting.date)] + meeting.speakerNames
     }
 
     /// Searchable date tokens for a meeting so users can filter by typing a

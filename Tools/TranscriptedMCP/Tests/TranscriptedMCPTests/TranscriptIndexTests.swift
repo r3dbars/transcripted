@@ -383,21 +383,43 @@ final class TranscriptIndexTests: XCTestCase {
         }
     }
 
+    /// Makes every insert into `table` fail (optionally only for one file) while
+    /// leaving the table and its DELETE path intact, so the failure lands after
+    /// the index transaction has already cleared old rows and written the parent row.
+    private func failInserts(into table: String, forFilename filename: String? = nil) throws {
+        let condition = filename.map { " WHEN NEW.filename = '\($0)'" } ?? ""
+        try execRawSQL(
+            "CREATE TRIGGER test_fail_\(table)_insert BEFORE INSERT ON \(table)\(condition) BEGIN SELECT RAISE(ABORT, 'test sabotage'); END"
+        )
+    }
+
+    private func allowInserts(into table: String) throws {
+        try execRawSQL("DROP TRIGGER test_fail_\(table)_insert")
+    }
+
+    private func bumpModificationDate(of filename: String, by seconds: TimeInterval = 60) throws {
+        let url = tempDir.appendingPathComponent("\(filename).md")
+        let current = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? Date()
+        try FileManager.default.setAttributes(
+            [.modificationDate: current.addingTimeInterval(seconds)],
+            ofItemAtPath: url.path
+        )
+    }
+
     func testFailedUtteranceInsertRollsBackMeetingAndAllowsRetry() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
 
-        // Sabotage the write path: drop the utterances table so the per-utterance
-        // insert fails after the meetings row was already written in-transaction.
-        try execRawSQL("DROP TABLE utterances")
+        // The meetings and meeting_speakers rows are written in-transaction before
+        // the first utterance insert fails.
+        try failInserts(into: "utterances")
 
         XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
 
         // The transaction must roll back: no half-indexed meeting marked indexed.
         XCTAssertTrue(try index.listRecentMeetings(count: 10).isEmpty)
 
-        // A fresh index (createTables restores the dropped table and triggers)
-        // retries the meeting because json_modified_at was never committed.
-        index = try TranscriptIndex(indexDir: tempDir)
+        // The meeting is retried because json_modified_at was never committed.
+        try allowInserts(into: "utterances")
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
@@ -405,22 +427,124 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(results.results.count, 1)
     }
 
+    func testFailedReindexKeepsPreviousRowsSearchable() throws {
+        let filename = "Call_2026-03-29_10-00-00"
+        try writeFixture(makeFixtureJSON(), filename: filename, to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
+
+        // Rewrite the meeting, then make the reindex fail after it has deleted the
+        // old rows and inserted the new meetings row.
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "Completely rewritten budget discussion"),
+        ]), filename: filename, to: tempDir)
+        try bumpModificationDate(of: filename)
+        try failInserts(into: "utterances")
+
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
+
+        // The delete rolled back with the failed insert: the old version is intact.
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
+        XCTAssertTrue(try index.searchUtterances(query: "rewritten", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
+
+        // Its old mtime is still stored, so the next pass retries the new version.
+        try allowInserts(into: "utterances")
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.searchUtterances(query: "rewritten", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
+        XCTAssertTrue(try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
+    }
+
     func testFailedDictationEntryInsertRollsBackDayAndAllowsRetry() throws {
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
 
-        try execRawSQL("DROP TABLE dictation_entries")
+        try failInserts(into: "dictation_entries")
 
         XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
 
         // The dictation_days row written before the failing entry insert must roll back.
         XCTAssertTrue(try index.listDictationDays(count: 10).isEmpty)
 
-        index = try TranscriptIndex(indexDir: tempDir)
+        try allowInserts(into: "dictation_entries")
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let days = try index.listDictationDays(count: 10)
         XCTAssertEqual(days.count, 1)
         XCTAssertEqual(days[0].entryCount, 2)
+    }
+
+    func testReadToolsKeepAnsweringWhileReconcileWaitsOnAnotherProcess() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        // Stand in for another server mid-pass: hold the reconcile lock on a
+        // separate open file description (flock locks conflict across those).
+        let lockPath = tempDir.appendingPathComponent("mcp_index.reconcile.lock").path
+        let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        XCTAssertGreaterThanOrEqual(lockFD, 0)
+        XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
+        var released = false
+        defer {
+            if !released {
+                flock(lockFD, LOCK_UN)
+            }
+            close(lockFD)
+        }
+
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-30T10:00:00-0500"),
+            filename: "Call_2026-03-30_10-00-00",
+            to: tempDir
+        )
+        let index = self.index!
+        let dir = tempDir!
+        let reconcileDone = expectation(description: "reconcile finished after the lock was released")
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? index.reconcile(meetingsDir: dir, dictationsDir: dir)
+            reconcileDone.fulfill()
+        }
+        // Give the background reconcile time to reach the lock.
+        Thread.sleep(forTimeInterval: 0.3)
+
+        // The lock is taken before the index queue, so reads don't wait on it.
+        let readDone = DispatchSemaphore(value: 0)
+        let readCount = ReadCountBox()
+        DispatchQueue.global(qos: .userInitiated).async {
+            readCount.value = (try? index.listRecentMeetings(count: 10).count) ?? -1
+            readDone.signal()
+        }
+        XCTAssertEqual(
+            readDone.wait(timeout: .now() + 2),
+            .success,
+            "a read tool must not block while reconcile waits on another process's lock"
+        )
+        XCTAssertEqual(readCount.value, 1, "the waiting pass hasn't indexed the new meeting yet")
+
+        flock(lockFD, LOCK_UN)
+        released = true
+        wait(for: [reconcileDone], timeout: 10)
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 2)
+    }
+
+    func testStartupKeepsGoingWhenOneFileFailsToIndex() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(makeFixtureJSON(date: "2026-03-30T10:00:00-0500"), filename: "Call_2026-03-30_10-00-00", to: tempDir)
+        try failInserts(into: "utterances", forFilename: "Call_2026-03-30_10-00-00")
+
+        // The watcher path still reports the failure...
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)) { error in
+            XCTAssertEqual((error as? MCPReconcileFileFailures)?.failedFileCount, 1)
+        }
+
+        // ...but startup attaches with the good file indexed instead of exiting.
+        XCTAssertNoThrow(try MCPStartupIndexing.prepareForAttach(
+            index: index,
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir]
+        ))
+        let meetings = try index.listRecentMeetings(count: 10)
+        XCTAssertEqual(meetings.map(\.filename), ["Call_2026-03-29_10-00-00"])
     }
 
     func testFailedRemovalRollsBackAndKeepsMeetingSearchable() throws {
@@ -472,4 +596,9 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertTrue(json?.contains("\"total_items_matched\" : 1") == true)
         XCTAssertTrue(json?.contains("\"truncated\" : false") == true)
     }
+}
+
+/// Written once on a background queue, read after the semaphore signals.
+private final class ReadCountBox: @unchecked Sendable {
+    var value = -1
 }

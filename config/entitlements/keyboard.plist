@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Entitlements for Transcripted Keyboard.app, the Writing input method nested at
+    Contents/Library/Input Methods/ and signed with hardened runtime by build-beta.sh.
+
+    Deliberately empty. The keyboard is a Developer ID IMKit input method outside the
+    App Sandbox: macOS launches it from ~/Library/Input Methods, it reaches the app
+    over a Unix-domain socket, and it links only system frameworks. None of that needs
+    an entitlement. It never records audio, uses JIT, or loads other teams' libraries,
+    so it gets none of the app's audio, JIT, or library-validation exceptions.
+
+    If it ever moves into the App Sandbox, it will need com.apple.security.app-sandbox
+    plus a com.apple.security.temporary-exception.mach-register.global-name entry for
+    its InputMethodConnectionName, the way App Store input methods do.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

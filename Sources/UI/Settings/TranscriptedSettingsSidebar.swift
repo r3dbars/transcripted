@@ -3,9 +3,9 @@ import SwiftUI
 struct SettingsSidebarSection {
     let pages: [TranscriptedSettingsPage]
 
-    /// Content-first rows that are always visible: the capture library plus the agent connection.
+    /// Content-first rows that are always visible: Today, the capture library, plus the agent connection.
     static let primarySection = SettingsSidebarSection(
-        pages: [.home, .dictations, .people, .connectAgent]
+        pages: [.today, .home, .dictations, .people, .connectAgent]
     )
 
     /// Configuration lives on one combined scrolling page (.general),

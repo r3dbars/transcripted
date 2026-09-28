@@ -1,0 +1,46 @@
+name: Mac runner sweep
+
+# Swift CI can send `checks` and `spm-tests` to the owner's Mac
+# (docs/self-hosted-mac-runner.md). If the Mac goes quiet while a job waits
+# for it (asleep, off, or its service died), this re-runs that run on hosted
+# runners, so the required build-and-test check can't sit pending for up to
+# GitHub's 24 hours. A live Mac re-runs its own stuck jobs instead.
+#
+# It always runs main's copy of the script, since it holds an actions: write
+# token. It does nothing until the Mac has been set up (no heartbeat variable).
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-runner-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    if: vars.MAC_RUNNER_HEARTBEAT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          sparse-checkout: scripts/ci
+
+      - name: Re-run runs stuck behind a quiet Mac
+        shell: bash
+        env:
+          HEARTBEAT: ${{ vars.MAC_RUNNER_HEARTBEAT }}
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/pick-ci-runner.py --reroute

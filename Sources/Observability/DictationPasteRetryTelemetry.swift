@@ -19,6 +19,8 @@ enum DictationPasteRetryTelemetry {
         switch outcome {
         case .pasted:
             return ["result": "pasted"]
+        case .likelyPasted:
+            return ["result": "likely_pasted"]
         case .copied(_, reason: let reason):
             return [
                 "reason": reason.analyticsName,
@@ -44,8 +46,6 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
-        case .pasteConfirmationUnavailable:
-            return "confirmation_unavailable"
         }
     }
 }

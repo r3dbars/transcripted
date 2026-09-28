@@ -98,6 +98,7 @@
     "SUPublicEDKey": "Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=",
     "SUEnableAutomaticChecks": true,
     "SUAllowsAutomaticUpdates": true,
+    "SUAutomaticallyUpdate": true,
     "TranscriptedSentryReleasePrefix": "transcripted",
     "TranscriptedPostHogHost": "https://us.i.posthog.com"
   },
@@ -155,12 +156,16 @@
       "Tests/*SanitizerTests.swift",
       "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
       "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json",
+      "Tests/TranscriptedWritingTests/Core/SecretRulesTests.swift",
+      "Tests/TranscriptedWritingTests/Core/RawContinuationPromptTests.swift",
       "archive/**"
     ],
     "history_file_allowlist_globs": [
       "Tests/*SanitizerTests.swift",
       "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
       "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json",
+      "Tests/TranscriptedWritingTests/Core/SecretRulesTests.swift",
+      "Tests/TranscriptedWritingTests/Core/RawContinuationPromptTests.swift",
       "archive/**"
     ]
   },

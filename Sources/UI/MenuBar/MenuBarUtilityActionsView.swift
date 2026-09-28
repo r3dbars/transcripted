@@ -7,11 +7,25 @@ final class MenuBarUtilityActionsView: NSView {
 
     var onOpenTranscripted: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
-    var onOpenSettings: (() -> Void)?
+    /// The softer hover tick for these rows.
+    var onRowHoverStart: (() -> Void)? {
+        didSet {
+            for row in allRows {
+                row.onHoverStart = { [weak self] in self?.onRowHoverStart?() }
+            }
+        }
+    }
+    /// The press click for these rows.
+    var onRowPressStart: (() -> Void)? {
+        didSet {
+            for row in allRows {
+                row.onPressStart = { [weak self] in self?.onRowPressStart?() }
+            }
+        }
+    }
 
     private let updatesRow = MenuBarActionRowView()
     private let openTranscriptedRow = MenuBarActionRowView()
-    private let settingsRow = MenuBarActionRowView()
     private let quitRow = MenuBarActionRowView()
 
     override init(frame: NSRect) {
@@ -27,18 +41,16 @@ final class MenuBarUtilityActionsView: NSView {
     private func setupViews() {
         updatesRow.onPress = { [weak self] in self?.onCheckForUpdates?() }
         openTranscriptedRow.onPress = { [weak self] in self?.onOpenTranscripted?() }
-        settingsRow.onPress = { [weak self] in self?.onOpenSettings?() }
         quitRow.onPress = { [weak self] in
             self?.trackMenuAction("quit")
             NSApplication.shared.terminate(nil)
         }
 
-        updatesRow.setAutomationIdentifier("transcripted.menubar.utility.check-updates")
         openTranscriptedRow.setAutomationIdentifier("transcripted.menubar.utility.open-transcripted")
-        settingsRow.setAutomationIdentifier("transcripted.menubar.utility.settings")
+        updatesRow.setAutomationIdentifier("transcripted.menubar.utility.check-updates")
         quitRow.setAutomationIdentifier("transcripted.menubar.utility.quit")
 
-        [updatesRow, openTranscriptedRow, settingsRow, quitRow].forEach(addSubview(_:))
+        [openTranscriptedRow, updatesRow, quitRow].forEach(addSubview(_:))
     }
 
     func update(
@@ -64,14 +76,6 @@ final class MenuBarUtilityActionsView: NSView {
         openTranscriptedRow.update(
             symbolName: "house.fill",
             title: "Open Transcripted",
-            detail: "",
-            tone: .standard,
-            size: .utility
-        )
-
-        settingsRow.update(
-            symbolName: "gearshape",
-            title: "Settings…",
             detail: "",
             tone: .standard,
             size: .utility
@@ -133,7 +137,8 @@ final class MenuBarUtilityActionsView: NSView {
     }
 
     private var allRows: [MenuBarActionRowView] {
-        [updatesRow, openTranscriptedRow, settingsRow, quitRow]
+        // Open Transcripted leads; Settings lives inside it.
+        [openTranscriptedRow, updatesRow, quitRow]
     }
 
     private var visibleRows: [MenuBarActionRowView] {
@@ -144,7 +149,6 @@ final class MenuBarUtilityActionsView: NSView {
         [
             "checkUpdates": updatesRow.smokeSnapshot,
             "openTranscripted": openTranscriptedRow.smokeSnapshot,
-            "settings": settingsRow.smokeSnapshot,
             "quit": quitRow.smokeSnapshot,
         ]
     }

@@ -80,4 +80,89 @@ func testPermissionsOnboardingPreferences() {
             "skipped tracking should not mark the first saved dictation key"
         )
     }
+
+    runSuite("PermissionsOnboardingPreferences resumes setup at permissions, never past it") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.resume.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            0,
+            "a fresh install starts on the welcome screen"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            1,
+            "a relaunch mid-setup reopens on the permissions step"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(2, userDefaults: defaults)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            1,
+            "reaching Done still resumes on permissions so the mic check runs again"
+        )
+
+        defaults.set(7, forKey: PermissionsOnboardingPreferences.resumeStepIndexKey)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            1,
+            "an out-of-range stored step is clamped"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(0, userDefaults: defaults)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            0,
+            "going back to welcome and quitting reopens on welcome"
+        )
+    }
+
+    runSuite("PermissionsOnboardingPreferences forgets the resume step once setup is done") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.resume-complete.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults)
+        PermissionsOnboardingPreferences.markCompleted(userDefaults: defaults)
+        assertNil(
+            defaults.object(forKey: PermissionsOnboardingPreferences.resumeStepIndexKey),
+            "completion clears the resume step"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults)
+        assertNil(
+            defaults.object(forKey: PermissionsOnboardingPreferences.resumeStepIndexKey),
+            "a completed setup does not record a new resume step"
+        )
+
+        defaults.set(true, forKey: PermissionsOnboardingPreferences.forceKey)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults),
+            0,
+            "a forced setup rerun starts on the welcome screen"
+        )
+    }
+
+    runSuite("PermissionsOnboardingPreferences ignores the resume step on automated launches") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.resume-automated.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: true)
+        assertNil(
+            defaults.object(forKey: PermissionsOnboardingPreferences.resumeStepIndexKey),
+            "a smoke that stops on Permissions leaves nothing behind for the next run"
+        )
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: false)
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults, isAutomatedLaunch: true),
+            0,
+            "a smoke always starts on the welcome screen, even with a stale resume step"
+        )
+    }
 }

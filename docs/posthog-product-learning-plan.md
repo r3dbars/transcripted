@@ -134,7 +134,7 @@ the MCP helper's server version.
 | `update_download_finished` | `automatic_downloads_enabled`, `failure_kind`, `state`, `version` |
 | `update_ready_to_install` | `automatic_downloads_enabled`, `state`, `version` |
 | `update_relaunching` | `version` |
-| `update_installed` | `previous_version`, `version` |
+| `update_installed` | `install_kind`, `previous_version`, `version` |
 
 ### Dictation
 
@@ -148,11 +148,12 @@ Dictation events also allow coarse route fields: `default_input_class`,
 
 | Event | Extra captured properties |
 | --- | --- |
-| `dictation_started` | `trigger` |
+| `dictation_started` | `first_since_launch`, `mac_chip`, `memory_gb_bucket`, `start_latency_bucket`, `start_latency_ms`, `stt_model`, `trigger` |
 | `dictation_start_failed` | `failure_kind`, `start_attempt_bucket`, `trigger` |
+| `dictation_start_dropped_for_modifier_combo` | `duration_bucket`, `trigger` |
 | `dictation_completed` | `auto_send`, `auto_send_expected`, `auto_send_key`, `auto_send_block_reason`, `target_confirmation_mode`, `delivery`, `duration_bucket`, `trigger`, `word_count_bucket` |
 | `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
-| `dictation_stop_latency_measured` | `auto_enter_bucket`, `auto_send`, `auto_send_expected`, `auto_send_key`, `auto_send_block_reason`, `target_confirmation_mode`, `cleanup_bucket`, `cleanup_changed`, `cleanup_enabled`, `copy_reason`, `decode_bucket`, `delivery`, `mic_stop_bucket`, `model_wait_bucket`, `outcome`, `paste_bucket`, `save_bucket`, `save_outcome`, `stop_to_done_bucket`, `stop_to_paste_bucket`, `trigger`, `word_count_bucket` |
+| `dictation_stop_latency_measured` | `auto_enter_bucket`, `auto_send`, `auto_send_expected`, `auto_send_key`, `auto_send_block_reason`, `target_confirmation_mode`, `cleanup_bucket`, `cleanup_changed`, `cleanup_enabled`, `copy_reason`, `decode_bucket`, `decode_latency_ms`, `delivery`, `first_sound_latency_bucket`, `first_sound_latency_ms`, `mac_chip`, `memory_gb_bucket`, `mic_stop_bucket`, `model_wait_bucket`, `outcome`, `paste_bucket`, `save_bucket`, `save_outcome`, `stop_to_done_bucket`, `stop_to_paste_bucket`, `stop_to_paste_latency_ms`, `stt_model`, `trigger`, `word_count_bucket` |
 | `dictation_cancelled` | `duration_bucket`, `trigger` |
 | `dictation_no_speech` | `duration_bucket`, `trigger` |
 | `dictation_audio_route_changed` | route fields only |
@@ -182,9 +183,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 | `meeting_recording_stopped` | diagnostics plus `capture_quality`, `duration_bucket`, `gap_count_bucket`, `reason`, `route_change_count_bucket`, `system_stream_present`, `stop_timed_out`, `trigger` |
 | `meeting_capture_health_snapshot` | same as `meeting_recording_stopped` |
 | `meeting_recording_cancelled` | diagnostics plus `duration_bucket`, `reason`, `stop_timed_out`, `system_stream_present`, `trigger` |
-| `meeting_transcript_saved` | `duration_bucket`, `participant_count_bucket`, `queue_depth_bucket`, `trigger`, `word_count_bucket` |
+| `meeting_transcript_saved` | `diarize_ms`, `duration_bucket`, `mac_chip`, `memory_gb_bucket`, `models_ready_ms`, `participant_count_bucket`, `processing_ms`, `queue_depth_bucket`, `recording_minutes`, `resample_ms`, `sleep_ms`, `stt_calls`, `stt_input_seconds`, `stt_ms`, `stt_model`, `trigger`, `word_count_bucket` |
 | `meeting_transcript_failed` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |
-| `meeting_speaker_finalization_failed` | `failure_kind`, `queue_depth_bucket`, `session_stage`, `trigger` |
+| `meeting_speaker_finalization_failed` | `failure_kind`, `queue_depth_bucket`, `session_stage`, `trigger`, plus when known `finalization_reason` (a fixed save-failure code such as `name_rewrite_failed` or `database_write_failed`), `review_mode` (`save` or `review_later`), and `is_retry` |
 | `meeting_transcript_skipped` | diagnostics plus `failure_kind`, `queue_depth_bucket`, `trigger` |
 | `meeting_saved_audio_retranscription_requested` | `mic_stream_present`, `trigger` |
 | `meeting_file_imported` | `queue_depth_bucket` |

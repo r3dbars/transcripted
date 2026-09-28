@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- Same bubble glyph as docs/assets/app-icon-options/round8/H-mono-*.svg, rescaled so the
+     824px tile in those files fills this 1024px Icon Composer canvas. -->
+<g transform="scale(1.242718) translate(-100 -100)"><g transform="translate(512 528) scale(0.84) translate(-512 -512)"><g stroke="#1d1d1f" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M 316.00 250.17 A 110 110 0 0 0 236 356 V 566 A 110 110 0 0 0 346 676 H 404 Q 396 748 350 804 Q 446 770 504 676 H 678 A 110 110 0 0 0 788 566 V 356 A 110 110 0 0 0 708.00 250.17"/><path d="M 420 350.0 V 550.0"/><path d="M 604 350.0 V 550.0"/><path d="M 328 400.0 V 500.0"/><path d="M 696 400.0 V 500.0"/><path d="M 402 246 H 622"/><path d="M 512 246 V 585"/></g></g></g>
+</svg>

@@ -49,6 +49,9 @@ class FloatingOverlayController {
     enum MessageTone {
         case error
         case notice
+        /// The text was saved, just not pasted (the 5-minute cap). Good news,
+        /// so no warning triangle and no shake.
+        case saved
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
@@ -64,7 +67,20 @@ class FloatingOverlayController {
         )
     }
     var listeningNotice = "" {
-        didSet { pushStateToViews() }
+        didSet {
+            guard listeningNotice != oldValue else { return }
+            pushStateToViews()
+            // The mini pill is too narrow for the Esc prompt, so it widens
+            // while the prompt shows and shrinks back after.
+            // Keep it on screen: while transcribing the pill doesn't follow
+            // the cursor, so widening near an edge could clip the prompt.
+            if isVisible, isCursorMiniPanelMode, state == .listening || state == .drafting {
+                resizePanelInstant(to: preferredPanelSize(for: state), keepingVisible: true)
+                if isCursorMiniTrackingMode {
+                    updateCursorFollowPosition(snap: true)
+                }
+            }
+        }
     }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
@@ -72,6 +88,8 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state != .drafting { clearNotPasted() }
+            updateEscapeCancelTracking()
             if state.isActiveDictationState {
                 cancelPendingHideForActiveDictation()
             }
@@ -85,8 +103,19 @@ class FloatingOverlayController {
     var isVisible = false
     var errorMessage: String = ""
     private var messageTone: MessageTone = .error
+    /// True while the message on screen is only a passing note about a take
+    /// that went fine (no speech heard, "press Return to send"), so a press
+    /// waiting for the next take may start over it. Any other message stays.
+    var messageCanGiveWayToNextStart = false
     private var errorActionTitle: String?
     private var errorActionHandler: (() -> Void)?
+    /// A dictation that didn't paste: its words, shown in the island, and
+    /// what the island's Paste button does. Kept apart from the actionable
+    /// error handler so closing the notice leaves the text on the clipboard.
+    private var notPastedText: String?
+    private var notPastedPasteHandler: (() -> Void)?
+    private var notPastedKeyMonitor: Any?
+    static let notPastedDismissSeconds: Double = 15
     var loadingElapsedSeconds: Int = 0 {
         didSet { pushStateToViews() }
     }
@@ -98,6 +127,11 @@ class FloatingOverlayController {
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
     var onActionableMessageDiscarded: (() -> Void)?
+    /// A message with a button was closed by the user (X or Esc) without the
+    /// button being pressed. Fires before `onActionableMessageDiscarded`.
+    var onActionableMessageClosedByUser: (() -> Void)?
+    /// Every Esc during an active session, before the discard decision.
+    var onEscapeKeyDuringSession: (() -> Void)?
 
     // MARK: - Panel & Views
 
@@ -129,9 +163,27 @@ class FloatingOverlayController {
         miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
         cursorFollowTask?.cancel()
+        escapeConfirmResetTask?.cancel()
     }
 
     var sttRouter: STTRouter?
+
+    /// Draws the session instead of the panel when Settings › Dictation
+    /// window is Notch island. The state machine, timers and Esc handling
+    /// below stay the same; only where it shows changes.
+    weak var island: NotchIslandController? {
+        didSet {
+            island?.dictationActionHandler = { [weak self] action in
+                self?.handleIslandAction(action)
+            }
+        }
+    }
+    /// The app the words go to, for the island's "Inserting into" line.
+    private var islandSourceApp: NSRunningApplication?
+
+    private var isIslandMode: Bool {
+        island != nil && NotchIslandController.isSelected
+    }
 
     // MARK: - Setup
 
@@ -212,6 +264,9 @@ class FloatingOverlayController {
                     rawLevel: level
                 )
                 self.rootView?.headerView.updateWaveformLevel(presentation.level)
+                if self.isIslandMode {
+                    self.island?.updateDictationLevel(presentation.level)
+                }
             }
             .store(in: &subscriptions)
 
@@ -241,7 +296,7 @@ class FloatingOverlayController {
                 handler?()
             },
             messageTone: messageTone,
-            onErrorDismiss: { [weak self] in self?.dismissError() },
+            onErrorDismiss: { [weak self] in self?.dismissErrorClosedByUser() },
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             successTitle: successTitle,
@@ -251,6 +306,90 @@ class FloatingOverlayController {
         )
         updatePanelMouseBehavior()
         updatePanelCornerRadius()
+        pushStateToIsland()
+    }
+
+    private func pushStateToIsland() {
+        guard let island else { return }
+        guard isIslandMode, isVisible else {
+            island.updateDictation(nil, targetApp: nil)
+            return
+        }
+        island.updateDictation(islandContent(), targetApp: islandSourceApp)
+    }
+
+    private func islandContent() -> NotchIslandDictationContent? {
+        let phase: NotchIslandDictationContent.Phase
+        switch state {
+        case .idle:
+            return nil
+        case .starting:
+            phase = .starting
+        case .loading:
+            // Only a model download has a real number ("42% downloaded").
+            let downloaded = loadingPresentation.status
+                .flatMap { $0.hasSuffix("% downloaded") ? $0.split(separator: "%").first : nil }
+                .flatMap { Double($0) }
+                .map { $0 / 100 }
+            phase = .loading(
+                title: loadingPresentation.title,
+                detail: loadingPresentation.detail,
+                progress: downloaded
+            )
+        case .listening:
+            phase = .listening
+        case .drafting where errorMessage.isEmpty:
+            phase = .writing
+        case .drafting:
+            let tone: NotchIslandDictationContent.Message.Tone
+            switch messageTone {
+            case .error:
+                tone = messageCanGiveWayToNextStart ? .noSpeech : .error
+            case .notice:
+                tone = .notice
+            case .saved:
+                tone = .saved
+            }
+            phase = .message(.init(
+                tone: tone,
+                text: errorMessage,
+                actionTitle: notPastedText != nil ? "Paste" : errorActionTitle,
+                preview: notPastedText,
+                dismissSeconds: notPastedText != nil ? Self.notPastedDismissSeconds : nil
+            ))
+        case .success:
+            phase = .success(title: successTitle)
+        }
+        return NotchIslandDictationContent(
+            phase: phase,
+            notice: listeningNotice,
+            targetAppName: islandSourceApp?.localizedName,
+            microphoneName: sttRouter?.inputDeviceName
+        )
+    }
+
+    private func handleIslandAction(_ action: NotchIslandAction) {
+        switch action {
+        case .dictationStop:
+            guard state == .listening else { return }
+            onStopListening?()
+        case .dictationCancel:
+            guard state.isActiveDictationState else { return }
+            clearEscapeConfirmation()
+            onEscapeDuringSession?()
+        case .dictationMessageAction:
+            if let paste = notPastedPasteHandler {
+                paste()
+                return
+            }
+            let handler = errorActionHandler
+            clearActionableErrorWithoutHiding()
+            handler?()
+        case .dictationDismissMessage:
+            dismissErrorClosedByUser()
+        default:
+            break
+        }
     }
 
     // MARK: - Panel Show/Hide
@@ -268,6 +407,15 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         successDismissTask?.cancel()
         successDismissTask = nil
+
+        if isIslandMode {
+            // The island draws the session; the panel stays hidden.
+            islandSourceApp = sourceApp
+            isVisible = true
+            pushStateToViews()
+            installEscapeMonitor()
+            return
+        }
 
         let shouldOpenAtCursor = isCursorMiniPanelMode
         let rawTargetRect = shouldOpenAtCursor
@@ -404,7 +552,7 @@ class FloatingOverlayController {
         successDismissTask?.cancel()
         successDismissTask = nil
 
-        guard let panel, isVisible else { return }
+        guard let panel, isVisible, !isIslandMode else { return }
         cancelPanelHideAnimations(panel)
         panel.ignoresMouseEvents = isCursorMiniPanelMode
         if !panel.isVisible {
@@ -422,6 +570,13 @@ class FloatingOverlayController {
         panel.alphaValue = 1
     }
 
+    /// The earliest show on a key press, before the start's checks run.
+    /// Only in Notch island mode; the other windows need the target field.
+    func showIslandStartingStateIfSelected(near sourceApp: NSRunningApplication?) {
+        guard isIslandMode, !state.isActiveDictationState else { return }
+        showStartingState(near: sourceApp)
+    }
+
     @discardableResult
     func showMiniCursorStartingStateIfNeeded(
         near sourceApp: NSRunningApplication?,
@@ -435,7 +590,7 @@ class FloatingOverlayController {
     // MARK: - Hide Animations
 
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
-        guard let panel = panel else { completion?(); _performHide(); return }
+        guard let panel = panel, !isIslandMode else { completion?(); _performHide(); return }
         let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
@@ -466,7 +621,7 @@ class FloatingOverlayController {
     }
 
     func hideWithCancelAnimation() {
-        guard let panel = panel else { _performHide(); return }
+        guard let panel = panel, !isIslandMode else { _performHide(); return }
         let gen = hideGeneration.snapshot()
         panel.ignoresMouseEvents = true
 
@@ -606,18 +761,71 @@ class FloatingOverlayController {
         showMessage(message, tone: .notice)
     }
 
+    /// A dictation that didn't paste (no text box, or focus moved). The
+    /// island shows the words, a Paste button, and a ring that runs down to
+    /// the close; pressing ⌘V elsewhere turns it into "Pasted". Other
+    /// overlay modes keep the plain clipboard notice.
+    func showNotPastedNotice(_ text: String, fallbackMessage: String, paste: @escaping () -> Void) {
+        guard isIslandMode else {
+            showClipboardNotice(fallbackMessage)
+            return
+        }
+        showMessage("Not pasted", tone: .notice, notPasted: (text, paste))
+    }
+
+    private func clearNotPasted() {
+        notPastedText = nil
+        notPastedPasteHandler = nil
+        if let notPastedKeyMonitor {
+            NSEvent.removeMonitor(notPastedKeyMonitor)
+            self.notPastedKeyMonitor = nil
+        }
+    }
+
+    /// Watches for the user's own ⌘V in another app while the words are
+    /// still on the clipboard.
+    private func watchForManualPaste(of text: String) {
+        notPastedKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags == .command, event.charactersIgnoringModifiers?.lowercased() == "v" else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.notPastedText == text, self.state == .drafting,
+                      NSPasteboard.general.string(forType: .string) == text else { return }
+                self.clearNotPasted()
+                self.showSuccessAndDismiss(title: "Pasted")
+            }
+        }
+    }
+
+    /// Calm "it's saved" message, with an optional action such as Paste It.
+    func showSavedNotice(
+        _ message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        showMessage(message, tone: .saved, actionTitle: actionTitle, action: action)
+    }
+
     private func showMessage(
         _ message: String,
         tone: MessageTone,
         actionTitle: String? = nil,
-        action: (() -> Void)? = nil
+        action: (() -> Void)? = nil,
+        notPasted: (text: String, paste: () -> Void)? = nil
     ) {
         errorDismissTask?.cancel()
+        clearNotPasted()
+        if let notPasted {
+            notPastedText = notPasted.text
+            notPastedPasteHandler = notPasted.paste
+            watchForManualPaste(of: notPasted.text)
+        }
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         discardActionableMessageIfNeeded()
         errorMessage = message
         messageTone = tone
+        messageCanGiveWayToNextStart = false
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
@@ -626,26 +834,76 @@ class FloatingOverlayController {
             showPanel(near: nil)
         }
         pushStateToViews()  // Force update for error message
+        if notPasted != nil {
+            // Runs down with the island's ring, and holds while hovered.
+            errorDismissTask = Task { @MainActor [weak self] in
+                var remaining = Self.notPastedDismissSeconds
+                while remaining > 0 {
+                    do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                    guard let self else { return }
+                    if !self.isMouseOverPanel { remaining -= 0.1 }
+                }
+                guard let self, !self.errorMessage.isEmpty else { return }
+                self.dismissError()
+            }
+            return
+        }
         guard actionTitle == nil else { return }
-        let dismissDelay = tone == .notice
-            ? TranscriptedConstants.clipboardNoticeDismissDelay
-            : TranscriptedConstants.errorDismissDelay
+        let dismissDelay = TranscriptedConstants.messageDismissDelay(
+            base: tone != .error
+                ? TranscriptedConstants.clipboardNoticeDismissDelay
+                : TranscriptedConstants.errorDismissDelay,
+            characterCount: message.count
+        )
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: dismissDelay)
+                // Hovering the pill holds the message so it can be read, up to
+                // a cap: in near-text mode the pointer often just sits there.
+                var heldNanoseconds: UInt64 = 0
+                while self?.isMouseOverPanel == true, heldNanoseconds < Self.messageHoverHoldLimit {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    heldNanoseconds += 300_000_000
+                }
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.dismissError()
         }
     }
 
+    private static let messageHoverHoldLimit: UInt64 = 30_000_000_000  // 30 s
+
+    private var isMouseOverPanel: Bool {
+        if isIslandMode {
+            return isVisible && island?.isPointerOverIsland == true
+        }
+        guard let panel, isVisible, panel.isVisible else { return false }
+        return panel.frame.contains(NSEvent.mouseLocation)
+    }
+
+    /// `dismissError()` for an explicit user close (X or Esc), as opposed to
+    /// a timeout or a newer message.
+    func dismissErrorClosedByUser() {
+        guard state == .drafting, !errorMessage.isEmpty else { return }
+        if errorActionHandler != nil {
+            onActionableMessageClosedByUser?()
+        }
+        dismissError()
+    }
+
     func dismissError() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
+        clearNotPasted()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         errorMessage = ""
         discardActionableMessageIfNeeded()
-        hideWithCancelAnimation()
+        // Only real problems shake on the way out.
+        if messageTone == .error {
+            hideWithCancelAnimation()
+        } else {
+            hideWithConfirmAnimation()
+        }
     }
 
     private func discardActionableMessageIfNeeded() {
@@ -659,6 +917,7 @@ class FloatingOverlayController {
 
     private func clearActionableErrorWithoutHiding() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
+        clearNotPasted()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         errorMessage = ""
@@ -670,11 +929,20 @@ class FloatingOverlayController {
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
     func showNoSpeechAndDismiss(
         trigger: String = "unknown",
-        reason: DictationEmptyTranscriptionReason = .noSpeech
+        reason: DictationEmptyTranscriptionReason = .noSpeech,
+        shortcutMode: DictationShortcutMode? = nil,
+        silentMicName: String? = nil
     ) {
         errorDismissTask?.cancel()
-        errorMessage = DictationNoSpeechPresentationPolicy.message(trigger: trigger, reason: reason)
+        clearNotPasted()
+        errorMessage = DictationNoSpeechPresentationPolicy.message(
+            trigger: trigger,
+            reason: reason,
+            shortcutMode: shortcutMode,
+            silentMicName: silentMicName
+        )
         messageTone = .error
+        messageCanGiveWayToNextStart = true
         discardActionableMessageIfNeeded()
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
@@ -682,9 +950,17 @@ class FloatingOverlayController {
             showPanel(near: nil)
         }
         pushStateToViews()
+        // A muted mic needs reading and acting on, so it stays up as long
+        // as other messages of its length; plain "no speech" is a flash.
+        let dismissDelay = silentMicName == nil
+            ? TranscriptedConstants.noSpeechDismissDelay
+            : TranscriptedConstants.messageDismissDelay(
+                base: TranscriptedConstants.errorDismissDelay,
+                characterCount: errorMessage.count
+            )
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: TranscriptedConstants.noSpeechDismissDelay)
+                try await Task.sleep(nanoseconds: dismissDelay)
             } catch { return }
             guard let self = self else { return }
             self.errorMessage = ""
@@ -694,12 +970,16 @@ class FloatingOverlayController {
 
     func showSuccessAndDismiss(title: String = "Pasted", completion: (() -> Void)? = nil) {
         errorDismissTask?.cancel()
+        clearNotPasted()
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
         errorMessage = ""
         messageTone = .error
         discardActionableMessageIfNeeded()
         successTitle = title
+        if isIslandMode {
+            island?.noteDictationInserted(title: title)
+        }
         state = .success
         resizePanelToCompact()
         if !isVisible {
@@ -742,6 +1022,8 @@ class FloatingOverlayController {
         discardActionableMessageIfNeeded()
         listeningNotice = ""
         loadingPresentation = .initial
+        islandSourceApp = nil
+        pushStateToIsland()
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh
@@ -758,16 +1040,94 @@ class FloatingOverlayController {
     private func installEscapeMonitor() {
         guard escapeMonitor == nil else { return }
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return }
+            // Key repeat from a held Esc must not count as the confirming press.
+            guard event.keyCode == 53, !event.isARepeat else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
                 if self.state == .drafting, !self.errorMessage.isEmpty {
-                    self.dismissError()
+                    self.dismissErrorClosedByUser()
                     return
                 }
-                self.onEscapeDuringSession?()
+                self.handleEscapeDuringSession()
             }
+        }
+    }
+
+    /// When the mic first started recording in this session; nil before that.
+    /// Uptime, not wall clock, so a clock change can't make a long take look short.
+    private var listeningStartedAt: TimeInterval?
+    /// A first Esc on a long take that is waiting for a second press.
+    private var escapeFirstPressAt: TimeInterval?
+    private var escapeConfirmResetTask: Task<Void, Never>?
+
+    private static func escapeClockNow() -> TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+
+    private func updateEscapeCancelTracking() {
+        switch state {
+        case .listening:
+            if listeningStartedAt == nil {
+                listeningStartedAt = Self.escapeClockNow()
+            }
+        case .idle, .starting, .success:
+            listeningStartedAt = nil
+            clearEscapeConfirmation()
+        case .loading, .drafting:
+            // Stopping is an explicit "keep": a prompt from before the stop
+            // must not let the next Esc throw the take away while it
+            // transcribes. A new Esc here asks again.
+            clearEscapeConfirmation()
+        }
+    }
+
+    /// A retained recording being readmitted for another transcription pass.
+    /// It already holds real audio, so Esc must ask before discarding it even
+    /// though the overlay only just returned to listening.
+    func markRetainedRecordingForEscape() {
+        listeningStartedAt = Self.escapeClockNow() - DictationEscapeCancelPolicy.instantCancelLimitSeconds
+    }
+
+    private func handleEscapeDuringSession() {
+        onEscapeKeyDuringSession?()
+        let now = Self.escapeClockNow()
+        let decision = DictationEscapeCancelPolicy.decision(
+            capturedSeconds: listeningStartedAt.map { now - $0 },
+            secondsSinceFirstPress: escapeFirstPressAt.map { now - $0 }
+        )
+        switch decision {
+        case .cancel:
+            clearEscapeConfirmation()
+            onEscapeDuringSession?()
+        case .askToConfirm:
+            escapeFirstPressAt = now
+            listeningNotice = DictationEscapeCancelPolicy.confirmNotice
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: DictationEscapeCancelPolicy.confirmNotice,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
+            escapeConfirmResetTask?.cancel()
+            escapeConfirmResetTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(
+                    nanoseconds: UInt64(DictationEscapeCancelPolicy.confirmWindowSeconds * 1_000_000_000)
+                )
+                guard !Task.isCancelled, let self else { return }
+                self.clearEscapeConfirmation()
+            }
+        }
+    }
+
+    private func clearEscapeConfirmation() {
+        escapeFirstPressAt = nil
+        escapeConfirmResetTask?.cancel()
+        escapeConfirmResetTask = nil
+        if listeningNotice == DictationEscapeCancelPolicy.confirmNotice {
+            listeningNotice = ""
         }
     }
 
@@ -785,7 +1145,7 @@ class FloatingOverlayController {
     }
 
     private func resizePanel(to size: NSSize, keepingVisible: Bool = false, animated: Bool = true) {
-        guard let panel = panel else { return }
+        guard let panel = panel, !isIslandMode else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height
@@ -824,6 +1184,10 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .listening where isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode && !listeningNotice.isEmpty:
+            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .starting where isCursorMiniPresentationMode:
             return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .listening where isCursorMiniPresentationMode:

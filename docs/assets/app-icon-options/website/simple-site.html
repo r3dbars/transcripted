@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transcripted Simple Site</title>
+<style>
+:root{--bg:#f7f7f5;--ink:#1d1d1f;--ink2:rgba(29,29,31,.58);--ink3:rgba(29,29,31,.38);--hair:rgba(29,29,31,.1);--btn:#1d1d1f;--btn-ink:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1a1a1b;--ink:#f5f5f3;--ink2:rgba(245,245,243,.62);--ink3:rgba(245,245,243,.4);--hair:rgba(245,245,243,.1);--btn:#f5f5f3;--btn-ink:#1d1d1f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1a1a1b;--ink:#f5f5f3;--ink2:rgba(245,245,243,.62);--ink3:rgba(245,245,243,.4);--hair:rgba(245,245,243,.1);--btn:#f5f5f3;--btn-ink:#1d1d1f;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:17px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+a{color:inherit}
+header,footer{display:flex;align-items:center;gap:16px;max-width:960px;width:100%;margin:0 auto;padding:20px 24px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;text-decoration:none;margin-right:auto}
+.brand img{width:28px;height:28px}
+.quiet{color:var(--ink2);text-decoration:none;font-size:15px}
+.quiet:hover{color:var(--ink)}
+main{flex:1;display:grid;place-items:center;text-align:center;padding:16px 24px 40px}
+.hero{max-width:720px;display:grid;justify-items:center}
+.icon{width:136px;height:136px;margin-bottom:24px}
+h1{font:700 clamp(34px,5.6vw,50px)/1.08 -apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;letter-spacing:-.025em;margin:0;text-wrap:balance}
+p.lede{font-size:19px;color:var(--ink2);margin:16px 0 30px;max-width:38ch;text-wrap:pretty}
+.btn{display:inline-block;background:var(--btn);color:var(--btn-ink);text-decoration:none;font-weight:600;font-size:16px;padding:13px 26px;border-radius:12px}
+.btn:focus-visible,.quiet:focus-visible,.brand:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.fine{font-size:13px;color:var(--ink3);margin:14px 0 0}
+ul.points{list-style:none;padding:0;margin:40px 0 0;display:flex;flex-wrap:wrap;justify-content:center;gap:10px 28px;color:var(--ink2);font-size:15px}
+ul.points li::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ink3);margin-right:9px;vertical-align:middle}
+footer{border-top:1px solid var(--hair);color:var(--ink3);font-size:13px}
+footer span{margin-right:auto}
+.logo-dark{display:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo-light{display:none}:root:not([data-theme="light"]) .logo-dark{display:block}}
+:root[data-theme="dark"] .logo-light{display:none}:root[data-theme="dark"] .logo-dark{display:block}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="#"><img class="logo-light" src="logo-light.png" alt=""><img class="logo-dark" src="logo-dark.png" alt="">Transcripted</a>
+  <a class="quiet" href="#">GitHub</a>
+</header>
+<main>
+  <div class="hero">
+    <img class="icon logo-light" src="icon-light.png" alt="Transcripted app icon"><img class="icon logo-dark" src="icon-dark.png" alt="Transcripted app icon, dark">
+    <h1>Turn your meetings and dictation into text files your AI can read.</h1>
+    <p class="lede">Transcripted captures what's said and saves it as a plain Markdown file on your Mac.</p>
+    <a class="btn" href="#">Download for Mac</a>
+    <p class="fine">Free · Open source · Transcribes on your Mac</p>
+    <ul class="points">
+      <li>Records meetings</li>
+      <li>Types what you say</li>
+      <li>Knows who's talking</li>
+    </ul>
+  </div>
+</main>
+<footer><span>© 2026 Transcripted</span><a class="quiet" href="#">Privacy</a><a class="quiet" href="#">GitHub</a></footer>
+</body>
+</html>

@@ -142,8 +142,8 @@
     {
       "id": "retry_recovery.dictation_start_rate",
       "rows": [
-        {"trigger": "physical_key", "start_requests": 48, "retry_requests": 3, "starts_succeeded": 44, "starts_failed": 2, "requesting_devices": 17},
-        {"trigger": "menu", "start_requests": 23, "retry_requests": 0, "starts_succeeded": 20, "starts_failed": 0, "requesting_devices": 9}
+        {"trigger": "physical_key", "start_requests": 48, "retry_requests": 3, "starts_succeeded": 44, "starts_failed": 2, "stopped_before_mic_ready": 1, "requesting_devices": 17},
+        {"trigger": "menu", "start_requests": 23, "retry_requests": 0, "starts_succeeded": 20, "starts_failed": 0, "stopped_before_mic_ready": 0, "requesting_devices": 9}
       ]
     },
     {

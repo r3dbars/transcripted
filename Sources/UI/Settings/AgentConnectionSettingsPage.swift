@@ -79,6 +79,13 @@ struct AgentConnectionSettingsPage: View {
         guard let first = ordered.first else { return "" }
         let remainder = ordered.count - 1
         let subject = remainder > 0 ? "\(first.displayName) and \(remainder) more" : first.displayName
+        let justConnected = ordered.filter { rowPhases[$0] == .connected }
+        if justConnected.count == 1, let agent = justConnected.first {
+            return "Connected · Restart \(agent.displayName) to finish"
+        }
+        if justConnected.count > 1 {
+            return "Connected · Restart your agents to finish"
+        }
         return "Connected · \(subject) reads your meetings and dictations"
     }
 
@@ -102,13 +109,18 @@ struct AgentConnectionSettingsPage: View {
 
     /// A connected agent collapses into the status line and stops rendering
     /// its own row — unless it still has something the user needs to act on
-    /// (a failed retry, or a config-repair notice that dropped their other
-    /// MCP servers and must stay visible).
+    /// (a failed retry, a config-repair notice that dropped their other MCP
+    /// servers and must stay visible, or a connect that just finished and
+    /// still needs the agent restarted before its first question works).
     private func shouldShowRow(for agent: AgentMCPAgent) -> Bool {
         guard detectedAgents.contains(agent) else { return false }
         guard connectedAgents.contains(agent) else { return true }
-        if case .failed = rowPhases[agent] ?? .idle { return true }
-        return configRepairNotices[agent] != nil
+        switch rowPhases[agent] ?? .idle {
+        case .failed, .connected:
+            return true
+        case .idle, .connecting:
+            return configRepairNotices[agent] != nil
+        }
     }
 
     private func agentRow(_ agent: AgentMCPAgent) -> some View {
@@ -249,12 +261,17 @@ struct AgentConnectionSettingsPage: View {
     }
 
     private func agentRowDetail(_ agent: AgentMCPAgent, isConnected: Bool, phase: RowPhase) -> String {
-        if phase == .connected || (isConnected && phase == .idle) {
+        // A running agent only loads the new tools when it starts, so the
+        // first question after Connect fails until it's restarted.
+        if phase == .connected {
+            return "Restart \(agent.displayName) to finish connecting."
+        }
+        if isConnected && phase == .idle {
             switch agent {
             case .claudeDesktop:
-                return "Direct tools installed. Restart Claude Desktop after updates."
+                return "Restart Claude Desktop after Transcripted updates."
             case .claudeCode, .codex, .cursor:
-                return "Direct tools registered. Restart \(agent.displayName) if it's running."
+                return "Restart \(agent.displayName) if it's running."
             }
         }
         return agent.detail

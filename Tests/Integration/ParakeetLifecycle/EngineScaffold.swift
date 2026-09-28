@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreML
 import Foundation
 import FluidAudio
 
@@ -70,3 +71,8 @@ enum AppLogger { static let transcription = SilentLogger() }
     func capture(level: Level, engine: String, event: String, message: String, context: [String: String] = [:]) {}
 }
 extension AVAuthorizationStatus { var diagnosticName: String { "test" } }
+enum ParakeetLocalModelLoader {
+    static func load(from directory: URL, encoderComputeUnits: MLComputeUnits?) async throws -> AsrModels {
+        try await AsrModels.load(from: directory, version: .v3, encoderComputeUnits: encoderComputeUnits)
+    }
+}

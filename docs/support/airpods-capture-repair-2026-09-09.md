@@ -1,5 +1,7 @@
 # AirPods capture repair — 2026-09-09
 
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+
 ## Report and evidence
 
 A customer reported failed AirPods dictation and missing local speech in meetings.

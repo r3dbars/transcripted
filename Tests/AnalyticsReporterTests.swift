@@ -164,6 +164,31 @@ func testAnalyticsReporter() {
         )
     }
 
+    runSuite("AnalyticsRuntimeConfiguration sends nothing from automated launches") {
+        let info: [String: Any] = [AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_bundle"]
+
+        assertEqual(
+            AnalyticsRuntimeConfiguration.apiKey(environment: ["POSTHOG_API_KEY": "phc_env"], infoDictionary: info),
+            "phc_env",
+            "a normal launch keeps its analytics key"
+        )
+        for key in AutomatedLaunchEnvironment.keys {
+            let environment = [key: "/tmp/report.json", "POSTHOG_API_KEY": "phc_env"]
+            assertTrue(
+                AutomatedLaunchEnvironment.isActive(environment: environment),
+                "\(key) marks an automated launch"
+            )
+            assertNil(
+                AnalyticsRuntimeConfiguration.apiKey(environment: environment, infoDictionary: info),
+                "\(key) launches must not report a fake new install"
+            )
+        }
+        assertFalse(
+            AutomatedLaunchEnvironment.isActive(environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"]),
+            "unrelated test switches do not silence analytics"
+        )
+    }
+
     runSuite("AnalyticsRuntimeConfiguration rejects unsafe build metadata") {
         let info: [String: Any] = [
             AnalyticsRuntimeConfiguration.buildChannelInfoKey: "/Users/jane/build",

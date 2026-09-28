@@ -325,6 +325,10 @@ public enum SpeakerClipExtractor {
     private static func removeClipFile(_ url: URL, label: String) {
         do {
             try FileManager.default.removeItem(at: url)
+        } catch where ClipRemovalPolicy.isAlreadyGone(error) {
+            // Nothing to remove: a speaker's first clip, or a profile that
+            // never had one. Not worth a warning on every save.
+            return
         } catch {
             AppLogger.pipeline.warning("Failed to remove clip file", [
                 "label": label,
@@ -332,5 +336,22 @@ public enum SpeakerClipExtractor {
                 "error": error.localizedDescription
             ])
         }
+    }
+}
+
+enum ClipRemovalPolicy {
+    /// True when removing a clip failed only because there was no file.
+    static func isAlreadyGone(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileNoSuchFileError {
+            return true
+        }
+        if nsError.domain == NSPOSIXErrorDomain, nsError.code == Int(ENOENT) {
+            return true
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isAlreadyGone(underlying)
+        }
+        return false
     }
 }

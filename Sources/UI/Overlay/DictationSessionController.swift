@@ -87,17 +87,23 @@ class DictationSessionController: ObservableObject {
         pendingStartStageEnteredAt = CFAbsoluteTimeGetCurrent()
     }
 
+    /// Sends a saved dictation recording through the same import as
+    /// Capture → Transcribe Audio File. Wired by the app delegate; without it
+    /// the recovery messages fall back to showing the file in Finder.
+    var onTranscribeSavedAudio: ((URL) -> Void)?
+
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
     }
     var overlayController: FloatingOverlayController? {
         didSet {
             oldValue?.onActionableMessageDiscarded = nil
+            oldValue?.onActionableMessageClosedByUser = nil
             textPaster.discardPasteRetry()
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self else { return }
                 guard self.isDictating else {
-                    self.overlayController?.dismissError()
+                    self.overlayController?.dismissErrorClosedByUser()
                     return
                 }
                 self.cancelDictation()
@@ -108,6 +114,17 @@ class DictationSessionController: ObservableObject {
             }
             overlayController?.onActionableMessageDiscarded = { [weak self] in
                 self?.textPaster.discardPasteRetry()
+                // Replaced or timed out: the user didn't say no, so launch
+                // may still remind them.
+                self?.savedAudioPromptURL = nil
+            }
+            overlayController?.onActionableMessageClosedByUser = { [weak self] in
+                self?.stopRemindingAboutSavedAudioPrompt()
+            }
+            // Any Esc, including the first of "press again to discard",
+            // takes back a start that is waiting on this take.
+            overlayController?.onEscapeKeyDuringSession = { [weak self] in
+                self?.dropQueuedDictationStart(showMessage: false)
             }
         }
     }
@@ -131,12 +148,42 @@ class DictationSessionController: ObservableObject {
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
+    /// Whether any dictation has been requested since this process launched.
+    /// The first one is where a cold start shows (models warming at launch,
+    /// the first mic bind), so both start events say whether they are it.
+    private static var hasRequestedDictationThisLaunch = false
+    private var currentRequestIsFirstSinceLaunch = false
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    /// Whether this session's start click has played. It plays once, on key
+    /// press or after recording starts (see `DictationStartCuePolicy`).
+    private var didPlayStartCue = false
+    /// The shortcut that started this session, when a shortcut did. Read from
+    /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
+    private var currentDictationShortcutMode: DictationShortcutMode?
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
+    /// The saved recording the overlay is currently offering to transcribe.
+    /// If the user closes that message (X or Esc), the recording is marked so
+    /// launch stops asking about it. The file itself is never deleted here.
+    private var savedAudioPromptURL: URL?
     private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
+    /// A start-shortcut press that landed while the last take was still
+    /// finishing. It starts as soon as that take is done. See
+    /// `DictationQueuedStartPolicy`.
+    private struct QueuedDictationStart {
+        let sourceApp: NSRunningApplication?
+        let trigger: DictationTrigger
+        let shortcutMode: DictationShortcutMode
+        let isRetry: Bool
+        let requestedAt: TimeInterval
+    }
+    private var queuedDictationStart: QueuedDictationStart?
+    private var queuedDictationStartTask: Task<Void, Never>?
+    /// Set while Quit waits for a take to finish, so a press then can't
+    /// queue a new recording during shutdown.
+    private var isTerminatingDictation = false
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -155,6 +202,7 @@ class DictationSessionController: ObservableObject {
         streamingTask?.cancel()
         recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
+        queuedDictationStartTask?.cancel()
     }
 
     private func setupInterruptionObserver() {
@@ -171,14 +219,43 @@ class DictationSessionController: ObservableObject {
     func presentPendingStoppedAudioRecoveryIfNeeded() {
         guard !isDictating,
               let overlayController,
-              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
+              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1, excludingDismissed: true).first else { return }
+        let savedAudioAction = savedDictationAudioAction(for: recovery.url)
         overlayController.showError(
-            "A stopped dictation recording is available. Retry it with Capture → Transcribe Audio File in Transcripted.",
-            actionTitle: "Show Audio",
-            action: {
-                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
-            }
+            "A saved dictation recording never became text. Transcribe it now, and it shows up in Meetings.",
+            actionTitle: savedAudioAction.title,
+            action: savedAudioAction.action
         )
+        savedAudioPromptURL = recovery.url
+    }
+
+    /// The user closed a "Transcribe It" message (X or Esc) without pressing
+    /// it. Launch stops asking about that recording, so an empty take doesn't
+    /// come back every time. Nothing is deleted.
+    private func stopRemindingAboutSavedAudioPrompt() {
+        guard let url = savedAudioPromptURL else { return }
+        savedAudioPromptURL = nil
+        let marked = DictationStoppedAudioRecoveryStore.markDismissed(audioURL: url)
+        appState?.logger.log("DICTATION | saved recording prompt closed; launch reminder \(marked ? "off" : "unchanged"), audio kept")
+    }
+
+    /// The button on a message about a saved dictation recording. The
+    /// messages used to point at Capture → Transcribe Audio File, a menu that
+    /// only shows while Transcripted is frontmost. Transcribe It runs that
+    /// same import on the saved file, and the meeting importer cleans the
+    /// recording up once its transcript is saved.
+    private func savedDictationAudioAction(for url: URL) -> (title: String, action: () -> Void) {
+        guard let onTranscribeSavedAudio else {
+            return ("Show Audio", { [weak self] in
+                self?.savedAudioPromptURL = nil
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            })
+        }
+        return (DictationSavedAudioActionCopy.transcribeTitle, { [weak self] in
+            self?.savedAudioPromptURL = nil
+            self?.overlayController?.hideWithConfirmAnimation()
+            onTranscribeSavedAudio(url)
+        })
     }
 
     // MARK: - Dictation Mode (Option+Space)
@@ -192,6 +269,24 @@ class DictationSessionController: ObservableObject {
     ///   alone cannot tell a retry apart from the press that preceded it, and
     ///   a user who taps Try Again four times would otherwise read as five
     ///   independent attempts in the denominator.
+    /// The "Not pasted" notice, whose Paste button pastes into whatever app
+    /// is in front now (the user clicks where the words go first).
+    private func showNotPasted(_ text: String, message: String, overlayController: FloatingOverlayController) {
+        overlayController.showNotPastedNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+            guard let self, let overlayController else { return }
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            guard frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+            switch self.textPaster.paste(text, target: DictationPasteTarget.capture(sourceApp: frontmost)) {
+            case .pasted, .likelyPasted:
+                overlayController.showSuccessAndDismiss(title: "Pasted")
+            case .copied(let retryMessage, reason: _):
+                self.showNotPasted(text, message: retryMessage, overlayController: overlayController)
+            case .failed(let failure, reason: _):
+                overlayController.showError(failure)
+            }
+        }
+    }
+
     func startDictation(
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
@@ -202,6 +297,21 @@ class DictationSessionController: ObservableObject {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating else { return }
+        // A shortcut press while the last take is still transcribing waits
+        // for it instead of being refused. It is counted below when it
+        // actually starts, or when the wait gives up.
+        if rememberStartPressIfFinishing(
+            sourceApp: sourceApp,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isRetry: isRetry
+        ) {
+            return
+        }
+        // Notch island: put it up on this key press, ahead of the telemetry
+        // and admission checks below (~12 ms on the main thread), so it lands
+        // on the next frame. A refused start replaces it with its message.
+        overlayController.showIslandStartingStateIfSelected(near: sourceApp)
         // The attempt denominator.
         //
         // `dictation_started` is emitted only once the microphone is actually
@@ -273,6 +383,7 @@ class DictationSessionController: ObservableObject {
         enterPendingStartStage("start_requested")
         currentDictationSessionID = UUID()
         didAttemptStartActivation = false
+        didPlayStartCue = false
         stopFinalizationGate.reset()
         dictationSession.startReadinessProfile = currentStartReadinessProfile
         dictationSession.telemetryContext = [
@@ -289,6 +400,7 @@ class DictationSessionController: ObservableObject {
         sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
+        currentDictationShortcutMode = shortcutMode
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
@@ -382,6 +494,7 @@ class DictationSessionController: ObservableObject {
         appState: TranscriptedAppState,
         trigger: DictationTrigger
     ) {
+        let requestToRecordingMs = max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000))
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -390,16 +503,23 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(
                 extra: [
                     "trigger": trigger.rawValue,
-                    "request_to_recording_ms": "\(max(0, Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1_000)))"
+                    "request_to_recording_ms": "\(requestToRecordingMs)"
                 ]
             )
         )
+        // `start_latency_bucket` is the off-device twin of
+        // `request_to_recording_ms`: how long the user waited between asking
+        // and the mic recording. It is the one field `dictation_start_requested`
+        // cannot carry, since the request fires before anything has started.
         AnalyticsReporter.track(
             "dictation_started",
             properties: dictationAnalyticsProperties(
                 extra: [
                     "trigger": trigger.rawValue,
-                ]
+                    "start_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: requestToRecordingMs),
+                    "start_latency_ms": MachineClassTelemetry.roundedMilliseconds(requestToRecordingMs),
+                    "first_since_launch": currentRequestIsFirstSinceLaunch ? "true" : "false",
+                ].merging(dictationSpeedContext(appState: appState)) { current, _ in current }
             )
         )
     }
@@ -417,12 +537,16 @@ class DictationSessionController: ObservableObject {
         trigger: DictationTrigger,
         isRetry: Bool
     ) {
+        currentRequestIsFirstSinceLaunch = !Self.hasRequestedDictationThisLaunch
+        Self.hasRequestedDictationThisLaunch = true
         var properties = appState.sttRouter.dictationAudioRouteAnalyticsContext
         properties["trigger"] = trigger.rawValue
         properties["start_retry"] = isRetry ? "true" : "false"
+        properties["first_since_launch"] = currentRequestIsFirstSinceLaunch ? "true" : "false"
         properties["model_state"] = ProductFrictionTelemetry.modelState(
             isReady: appState.sttRouter.isModelLoaded
         )
+        properties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_start_requested",
@@ -521,12 +645,13 @@ class DictationSessionController: ObservableObject {
             beginDictationRecording(sourceApp: sourceApp)
 
         case .concurrentWarmupThenImmediate:
-            // The model files are already on disk — open the microphone now
-            // and load the model concurrently so the first dictation after
-            // launch doesn't stare at "Loading voice model" before it can
-            // listen. The stop path already waits for the model before
-            // transcribing (and surfaces a load failure gracefully), so a
-            // stop that beats the load is covered.
+            // The model isn't loaded yet (cached, loading, or still
+            // downloading on a first run) — open the microphone now and load
+            // the model concurrently so dictation never stares at "Warming
+            // up" before it can listen. The stop path checkpoints the audio
+            // and waits for the model before transcribing (and surfaces a
+            // load failure gracefully), so a stop that beats the load is
+            // covered.
             //
             // Deliberately untracked: cancelling this dictation must not
             // abandon a model load the next session will need, and the
@@ -607,6 +732,11 @@ class DictationSessionController: ObservableObject {
             // still runs asynchronously so a slow device graph never blocks UI.
             enterPendingStartStage("opening_microphone")
             overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
+            if DictationStartCuePolicy.playsOnKeyPress(
+                recordedInput: appState.sttRouter.parakeetEngine.cachedInputDeviceSelection?.selectedInput
+            ) {
+                playStartCueOnce()
+            }
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -648,7 +778,7 @@ class DictationSessionController: ObservableObject {
                             ]
                         )
                     )
-                    AppSoundPlayer.shared.play(.dictationStart)
+                    self.playStartCueOnce()
                     self.installSessionTimeout()
                 } else {
                     let requestToFallbackMs = Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000)
@@ -700,6 +830,15 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = Task { @MainActor [weak self] in
             await self?.waitForEngineAndStart(sourceApp: sourceApp)
         }
+    }
+
+    /// The start click, once per session, from whichever path gets there
+    /// first: the key press on a built-in or wired mic, otherwise the moment
+    /// recording starts.
+    private func playStartCueOnce() {
+        guard !didPlayStartCue else { return }
+        didPlayStartCue = true
+        AppSoundPlayer.shared.play(.dictationStart)
     }
 
     // The recovery wait-loop state machine (deadline, readiness-refresh
@@ -778,7 +917,7 @@ class DictationSessionController: ObservableObject {
             // which discards the audio the engine preserved instead of
             // transcribing it.
             recordingStartRetryTask = nil
-            AppSoundPlayer.shared.play(.dictationStart)
+            playStartCueOnce()
             installSessionTimeout()
 
         case .timedOut(let info):
@@ -835,6 +974,7 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
         if cleanupPlan.resetSpeechEngine {
             await dictationSession.resetEngineAfterFailedStart(
                 appState: appState,
@@ -959,6 +1099,17 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
+        // A hands-free press after this take already stopped is a request for
+        // the next one, not another stop.
+        if trigger == .physicalKey,
+           shortcutMode == .handsFree,
+           rememberStartPressIfFinishing(
+               sourceApp: NSWorkspace.shared.frontmostApplication,
+               trigger: trigger,
+               shortcutMode: shortcutMode
+           ) {
+            return
+        }
         // The overlay can briefly look like pending startup again while the
         // first stop waits for a model. Fence repeats before stopDecision so
         // they cannot be misread as cancelPendingStart and discard its WAV.
@@ -1065,6 +1216,7 @@ class DictationSessionController: ObservableObject {
         }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
 
@@ -1089,6 +1241,10 @@ class DictationSessionController: ObservableObject {
             // idle stop path invalidates any pending recovery restart.
             await appState.sttRouter.stopRecording()
             stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
+            // The only end-of-take click. It plays once the mic is stopped, so on
+            // speakers it can't land in the take, and before transcription and
+            // paste, so it means "got it", not "pasted".
+            AppSoundPlayer.shared.play(.dictationStop)
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
@@ -1213,7 +1369,18 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isRecordingModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
+                    if let recovery = self.stoppedAudioRecovery, recovery.sessionID == taskSessionID {
+                        let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true),
+                            actionTitle: savedAudioAction.title,
+                            action: savedAudioAction.action
+                        )
+                    } else {
+                        overlayController.showError(
+                            DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+                        )
+                    }
                     ProductFrictionTelemetry.track(
                         surface: .dictation,
                         stage: "dictation_transcribe",
@@ -1255,6 +1422,7 @@ class DictationSessionController: ObservableObject {
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
                 let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
+                let isMisTap = emptyReason.isAccidentalStart(pressDuration: stopTiming.requestedAt - sessionStartTime)
                 appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                 EventReporter.shared.capture(
                     level: .warning,
@@ -1283,27 +1451,87 @@ class DictationSessionController: ObservableObject {
                 ProductFrictionTelemetry.track(
                     surface: .dictation,
                     stage: "dictation_transcribe",
-                    result: .giveUp,
+                    result: isMisTap ? .cancelled : .giveUp,
                     failureKind: emptyReason.frictionFailureKind,
                     elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
-                if emptyReason.shouldDiscardStoppedAudioRecovery {
+                if isMisTap {
+                    // A mis-tap: close the overlay the same way a cancel does,
+                    // with no "Recording ended too soon" error to dismiss.
+                    NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
+                    AppSoundPlayer.shared.play(.dictationCancelled)
+                    overlayController.hideWithCancelAnimation()
+                } else if emptyReason.shouldDiscardStoppedAudioRecovery {
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.noSpeech)
-                    overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
-                } else if let recovery = self.stoppedAudioRecovery {
+                    overlayController.showNoSpeechAndDismiss(
+                        trigger: currentDictationTrigger.rawValue,
+                        reason: emptyReason,
+                        shortcutMode: currentDictationShortcutMode,
+                        silentMicName: appState.sttRouter.lastRecordingWasDigitalSilence
+                            ? appState.sttRouter.inputDeviceName
+                            : nil
+                    )
+                } else if emptyReason == .otherLanguage,
+                          let heldText = appState.sttRouter.heldBackDictationText {
+                    // Probably a wrong-language guess, but the check can be
+                    // wrong, so the text is one press away and the audio stays.
+                    let heldRecovery = self.stoppedAudioRecovery
+                    let heldSaveContext = self.dictationContext()
                     overlayController.showError(
                         DictationNoSpeechPresentationPolicy.message(
                             trigger: currentDictationTrigger.rawValue,
-                            reason: emptyReason
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
                         ),
-                        actionTitle: "Show Audio",
-                        action: {
-                            NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                        actionTitle: DictationHeldTextActionCopy.pasteAnywayTitle,
+                        action: { [weak self] in
+                            guard let self else { return }
+                            let outcome = self.pasteWithClipboardRestore(heldText)
+                            // Save it like any finished take: dictation history,
+                            // Paste Last Dictation, and the kept audio cleaned up.
+                            self.lastCompletedText = heldText
+                            let saveTask = self.startPersistingDictationTranscript(
+                                text: heldText,
+                                delivery: outcome.delivery,
+                                recovery: heldRecovery
+                            )
+                            Task { @MainActor [weak self] in
+                                let result = await saveTask.value
+                                self?.publishDictationTranscriptPersistence(
+                                    result,
+                                    delivery: outcome.delivery,
+                                    context: heldSaveContext
+                                )
+                            }
+                            // Pasting pumps the run loop; a take started meanwhile owns the pill.
+                            guard self.currentDictationSessionID == taskSessionID, !self.isDictating else { return }
+                            switch outcome {
+                            case .pasted, .likelyPasted:
+                                overlayController.showSuccessAndDismiss(title: "Pasted")
+                            case .copied(let message, reason: _), .failed(let message, reason: _):
+                                overlayController.showError(message)
+                            }
                         }
                     )
+                } else if let recovery = self.stoppedAudioRecovery {
+                    let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
+                    overlayController.showError(
+                        DictationNoSpeechPresentationPolicy.message(
+                            trigger: currentDictationTrigger.rawValue,
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
+                        ),
+                        actionTitle: savedAudioAction.title,
+                        action: savedAudioAction.action
+                    )
+                    // Only for audio the model heard nothing in. A model
+                    // failure keeps its launch reminder even if closed.
+                    if emptyReason == .audioNeedsRecovery {
+                        self.savedAudioPromptURL = recovery.url
+                    }
                 } else {
                     if emptyReason == .audioNeedsRecovery {
                         // The captured audio has no durable WAV. If native RAM
@@ -1315,7 +1543,8 @@ class DictationSessionController: ObservableObject {
                         overlayController.showError(
                             DictationNoSpeechPresentationPolicy.message(
                                 trigger: currentDictationTrigger.rawValue,
-                                reason: emptyReason
+                                reason: emptyReason,
+                                shortcutMode: currentDictationShortcutMode
                             )
                         )
                     }
@@ -1351,7 +1580,13 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
-            let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let modelWaitSeconds = (stopTiming.modelReadyAt ?? 0) - (stopTiming.modelWaitStartedAt ?? 0)
+            let pasteOutcome = self.pasteWithClipboardRestore(
+                text,
+                followCurrentFocus: DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(
+                    modelWaitSeconds: modelWaitSeconds
+                )
+            )
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
             // Paste confirmation pumps the run loop, so cancellation/restart can occur here too.
             guard DictationSessionCompletionPolicy.canPublish(
@@ -1448,28 +1683,35 @@ class DictationSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
-                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else if case .failed(let failure) = autoSendOutcome {
-                    overlayController.showError("Text pasted, but Auto Enter didn't run. \(failure.message)")
+                    overlayController.showError(failure.message)
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: .pasteConfirmationUnavailable):
+            case .likelyPasted:
+                // No Accessibility proof, but the target stayed in front and read
+                // the clipboard right after Cmd+V, so the text almost certainly
+                // landed and the user's clipboard is already being restored.
                 if let saveFailureMessage {
-                    overlayController.showError("\(message) \(saveFailureMessage)")
+                    overlayController.showError(saveFailureMessage)
+                } else if self.autoSendRequestDecision.expected {
+                    // Auto Enter only presses Return after a confirmed paste.
+                    overlayController.showClipboardNotice("Pasted. Press Return to send it.")
+                    // The text landed; a press for the next take can replace this.
+                    overlayController.messageCanGiveWayToNextStart = true
                 } else {
-                    overlayController.showClipboardNotice(message)
+                    overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
-                appState.logger.log("DICTATION | paste command sent without positive delivery proof; showing neutral clipboard notice: \(message)")
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
                 } else {
                     // The text is safe on the clipboard — present it as a calm
-                    // "press ⌘V" notice, not a warning-triangle error.
-                    overlayController.showClipboardNotice(message)
+                    // "press ⌘V" notice, not a warning-triangle error. The
+                    // island also shows the words and a Paste button.
+                    self.showNotPasted(text, message: message, overlayController: overlayController)
                 }
             case .failed(let message, reason: _):
                 let combinedMessage: String
@@ -1601,14 +1843,20 @@ class DictationSessionController: ObservableObject {
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
         } else {
-            overlayController.showError(
-                "Saved to Markdown. Paste it now, or use Paste Last Dictation later.",
+            // Hitting the 5-minute cap still saved the text: a notice, not
+            // an error with a warning triangle and a shake. The menu has no
+            // Paste Last row, so name the shortcut that reaches it.
+            let pasteLastShortcut = PhysicalDictationTriggerPreferences.displayString(
+                for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
+            )
+            overlayController.showSavedNotice(
+                "Saved to Markdown. Paste it now, or press \(pasteLastShortcut) later.",
                 actionTitle: "Paste It",
                 action: { [weak self] in
                     guard let self else { return }
                     let outcome = self.pasteWithClipboardRestore(text)
                     switch outcome {
-                    case .pasted:
+                    case .pasted, .likelyPasted:
                         overlayController.showSuccessAndDismiss(title: "Pasted")
                     case .copied(let message, reason: _), .failed(let message, reason: _):
                         overlayController.showError(message)
@@ -1639,17 +1887,72 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    /// This session's id while it is dictating, for a caller that needs to
+    /// act on this exact session later.
+    var activeDictationSessionID: UUID? {
+        isDictating ? currentDictationSessionID : nil
+    }
+
+    /// A hands-free modifier press started this session, then another key went
+    /// down while it was held: it was a combo (Option+M, or typing é), not a
+    /// dictation tap. Drop the start with no sound, error, or saved audio.
+    /// With no session id the press only queued a start behind a take that
+    /// was still finishing, so that queued start is dropped instead.
+    func abandonDictationStartForModifierCombo(sessionID: UUID?) {
+        guard let (appState, overlayController) = readyState() else { return }
+        guard let sessionID else {
+            dropQueuedDictationStart(showMessage: false)
+            return
+        }
+        guard isDictating, currentDictationSessionID == sessionID else { return }
+        let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
+        let stage = pendingStartStage
+        cancelActiveTasks(cancelRecording: true)
+        discardStoppedAudioRecovery(explicitDiscard: true)
+        overlayController.hideWithCancelAnimation()
+        isDictating = false
+        enterPendingStartStage(Self.idleStartStage)
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "modifier_combo")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_start_dropped_for_modifier_combo",
+            message: "A hands-free key press became a key combo, so its dictation start was dropped",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "pending_for_ms": "\(startPendingForMs)",
+                    "pending_stage": stage
+                ]
+            )
+        )
+        // Closes the attempt `dictation_start_requested` opened, so the start
+        // funnel doesn't read a dropped combo as a lost start.
+        AnalyticsReporter.track(
+            "dictation_start_dropped_for_modifier_combo",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
+        )
+    }
+
     /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
+        // Esc on a finishing take means stop, not "and start the next one".
+        dropQueuedDictationStart(showMessage: false)
         if preserveStoppedAudio {
             stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
         }
         cancelActiveTasks(cancelRecording: true)
         if !preserveStoppedAudio {
             discardStoppedAudioRecovery(explicitDiscard: true)
+            // The "discarded" cue only when something was actually thrown away;
+            // a quit that keeps the audio for recovery stays silent.
+            AppSoundPlayer.shared.play(.dictationCancelled)
         }
-        AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "cancelled")
@@ -1691,6 +1994,10 @@ class DictationSessionController: ObservableObject {
     }
 
     func finishDictationForTermination() async -> Bool {
+        // Stays set once Quit is admitted, so nothing can queue a new take
+        // while the app shuts down. Every refusal below clears it.
+        isTerminatingDictation = true
+        dropQueuedDictationStart(showMessage: false)
         guard isDictating else { return admitInactiveDictationQuit() }
         stopDictationAndPaste(trigger: .unknown)
 
@@ -1699,6 +2006,7 @@ class DictationSessionController: ObservableObject {
             do {
                 try await Task.sleep(nanoseconds: 100_000_000)
             } catch {
+                isTerminatingDictation = false
                 return false
             }
         }
@@ -1708,6 +2016,7 @@ class DictationSessionController: ObservableObject {
             guard let stoppedAudioCheckpointSignal,
                   await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000) else {
                 showUnsafeDictationQuitError()
+                isTerminatingDictation = false
                 return false
             }
             guard DictationTerminationAdmissionPolicy.canTerminate(
@@ -1717,6 +2026,7 @@ class DictationSessionController: ObservableObject {
                 recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
             ) else {
                 showUncheckpointedActiveDictationQuitError()
+                isTerminatingDictation = false
                 return false
             }
             cancelDictation(preserveStoppedAudio: true)
@@ -1737,7 +2047,10 @@ class DictationSessionController: ObservableObject {
             hasRecoverableRecording: appState?.sttRouter.hasRecoverableRecording ?? false,
             recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
         )
-        if !canTerminate { showFailedCheckpointRecoveryError() }
+        if !canTerminate {
+            isTerminatingDictation = false
+            showFailedCheckpointRecoveryError()
+        }
         return canTerminate
     }
 
@@ -1800,6 +2113,7 @@ class DictationSessionController: ObservableObject {
             self.processActivityLabel = "stop finalization"
             self.isDictating = true
             overlayController.state = .listening
+            overlayController.markRetainedRecordingForEscape()
             self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
             if self.isDictating,
                self.stopFinalizationGate.admittedSessionID == sessionID {
@@ -2000,26 +2314,26 @@ class DictationSessionController: ObservableObject {
         var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
         timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            var didWarnSessionCap = false
+            var didAnnounceSessionCap = false
             while !Task.isCancelled {
                 let now = ProcessInfo.processInfo.systemUptime
                 if timeout.isExpired(at: now) { break }
                 let remainingSeconds = timeout.remaining(at: now) ?? 0
-                if !didWarnSessionCap, remainingSeconds <= 30 {
-                    didWarnSessionCap = true
-                    self?.overlayController?.showLoadingState(
-                        near: self?.sessionSourceApp,
-                        presentation: .init(
-                            title: "Long dictation",
-                            detail: "Wrapping up soon. Release the key to finish now.",
-                            progress: 0.94,
-                            status: "30 seconds left"
-                        ),
-                        anchorRect: self?.sessionAnchorRect
-                    )
+                let inWarningWindow = DictationSessionCapWarningPolicy.shouldWarn(remainingSeconds: remainingSeconds)
+                if inWarningWindow,
+                   self?.showSessionCapCountdown(
+                       remainingSeconds: remainingSeconds,
+                       announce: !didAnnounceSessionCap
+                   ) == true {
+                    didAnnounceSessionCap = true
                 }
-                let remainingNanos = UInt64((remainingSeconds * 1_000_000_000).rounded(.up))
-                let sleepNanos = min(remainingNanos, Self.sessionTimeoutPollIntervalNanos)
+                // Inside the warning window, tick every second so the pill
+                // counts down live. Before it, sleep until the window opens.
+                let secondsUntilNextCheck = inWarningWindow
+                    ? min(remainingSeconds, 1)
+                    : remainingSeconds - DictationSessionCapWarningPolicy.warningWindowSeconds
+                let checkNanos = UInt64((secondsUntilNextCheck * 1_000_000_000).rounded(.up))
+                let sleepNanos = min(checkNanos, Self.sessionTimeoutPollIntervalNanos)
                 if sleepNanos == 0 { break }
                 try? await Task.sleep(nanoseconds: sleepNanos)
             }
@@ -2040,13 +2354,185 @@ class DictationSessionController: ObservableObject {
         }
     }
 
+    /// Shows the cap countdown in the listening pill's notice slot. The
+    /// pill keeps listening (waveform, stop button, Esc) the whole time.
+    /// Returns whether the countdown is on screen.
+    @discardableResult
+    private func showSessionCapCountdown(remainingSeconds: Double, announce: Bool) -> Bool {
+        guard isDictating,
+              let overlayController,
+              overlayController.state == .listening else { return false }
+        let current = overlayController.listeningNotice
+        // The Esc confirm prompt wins while it waits for a second press; the
+        // next tick puts the countdown back.
+        guard current.isEmpty || DictationSessionCapWarningPolicy.isCapNotice(current) else { return false }
+        overlayController.listeningNotice = DictationSessionCapWarningPolicy.notice(
+            remainingSeconds: remainingSeconds,
+            shortcutMode: currentDictationShortcutMode
+        )
+        if announce {
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: DictationSessionCapWarningPolicy.announcement(
+                        shortcutMode: currentDictationShortcutMode
+                    ),
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
+        }
+        return true
+    }
+
+    /// Drops the cap countdown once the take stops, so it can't linger into
+    /// the transcribing pill. Leaves any other notice alone.
+    private func clearSessionCapCountdown() {
+        guard let overlayController,
+              DictationSessionCapWarningPolicy.isCapNotice(overlayController.listeningNotice) else { return }
+        overlayController.listeningNotice = ""
+    }
+
+    // MARK: - Back-to-back presses
+
+    /// Whether the last take has stopped recording but is still being
+    /// transcribed, pasted, or saved.
+    private var isPreviousDictationFinishing: Bool {
+        guard let appState, let overlayController else { return false }
+        if isDictating {
+            return stopFinalizationGate.admittedSessionID == currentDictationSessionID
+                && overlayController.state != .listening
+                && overlayController.state != .starting
+        }
+        return appState.sttRouter.isTranscribing
+    }
+
+    /// Remembers a start-shortcut press that landed while the last take is
+    /// still finishing, and starts it once that take is done. Returns false
+    /// when the press isn't one to remember, so the caller keeps its old
+    /// handling.
+    @discardableResult
+    func rememberStartPressIfFinishing(
+        sourceApp: NSRunningApplication?,
+        trigger: DictationTrigger,
+        shortcutMode: DictationShortcutMode?,
+        isRetry: Bool = false
+    ) -> Bool {
+        guard !isTerminatingDictation,
+              let shortcutMode,
+              DictationQueuedStartPolicy.remembersPress(shortcutMode: shortcutMode),
+              isPreviousDictationFinishing else { return false }
+        if let queued = queuedDictationStart,
+           queued.shortcutMode == .handsFree,
+           shortcutMode == .handsFree {
+            // Hands-free toggles: a second press takes the waiting start back.
+            dropQueuedDictationStart(showMessage: false)
+            return true
+        }
+        queuedDictationStart = QueuedDictationStart(
+            sourceApp: sourceApp,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isRetry: isRetry,
+            requestedAt: ProcessInfo.processInfo.systemUptime
+        )
+        if let overlayController,
+           overlayController.listeningNotice.isEmpty
+            || overlayController.listeningNotice == DictationQueuedStartPolicy.waitingNotice {
+            overlayController.listeningNotice = DictationQueuedStartPolicy.waitingNotice
+        }
+        appState?.logger.log("DICTATION | start press remembered while the last dictation finishes")
+        queuedDictationStartTask?.cancel()
+        queuedDictationStartTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, let request = self.queuedDictationStart else { return }
+                let stillFinishing = self.isDictating || (self.appState?.sttRouter.isTranscribing ?? false)
+                let waited = ProcessInfo.processInfo.systemUptime - request.requestedAt
+                // A take that ended in a problem or a "press ⌘V" notice keeps
+                // its message; starting over it would wipe the only sign the
+                // text didn't land (and its Transcribe It or Paste It button).
+                let previousLeftMessage = self.overlayController.map {
+                    $0.state == .drafting && !$0.errorMessage.isEmpty && !$0.messageCanGiveWayToNextStart
+                } ?? false
+                switch DictationQueuedStartPolicy.decision(
+                    previousStillFinishing: stillFinishing,
+                    previousLeftMessage: previousLeftMessage,
+                    secondsWaited: waited
+                ) {
+                case .keepWaiting:
+                    break
+                case .start:
+                    self.queuedDictationStart = nil
+                    self.queuedDictationStartTask = nil
+                    self.clearQueuedStartNotice()
+                    self.startDictation(
+                        sourceApp: request.sourceApp,
+                        trigger: request.trigger,
+                        shortcutMode: request.shortcutMode,
+                        isRetry: request.isRetry
+                    )
+                    return
+                case .giveUp:
+                    self.queuedDictationStartTask = nil
+                    self.dropQueuedDictationStart(showMessage: true)
+                    return
+                case .dropForMessage:
+                    self.queuedDictationStartTask = nil
+                    self.dropQueuedDictationStart(showMessage: false)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: DictationQueuedStartPolicy.pollIntervalNanos)
+            }
+        }
+        return true
+    }
+
+    /// A push-to-talk key let go before its remembered press could start.
+    /// Returns true when there was one to drop.
+    @discardableResult
+    func dropQueuedPushToTalkStart() -> Bool {
+        guard queuedDictationStart?.shortcutMode == .pushToTalk else { return false }
+        dropQueuedDictationStart(showMessage: true)
+        return true
+    }
+
+    /// Forgets a remembered press. It still counts as a refused start, the
+    /// same as the old "still finishing" refusal did.
+    private func dropQueuedDictationStart(showMessage: Bool) {
+        guard let request = queuedDictationStart else { return }
+        queuedDictationStart = nil
+        queuedDictationStartTask?.cancel()
+        queuedDictationStartTask = nil
+        clearQueuedStartNotice()
+        guard let (appState, overlayController) = readyState() else { return }
+        trackDictationStartRequested(appState: appState, trigger: request.trigger, isRetry: request.isRetry)
+        trackDictationStartRefused(
+            appState: appState,
+            trigger: request.trigger,
+            failureKind: "previous_dictation_transcribing"
+        )
+        // While the last take is still on screen transcribing, an error
+        // would cover its pill (and can hide it and turn off Esc), so the
+        // press drops quietly there, as it did before it was remembered.
+        if showMessage, !isDictating {
+            overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+        }
+    }
+
+    private func clearQueuedStartNotice() {
+        guard let overlayController,
+              overlayController.listeningNotice == DictationQueuedStartPolicy.waitingNotice else { return }
+        overlayController.listeningNotice = ""
+    }
+
     private func cancelPendingDictationStartAfterEarlyRelease(
         appState: TranscriptedAppState,
         overlayController: FloatingOverlayController,
         shortcutMode: DictationShortcutMode?
     ) {
         cancelActiveTasks(cancelRecording: true)
-        AppSoundPlayer.shared.play(.dictationCancelled)
+        // No cancel cue here: an early release is often a quick modifier chord
+        // (Fn+arrow), and a sound on every one of those would be noise.
         let releasedWhileAppActive = NSApp.isActive
         let startPendingForMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
         let stage = pendingStartStage
@@ -2163,6 +2649,7 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        clearSessionCapCountdown()
 
         guard cancellationPlan.cancelSpeechEngine,
               let appState else { return }
@@ -2230,6 +2717,7 @@ class DictationSessionController: ObservableObject {
                         self.processActivityLabel = "stop finalization"
                         self.isDictating = true
                         self.overlayController?.state = .listening
+                        self.overlayController?.markRetainedRecordingForEscape()
                         self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
                     }
                 } else {
@@ -2274,8 +2762,15 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        retargetPasteToCurrentFocus()
+    private func pasteWithClipboardRestore(
+        _ text: String,
+        followCurrentFocus: Bool = true
+    ) -> DictationPasteOutcome {
+        if followCurrentFocus {
+            retargetPasteToCurrentFocus()
+        } else {
+            appState?.logger.log("DICTATION | long model wait, keeping the original paste target")
+        }
         autoSendRequestDecision = DictationAutoSendPolicy.requestDecision(
             isEnabled: DictationAutoSendPreferences.isEnabled(),
             key: DictationAutoSendPreferences.sendKey(),
@@ -2305,12 +2800,17 @@ class DictationSessionController: ObservableObject {
                 event: diagnostic.event,
                 message: diagnostic.event == "dictation_paste_confirmed"
                     ? "Paste delivery confirmed from privacy-safe target signals"
-                    : "Paste delivery could not be confirmed from privacy-safe target signals",
+                    : outcome == .likelyPasted
+                        ? "Paste most likely delivered: the target read the clipboard right after Cmd+V"
+                        : "Paste delivery could not be confirmed from privacy-safe target signals",
                 context: context
             )
         }
 
         let context = ["attempt": attempt]
+        if outcome == .likelyPasted {
+            appState?.logger.log("DICTATION | target read the clipboard right after paste; treating as pasted and restoring the clipboard")
+        }
         switch outcome.copyReason {
         case .accessibilityMissing:
             appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
@@ -2326,10 +2826,6 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
                 message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard", context: context)
             appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
-        case .pasteConfirmationUnavailable:
-            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Paste-back was dispatched but the target did not expose confirmation", context: context)
-            appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case nil:
             break
         }
@@ -2577,6 +3073,9 @@ class DictationSessionController: ObservableObject {
         for (key, value) in measurements {
             localContext[key] = "\(value)"
         }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            localContext["press_to_first_sound_ms"] = "\(firstSoundMs)"
+        }
 
         DiagnosticsTrail.record(
             logger: appState.logger,
@@ -2627,6 +3126,21 @@ class DictationSessionController: ObservableObject {
             guard let milliseconds = measurements[timingBucket.metric] else { continue }
             analyticsProperties[timingBucket.bucket] = AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
         }
+        // Exact (10 ms) timings next to the buckets, so PostHog can compute
+        // real percentiles per model and per kind of Mac.
+        let exactTimings: [(metric: String, key: String)] = [
+            ("decode_ms", "decode_latency_ms"),
+            ("stop_to_paste_ms", "stop_to_paste_latency_ms"),
+        ]
+        for exactTiming in exactTimings {
+            guard let milliseconds = measurements[exactTiming.metric] else { continue }
+            analyticsProperties[exactTiming.key] = MachineClassTelemetry.roundedMilliseconds(milliseconds)
+        }
+        if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
+            analyticsProperties["first_sound_latency_bucket"] = AnalyticsReporter.latencyBucket(milliseconds: firstSoundMs)
+            analyticsProperties["first_sound_latency_ms"] = MachineClassTelemetry.roundedMilliseconds(firstSoundMs)
+        }
+        analyticsProperties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_stop_latency_measured",
@@ -2652,6 +3166,30 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+
+    /// Model and coarse Mac class, so dictation speed can be compared across
+    /// models and machines. No device or user identifiers.
+    private func dictationSpeedContext(appState: TranscriptedAppState) -> [String: String] {
+        var context = MachineClassTelemetry.current
+        // The lease is the model this recording actually uses, even if the
+        // setting changes mid-dictation.
+        let model = appState.sttRouter.recordingModelLease?.model ?? appState.sttRouter.selectedModel
+        context["stt_model"] = model.rawValue
+        return context
+    }
+
+    /// Key press to the first real audio buffer of this dictation. Nil when
+    /// the audio didn't come through the dictation engine (for example the
+    /// shared meeting mic) or the stamp belongs to another session.
+    private func pressToFirstSoundMilliseconds(
+        appState: TranscriptedAppState,
+        stopRequestedAt: CFAbsoluteTime
+    ) -> Int? {
+        guard let firstSampleAt = appState.sttRouter.parakeetEngine.firstAudioSampleTime(),
+              firstSampleAt >= sessionStartTime,
+              firstSampleAt <= stopRequestedAt else { return nil }
+        return Int(((firstSampleAt - sessionStartTime) * 1_000).rounded())
     }
 
     private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {
@@ -2734,7 +3272,7 @@ private typealias DictationPasteOutcome = TextPasteOutcome
 private extension TextPasteOutcome {
     var delivery: DictationDelivery {
         switch self {
-        case .pasted:
+        case .pasted, .likelyPasted:
             return .pasted
         case .copied:
             return .copied
@@ -2745,9 +3283,7 @@ private extension TextPasteOutcome {
 
     var diagnosticLevel: EventLevel {
         switch self {
-        case .pasted:
-            return .info
-        case .copied(_, reason: let reason) where reason.isPasteConfirmationUnavailable:
+        case .pasted, .likelyPasted:
             return .info
         case .copied:
             return .warning
@@ -2758,15 +3294,6 @@ private extension TextPasteOutcome {
 }
 
 private extension TextPasteCopyReason {
-    var isPasteConfirmationUnavailable: Bool {
-        switch self {
-        case .pasteConfirmationUnavailable:
-            return true
-        case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
-            return false
-        }
-    }
-
     var diagnosticName: String {
         switch self {
         case .accessibilityMissing:
@@ -2777,8 +3304,6 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
-        case .pasteConfirmationUnavailable:
-            return "paste_confirmation_unavailable"
         }
     }
 }

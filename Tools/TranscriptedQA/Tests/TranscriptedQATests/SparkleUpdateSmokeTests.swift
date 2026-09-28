@@ -32,7 +32,7 @@ final class SparkleUpdateSmokeTests: XCTestCase {
                 updateCallout: row(isVisible: false),
                 checkUpdates: row(
                     title: "Preparing Update",
-                    detail: "Transcripted will ask you to restart when 9.9.9 is ready",
+                    detail: "Downloading 9.9.9",
                     isVisible: true,
                     isEnabled: false
                 )

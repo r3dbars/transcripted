@@ -35,6 +35,12 @@ enum MeetingInputDeviceSelectionReason: String {
     case preservedDefaultInput
     case preferredBuiltInForBluetoothHeadset
     case noBuiltInFallbackAvailable
+    /// The chosen mic could not start or stopped delivering audio, so this
+    /// recording moved to the built-in mic instead of failing.
+    case builtInFallbackAfterFailure
+    /// The host named a specific mic (`Audio.meetingPreferredInputDeviceUID`)
+    /// and it is connected, so it is recorded instead of the macOS input.
+    case userChosenInput
 }
 
 struct MeetingInputDeviceSelection: Equatable {
@@ -61,13 +67,17 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
-        mode: MeetingInputDeviceSelectionMode = .automatic
+        mode: MeetingInputDeviceSelectionMode = .automatic,
+        preferredInputID: AudioDeviceID? = nil,
+        lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         selection(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
-            mode: mode
+            mode: mode,
+            preferredInputID: preferredInputID,
+            lidClosed: lidClosed
         )
     }
 
@@ -114,7 +124,8 @@ enum MeetingInputDeviceSelectionPolicy {
         requestedOutcome: CaptureRouteStabilizationOutcome
     ) -> CaptureRouteStabilizationOutcome {
         switch selectionReason {
-        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput:
+        case .preferredBuiltInForBluetoothHeadset, .preservedDefaultInput, .builtInFallbackAfterFailure,
+             .userChosenInput:
             // An unapplied explicit choice must not become a nil selection
             // that lets route readiness accept the node's previous device.
             return .switchFailed
@@ -169,7 +180,9 @@ enum MeetingInputDeviceSelectionPolicy {
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice],
-        mode: MeetingInputDeviceSelectionMode = .automatic
+        mode: MeetingInputDeviceSelectionMode = .automatic,
+        preferredInputID: AudioDeviceID? = nil,
+        lidClosed: Bool = false
     ) -> MeetingInputDeviceSelection {
         guard mode == .automatic else {
             return MeetingInputDeviceSelection(
@@ -177,6 +190,20 @@ enum MeetingInputDeviceSelectionPolicy {
                 selectedInput: defaultInput,
                 defaultOutput: defaultOutput,
                 reason: .preservedDefaultInput
+            )
+        }
+
+        if let chosenInput = usableChosenInput(
+            preferredInputID,
+            from: availableInputs,
+            defaultInput: defaultInput,
+            lidClosed: lidClosed
+        ) {
+            return MeetingInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: chosenInput,
+                defaultOutput: defaultOutput,
+                reason: .userChosenInput
             )
         }
 
@@ -189,7 +216,11 @@ enum MeetingInputDeviceSelectionPolicy {
             )
         }
 
-        guard let builtInInput = preferredBuiltInInput(from: availableInputs, defaultInput: defaultInput) else {
+        guard let builtInInput = preferredBuiltInInput(
+            from: availableInputs,
+            defaultInput: defaultInput,
+            lidClosed: lidClosed
+        ) else {
             return MeetingInputDeviceSelection(
                 defaultInput: defaultInput,
                 selectedInput: defaultInput,
@@ -206,12 +237,71 @@ enum MeetingInputDeviceSelectionPolicy {
         )
     }
 
+    /// The built-in mic to try after `failedInputID` could not be used, in
+    /// either selection mode. Nil when there is no built-in mic, or when the
+    /// built-in mic is the one that just failed. With the lid closed the
+    /// laptop's own mic is cut off in hardware and would record silence
+    /// without ever failing, so only a display or other built-in mic counts.
+    static func builtInFallbackAfterFailure(
+        failedInputID: AudioDeviceID,
+        defaultInput: MeetingAudioDevice,
+        defaultOutput: MeetingAudioDevice?,
+        availableInputs: [MeetingAudioDevice],
+        lidClosed: Bool = false
+    ) -> MeetingInputDeviceSelection? {
+        guard let builtInInput = bestBuiltInInput(
+            from: availableInputs,
+            excluding: failedInputID,
+            lidClosed: lidClosed
+        ) else {
+            return nil
+        }
+        return MeetingInputDeviceSelection(
+            defaultInput: defaultInput,
+            selectedInput: builtInInput,
+            defaultOutput: defaultOutput,
+            reason: .builtInFallbackAfterFailure
+        )
+    }
+
+    /// The engine path only hurts when it would open a Bluetooth headset
+    /// that is the macOS input while the meeting records a different mic.
+    static func pinnedRecorderIsNeeded(for selection: MeetingInputDeviceSelection) -> Bool {
+        selection.didOverrideDefault && isBluetoothHeadsetInput(selection.defaultInput)
+    }
+
     static func preferredBuiltInFallback(
         for selectedInput: MeetingAudioDevice,
-        availableInputs: [MeetingAudioDevice]
+        availableInputs: [MeetingAudioDevice],
+        lidClosed: Bool = false
     ) -> MeetingAudioDevice? {
         guard isBluetoothHeadsetInput(selectedInput) else { return nil }
-        return preferredBuiltInInput(from: availableInputs, defaultInput: selectedInput)
+        return preferredBuiltInInput(
+            from: availableInputs,
+            defaultInput: selectedInput,
+            lidClosed: lidClosed
+        )
+    }
+
+    /// The host's chosen mic, when it's connected and differs from the macOS
+    /// input. A Bluetooth headset never counts (recording one is what drops it
+    /// into call mode), and neither does a closed MacBook's own mic, which
+    /// records silence. Otherwise automatic selection runs as usual.
+    private static func usableChosenInput(
+        _ preferredInputID: AudioDeviceID?,
+        from availableInputs: [MeetingAudioDevice],
+        defaultInput: MeetingAudioDevice,
+        lidClosed: Bool
+    ) -> MeetingAudioDevice? {
+        guard let preferredInputID,
+              preferredInputID != defaultInput.id,
+              let chosen = availableInputs.first(where: { $0.id == preferredInputID }),
+              chosen.inputChannelCount > 0,
+              !isBluetoothHeadsetInput(chosen),
+              !(lidClosed && isLidMicrophone(chosen)) else {
+            return nil
+        }
+        return chosen
     }
 
     private static func shouldAvoidBluetoothHeadsetInput(
@@ -235,12 +325,35 @@ enum MeetingInputDeviceSelectionPolicy {
         return normalize(defaultOutput.name) == normalize(defaultInput.name)
     }
 
+    /// A MacBook's own mic, which is cut off in hardware while the lid is
+    /// closed but stays listed and delivers zeros. Not the headphone-jack
+    /// mic or a display's mic.
+    static func isLidMicrophone(_ device: MeetingAudioDevice) -> Bool {
+        let normalized = normalize(device.name)
+        if normalized.contains("macbook") {
+            return true
+        }
+        return device.transport == .builtIn
+            && (normalized.contains("built-in microphone") || normalized.contains("built in microphone"))
+    }
+
     private static func preferredBuiltInInput(
         from availableInputs: [MeetingAudioDevice],
-        defaultInput: MeetingAudioDevice
+        defaultInput: MeetingAudioDevice,
+        lidClosed: Bool
+    ) -> MeetingAudioDevice? {
+        bestBuiltInInput(from: availableInputs, excluding: defaultInput.id, lidClosed: lidClosed)
+    }
+
+    /// The one place the lid filter applies, for every built-in pick.
+    private static func bestBuiltInInput(
+        from availableInputs: [MeetingAudioDevice],
+        excluding excludedInputID: AudioDeviceID,
+        lidClosed: Bool
     ) -> MeetingAudioDevice? {
         availableInputs
-            .filter { $0.id != defaultInput.id }
+            .filter { $0.id != excludedInputID }
+            .filter { !(lidClosed && isLidMicrophone($0)) }
             .filter { builtInInputRank($0) < Int.max }
             .sorted { lhs, rhs in
                 let lhsRank = builtInInputRank(lhs)
@@ -312,12 +425,19 @@ enum MeetingInputDeviceSelectionPolicy {
     }
 }
 
-private enum MeetingInputDeviceLookup {
+enum MeetingInputDeviceLookup {
+    /// `excludingDeviceID` drops a mic that just died or went silent from
+    /// the candidates (the default stays, since it may be all that's left).
     static func preferredInputSelection(
-        mode: MeetingInputDeviceSelectionMode
+        mode: MeetingInputDeviceSelectionMode,
+        preferredInputUID: String? = nil,
+        excludingDeviceID: AudioDeviceID? = nil
     ) throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
         var availableInputs = try allInputDevices()
+        if let excludingDeviceID, excludingDeviceID != defaultInputID {
+            availableInputs.removeAll { $0.id == excludingDeviceID }
+        }
 
         let defaultInput: MeetingAudioDevice
         if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
@@ -332,11 +452,39 @@ private enum MeetingInputDeviceLookup {
             inputChannelCount: 0
         )
 
+        // An excluded chosen mic is already gone from the candidates, so a
+        // replacement lands on the automatic pick.
+        let preferredInputID = preferredInputUID.flatMap { uid in
+            availableInputs.first { (try? $0.id.readString(kAudioDevicePropertyDeviceUID)) == uid }?.id
+        }
+
         return MeetingInputDeviceSelectionPolicy.selectionForMeetingStart(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
             availableInputs: availableInputs,
-            mode: mode
+            mode: mode,
+            preferredInputID: preferredInputID,
+            lidClosed: MacLidState.isClosed()
+        )
+    }
+
+    static func builtInFallbackAfterFailure(
+        failedInputID: AudioDeviceID?
+    ) throws -> MeetingInputDeviceSelection? {
+        let defaultInputID = try AudioObjectID.readDefaultInputDevice()
+        let availableInputs = try allInputDevices()
+        let defaultInput = try availableInputs.first(where: { $0.id == defaultInputID })
+            ?? deviceDescriptor(for: defaultInputID, inputChannelCount: 1)
+        let defaultOutput = try? deviceDescriptor(
+            for: AudioObjectID.readDefaultOutputDevice(),
+            inputChannelCount: 0
+        )
+        return MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+            failedInputID: failedInputID ?? defaultInputID,
+            defaultInput: defaultInput,
+            defaultOutput: defaultOutput,
+            availableInputs: availableInputs,
+            lidClosed: MacLidState.isClosed()
         )
     }
 
@@ -345,7 +493,8 @@ private enum MeetingInputDeviceLookup {
     ) throws -> MeetingAudioDevice? {
         MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
             for: selectedInput,
-            availableInputs: try allInputDevices()
+            availableInputs: try allInputDevices(),
+            lidClosed: MacLidState.isClosed()
         )
     }
 
@@ -485,6 +634,40 @@ private struct MeetingInputDeviceApplicationResult {
 }
 
 extension Audio {
+    /// Pin the built-in mic for the next graph attempt because the chosen mic
+    /// could not be used. Returns false, leaving the selection alone, when
+    /// there is no built-in mic or it is the one that just failed.
+    @discardableResult
+    func pinBuiltInMeetingInputFallback(operation: String) -> Bool {
+        let failedSelection = meetingInputSelectionSnapshot()
+        let fallback: MeetingInputDeviceSelection?
+        do {
+            fallback = try MeetingInputDeviceLookup.builtInFallbackAfterFailure(
+                failedInputID: failedSelection?.selectedInput.id
+            )
+        } catch {
+            AppLogger.audioMic.warning("Built-in microphone fallback unavailable", [
+                "operation": operation,
+                "error": error.localizedDescription
+            ])
+            return false
+        }
+        guard let fallback else {
+            AppLogger.audioMic.info("No other built-in microphone to fall back to", [
+                "operation": operation,
+                "failedTransport": failedSelection?.selectedInput.transport.rawValue ?? "unknown"
+            ])
+            return false
+        }
+        setMeetingInputSelection(fallback)
+        AppLogger.audioMic.warning("Falling back to the built-in microphone", [
+            "operation": operation,
+            "failedTransport": failedSelection?.selectedInput.transport.rawValue ?? "unknown",
+            "selectedTransport": fallback.selectedInput.transport.rawValue
+        ])
+        return true
+    }
+
     @discardableResult
     func applyMeetingInputDevice(
         to inputNode: AVAudioInputNode,
@@ -495,7 +678,8 @@ extension Audio {
         if selection == nil {
             do {
                 selection = try MeetingInputDeviceLookup.preferredInputSelection(
-                    mode: meetingInputDeviceSelectionModeForCurrentRecording
+                    mode: meetingInputDeviceSelectionModeForCurrentRecording,
+                    preferredInputUID: meetingPreferredInputDeviceUIDForCurrentRecording
                 )
             } catch {
                 AppLogger.audioMic.warning("Meeting input selection unavailable", [
@@ -516,6 +700,7 @@ extension Audio {
                 mode: meetingInputDeviceSelectionModeForCurrentRecording
             )
         }
+        recordAttemptedMeetingSelectionReason(selection.reason)
 
         var stabilizationOutcome = CaptureRouteStabilizationOutcome.notNeeded
         let stabilizationAlreadyAttempted = meetingRouteStabilizationOutcomeValue != CaptureRouteStabilizationOutcome.notNeeded.rawValue

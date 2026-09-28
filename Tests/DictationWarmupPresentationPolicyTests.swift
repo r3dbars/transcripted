@@ -71,4 +71,33 @@ func testDictationWarmupPresentationPolicy() {
         assertEqual(failed.title, "Dictation couldn't start", "failed warmup should say dictation could not start")
         assertEqual(failed.detail, "The model download was interrupted.", "failed warmup should pass through the reason")
     }
+
+    runSuite("DictationPostStopModelWaitPolicy keeps the original paste target after a long model wait") {
+        assertTrue(
+            DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(modelWaitSeconds: 0),
+            "no model wait should keep following focus as before"
+        )
+        assertTrue(
+            DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(modelWaitSeconds: 3),
+            "a short warm load should keep following focus"
+        )
+        assertTrue(
+            !DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(modelWaitSeconds: 10),
+            "a long wait must not paste into whatever app is in front now"
+        )
+        assertTrue(
+            !DictationPostStopModelWaitPolicy.pasteFollowsCurrentFocus(modelWaitSeconds: 120),
+            "a full-budget wait must not paste into whatever app is in front now"
+        )
+    }
+
+    runSuite("DictationPostStopModelWaitPolicy says the recording is saved when the model never loads") {
+        let saved = DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true)
+        assertTrue(saved.contains("your recording is saved"), "a checkpointed recording must be mentioned")
+        assertTrue(saved.contains(DictationSavedAudioActionCopy.transcribeTitle), "the saved-recording copy must name the button that retries it")
+        assertFalse(saved.contains("Capture →"), "don't send people to a menu that only shows while the app is in front")
+
+        let unsaved = DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: false)
+        assertTrue(!unsaved.contains("saved"), "without a checkpoint the copy must not promise saved audio")
+    }
 }

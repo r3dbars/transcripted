@@ -303,4 +303,81 @@ final class SummaryItemIndexTests: XCTestCase {
         let actions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.actionItem)
         XCTAssertEqual(actions.first?.owner, "Sam")
     }
+
+    // Two MCP clients (a desktop chat app and an IDE agent) each launch their own
+    // server against one index. Their reconciles used to race: both inserted the
+    // same meeting and the loser failed with "UNIQUE constraint failed:
+    // meeting_summary_documents.filename", aborting its whole pass.
+    func testConcurrentReconcilesFromTwoProcessesIndexEachMeetingOnce() throws {
+        let meetingCount = 40
+        for minute in 0..<meetingCount {
+            try writeFixture(
+                makeMeetingWithInlineSummary(),
+                filename: String(format: "Call_2026-04-18_09-%02d-00", minute),
+                to: tempDir
+            )
+        }
+        // A second TranscriptIndex opens its own connection and its own lock file
+        // descriptor, the same as a second server process.
+        let secondProcess = try TranscriptIndex(indexDir: tempDir)
+        let indexes: [TranscriptIndex] = [index, secondProcess]
+        let errors = NSLock()
+        var failures: [Error] = []
+
+        DispatchQueue.concurrentPerform(iterations: indexes.count) { position in
+            do {
+                try indexes[position].reconcile(meetingsDir: tempDir, dictationsDir: tempDir, updateEmbeddings: false)
+            } catch {
+                errors.lock()
+                failures.append(error)
+                errors.unlock()
+            }
+        }
+
+        XCTAssertTrue(failures.isEmpty, "reconcile failed: \(failures)")
+        XCTAssertEqual(try index.listRecentMeetings(count: 100).count, meetingCount)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), meetingCount)
+        XCTAssertEqual(
+            try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count,
+            meetingCount * 2
+        )
+    }
+
+    // An index left with a summary row from an earlier interrupted pass must heal
+    // on the next reconcile instead of failing on that row forever.
+    func testReconcileReplacesLeftoverSummaryDocumentForUnindexedMeeting() throws {
+        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &raw), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_exec(
+                raw,
+                "INSERT INTO meeting_summary_documents (filename, title) VALUES ('Call_2026-04-18_09-15-00', 'stale')",
+                nil, nil, nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(raw)
+
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), 1)
+        XCTAssertEqual(
+            try index.searchUtterances(query: "Beta launch", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.meetingTitle,
+            "Beta launch sync"
+        )
+    }
+
+    private func rowCount(_ sql: String) throws -> Int {
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var raw: OpaquePointer?
+        guard sqlite3_open(dbPath, &raw) == SQLITE_OK else { throw XCTSkip("could not open index") }
+        defer { sqlite3_close(raw) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(raw, sql, -1, &stmt, nil) == SQLITE_OK else { throw XCTSkip("could not prepare \(sql)") }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
 }

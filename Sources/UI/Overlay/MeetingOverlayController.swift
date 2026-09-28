@@ -36,13 +36,21 @@ final class MeetingOverlayController: NSObject {
         let secondaryAccessibilityLabel: String
         let primaryTitle: String
         let primaryAccessibilityLabel: String
+        /// Optional third, left-aligned button (Check Access on the system
+        /// audio warning). Nil keeps the usual two-button prompt.
         var tertiaryTitle: String? = nil
         var tertiaryAccessibilityLabel: String? = nil
     }
 
     // MARK: - State
 
-    private(set) var state: OverlayState = .idle
+    private(set) var state: OverlayState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            if case .error = state { return }
+            snapshotFailedMeetingIDs()
+        }
+    }
     private var currentDuration: TimeInterval = 0
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
@@ -52,6 +60,7 @@ final class MeetingOverlayController: NSObject {
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    private var micOnlyNotice: MeetingMicOnlyNotice?
     // Audio inactivity drives its own per-second countdown Task
     // (schedulePromptCountdown). The combined warning subscription re-fires
     // on *any* of the four signals changing, so this mirror lets it tell
@@ -61,6 +70,30 @@ final class MeetingOverlayController: NSObject {
     private var lastAppliedAudioInactivityWarning: MeetingAudioInactivityWarning?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
+    // Transcription progress for the "Transcribing meeting…" pill. Nil when
+    // the pipeline has no number to show.
+    private var currentTranscriptionProgress: Double?
+    private var currentQueuedTranscriptionCount = 0
+    // The transcript the "Saved to Markdown" pill opens. Cleared when a new
+    // transcription starts, so Open never lands on the previous meeting; it
+    // arrives once the saved file is restyled, which can be after the pill
+    // appears (Open then just shows the Meetings page).
+    private var savedTranscriptURL: URL?
+    private var savedTranscriptTitle: String?
+    // Which job's transcript the saved pill may take. The session's URL
+    // lands after an async restyle and can be republished later (speaker
+    // naming), so an earlier meeting's URL can arrive while a later one is
+    // transcribing or already saved. Only accept a URL between this job's
+    // `.transcriptSaved` and the next job's start, and never one already
+    // seen for an earlier job (including one that arrived too late).
+    private var isTranscriptionJobRunning = false
+    private var acceptsSavedTranscript = false
+    private var earlierJobTranscriptURLs: Set<URL> = []
+
+    // Failed-meeting rows that existed before the current error, so the
+    // error pill only offers Open for a failure that left a row behind (not
+    // for an old, unrelated one). Refreshed on every non-error state.
+    private var failedMeetingIDsBeforeError: Set<UUID> = []
 
     // MARK: - Panel & views
 
@@ -68,6 +101,10 @@ final class MeetingOverlayController: NSObject {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
+    /// Hides a "call audio is back" notice after a few seconds. Kept apart
+    /// from `autoHideTask`, which hides the whole panel after a save.
+    private var systemAudioAutoHideTask: Task<Void, Never>?
+    private var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
     private var isShowingCancelConfirmation = false
     private var isRestingCondensed = false
     private var isPanelHovered = false
@@ -99,6 +136,25 @@ final class MeetingOverlayController: NSObject {
     /// "Disabled" means the user tapped "Don't show again" — the wiring in
     /// `TranscriptedApp` persists the opt-out.
     var onMissedCallNudgeResolved: ((MissedCallNudgeOutcome) -> Void)?
+    /// Opens the Meetings page, from the saved pill's or error pill's Open
+    /// button. A transcript URL asks the page to expand that meeting.
+    var onOpenMeetings: ((URL?) -> Void)?
+
+    /// Draws the meeting instead of the pill when Settings › Dictation
+    /// window is Notch island. States, prompts and timers stay here.
+    weak var island: NotchIslandController? {
+        didSet {
+            island?.meetingActionHandler = { [weak self] action in self?.handleIslandAction(action) }
+            island?.meetingHoverHandler = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
+            island?.meetingMenuProvider = { [weak self] in self?.makeStripMenu() }
+        }
+    }
+    /// Whether the island is carrying the meeting (the pill's `isVisible`).
+    private var islandShown = false
+
+    private var isIslandMode: Bool {
+        island != nil && NotchIslandController.isSelected
+    }
 
     // MARK: - Setup
 
@@ -125,7 +181,7 @@ final class MeetingOverlayController: NSObject {
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
-        rootView.onTertiaryAction = { [weak self] in self?.handleTertiaryActionTapped() }
+        rootView.onCallAudioAction = { [weak self] in self?.handleCallAudioActionTapped() }
         rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
         rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
         panel.contentView?.addSubview(rootView)
@@ -210,6 +266,7 @@ final class MeetingOverlayController: NSObject {
     // MARK: - Subscriptions
 
     private func wireSubscriptions(to session: MeetingSessionController) {
+        snapshotFailedMeetingIDs(from: session)
         session.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessionState in
@@ -256,6 +313,42 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
+        session.$displayStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.applyDisplayStatus(status)
+            }
+            .store(in: &subscriptions)
+
+        // Delivered on the next main-queue turn, so `lastSavedTitle` (set
+        // right after the URL) is already current when this reads it.
+        session.$lastSavedTranscriptURL
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] url in
+                self?.applySavedTranscript(url: url)
+            }
+            .store(in: &subscriptions)
+
+        // The error pill's Open depends on a failed-meeting row existing,
+        // which can land just after the error state itself.
+        session.$failedMeetings
+            .map { Self.settledFailedMeetingIDs(in: $0) }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, case .error = self.state else { return }
+                self.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$micOnlyNotice
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notice in
+                self?.applyMicOnlyNotice(notice)
+            }
+            .store(in: &subscriptions)
+
         // The four warning-driven prompts are read together and resolved as
         // one unit: their precedence lattice (audioInactivity > systemAudio >
         // {audioRoute, micBoost}, the latter pair mutually sticky) needs to
@@ -280,6 +373,53 @@ final class MeetingOverlayController: NSObject {
         }
         .store(in: &subscriptions)
 
+    }
+
+    private func applyDisplayStatus(_ status: DisplayStatus) {
+        // `percent(progress:)` already shows nothing for the idle, saved and
+        // failed values (0 or 1), so no switch over every case is needed.
+        let previousDetail = finishDetail
+        currentTranscriptionProgress = status.progress
+        currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
+
+        switch status {
+        case .gettingReady, .transcribing:
+            if !isTranscriptionJobRunning {
+                isTranscriptionJobRunning = true
+                acceptsSavedTranscript = false
+                if let savedTranscriptURL {
+                    earlierJobTranscriptURLs.insert(savedTranscriptURL)
+                }
+                savedTranscriptURL = nil
+                savedTranscriptTitle = nil
+            }
+        case .transcriptSaved:
+            isTranscriptionJobRunning = false
+            acceptsSavedTranscript = true
+        case .failed:
+            isTranscriptionJobRunning = false
+        default:
+            break
+        }
+
+        // Progress ticks often; only redraw when the text on the pill moves.
+        if state == .transcribing, finishDetail != previousDetail {
+            pushToView()
+        }
+    }
+
+    private func applySavedTranscript(url: URL?) {
+        guard let url, !earlierJobTranscriptURLs.contains(url) else { return }
+        guard acceptsSavedTranscript else {
+            // A late URL from a job that has already been replaced.
+            earlierJobTranscriptURLs.insert(url)
+            return
+        }
+        savedTranscriptURL = url
+        savedTranscriptTitle = meetingSession?.lastSavedTitle
+        if state == .saved {
+            pushToView()
+        }
     }
 
     /// Single entry point for all four warning-driven prompts. Fires whenever
@@ -308,6 +448,7 @@ final class MeetingOverlayController: NSObject {
 
         guard let resolvedKind else {
             lastAppliedAudioInactivityWarning = nil
+            cancelSystemAudioAutoHide()
             if isWarningDrivenPromptKind(promptKind) {
                 clearWarningPrompt()
             } else if state == .recording {
@@ -352,6 +493,40 @@ final class MeetingOverlayController: NSObject {
         if display.schedulesCountdown {
             schedulePromptCountdown()
         }
+        updateSystemAudioAutoHide(kind: resolvedKind, warning: systemAudio)
+    }
+
+    /// A recovered system-audio notice hides itself through the normal
+    /// acknowledgement, so the meeting stays marked degraded. Re-applying
+    /// the same notice (another signal changed) keeps the running timer.
+    private func updateSystemAudioAutoHide(
+        kind: PromptKind,
+        warning: MeetingSystemAudioDegradationWarning?
+    ) {
+        guard kind == .systemAudio,
+              let warning,
+              let seconds = MeetingSystemAudioPromptPolicy.autoHideSeconds(for: warning) else {
+            cancelSystemAudioAutoHide()
+            return
+        }
+        if systemAudioAutoHideTask != nil, systemAudioAutoHideWarning == warning { return }
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideWarning = warning
+        systemAudioAutoHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.systemAudioAutoHideTask = nil
+            self.systemAudioAutoHideWarning = nil
+            guard self.promptKind == .systemAudio,
+                  self.systemAudioDegradationWarning == warning else { return }
+            self.meetingSession?.acknowledgeSystemAudioDegradationWarning(automatic: true)
+        }
+    }
+
+    private func cancelSystemAudioAutoHide() {
+        systemAudioAutoHideTask?.cancel()
+        systemAudioAutoHideTask = nil
+        systemAudioAutoHideWarning = nil
     }
 
     /// Builds the display copy for the resolved warning-prompt kind, plus
@@ -420,7 +595,7 @@ final class MeetingOverlayController: NSObject {
     /// missed-call nudge — both funnel through `promptKind`).
     ///
     /// Not total, though: `.saved` is a transient display (session `.ready`
-    /// right after `.transcribing`, shown for `scheduleAutoHide`'s 1.5s
+    /// right after `.transcribing`, shown for `MeetingPillFinishPresentation.savedPillDwellSeconds`
     /// before falling back to idle) that depends on the *previous* overlay
     /// state, not just the current session state — genuinely not derivable
     /// from `(session, prompt)` alone. `applySessionState` below keeps that
@@ -460,6 +635,12 @@ final class MeetingOverlayController: NSObject {
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
+        case .recording, .stoppingRecording:
+            break
+        default:
+            micOnlyNotice = meetingSession?.micOnlyNotice
+        }
+        switch sessionState {
         case .idle:
             cancelRest()
             if state == .prompt {
@@ -474,6 +655,8 @@ final class MeetingOverlayController: NSObject {
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            // A saved pill's dwell must not hide the next meeting's start.
+            autoHideTask?.cancel()
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .ready:
@@ -488,10 +671,13 @@ final class MeetingOverlayController: NSObject {
             // only exists because the *previous* overlay state was
             // `.transcribing` — so it stays an explicit branch here instead
             // of going through `presentationState`.
-            if case .transcribing = state {
+            // A discarded accidental start saved nothing, so it must not
+            // flash "Saved". It just goes away, like a cancel.
+            if case .transcribing = state,
+               meetingSession?.lastTerminalTranscriptionOutcome != .discarded {
                 state = .saved
                 showPanel()
-                scheduleAutoHide(after: 1.5)
+                scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillDwellSeconds)
                 break
             }
             if case .saved = state { break }
@@ -516,6 +702,10 @@ final class MeetingOverlayController: NSObject {
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            if state != .transcribing {
+                autoHideTask?.cancel()
+            }
+            currentQueuedTranscriptionCount = meetingSession?.queuedTranscriptionCount ?? 0
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .error:
@@ -533,6 +723,10 @@ final class MeetingOverlayController: NSObject {
     // MARK: - Panel show/hide
 
     private func showPanel() {
+        if isIslandMode {
+            islandShown = true
+            return
+        }
         guard let panel = panel else { return }
         if panel.isVisible { return }
 
@@ -575,9 +769,7 @@ final class MeetingOverlayController: NSObject {
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillHeight
         case .error:
-            return meetingSession?.systemAudioPermissionRecoveryNeeded == true
-                ? MeetingOverlayTokens.permissionErrorHeight
-                : MeetingOverlayTokens.errorHeight
+            return MeetingOverlayTokens.errorHeight
         default:
             return MeetingOverlayTokens.panelHeight
         }
@@ -585,10 +777,12 @@ final class MeetingOverlayController: NSObject {
 
     private func currentPanelWidth() -> CGFloat {
         switch state {
-        case .prompt where currentPrompt?.tertiaryTitle != nil:
-            return MeetingOverlayTokens.permissionPromptWidth
         case .recording where isVisuallyCondensed:
-            return MeetingOverlayTokens.condensedPillWidth
+            return showsMicOnlyNote && micOnlyNotice == .callAudioOff
+                ? MeetingOverlayTokens.condensedPillWidthWithMicOnlyCue
+                : MeetingOverlayTokens.condensedPillWidth
+        case .recording where showsMicOnlyNote:
+            return MeetingOverlayTokens.recordingPanelWidthWithMicOnlyNote
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -597,6 +791,11 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func hidePanel() {
+        if islandShown {
+            islandShown = false
+            isPanelHovered = false
+            island?.updateMeeting(nil)
+        }
         guard let panel = panel, panel.isVisible else { return }
         lastRequestedPanelSize = nil
         // A panel hidden under the cursor never delivers mouseExited; a
@@ -649,8 +848,15 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         autoHideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self?.hidePanel()
+            guard !Task.isCancelled, let self else { return }
+            // Someone reading the saved pill or reaching for Open keeps it
+            // up. Checked here instead of trusting hover events, which can
+            // be missed when the pill appears under the pointer.
+            if case .saved = self.state, self.pointerIsOverPanel() {
+                self.scheduleAutoHide(after: MeetingPillFinishPresentation.savedPillHoverOutDwellSeconds)
+                return
+            }
+            self.hidePanel()
         }
     }
 
@@ -697,6 +903,22 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func handlePrimaryActionTapped() {
+        switch state {
+        case .saved:
+            openMeetingsFromPill(transcriptURL: savedTranscriptURL)
+            return
+        case .error:
+            // A start that macOS refused for System Audio Recording: the one
+            // fix is that Settings pane, then a new recording.
+            if meetingSession?.systemAudioPermissionRecoveryNeeded == true {
+                TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+                return
+            }
+            openMeetingsFromPill(transcriptURL: nil)
+            return
+        default:
+            break
+        }
         guard case .prompt = state else { return }
         promptCountdownTask?.cancel()
 
@@ -729,23 +951,54 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    private func handleTertiaryActionTapped() {
-        if case .error = state,
-           meetingSession?.systemAudioPermissionRecoveryNeeded == true {
-            TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
-            return
-        }
-        guard case .prompt = state,
-              promptKind == .systemAudio,
-              let warning = systemAudioDegradationWarning,
-              MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: warning) else { return }
+    private func openMeetingsFromPill(transcriptURL: URL?) {
+        autoHideTask?.cancel()
+        state = .idle
+        hidePanel()
+        pushToView()
+        onOpenMeetings?(transcriptURL)
+    }
 
-        // Do not launch a second capture probe while the meeting is active.
-        // A quiet Mac, denied tap, and stream failure cannot be distinguished
-        // reliably here, so open the audio-only pane without changing the
-        // verified/denied permission cache.
-        meetingSession?.acknowledgeSystemAudioDegradationWarning()
-        TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+    /// The pill's "Mic only" note, or Check Access on the system audio
+    /// warning. Both send the user to turn call audio on.
+    private func handleCallAudioActionTapped() {
+        switch state {
+        case .prompt:
+            guard promptKind == .systemAudio else { return }
+            meetingSession?.checkSystemAudioAccessFromWarning()
+        case .recording:
+            guard micOnlyNotice == .callAudioOff else { return }
+            Task { @MainActor [weak self] in
+                await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
+            }
+        default:
+            break
+        }
+    }
+
+    /// The note is a quiet label, not a prompt: it never blocks resting. It
+    /// only wakes the pill when it changes to say call audio is now on, so
+    /// the user sees the fix worked.
+    private func applyMicOnlyNotice(_ notice: MeetingMicOnlyNotice?) {
+        // Stop clears the session's note while the pill still shows through
+        // teardown. Keep it until the pill leaves recording, so the pill
+        // doesn't shrink and slide Stop under the cursor mid-stop.
+        // `applySessionState` resyncs once the session moves on.
+        if notice == nil, meetingSession?.state == .stoppingRecording { return }
+        let previous = micOnlyNotice
+        micOnlyNotice = notice
+        if state == .recording,
+           previous == .callAudioOff,
+           notice == .callAudioOnForNextMeeting {
+            bloomFromRest()
+            scheduleRestIfNeeded()
+        }
+        pushToView()
+    }
+
+    /// The "Audio unverified" title owns the strip's middle when both apply.
+    private var showsMicOnlyNote: Bool {
+        micOnlyNotice != nil && systemAudioDegradationWarning?.cause != .unverified
     }
 
     // MARK: - Rest / wake
@@ -797,6 +1050,9 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pointerIsOverPanel() -> Bool {
+        if islandShown {
+            return island?.isPointerOverIsland == true
+        }
         guard let panel, panel.isVisible else { return false }
         return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
     }
@@ -819,6 +1075,9 @@ final class MeetingOverlayController: NSObject {
     private func handlePanelHoverChanged(_ hovered: Bool) {
         guard hovered != isPanelHovered else { return }
         isPanelHovered = hovered
+        // The saved pill has no rest/bloom; its auto-hide checks the
+        // pointer itself.
+        if case .saved = state { return }
         if hovered {
             restTask?.cancel()
             if isRestingCondensed {
@@ -972,7 +1231,22 @@ final class MeetingOverlayController: NSObject {
     private func systemAudioWarningPromptDisplay(
         warning: MeetingSystemAudioDegradationWarning
     ) -> PromptDisplay {
-        let offerAccessCheck = MeetingSystemAudioDegradationCopy.shouldOfferAccessCheck(for: warning)
+        guard MeetingSystemAudioPromptPolicy.offersActions(for: warning) else {
+            // Good news with nothing to decide: just OK, and it hides itself.
+            return PromptDisplay(
+                title: MeetingSystemAudioDegradationCopy.title(for: warning),
+                detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
+                countdownText: "",
+                secondaryTitle: "OK",
+                secondaryAccessibilityLabel: "Dismiss this notice and keep recording",
+                primaryTitle: "",
+                primaryAccessibilityLabel: ""
+            )
+        }
+        let offersCheckAccess = MeetingSystemAudioCheckAccessPolicy.offersCheckAccess(
+            for: warning,
+            status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        )
         return PromptDisplay(
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
@@ -981,8 +1255,8 @@ final class MeetingOverlayController: NSObject {
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
             primaryTitle: "End & Transcribe",
             primaryAccessibilityLabel: "End and transcribe the meeting",
-            tertiaryTitle: offerAccessCheck ? "Check Access" : nil,
-            tertiaryAccessibilityLabel: offerAccessCheck ? "Open System Audio Recording settings" : nil
+            tertiaryTitle: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessTitle : nil,
+            tertiaryAccessibilityLabel: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessAccessibilityLabel : nil
         )
     }
     private func audioInactivityPromptDisplay(
@@ -1037,14 +1311,14 @@ final class MeetingOverlayController: NSObject {
     }
 
     // The prompt panel renders `detail` as a single truncating line (~336pt
-    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The ducking
-    // trade-off disclosure must be the detail on its own and fit untruncated
-    // — the user has to see the cost before consenting to VPIO — so the
-    // cause lives in the title instead.
+    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The scope and
+    // ducking trade-off must be the detail on its own and fit untruncated
+    // (the user has to see the cost before consenting to VPIO), so the
+    // cause lives in the title instead. Accepting never saves the mode.
     private func micBoostPromptDisplay() -> PromptDisplay {
         PromptDisplay(
             title: "Mic is very quiet — another app's call",
-            detail: "Boosting may make other apps' audio slightly quieter.",
+            detail: "Just this meeting. Other audio may get a little quieter.",
             countdownText: "",
             secondaryTitle: "Not now",
             secondaryAccessibilityLabel: "Keep software mic boost",
@@ -1061,9 +1335,12 @@ final class MeetingOverlayController: NSObject {
             ? "That browser call"
             : "That \(call.provider.displayName) call"
         let length = formatInactiveDuration(call.duration)
+        let shortcut = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.meetingBinding()
+        )
         return PromptDisplay(
             title: "\(surface) wasn't recorded",
-            detail: "About \(length). Tap Record on the prompt or press Option-M next time.",
+            detail: "About \(length). Click Record on the prompt or press \(shortcut) next time.",
             countdownText: "",
             secondaryTitle: "Don't show again",
             secondaryAccessibilityLabel: "Disable missed-call reminders",
@@ -1076,9 +1353,108 @@ final class MeetingOverlayController: NSObject {
         MeetingDurationFormatter.formatInactiveDuration(duration)
     }
 
+    // MARK: - Notch island
+
+    private func islandContent() -> NotchIslandMeetingContent {
+        let sessionState = meetingSession?.state
+        let phase: NotchIslandMeetingContent.Phase
+        switch state {
+        case .idle:
+            phase = .none
+        case .prompt:
+            // Warning prompts arrive mid-recording; the missed-call nudge
+            // arrives with nothing recording.
+            switch sessionState {
+            case .recording?, .stoppingRecording?:
+                phase = .recording
+            default:
+                phase = .none
+            }
+        case .preparing where currentWarmupStatus.progress >= 1:
+            // Models are ready; the mic and call audio are what's starting.
+            phase = .preparing(title: "Starting meeting…", detail: "Checking permissions and audio")
+        case .preparing:
+            phase = .preparing(
+                title: currentWarmupStatus.title,
+                detail: currentWarmupStatus.subtitle.isEmpty ? currentWarmupStatus.detail : currentWarmupStatus.subtitle
+            )
+        case .recording:
+            phase = .recording
+        case .transcribing:
+            phase = .transcribing(
+                progress: MeetingPillFinishPresentation.percent(progress: currentTranscriptionProgress).map { Double($0) / 100 },
+                detail: finishDetail
+            )
+        case .saved:
+            phase = .saved(title: savedTranscriptTitle)
+        case .error(let message):
+            let copy = MeetingFailureCopy.make(forMessage: message, shortErrorMessage: message, isRetryable: true)
+            phase = .error(
+                title: copy.title,
+                message: copy.detail,
+                canOpen: MeetingPillFinishPresentation.errorOffersOpenMeetings(
+                    failureKind: MeetingFailureKind.classify(message: message),
+                    hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
+                ),
+                grantsSystemAudio: meetingSession?.systemAudioPermissionRecoveryNeeded == true
+            )
+        }
+        let prompt = currentPrompt.map {
+            NotchIslandMeetingContent.Prompt(
+                title: $0.title,
+                detail: $0.detail,
+                countdown: $0.countdownText,
+                primaryTitle: $0.primaryTitle,
+                secondaryTitle: $0.secondaryTitle,
+                tertiaryTitle: $0.tertiaryTitle
+            )
+        }
+        var callAudioNote: NotchIslandMeetingContent.CallAudioNote?
+        switch showsMicOnlyNote ? micOnlyNotice : nil {
+        case .callAudioOff?:
+            callAudioNote = .off
+        case .callAudioOnForNextMeeting?:
+            callAudioNote = .onForNextMeeting
+        case nil:
+            callAudioNote = nil
+        }
+        return NotchIslandMeetingContent(
+            phase: phase,
+            prompt: state == .prompt ? prompt : nil,
+            duration: currentDuration,
+            callAudioNote: callAudioNote,
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+        )
+    }
+
+    private func handleIslandAction(_ action: NotchIslandAction) {
+        switch action {
+        case .meetingStop, .meetingDismissError:
+            handleCloseTapped()
+        case .meetingPrimary, .meetingOpen:
+            handlePrimaryActionTapped()
+        case .meetingSecondary:
+            handleSecondaryActionTapped()
+        case .meetingTertiary:
+            handleCallAudioActionTapped()
+        case .meetingCallAudio:
+            // The "Mic only" chip, which can show under a warning prompt too.
+            guard micOnlyNotice == .callAudioOff else { return }
+            Task { @MainActor [weak self] in
+                await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
+            }
+        default:
+            break
+        }
+    }
+
     // MARK: - View push
 
     private func pushToView() {
+        if islandShown {
+            island?.updateMeeting(islandContent())
+            return
+        }
         resizePanelIfNeeded()
         rootView?.update(
             state: state,
@@ -1090,11 +1466,51 @@ final class MeetingOverlayController: NSObject {
             prompt: currentPrompt,
             isCondensed: isVisuallyCondensed,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
+            finishDetail: finishDetail,
+            hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError,
+            micOnlyNotice: showsMicOnlyNote ? micOnlyNotice : nil,
             systemAudioPermissionDenied: meetingSession?.systemAudioPermissionRecoveryNeeded == true
         )
     }
 
+    private func snapshotFailedMeetingIDs(from session: MeetingSessionController? = nil) {
+        let failedMeetings = (session ?? meetingSession)?.failedMeetings ?? []
+        failedMeetingIDsBeforeError = Self.settledFailedMeetingIDs(in: failedMeetings)
+    }
+
+    /// Failed rows that aren't mid-retry. A retry keeps its row's id, so
+    /// leaving retrying rows out lets a retry that fails again count as a
+    /// new row for the error pill's Open.
+    nonisolated private static func settledFailedMeetingIDs(in failedMeetings: [MeetingSessionController.FailedMeetingItem]) -> Set<UUID> {
+        Set(failedMeetings.filter { !$0.isRetrying }.map(\.id))
+    }
+
+    private var hasFailedMeetingRowForCurrentError: Bool {
+        guard let failedMeetings = meetingSession?.failedMeetings else { return false }
+        return !Self.settledFailedMeetingIDs(in: failedMeetings).isSubset(of: failedMeetingIDsBeforeError)
+    }
+
+    /// Secondary text for the finish states: progress while transcribing,
+    /// the meeting's name once saved.
+    private var finishDetail: String {
+        switch state {
+        case .transcribing:
+            return MeetingPillFinishPresentation.pillDetail(
+                progress: currentTranscriptionProgress,
+                queuedCount: currentQueuedTranscriptionCount
+            )
+        case .saved:
+            return MeetingPillFinishPresentation.savedDetail(meetingTitle: savedTranscriptTitle)
+        default:
+            return ""
+        }
+    }
+
     private func pushAudioLevelsToView() {
+        if islandShown {
+            island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
+            return
+        }
         rootView?.updateAudioLevels(
             micLevel: currentMicLevel,
             systemLevel: currentSystemLevel

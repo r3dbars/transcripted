@@ -52,24 +52,10 @@ func testUIAutomationSurfaceContract() {
             "Acknowledgement must not hide the unverified capture state")
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("signalVerified: capture.hasObservedSystemAudioSignal"),
+        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
             "The warning must resolve from this capture's PCM evidence, not a cached permission")
         assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
             "Saved health must include failures discovered while draining the tail")
-    }
-    runSuite("Unverified system audio has an actionable settings button without losing recording controls") {
-        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
-        assertTrue(controller.contains("tertiaryTitle: offerAccessCheck ? \"Check Access\" : nil"),
-            "unverified or failed audio should offer a narrow, non-accusatory settings check")
-        assertTrue(controller.contains("TranscriptedPermissionAccess.openSystemAudioRecordingSettings()"),
-            "checking access should open the audio-only pane without starting another capture probe")
-        assertTrue(controller.contains("secondaryTitle: \"Keep Recording\"")
-            && controller.contains("primaryTitle: \"End & Transcribe\""),
-            "the existing keep and finish choices must remain available")
-        assertTrue(view.contains("accessButton.setAccessibilityLabel")
-            && view.contains("onTertiaryAction?()"),
-            "the access action needs an accessible, wired button")
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
@@ -142,7 +128,7 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(title)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(visibleTitle)")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),
@@ -161,7 +147,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
-            "transcripted.menubar.primary.paste-last-dictation",
         ] {
             assertTrue(
                 contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
@@ -173,7 +158,6 @@ func testUIAutomationSurfaceContract() {
         for identifier in [
             "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ] {
             assertTrue(
@@ -247,18 +231,21 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
+            "Button(\"Today\")",
+            "appDelegate.menuOpenPage(.today)",
+            ".keyboardShortcut(\"1\", modifiers: .command)",
             "Button(\"Meetings\")",
             "appDelegate.menuOpenPage(.home)",
-            ".keyboardShortcut(\"1\", modifiers: .command)",
+            ".keyboardShortcut(\"2\", modifiers: .command)",
             "Button(\"Dictations\")",
             "appDelegate.menuOpenPage(.dictations)",
-            ".keyboardShortcut(\"2\", modifiers: .command)",
+            ".keyboardShortcut(\"3\", modifiers: .command)",
             "Button(\"Speakers\")",
             "appDelegate.menuOpenPage(.people)",
-            ".keyboardShortcut(\"3\", modifiers: .command)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
             "Button(\"Agent\")",
             "appDelegate.menuOpenPage(.connectAgent)",
-            ".keyboardShortcut(\"4\", modifiers: .command)",
+            ".keyboardShortcut(\"5\", modifiers: .command)",
             "Button(\"Find Speaker",
             "appDelegate.menuFindSpeaker()",
             ".keyboardShortcut(\"f\", modifiers: .command)",
@@ -267,10 +254,11 @@ func testUIAutomationSurfaceContract() {
         }
 
         for requiredPageHook in [
-            "case .home: return \"1\"",
-            "case .dictations: return \"2\"",
-            "case .people: return \"3\"",
-            "case .connectAgent: return \"4\"",
+            "case .today: return \"1\"",
+            "case .home: return \"2\"",
+            "case .dictations: return \"3\"",
+            "case .people: return \"4\"",
+            "case .connectAgent: return \"5\"",
             "return \"\\(title)  ⌘\\(key)\"",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
@@ -317,6 +305,7 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         for pageCase in [
+            "case today",
             "case home",
             "case dictations",
             "case general",
@@ -782,6 +771,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.section.privacy",
             "transcripted.settings.general.keyboard-shortcuts",
             "transcripted.settings.general.bluetooth-dictation",
+            "transcripted.settings.general.microphone",
             "transcripted.settings.general.auto-send",
             "transcripted.settings.general.model",
             "transcripted.settings.general.corrections",
@@ -872,7 +862,7 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRowMenuItem(title: \"Review speakers\"")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("if !audioRevealURLs.isEmpty")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: \"Re-transcribe with speaker ID\""),
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 
@@ -893,9 +883,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.back")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("(currentStep == .permissions || currentStep == .done) && !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .permissions:\n            return !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .done:\n            return !canFinishSetup")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("hasRequiredPermissions || skippedMicrophone")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
             "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
+        )
+        // After a Don't Allow, macOS won't ask for the mic again, so setup
+        // offers a skip instead of a dead end; it never shows before that.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("guard currentStep == .permissions, micBlocked, !micGranted else { return nil }")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.secondary"),
+            "onboarding should offer Skip for now only once the microphone is blocked"
         )
 
         assertTrue(
@@ -1055,18 +1054,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             tokens.contains("enum Font")
                 && tokens.contains("static let rowTitlePrimary")
-                && tokens.contains("static let headerTitle"),
+                && tokens.contains("static let headerStatus"),
             "MenuTokens should own the menubar's type roles so views never reach for a raw NSFont literal"
         )
         assertTrue(
             actionRow.contains("MenuTokens.Font.rowTitlePrimary")
                 && actionRow.contains("MenuTokens.Font.rowTitleUtility")
-                && header.contains("MenuTokens.Font.headerTitle"),
+                && header.contains("MenuTokens.Font.headerStatus"),
             "menubar rows and header should read their fonts from MenuTokens.Font"
         )
         assertFalse(
             actionRow.contains("NSFont.systemFont(ofSize: 12.5")
-                || header.contains("NSFont.systemFont(ofSize: 15.5"),
+                || header.contains("NSFont.systemFont(ofSize: 11.5"),
             "menubar labels should not re-inline raw NSFont sizes now that MenuTokens.Font owns them"
         )
         assertTrue(

@@ -13,6 +13,16 @@ func testReleaseMetadataContract() {
             infoPlist.contains("<key>CFBundleIconFile</key>\n\t<string>Transcripted</string>"),
             "Info.plist should point at the active Transcripted icon"
         )
+        assertTrue(
+            infoPlist.contains("<key>CFBundleIconName</key>\n\t<string>Transcripted</string>"),
+            "Info.plist should name the compiled icon so macOS 26 uses the real dark variant"
+        )
+
+        let iconJSON = releaseContractFile("AppIcon/Transcripted.icon/icon.json")
+        assertTrue(
+            iconJSON.contains("\"appearance\" : \"dark\""),
+            "The app icon needs a dark appearance, or macOS 26 derives an all-black one"
+        )
 
         let resourceURL = releaseContractRepoRoot().appendingPathComponent("Resources", isDirectory: true)
         let shippedIcons = ((try? FileManager.default.contentsOfDirectory(
@@ -116,6 +126,10 @@ func testReleaseMetadataContract() {
         assertEqual(appcastSelfURL, feedURL, "appcast self link should match Info.plist SUFeedURL")
         assertTrue(releasePlistBoolean("SUEnableAutomaticChecks", in: infoPlist) == true, "Sparkle automatic checks should stay enabled")
         assertTrue(releasePlistBoolean("SUAllowsAutomaticUpdates", in: infoPlist) == true, "Sparkle automatic downloads should stay available")
+        assertTrue(
+            releasePlistBoolean("SUAutomaticallyUpdate", in: infoPlist) == true,
+            "Sparkle should download updates in the background and install on quit by default; a saved user choice still wins"
+        )
         assertEqual(releasePlistInteger("SUScheduledCheckInterval", in: infoPlist), 14_400, "Sparkle check interval should stay at 4 hours")
         assertNotNil(publicKey, "Info.plist should include the Sparkle EdDSA public key")
         if let publicKey {

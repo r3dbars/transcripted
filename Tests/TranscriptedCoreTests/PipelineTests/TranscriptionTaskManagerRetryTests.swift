@@ -115,6 +115,40 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(markdown.contains("Recovered from mic only."))
     }
 
+    func testRetryOfAMicOnlyChoiceWritesTheSilentTrackAndKeepsTheMarker() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Just my side of the room.")
+        )
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("choice_mic.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
+            meetingTitle: "Mic-only by choice",
+            micOnlyByChoice: true
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.micOnlyByChoice)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failed.id,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("mic_only: true"))
+        XCTAssertTrue(markdown.contains("sources: [mic]"), "the silent stand-in track is not a source")
+        XCTAssertFalse(markdown.contains("system_audio_missing"), "a mic-only choice is not a missing track")
+        XCTAssertFalse(markdown.contains("capture_quality:"), "a retry never measured the capture, so it claims no grade")
+        XCTAssertTrue(markdown.contains("Just my side of the room."))
+    }
+
     func testCancelAllDuringRetryDoesNotPoisonFutureRetry() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Recovered after cancel.")
         let manager = makeManager(speechToText: speech)
@@ -549,6 +583,43 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(failed.id, failedId)
         XCTAssertEqual(failed.meetingTitle, "Customer call")
         XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
+    }
+
+    func testRetryOnParakeetKeepsTheWhisperModelGuidanceForASavedLanguage() async throws {
+        // STTRouter refuses a saved explicit language on Parakeet with this
+        // text. It names Whisper, so it used to be filed as an inference
+        // failure and the row only said "Transcription inference failed".
+        let routerError = NSError(domain: "STTRouter", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language."
+        ])
+        let manager = makeManager(speechToText: MetadataStubSpeechToTextEngine(transcribeError: routerError))
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("language-retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("language-retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Finnish sync"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertFalse(didRetry)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(
+            failed.errorMessage,
+            "Retry failed: \(TranscriptionTaskManager.languageNeedsWhisperModelMessage)"
+        )
+        XCTAssertTrue(failed.isRetryable, "switching to Whisper and retrying must stay possible")
+        XCTAssertTrue(failed.audioFilesExist())
     }
 
     func testRetryFailedTranscriptionHonorsPersistedSplitLocalSpeakers() async throws {

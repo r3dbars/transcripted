@@ -113,6 +113,11 @@ func testTranscriptedStoragePaths() {
             "manifest should expose dictations root"
         )
         assertEqual(
+            manifest.writingDirectory,
+            captureRoot.appendingPathComponent("writing", isDirectory: true).standardizedFileURL.path,
+            "manifest should expose the writing root"
+        )
+        assertEqual(
             permissions(of: manifestURL),
             NSNumber(value: 0o600),
             "manifest should be restricted to owner-only access"
@@ -146,6 +151,7 @@ func testTranscriptedStoragePaths() {
 
         let meetings = FileManager.default.meetingSupportDir
         let dictations = FileManager.default.dictationSupportDir
+        let writing = FileManager.default.writingSupportDir
 
         assertEqual(
             manifest.meetingsDirectory,
@@ -156,6 +162,11 @@ func testTranscriptedStoragePaths() {
             manifest.dictationsDirectory,
             dictations.path,
             "manifest dictationsDirectory should match FileManager.dictationSupportDir for the same capture root"
+        )
+        assertEqual(
+            manifest.writingDirectory,
+            writing.path,
+            "manifest writingDirectory should match FileManager.writingSupportDir for the same capture root"
         )
     }
 
@@ -184,10 +195,15 @@ func testTranscriptedStoragePaths() {
             FileManager.default.fileExists(atPath: customRoot.appendingPathComponent("dictations", isDirectory: true).path),
             "setting a custom capture library should prepare the dictations folder before writers use it"
         )
+        assertTrue(
+            FileManager.default.fileExists(atPath: customRoot.appendingPathComponent("writing", isDirectory: true).path),
+            "setting a custom capture library should prepare the writing folder before writers use it"
+        )
 
         let captureLibrary = FileManager.default.transcriptedCaptureLibraryDir
         let meetings = FileManager.default.meetingSupportDir
         let dictations = FileManager.default.dictationSupportDir
+        let writing = FileManager.default.writingSupportDir
 
         assertEqual(
             captureLibrary,
@@ -204,8 +220,13 @@ func testTranscriptedStoragePaths() {
             captureLibrary.appendingPathComponent("dictations", isDirectory: true),
             "dictation storage should stay inside the chosen capture library"
         )
+        assertEqual(
+            writing,
+            captureLibrary.appendingPathComponent("writing", isDirectory: true),
+            "writing storage should stay inside the chosen capture library"
+        )
 
-        for directory in [captureLibrary, meetings, dictations] {
+        for directory in [captureLibrary, meetings, dictations, writing] {
             assertTrue(
                 FileManager.default.fileExists(atPath: directory.path),
                 "expected storage directory to exist: \(directory.lastPathComponent)"
@@ -370,6 +391,144 @@ func testTranscriptedStoragePaths() {
             FileManager.default.transcriptedCaptureLibraryDir,
             existingRoot.standardizedFileURL,
             "storage should keep using the previous capture library after a rejected replacement"
+        )
+    }
+
+    runSuite("Transcripted capture library helpers — writing is a sibling of meetings and dictations") {
+        let library = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-helpers-\(UUID().uuidString)", isDirectory: true)
+
+        assertEqual(FileManager.writingDirectoryName, "writing", "the writing folder name is part of the capture-library contract")
+        assertEqual(
+            FileManager.writingDirectory(in: library),
+            library.appendingPathComponent("writing", isDirectory: true),
+            "writing day files live in <capture-library>/writing/"
+        )
+        assertEqual(
+            FileManager.meetingsDirectory(in: library),
+            library.appendingPathComponent("meetings", isDirectory: true),
+            "the meetings helper should keep the existing folder name"
+        )
+        assertEqual(
+            FileManager.dictationsDirectory(in: library),
+            library.appendingPathComponent("dictations", isDirectory: true),
+            "the dictations helper should keep the existing folder name"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: library.path),
+            "the pure folder helpers must not create anything"
+        )
+    }
+
+    runSuite("Transcripted MCP directory manifest — a pre-Writing manifest decodes and is rewritten with the writing key") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-prewriting-\(UUID().uuidString)", isDirectory: true)
+        let captureRoot = tempRoot.appendingPathComponent("captures", isDirectory: true).standardizedFileURL
+        let manifestURL = tempRoot.appendingPathComponent("mcp-directories.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        // Exactly the shape builds before Writing wrote: no writingDirectory key.
+        let meetingsPath = captureRoot.appendingPathComponent("meetings", isDirectory: true).path
+        let dictationsPath = captureRoot.appendingPathComponent("dictations", isDirectory: true).path
+        let preWriting: [String: Any] = [
+            "version": 1,
+            "captureLibraryDirectory": captureRoot.path,
+            "meetingsDirectory": meetingsPath,
+            "dictationsDirectory": dictationsPath,
+            "updatedAt": "1970-01-01T00:00:00Z",
+        ]
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: preWriting) {
+            try? data.write(to: manifestURL, options: [.atomic])
+        }
+
+        guard let oldData = try? Data(contentsOf: manifestURL),
+              let old = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: oldData) else {
+            assertTrue(false, "a manifest without writingDirectory should still decode")
+            return
+        }
+        assertNil(old.writingDirectory, "a pre-Writing manifest has no writing folder")
+        assertEqual(old.meetingsDirectory, meetingsPath, "older keys should decode unchanged")
+        assertEqual(old.dictationsDirectory, dictationsPath, "older keys should decode unchanged")
+
+        try? FileManager.default.writeTranscriptedMCPDirectoriesManifestIfNeeded(
+            captureLibraryURL: captureRoot,
+            manifestURL: manifestURL,
+            updatedAt: Date(timeIntervalSince1970: 86_400)
+        )
+
+        guard let newData = try? Data(contentsOf: manifestURL),
+              let rewritten = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: newData) else {
+            assertTrue(false, "the rewritten manifest should decode")
+            return
+        }
+        assertEqual(
+            rewritten.writingDirectory,
+            captureRoot.appendingPathComponent("writing", isDirectory: true).path,
+            "the equality shortcut must not keep a manifest that lacks the writing folder"
+        )
+        assertEqual(rewritten.updatedAt, "1970-01-02T00:00:00Z", "the pre-Writing manifest should have been rewritten")
+        assertEqual(rewritten.version, 1, "an optional key is additive, so the version stays 1")
+        assertEqual(rewritten.meetingsDirectory, meetingsPath, "the rewrite should keep the meetings folder")
+        assertEqual(rewritten.dictationsDirectory, dictationsPath, "the rewrite should keep the dictations folder")
+    }
+
+    runSuite("Transcripted MCP directory manifest — a current manifest round-trips and is not rewritten") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-roundtrip-\(UUID().uuidString)", isDirectory: true)
+        let captureRoot = tempRoot.appendingPathComponent("captures", isDirectory: true)
+        let manifestURL = tempRoot.appendingPathComponent("mcp-directories.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.writeTranscriptedMCPDirectoriesManifestIfNeeded(
+            captureLibraryURL: captureRoot,
+            manifestURL: manifestURL,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        try? FileManager.default.writeTranscriptedMCPDirectoriesManifestIfNeeded(
+            captureLibraryURL: captureRoot,
+            manifestURL: manifestURL,
+            updatedAt: Date(timeIntervalSince1970: 86_400)
+        )
+
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: data) else {
+            assertTrue(false, "manifest should be readable JSON")
+            return
+        }
+        assertEqual(manifest.updatedAt, "1970-01-01T00:00:00Z", "an up-to-date manifest with the writing key should not be rewritten")
+        assertNotNil(manifest.writingDirectory, "the written manifest should carry the writing folder")
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let reencoded = try? encoder.encode(manifest)
+        assertEqual(
+            reencoded.flatMap { try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: $0) },
+            manifest,
+            "the manifest should round-trip through Codable unchanged"
+        )
+
+        let withoutWriting = TranscriptedMCPDirectoriesManifest(
+            version: 1,
+            captureLibraryDirectory: manifest.captureLibraryDirectory,
+            meetingsDirectory: manifest.meetingsDirectory,
+            dictationsDirectory: manifest.dictationsDirectory,
+            writingDirectory: nil,
+            updatedAt: manifest.updatedAt
+        )
+        guard let withoutWritingData = try? encoder.encode(withoutWriting),
+              let withoutWritingKeys = (try? JSONSerialization.jsonObject(with: withoutWritingData)) as? [String: Any] else {
+            assertTrue(false, "a manifest without the writing folder should encode")
+            return
+        }
+        assertFalse(
+            withoutWritingKeys.keys.contains("writingDirectory"),
+            "a nil writing folder should be omitted, keeping the pre-Writing shape"
+        )
+        assertEqual(
+            try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: withoutWritingData),
+            withoutWriting,
+            "a manifest without the writing key should round-trip too"
         )
     }
 

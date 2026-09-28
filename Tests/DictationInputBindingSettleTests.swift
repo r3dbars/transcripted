@@ -37,6 +37,30 @@ func testDictationInputBindingSettle() async {
         assertTrue(zip(budgets, budgets.dropFirst()).allSatisfy { $0 > $1 }, "native probes get shrinking timeouts")
     } catch { assertTrue(false, "slow-settle scenario failed: \(error)") }
 
+    // An input that is already bound verifies on the first probe, with no
+    // fixed settle delay in front of it.
+    clock = 0
+    do {
+        let result: UInt32 = try await DictationInputDeviceBindingPolicy.waitForBinding(
+            now: { clock }, sleep: { clock += $0 }, isCurrent: { true }
+        ) { _ in
+            try DictationInputDeviceBindingPolicy.verify(selectedDeviceID: mic.id, boundDeviceID: mic.id)
+            return mic.id
+        }
+        assertEqual(result, mic.id, "an already-bound input verifies")
+        assertEqual(clock, 0, "an already-bound input starts without a settle delay")
+    } catch { assertTrue(false, "already-bound scenario failed: \(error)") }
+
+    let airPods = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1)
+    let skipsHeadset = DictationInputDeviceSelection(defaultInput: airPods, selectedInput: mic,
+        defaultOutput: nil, reason: .preferredBuiltInForBluetoothHeadset)
+    assertEqual(
+        DictationInputDeviceBindingPolicy.initialSettleDelay(for: skipsHeadset),
+        TranscriptedConstants.audioRecoveryDelay,
+        "moving off a Bluetooth macOS input keeps the settle before the engine starts"
+    )
+    assertEqual(DictationInputDeviceBindingPolicy.initialSettleDelay(for: selection), 0, "a safe macOS input starts without a settle")
+
     for staleID in [UInt32(0), UInt32(10)] {
         clock = 0
         var probes = 0

@@ -45,8 +45,54 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(report.checks.contains { $0.id == "release-dsym-uuid" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "release-dmg" && $0.status == .pass })
         XCTAssertTrue(report.checks.contains { $0.id == "logs/privacy-scan" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-helper" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-signature" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-bundle" && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-signature" && $0.status == .pass })
         XCTAssertEqual(report.status, .warn)
         XCTAssertEqual(report.exitCode, 3)
+    }
+
+    func testMissingLlamaServerHelperFails() throws {
+        let fixture = try makeFixture()
+        try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/Helpers/llama-server"))
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-helper" && $0.status == .fail })
+        XCTAssertFalse(report.checks.contains { $0.id == "llama-server-signature" })
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testMissingKeyboardBundleFails() throws {
+        let fixture = try makeFixture()
+        try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/Library/Input Methods/Transcripted Keyboard.app"))
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-bundle" && $0.status == .fail })
+        XCTAssertFalse(report.checks.contains { $0.id == "keyboard-signature" })
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testUnsignedKeyboardBundleFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(codesignExitCode: 1)
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "keyboard-signature" && $0.status == .fail })
+    }
+
+    func testUnsignedLlamaServerHelperFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(codesignExitCode: 1)
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "llama-server-signature" && $0.status == .fail })
     }
 
     func testPackagedAppSmokeWarnsWhenFirstRunReliabilityHarnessIsSkipped() throws {
@@ -151,6 +197,63 @@ final class PackagedAppSmokeTests: XCTestCase {
         })
     }
 
+    func testMissingCLIHelperFailsWithoutLaunching() throws {
+        let fixture = try makeFixture()
+        try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/Helpers/transcripted-cli"))
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-helper" && $0.status == .fail })
+        XCTAssertFalse(report.checks.contains { $0.id == "cli-launch" })
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testCLIThatCannotLaunchFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(
+            cliExitCode: 134,
+            cliOutput: "dyld: Library not loaded: @rpath/FluidAudio.framework/FluidAudio (code signature not valid for use in process)\n"
+        )
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        let launch = try XCTUnwrap(report.checks.first { $0.id == "cli-launch" })
+        XCTAssertEqual(launch.status, .fail)
+        XCTAssertTrue(launch.detail.contains("134"))
+        XCTAssertEqual(report.exitCode, 1)
+    }
+
+    func testCLIWithoutMeetingPipelineFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(
+            cliOutput: #"{"diarization":false,"meetingImport":false,"mode":"retrieval","transcription":false}"# + "\n"
+        )
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .fail })
+    }
+
+    func testCLIWithoutCapabilitiesJSONFails() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(cliOutput: "OVERVIEW: Transcripted command-line tools\n")
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .fail })
+    }
+
+    func testCLIStderrNoiseBeforeCapabilitiesJSONStillPasses() throws {
+        let fixture = try makeFixture()
+        let commandRunner = FakePackagedAppSmokeCommandRunner(
+            cliOutput: "objc[1]: Class X is implemented in both\n" + FakePackagedAppSmokeCommandRunner.fullPipelineBuildInfo
+        )
+
+        let report = makeRunner(fixture: fixture, commandRunner: commandRunner).run()
+
+        XCTAssertTrue(report.checks.contains { $0.id == "cli-launch" && $0.status == .pass })
+    }
+
     func testCommandRunnerDrainsLargeOutputWithoutDeadlocking() {
         let result = ProcessPackagedAppSmokeCommandRunner().run(
             "/usr/bin/awk",
@@ -209,9 +312,17 @@ final class PackagedAppSmokeTests: XCTestCase {
         try "binary".write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
 
-        let helper = helpers.appendingPathComponent("transcripted-mcp", isDirectory: false)
-        try "helper".write(to: helper, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let keyboardMacOS = contents.appendingPathComponent("Library/Input Methods/Transcripted Keyboard.app/Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: keyboardMacOS, withIntermediateDirectories: true)
+        let keyboardExecutable = keyboardMacOS.appendingPathComponent("TranscriptedKeyboard", isDirectory: false)
+        try "keyboard".write(to: keyboardExecutable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: keyboardExecutable.path)
+
+        for name in ["transcripted-mcp", "transcripted-cli", "llama-server"] {
+            let helper = helpers.appendingPathComponent(name, isDirectory: false)
+            try "helper".write(to: helper, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        }
 
         let sourceInfoPlist = tempRoot.appendingPathComponent("Info.plist", isDirectory: false)
         let builtInfoPlist = contents.appendingPathComponent("Info.plist", isDirectory: false)
@@ -286,8 +397,18 @@ private struct FakePackagedAppSmokeCommandRunner: PackagedAppSmokeCommandRunning
     var dSYMUUID: String = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
     var codesignExitCode: Int32 = 0
     var hdiutilExitCode: Int32 = 0
+    var cliExitCode: Int32 = 0
+    var cliOutput: String = FakePackagedAppSmokeCommandRunner.fullPipelineBuildInfo
+
+    static let fullPipelineBuildInfo = #"{"diarization":true,"meetingImport":true,"mode":"meeting","transcription":true}"# + "\n"
 
     func run(_ executable: String, _ arguments: [String]) -> PackagedAppSmokeCommandResult {
+        if executable.hasSuffix("/Contents/Helpers/transcripted-cli") {
+            guard arguments == ["build-info"] else {
+                return PackagedAppSmokeCommandResult(exitCode: 64, stdout: "", stderr: "unexpected CLI arguments \(arguments)")
+            }
+            return PackagedAppSmokeCommandResult(exitCode: cliExitCode, stdout: cliOutput, stderr: "")
+        }
         if executable.contains("codesign") {
             return PackagedAppSmokeCommandResult(exitCode: codesignExitCode, stdout: "", stderr: codesignExitCode == 0 ? "" : "bad signature")
         }

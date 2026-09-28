@@ -29,22 +29,20 @@ enum FocusOrderContract {
 
     // MARK: - Menu bar popover
 
-    /// Primary action rows, top to bottom, as laid out in
-    /// `MenuBarPrimaryActionsView` (Record/Stop Meeting leads, then the
-    /// dictation and paste actions).
+    /// The two side-by-side buttons, left to right, as laid out in
+    /// `MenuBarPrimaryActionsView` (Record/Stop Meeting leads, then Dictate).
     static let menuBarPrimaryOrder: [String] = [
         "transcripted.menubar.primary.start-meeting",
         "transcripted.menubar.primary.start-dictation",
-        "transcripted.menubar.primary.paste-last-dictation",
     ]
 
     /// Utility action rows, top to bottom, as laid out in
-    /// `MenuBarUtilityActionsView` (quiet-library redesign: verbs up top,
-    /// utilities below — Home/Recent/Connect/Feedback rows retired).
+    /// `MenuBarUtilityActionsView`. The slim menu keeps three rows: Settings
+    /// lives inside Open Transcripted, and Paste Last Dictation keeps its
+    /// shortcut but has no row.
     static let menuBarUtilityOrder: [String] = [
-        "transcripted.menubar.utility.check-updates",
         "transcripted.menubar.utility.open-transcripted",
-        "transcripted.menubar.utility.settings",
+        "transcripted.menubar.utility.check-updates",
         "transcripted.menubar.utility.quit",
     ]
 
@@ -58,9 +56,11 @@ enum FocusOrderContract {
 
     // MARK: - Settings sidebar
 
-    /// Primary sidebar navigation, top to bottom (Home, Dictations, Speakers,
-    /// Agent), matching the ⌘1–⌘4 "Go" shortcuts and the sidebar's visual order.
+    /// Primary sidebar navigation, top to bottom (Today, Meetings, Dictations,
+    /// Speakers, Agent), matching the ⌘1–⌘5 "Go" shortcuts and the sidebar's
+    /// visual order.
     static let settingsSidebarOrder: [String] = [
+        "transcripted.settings.sidebar.today",
         "transcripted.settings.sidebar.home",
         "transcripted.settings.sidebar.dictations",
         "transcripted.settings.sidebar.people",

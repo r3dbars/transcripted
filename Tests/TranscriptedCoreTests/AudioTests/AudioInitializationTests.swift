@@ -35,6 +35,60 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testPickedMeetingMicIsCapturedForTheRecordingAndCanBeDroppedForARetry() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertNil(audio.meetingPreferredInputDeviceUID)
+        XCTAssertNil(audio.meetingPreferredInputDeviceUIDForCurrentRecording)
+
+        audio.meetingPreferredInputDeviceUID = "usb-mic"
+        audio.prepareForNewRecordingStart()
+        XCTAssertEqual(audio.meetingPreferredInputDeviceUIDForCurrentRecording, "usb-mic")
+
+        audio.meetingPreferredInputDeviceUID = nil
+        audio.resetMeetingRouteState()
+        XCTAssertEqual(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "usb-mic",
+            "a recovery retry keeps this meeting's picked mic"
+        )
+
+        XCTAssertTrue(audio.dropMeetingPreferredInputDeviceForCurrentRecording())
+        XCTAssertNil(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "a pick that would not start is dropped so the retry runs the automatic choice"
+        )
+        XCTAssertFalse(audio.dropMeetingPreferredInputDeviceForCurrentRecording(), "nothing left to drop")
+
+        audio.meetingPreferredInputDeviceUID = "usb-mic"
+        audio.prepareForNewRecordingStart()
+        XCTAssertEqual(
+            audio.meetingPreferredInputDeviceUIDForCurrentRecording,
+            "usb-mic",
+            "the next meeting tries the pick again"
+        )
+    }
+
+    func testLastAttemptedMeetingSelectionReasonClearsWithRouteState() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason)
+        audio.recordAttemptedMeetingSelectionReason(.userChosenInput)
+        XCTAssertEqual(
+            audio.lastAttemptedMeetingSelectionReason,
+            .userChosenInput,
+            "kept even when binding failed and the selection was never stored"
+        )
+        audio.resetMeetingRouteState()
+        XCTAssertNil(audio.lastAttemptedMeetingSelectionReason, "each start or retry begins without a stale reason")
+    }
+
     func testMicRecoveryOnlySucceedsAfterANewBuffer() {
         XCTAssertFalse(
             MicRecoveryReadinessPolicy.deliveredNewBuffer(before: 10, after: 10),
@@ -110,6 +164,28 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testWatchdogWaitsOutSystemSleep() {
+        XCTAssertFalse(
+            MicWatchdogSessionPolicy.shouldRun(
+                watchdogGeneration: 8,
+                currentGeneration: 8,
+                isRecording: true,
+                isRecovering: false,
+                isSystemSleepPending: true
+            ),
+            "silence while the Mac goes to sleep must not restart the mic or count toward giving up"
+        )
+    }
+
+    func testMicRestartAfterWakeIsNotCountedAsADeviceSwitch() {
+        XCTAssertTrue(MicDeviceSwitchCountingPolicy.counts(reason: .deviceChange, afterSystemWake: false))
+        XCTAssertFalse(
+            MicDeviceSwitchCountingPolicy.counts(reason: .deviceChange, afterSystemWake: true),
+            "sleeping the Mac must not mark a clean meeting degraded"
+        )
+        XCTAssertFalse(MicDeviceSwitchCountingPolicy.counts(reason: .processingChange, afterSystemWake: false))
+    }
+
     func testMicRecoveryOwnershipRemainsWithTheActiveSession() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
@@ -171,6 +247,58 @@ final class AudioInitializationTests: XCTestCase {
         )
         XCTAssertTrue(audio.recordingGaps.isEmpty)
         XCTAssertTrue(audio.micSegments.isEmpty)
+    }
+
+    func testRecoverySegmentIsListedBeforeAudioArrivesAndKeptWhenStopWins() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
+        let url = root.appendingPathComponent("recovery.wav")
+
+        XCTAssertTrue(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: url, gapBeforeDuration: 3),
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.micSegments.map(\.url), [url], "Stop must see the segment mid-recovery")
+
+        let gap = Audio.AudioGap(start: Date(), duration: 4.5, reason: "Device switch")
+        XCTAssertTrue(
+            audio.finalizeRegisteredMicRecoverySegment(
+                gap: gap,
+                segmentURL: url,
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertEqual(audio.micSegments.map(\.gapBeforeDuration), [4.5])
+        XCTAssertEqual(audio.recordingGaps.count, 1)
+
+        let failedURL = root.appendingPathComponent("failed-recovery.wav")
+        XCTAssertTrue(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: failedURL),
+                sessionGeneration: generation
+            )
+        )
+        XCTAssertTrue(audio.unregisterMicRecoverySegment(failedURL, sessionGeneration: generation))
+        XCTAssertEqual(audio.micSegments.map(\.url), [url], "a failed attempt drops only its own segment")
+
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(
+            audio.unregisterMicRecoverySegment(url, sessionGeneration: generation),
+            "once Stop owns the session the recovery must keep the file"
+        )
+        XCTAssertFalse(
+            audio.registerMicRecoverySegment(
+                MicRecordingSegment(url: failedURL),
+                sessionGeneration: generation
+            )
+        )
     }
 
     func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
@@ -292,10 +420,11 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneGraph.rawValue, "microphone_graph")
         XCTAssertEqual(AudioCaptureStartFailureStage.systemAudio.rawValue, "system_audio")
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneFile.rawValue, "microphone_file")
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphoneTapRaised.rawValue, "microphone_tap_raised")
         XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
     }
 
-    func testStartClearsPreviousFailureStageBeforePreflightFailure() {
+    func testStartClearsPreviousFailureStageBeforePreflightFailure() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioPreflightFailure-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -315,8 +444,16 @@ final class AudioInitializationTests: XCTestCase {
             }
         }
 
+        // The blocker must really exist. Without `root`, createFile quietly
+        // failed, preflight created the folder and passed, and `start()` went
+        // on to probe real microphones and TCC from inside a unit test. Bail
+        // out on setup failure: XCTest keeps going after a failed assert.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let blockedSavePath = root.appendingPathComponent("capture-blocker")
-        FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data())
+        guard FileManager.default.createFile(atPath: blockedSavePath.path, contents: Data()) else {
+            XCTFail("could not create the save-folder blocker file")
+            return
+        }
         let paths = CoreStoragePaths(
             transcripts: blockedSavePath,
             speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
@@ -331,6 +468,11 @@ final class AudioInitializationTests: XCTestCase {
 
         audio.start()
 
+        XCTAssertEqual(
+            audio.error?.hasPrefix("Can't write to save folder"),
+            true,
+            "start() must stop at the blocked save folder, before any real microphone or permission check"
+        )
         XCTAssertEqual(
             audio.startFailureStage,
             .unknown,
@@ -576,6 +718,70 @@ final class AudioInitializationTests: XCTestCase {
 
         XCTAssertEqual(snapshot.sampleRate, 48_000, accuracy: 0.1)
         XCTAssertEqual(snapshot.channelCount, 2)
+    }
+
+    func testMicTapIsNotInstalledAfterAirPodsSwitchToTheirCallFormat() throws {
+        func format(_ sampleRate: Double, _ channels: AVAudioChannelCount) throws -> AVAudioFormat {
+            try XCTUnwrap(AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: false
+            ))
+        }
+        let validated = try format(48_000, 1)
+
+        XCTAssertTrue(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 1)))
+        XCTAssertFalse(
+            MicTapFormatPolicy.stillMatches(expected: validated, current: try format(24_000, 1)),
+            "AirPods dropping to 24 kHz after validation must stop the tap install instead of crashing"
+        )
+        XCTAssertFalse(MicTapFormatPolicy.stillMatches(expected: validated, current: try format(48_000, 2)))
+    }
+
+    /// The format check before `installTap` only turns a crash into a failed
+    /// start. AirPods flip on nearly every first start, so the start must
+    /// rebuild on the settled route before it sizes the mic file.
+    func testMeetingStartSettlesTheMicRouteBeforeCreatingTheMicFile() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioFileManager.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "func startAudioCapture(sessionGeneration: UInt64)"))
+        let body = source[start.upperBound...]
+
+        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
+        let micFile = try XCTUnwrap(body.range(of: "_mic.wav"))
+        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
+        let installTap = try XCTUnwrap(body.range(of: "inputNode.installTap("))
+
+        XCTAssertLessThan(settle.lowerBound, micFile.lowerBound)
+        XCTAssertLessThan(micFile.lowerBound, tapGuard.lowerBound)
+        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+    }
+
+    func testMicRecoverySettlesTheRouteBeforeSizingTheRecoverySegment() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AudioTests
+            .deletingLastPathComponent() // TranscriptedCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "func recoverFromDeviceChange("))
+        let body = source[start.upperBound...]
+
+        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
+        let snapshot = try XCTUnwrap(body.range(of: "let recordingSnapshot = preparedGraph.recordingSnapshot"))
+        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
+        let installTap = try XCTUnwrap(body.range(of: "newInputNode.installTap("))
+
+        XCTAssertLessThan(settle.lowerBound, snapshot.lowerBound)
+        XCTAssertLessThan(snapshot.lowerBound, tapGuard.lowerBound)
+        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
     }
 
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {

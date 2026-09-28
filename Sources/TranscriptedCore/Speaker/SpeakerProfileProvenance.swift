@@ -266,6 +266,15 @@ extension SpeakerDatabase {
         queue.sync { undoableMergeImpl(forTargetId: targetId) }
     }
 
+    /// The saved person that now holds `profileId` after one or more merges that
+    /// have not been undone, or nil when the profile was deleted outright (or never
+    /// merged). A review that is still open when another meeting's duplicate cleanup
+    /// absorbs its profile uses this to follow the voice to where it went.
+    public func mergeSurvivorId(of profileId: UUID) -> UUID? {
+        if isExecutingOnQueue { return mergeSurvivorIdImpl(of: profileId) }
+        return queue.sync { mergeSurvivorIdImpl(of: profileId) }
+    }
+
     /// Audit trail of contributions that built a profile, newest first.
     public func contributions(forProfileId profileId: UUID) -> [SpeakerContribution] {
         queue.sync { contributionsImpl(forProfileId: profileId) }
@@ -298,6 +307,41 @@ extension SpeakerDatabase {
     }
 
     // MARK: - Impl
+
+    private func mergeSurvivorIdImpl(of profileId: UUID) -> UUID? {
+        guard isDatabaseOpen else { return nil }
+        let sql = """
+        SELECT target_id FROM speaker_merge_events
+        WHERE source_id = ? AND undone_at IS NULL
+        ORDER BY rowid DESC
+        LIMIT 1;
+        """
+        var current = profileId
+        var visited: Set<UUID> = [profileId]
+        // Merge chains are short in practice; the hop cap and visited set only guard
+        // against a corrupt event log that loops.
+        for _ in 0..<16 {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                AppLogger.speakers.error("Failed to prepare merge survivor lookup", ["sqlite_error": dbErrorMessage()])
+                sqlite3_finalize(statement)
+                return nil
+            }
+            sqlite3_bind_text(statement, 1, (current.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            var next: UUID?
+            if sqlite3_step(statement) == SQLITE_ROW {
+                next = sqlite3_column_text(statement, 0)
+                    .map(String.init(cString:))
+                    .flatMap(UUID.init(uuidString:))
+            }
+            sqlite3_finalize(statement)
+
+            guard let next, visited.insert(next).inserted else { return nil }
+            if getSpeakerImpl(id: next) != nil { return next }
+            current = next
+        }
+        return nil
+    }
 
     private func recentUndoableMergesImpl(limit: Int) -> [SpeakerMergeRecord] {
         guard isDatabaseOpen else { return [] }

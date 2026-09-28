@@ -601,14 +601,40 @@ struct HomeMeetingPreviewContent {
 }
 
 struct HomeMeetingTranscriptLine: Equatable {
-    /// The transcript renders this clock string as static text. Speaker review
-    /// can separately use it to bound a retained-audio sample; rows never
-    /// follow or highlight the playhead.
+    /// The transcript renders this clock string, and clicking it plays the
+    /// meeting audio from there when audio was kept. Speaker review can
+    /// separately use it to bound a retained-audio sample; rows never follow
+    /// or highlight the playhead.
     let time: String
     let identity: HomeMeetingSpeakerIdentity
     let text: String
 
     var speaker: String { identity.displayName }
+
+    /// Offset into the meeting audio for `time`, or nil when the clock string
+    /// isn't a usable `M:SS` / `H:MM:SS` value.
+    var startSeconds: TimeInterval? {
+        HomeMeetingTranscriptClock.seconds(from: time)
+    }
+}
+
+enum HomeMeetingTranscriptClock {
+    /// Parses `MM:SS` or `H:MM:SS`. Each part is capped at a few digits so a
+    /// corrupted transcript can't overflow the multiply.
+    static func seconds(from value: String) -> TimeInterval? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3,
+              parts.allSatisfy({ !$0.isEmpty && $0.count <= 4 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }) else {
+            return nil
+        }
+        let numbers = parts.compactMap { Int($0) }
+        guard numbers.count == parts.count, numbers[numbers.count - 1] < 60 else { return nil }
+        if numbers.count == 3 {
+            guard numbers[1] < 60 else { return nil }
+            return TimeInterval(numbers[0] * 3600 + numbers[1] * 60 + numbers[2])
+        }
+        return TimeInterval(numbers[0] * 60 + numbers[1])
+    }
 }
 
 private struct PendingTranscriptLine {

@@ -19,6 +19,10 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
         case closed = 0
         case open = 1
         case failed = 2
+        // Stop has moved the session boundary, but the producer may still
+        // deliver audio it captured before Stop. Admission stays open for that
+        // tail until the producer is torn down and the owner calls `close`.
+        case finishing = 3
     }
 
     let byteLimit: Int
@@ -42,6 +46,22 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
         )
     }
 
+    /// Keeps `generation` admitting its already-captured tail after Stop.
+    /// Only an open generation can start finishing: an overflowed or closed
+    /// one stays shut, and a successor's `begin` replaces this state outright.
+    func beginFinishing(generation: UInt64) {
+        _ = generationState.compareExchange(
+            expected: encoded(generation: generation, state: .open),
+            desired: encoded(generation: generation, state: .finishing),
+            ordering: .acquiringAndReleasing
+        )
+    }
+
+    func isFinishing(generation: UInt64) -> Bool {
+        generationState.load(ordering: .acquiring)
+            == encoded(generation: generation, state: .finishing)
+    }
+
     func close(generation: UInt64) {
         let closed = encoded(generation: generation, state: .closed)
         var observed = generationState.load(ordering: .acquiring)
@@ -58,19 +78,19 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
 
     func admit(bytes: Int, generation: UInt64) -> Admission {
         guard bytes > 0 else { return .closed }
-        let open = encoded(generation: generation, state: .open)
-        guard generationState.load(ordering: .acquiring) == open else {
+        let admitting = generationState.load(ordering: .acquiring)
+        guard isAdmitting(admitting, generation: generation) else {
             return .closed
         }
 
         guard bytes <= byteLimit else {
-            return failOpenGeneration(generation, expectedOpenState: open)
+            return failOpenGeneration(generation, expectedOpenState: admitting)
         }
 
         var observedBytes = pendingBytes.load(ordering: .relaxed)
         while true {
             guard observedBytes <= byteLimit - bytes else {
-                return failOpenGeneration(generation, expectedOpenState: open)
+                return failOpenGeneration(generation, expectedOpenState: admitting)
             }
 
             let result = pendingBytes.compareExchange(
@@ -81,7 +101,11 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
             if result.exchanged {
                 // Stop or overflow may have won while this reservation CAS was
                 // in flight. Give the bytes back instead of queueing stale work.
-                guard generationState.load(ordering: .acquiring) == open else {
+                // Open -> finishing is not a loss: that tail is still wanted.
+                guard isAdmitting(
+                    generationState.load(ordering: .acquiring),
+                    generation: generation
+                ) else {
                     release(bytes: bytes)
                     return .closed
                 }
@@ -109,6 +133,11 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
         pendingBytes.load(ordering: .acquiring)
     }
 
+    private func isAdmitting(_ encodedState: UInt64, generation: UInt64) -> Bool {
+        encodedState == encoded(generation: generation, state: .open)
+            || encodedState == encoded(generation: generation, state: .finishing)
+    }
+
     private func failOpenGeneration(
         _ generation: UInt64,
         expectedOpenState: UInt64
@@ -119,7 +148,13 @@ final class PCMBufferBackpressureGate: @unchecked Sendable {
             desired: failed,
             ordering: .acquiringAndReleasing
         )
-        return result.exchanged ? .firstOverflow : .closed
+        // A finishing generation is already stopping; overflow there only
+        // drops the rest of the tail and must not request a second stop.
+        guard result.exchanged,
+              expectedOpenState == encoded(generation: generation, state: .open) else {
+            return .closed
+        }
+        return .firstOverflow
     }
 
     private func encoded(

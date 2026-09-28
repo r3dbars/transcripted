@@ -22,6 +22,9 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Meeting title. Defaults to the input filename without its extension.")
     var title: String?
 
+    @Flag(name: .long, help: "Name the Markdown just after the title (the input filename by default), with no date in front or ID at the end. Adds the ID only if that name is already taken.")
+    var plainFilename = false
+
     @Flag(name: .long, help: "Save Markdown only, without a retained playback WAV. The original input is always preserved.")
     var noRetainAudio = false
 
