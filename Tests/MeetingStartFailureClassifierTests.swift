@@ -324,4 +324,30 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("Typed system-audio denial offers recovery without mislabeling silence") {
+        assertTrue(
+            MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
+                missingPermissions: ["system_audio_recording"]
+            ),
+            "a missing system-audio grant should offer the direct Settings recovery"
+        )
+        assertTrue(
+            !MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
+                missingPermissions: ["microphone", "system_audio_recording"]
+            ),
+            "a single audio-settings action must not imply it fixes a combined mic and audio blocker"
+        )
+        assertTrue(
+            MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
+                explicitSystemAudioPermissionDenialObserved: true
+            ),
+            "an actual capture denial should offer the direct Settings recovery"
+        )
+        assertTrue(
+            !MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery()
+                && !MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(missingPermissions: ["microphone"]),
+            "generic capture errors and microphone-only denial are not system-audio denial"
+        )
+    }
+
 }

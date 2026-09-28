@@ -70,8 +70,8 @@ enum MeetingImportWorkflow {
 
         let store = SpeakerDatabase(path: snapshot.path)
         let originalProfiles = store.allSpeakers()
+        let speech = await MainActor.run { MeetingImportSpeechEngine(manager: manager) }
         let pipeline = await MainActor.run {
-            let speech = MeetingImportSpeechEngine(manager: manager)
             let diarization = DiarizationService(
                 bundleProvider: { _ in modelPaths.diarization },
                 segmentEmbedder: embedder
@@ -81,8 +81,13 @@ enum MeetingImportWorkflow {
         }
         log("Transcribing and separating speakers with local Parakeet v3 + PyAnnote…")
         try Task.checkCancellation()
+        let transcribeStart = ProcessInfo.processInfo.systemUptime
         let result = try await pipeline.transcribeAudioFile(at: normalized)
         try Task.checkCancellation()
+        let speechStats = await MainActor.run { (speech.modelCalls, speech.modelSeconds, speech.packedSegmentWindowSamples != nil) }
+        let totalSeconds = String(format: "%.2f", ProcessInfo.processInfo.systemUptime - transcribeStart)
+        let modelSeconds = String(format: "%.2f", speechStats.1)
+        log("Transcribed in \(totalSeconds) s: \(speechStats.0) speech-to-text calls taking \(modelSeconds) s (packing \(speechStats.2 ? "on" : "off")).")
         guard result.systemWordCount > 0 else { throw PipelineError.noSpeechDetected }
 
         let identities = MeetingImportSpeakerMapping.resolve(result: result, originalProfiles: originalProfiles, store: store)
@@ -138,6 +143,8 @@ enum MeetingImportWorkflow {
 private final class MeetingImportSpeechEngine: SpeechToTextEngine {
     let manager: AsrManager
     var isReady: Bool { true }
+    private(set) var modelCalls = 0
+    private(set) var modelSeconds: Double = 0
     init(manager: AsrManager) { self.manager = manager }
     func initialize() async {}
     func cleanup() {}
@@ -147,9 +154,43 @@ private final class MeetingImportSpeechEngine: SpeechToTextEngine {
         var audio = samples
         if audio.count < 16_000 { audio.append(contentsOf: repeatElement(0, count: 16_000 - audio.count)) }
         var state = try TdtDecoderState(decoderLayers: await manager.decoderLayerCount)
+        let callStart = ProcessInfo.processInfo.systemUptime
         let result = try await manager.transcribe(audio, decoderState: &state)
+        modelCalls += 1
+        modelSeconds += ProcessInfo.processInfo.systemUptime - callStart
         try Task.checkCancellation()
         return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Same packing as the app (see SpeechSegmentPacking): short segments share
+    // one 15 s Parakeet window. TRANSCRIPTED_MEETING_STT_PACKING=0 turns it
+    // off, which is how a before/after speed run compares the two paths.
+    var packedSegmentWindowSamples: Int? {
+        guard ProcessInfo.processInfo.environment["TRANSCRIPTED_MEETING_STT_PACKING"] != "0" else { return nil }
+        return ASRConstants.maxModelSamples - ASRConstants.samplesPerEncoderFrame
+    }
+
+    func transcribePackedSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String]? {
+        guard segments.count > 1, packedSegmentWindowSamples != nil else { return nil }
+        try Task.checkCancellation()
+        let layout = SpeechSegmentPacking.layout(segments)
+        guard layout.samples.count <= ASRConstants.maxModelSamples else { return nil }
+        var state = try TdtDecoderState(decoderLayers: await manager.decoderLayerCount)
+        let callStart = ProcessInfo.processInfo.systemUptime
+        let result = try await manager.transcribe(layout.samples, decoderState: &state)
+        modelCalls += 1
+        modelSeconds += ProcessInfo.processInfo.systemUptime - callStart
+        try Task.checkCancellation()
+        guard let timings = result.tokenTimings, !timings.isEmpty else {
+            return result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? Array(repeating: "", count: segments.count) : nil
+        }
+        let tokens = timings.map { TimedTranscriptToken(text: $0.token, startSeconds: $0.startTime) }
+        return SpeechSegmentPacking.split(tokens: tokens, ranges: layout.ranges)
     }
 }
 

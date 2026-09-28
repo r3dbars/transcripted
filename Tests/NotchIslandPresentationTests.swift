@@ -250,6 +250,24 @@ func testNotchIslandPresentation() {
         let error = notchLayout(meeting: failed)
         assertEqual(error.left, [.symbol(.warning, .warning), .text("Meeting not saved", .title)])
         assertEqual(error.drop, .meetingError(title: "Microphone didn't start", message: "Check your input device.", canOpen: false))
+
+        let denied = NotchIslandMeetingContent(phase: .error(
+            title: "Turn on System Audio Recording",
+            message: "Turn on System Audio Recording in System Settings, then retry the meeting.",
+            canOpen: true,
+            grantsSystemAudio: true
+        ))
+        let deniedLayout = notchLayout(meeting: denied)
+        assertEqual(
+            deniedLayout.drop,
+            .meetingError(
+                title: "Turn on System Audio Recording",
+                message: "Turn on System Audio Recording in System Settings, then retry the meeting.",
+                canOpen: true,
+                grantsSystemAudio: true
+            ),
+            "a confirmed System Audio denial carries its Settings action into the drop-down"
+        )
         assertTrue(error.dropIsSticky)
     }
 

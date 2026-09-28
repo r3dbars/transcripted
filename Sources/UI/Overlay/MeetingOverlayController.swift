@@ -908,6 +908,12 @@ final class MeetingOverlayController: NSObject {
             openMeetingsFromPill(transcriptURL: savedTranscriptURL)
             return
         case .error:
+            // A start that macOS refused for System Audio Recording: the one
+            // fix is that Settings pane, then a new recording.
+            if meetingSession?.systemAudioPermissionRecoveryNeeded == true {
+                TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
+                return
+            }
             openMeetingsFromPill(transcriptURL: nil)
             return
         default:
@@ -1389,7 +1395,8 @@ final class MeetingOverlayController: NSObject {
                 canOpen: MeetingPillFinishPresentation.errorOffersOpenMeetings(
                     failureKind: MeetingFailureKind.classify(message: message),
                     hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
-                )
+                ),
+                grantsSystemAudio: meetingSession?.systemAudioPermissionRecoveryNeeded == true
             )
         }
         let prompt = currentPrompt.map {
@@ -1461,7 +1468,8 @@ final class MeetingOverlayController: NSObject {
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             finishDetail: finishDetail,
             hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError,
-            micOnlyNotice: showsMicOnlyNote ? micOnlyNotice : nil
+            micOnlyNotice: showsMicOnlyNote ? micOnlyNotice : nil,
+            systemAudioPermissionDenied: meetingSession?.systemAudioPermissionRecoveryNeeded == true
         )
     }
 

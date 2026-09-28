@@ -860,10 +860,14 @@ final class NotchIslandDropView: NSView {
         case .meetingSaved(let title):
             add(titleBlock(title ?? "Meeting saved", "Saved to your meetings"))
             add(buttonRow(leading: [], trailing: [button("Open transcript", .accent, .meetingOpen)]))
-        case .meetingError(let title, let message, let canOpen):
+        case .meetingError(let title, let message, let canOpen, let grantsSystemAudio):
             add(titleBlock(title, message, wrapsDetail: true))
             var trailing = [button("Dismiss", .plain, .meetingDismissError)]
-            if canOpen {
+            if grantsSystemAudio {
+                // The meeting overlay's primary action opens the audio-only
+                // Settings pane while the start's denial is on screen.
+                trailing.append(button("Grant Access", .accent, .meetingPrimary))
+            } else if canOpen {
                 trailing.append(button("Open", .accent, .meetingOpen))
             }
             add(buttonRow(leading: [], trailing: trailing))
