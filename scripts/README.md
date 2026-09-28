@@ -82,6 +82,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
 - `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files
 - `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
+- `scripts/stt-shootout/run.sh` — speech-to-text model shootout on an Apple Silicon Mac: runs Parakeet V3 (the app's model) and other on-device models over an hour-long human-captioned video and reports speed, latency, peak memory, and word error rate; see `scripts/stt-shootout/README.md`
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
 ## Linux checks (no Swift toolchain)
