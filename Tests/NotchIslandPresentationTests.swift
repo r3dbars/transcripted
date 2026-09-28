@@ -130,6 +130,20 @@ func testNotchIslandPresentation() {
         )
     }
 
+    runSuite("A clipboard too busy to paste through offers to copy the words") {
+        let message = NotchIslandDictationContent.Message(
+            tone: .notice,
+            text: "Not pasted",
+            actionTitle: "Copy",
+            preview: "send me the notes",
+            dismissSeconds: 15,
+            hint: "Your clipboard holds something too big to set aside."
+        )
+        assertEqual(NotchIslandPresentation.messageLabel(message), "Not pasted")
+        let layout = notchLayout(dictation: NotchIslandDictationContent(phase: .message(message)))
+        assertEqual(layout.drop, .dictationMessage(message), "the words, the reason and Copy open by themselves")
+    }
+
     runSuite("NotchIslandPresentation splits a dictation over a live meeting") {
         let layout = notchLayout(dictation: listening(), meeting: recording())
         assertEqual(layout.left, [.recordingDot, .live(.meetingTimer, .title)], "the meeting keeps the left wing")
