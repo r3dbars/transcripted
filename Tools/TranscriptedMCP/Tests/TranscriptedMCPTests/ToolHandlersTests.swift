@@ -13,10 +13,17 @@ final class ToolHandlersTests: XCTestCase {
         index = try! TranscriptIndex(indexDir: tempDir)
         telemetry = RecordingAgentCaptureQueryTelemetry()
         AgentCaptureQueryTelemetryRuntime.recorder = telemetry
+        // A standalone helper with no saved build info, whatever is installed
+        // on this Mac.
+        let emptyAppSupport = tempDir!
+        AgentCaptureQueryTelemetryRuntime.buildIdentity = {
+            .resolve(environment: [:], bundleInfo: nil, appSupportDirectory: emptyAppSupport)
+        }
     }
 
     override func tearDown() {
         AgentCaptureQueryTelemetryRuntime.recorder = AgentCaptureQueryTelemetry.shared
+        AgentCaptureQueryTelemetryRuntime.buildIdentity = { .resolve() }
         telemetry = nil
         index = nil
         removeTempDir(tempDir)

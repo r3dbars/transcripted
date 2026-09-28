@@ -453,6 +453,11 @@ extension AgentCaptureQueryTelemetry: AgentCaptureQueryTelemetryRecording {}
 
 enum AgentCaptureQueryTelemetryRuntime {
     static var recorder: AgentCaptureQueryTelemetryRecording = AgentCaptureQueryTelemetry.shared
+    /// The build each observation reports: the environment, then the build
+    /// info the running app saves in Application Support, then this bundle.
+    /// Tests point it at an empty folder so a Transcripted install on the
+    /// test Mac can't leak its build into their payloads.
+    static var buildIdentity: () -> AgentCaptureQueryBuildIdentity = { .resolve() }
     @TaskLocal static var invocation: AgentCaptureQueryInvocation?
 }
 
@@ -514,7 +519,7 @@ func trackAgentCaptureQueryObserved(
             captureKind: captureKind,
             sourceCount: sourceCount,
             resultCount: resultCount,
-            buildIdentity: .resolve()
+            buildIdentity: AgentCaptureQueryTelemetryRuntime.buildIdentity()
         )
     )
 }
