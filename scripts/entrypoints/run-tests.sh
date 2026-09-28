@@ -403,6 +403,7 @@ APP_SOURCES=(
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoppedAudioRecovery.swift"
+    "Sources/Dictation/DictationStopCheckpoint.swift"
     "Sources/Dictation/DictationStoppedAudioCheckpointSignal.swift"
     "Sources/Dictation/DictationTerminationAdmissionPolicy.swift"
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"

@@ -1239,86 +1239,70 @@ class DictationSessionController: ObservableObject {
             // The accepted stop request owns cancellation even if recovery
             // publishes a brief idle state before this task begins. The engine's
             // idle stop path invalidates any pending recovery restart.
-            await appState.sttRouter.stopRecording()
-            stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
-            // The only end-of-take click. It plays once the mic is stopped, so on
-            // speakers it can't land in the take, and before transcription and
-            // paste, so it means "got it", not "pasted".
-            AppSoundPlayer.shared.play(.dictationStop)
-            guard !Task.isCancelled,
-                  self.isDictating,
-                  self.currentDictationSessionID == taskSessionID else { return }
-
-            do {
-                stopTiming.snapshotStartedAt = CFAbsoluteTimeGetCurrent()
-                if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
-                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
-                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
-                        taskCancelled: Task.isCancelled,
-                        isDictating: self.isDictating,
-                        taskSessionID: taskSessionID,
-                        currentSessionID: self.currentDictationSessionID
-                    ) else { return }
-                    stopTiming.recoveryCheckpointStartedAt = CFAbsoluteTimeGetCurrent()
-                    let recovery = try await Task.detached(priority: .userInitiated) {
-                        try DictationStoppedAudioRecoveryStore.persist(
-                            samples16k: recording.samples16k,
-                            sessionID: taskSessionID
+            // DictationStopCheckpoint stops the mic, plays the stop click, and
+            // saves the take to a private WAV checkpoint before anything waits
+            // on the model.
+            let checkpoint = await DictationStopCheckpoint.run(
+                DictationStopCheckpoint.Steps<RecordedSpeechSamples, DictationStoppedAudioRecovery?>(
+                    isCurrent: {
+                        DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                            taskCancelled: Task.isCancelled,
+                            isDictating: self.isDictating,
+                            taskSessionID: taskSessionID,
+                            currentSessionID: self.currentDictationSessionID
                         )
-                    }.value
-                    stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
-                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
-                        taskCancelled: Task.isCancelled,
-                        isDictating: self.isDictating,
-                        taskSessionID: taskSessionID,
-                        currentSessionID: self.currentDictationSessionID
-                    ) else {
-                        if !DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
+                    },
+                    stopMicrophone: { await appState.sttRouter.stopRecording() },
+                    playStopCue: { AppSoundPlayer.shared.play(.dictationStop) },
+                    snapshot: { await appState.sttRouter.snapshotRecordedSamplesForPersistence() },
+                    checkpointWork: { recording in
+                        let samples16k = recording.samples16k
+                        return {
+                            try DictationStoppedAudioRecoveryStore.persist(
+                                samples16k: samples16k,
+                                sessionID: taskSessionID
+                            )
+                        }
+                    },
+                    discardWork: { recovery in
+                        {
+                            _ = DictationStoppedAudioRecoveryStore.cleanup(
+                                recovery,
+                                explicitDiscard: true
+                            )
+                        }
+                    },
+                    keepAbandonedCheckpoint: {
+                        DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
                             taskSessionID: taskSessionID,
                             preservationSessionID: self.stoppedAudioRecoveryPreservationSessionID
-                        ) {
-                            _ = await Task.detached(priority: .utility) {
-                                DictationStoppedAudioRecoveryStore.cleanup(
-                                    recovery,
-                                    explicitDiscard: true
-                                )
-                            }.value
-                        }
-                        return
-                    }
-                    self.stoppedAudioRecovery = recovery
-                    stoppedRecordingSnapshot = recording
-                } else {
-                    stopTiming.snapshotFinishedAt = CFAbsoluteTimeGetCurrent()
-                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
-                        taskCancelled: Task.isCancelled,
-                        isDictating: self.isDictating,
-                        taskSessionID: taskSessionID,
-                        currentSessionID: self.currentDictationSessionID
-                    ) else { return }
-                    if DictationTerminationAdmissionPolicy.mustStopBeforeInference(
-                        snapshotAvailable: false,
-                        hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording
-                    ) {
-                        // A converter/owner race may fail the WAV snapshot
-                        // while native audio survives. Inference would consume
-                        // that last RAM copy without a durable checkpoint.
-                        self.isDictating = false
-                        appState.runtimeDiagnostics.clearSession(
-                            kind: "dictation", outcome: "audio_checkpoint_unavailable"
                         )
-                        self.showFailedCheckpointRecoveryError()
-                        return
-                    }
-                }
-            } catch {
-                stopTiming.recoveryCheckpointFinishedAt = CFAbsoluteTimeGetCurrent()
-                guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
-                    taskCancelled: Task.isCancelled,
-                    isDictating: self.isDictating,
-                    taskSessionID: taskSessionID,
-                    currentSessionID: self.currentDictationSessionID
-                ) else { return }
+                    },
+                    hasRecoverableRecording: { appState.sttRouter.hasRecoverableRecording },
+                    now: { CFAbsoluteTimeGetCurrent() }
+                )
+            )
+            stopTiming.micStoppedAt = checkpoint.marks.micStoppedAt
+            stopTiming.snapshotStartedAt = checkpoint.marks.snapshotStartedAt
+            stopTiming.snapshotFinishedAt = checkpoint.marks.snapshotFinishedAt
+            stopTiming.recoveryCheckpointStartedAt = checkpoint.marks.checkpointStartedAt
+            stopTiming.recoveryCheckpointFinishedAt = checkpoint.marks.checkpointFinishedAt
+            switch checkpoint.outcome {
+            case .abandoned:
+                return
+            case .checkpointed(let recording, let recovery):
+                self.stoppedAudioRecovery = recovery
+                stoppedRecordingSnapshot = recording
+            case .noSnapshot:
+                break
+            case .checkpointUnavailable:
+                self.isDictating = false
+                appState.runtimeDiagnostics.clearSession(
+                    kind: "dictation", outcome: "audio_checkpoint_unavailable"
+                )
+                self.showFailedCheckpointRecoveryError()
+                return
+            case .checkpointFailed(let error):
                 appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
                 EventReporter.shared.capture(
                     level: .error,

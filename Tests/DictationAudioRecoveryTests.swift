@@ -160,10 +160,9 @@ func testDictationAudioRecovery() {
             sessionSource.contains("appState.sttRouter.cancel()\n            let failureKind"),
             "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
         )
-        assertTrue(
-            sessionSource.contains("await appState.sttRouter.stopRecording()\n            stopTiming.micStoppedAt"),
-            "an admitted stop must always reach the engine so a temporary recovery-idle state cannot revive the microphone"
-        )
+        // "An admitted stop always reaches the engine" is a behavior test now:
+        // "The mic stop runs first, whatever the session state" in
+        // DictationStopCheckpointTests.swift.
         guard let stopTaskOwner = sessionSource.range(of: "let taskSessionID = currentDictationSessionID"),
               let preStopGuard = sessionSource.range(
                 of: "guard !Task.isCancelled,",
