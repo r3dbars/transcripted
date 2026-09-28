@@ -688,6 +688,14 @@ def _self_test_serve(tmp: str) -> None:
     conns: list[socket.socket] = []
     mode: dict = {}
     listener, port = _fake_vnc_server(events, conns, mode)
+    # A Unix socket path is capped at 104 bytes on macOS and 108 on Linux, and
+    # linux-checks.sh points TMPDIR deep inside the checkout. Put the socket in
+    # a short directory when the temp root is long (same fix as #1883).
+    import tempfile
+    short_root = None  # removed when this function returns and it is collected
+    if len(tmp) > 48:
+        short_root = tempfile.TemporaryDirectory(prefix="vnc.", dir="/tmp")
+        tmp = short_root.name
     path = os.path.join(tmp, "vm.vncsock")
     result: list[int] = []
     server = threading.Thread(target=lambda: result.append(serve("127.0.0.1", port, None, path)), daemon=True)
