@@ -298,6 +298,7 @@ SELF_TEST_SCRIPTS=(
     scripts/release/bump-release-version.py
     scripts/release/post-dmg-release-audit.py
     scripts/release/sentry-release-dry-run.py
+    scripts/dev/mutation-probe.py
 )
 PY_TEST_SUITES=(
     scripts/ops/test-native-smoke-isolation.py

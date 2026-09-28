@@ -131,6 +131,7 @@ Use these docs for these jobs:
 - `docs/qa-meeting-cross-app-crossover.md` — manual same-build meeting audio crossover test
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, UI, Sparkle update, packaged, corpus, corpus-compare, live, artifact, and synthetic audio passes
 - `docs/test-automation-strategy.md` — agent-first QA coverage map, gate strategy, and automation roadmap
+- `docs/mutation-testing.md` — how to run `scripts/dev/mutation-probe.py` to find assertions that never catch a bug, with the first real results
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract

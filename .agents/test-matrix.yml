@@ -263,6 +263,14 @@ rules:
       - "python3 scripts/dev/check-superseded.py --self-test"
 
   - paths:
+      - "scripts/dev/mutation-probe.py"
+      - "docs/mutation-testing.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/mutation-probe.py"
+      - "python3 scripts/dev/mutation-probe.py --self-test"
+
+  - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"
       - "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"
     checks:
