@@ -552,27 +552,9 @@ extension Transcription {
                 )
             }
 
-            for (index, segment) in speakerSegments.enumerated() {
-                // Allow cancellation between segments (user hit stop or app is terminating)
-                try Task.checkCancellation()
-
-                // Extract audio slice for this segment
-                let segmentSamples = AudioResampler.extractSlice(
-                    from: systemSamples,
-                    sampleRate: 16000,
-                    startTime: segment.startTime,
-                    endTime: segment.endTime
-                )
-
-                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples.
-                // A meeting made only of short answers is picked up by the
-                // last-chance pass below, which pads them.
-                guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
-
-                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system, language: languageContext)
-
+            func appendSystemUtterance(segment: SpeakerSegment, text: String) {
                 // Skip empty transcriptions
-                guard !text.isEmpty else { continue }
+                guard !text.isEmpty else { return }
 
                 // Apply remap (unifies speakers that matched the same DB profile)
                 let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
@@ -597,10 +579,57 @@ extension Transcription {
                     matchSimilarity: similarity,
                     transcript: text
                 ))
+            }
+
+            // Short segments are packed into one full speech-to-text window
+            // when the engine supports it (see SpeechSegmentPacking); the
+            // utterances come out in the same order either way.
+            var systemBatcher = SpeechSegmentBatcher<SpeakerSegment>(
+                windowSamples: await parakeet.packedSegmentWindowSamples ?? 0
+            )
+            for (index, segment) in speakerSegments.enumerated() {
+                // Allow cancellation between segments (user hit stop or app is terminating)
+                try Task.checkCancellation()
+
+                // Extract audio slice for this segment
+                let segmentSamples = AudioResampler.extractSlice(
+                    from: systemSamples,
+                    sampleRate: 16000,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime
+                )
+
+                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples.
+                // A meeting made only of short answers is picked up by the
+                // last-chance pass below, which pads them.
+                guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+
+                for batch in systemBatcher.add(segment, samples: segmentSamples) {
+                    let texts = try await Self.transcribeSegmentBatch(
+                        batch.map(\.samples),
+                        engine: parakeet,
+                        source: .system,
+                        language: languageContext
+                    )
+                    for (entry, text) in zip(batch, texts) {
+                        appendSystemUtterance(segment: entry.item, text: text)
+                    }
+                }
 
                 // Update progress (30% to 65% during system transcription)
                 let segmentProgress = 0.30 + (Double(index + 1) / Double(max(1, totalSegments))) * 0.35
                 onProgress?(segmentProgress)
+            }
+            for batch in systemBatcher.finish() {
+                let texts = try await Self.transcribeSegmentBatch(
+                    batch.map(\.samples),
+                    engine: parakeet,
+                    source: .system,
+                    language: languageContext
+                )
+                for (entry, text) in zip(batch, texts) {
+                    appendSystemUtterance(segment: entry.item, text: text)
+                }
             }
 
             // Segment slicing above was the last use of the whole-meeting
@@ -662,6 +691,36 @@ extension Transcription {
                         let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
                         AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
 
+                        struct PendingMicSegment {
+                            let index: Int
+                            let start: Double
+                            let end: Double
+                            let prepared: PreparedMicSegment
+                        }
+                        func appendMicUtterance(_ pending: PendingMicSegment, text: String) {
+                            guard !text.isEmpty else {
+                                var context = pending.prepared.analysis.context
+                                context["segment_index"] = "\(pending.index)"
+                                context["gain"] = String(format: "%.2f", pending.prepared.gain)
+                                context["padded_samples"] = "\(pending.prepared.paddedSampleCount)"
+                                AppLogger.transcription.warning("Mic segment returned empty transcription", context)
+                                return
+                            }
+
+                            micUtterances.append(TranscriptionUtterance(
+                                start: pending.start,
+                                end: pending.end,
+                                channel: 0,
+                                speakerId: 0,
+                                persistentSpeakerId: nil,
+                                matchSimilarity: nil,
+                                transcript: text
+                            ))
+                        }
+
+                        var micBatcher = SpeechSegmentBatcher<PendingMicSegment>(
+                            windowSamples: await parakeet.packedSegmentWindowSamples ?? 0
+                        )
                         for (index, segment) in micSegments.enumerated() {
                             try Task.checkCancellation()
 
@@ -680,29 +739,38 @@ extension Transcription {
                                 continue
                             }
 
-                            let text = try await parakeet.transcribeSegment(samples: preparedSegment.samples, source: .microphone, language: languageContext)
-                            guard !text.isEmpty else {
-                                var context = preparedSegment.analysis.context
-                                context["segment_index"] = "\(index)"
-                                context["gain"] = String(format: "%.2f", preparedSegment.gain)
-                                context["padded_samples"] = "\(preparedSegment.paddedSampleCount)"
-                                AppLogger.transcription.warning("Mic segment returned empty transcription", context)
-                                continue
-                            }
-
-                            micUtterances.append(TranscriptionUtterance(
+                            let pending = PendingMicSegment(
+                                index: index,
                                 start: segment.start,
                                 end: segment.end,
-                                channel: 0,
-                                speakerId: 0,
-                                persistentSpeakerId: nil,
-                                matchSimilarity: nil,
-                                transcript: text
-                            ))
+                                prepared: preparedSegment
+                            )
+                            for batch in micBatcher.add(pending, samples: preparedSegment.samples) {
+                                let texts = try await Self.transcribeSegmentBatch(
+                                    batch.map(\.samples),
+                                    engine: parakeet,
+                                    source: .microphone,
+                                    language: languageContext
+                                )
+                                for (entry, text) in zip(batch, texts) {
+                                    appendMicUtterance(entry.item, text: text)
+                                }
+                            }
 
                             // Update progress (65% to 90% during mic transcription)
                             let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
                             onProgress?(micProgress)
+                        }
+                        for batch in micBatcher.finish() {
+                            let texts = try await Self.transcribeSegmentBatch(
+                                batch.map(\.samples),
+                                engine: parakeet,
+                                source: .microphone,
+                                language: languageContext
+                            )
+                            for (entry, text) in zip(batch, texts) {
+                                appendMicUtterance(entry.item, text: text)
+                            }
                         }
 
                         // Segment slicing above was the last use of the
@@ -1450,6 +1518,42 @@ extension Transcription {
             AppLogger.transcription.info("System audio contained no speech; continuing with mic track")
             return []
         }
+    }
+
+    /// Transcribes one batch from `SpeechSegmentBatcher`: several segments in
+    /// one packed call when the engine supports it, else one call each.
+    /// Returns one text per segment, in order. A packed call that fails for
+    /// any reason other than cancellation falls back to one call per segment,
+    /// so packing can make a meeting faster but never lose it.
+    nonisolated static func transcribeSegmentBatch(
+        _ segments: [[Float]],
+        engine: any SpeechToTextEngine,
+        source: AudioSource,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String] {
+        if segments.count > 1 {
+            do {
+                if let texts = try await engine.transcribePackedSegments(segments, source: source, language: language),
+                   texts.count == segments.count {
+                    return texts
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+                AppLogger.transcription.warning("Packed speech-to-text call failed; transcribing segments one by one", [
+                    "segments": "\(segments.count)",
+                    "errorType": "\(type(of: error))"
+                ])
+            }
+        }
+        var texts: [String] = []
+        texts.reserveCapacity(segments.count)
+        for samples in segments {
+            try Task.checkCancellation()
+            texts.append(try await engine.transcribeSegment(samples: samples, source: source, language: language))
+        }
+        return texts
     }
 
     nonisolated static func isExplicitNoSpeechError(_ error: Error) -> Bool {

@@ -399,18 +399,20 @@ public class TranscriptionTaskManager: ObservableObject {
                 }
 
                 let timings = MeetingPipelineTimings()
-                let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
-                    try await self.transcribeWithSpeakerIdentification(
-                        micURL: micURL,
-                        systemURL: systemURL,
-                        outputFolder: outputFolder,
-                        taskId: task.id,
-                        healthInfo: task.healthInfo,
-                        splitLocalSpeakers: task.splitLocalSpeakers,
-                        meetingTitle: task.meetingTitle,
-                        recordingDate: task.recordingDate,
-                        languageSelection: task.languageSelection
-                    )
+                let transcriptURL = try await TranscriptionJobActivity.keepingMacAwake {
+                    try await MeetingPipelineTimings.$current.withValue(timings) {
+                        try await self.transcribeWithSpeakerIdentification(
+                            micURL: micURL,
+                            systemURL: systemURL,
+                            outputFolder: outputFolder,
+                            taskId: task.id,
+                            healthInfo: task.healthInfo,
+                            splitLocalSpeakers: task.splitLocalSpeakers,
+                            meetingTitle: task.meetingTitle,
+                            recordingDate: task.recordingDate,
+                            languageSelection: task.languageSelection
+                        )
+                    }
                 }
 
                 await MainActor.run {
@@ -738,15 +740,17 @@ public class TranscriptionTaskManager: ObservableObject {
                 }
 
                 let timings = MeetingPipelineTimings()
-                let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
-                    try await self.transcribeImportedAudio(
-                        audioURL: audioURL,
-                        outputFolder: outputFolder,
-                        taskId: taskId,
-                        meetingTitle: meetingTitle,
-                        recordingDate: recordingDate,
-                        languageSelection: languageSelection
-                    )
+                let transcriptURL = try await TranscriptionJobActivity.keepingMacAwake {
+                    try await MeetingPipelineTimings.$current.withValue(timings) {
+                        try await self.transcribeImportedAudio(
+                            audioURL: audioURL,
+                            outputFolder: outputFolder,
+                            taskId: taskId,
+                            meetingTitle: meetingTitle,
+                            recordingDate: recordingDate,
+                            languageSelection: languageSelection
+                        )
+                    }
                 }
 
                 await MainActor.run {
@@ -2204,19 +2208,21 @@ public class TranscriptionTaskManager: ObservableObject {
 
         do {
             let timings = MeetingPipelineTimings()
-            let transcriptURL = try await MeetingPipelineTimings.$current.withValue(timings) {
-                try await transcribeWithSpeakerIdentification(
-                    micURL: failed.micAudioURL,
-                    systemURL: failed.systemAudioURL,
-                    outputFolder: outputFolder,
-                    taskId: failedId,
-                    healthInfo: Self.retryHealthInfo(for: failed),
-                    splitLocalSpeakers: failed.splitLocalSpeakers,
-                    meetingTitle: failed.meetingTitle,
-                    recordingDate: failed.recordingDate ?? failed.timestamp,
-                    sourceFailedTranscriptionId: failedId,
-                    languageSelection: failed.languageSelection
-                )
+            let transcriptURL = try await TranscriptionJobActivity.keepingMacAwake {
+                try await MeetingPipelineTimings.$current.withValue(timings) {
+                    try await transcribeWithSpeakerIdentification(
+                        micURL: failed.micAudioURL,
+                        systemURL: failed.systemAudioURL,
+                        outputFolder: outputFolder,
+                        taskId: failedId,
+                        healthInfo: Self.retryHealthInfo(for: failed),
+                        splitLocalSpeakers: failed.splitLocalSpeakers,
+                        meetingTitle: failed.meetingTitle,
+                        recordingDate: failed.recordingDate ?? failed.timestamp,
+                        sourceFailedTranscriptionId: failedId,
+                        languageSelection: failed.languageSelection
+                    )
+                }
             }
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
