@@ -67,6 +67,8 @@ Current `transcripted-mcp` capabilities:
 - `read_meeting`
 - `list_dictations`
 - `read_dictation`
+- `list_writing`
+- `read_writing`
 - `search`
 - `who_is`
 - `recap`
@@ -78,15 +80,23 @@ The last three roll up structured summary fields (decisions, action items,
 open questions) across saved meetings. They only return rows for meetings
 that have a saved summary; see `docs/cross-meeting-tools.md`.
 
-These tools are read-only, but they are not redacted. `read_meeting` and
-`read_dictation` can return local transcript text to the agent you connected.
+Agents can read what you wrote, too, if Save my writing is on.
+`list_writing` and `read_writing` open the daily `Writing_<date>.md` files.
+`search_context` and `recent_context` include writing by default; pass
+`kind: "writing"` to get only writing. Writing search is full text only, not
+semantic.
+
+These tools are read-only, but they are not redacted. `read_meeting`,
+`read_dictation`, and `read_writing` can return local transcript or writing
+text to the agent you connected.
 
 ### Anonymous Usage Ping
 
 Like the app, the MCP helper can send one anonymous analytics event per
 successful tool call (`agent_capture_query_observed`) so we can tell whether
 the agent connection gets used. It carries only bucketed metadata: which kind
-of tool ran, meeting vs. dictation, rough capture age, and rough source count.
+of tool ran, which kind of capture (meeting, dictation, or writing), rough
+capture age, and rough source count.
 It never includes transcript text, queries, titles, speaker names, file paths,
 or audio, and your captures still never leave your Mac.
 
@@ -118,6 +128,7 @@ connected, otherwise read the saved Markdown folders:
 ```text
 ~/Library/Application Support/Transcripted/captures/meetings
 ~/Library/Application Support/Transcripted/captures/dictations
+~/Library/Application Support/Transcripted/captures/writing
 ```
 
 ## Transcribe Files From an Agent
@@ -208,7 +219,7 @@ Notes:
 - `transcripted-mcp` communicates over stdio, not HTTP.
 - `--self-test` verifies directory resolution, creates missing local data/index directories, and exits without starting the MCP stdio server.
 - By default it follows the capture library chosen in Transcripted Settings, then also reads legacy Draft or `~/Documents/Transcripted/` layouts when those folders still contain capture Markdown.
-- `TRANSCRIPTED_DATA_DIR` can point at a shared root with `meetings/` and `dictations/` subfolders. For `transcripted-mcp`, that shared root also becomes the default SQLite index location unless `TRANSCRIPTED_INDEX_DIR` is set.
+- `TRANSCRIPTED_DATA_DIR` can point at a shared root with `meetings/`, `dictations/`, and `writing/` subfolders. For `transcripted-mcp`, that shared root also becomes the default SQLite index location unless `TRANSCRIPTED_INDEX_DIR` is set.
 - If needed, override paths with `TRANSCRIPTED_DATA_DIR`,
-  `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`, and
-  `TRANSCRIPTED_INDEX_DIR`.
+  `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`,
+  `TRANSCRIPTED_WRITING_DIR`, and `TRANSCRIPTED_INDEX_DIR`.

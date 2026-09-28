@@ -95,7 +95,12 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try applySchemaVersionGate()
         createTables()
-        exec("PRAGMA user_version=\(Self.schemaVersion)")
+        // Only ever raise it. An older helper still running from before an
+        // update must not roll the version back, or the next newer helper to
+        // open would rebuild again.
+        if storedUserVersion() < Self.schemaVersion {
+            exec("PRAGMA user_version=\(Self.schemaVersion)")
+        }
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
@@ -109,20 +114,51 @@ final class TranscriptIndex: @unchecked Sendable {
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
     /// populate for it. When the stored `user_version` is older than the current
-    /// schema, wipe and reopen the index so the next reconcile rebuilds every
-    /// derived table from disk. Mirrors the corruption-recovery path above.
-    /// (Old/unversioned indexes report 0, indistinguishable from a fresh DB —
-    /// rebuilding an empty fresh DB is a harmless no-op.)
+    /// schema, empty the index so the next reconcile rebuilds every derived
+    /// table from disk. (Old/unversioned indexes report 0, indistinguishable
+    /// from a fresh DB — emptying an empty fresh DB is a harmless no-op.)
+    ///
+    /// It drops the tables in place, in one transaction, rather than deleting
+    /// the file: every agent runs its own server on this index, and after an
+    /// update some are still the old version. Deleting the database under
+    /// their open connections left them failing every query with "disk I/O
+    /// error" until they were restarted.
     private func applySchemaVersionGate() throws {
         guard storedUserVersion() < Self.schemaVersion else { return }
-        sqlite3_close(db)
-        db = nil
-        try? FileManager.default.removeItem(at: indexPath)
         log("Index schema older than v\(Self.schemaVersion), rebuilding from disk")
-        if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
-            throw MCPIndexError.databaseOpenFailed(dbError())
+        try execOrThrow("BEGIN IMMEDIATE")
+        do {
+            // Virtual tables first: dropping one drops its shadow tables,
+            // which must never be dropped on their own.
+            for name in schemaObjectNames(virtualTablesOnly: true) {
+                try execOrThrow("DROP TABLE IF EXISTS \(Self.quotedIdentifier(name))")
+            }
+            for name in schemaObjectNames(virtualTablesOnly: false) {
+                try execOrThrow("DROP TABLE IF EXISTS \(Self.quotedIdentifier(name))")
+            }
+            try execOrThrow("COMMIT")
+        } catch {
+            exec("ROLLBACK")
+            throw error
         }
-        configureDatabase()
+    }
+
+    /// The index's own tables (triggers and indexes go with them).
+    private func schemaObjectNames(virtualTablesOnly: Bool) -> [String] {
+        let filter = virtualTablesOnly ? " AND sql LIKE 'CREATE VIRTUAL TABLE%'" : ""
+        let sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'\(filter)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            names.append(colText(stmt, 0))
+        }
+        return names
+    }
+
+    private static func quotedIdentifier(_ name: String) -> String {
+        "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     private func storedUserVersion() -> Int32 {

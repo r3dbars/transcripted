@@ -9,10 +9,15 @@ import Foundation
 /// break the keyboard reports (a caret jump, Return, a shortcut: anything
 /// that starts a new segment chain). A Backspace the keyboard tracked removes
 /// its UTF-16 units from the open entry; an entry under 2 characters after trimming
-/// isn't saved. Pure: the caller passes the clock. Not part of Tilde.
+/// isn't saved. A scrap (under 3 words, like "yeah I can") doesn't end at a
+/// segment break when the same app's next segment starts within a minute:
+/// it folds into that entry on its own line, so quick chat replies don't
+/// each become an entry. Pure: the caller passes the clock. Not part of Tilde.
 struct WritingEntryComposer {
     static let idleGapMilliseconds: Int64 = 120_000
     static let minimumCharacters = 2
+    static let scrapWordLimit = 3
+    static let scrapMergeGapMilliseconds: Int64 = 60_000
 
     /// A closed entry, ready for the day file.
     struct Entry: Equatable, Sendable {
@@ -37,10 +42,12 @@ struct WritingEntryComposer {
         let appBundleIdentifier: String
         let historyIdentifier: String
         let consentIdentifier: String
-        let chainRoot: String
+        var chainRoot: String
         let firstTimestampMilliseconds: Int64
         var lastActivityMilliseconds: Int64
         var pieces: [Piece] = []
+
+        var text: String { pieces.map(\.text).joined() }
 
         mutating func append(_ text: String, accepted: Bool) {
             if let last = pieces.indices.last, pieces[last].accepted == accepted {
@@ -85,7 +92,8 @@ struct WritingEntryComposer {
         var closed: [Entry] = []
         var openTouched = false
         for event in events {
-            if var entry = open, Self.continues(entry, with: event) {
+            if var entry = open, Self.continues(entry, with: event) || Self.foldsScrap(entry, into: event) {
+                Self.startSegmentIfNeeded(&entry, for: event)
                 Self.apply(event, to: &entry)
                 entry.lastActivityMilliseconds = max(entry.lastActivityMilliseconds, event.timestampMilliseconds)
                 open = entry
@@ -157,6 +165,28 @@ struct WritingEntryComposer {
             && entry.consentIdentifier == event.consentIdentifier
             && PersonalHistorySegmentChain.root(of: event.sessionIdentifier) == entry.chainRoot
             && event.timestampMilliseconds - entry.lastActivityMilliseconds <= idleGapMilliseconds
+    }
+
+    /// The open entry is a scrap and `event` starts the same app's next
+    /// segment within a minute. A deletion never starts a new segment.
+    private static func foldsScrap(_ entry: OpenEntry, into event: PersonalHistoryEvent) -> Bool {
+        event.source != .deletion
+            && entry.appBundleIdentifier == event.appBundleIdentifier
+            && entry.historyIdentifier == event.historyIdentifier
+            && entry.consentIdentifier == event.consentIdentifier
+            && event.timestampMilliseconds - entry.lastActivityMilliseconds <= scrapMergeGapMilliseconds
+            && wordCount(entry.text) < scrapWordLimit
+    }
+
+    /// When `event` is from a new segment chain, puts the new segment on its
+    /// own line and follows that chain from here on.
+    private static func startSegmentIfNeeded(_ entry: inout OpenEntry, for event: PersonalHistoryEvent) {
+        let root = String(PersonalHistorySegmentChain.root(of: event.sessionIdentifier))
+        guard root != entry.chainRoot else { return }
+        entry.chainRoot = root
+        if !entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            entry.append("\n", accepted: false)
+        }
     }
 
     private static func apply(_ event: PersonalHistoryEvent, to entry: inout OpenEntry) {

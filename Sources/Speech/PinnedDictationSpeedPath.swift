@@ -24,6 +24,9 @@ enum PinnedDictationSpeedPath {
     /// One empty take is common (a press with nothing said), so it takes two
     /// in a row. The cost of a wrong move is the old start speed, not words.
     static let emptyTakesBeforeFallback = 2
+    /// A recorder that never delivers audio ends a long take with about none.
+    /// A healthy mic that started slowly still delivers most of its hold.
+    static let deadRecorderMaximumAudio: TimeInterval = 0.5
 
     enum TakeOutcome: Equatable {
         case hadWords
@@ -40,9 +43,18 @@ enum PinnedDictationSpeedPath {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     }
 
-    /// Nil when the take says nothing about the mic: too short, a model
-    /// failure, or cancelled.
-    static func outcome(text: String?, emptyReason: DictationEmptyTranscriptionReason?) -> TakeOutcome? {
+    /// Nil when the take says nothing about the mic: a tap, a model failure,
+    /// or cancelled.
+    ///
+    /// Too little audio from a recorder open past a mis-tap is empty only when
+    /// almost none arrived: that is the "mic never delivers audio" failure,
+    /// not a tap or a slow start.
+    static func outcome(
+        text: String?,
+        emptyReason: DictationEmptyTranscriptionReason?,
+        heldSeconds: TimeInterval = 0,
+        audioSeconds: TimeInterval = 0
+    ) -> TakeOutcome? {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .hadWords
         }
@@ -52,7 +64,10 @@ enum PinnedDictationSpeedPath {
         case .otherLanguage?:
             // Words came back, just in another script, so the mic worked.
             return .hadWords
-        case .recordingTooShort?, .modelFailure?, nil:
+        case .recordingTooShort?:
+            let heldPastMisTap = heldSeconds >= DictationEmptyTranscriptionReason.accidentalStartMaximumPress
+            return heldPastMisTap && audioSeconds < deadRecorderMaximumAudio ? .empty : nil
+        case .modelFailure?, nil:
             return nil
         }
     }
@@ -137,6 +152,10 @@ struct PinnedDictationSpeedPathTake: Equatable {
     let restarts: Int
     let gaps: Int
     let droppedCallbacks: Int
+    /// How long the recorder was open, from its start returning to Stop.
+    var heldSeconds: TimeInterval = 0
+    /// How much audio the take actually delivered.
+    var audioSeconds: TimeInterval = 0
 
     /// Local `EventReporter` context; `AnalyticsEventForwardingPolicy`
     /// bounds and buckets it before anything leaves the Mac.

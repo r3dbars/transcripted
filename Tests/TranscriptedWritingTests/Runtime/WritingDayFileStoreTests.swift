@@ -194,7 +194,7 @@ struct WritingDayFileStoreTests {
         defer { sandbox.remove() }
         let written = Written()
         let recorder = Self.recorder(sandbox: sandbox, clock: Clock(Self.start), written: written)
-        await recorder.ingest([Self.typed("first entry", session: "a", at: Self.start)])
+        await recorder.ingest([Self.typed("the first full entry", session: "a", at: Self.start)])
         await recorder.ingest([Self.typed("still open", session: "b", at: Self.start + 1_000)])
         #expect(written.urls.count == 1)
         #expect(recorder.deleteAll())
@@ -215,7 +215,7 @@ struct WritingDayFileStoreTests {
         // A file where the folder should be fails the same closed way as a
         // NAS or exFAT library that won't take 0700.
         try Data().write(to: sandbox.writing)
-        await recorder.ingest([Self.typed("first entry", session: "a", at: Self.start)])
+        await recorder.ingest([Self.typed("the first full entry", session: "a", at: Self.start)])
         recorder.flush()
         let failure = try #require(recorder.lastWriteFailure)
         #expect(failure.error == .folderUnavailable)

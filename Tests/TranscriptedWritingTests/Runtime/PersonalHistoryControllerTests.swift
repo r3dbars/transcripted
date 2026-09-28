@@ -214,7 +214,7 @@ struct PersonalHistoryControllerTests {
         ) == .internalError)
         #expect(PersonalHistoryStorageHealth.healthy.menuLine == nil)
         #expect(PersonalHistoryStorageHealth.internalError.menuLine
-            == "History: not saving — restart Tilde")
+            == "History: not saving — restart Transcripted")
     }
 
     @Test("Repeated failures log once and the next stored event logs recovery")

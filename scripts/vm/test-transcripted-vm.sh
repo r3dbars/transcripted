@@ -12,6 +12,14 @@ set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/transcripted-vm.sh"
 ROOT="$(mktemp -d)"
+# The VNC session's Unix socket lives at $ROOT/home/.transcripted-vm/run/<vm>.vncsock,
+# and a socket path is capped at 104 bytes on macOS and 108 on Linux.
+# linux-checks.sh points TMPDIR deep inside the checkout (build/linux-checks/tmp),
+# which puts that socket past the cap on CI. Use a short root there instead.
+if [ "${#ROOT}" -gt 48 ]; then
+    rmdir "$ROOT"
+    ROOT="$(mktemp -d /tmp/tvm.XXXXXX)"
+fi
 trap 'rm -rf "$ROOT"' EXIT
 
 export HOME="$ROOT/home"
