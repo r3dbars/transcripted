@@ -56,15 +56,23 @@ func testDictationStartedTelemetryContract() {
         let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
 
         let admission = start.range(of: "DictationStartAdmission.decide(")
+        let requested = start.range(of: "trackDictationStartRequested(")
         let newSession = start.range(of: "currentDictationSessionID = UUID()")
 
-        assertTrue(admission != nil && newSession != nil, "startDictation should decide admission and mint a session")
-        if let admission, let newSession {
+        assertTrue(admission != nil && requested != nil && newSession != nil,
+                   "startDictation should decide admission, count the request, and mint a session")
+        if let admission, let requested, let newSession {
             assertTrue(
-                admission.lowerBound < newSession.lowerBound,
+                admission.lowerBound < newSession.lowerBound && requested.lowerBound < newSession.lowerBound,
                 "the attempt event must fire before the session UUID is minted, or it borrows the previous session's id"
             )
         }
+        let countRequest = sourceSlice(start, from: "countRequest:", to: "blocksNewCapture:")
+        assertTrue(countRequest.contains("trackDictationStartRequested("),
+                   "admission's request count must be the real dictation_start_requested event")
+        let countRefusal = sourceSlice(start, from: "countRefusal:", to: "switch admission")
+        assertTrue(countRefusal.contains("trackDictationStartRefused(") && countRefusal.contains("failureKind: refusal.rawValue"),
+                   "each refusal must be reported with its own failure kind")
 
         // One definition, the startDictation call, and the one in
         // dropQueuedDictationStart. A press remembered while the last take

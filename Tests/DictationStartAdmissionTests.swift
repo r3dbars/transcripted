@@ -13,7 +13,7 @@ func testDictationStartAdmission() {
         let decision = DictationStartAdmission.decide(fake.steps())
 
         assertEqual(decision, .refused(.unsavedCaptureRecoveryPending, message: nil), "the first guard refused it")
-        assertEqual(fake.events, ["island", "count request", "check unsaved audio", "count refusal: unsaved_capture_recovery_pending"],
+        assertEqual(fake.events, ["remember", "island", "count request", "check unsaved audio", "count refusal: unsaved_capture_recovery_pending"],
                     "a refused start is still a start the user asked for, so it's counted first")
     }
 
@@ -60,6 +60,14 @@ func testDictationStartAdmission() {
 
         assertEqual(fake.refusals, ["unsaved_capture_recovery_pending"], "only the first refusal is reported")
         assertFalse(fake.events.contains("check transcribing"), "later guards don't run after a refusal")
+
+        let busyAndUnavailable = StartAdmissionFake()
+        busyAndUnavailable.previousTakeIsTranscribing = true
+        busyAndUnavailable.unavailableReason = "unavailable"
+        assertEqual(DictationStartAdmission.decide(busyAndUnavailable.steps()),
+                    .refused(.previousDictationTranscribing, message: nil),
+                    "a take still transcribing is reported before dictation being unavailable")
+        assertFalse(busyAndUnavailable.events.contains("check available"), "the third guard doesn't run after the second refuses")
     }
 
     runSuite("A press while already dictating is ignored and not counted") {
@@ -79,14 +87,16 @@ func testDictationStartAdmission() {
         let decision = DictationStartAdmission.decide(fake.steps())
 
         assertEqual(decision, .queuedBehindFinishingTake, "the press waits for the last take")
-        assertFalse(fake.events.contains("count request"), "counting it now and again when it starts would double-count")
+        assertEqual(fake.events, ["remember"],
+                    "not counted (counting now and again when it starts would double-count), no island, no guards")
     }
 
     runSuite("The Notch island goes up before the counting and checks") {
         let fake = StartAdmissionFake()
         _ = DictationStartAdmission.decide(fake.steps())
 
-        assertEqual(fake.events.first, "island", "the island lands on the next frame, ahead of the ~12 ms of telemetry and checks")
+        assertEqual(Array(fake.events.prefix(3)), ["remember", "island", "count request"],
+                    "the island lands on the next frame, ahead of the ~12 ms of telemetry and checks")
     }
 }
 
@@ -105,7 +115,10 @@ private final class StartAdmissionFake {
     func steps() -> DictationStartAdmission.Steps {
         DictationStartAdmission.Steps(
             isDictating: { [unowned self] in self.isDictating },
-            rememberPressIfFinishing: { [unowned self] in self.previousTakeFinishing },
+            rememberPressIfFinishing: { [unowned self] in
+                self.events.append("remember")
+                return self.previousTakeFinishing
+            },
             showStartingIsland: { [unowned self] in self.events.append("island") },
             countRequest: { [unowned self] in self.events.append("count request") },
             blocksNewCapture: { [unowned self] in

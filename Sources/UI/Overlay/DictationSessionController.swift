@@ -333,22 +333,20 @@ class DictationSessionController: ObservableObject {
                 }
             )
         )
-        switch admission {
-        case .alreadyDictating, .queuedBehindFinishingTake:
+        guard admission == .admitted else {
+            switch admission {
+            case .refused(.unsavedCaptureRecoveryPending, _):
+                // A failed checkpoint may leave native audio as the only copy.
+                // Starting a fresh capture would clear that timeline.
+                showFailedCheckpointRecoveryError()
+            case .refused(.previousDictationTranscribing, _):
+                overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+            case .refused(.dictationUnavailable, let message):
+                overlayController.showError(message ?? "")
+            case .alreadyDictating, .queuedBehindFinishingTake, .admitted:
+                break
+            }
             return
-        case .refused(.unsavedCaptureRecoveryPending, _):
-            // A failed checkpoint may leave native audio as the only copy.
-            // Starting a fresh capture would clear that timeline.
-            showFailedCheckpointRecoveryError()
-            return
-        case .refused(.previousDictationTranscribing, _):
-            overlayController.showError("Still finishing the last dictation. Try again in a moment.")
-            return
-        case .refused(.dictationUnavailable, let message):
-            overlayController.showError(message ?? "")
-            return
-        case .admitted:
-            break
         }
         // Issue #1743: decide the readiness plan BEFORE `isDictating` flips,
         // because that flip takes the App Nap suppression assertion and its
