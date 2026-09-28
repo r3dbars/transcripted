@@ -314,7 +314,9 @@ class AdapterTests(GrandchildMixin, unittest.TestCase):
                      "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"):
             self.assertEqual(env[flag], "1")
         self.assertEqual(env["HOME"], env["CFFIXED_USER_HOME"])
-        self.assertTrue(env["HOME"].startswith(str(request_path.parent)))
+        # The adapter resolves the request path; on macOS a temp dir under /var
+        # resolves to /private/var, so compare resolved paths.
+        self.assertTrue(env["HOME"].startswith(str(request_path.resolve().parent)))
         self.assertEqual(result["environment"]["encoder_compute_units"], "all")
         # chunked variant has no decode_s in the runner's output
         self.assertNotIn("decode_s", self.by_id(result)["p001"]["metrics"])
