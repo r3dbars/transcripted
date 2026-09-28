@@ -820,7 +820,7 @@ def self_test() -> None:
     else:
         raise ProofError("outside-repo report paths must fail closed")
     try:
-        normalize_report_path(REPO_ROOT / "AGENT_START.md")
+        normalize_report_path(REPO_ROOT / "AGENTS.md")
     except ProofError:
         pass
     else:

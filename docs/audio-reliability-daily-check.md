@@ -62,6 +62,25 @@ The run passes only when the normal flows work and any failed meeting can answer
 
 If a scenario fails, keep the report folder. It is the repro packet.
 
+## Nightly, unattended
+
+`scripts/ops/nightly-hardware-smokes.sh` runs `bash check.sh hardware` (app
+build, live capture smoke, slow paste-back smoke) plus the `--synthetic` pass,
+and keeps dated logs under `build/nightly-hardware/` with a one-line
+`latest.txt`. It posts a macOS notification when something fails.
+
+```bash
+bash scripts/ops/nightly-hardware-smokes.sh                 # run once now
+bash scripts/ops/nightly-hardware-smokes.sh --install 03:30 # daily LaunchAgent
+bash scripts/ops/nightly-hardware-smokes.sh --status
+bash scripts/ops/nightly-hardware-smokes.sh --uninstall
+```
+
+Run it once by hand before installing, so macOS asks for Microphone and System
+Audio Recording permission while someone can answer. The live capture smoke
+plays a short test tone out loud, so pick a quiet-hours time where that's fine.
+It tests whatever the checkout has; it never pulls or switches branches.
+
 ## Options
 
 Skip the build when you already built the exact app you want to test:

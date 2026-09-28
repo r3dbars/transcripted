@@ -1,5 +1,68 @@
 # Tests Guide
 
+## Test rules (read before writing a test)
+
+A test checks a **promise** through the front door: give the code inputs and
+check what it returns or does. It never reads the app's code as text. These
+rules exist because tests that pin code shape go red on harmless renames, stay
+green when behavior breaks, and cost agents a CI run each time.
+
+1. **Name the promise.** The `runSuite` name (or test name) says what must stay
+   true, in plain words: "The stop click plays after the mic stops."
+2. **Inputs in, outputs out.** Call the real function or type with plain values
+   or fakes, then assert on the result, the saved file, or the order of
+   recorded events.
+3. **No source-text tests.** Don't read `Sources/**` as a string and assert on
+   fragments. If the logic is stuck inside a big file, pull the decision into a
+   small function (a "policy") and test that. `scripts/dev/check-test-shape.py`
+   blocks new ones. The grandfathered files are listed in
+   `.agents/test-shape-baseline.json`, and that list can only shrink: after
+   converting one, run `python3 scripts/dev/check-test-shape.py --shrink`.
+4. **No wall-clock limits.** Don't assert that real elapsed time stayed under a
+   number. Assert the outcome instead (it timed out, it didn't wait for the
+   slow part), give slow fakes a wide margin, or inject a clock. The same guard
+   blocks new ones.
+5. **Write it from the promise, not from the code.** Write the test before the
+   fix, or from a one-line spec. A test written by reading the implementation
+   tends to copy its bugs. For bigger features, have a second agent write the
+   tests from the spec (`.claude/agents/test-writer.md`).
+6. **Prove it can fail.** Before committing, break the code on purpose (flip
+   the condition, drop the call) and watch the test go red.
+   `scripts/dev/mutation-probe.py` does this for a whole file and lists the
+   breaks no test catches (see `docs/mutation-testing.md`).
+7. **Synthetic is not real.** A fake-mic test never proves real microphone,
+   Bluetooth, system audio, or paste-back behavior. Say which real check is
+   still needed.
+
+Where each kind of test goes, fastest first:
+
+| Layer | Use it for | Where |
+| --- | --- | --- |
+| Compiler | Making bad states impossible to write | Types and enums in `Sources/` |
+| Decision tests | Policies, parsers, formatting, ordering | `Tests/*Tests.swift`, `Tests/TranscriptedCoreTests/` |
+| Output tests | Saved Markdown and other artifacts | `MeetingMarkdownGoldenTests` (approved copies in `Tests/Fixtures/golden-meetings/`), `bash run-e2e-smoke.sh` |
+| Consistency checks | Files that must agree with each other | `scripts/dev/check-*.py`, `scripts/dev/linux-checks.sh` |
+| Real world | Mic, AirPods, system audio, paste-back | `bash check.sh hardware`, `bash run-daily-audio-reliability.sh` |
+
+### Flaky tests
+
+A test that fails without a code change is a flake, and a flake teaches
+everyone to ignore red. The same day, either fix it or bench it: add
+`YYYY-MM-DD | <runSuite name> | <why, and who fixes it>` to
+`Tests/quarantine.txt`. `run-tests.sh` skips benched suites and lists them in
+its summary, and the test-shape guard warns once an entry is two weeks old. For
+Swift Testing use `.disabled("why")`, for XCTest `XCTSkip("why")`, under the
+same same-day rule. Never add retries until it passes.
+
+### One command
+
+```bash
+bash check.sh            # the checks your diff needs (from .agents/test-matrix.yml)
+bash check.sh quick      # Linux-safe repo checks and the test-shape guard, no Swift build
+bash check.sh full       # what Swift CI runs on a PR
+bash check.sh hardware   # real mic, system audio and paste-back smokes on this Mac
+```
+
 ## Test Surfaces
 
 This repo has eleven distinct verification layers:
@@ -70,8 +133,8 @@ To run a single suite instead of the whole set, pass `--filter`:
 bash run-tests.sh --filter <entryFn|File>
 ```
 
-The selector matches an entry function (`testJSONLWriter`), a file name
-(`JSONLWriterTests.swift` or `JSONLWriterTests`), or a case-insensitive
+The selector matches an entry function (`testObservabilityLogWriter`), a file name
+(`ObservabilityLogWriterTests.swift` or `ObservabilityLogWriterTests`), or a case-insensitive
 substring of either. `--only` is an alias. To see the known entry functions:
 
 ```bash
@@ -90,6 +153,21 @@ bash run-tests.sh --coverage
 This uses the same convention-driven runner with LLVM coverage instrumentation
 and writes `summary.txt`, `coverage.profdata`, raw `.profraw`, and
 `report.lcov` under `build/coverage/fast-tests/`.
+
+## Running one test
+
+`bash run-tests.sh --filter <entryFn|File>` runs one fast-test file; the
+selector matches an entry function, a file name, or a case-insensitive
+substring of either. Compiled app sources are cached under
+`build/fast-tests-cache/` (keyed by the source list, file contents, compiler
+and flags), so later filtered runs skip that work;
+`TRANSCRIPTED_FAST_TESTS_NO_CACHE=1` forces a clean compile.
+
+`Tests/TranscriptedCoreTests/` is split into five package test targets:
+`AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests`.
+Scope a loop with `swift test --filter '^SpeakerTests\.'`, or one class with
+`swift test --filter <ClassName>`. Plain `swift test` runs them all, which is
+what CI does.
 
 ## Core Package Tests
 

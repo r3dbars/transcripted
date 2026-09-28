@@ -1,0 +1,9 @@
+# Benched flaky fast-test suites. See Tests/README.md ("Flaky tests").
+#
+# One line per suite:
+#   YYYY-MM-DD | <runSuite name, exactly> | <why it's flaky, and who fixes it>
+#
+# A benched suite is skipped by run-tests.sh and listed in its summary.
+# scripts/dev/check-test-shape.py fails on a malformed line or a suite name
+# that no longer exists, and warns once an entry is older than two weeks.
+# Benching is for flakes only: a test that fails every time is a real failure.

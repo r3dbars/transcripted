@@ -9,7 +9,7 @@
 // with `sharingType = .none`.
 //
 // Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
-// stay capturable" below read Sources/UI/Overlay/{CapturePillController,MeetingOverlayPanel}.swift,
+// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift,
 // Sources/UI/MenuBar/PasteLastDictationFeedback.swift, and Sources/UI/Settings/{SpeakerNamingSheet,
 // TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
 // constructing every surface. PasteLastDictationFeedbackPanel is `private` to its own file;
@@ -18,10 +18,9 @@
 // TranscriptedOnboardingWindowController's init only takes closures (makeView returning
 // PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
 // in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
-// FloatingOverlayPanel and CapturePillPanel are re-pinned here even though they're instantiated live
-// above, and MeetingOverlayPanel/MeetingOverlayTooltipPanel look just as constructible but aren't tested
-// that way either — all six stay in one shared table rather than special-casing which ones could be built
-// directly. The CapturePillController suite greps
+// FloatingOverlayPanel, CapturePillPanel, and NotchIslandPanel are compiled here and built live by the
+// first three suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
+// live in a file this runner does not compile, so they stay on it. The CapturePillController suite greps
 // present()/installEventMonitor() because proving real Return/Escape key routing needs a live
 // NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
 // (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
@@ -125,28 +124,13 @@ func testOverlayScreenSharePrivacy() async {
     // Source contract: most app surfaces live in files the fast runner cannot
     // compile in isolation, so guard their init bodies at the source level.
     runSuite("protected Transcripted NSWindow/NSPanel inits set sharingType = .none") {
-        let floating = overlayPrivacySource("Sources/UI/Overlay/FloatingOverlayPanel.swift")
-        let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
+        // FloatingOverlayPanel, CapturePillPanel, and NotchIslandPanel are
+        // compiled here and built for real by the suites above; only the
+        // surfaces this runner cannot construct stay on this source table.
         let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
         let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
         let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let inits: [(name: String, body: String)] = [
-            (
-                "FloatingOverlayPanel",
-                overlayPrivacySlice(
-                    floating,
-                    from: "class FloatingOverlayPanel: NSPanel {",
-                    to: "override var canBecomeKey"
-                )
-            ),
-            (
-                "CapturePillPanel",
-                overlayPrivacySlice(
-                    capturePill,
-                    from: "final class CapturePillPanel: NSPanel {",
-                    to: "private final class CapturePillView"
-                )
-            ),
             (
                 "MeetingOverlayPanel",
                 overlayPrivacySlice(

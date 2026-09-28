@@ -183,6 +183,60 @@ rules:
       - "python3 -m py_compile scripts/dev/agent-context.py"
       - "python3 scripts/dev/agent-context.py --self-test"
 
+  # Test-shape ratchet (Tests/README.md, "Test rules"): no new tests that read
+  # Sources/ as text or assert on wall-clock time; the grandfathered baseline
+  # can only shrink. Also validates Tests/quarantine.txt.
+  - paths:
+      - "Tests/**"
+      - "Tools/*/Tests/**"
+      - ".agents/test-shape-baseline.json"
+      - "scripts/dev/check-test-shape.py"
+    checks:
+      - "python3 scripts/dev/check-test-shape.py --self-test"
+      - "python3 scripts/dev/check-test-shape.py"
+
+  - paths:
+      - "Tools/*/Package.swift"
+      - ".github/workflows/**"
+      - "docs/repo-layout.md"
+      - "*.sh"
+      - "scripts/dev/check-known-traps.py"
+    checks:
+      - "python3 scripts/dev/check-known-traps.py --self-test"
+      - "python3 scripts/dev/check-known-traps.py"
+
+  - paths:
+      - "scripts/dev/explain-missing-sources.py"
+      - "scripts/dev/test-parakeet-lifecycle.sh"
+    checks:
+      - "python3 scripts/dev/explain-missing-sources.py --self-test"
+      - "bash -n scripts/dev/test-parakeet-lifecycle.sh"
+
+  # Swift 6 migration ratchet: a typecheck-only pass with strict concurrency
+  # (no binary). Concurrency warnings per Sources/ folder may only go down.
+  - paths:
+      - "Sources/**/*.swift"
+      - ".agents/concurrency-baseline.json"
+      - "scripts/dev/concurrency-census.sh"
+      - "scripts/dev/concurrency-census.py"
+    checks:
+      - "python3 scripts/dev/concurrency-census.py --self-test"
+      - "bash scripts/dev/concurrency-census.sh --check"
+
+  - paths:
+      - "scripts/ops/nightly-hardware-smokes.sh"
+    checks:
+      - "bash -n scripts/ops/nightly-hardware-smokes.sh"
+      - "bash scripts/ops/nightly-hardware-smokes.sh --help"
+
+  - paths:
+      - "check.sh"
+      - "scripts/entrypoints/check.sh"
+    checks:
+      - "bash -n check.sh"
+      - "bash -n scripts/entrypoints/check.sh"
+      - "bash check.sh --help"
+
   - paths:
       - "scripts/dev/agent-check.py"
       - "scripts/dev/agent-preflight.sh"
@@ -207,6 +261,14 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/dev/check-superseded.py"
       - "python3 scripts/dev/check-superseded.py --self-test"
+
+  - paths:
+      - "scripts/dev/mutation-probe.py"
+      - "docs/mutation-testing.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/mutation-probe.py"
+      - "python3 scripts/dev/mutation-probe.py --self-test"
 
   - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"
@@ -574,7 +636,6 @@ rules:
 
   - paths:
       - "README.md"
-      - "AGENT_START.md"
       - "AGENTS.md"
       - "CLAUDE.md"
       - "CONTRIBUTING.md"
@@ -592,8 +653,12 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/agent-context.py"
       - "scripts/dev/test-matrix-checks.py"
+      - "**/*.md"
+      - "scripts/dev/check-doc-paths.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-doc-paths.py --self-test"
+      - "python3 scripts/dev/check-doc-paths.py"
 
   # Root fast tests assert on the literal *content* of these non-Swift files
   # (readSourceFixture / repoFixtureURL / readObservabilityTestRepoTextFile), so

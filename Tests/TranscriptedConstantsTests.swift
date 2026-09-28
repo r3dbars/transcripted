@@ -210,16 +210,28 @@ func testTranscriptedConstants() async {
     }
 
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns even when work ignores cancellation") {
-        let startedAt = Date()
+        // The work ignores cancellation and runs about 10 s. If the timeout
+        // waited for it, the work would have finished by the time we return.
+        let workFinished = DetachedTimeoutWorkFlag()
         let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 0.01) {
             for _ in 0..<1_000 {
                 try? await Task.sleep(nanoseconds: 10_000_000)
             }
+            workFinished.set()
             return "late"
         }
-        let elapsed = Date().timeIntervalSince(startedAt)
 
         assertNil(result, "detached timeout should throw on deadline")
-        assertTrue(elapsed < 0.5, "detached timeout should not wait for non-cooperative model work to unwind")
+        assertFalse(workFinished.isSet, "detached timeout should not wait for non-cooperative model work to unwind")
     }
+}
+
+/// Set by work that should still be running when a detached timeout returns.
+private final class DetachedTimeoutWorkFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool { lock.withLock { value } }
+
+    func set() { lock.withLock { value = true } }
 }

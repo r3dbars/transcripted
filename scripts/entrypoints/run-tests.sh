@@ -9,6 +9,12 @@ ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# Several fast tests build fixed -0500 instants and assert locally formatted
+# headings and filenames, so they assume America/Chicago. CI sets it; default it
+# here too so a run anywhere matches CI instead of failing on the clock. An
+# explicit TZ still wins.
+export TZ="${TZ:-America/Chicago}"
+
 source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
 
 BUILD_DIR="build"
@@ -319,6 +325,9 @@ EOF
 cat >> "$GENERATED_RUNNER" <<'EOF'
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
+        if quarantinedSuiteCount > 0 {
+            print("\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt")
+        }
         if failedTests > 0 {
             print("FAILED")
             exit(1)
@@ -723,8 +732,16 @@ SWIFTC_ARGS+=(
 )
 
 compile_status=0
-"${SWIFTC_ARGS[@]}" 2>&1 || compile_status=$?
+compile_log="$BUILD_DIR/fast-test-compile.log"
+set +e
+"${SWIFTC_ARGS[@]}" 2>&1 | tee "$compile_log"
+compile_status=${PIPESTATUS[0]}
+set -e
 if [ "$compile_status" -ne 0 ]; then
+    echo ""
+    python3 "$REPO_ROOT/scripts/dev/explain-missing-sources.py" \
+        --log "$compile_log" \
+        --list "the APP_SOURCES list in scripts/entrypoints/run-tests.sh" || true
     echo ""
     echo "+------------------------------------------------------------------+"
     echo "| Fast-test compile failed.                                        |"

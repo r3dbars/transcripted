@@ -432,13 +432,21 @@ func testFailedMeetingPresentation() {
             "failed rows should keep retry readiness tied to complete retryable audio, not mere visibility"
         )
 
-        let recoveryPresentationSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"),
-            encoding: .utf8
-        )) ?? ""
-
-        assertTrue(
-            recoveryPresentationSource.contains("!canRetry || !isRetryable || !hasAudioFiles || isRetrying || usableAudio == .absent"),
+        // The shared retry-readiness helper Home delegates to is compiled into
+        // this runner, so call it instead of reading its body. (Busy-queue and
+        // active-retry cases live in FailedMeetingRecoveryPresentationTests.)
+        let retryReady = { (isRetryable: Bool, hasAudioFiles: Bool, usableAudio: FailedMeetingUsableAudio) in
+            !FailedMeetingRecoveryPresentation.retryDisabled(
+                canRetry: true,
+                isRetryable: isRetryable,
+                isRetrying: false,
+                hasAudioFiles: hasAudioFiles,
+                usableAudio: usableAudio
+            )
+        }
+        assertTrue(retryReady(true, true, .unknown), "complete retryable audio should keep retry available")
+        assertFalse(
+            retryReady(true, false, .unknown) || retryReady(false, true, .unknown) || retryReady(true, true, .absent),
             "the shared retry-readiness helper Home delegates to should still require complete retryable audio, and must not offer retry for audio probed as silent"
         )
         assertTrue(

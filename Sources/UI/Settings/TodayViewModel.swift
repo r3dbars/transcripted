@@ -39,9 +39,9 @@ final class TodayViewModel: ObservableObject {
     /// How many Recent context rows to show; Load more adds a page.
     private(set) var recentLimit = TodayRecentActivity.pageSize
     /// Upper bound on the Recent context list, however often Load more is pressed.
-    static let maxRecentLimit = 500
+    nonisolated static let maxRecentLimit = 500
     /// Upper bound on dictations read to fill the week's tape.
-    static let maxTapeDictations = 1_000
+    nonisolated static let maxTapeDictations = 1_000
     /// App activation, saves and window opens can each ask for a refresh; a
     /// whole-library scan runs at most this often, with one trailing run so the
     /// last change still shows.

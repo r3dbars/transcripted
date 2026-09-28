@@ -550,7 +550,7 @@ by recording-side durations.
 
 **Deliberately not built: default auto-record.** A visible countdown that
 auto-starts recording (Notion-style) remains the documented *opt-in* design in
-`docs/MEETING_CAPTURE_PROMPTING.md` — short countdown (~8s, with the prompt
+the old prompting draft (`docs/MEETING_CAPTURE_PROMPTING.md`, removed; see git history) — short countdown (~8s, with the prompt
 already visible ~60s), never silent at t=0, default OFF. The gentle default
 keeps the product invariant "no file is ever written without a human signal,"
 which is the line that keeps false positives from ever becoming privacy

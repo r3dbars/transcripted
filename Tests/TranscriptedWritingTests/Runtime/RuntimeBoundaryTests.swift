@@ -106,10 +106,11 @@ struct RuntimeBoundaryTests {
         child.arguments = ["10"]
         try child.run()
 
-        let started = ContinuousClock.now
         LlamaServerProcessHost.shutDownNow(child)
 
+        // `sleep 10` can only be gone this soon if it was signalled; waiting
+        // it out would end in a normal exit instead.
         #expect(!child.isRunning)
-        #expect(ContinuousClock.now - started < .seconds(2))
+        #expect(child.terminationReason == .uncaughtSignal)
     }
 }

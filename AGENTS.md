@@ -1,265 +1,79 @@
-# Transcripted Agent Guide
+# Transcripted agent guide
 
-## Current repo truth
+The one set of rules for every coding agent (Claude, Codex, or other). `CLAUDE.md` imports this file.
 
-- `main` is the current Transcripted product, derived from the earlier Draft codebase.
-- The current app on `main` supports **dictation** and **meetings**.
-- Meeting capture includes local mic + system audio, imported-audio transcription, optional local-speaker review, and agent-readable Markdown output.
-- The older draft / ghostwriting flow is not active on `main`.
-- `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
-- `Sources/Speech/` owns the app-owned local STT path. Meetings reuse that path through `Sources/Meeting/MeetingSTTAdapter.swift`.
-- `Sources/Reliability/` owns wake / sleep recovery for hotkeys and active capture flows.
-- `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
+Transcripted is a macOS 26+, Apple Silicon menubar app: dictation with paste-back, meeting capture (mic + system audio) with local transcription, imported audio and video, and Writing. Everything it captures is saved as agent-readable Markdown on disk.
 
-## Product capability contract
+## Start here
 
-Simplification work must preserve the current product surface unless the owner
-explicitly approves a capability change. In particular, keep:
+1. `python3 scripts/dev/agent-context.py <changed paths>` prints the owner docs, the rules to keep true, and the checks for your change. Add `--symptom "short description"` when you don't know where a bug lives.
+2. Read the nearest `CLAUDE.md` in the folder you're changing (`Sources/<area>/CLAUDE.md`, `Tools/<package>/CLAUDE.md`). That's where subsystem detail lives.
+3. `docs/repo-layout.md` is the map: folders, commands, docs, and hotspot files.
+4. Before you hand off: `bash check.sh`.
 
-- automatic meeting detection and its record / dismiss / remind flow
-- the Speakers directory and speaker review, rename, merge, and delete tools
-- per-app dictation Auto Enter
-- manual model-cache inspection and cleanup controls
-- the status item's right-click quick menu
-- retained meeting-audio playback; clicking a transcript row's time plays from
-  there, but rows do not highlight or follow the playhead
+When sources disagree: current code wins for runtime behavior, this file and `.agents/test-matrix.yml` win for workflow.
 
-These surfaces may share less code underneath, but do not delete, hide, or make
-them harder to reach as part of an architecture or visual cleanup.
+## Rules that always apply
 
-## Response voice
-
-- Write like a real person texting a friend, not like a presentation.
-- Keep things simple, direct, and useful.
-- Use short, punchy sentences most of the time.
-- Vary the rhythm. Short punch. Then a little more detail when it helps.
-- Use casual connectors when they fit: "so", "anyway", "plus", "also".
-- Be honest when something is weird, unclear, or unknown.
-- Use light natural hesitation sparingly: "I think maybe", "probably", "not sure but".
-- Avoid marketing speak, corporate buzzwords, stiff transitions, and obvious AI phrases like "dive into", "delve into", or "let's explore".
-- Avoid piling on adjectives.
-- Keep capitalization normal.
-- Be relaxed, but still clear. Real, not sloppy.
-
-## Read this first
-
-0. `AGENT_START.md` for the short agent entrypoint
-1. `README.md`
-2. `AGENTS.md`
-3. `docs/repo-layout.md`
-4. `docs/agent-onboarding.md`
-5. `CLAUDE.md`
-6. `Sources/CLAUDE.md`
-7. the nearest local `CLAUDE.md` for the area you are changing
-8. `Sources/Accessibility/CLAUDE.md` when touching focused-editor AX metadata, overlay placement, or paste-back context
-9. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
-10. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
-11. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
-12. `Sources/Speech/CLAUDE.md` when touching dictation STT, audio recovery, or device handling
-13. `Sources/Support/CLAUDE.md` when touching shared preferences, permissions, paths, or Claude Desktop install flow
-14. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI (plus `Sources/UI/Settings/CLAUDE.md` for settings and Home)
-15. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
-16. `Tests/README.md`
-17. `docs/storage-paths.md`
-18. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-19. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
-20. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-21. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
-22. `Tools/*/CLAUDE.md` when touching standalone CaptureKit, CLI, MCP, QA, Lab, or speaker-eval tools
-23. `scripts/README.md` when running or changing repo scripts
-
-Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
-Use `.agents/test-matrix.yml` as the quick path-to-verification map, with this
-file taking precedence when there is any conflict.
-
-## Coordinator closeout
-
-When a worker lane reports back to the Transcripted coordinator, use this exact
-one-line shape and keep it short:
-
-`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`
-
-The lane contract below applies to the local Codex coordinator and its runner.
-Cloud Claude sessions don't have `maestro-delegate`; they fill the `lanes used`
-field with `n/a (cloud session)` and use an independent review thread or
-`/code-review` as their `codex-review`.
-
-For review, merge-room, and worker-thread prompts on the local runner, include the Maestro lane
-contract. Codex is the final reviewer / merger. Claude is for risky reasoning.
-Mac local models and the Windows worker are cheap first-pass lanes for summaries,
-clustering, log triage, and draft work. If a lane is skipped, say why in the
-closeout.
-
-For non-Codex lanes, use `~/.codex/bin/maestro-delegate` whenever possible, for
-example `maestro-delegate local --label pr-dedupe -- "..."`,
-`maestro-delegate windows --label review -- "..."`, or
-`maestro-delegate claude --label risk-review -- "..."`. A lane only counts as
-used if the closeout includes a real `MAESTRO_PROOF` path, output path, or pasted
-command output.
-
-Use `docs/agent-closeout.md` for the status meanings and GitHub cleanup
-boundaries.
+- **Keep the product surface.** Simplification must not delete, hide, or bury: automatic meeting detection and its record / dismiss / remind flow; the Speakers directory with review, rename, merge, and delete; per-app dictation Auto Enter; model-cache inspection and cleanup; the status item's right-click menu; retained meeting-audio playback (clicking a row's time plays from there; rows don't follow the playhead). Changing any of these needs the owner's approval.
+- **Local-first and private.** Never send or log raw transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute paths, or raw device names off the device.
+- **`Sources/TranscriptedCore/` is a library.** The app reaches it only through `Sources/Meeting/`, and `build.sh` links it from the prebuilt archive, never compiling it into the app target. `Sources/Speech/` owns dictation STT; meetings reuse it through `Sources/Meeting/MeetingSTTAdapter.swift`.
+- **CoreAudio real-time callbacks:** no I/O, locks, allocations, or ObjC calls inside them. Deep-copy buffers before any async hop. Session controllers and UI state are `@MainActor`; capture internals use `DispatchQueue` + `NSLock`.
+- **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device; if that's AirPods, they flip into call mode and the audio garbles. Every AirPods garble bug so far came from this. Any code that builds an engine or touches `inputNode` must say what happens with a Bluetooth headset as the default input. Read `Sources/Speech/CLAUDE.md` first.
+- **Harnesses never touch real user state.** Automated launches go through `AutomatedLaunchEnvironment`. Scripts, labs, and tests don't write to the real capture library or prefs. Anything that deletes checks the path is under the root it owns first. Use `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when running binaries directly.
 
 ## Build and test
 
 ```bash
-bash build-deps.sh
-bash build.sh --no-open
-bash run-tests.sh
-bash run-integration-smoke.sh
-swift test
+bash check.sh             # the checks your diff needs, from .agents/test-matrix.yml
+bash check.sh quick       # Linux-safe checks, no Swift build (about a minute)
+bash check.sh full        # what Swift CI runs on a PR
+bash check.sh hardware    # real mic, system audio, and paste-back smokes on this Mac
 ```
 
-Rules. Use `.agents/test-matrix.yml` for the full path-to-verification map;
-these are the common minimums:
+The pieces, when you need one directly: `bash build-deps.sh` (prebuilt audio libraries; `--force` after touching `Sources/TranscriptedCore/` or `Sources/Meeting/`), `bash build.sh --no-open` (the real app build), `bash run-tests.sh` (fast tests; `--filter <name>` for one), `swift test` (Core package tests), `bash run-integration-smoke.sh`, `bash run-e2e-smoke.sh`. More in `Tests/README.md`.
 
-1. After changing Swift source, run `bash build.sh --no-open` and `bash run-tests.sh`.
-2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash build-deps.sh --force` and `bash run-integration-smoke.sh`.
-3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`.
-4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
+- **Writing a test:** follow "Test rules" in `Tests/README.md`. A test checks a named promise through inputs and outputs. It never reads `Sources/` as text and never asserts on wall-clock time. `scripts/dev/check-test-shape.py` blocks new ones.
+- **Flaky test:** fix it or bench it in `Tests/quarantine.txt` the same day. Never retry until green.
+- **No Swift toolchain** (Linux, cloud): run `bash scripts/dev/linux-checks.sh`, and never say a Swift change was built or tested until CI ran on that exact head. Claude sessions can't re-run Actions jobs; don't push empty commits to retrigger.
+- **PR review level:** docs-only needs `bash check.sh`. Meaningful code also needs an independent review of the full diff against the real base (`codex review`, a separate deep-review thread, or `/code-review`); record the verdict in the PR. Broad, risky, or release-impacting work also needs `bash scripts/ops/transcripted-qa-bench.sh --mode full`. Release notes, appcast, cask, QA-gate, and download docs count as release-impacting even when only Markdown changed.
 
-PR QA levels:
+## Known traps
 
-- Tiny docs-only: run `scripts/dev/agent-preflight.sh` and the mapped docs gate. Do not require full release QA for spelling, comments, or internal docs that do not change release truth.
-- Meaningful code: run `codex-review` against the real PR base, then run the union of `.agents/test-matrix.yml` checks for the changed paths.
-- Broad, risky, or release-impacting: run `codex-review`, the mapped checks, and `bash scripts/ops/transcripted-qa-bench.sh --mode full`.
+Each of these has cost a red CI run or a wrong merge. The ones with a check fail loudly now; the rest you have to remember.
 
-Treat release notes, appcast/update docs, Homebrew cask docs, QA-gate docs, and
-public download/release-truth docs as release-impacting even when the diff is
-Markdown-only.
+- **Tests that read source as text.** 58 grandfathered test files still assert on exact code fragments, so a rename or a reflow can turn CI red. Before editing a file, run `python3 scripts/dev/check-source-pins.py --changed-only`. Most-pinned: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`. `Tests/OverlayScreenSharePrivacyTests.swift` scans all of `Sources/UI`. New ones are blocked by `check-test-shape.py`.
+- **Telemetry keys are dropped by substring.** The sanitizers silently drop any key whose name contains `audio`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url` and more, so `start_profile` never arrives ("profile" contains "file"). `python3 scripts/dev/check-telemetry-keys.py` catches it. Adding an analytics event is a lockstep edit; see `Sources/Observability/CLAUDE.md`.
+- **Hand-kept source lists.** `run-tests.sh` and some smokes compile a listed subset of `Sources/`. A new file a test needs must be added there; the compile error now names the file and the list.
+- **A clean text merge isn't a working merge.** Git won't flag a new enum case missing from another PR's `switch`, two PRs bumping the same literal count, or a renamed helper another PR's test calls. When two PRs touch the same file, let CI build the merged result. Assert against explicit lists, not counts.
+- **"Dirty" on GitHub** is often a criss-cross history, not a real conflict: merge current `main` into the PR (a merge commit; never force-push). Before opening any repair or reland branch, run `python3 scripts/dev/check-superseded.py --pr <number>`; exit 3 means it already merged under another PR.
+- **Naming:** `Sources/Support/CaptureLibrary*.swift` is the relocatable capture *library* (saved Markdown and audio), not `Sources/Capture/` (hotkeys and triggers). `Sources/Support/ModelCacheInventory.swift` inventories `Sources/Speech/` model caches.
+- **New Tools package** needs a CI job and a test-matrix rule; `scripts/dev/check-known-traps.py` fails without them.
 
-`codex-review` means: an independent model review of the full PR diff against
-the real base branch — e.g. `codex review` from the OpenAI Codex CLI, or an
-equivalent independent agent reviewer (a separate Claude deep-review thread or
-`/code-review` counts). Record the verdict (and any findings you
-rejected, with reasons) in the PR description. It is not defined as a repo
-script; any tool that reviews the true diff qualifies.
+**Hotspots.** Files over 1,500 lines, with `Sources/TranscriptedCore/Audio/Audio.swift` the riskiest: read the whole file and its folder's `CLAUDE.md` before editing, and don't add another responsibility to any of them. The list and what each owns is in `docs/repo-layout.md`.
 
-## Before opening a repair branch
+## Releases
 
-When a PR goes dirty (conflicting) the reflex is to spin up a fresh
-`repair-pr-NNNN` branch. Do not. First confirm the change did not ALREADY merge
-under a different PR number — this has burned multiple threads that each
-re-opened a repair branch for a fix that was already on `main`.
+Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow. Use `build-beta.sh`, not `build.sh`, for builds that go to other machines. A release isn't done when the DMG exists: publish the signed archive, update `docs/appcast.xml`, and push it to the branch behind the live feed so installs see it; then `bash scripts/release/update-cask.sh <version>` and commit `Casks/transcripted.rb` for Homebrew. If you skip either, say so plainly. Keep `SUFeedURL` and `SUPublicEDKey` in `Info.plist` matching the real feed. For a Release Candidate workflow build, tag the workflow's `source_ref`, not the run's head SHA.
 
-Required step before opening any repair/redo/reland branch:
+## Observability
 
-```bash
-python3 scripts/dev/check-superseded.py --pr <dirty-pr-number>
-# or, once you are on the repair branch:
-python3 scripts/dev/check-superseded.py --branch "$(git branch --show-current)"
-```
-
-- Exit `3` with `STOP: #NNNN already merged this` means the scope is already on
-  `main`. Close the dirty PR as superseded and do the work only if something is
-  genuinely still missing. Do not open the repair branch.
-- Exit `0` (`no merged PR already covers ...`) means the change is novel. Proceed.
-
-`scripts/dev/agent-preflight.sh` also prints this reminder automatically when it
-detects a repair-shaped branch name.
-
-Often a dirty PR doesn't need a repair branch at all. GitHub marks a PR dirty
-after criss-cross merges even when `git merge origin/main` is clean. Merge
-current `main` into the PR branch (a merge commit, not a rebase or force-push)
-and push; that often clears it. Only a real conflict needs resolving, and
-after any merge of two PRs that touched the same file, let CI build the merged
-result before trusting it (see "Known traps" in `CLAUDE.md`).
-
-## Releases, Sparkle, and Homebrew
-
-When the task is a user-facing release, package handoff, or update-path change,
-agents must treat Sparkle as part of the release contract, not as optional
-follow-up work.
-
-Rules:
-
-1. Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow.
-2. For builds intended for other machines, use `build-beta.sh`, not `build.sh`.
-3. A release is not complete just because a DMG exists. For in-app updates to work, the release flow must also:
-   - publish the signed archive where users can fetch it
-   - update `docs/appcast.xml`
-   - push the updated appcast to the branch that backs the live feed
-4. If the release should also be installable or upgradeable through Homebrew, the release flow must also:
-   - run `bash scripts/release/update-cask.sh <version>` after the GitHub release is published
-   - commit the updated `Casks/transcripted.rb`
-   - push that cask update so `brew install` and `brew upgrade` see the new version
-5. If Sparkle metadata was not updated, say explicitly that existing installs will not discover the new release in-app yet.
-6. If the Homebrew cask was not updated, say explicitly that `brew install` / `brew upgrade` will still point at the older release.
-7. If the release artifact URL, appcast URL, public key, Sparkle tooling, or Homebrew install path changes, update the docs in the same change.
-8. Keep `Info.plist` Sparkle settings aligned with the actual release feed:
-   - `SUFeedURL`
-   - `SUPublicEDKey`
-   - any automatic-check / automatic-download flags
-9. Preferred release verification for release-path changes:
-   - `bash build-deps.sh --force` when dependency tooling changes
-   - `bash build.sh --no-open`
-   - `bash run-tests.sh`
-   - `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging smoke, or the full notarized path when cutting a real release
-
-## Observability, Sentry, and Analytics
-
-Treat Sentry and PostHog as explicitly bounded integrations, not generic log
-sinks.
-
-Rules:
-
-1. Read `Sources/Observability/CLAUDE.md` before changing crash reporting, event forwarding, anonymous analytics, file logging, or update plumbing.
-2. Runtime Sentry config lives in `Info.plist` under:
-   - `TranscriptedSentryDSN`
-   - `TranscriptedSentryEnvironment`
-   - `TranscriptedSentryReleasePrefix`
-   - optional: `TranscriptedSentryAppHangTrackingEnabled`
-3. Local overrides for testing can come from process environment:
-   - `SENTRY_DSN`
-   - `SENTRY_ENVIRONMENT`
-   - `SENTRY_RELEASE`
-   - `SENTRY_DIST`
-   - `SENTRY_ENABLE_APP_HANG_TRACKING`
-4. Runtime PostHog config lives in `Info.plist` under:
-   - `TranscriptedPostHogAPIKey`
-   - `TranscriptedPostHogHost`
-5. Local overrides for analytics testing can come from process environment:
-   - `POSTHOG_API_KEY`
-   - `POSTHOG_HOST`
-6. The user-facing crash reporting and anonymous analytics preferences are stored by `CrashReportingPreferences` and `AnalyticsPreferences`. Both default to enabled until the user changes them in Settings or onboarding.
-7. `EventReporter` does not forward every `.error` event to Sentry. Off-device forwarding is gated by the explicit allowlist in `Sources/Observability/SentryEventPolicy.swift`.
-8. PostHog events and properties are gated by `Sources/Observability/AnalyticsEventPolicy.swift`.
-9. Keep off-device payloads privacy-safe. Do not send raw transcript text, audio references, meeting titles, speaker names, emails, tokens, or absolute file paths. If payload shape changes, update the relevant sanitizer and tests in the same change:
-   - `Sources/Observability/SentryPayloadSanitizer.swift`
-   - `Sources/Observability/AnalyticsPayloadSanitizer.swift`
-10. Test and smoke runs should keep local production logs clean with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when invoking binaries directly.
-11. Preserve the user verification path when touching the integrations:
-   - Settings should still expose the crash-reporting toggle
-   - Settings should still expose the anonymous analytics toggle
-   - About should still expose the `Send diagnostics` action when Sentry is configured (the old `Send Test Sentry Event` settings row was removed by owner decision in the 2026-08 settings simplification)
-12. Preferred verification for observability-related changes:
-   - `bash build.sh --no-open`
-   - `bash run-tests.sh`
-   - confirm Sentry, analytics, and observability preference tests still pass through `run-tests.sh`
-
-## Testing gotchas
-
-- `run-tests.sh` is a custom `swiftc` runner, not XCTest.
-- Root fast tests are discovered by convention: `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry function.
-- `Tests/TranscriptedCoreTests/` is a separate Swift Package target, run via `swift test` rather than `run-tests.sh`.
+Sentry and PostHog are bounded integrations, not log sinks. Off-device events pass allowlists in `Sources/Observability/SentryEventPolicy.swift` and `AnalyticsEventPolicy.swift`; if payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change. Keep the crash-reporting and analytics toggles in Settings and "Send diagnostics" in About. Config keys, env overrides, and sinks: `Sources/Observability/CLAUDE.md` and `docs/observability.md`.
 
 ## Storage
 
-Current app builds on `main` default to Transcripted-named Application Support paths:
+App state lives under `~/Library/Application Support/Transcripted/`, with saved meetings and dictations in `captures/`. Users can move the capture library (`transcriptSaveLocation`); state, cache, logs, and temp files stay put. Full map, including old `Draft` fallbacks: `docs/storage-paths.md`.
 
-- app support root: `~/Library/Application Support/Transcripted/`
-- capture library: `~/Library/Application Support/Transcripted/captures/`
-- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
-- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
+## Handoff and orchestration
 
-The user can relocate the capture library in Settings via
-`transcriptSaveLocation`. App-owned state, cache, logs, and temp files stay
-under `~/Library/Application Support/Transcripted/`.
+For substantive work (research, audits, cross-cutting changes, design, reviews), default to a workflow that fans out parallel agents and cross-checks their findings instead of working solo; keep solo work for small mechanical edits and conversation. Workers inherit this default. Correctness and coverage matter more than token cost.
 
-Historic `Draft` paths still exist for migration and standalone-tool fallback.
+A worker reporting back to the Transcripted coordinator ends with one line:
 
-See `docs/storage-paths.md` for the canonical storage map, including legacy fallbacks and `TranscriptedCore` standalone defaults.
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`
 
-## Default orchestration: ultracode + workflows
+Cloud Claude sessions fill `lanes used` with `n/a (cloud session)`. Lane routing for the local Codex runner (`maestro-delegate`, proof paths) and the status meanings: `docs/agent-closeout.md`.
 
-For substantive work — research, audits, multi-file or cross-cutting changes, design, and reviews — default to authoring and running a **Workflow** that fans out parallel agents and adversarially verifies findings, rather than working solo. Reserve solo execution for trivial mechanical edits and conversational replies. Spawned worker threads inherit this default: a thread doing real work should itself orchestrate with a workflow wherever breadth or independent verification helps. Token cost is not the constraint here — correctness and coverage are. This is "ultracode" as the standing default for this repo.
+## Voice
+
+Write like a real person texting a friend, not a presentation. Short, direct sentences; vary the rhythm. Casual connectors ("so", "anyway", "also") are fine. Say plainly when something is unclear. No marketing speak, no "dive into" or "let's explore", no piles of adjectives. Normal capitalization. Relaxed but clear.

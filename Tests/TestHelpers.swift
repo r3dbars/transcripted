@@ -73,12 +73,42 @@ func assertNotNil<T>(_ value: T?, _ message: String = "", file: String = #file, 
     }
 }
 
+/// Suites benched in Tests/quarantine.txt, one per line as
+/// `YYYY-MM-DD | <runSuite name> | <why, and who fixes it>`. A benched suite is
+/// skipped and reported instead of turning unrelated PRs red while it gets
+/// fixed. `scripts/dev/check-test-shape.py` validates the file and warns about
+/// entries older than two weeks. See Tests/README.md ("Flaky tests").
+let quarantinedSuites: [String: String] = {
+    guard let text = try? String(contentsOf: repoFixtureURL("Tests/quarantine.txt"), encoding: .utf8) else {
+        return [:]
+    }
+    var suites: [String: String] = [:]
+    for rawLine in text.split(separator: "\n") {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        if line.isEmpty || line.hasPrefix("#") { continue }
+        let parts = line.split(separator: "|", maxSplits: 2).map { $0.trimmingCharacters(in: .whitespaces) }
+        if parts.count == 3 { suites[parts[1]] = parts[2] }
+    }
+    return suites
+}()
+
+var quarantinedSuiteCount = 0
+
+private func skipQuarantinedSuite(_ name: String) -> Bool {
+    guard let reason = quarantinedSuites[name] else { return false }
+    quarantinedSuiteCount += 1
+    print("Skipping \(name) (quarantined: \(reason))")
+    return true
+}
+
 func runSuite(_ name: String, _ block: () -> Void) {
+    if skipQuarantinedSuite(name) { return }
     print("Running \(name)...")
     block()
 }
 
 func runSuite(_ name: String, _ block: () async -> Void) async {
+    if skipQuarantinedSuite(name) { return }
     print("Running \(name)...")
     await block()
 }

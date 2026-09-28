@@ -241,7 +241,7 @@ click.
    before anything records.
 
 Record what happened per scenario (pass/fail, screenshot names, relevant log
-lines) and keep private data out, per `docs/test-automation-strategy.md`.
+lines) and keep private data out, per "Test rules" in `Tests/README.md`.
 
 ## Driving it from an agent
 

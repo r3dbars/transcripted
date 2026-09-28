@@ -69,9 +69,16 @@ on:
 permissions:
   contents: read
 
+# PRs: a new push cancels the older run on that branch; only the newest head
+# matters. main: a run that has started always finishes, so main's history
+# shows a real pass or fail instead of a trail of cancelled runs. GitHub still
+# collapses a burst of merges: while one main run is going, only the newest
+# waiting run is kept, and it tests all of those commits together. (A group
+# per commit would let main runs pile up in parallel and take the hosted macOS
+# slots PRs need.)
 concurrency:
   group: swift-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Every build/test entrypoint disables the on-disk file logger so it does not
