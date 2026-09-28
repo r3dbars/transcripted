@@ -296,69 +296,59 @@ class DictationSessionController: ObservableObject {
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
-        guard !isDictating else { return }
-        // A shortcut press while the last take is still transcribing waits
-        // for it instead of being refused. It is counted below when it
-        // actually starts, or when the wait gives up.
-        if rememberStartPressIfFinishing(
-            sourceApp: sourceApp,
-            trigger: trigger,
-            shortcutMode: shortcutMode,
-            isRetry: isRetry
-        ) {
+        // DictationStartAdmission decides whether this press becomes a take
+        // and counts it: a press while already dictating or queued behind a
+        // finishing take isn't counted yet; every other press is counted
+        // (`dictation_start_requested`, the attempt denominator) before any
+        // guard can refuse it and before the session id is minted below.
+        let admission = DictationStartAdmission.decide(
+            DictationStartAdmission.Steps(
+                isDictating: { self.isDictating },
+                rememberPressIfFinishing: {
+                    self.rememberStartPressIfFinishing(
+                        sourceApp: sourceApp,
+                        trigger: trigger,
+                        shortcutMode: shortcutMode,
+                        isRetry: isRetry
+                    )
+                },
+                showStartingIsland: { overlayController.showIslandStartingStateIfSelected(near: sourceApp) },
+                countRequest: {
+                    self.trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
+                },
+                blocksNewCapture: {
+                    DictationTerminationAdmissionPolicy.blocksNewCapture(
+                        hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
+                        recoveryWAVExists: self.currentStoppedAudioRecoveryWAVExists
+                    )
+                },
+                previousTakeIsTranscribing: { appState.sttRouter.isTranscribing },
+                unavailableReason: { self.dictationStartUnavailableReason(appState: appState) },
+                countRefusal: { refusal in
+                    self.trackDictationStartRefused(
+                        appState: appState,
+                        trigger: trigger,
+                        failureKind: refusal.rawValue
+                    )
+                }
+            )
+        )
+        switch admission {
+        case .alreadyDictating, .queuedBehindFinishingTake:
             return
-        }
-        // Notch island: put it up on this key press, ahead of the telemetry
-        // and admission checks below (~12 ms on the main thread), so it lands
-        // on the next frame. A refused start replaces it with its message.
-        overlayController.showIslandStartingStateIfSelected(near: sourceApp)
-        // The attempt denominator.
-        //
-        // `dictation_started` is emitted only once the microphone is actually
-        // open, so a failure count measured against it is failures per
-        // success, not failures per attempt. That is why 1.1.59's 21 logged
-        // startup failures could not be turned into a rate: there was no
-        // count of how many starts were asked for. This fires before the
-        // three admission guards below and before any permission, model, or
-        // audio work, so every request a user made is counted — including the
-        // ones refused outright, which until now emitted nothing at all.
-        //
-        // It deliberately carries no session id. The session UUID is minted
-        // further down, past the guards, and stamping the previous session's
-        // id on a request that may never get one would read as correlation
-        // that does not exist.
-        trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
-        guard !DictationTerminationAdmissionPolicy.blocksNewCapture(
-            hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
-            recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
-        ) else {
+        case .refused(.unsavedCaptureRecoveryPending, _):
             // A failed checkpoint may leave native audio as the only copy.
             // Starting a fresh capture would clear that timeline.
-            trackDictationStartRefused(
-                appState: appState,
-                trigger: trigger,
-                failureKind: "unsaved_capture_recovery_pending"
-            )
             showFailedCheckpointRecoveryError()
             return
-        }
-        guard !appState.sttRouter.isTranscribing else {
-            trackDictationStartRefused(
-                appState: appState,
-                trigger: trigger,
-                failureKind: "previous_dictation_transcribing"
-            )
+        case .refused(.previousDictationTranscribing, _):
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             return
-        }
-        if let unavailableReason = dictationStartUnavailableReason(appState: appState) {
-            trackDictationStartRefused(
-                appState: appState,
-                trigger: trigger,
-                failureKind: "dictation_unavailable"
-            )
-            overlayController.showError(unavailableReason)
+        case .refused(.dictationUnavailable, let message):
+            overlayController.showError(message ?? "")
             return
+        case .admitted:
+            break
         }
         // Issue #1743: decide the readiness plan BEFORE `isDictating` flips,
         // because that flip takes the App Nap suppression assertion and its
