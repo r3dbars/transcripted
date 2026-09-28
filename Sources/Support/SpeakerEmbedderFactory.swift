@@ -39,9 +39,20 @@ enum SpeakerEmbedderFactory {
     /// of the wrong dimension (e.g. a present-but-unloadable model must NOT route
     /// 256-d WeSpeaker vectors into the 192-d ERes2Net database). Kept here (not in
     /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
-    static func speakerDBURL(for embedder: (any SpeakerSegmentEmbedder)?) -> URL {
+    ///
+    /// The experimental Nemotron diarization backend has no voiceprints of its own.
+    /// With no injected embedder, Core fills them with FluidAudio's *online* WeSpeaker
+    /// model, a different Core ML conversion than the offline pipeline that wrote
+    /// `speakers.sqlite`. Until the speaker lab shows the two agree, those vectors get
+    /// their own database so they can never pollute the saved people.
+    static func speakerDBURL(
+        for embedder: (any SpeakerSegmentEmbedder)?,
+        diarizationBackend: DiarizationBackend = .pyannote
+    ) -> URL {
         let state = FileManager.default.transcriptedStateDir
-        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: embedder?.identifier)
+        let identifier = embedder?.identifier
+            ?? (diarizationBackend == .nemotron ? FluidWeSpeakerSegmentEmbedder.embedderIdentifier : nil)
+        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: identifier)
         return state.appendingPathComponent(name, isDirectory: false)
     }
 
@@ -49,7 +60,18 @@ enum SpeakerEmbedderFactory {
     /// (e.g. the Settings → People fallback). Resolves the embedder by actually
     /// loading it so the path agrees with what the meeting pipeline will use.
     static func activeSpeakerDBURL() -> URL {
-        speakerDBURL(for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()))
+        speakerDBURL(
+            for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()),
+            diarizationBackend: activeDiarizationBackend()
+        )
+    }
+
+    /// Core's backend for the hidden diarization switch (see DiarizationBackendPreferences).
+    static func activeDiarizationBackend() -> DiarizationBackend {
+        switch DiarizationBackendPreferences.effectiveChoice() {
+        case .pyannote: return .pyannote
+        case .nemotron: return .nemotron
+        }
     }
 
     /// First match wins: app bundle Resources, then the shared FluidAudio Models

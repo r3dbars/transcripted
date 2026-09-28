@@ -204,13 +204,17 @@ SOFTWARE.
 ## FluidAudio
 
 - **Component:** Statically linked Swift library (speaker diarization and audio ML pipeline)
-- **Version:** v0.15.4
+- **Version:** v0.17.0
 - **Upstream:** https://github.com/FluidInference/FluidAudio
 - **License:** Apache License 2.0
 
-FluidAudio itself redistributes third-party components: fastcluster (BSD-style) and VBx
-(Apache-2.0), whose license texts ship in the upstream repository's `ThirdPartyLicenses/`
-directory. (FluidAudio versions before 0.15 also vendored the GPL-3.0 eSpeak NG binary
+FluidAudio itself redistributes third-party components, whose license texts ship in the
+upstream repository's `ThirdPartyLicenses/` directory: fastcluster (BSD-style), VBx
+(Apache-2.0), and, since 0.17, the Kokoro text frontends' Japanese G2P (a Swift port of
+Misaki's cutlet.py and num2kana.py, Apache-2.0 / MIT, with the unidic-lite UniDic
+dictionary, BSD) and Spanish/French lexicon notes (ipa-dict, MIT; CharsiuG2P, MIT).
+Transcripted builds FluidAudio with its `NemoTextProcessing` trait turned off, so the
+prebuilt NeMo text-processing Rust library is not linked. (FluidAudio versions before 0.15 also vendored the GPL-3.0 eSpeak NG binary
 framework; 0.15.x dropped it, so Transcripted no longer bundles or links it.)
 
 ### License text

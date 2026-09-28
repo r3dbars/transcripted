@@ -259,7 +259,8 @@ enum ParakeetLocalModelError: LocalizedError, Equatable, CaseIterable {
 /// load is a second layer in case the folder changes underneath it.
 enum ParakeetLocalModelPolicy {
     /// The compiled Core ML models and vocabulary a local-only install holds,
-    /// named as FluidAudio 0.15's v3 layout names them.
+    /// named as FluidAudio's v3 layout names them (unchanged from 0.15.x
+    /// through 0.17.0 for the default int8 encoder).
     static let preprocessorFileName = "Preprocessor.mlmodelc"
     static let encoderFileName = "Encoder.mlmodelc"
     static let decoderFileName = "Decoder.mlmodelc"

@@ -21,7 +21,7 @@ enum ParakeetModelVariant: String, CaseIterable, Sendable {
         ["Encoder.mlmodelc", jointModelName, "Decoder.mlmodelc", "Preprocessor.mlmodelc"]
     }
     var requiredFileNames: [String] {
-        // FluidAudio v0.15.4: ModelNames.swift and AsrModels.getRequiredModels
+        // FluidAudio v0.17.0: ModelNames.swift and AsrModels.getRequiredModels
         // define the compiled model set; AsrModels loads the shared vocabulary
         // for v2. Recheck this contract when changing the dependency version.
         switch self {
