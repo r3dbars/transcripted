@@ -137,11 +137,6 @@ func testDictationTerminationCheckpoint() async {
         let unsavedAudio = controller.range(of: "if emptyReason == .audioNeedsRecovery {")
         let unsavedAudioRetry = controller.range(of: "showFailedCheckpointRecoveryError()",
                                                  range: (unsavedAudio?.upperBound ?? controller.startIndex)..<controller.endIndex)
-        let snapshot = controller.range(of: "if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence()")
-        let nilSnapshotFence = controller.range(of: "DictationTerminationAdmissionPolicy.mustStopBeforeInference(",
-                                                range: (snapshot?.upperBound ?? controller.startIndex)..<controller.endIndex)
-        let inference = controller.range(of: "let voiceText = await appState.sttRouter.transcribe(",
-                                         range: (nilSnapshotFence?.upperBound ?? controller.startIndex)..<controller.endIndex)
 
         runSuite("Production Quit wiring defers shutdown before an unsafe checkpoint") {
             assertTrue(terminationBody.contains("if !isDictating { return admitInactiveDictationQuit() }"),
@@ -176,11 +171,23 @@ func testDictationTerminationCheckpoint() async {
             }
             assertTrue(unsavedAudio != nil && unsavedAudioRetry != nil,
                        "an undecoded recording without WAV must offer retained-RAM saving retry instead of claiming only model-empty speech")
-            assertTrue(snapshot != nil && nilSnapshotFence != nil && inference != nil,
-                       "failed WAV snapshot with retained RAM must be fenced before consuming model inference")
-            if let snapshot, let nilSnapshotFence, let inference {
-                assertTrue(snapshot.lowerBound < nilSnapshotFence.lowerBound && nilSnapshotFence.lowerBound < inference.lowerBound,
-                           "snapshot failure must stop before the model can drain the only audio copy")
+            // A failed WAV snapshot with audio still in memory stopping before
+            // inference is a behavior test now: "No snapshot while native audio
+            // is still in memory stops before transcribing" in
+            // DictationStopCheckpointTests.swift. What's left to pin is the
+            // controller's wiring of that outcome, until the rest of the stop
+            // path moves out of the controller.
+            let unavailable = controller.range(of: "case .checkpointUnavailable:")
+            let checkpointFailed = controller.range(of: "case .checkpointFailed(let error):")
+            let inference = controller.range(of: "let voiceText = await appState.sttRouter.transcribe(")
+            if let unavailable, let checkpointFailed, let inference, unavailable.upperBound < checkpointFailed.lowerBound {
+                let handling = controller[unavailable.upperBound..<checkpointFailed.lowerBound]
+                assertTrue(handling.contains("showFailedCheckpointRecoveryError()") && handling.contains("return"),
+                           "an unavailable checkpoint must show the recovery error and return")
+                assertTrue(checkpointFailed.lowerBound < inference.lowerBound,
+                           "the checkpoint outcome must be handled before the model runs")
+            } else {
+                assertTrue(false, "the controller must handle DictationStopCheckpoint's unavailable outcome before transcribing")
             }
         }
     } catch {
