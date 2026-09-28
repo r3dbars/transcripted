@@ -58,6 +58,10 @@ final class MeetingOverlayController: NSObject {
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
     private var islandCallAudioAskPending = false
+    /// The ask is raised before the new meeting's status reaches the island,
+    /// so it only ends once that meeting has been seen preparing or recording
+    /// and then leaves those phases, not on the previous meeting's status.
+    private var islandCallAudioAskSawItsMeeting = false
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
@@ -1421,10 +1425,13 @@ final class MeetingOverlayController: NSObject {
         }
         switch phase {
         case .preparing, .recording:
-            break
+            if islandCallAudioAskPending { islandCallAudioAskSawItsMeeting = true }
         default:
             // The ask belongs to the recording that skipped the question.
-            islandCallAudioAskPending = false
+            if islandCallAudioAskSawItsMeeting {
+                islandCallAudioAskPending = false
+                islandCallAudioAskSawItsMeeting = false
+            }
         }
         return NotchIslandMeetingContent(
             phase: phase,
@@ -1438,9 +1445,10 @@ final class MeetingOverlayController: NSObject {
 
     /// Called when the island answered "can't hear the other side" with mic
     /// only so the meeting could start without a modal; the island asks
-    /// instead, once, while this recording runs.
+    /// instead while this recording runs. Every meeting asks again.
     func islandSkippedSystemAudioQuestion() {
         islandCallAudioAskPending = true
+        islandCallAudioAskSawItsMeeting = false
         pushToView()
     }
 

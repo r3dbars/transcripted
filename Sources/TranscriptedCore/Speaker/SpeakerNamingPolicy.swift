@@ -37,14 +37,34 @@ public enum SpeakerNamingPolicy {
         public var requiredConfirmedMeetings: Int
         public var similarity: Double
         public var marginMin: Double
+        /// When no other saved person came close (no runner-up), the lower
+        /// similarity bar alone isn't enough: the match must also clear
+        /// `autoAcceptSimilarityThreshold`. Without an invite the lineup is
+        /// just whoever you heard lately, so a stranger who sounds a bit like
+        /// one of them has nobody to lose a margin to.
+        public var needsRunnerUpBelowStandardBar: Bool
 
-        public init(requiredConfirmedMeetings: Int, similarity: Double, marginMin: Double) {
+        public init(
+            requiredConfirmedMeetings: Int,
+            similarity: Double,
+            marginMin: Double,
+            needsRunnerUpBelowStandardBar: Bool = false
+        ) {
             self.requiredConfirmedMeetings = requiredConfirmedMeetings
             self.similarity = similarity
             self.marginMin = marginMin
+            self.needsRunnerUpBelowStandardBar = needsRunnerUpBelowStandardBar
         }
 
         public static let labTuned = InviteeBars(requiredConfirmedMeetings: 2, similarity: 0.80, marginMin: 0.10)
+        /// Bars for the no-invite lineup (people heard most recently): the
+        /// invite bars, but a lone match below 0.92 goes to review.
+        public static let recentLineup = InviteeBars(
+            requiredConfirmedMeetings: 2,
+            similarity: 0.80,
+            marginMin: 0.10,
+            needsRunnerUpBelowStandardBar: true
+        )
     }
 
     /// Who counts as "expected" in a meeting for lineup naming: the calendar invite,
@@ -78,11 +98,22 @@ public enum SpeakerNamingPolicy {
         name.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
-    /// Invitee bars for `profile` when its name is on the invite, else nil (today's bars).
-    public static func inviteeBars(for profile: SpeakerProfile, invitedNameKeys: Set<String>) -> InviteeBars? {
+    /// Lineup bars for `profile` when its name is on the lineup, else nil (today's bars).
+    /// `lineupIsFromInvite` false means the lineup is the recent-people fallback.
+    public static func inviteeBars(
+        for profile: SpeakerProfile,
+        invitedNameKeys: Set<String>,
+        lineupIsFromInvite: Bool = true
+    ) -> InviteeBars? {
         guard !invitedNameKeys.isEmpty, let name = profile.displayName, !name.isEmpty,
               invitedNameKeys.contains(nameKey(name)) else { return nil }
-        return .labTuned
+        return lineupIsFromInvite ? .labTuned : .recentLineup
+    }
+
+    /// True when `request` builds its lineup from a real invite rather than
+    /// from the people heard most recently.
+    public static func lineupIsFromInvite(_ request: LineupRequest) -> Bool {
+        request.invitedNames.contains { !nameKey($0).isEmpty }
     }
 
     /// Profile-level eligibility for silent recognition, shared by the
@@ -137,7 +168,10 @@ public enum SpeakerNamingPolicy {
             // and route to confirm rather than silently auto-name.
             marginOK = false
         case .some(let second) where second < 0:
-            marginOK = true   // no confusable runner-up cleared the match floor
+            // No confusable runner-up cleared the match floor. On the no-invite
+            // lineup that only counts at the standard bar.
+            marginOK = !(inviteeBars?.needsRunnerUpBelowStandardBar ?? false)
+                || similarity > autoAcceptSimilarityThreshold
         case .some(let second):
             marginOK = (marginTop - second) >= (inviteeBars?.marginMin ?? autoAcceptMarginMin)
         }

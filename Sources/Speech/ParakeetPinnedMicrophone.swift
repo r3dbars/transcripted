@@ -329,7 +329,8 @@ extension ParakeetEngine {
                   text: text,
                   emptyReason: emptyReason,
                   heldSeconds: take.heldSeconds,
-                  audioSeconds: take.audioSeconds
+                  audioSeconds: take.audioSeconds,
+                  micSentOnlyDigitalSilence: lastRecordingWasDigitalSilence
               ) else { return }
         let result = PinnedDictationSpeedPath.record(outcome, for: take.input)
         guard result.turnedOffNow else { return }

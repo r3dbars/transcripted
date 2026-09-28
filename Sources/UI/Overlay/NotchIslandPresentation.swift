@@ -380,7 +380,8 @@ enum NotchIslandPresentation {
         case .error:
             return "Dictation"
         case .notice:
-            if message.preview != nil { return "Not pasted" }
+            // A notice with the words ("Not pasted", "Maybe pasted") names itself.
+            if message.preview != nil { return message.text }
             return message.text.hasPrefix("Pasted") ? "Pasted" : "Copied"
         case .saved:
             return "Saved"

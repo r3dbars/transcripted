@@ -3,8 +3,9 @@ import TranscriptedCore
 
 /// Chooses the speaker separation for one live meeting: the tuned settings for the
 /// diarization backend this app runs, capped from the calendar invite the recording
-/// started with. The invite count comes from the same lookup speaker review uses for
-/// its name buttons, so no invite (or no calendar access) simply means no cap.
+/// started with. The invite comes from the same lookup speaker review uses for its
+/// name buttons (counting every person on it, named or not), so no invite (or no
+/// calendar access) simply means no cap.
 enum MeetingSpeakerSeparation {
     /// Pure decision: backend and invited people in, options out.
     static func options(backend: DiarizationBackend, invitedPeople: Int?) -> SpeakerSeparationOptions {
@@ -15,8 +16,11 @@ enum MeetingSpeakerSeparation {
     static func resolve(backend: DiarizationBackend, recordingStart: Date?) async -> SpeakerSeparationOptions {
         var invitedPeople: Int?
         if let recordingStart {
-            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recordingStart)
-            invitedPeople = names.isEmpty ? nil : names.count
+            // Count people, not names: an invitee with only an email that
+            // doesn't read as a name still talks, and a miscount of 1 would
+            // fold every remote voice into one speaker.
+            let count = await MeetingInviteeCalendarReader.shared.invitedPeopleCount(recordingStart: recordingStart)
+            invitedPeople = (count ?? 0) > 0 ? count : nil
         }
         return options(backend: backend, invitedPeople: invitedPeople)
     }

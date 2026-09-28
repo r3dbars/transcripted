@@ -326,15 +326,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.island = notchIsland
             capturePillController.island = notchIsland
-            // With the Notch island, a meeting whose call audio is off starts
-            // at once with just the mic, and the island asks about call audio
-            // while it records instead of a modal alert blocking the start.
+            // With the Notch island, macOS's own allow box comes up at once the
+            // first time. After a denial the meeting starts on the mic and the
+            // island asks about call audio while it records, every meeting:
+            // recording both sides is the point, so mic only is never
+            // remembered as a choice.
+            meetingSession.systemAudioAccessAsksWhileRecording = { NotchIslandController.isSelected }
             meetingSession.systemAudioAccessPrompter = { [weak self] copy in
                 guard NotchIslandController.isSelected, let self else {
                     return await MeetingSystemAudioAccessAlert.ask(copy)
                 }
+                if copy == .notYetAllowed { return .turnOn }
                 self.meetingOverlayController.islandSkippedSystemAudioQuestion()
-                return .recordMicOnly
+                return .askWhileRecording
             }
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in

@@ -282,6 +282,10 @@ final class MeetingSessionController: ObservableObject {
     var systemAudioAccessPrompter: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice = {
         await MeetingSystemAudioAccessAlert.ask($0)
     }
+    /// True when the prompter asks while the meeting records (the Notch
+    /// island) instead of blocking the start. Then a mic-only start is never
+    /// remembered, so every meeting asks again about call audio.
+    var systemAudioAccessAsksWhileRecording: @MainActor () -> Bool = { false }
     private var activeRecordingStartedAt: Date?
     /// System-audio status and degradation warning as they stood the moment
     /// capture stopped underneath the controller (state still `.recording`).
@@ -1191,6 +1195,7 @@ final class MeetingSessionController: ObservableObject {
             outcome = await MeetingSystemAudioAccessFlow.resolve(
                 isUndetermined: systemStatus == .notDetermined,
                 rememberedMicOnly: systemStatus == .denied && MeetingMicOnlyChoicePreference.isRemembered(),
+                remembersMicOnly: !systemAudioAccessAsksWhileRecording(),
                 ask: systemAudioAccessPrompter,
                 requestAccess: { await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess() },
                 openSettings: { TranscriptedPermissionAccess.openSystemAudioRecordingSettings() }

@@ -345,18 +345,25 @@ extension TranscriptionTaskManager {
             "transcription_engine": speechEngine.identifier
         ])
 
+        // An imported file's date says when the file was made or copied, not
+        // which meeting it was, so imports never pick up a calendar invite:
+        // no invite cap on its speakers and no lowered lineup bars.
+        let isImport = importedAt != nil
         let separationProvider = await MainActor.run { self.speakerSeparationProvider }
-        let speakerSeparation = await separationProvider?(recordingDate)
+        let speakerSeparation = await separationProvider?(isImport ? nil : recordingDate)
         // Lineup naming: people on the lineup get lower silent-naming bars
         // (SpeakerNamingPolicy.InviteeBars). Resolved before Phase 1 matches voices,
         // so a voice heard in this meeting can't put itself on its own lineup.
         let lineupProvider = await MainActor.run { self.lineupNamingProvider }
         let invitedNameKeys: Set<String>
-        if let request = await lineupProvider?(recordingDate) {
+        let lineupIsFromInvite: Bool
+        if !isImport, let request = await lineupProvider?(recordingDate) {
             let profilesBefore = await MainActor.run { transcription.speakerDB.allSpeakers() }
             invitedNameKeys = SpeakerNamingPolicy.lineupNameKeys(request, profilesBeforeMeeting: profilesBefore)
+            lineupIsFromInvite = SpeakerNamingPolicy.lineupIsFromInvite(request)
         } else {
             invitedNameKeys = []
+            lineupIsFromInvite = false
         }
 
         // Phase 1: Transcribe with local models
@@ -423,7 +430,8 @@ extension TranscriptionTaskManager {
                     secondBestSimilarity: entry.secondSimilarity,
                     recentOutcomes: cachedRecentOutcomes(entry.profile),
                     marginSimilarities: entry.marginSimilarities,
-                    inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                    inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite)
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
@@ -452,7 +460,8 @@ extension TranscriptionTaskManager {
                 secondBestSimilarity: entry.secondSimilarity,
                 recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                 marginSimilarities: entry.marginSimilarities,
-                inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite)
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -485,7 +494,8 @@ extension TranscriptionTaskManager {
                         secondBestSimilarity: entry.secondSimilarity,
                         recentOutcomes: cachedRecentOutcomes(entry.profile),
                         marginSimilarities: entry.marginSimilarities,
-                        inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                        inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite)
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
@@ -519,7 +529,8 @@ extension TranscriptionTaskManager {
                     secondBestSimilarity: entry.secondSimilarity,
                     recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                     marginSimilarities: entry.marginSimilarities,
-                    inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                    inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite)
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"

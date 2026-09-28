@@ -280,8 +280,17 @@ class DictationSessionController: ObservableObject {
 
     /// The "Not pasted" notice, whose Paste button pastes into whatever app
     /// is in front now (the user clicks where the words go first).
-    private func showNotPasted(_ text: String, message: String, overlayController: FloatingOverlayController) {
-        overlayController.showNotPastedNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+    private func showNotPasted(
+        _ text: String,
+        message: String,
+        unconfirmed: Bool = false,
+        overlayController: FloatingOverlayController
+    ) {
+        overlayController.showNotPastedNotice(
+            text,
+            fallbackMessage: message,
+            unconfirmed: unconfirmed
+        ) { [weak self, weak overlayController] in
             guard let self, let overlayController else { return }
             let frontmost = NSWorkspace.shared.frontmostApplication
             guard frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
@@ -1693,14 +1702,19 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
-            case .copied(let message, reason: _):
+            case .copied(let message, reason: let reason):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
                 } else {
                     // The text is safe on the clipboard — present it as a calm
                     // "press ⌘V" notice, not a warning-triangle error. The
                     // island also shows the words and a Paste button.
-                    self.showNotPasted(text, message: message, overlayController: overlayController)
+                    self.showNotPasted(
+                        text,
+                        message: message,
+                        unconfirmed: reason == .pasteNotConfirmed,
+                        overlayController: overlayController
+                    )
                 }
             case .failed(let message, reason: _):
                 let combinedMessage: String

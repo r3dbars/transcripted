@@ -1544,6 +1544,27 @@ private struct SpeakerVoiceToNameRow: View {
         guard canSave, !isSaving else { return }
         isSaving = true
         saveErrorMessage = nil
+        // A name that already belongs to one saved person (an invitee chip
+        // or a typed "Alice") adds this voice to them, like the island and
+        // the review window do, instead of making a second Alice.
+        let voice = group.representative.profile
+        if let existing = SpeakerNameSelectionPolicy.uniqueSavedPerson(
+            named: nameDraft,
+            among: model.profiles,
+            excluding: voice.id,
+            id: \.id,
+            displayName: \.displayName
+        ) {
+            model.merge(source: voice, into: existing) { didSave in
+                isSaving = false
+                if didSave {
+                    nameDraft = ""
+                } else {
+                    saveErrorMessage = "Couldn't save — the meeting file may have moved."
+                }
+            }
+            return
+        }
         model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
             isSaving = false
             if didSave {
