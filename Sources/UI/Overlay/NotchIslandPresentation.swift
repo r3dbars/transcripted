@@ -88,6 +88,9 @@ struct NotchIslandMeetingContent: Equatable {
     var duration: TimeInterval = 0
     var callAudioNote: CallAudioNote?
     var systemAudioUnverified = false
+    /// The island skipped the "can't hear the other side" question so the
+    /// meeting could start at once; ask it now, from the island, once.
+    var asksAboutCallAudio = false
 
     var isRecording: Bool { phase == .recording }
 
@@ -106,6 +109,21 @@ struct NotchIslandCallPromptContent: Equatable {
     var title: String
     var detail: String
     var secondsLeft: Int
+}
+
+/// A finished meeting asking who was on it. The rows, typing and playback
+/// live in `NotchIslandSpeakerReviewView`; this only says which review is up
+/// and whether it is still asking or showing its result.
+struct NotchIslandSpeakerReviewContent: Equatable {
+    enum Stage: Equatable {
+        case naming
+        /// Names were saved. `leftForLater` voices wait in Speakers.
+        case done(leftForLater: Int)
+    }
+
+    var reviewID: UUID
+    var meetingTitle: String?
+    var stage: Stage
 }
 
 /// The dictation that just landed. The island lingers on it for a moment so a
@@ -168,6 +186,7 @@ enum NotchIslandAction: Equatable {
     case meetingSecondary
     case meetingTertiary
     case meetingCallAudio
+    case meetingCallAudioDismiss
     case meetingOpen
     case meetingDismissError
     case callRecord
@@ -188,7 +207,7 @@ enum NotchIslandAction: Equatable {
         case .copyLastDictation, .pasteLastDictation:
             return .island
         case .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
-             .meetingCallAudio, .meetingOpen, .meetingDismissError:
+             .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
             return .meeting
         case .callRecord, .callDismiss, .callRemind:
             return .callPrompt
@@ -223,6 +242,9 @@ enum NotchIslandDrop: Equatable {
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
     case callPrompt(title: String, detail: String)
+    case speakerReview(NotchIslandSpeakerReviewContent)
+    /// Recording already started with only the mic; offer call audio.
+    case meetingCallAudioAsk
 
     /// Identifies an auto-opened drop-down, so closing one keeps it closed
     /// until something new needs saying.
@@ -232,6 +254,8 @@ enum NotchIslandDrop: Equatable {
         case .meetingPrompt(let prompt): return "meeting-prompt:\(prompt.title)"
         case .meetingError(let title, let message, _, _): return "meeting-error:\(title)|\(message)"
         case .callPrompt(let title, _): return "call:\(title)"
+        case .speakerReview(let review): return "speaker-review:\(review.reviewID.uuidString)"
+        case .meetingCallAudioAsk: return "meeting-call-audio-ask"
         case .dictationTarget, .dictationLoading, .justInserted, .meetingPreparing,
              .meetingControls, .meetingSaved:
             return ""
@@ -256,6 +280,9 @@ struct NotchIslandLayout: Equatable {
 @MainActor
 protocol NotchIslandCallPromptPresenting: AnyObject {
     var callActionHandler: ((NotchIslandAction) -> Void)? { get set }
+    /// The pointer entered or left the island while the call prompt is up,
+    /// so the prompt's own timeout can pause with the ring around Not now.
+    var callHoverHandler: ((Bool) -> Void)? { get set }
     func updateCallPrompt(_ content: NotchIslandCallPromptContent?)
     func updateCallPromptSeconds(_ secondsLeft: Int)
 }
@@ -268,9 +295,10 @@ enum NotchIslandPresentation {
     static func stickyKey(
         dictation: NotchIslandDictationContent?,
         meeting: NotchIslandMeetingContent?,
-        callPrompt: NotchIslandCallPromptContent?
+        callPrompt: NotchIslandCallPromptContent?,
+        speakerReview: NotchIslandSpeakerReviewContent? = nil
     ) -> String? {
-        stickyDrop(dictation: dictation, meeting: meeting, callPrompt: callPrompt)?.stickyKey
+        stickyDrop(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview)?.stickyKey
     }
 
     /// Composes the island from whatever is active. Dictation owns the right
@@ -283,11 +311,12 @@ enum NotchIslandPresentation {
         callPrompt: NotchIslandCallPromptContent?,
         recentInsert: NotchIslandRecentInsert?,
         expanded: Bool,
-        collapsedStickyKey: String? = nil
+        collapsedStickyKey: String? = nil,
+        speakerReview: NotchIslandSpeakerReviewContent? = nil
     ) -> NotchIslandLayout {
         var result = NotchIslandLayout()
 
-        let sticky = stickyDrop(dictation: dictation, meeting: meeting, callPrompt: callPrompt)
+        let sticky = stickyDrop(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview)
         if let sticky, sticky.stickyKey != collapsedStickyKey || expanded {
             result.drop = sticky
             result.dropIsSticky = true
@@ -306,6 +335,9 @@ enum NotchIslandPresentation {
             result.right = dropIsOpen
                 ? [.live(.callSeconds, .secondary)]
                 : [.chip("Record", .destructive, .callRecord)]
+        } else if let speakerReview, !(meeting?.isBusy ?? false) {
+            result.left = [.symbol(.check, .accent), .text(speakerReview.meetingTitle ?? "Saved", .title)]
+            result.right = []
         } else if let meeting {
             (result.left, result.right) = meetingWings(meeting, dropIsOpen: dropIsOpen)
         } else if let recentInsert {
@@ -362,7 +394,8 @@ enum NotchIslandPresentation {
     private static func stickyDrop(
         dictation: NotchIslandDictationContent?,
         meeting: NotchIslandMeetingContent?,
-        callPrompt: NotchIslandCallPromptContent?
+        callPrompt: NotchIslandCallPromptContent?,
+        speakerReview: NotchIslandSpeakerReviewContent?
     ) -> NotchIslandDrop? {
         if let dictation, case .message(let message) = dictation.phase {
             return .dictationMessage(message)
@@ -372,11 +405,19 @@ enum NotchIslandPresentation {
         if let callPrompt {
             return .callPrompt(title: callPrompt.title, detail: callPrompt.detail)
         }
+        // Who was on the call asks once the meeting is saved, never while a
+        // new one is starting or recording.
+        if let speakerReview, !(meeting?.isBusy ?? false) {
+            return .speakerReview(speakerReview)
+        }
         if let prompt = meeting?.prompt {
             return .meetingPrompt(prompt)
         }
         if case .error(let title, let message, let canOpen, let grantsSystemAudio)? = meeting?.phase {
             return .meetingError(title: title, message: message, canOpen: canOpen, grantsSystemAudio: grantsSystemAudio)
+        }
+        if let meeting, meeting.isRecording, meeting.asksAboutCallAudio, meeting.callAudioNote == .off {
+            return .meetingCallAudioAsk
         }
         return nil
     }

@@ -138,6 +138,14 @@ final class NotchIslandButton: NSButton {
         needsLayout = true
     }
 
+    /// Takes the ring away for good (the person started answering).
+    func stopCountdown() {
+        countdownSeconds = nil
+        ring.removeAllAnimations()
+        ring.removeFromSuperlayer()
+        ringTrack.removeFromSuperlayer()
+    }
+
     func setCountdownPaused(_ paused: Bool) {
         guard countdownStarted, paused != countdownPaused else { return }
         countdownPaused = paused
@@ -708,7 +716,6 @@ final class NotchIslandDropView: NSView {
     private let stack = NSStackView()
     private var youLane: NotchIslandBarsView?
     private var callLane: NotchIslandBarsView?
-    private var countdownLabel: NSTextField?
     private var promptCountdownLabel: NSTextField?
     private var countdownButton: NotchIslandButton?
 
@@ -716,8 +723,13 @@ final class NotchIslandDropView: NSView {
         countdownButton?.setCountdownPaused(paused)
     }
 
-    init(drop: NotchIslandDrop, live: NotchIslandLiveValues, targetIcon: NSImage?) {
+    /// The island's "Who was on this call?" view, kept alive by the
+    /// controller so typing and playback survive the drop-down being rebuilt.
+    private let speakerReviewView: NSView?
+
+    init(drop: NotchIslandDrop, live: NotchIslandLiveValues, targetIcon: NSImage?, speakerReviewView: NSView? = nil) {
         self.drop = drop
+        self.speakerReviewView = speakerReviewView
         super.init(frame: NSRect(x: 0, y: 0, width: NotchIslandGeometry.dropWidth, height: 10))
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -742,9 +754,9 @@ final class NotchIslandDropView: NSView {
 
     var fittingHeight: CGFloat { ceil(stack.fittingSize.height) }
 
-    func updateLive(_ live: NotchIslandLiveValues) {
-        countdownLabel?.stringValue = "Closes in \(max(1, live.callSecondsLeft))s"
-    }
+    /// Nothing in the drop-down reads a live value today: the call prompt's
+    /// countdown is the ring around Not now, which runs by itself.
+    func updateLive(_ live: NotchIslandLiveValues) {}
 
     /// A meeting prompt that only changed its "Ends in 12s" line is updated
     /// in place, so its buttons are not rebuilt under the pointer each second.
@@ -877,18 +889,33 @@ final class NotchIslandDropView: NSView {
             add(buttonRow(leading: [], trailing: trailing))
         case .callPrompt(let title, let detail):
             add(titleBlock(title, detail))
-            let countdown = NotchIslandPalette.label(
-                "Closes in \(max(1, live.callSecondsLeft))s",
-                font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-                color: NotchIslandPalette.secondaryText
-            )
-            countdownLabel = countdown
-            add(countdown)
+            // The countdown is a ring around Not now, like the dictation
+            // Dismiss ring; it pauses while the pointer is over the island.
+            let notNow = NotchIslandButton(title: "Not now", style: .plain)
+            notNow.onPress = { [weak self] in self?.onAction?(.callDismiss) }
+            notNow.setContentHuggingPriority(.required, for: .horizontal)
+            notNow.startCountdown(seconds: Double(max(1, live.callSecondsLeft)))
+            countdownButton = notNow
             add(buttonRow(leading: [], trailing: [
-                button("Not now", .plain, .callDismiss),
-                button("Remind me soon", .plain, .callRemind),
+                notNow,
+                button("Later", .plain, .callRemind),
                 button("Record", .destructive, .callRecord, symbol: "record.circle.fill"),
             ]))
+        case .meetingCallAudioAsk:
+            add(titleBlock(
+                "Only your mic is recording",
+                "Turn on call audio to hear everyone else. It starts with your next meeting; this one keeps recording.",
+                wrapsDetail: true
+            ))
+            add(buttonRow(leading: [], trailing: [
+                button("Mic only is fine", .plain, .meetingCallAudioDismiss),
+                button("Turn on call audio", .accent, .meetingCallAudio),
+            ]))
+        case .speakerReview:
+            if let speakerReviewView {
+                speakerReviewView.removeFromSuperview()
+                stack.addArrangedSubview(speakerReviewView)
+            }
         }
     }
 
@@ -1019,6 +1046,8 @@ final class NotchIslandView: NSView {
     private let leftWing = NotchIslandWingView(side: .leading)
     private let rightWing = NotchIslandWingView(side: .trailing)
     private var dropView: NotchIslandDropView?
+    /// Set by the controller while a speaker review is up.
+    var speakerReviewView: NSView?
     private let edge = NSView()
     private var rowHeight: CGFloat = NotchIslandGeometry.tabRowHeight
     private var notchWidth: CGFloat?
@@ -1092,7 +1121,7 @@ final class NotchIslandView: NSView {
             dropView?.removeFromSuperview()
             dropView = nil
             if let drop = layout.drop {
-                let view = NotchIslandDropView(drop: drop, live: live, targetIcon: targetAppIcon)
+                let view = NotchIslandDropView(drop: drop, live: live, targetIcon: targetAppIcon, speakerReviewView: speakerReviewView)
                 view.onAction = { [weak self] action in self?.onAction?(action) }
                 itemsView.addSubview(view)
                 dropView = view

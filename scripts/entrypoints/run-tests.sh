@@ -543,6 +543,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/CapturePillController.swift"
     "Sources/UI/Overlay/CapturePillPlacementPolicy.swift"
     "Sources/UI/Overlay/NotchIslandPresentation.swift"
+    "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
     "Sources/UI/Overlay/NotchIslandGeometry.swift"
     "Sources/UI/Overlay/NotchIslandPanel.swift"
     "Sources/UI/Overlay/FloatingOverlayPanel.swift"

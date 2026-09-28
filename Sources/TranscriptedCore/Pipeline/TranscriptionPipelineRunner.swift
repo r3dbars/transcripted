@@ -768,6 +768,15 @@ extension TranscriptionTaskManager {
             }.count
 
             let capturedEntries = namingEntries
+            // Voices auto-named in this meeting, once each, in the order heard.
+            var seenRecognizedNames: Set<String> = []
+            let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in
+                guard let name = pending.knowledge.profile.displayName?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !name.isEmpty,
+                    seenRecognizedNames.insert(name).inserted else { return nil }
+                return name
+            }
             let speakerNamingRequestId = UUID()
             try await rollback.checkCancellation()
             await MainActor.run {
@@ -779,6 +788,7 @@ extension TranscriptionTaskManager {
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
                     recognizedPeopleCount: recognizedPeopleCount,
+                    recognizedSpeakerNames: recognizedSpeakerNames,
                     transcriptURL: savedURL,
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,

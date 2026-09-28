@@ -57,6 +57,7 @@ final class MeetingOverlayController: NSObject {
     private var currentParticipants: [String] = []
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
+    private var islandCallAudioAskPending = false
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
@@ -1418,17 +1419,36 @@ final class MeetingOverlayController: NSObject {
         case nil:
             callAudioNote = nil
         }
+        switch phase {
+        case .preparing, .recording:
+            break
+        default:
+            // The ask belongs to the recording that skipped the question.
+            islandCallAudioAskPending = false
+        }
         return NotchIslandMeetingContent(
             phase: phase,
             prompt: state == .prompt ? prompt : nil,
             duration: currentDuration,
             callAudioNote: callAudioNote,
-            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
+            asksAboutCallAudio: islandCallAudioAskPending
         )
+    }
+
+    /// Called when the island answered "can't hear the other side" with mic
+    /// only so the meeting could start without a modal; the island asks
+    /// instead, once, while this recording runs.
+    func islandSkippedSystemAudioQuestion() {
+        islandCallAudioAskPending = true
+        pushToView()
     }
 
     private func handleIslandAction(_ action: NotchIslandAction) {
         switch action {
+        case .meetingCallAudioDismiss:
+            islandCallAudioAskPending = false
+            pushToView()
         case .meetingStop, .meetingDismissError:
             handleCloseTapped()
         case .meetingPrimary, .meetingOpen:
@@ -1439,7 +1459,11 @@ final class MeetingOverlayController: NSObject {
             handleCallAudioActionTapped()
         case .meetingCallAudio:
             // The "Mic only" chip, which can show under a warning prompt too.
-            guard micOnlyNotice == .callAudioOff else { return }
+            islandCallAudioAskPending = false
+            guard micOnlyNotice == .callAudioOff else {
+                pushToView()
+                return
+            }
             Task { @MainActor [weak self] in
                 await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
             }
