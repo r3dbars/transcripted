@@ -40,7 +40,6 @@
     "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 11,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 4,
-    "Tests/ParakeetShortAudioGateTests.swift": 2,
     "Tests/ParakeetStartRecordingFailurePolicyTests.swift": 9,
     "Tests/PermissionStateHarnessContractTests.swift": 5,
     "Tests/RecordedAudioTimelineTests.swift": 1,

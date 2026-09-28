@@ -1404,7 +1404,12 @@ class DictationSessionController: ObservableObject {
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
                 let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
-                let isMisTap = emptyReason.isAccidentalStart(pressDuration: stopTiming.requestedAt - sessionStartTime)
+                let emptyDecision = DictationEmptyTranscriptPolicy.decide(
+                    reason: emptyReason,
+                    pressDuration: stopTiming.requestedAt - sessionStartTime,
+                    hasHeldBackText: appState.sttRouter.heldBackDictationText != nil,
+                    hasSavedRecording: self.stoppedAudioRecovery != nil
+                )
                 appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                 EventReporter.shared.capture(
                     level: .warning,
@@ -1433,19 +1438,20 @@ class DictationSessionController: ObservableObject {
                 ProductFrictionTelemetry.track(
                     surface: .dictation,
                     stage: "dictation_transcribe",
-                    result: isMisTap ? .cancelled : .giveUp,
+                    result: emptyDecision.countsAsCancelled ? .cancelled : .giveUp,
                     failureKind: emptyReason.frictionFailureKind,
                     elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
-                if isMisTap {
+                switch emptyDecision.action {
+                case .closeLikeCancel:
                     // A mis-tap: close the overlay the same way a cancel does,
                     // with no "Recording ended too soon" error to dismiss.
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.dictationCancelled)
                     overlayController.hideWithCancelAnimation()
-                } else if emptyReason.shouldDiscardStoppedAudioRecovery {
+                case .showNoSpeechAndDismiss:
                     NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                     AppSoundPlayer.shared.play(.noSpeech)
                     overlayController.showNoSpeechAndDismiss(
@@ -1456,10 +1462,12 @@ class DictationSessionController: ObservableObject {
                             ? appState.sttRouter.inputDeviceName
                             : nil
                     )
-                } else if emptyReason == .otherLanguage,
-                          let heldText = appState.sttRouter.heldBackDictationText {
+                case .offerPasteAnyway:
                     // Probably a wrong-language guess, but the check can be
                     // wrong, so the text is one press away and the audio stays.
+                    // Unreachable: decide() saw this text, and nothing between
+                    // it and here (all synchronous, on the main actor) clears it.
+                    guard let heldText = appState.sttRouter.heldBackDictationText else { break }
                     let heldRecovery = self.stoppedAudioRecovery
                     let heldSaveContext = self.dictationContext()
                     overlayController.showError(
@@ -1498,7 +1506,8 @@ class DictationSessionController: ObservableObject {
                             }
                         }
                     )
-                } else if let recovery = self.stoppedAudioRecovery {
+                case .offerSavedRecording(let remindAtLaunch):
+                    guard let recovery = self.stoppedAudioRecovery else { break }
                     let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)
                     overlayController.showError(
                         DictationNoSpeechPresentationPolicy.message(
@@ -1511,29 +1520,27 @@ class DictationSessionController: ObservableObject {
                     )
                     // Only for audio the model heard nothing in. A model
                     // failure keeps its launch reminder even if closed.
-                    if emptyReason == .audioNeedsRecovery {
+                    if remindAtLaunch {
                         self.savedAudioPromptURL = recovery.url
                     }
-                } else {
-                    if emptyReason == .audioNeedsRecovery {
-                        // The captured audio has no durable WAV. If native RAM
-                        // remains, offer the guarded no-paste checkpoint retry
-                        // rather than mislabeling this as model-empty speech.
-                        isDictating = false
-                        showFailedCheckpointRecoveryError()
-                    } else {
-                        overlayController.showError(
-                            DictationNoSpeechPresentationPolicy.message(
-                                trigger: currentDictationTrigger.rawValue,
-                                reason: emptyReason,
-                                shortcutMode: currentDictationShortcutMode
-                            )
+                case .offerCheckpointRetry:
+                    // The captured audio has no durable WAV. If native RAM
+                    // remains, offer the guarded no-paste checkpoint retry
+                    // rather than mislabeling this as model-empty speech.
+                    isDictating = false
+                    showFailedCheckpointRecoveryError()
+                case .showMessage:
+                    overlayController.showError(
+                        DictationNoSpeechPresentationPolicy.message(
+                            trigger: currentDictationTrigger.rawValue,
+                            reason: emptyReason,
+                            shortcutMode: currentDictationShortcutMode
                         )
-                    }
+                    )
                 }
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
-                if emptyReason.shouldDiscardStoppedAudioRecovery {
+                if emptyDecision.discardsSavedRecording {
                     self.discardStoppedAudioRecovery(explicitDiscard: true)
                 }
                 return
