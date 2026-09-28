@@ -677,6 +677,14 @@ final class MeetingSessionController: ObservableObject {
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
         }
+        // Off unless the speaker-separation flag is on (MeetingSpeakerSeparation).
+        taskManager.speakerSeparationProvider = { recordingDate in
+            await MeetingSpeakerSeparation.resolve(recordingStart: recordingDate)
+        }
+        // Off unless the calendar-naming flag is on (MeetingCalendarNaming).
+        taskManager.lineupNamingProvider = { recordingDate in
+            await MeetingCalendarNaming.lineupRequest(recordingStart: recordingDate)
+        }
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             Task { @MainActor [weak self] in

@@ -69,6 +69,7 @@ class Profile:
     embs: list = field(default_factory=list)
     confirmations: int = 0
     meetings_confirmed: set = field(default_factory=set)
+    last_seen: int = -1
 
     @property
     def centroid(self) -> np.ndarray:
@@ -89,6 +90,9 @@ class Policy:
     assign: bool = False                # one person per voice, solved jointly
     eliminate: bool = False             # last unknown voice <- last unmatched invitee (suggest)
     min_talk_s: float = 0.0             # voices under this are hidden, not rows
+    use_invite: bool = True             # False: pretend no meeting had a calendar invite
+    recent_lineup: int = 0              # >0: people seen in the last N meetings act as the lineup
+    recent_top: int = 0                 # >0: the N most recently heard named people act as the lineup (app version)
 
 
 POLICIES = [
@@ -103,6 +107,24 @@ POLICIES = [
            lineup_auto_sim=0.75, lineup_auto_margin=0.08),
     Policy("lineup + assign + eliminate + hide <5 s", lineup=True, assign=True, eliminate=True, min_talk_s=5.0,
            lineup_auto_confirmations=1, lineup_auto_sim=0.75, lineup_auto_margin=0.08),
+    Policy("APP v2: invite bars 2 confirms @0.80/0.10", lineup=True, lineup_auto_confirmations=2,
+           lineup_auto_sim=0.80, lineup_auto_margin=0.10),
+    # ---- no calendar at all (random Zooms)
+    Policy("NO INVITE: today", use_invite=False),
+    Policy("NO INVITE: 3 confirms @0.92/0.12", use_invite=False, auto_confirmations=3),
+    Policy("NO INVITE: 2 confirms @0.92/0.12", use_invite=False, auto_confirmations=2),
+    Policy("NO INVITE: recent-8 lineup, 2 confirms @0.85/0.12", use_invite=False, lineup=True, recent_lineup=8,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.85, lineup_auto_margin=0.12),
+    Policy("NO INVITE: recent-8 lineup, 2 confirms @0.80/0.10", use_invite=False, lineup=True, recent_lineup=8,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.80, lineup_auto_margin=0.10),
+    Policy("NO INVITE: recent-8 + 2 confirms + hide <5 s", use_invite=False, lineup=True, recent_lineup=8,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.85, lineup_auto_margin=0.12, min_talk_s=5.0),
+    Policy("NO INVITE: APP top-12 recent, 2 confirms @0.80/0.10", use_invite=False, lineup=True, recent_top=12,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.80, lineup_auto_margin=0.10),
+    Policy("NO INVITE: APP top-8 recent, 2 confirms @0.80/0.10", use_invite=False, lineup=True, recent_top=8,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.80, lineup_auto_margin=0.10),
+    Policy("APP v2 full: invite, else top-12 recent", lineup=True, recent_top=12,
+           lineup_auto_confirmations=2, lineup_auto_sim=0.80, lineup_auto_margin=0.10),
 ]
 COST = {"auto": 0, "suggest_ok": 1, "suggest_wrong": 3, "ask_new": 3, "ask_existing": 2, "hidden": 0}
 
@@ -116,10 +138,18 @@ def replay(meetings: list[dict], pol: Policy) -> dict:
     appear: dict[str, int] = defaultdict(int)
     hidden_real_seconds = 0.0
     wrong_autos = []
-    for m in meetings:
+    for mi, m in enumerate(meetings):
         voices = [v for v in m["speakers"] if v["channel"] == "system" and v.get("sessionEmbedding")]
-        invite = m["calendar"]["invitees"]
+        invite = m["calendar"]["invitees"] if pol.use_invite else []
         invite_keys = [name_keys(i.get("name"), i.get("email")) for i in invite if i["is_person"]]
+        if pol.recent_lineup:
+            # No invite: the people you've met with in your last N meetings stand in for it.
+            recent = [p for p in profiles if p.last_seen >= mi - pol.recent_lineup]
+            invite_keys = [{profile_key(p.name)} for p in recent]
+        if pol.recent_top and not invite_keys:
+            # App version: the N named people heard most recently (by last-seen time).
+            recent = sorted((p for p in profiles if p.last_seen >= 0), key=lambda p: -p.last_seen)[: pol.recent_top]
+            invite_keys = [{profile_key(p.name)} for p in recent]
         in_lineup = lambda p: any(profile_key(p.name) in ks for ks in invite_keys)  # noqa: E731
         people_here = {v["truthIdentity"] for v in voices if v.get("truthIdentity")}
         for ident in people_here:
@@ -213,6 +243,7 @@ def replay(meetings: list[dict], pol: Policy) -> dict:
                 counts["auto"] += 1
                 first_auto.setdefault(ident, appear[ident])
                 p.embs.append(emb)
+                p.last_seen = mi
                 continue
             if kind in ("suggest", "elim"):
                 if kind == "suggest":
@@ -240,6 +271,7 @@ def replay(meetings: list[dict], pol: Policy) -> dict:
                 profiles.append(target)
             target.embs.append(emb)
             target.meetings_confirmed.add(m["id"])
+            target.last_seen = mi
     recurring = [i for i, n in appear.items() if n >= 4]
     fs = [first_suggest.get(i) for i in recurring]
     fa = [first_auto.get(i) for i in recurring]

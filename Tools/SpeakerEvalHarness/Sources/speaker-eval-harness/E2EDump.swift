@@ -19,6 +19,8 @@ struct E2ESegment: Codable {
     let speaker: Int
     let start: Double
     let end: Double
+    var quality: Float? = nil
+    var embedding: [Float]? = nil
 }
 
 struct E2EDumpOut: Codable {
@@ -116,17 +118,24 @@ func runDumpSet(_ args: [String]) async {
           let series = try? JSONDecoder().decode(LabSeries.self, from: data) else {
         die("could not read series.json in \(setPath)")
     }
+    let keepEmbeddings = args.contains("--embeddings")
     let service = await DiarizationService()
     await service.initialize()
     guard await MainActor.run(body: { service.isReady }) else { die("diarizer failed to initialize") }
     for meeting in series.meetings {
         let dir = setDir.appendingPathComponent(meeting.id, isDirectory: true)
-        let out = dir.appendingPathComponent("e2e_raw-\(tag).json")
+        let out = dir.appendingPathComponent(keepEmbeddings ? "emb_raw-\(tag).json" : "e2e_raw-\(tag).json")
         if FileManager.default.fileExists(atPath: out.path) { continue }
         let t0 = Date()
         do {
             let segments = try await service.diarizeOffline(audioURL: dir.appendingPathComponent("system.wav"))
-            let e2e = segments.map { E2ESegment(speaker: $0.speakerId, start: $0.startTime, end: $0.endTime) }
+            // --embeddings keeps each segment's WeSpeaker vector so merge policies
+            // can be replayed offline (scripts/speaker_lab/merge_replay.py).
+            let e2e = segments.map {
+                E2ESegment(speaker: $0.speakerId, start: $0.startTime, end: $0.endTime,
+                           quality: keepEmbeddings ? $0.qualityScore : nil,
+                           embedding: keepEmbeddings ? $0.embedding : nil)
+            }
                 .sorted { $0.start < $1.start }
             let dump = E2EDumpOut(meeting: meeting.id, model: "raw-\(tag)", seconds: e2e.last?.end ?? 0,
                                   processingSeconds: Date().timeIntervalSince(t0),

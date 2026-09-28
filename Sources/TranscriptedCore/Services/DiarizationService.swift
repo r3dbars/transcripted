@@ -182,15 +182,56 @@ public class DiarizationService: ObservableObject {
         return manager
     }
 
+    /// Managers that differ from the loaded one only in clustering threshold
+    /// (`SpeakerSeparationOptions.clusteringThreshold`). They share one copy of the
+    /// models, loaded from the same place `initializeOffline` loads them.
+    private var thresholdManagers: [Double: OfflineDiarizerManager] = [:]
+    private var sharedOfflineModels: OfflineDiarizerModels?
+
+    private func manager(clusteringThreshold: Double) async throws -> OfflineDiarizerManager? {
+        if let cached = thresholdManagers[clusteringThreshold] { return cached }
+        guard var config = baseOfflineConfig else { return nil }
+        config.clusteringThreshold = clusteringThreshold
+        let models: OfflineDiarizerModels
+        if let shared = sharedOfflineModels {
+            models = shared
+        } else {
+            models = try await OfflineDiarizerModels.load(
+                from: bundleProvider("offline-diarizer-models") ?? OfflineDiarizerModels.defaultModelsDirectory()
+            )
+            sharedOfflineModels = models
+        }
+        let manager = OfflineDiarizerManager(config: config)
+        manager.initialize(models: models)
+        thresholdManagers[clusteringThreshold] = manager
+        AppLogger.transcription.info("Offline diarizer ready at a custom clustering threshold", [
+            "threshold": String(format: "%.2f", clusteringThreshold)
+        ])
+        return manager
+    }
+
     // MARK: - Offline Diarization (PyAnnote)
 
     /// Run offline speaker diarization on audio samples using PyAnnote pipeline.
     /// Supports unlimited speakers. Samples should be 16kHz mono Float32.
     nonisolated public func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
+        try await diarizeOffline(samples: samples, sampleRate: sampleRate, clusteringThreshold: nil)
+    }
+
+    /// Same as `diarizeOffline(samples:sampleRate:)`, at `clusteringThreshold` when
+    /// it is set (higher splits more; nil keeps the shipped 0.6).
+    nonisolated public func diarizeOffline(
+        samples: [Float],
+        sampleRate: Int,
+        clusteringThreshold: Double?
+    ) async throws -> [SpeakerSegment] {
         guard var manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
             throw NSError(domain: "DiarizationService", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Offline diarizer model not loaded"
             ])
+        }
+        if let clusteringThreshold, let custom = try await self.manager(clusteringThreshold: clusteringThreshold) {
+            manager = custom
         }
         if let bounds = await MainActor.run(body: { self.labSpeakerBounds }),
            let bounded = try await self.boundedManager(bounds) {
@@ -299,6 +340,8 @@ public class DiarizationService: ObservableObject {
 
     public func cleanup() {
         offlineDiarizerManager = nil
+        thresholdManagers = [:]
+        sharedOfflineModels = nil
         modelState = .notLoaded
     }
 

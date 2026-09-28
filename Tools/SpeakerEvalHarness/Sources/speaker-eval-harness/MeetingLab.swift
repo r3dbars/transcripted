@@ -320,6 +320,34 @@ func labSpeakerBounds(mode: String, meetingDir: URL, truth: LabTruth) -> Diariza
     }
 }
 
+/// People on a meeting's simulated invite (calendar.json), the same count the app
+/// takes from EventKit.
+func labInvitedPeople(meetingDir: URL) -> Int? {
+    struct Invite: Codable { struct Invitee: Codable { let is_person: Bool }; let invitees: [Invitee] }
+    guard let data = try? Data(contentsOf: meetingDir.appendingPathComponent("calendar.json")),
+          let invite = try? JSONDecoder().decode(Invite.self, from: data) else { return nil }
+    return invite.invitees.filter(\.is_person).count
+}
+
+/// Invitee display names from calendar.json, the way the app's invite lookup
+/// cleans them: people only, email-only invitees named from the email when it reads
+/// like a name ("sam.lee@..." -> "Sam Lee").
+func labInviteeNames(meetingDir: URL) -> [String] {
+    struct Invite: Codable {
+        struct Invitee: Codable { let name: String?; let email: String?; let is_person: Bool }
+        let invitees: [Invitee]
+    }
+    guard let data = try? Data(contentsOf: meetingDir.appendingPathComponent("calendar.json")),
+          let invite = try? JSONDecoder().decode(Invite.self, from: data) else { return [] }
+    return invite.invitees.filter(\.is_person).compactMap { invitee in
+        if let name = invitee.name, !name.isEmpty { return name }
+        guard let local = invitee.email?.split(separator: "@").first else { return nil }
+        let parts = local.split(whereSeparator: { $0 == "." || $0 == "_" })
+        guard parts.count >= 2 else { return nil }
+        return parts.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+}
+
 @MainActor
 func labWait(timeout: TimeInterval, _ condition: @MainActor () -> Bool) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
@@ -348,6 +376,16 @@ func runMeetingSeries(_ args: [String]) async {
     let limit = argValue("--limit", in: args).flatMap(Int.init) ?? Int.max
     let force = args.contains("--force")
     let speakerHint = argValue("--speaker-hint", in: args) ?? "none"
+    // --separation lab: install TranscriptionTaskManager.speakerSeparationProvider the
+    // way the app does (SpeakerSeparationOptions.labTuned, capped by the invite size).
+    // --separation nocap: same settings with no calendar cap.
+    let separation = argValue("--separation", in: args) ?? "none"
+    // --calendar-naming: install TranscriptionTaskManager.lineupNamingProvider with the
+    // invite's display names (calendar.json), as the app does from EventKit.
+    // --no-invite: same, but as if no meeting had an invite (random Zooms), so the
+    // lineup falls back to recently heard people.
+    let calendarNaming = args.contains("--calendar-naming")
+    let noInvite = args.contains("--no-invite")
     let workRoot = URL(fileURLWithPath: argValue("--work", in: args)
         ?? setDir.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("runs").appendingPathComponent(series.set).path, isDirectory: true)
@@ -421,6 +459,16 @@ func runMeetingSeries(_ args: [String]) async {
                 statsStore: LabStatsStore()
             )
             m.pipelineResultObserver = { box.set($0) }
+            if separation != "none" {
+                let cap = separation == "nocap" ? nil : labInvitedPeople(meetingDir: meetingDir).flatMap {
+                    SpeakerSeparationOptions.speakerCap(invitedPeople: $0)
+                }
+                m.speakerSeparationProvider = { _ in SpeakerSeparationOptions.labTuned(maxSpeakers: cap) }
+            }
+            if calendarNaming {
+                let names = noInvite ? [] : labInviteeNames(meetingDir: meetingDir)
+                m.lineupNamingProvider = { _ in SpeakerNamingPolicy.LineupRequest(invitedNames: names, recentPeopleLimit: 12) }
+            }
             return m
         }
 
@@ -547,7 +595,9 @@ func runMeetingSeries(_ args: [String]) async {
             rows: rows, silentNames: silent, utterances: utterances,
             profilesAfter: speakerDB.allSpeakers().count
         )
-        out.speakerHint = speakerHint
+        out.speakerHint = [separation == "none" ? speakerHint : "separation-\(separation)",
+                           calendarNaming ? (noInvite ? "lineup-naming-no-invite" : "lineup-naming") : nil]
+            .compactMap { $0 }.joined(separator: "+")
         out.speakerBoundsMin = bounds?.min
         out.speakerBoundsMax = bounds?.max
         for (channel, contexts) in [("system", result.systemSpeakerContexts), ("mic", result.micSpeakerContexts)] {

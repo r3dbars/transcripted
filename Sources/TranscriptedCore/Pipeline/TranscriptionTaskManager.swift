@@ -168,6 +168,17 @@ public class TranscriptionTaskManager: ObservableObject {
     /// classification, so `Tools/SpeakerEvalHarness` can score naming rows
     /// against a simulated answer key. The app never sets it.
     public var pipelineResultObserver: (@Sendable (TranscriptionResult) -> Void)?
+    /// Per-meeting speaker separation for the call channel (SpeakerSeparation.swift).
+    /// The app sets this to turn on "split generously, then merge smartly" and to pass
+    /// a speaker cap from the calendar invite. Called once per live meeting run with
+    /// the meeting's recording date; nil (the default) keeps the shipped behavior.
+    public var speakerSeparationProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerSeparationOptions?)?
+    /// Lineup naming: who is expected in this meeting (the calendar invite, else the
+    /// people heard most recently). When a voice's best match is on the lineup, silent
+    /// naming uses `SpeakerNamingPolicy.InviteeBars` instead of the stricter default
+    /// bars. The app sets this only when the feature is on; nil keeps today's behavior.
+    /// Called once per live meeting run with the meeting's recording date.
+    public var lineupNamingProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerNamingPolicy.LineupRequest?)?
 
     /// Scratch-directory mic placeholders minted for system-only failures,
     /// keyed by task. When the archive pass later mints a second placeholder

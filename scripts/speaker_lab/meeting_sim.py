@@ -26,6 +26,7 @@ import argparse
 import io
 import json
 import os
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -96,12 +97,19 @@ class Bank:
     def __init__(self, lang: str):
         self.dir = ROOT / "bank" / lang
         self.voices: dict[str, Voice] = {}
+        xr = self.dir / "cross_recording_identities.json"
+        self.cross = json.load(open(xr)) if xr.exists() else {"groups": [], "likely_synthetic": []}
+        synthetic = set(self.cross["likely_synthetic"])
         for line in open(self.dir / "identities.jsonl"):
             r = json.loads(line)
             if r.get("unreliable"):
                 continue  # dense check found too much speech off this voice (voicebank.py verify)
+            if r["identity"] in synthetic:
+                continue  # same voice at 0.95+ across different videos: likely TTS narration
             info = json.load(open(self.dir / "regions" / f"{r['video']}.json"))
-            regions = joined(info["regions"], 0.6)
+            # Captions can overhang the audio; never point past the end of the file.
+            audio_s = sf.info(str(self.dir / "audio16k" / f"{r['video']}.flac")).duration - 0.05
+            regions = [[a, min(b, audio_s)] for a, b in joined(info["regions"], 0.6) if a < audio_s]
             holes = [(b - 1.5, b + 3.0 + 1.5) for b in r["bad_windows"]]
             spans = [sp for sp in subtract(regions, holes) if sp[1] - sp[0] >= 1.0]
             inside = lambda t: any(s <= t < e for s, e in spans)  # noqa: E731
@@ -243,6 +251,11 @@ class Person:
     offset: float = 0.0           # seconds into current span
     budget_s: float = 0.0
     talk_s: float = 0.0
+    voice: str = ""               # audio source when it differs from identity (family X)
+
+    @property
+    def vid(self) -> str:
+        return self.voice or self.identity
 
     @property
     def channel(self) -> str:
@@ -367,7 +380,7 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
         if cur not in alive:
             cur = int(rng.choice(alive))
         p = people[cur]
-        voice = bank.voices[p.identity]
+        voice = bank.voices[p.vid]
         median = 5.0 * (0.6 + 2.0 * p.dominance)
         want = float(np.clip(rng.lognormal(np.log(median), 0.85), 1.2, 75.0))
         if stress and rng.random() < 0.05:
@@ -384,11 +397,11 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
         # backchannels from others during longer turns
         if dur > 5:
             for q in people:
-                if q.pid == p.pid or not bank.voices[q.identity].backchannels:
+                if q.pid == p.pid or not bank.voices[q.vid].backchannels:
                     continue
                 k = rng.poisson(dur / 60.0 * (6 if stress else 3) / max(1, n - 1) * 2)
                 for _ in range(int(k)):
-                    w = bank.voices[q.identity].backchannels[int(rng.integers(len(bank.voices[q.identity].backchannels)))]
+                    w = bank.voices[q.vid].backchannels[int(rng.integers(len(bank.voices[q.vid].backchannels)))]
                     bs = float(rng.uniform(t + 1.0, t + dur - 1.0))
                     bsrc = (max(0.0, w[0] - 0.05), w[1] + 0.08)
                     segments.append({"pid": q.pid, "start": round(bs, 3), "end": round(bs + bsrc[1] - bsrc[0], 3),
@@ -415,7 +428,7 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
     words_out = []
     for seg in segments:
         p = by_pid[seg["pid"]]
-        voice = bank.voices[p.identity]
+        voice = bank.voices[p.vid]
         x = bank.audio(voice.video, seg["src"][0], seg["src"][1])
         if len(x) < 160:
             continue
@@ -468,7 +481,7 @@ def build_meeting(bank: Bank, family: str, seed: int, out: Path, plan: Plan | No
     truth = {
         "meeting": out.name, "family": family, "seed": seed, "duration_s": round(duration, 2), "title": plan.title,
         "split_local_speakers": spec["split"], "echo_leak": bool(echo), "room": room.description,
-        "participants": [{"pid": p.pid, "identity": p.identity, "name": p.name, "role": p.role,
+        "participants": [{"pid": p.pid, "identity": p.identity, "voice": p.vid, "name": p.name, "role": p.role,
                           "channel": p.channel, "talk_s": round(p.talk_s, 1),
                           "device": p.device.to_json() if p.device else None,
                           "device_after_switch": p.device_after_switch.to_json() if p.device_after_switch else None}
@@ -605,10 +618,87 @@ def plan_company(bank: Bank, rng: np.random.Generator, weeks: int, hard: bool = 
                 cursors[p.identity] = (p.cursor, p.offset)
 
 
+X_TEMPLATES = {
+    # Shorter meetings than family F so each person's few recordings last the series.
+    "1:1 with manager": ((9, 14), ["manager"]),
+    "Team standup": ((5, 7), ["team"]),
+    "Team sync": ((13, 18), ["manager", "team", "guest?"]),
+    "Client call": ((10, 15), ["client", "guest?"]),
+}
+
+
+def plan_cross_company(bank: Bank, rng: np.random.Generator, weeks: int, guest_p: float = 0.9):
+    """Family X: like F, but every recurring person is a cross-recording identity
+    (voicebank cross_recording_identities.json: the same voice in 2-8 different
+    videos) and their voice rotates to a different recording each meeting. This is
+    the honest test of cross-meeting naming: the matcher sees real session-to-session
+    voice change instead of one recording cut into pieces.
+    """
+    groups = [[m for m in g["members"] if m in bank.voices] for g in bank.cross["groups"]]
+    groups = [g for g in groups if len(g) >= 2]
+    groups.sort(key=lambda g: -sum(bank.voices[m].usable_s for m in g))
+    grouped = {m for g in groups for m in g}
+    roles = ["manager", "team", "team", "team", "team", "team", "client"]
+    if len(groups) < len(roles):
+        raise SystemExit(f"need {len(roles)} cross-recording people, bank has {len(groups)}")
+    cast = groups[: len(roles)]
+    singles = sorted((v for v in bank.voices.values() if v.identity not in grouped), key=lambda v: -v.usable_s)
+    you = singles[0].identity
+    guests = [v.identity for v in singles[1:] if bank.compatible(v.identity, [m for g in cast for m in g])]
+    rng.shuffle(guests)
+    names = ["Priya Nair", "Sam Lee", "Sam Patel", "Robert Chen", "Elena Rossi", "Kwame Mensah", "Grace Kim"]
+    people_of = {f"xr-{k}": (role, name, g) for k, (role, name, g) in enumerate(zip(roles, names, cast))}
+    plan_cross_company.cast = [you] + list(people_of)
+    appearances: dict[str, int] = defaultdict(int)
+    cursors: dict[str, tuple[int, float]] = {}
+    last_device: dict[str, Device] = {}
+    guest_names = iter(fake_names(rng, 400))
+    k = 0
+    for w in range(1, weeks + 1):
+        for day, title in WEEK:
+            (lo, hi), who = X_TEMPLATES[title]
+            ids: list[str] = [you]
+            for slot in who:
+                if slot == "team":
+                    team = [i for i, (r, _, _) in people_of.items() if r == "team"]
+                    if title == "Team standup" and rng.random() < 0.35:
+                        team.remove(team[int(rng.integers(len(team)))])
+                    ids += team
+                elif slot == "guest?":
+                    if rng.random() < guest_p and guests:
+                        ids.append(guests.pop())
+                else:
+                    ids += [i for i, (r, _, _) in people_of.items() if r == slot]
+            total_s = float(rng.uniform(lo, hi)) * 60
+            dom = rng.dirichlet(np.full(len(ids), 1.6))
+            people = []
+            for i, ident in enumerate(ids):
+                if ident in people_of:
+                    _, name, members = people_of[ident]
+                    voice = members[appearances[ident] % len(members)]   # a different recording each time
+                    appearances[ident] += 1
+                else:
+                    name, voice = ("You" if i == 0 else next(guest_names)), ident
+                p = Person(pid=f"p{i}", identity=ident, name=name, role="you" if i == 0 else "remote",
+                           dominance=float(dom[i]), voice=voice)
+                if i > 0:
+                    prev = last_device.get(ident)
+                    p.device = prev if prev is not None and rng.random() < 0.7 else remote_device(rng)
+                    last_device[ident] = p.device
+                p.cursor, p.offset = cursors.get(voice, (0, 0.0))
+                p.budget_s = float(dom[i]) * total_s * 1.5 + 20
+                people.append(p)
+            k += 1
+            yield (f"X-w{w}-{day}-{title.split()[0].lower().replace(':', '')}-{k:02d}",
+                   Plan(people, total_s, False, 0.08, False, title=title))
+            for p in people:
+                cursors[p.vid] = (p.cursor, p.offset)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--lang", default="en")
-    ap.add_argument("--family", required=True, choices=sorted(FAMILIES) + ["F"])
+    ap.add_argument("--family", required=True, choices=sorted(FAMILIES) + ["F", "X"])
     ap.add_argument("--count", type=int, default=10)
     ap.add_argument("--weeks", type=int, default=4, help="family F: weeks of company meetings")
     ap.add_argument("--hard", action="store_true", help="family F: sound-alike team and sound-alike guests")
@@ -623,18 +713,23 @@ def main() -> None:
     series_path = set_dir / "series.json"
     series = json.load(open(series_path)) if series_path.exists() else {"set": args.set, "meetings": []}
     have = {m["id"] for m in series["meetings"]}
-    if args.family == "F":
+    if args.family in ("F", "X"):
         if have:
             raise SystemExit(f"{set_dir} already has meetings; a company series must be generated in one go")
         rng = np.random.default_rng(args.seed)
         skip = set()
         for other in args.skip_cast_of:
             skip |= set(json.load(open(ROOT / "sim" / other / "series.json")).get("cast", []))
-        gen = plan_company(bank, rng, args.weeks, hard=args.hard, skip=frozenset(skip), guest_p=args.guest_p)
+        if args.family == "X":
+            gen = plan_cross_company(bank, rng, args.weeks, guest_p=args.guest_p)
+            planner = plan_cross_company
+        else:
+            gen = plan_company(bank, rng, args.weeks, hard=args.hard, skip=frozenset(skip), guest_p=args.guest_p)
+            planner = plan_company
         for k, (mid, plan) in enumerate(gen):
-            series["cast"] = plan_company.cast
-            truth = build_meeting(bank, "F", args.seed + k, set_dir / mid, plan)
-            series["meetings"].append({"id": mid, "family": "F", "seed": args.seed + k, "title": plan.title,
+            series["cast"] = planner.cast
+            truth = build_meeting(bank, args.family, args.seed + k, set_dir / mid, plan)
+            series["meetings"].append({"id": mid, "family": args.family, "seed": args.seed + k, "title": plan.title,
                                        "split_local_speakers": False, "fresh_db": False})
             print(f"[sim] {mid}: {truth['duration_s']/60:.1f} min, {len(truth['participants']) - 1} remote", flush=True)
             json.dump(series, open(series_path, "w"), indent=1)

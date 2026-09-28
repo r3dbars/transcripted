@@ -30,6 +30,10 @@ public protocol DiarizationEngine: ObservableObject {
     /// - Returns: Speaker segments with embeddings
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment]
 
+    /// Offline diarization at a custom clustering threshold (higher splits more).
+    /// nil keeps the engine's default. Engines without the knob ignore it.
+    func diarizeOffline(samples: [Float], sampleRate: Int, clusteringThreshold: Double?) async throws -> [SpeakerSegment]
+
     /// Perform offline diarization on an audio file
     /// - Parameter audioURL: Path to audio file
     /// - Returns: Speaker segments with embeddings
@@ -47,4 +51,9 @@ public protocol DiarizationEngine: ObservableObject {
 public extension DiarizationEngine {
     /// Default: the diarizer's native (WeSpeaker) thresholds.
     nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds { .weSpeaker }
+
+    /// Default: no clustering knob, so the threshold is ignored.
+    func diarizeOffline(samples: [Float], sampleRate: Int, clusteringThreshold: Double?) async throws -> [SpeakerSegment] {
+        try await diarizeOffline(samples: samples, sampleRate: sampleRate)
+    }
 }

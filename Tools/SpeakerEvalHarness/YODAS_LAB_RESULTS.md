@@ -1,6 +1,6 @@
 # Speaker Lab on YODAS3: results so far
 
-**Date:** 2026-09-28. **Plan:** `YODAS_LAB_PLAN.md`. **Status:** P0 done, P1/P2 experiments running.
+**Date:** 2026-09-28. **Plan:** `YODAS_LAB_PLAN.md`. **Status:** P0–P2 done; two changes built into the app behind beta toggles (Finding 6).
 
 Every number here comes from simulated meetings run through the real app pipeline headless
 (`speaker-eval-harness meeting-series`: real DiarizationService, real Parakeet, real speaker DB,
@@ -89,6 +89,53 @@ fingerprints:
 
 WeSpeaker session fingerprints separated people cleanly here: same person median 0.876, different
 people never above 0.469.
+
+## Finding 5: "split generously, then merge smartly" wins, and holds on fresh calls
+
+Forcing the invite count into FluidAudio's re-clustering merged the wrong voices. What works:
+diarize at clustering threshold **0.70** (splits more), then (1) fold any voice with under **5 s**
+of talk into the voice it sounds most like, (2) merge voices whose fingerprints are **≥ 0.6**
+similar, (3) if a calendar invite exists, fold the quietest voices until the count fits the
+invite (+1 spare seat on calls of 3+). Steps 1–2 do most of the work without any calendar; the
+cap mostly helps 1:1s.
+
+Holdout: 45 fresh meetings (new seeds, never used for tuning), run end to end through the real
+pipeline with the feature on (`meeting-series --separation lab`):
+
+| Call | Exactly right (today → new) | Merged-person meetings | Missed people | Words right |
+|---|---|---|---|---|
+| 1:1 | 80% → **93%** | 0% → 0% | 0 → 0 | 92.4% → 92.4% |
+| 3–4 remote | 83% → 75% | 17% → **8%** | 2 → 3 | 80.5% → 80.3% |
+| 6–8 remote | 0% → **60%** | 80% → **20%** | 27 → **3** | 54.8% → **78.2%** |
+| Stress | 0% → **75%** | 88% → **25%** | 15 → **2** | 56.4% → **78.9%** |
+
+3–4 person calls are a wash (fewer merges, one more missed person); everything else improves.
+The one 1:1 still showing two rows had a no-show on its invite (cap 2) and a 6.2 s stray voice
+just above the 5 s floor.
+
+## Finding 6: naming holds on real voice variation
+
+Family X: a company whose 7 regulars are cross-recording identities (the same voice found in 2–8
+different YouTube videos), each meeting using a different recording. Same-person fingerprint
+median 0.83 (vs 0.88 when every meeting came from one recording); strangers never above 0.49.
+Replay: today's rules name only 2 of 6 regulars silently (6th–8th meeting); calendar lineup +
+assignment + elimination cuts naming work 103 → 38 (**−63%**), silent naming from the 2nd meeting,
+0 wrong in 41. One warning sign: in a sound-alike company two different people scored **0.93**,
+above today's 0.92 auto bar; only the margin rule stopped a wrong name. That's the argument for
+naming silently only against the invite lineup.
+
+## What changed in the app (behind two beta toggles, off by default)
+
+- **Separate voices on calls (beta)** → `Sources/TranscriptedCore/Speaker/SpeakerSeparation.swift` +
+  `DiarizationService.diarizeOffline(samples:sampleRate:clusteringThreshold:)` +
+  `TranscriptionTaskManager.speakerSeparationProvider`; the app sets it from
+  `SpeakerSeparationPreferences` and the invite size (`MeetingSpeakerSeparation`).
+- **Name people from your calendar (beta)** → `SpeakerNamingPolicy.InviteeBars` (2 confirmed
+  meetings, similarity 0.80, margin 0.10, only for a voice whose best match is an invitee) +
+  `TranscriptionTaskManager.calendarNamingProvider`; the app sets it from
+  `CalendarNamingPreferences` and the invite names (`MeetingCalendarNaming`).
+- Not built yet: one-voice-per-invitee assignment and process-of-elimination suggestions (they
+  need the naming sheet to accept a per-row suggested invitee), and the NVIDIA/LS-EEND hybrid.
 
 ## Caveats (read before quoting)
 
