@@ -259,7 +259,7 @@ func withAgentCaptureQueryTelemetry(
         return try operation()
     }
 
-    let resolvedBuildIdentity = buildIdentity ?? .resolve()
+    let resolvedBuildIdentity = buildIdentity ?? AgentCaptureQueryTelemetryRuntime.buildIdentity()
     let invocation = AgentCaptureQueryInvocation(
         toolKind: descriptor.toolKind,
         captureKind: descriptor.captureKind
