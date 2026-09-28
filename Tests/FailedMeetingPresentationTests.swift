@@ -393,27 +393,104 @@ func testFailedMeetingPresentation() {
         assertTrue(copy.detail.contains("transcript saved"), "copy should say the transcript itself was saved")
     }
 
-    runSuite("FailedMeetingPresentation separates retained audio from retry-ready audio") {
-        let source = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
-            encoding: .utf8
-        )) ?? ""
+    runSuite("A failed row can reveal a lone mic placeholder but cannot retry it") {
+        let directory = makeFailedMeetingPresentationTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        assertTrue(
-            source.contains("let availableAudioURLs = audioURLs(for: failed)"),
-            "available retained audio should stay separate from retry readiness"
+        let placeholder = writeFailedMeetingAudio(in: directory, named: "microphone_placeholder.wav")
+        let failed = FailedTranscription(
+            micAudioURL: placeholder,
+            systemAudioURL: directory.appendingPathComponent("system_audio.wav"),
+            errorMessage: "Model not loaded"
         )
-        assertTrue(
-            source.contains("let hasRetryableAudioFiles = failed.audioFilesExist()"),
-            "retry readiness should require all failed-transcription audio files"
+        let item = FailedMeetingPresentation.item(from: failed, isRetrying: false)
+
+        assertEqual(item.audioURLs, [placeholder], "audio still on disk stays revealable, even a placeholder")
+        assertFalse(item.hasAudioFiles, "a silent placeholder alone must not make the row retry-ready")
+    }
+
+    runSuite("A failed row with surviving audio is revealable and retry-ready") {
+        let directory = makeFailedMeetingPresentationTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let mic = writeFailedMeetingAudio(in: directory, named: "microphone.wav")
+        let system = writeFailedMeetingAudio(in: directory, named: "system_audio.wav")
+        let both = FailedMeetingPresentation.item(
+            from: FailedTranscription(micAudioURL: mic, systemAudioURL: system, errorMessage: "Model not loaded"),
+            isRetrying: false
         )
-        assertTrue(
-            source.contains("hasAudioFiles: hasRetryableAudioFiles"),
-            "partial retained audio should not enable the retry action"
+        assertEqual(both.audioURLs, [system, mic], "every surviving file is revealable, system audio first")
+        assertTrue(both.hasAudioFiles, "complete retained audio makes the row retry-ready")
+
+        let systemOnly = FailedMeetingPresentation.item(
+            from: FailedTranscription(
+                micAudioURL: directory.appendingPathComponent("gone.wav"),
+                systemAudioURL: system,
+                errorMessage: "Model not loaded"
+            ),
+            isRetrying: false
         )
+        assertEqual(systemOnly.audioURLs, [system], "a missing file is not offered for reveal")
+        assertTrue(systemOnly.hasAudioFiles, "a missing mic file must not hide retry while system audio survives")
+    }
+
+    runSuite("A failed row whose audio is gone offers neither reveal nor retry") {
+        let directory = makeFailedMeetingPresentationTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let item = FailedMeetingPresentation.item(
+            from: FailedTranscription(
+                micAudioURL: directory.appendingPathComponent("microphone.wav"),
+                systemAudioURL: directory.appendingPathComponent("system_audio.wav"),
+                errorMessage: "Model not loaded"
+            ),
+            isRetrying: false
+        )
+
+        assertEqual(item.audioURLs, [], "nothing on disk means nothing to reveal")
+        assertFalse(item.hasAudioFiles, "nothing on disk means nothing to retry")
+    }
+
+    runSuite("A failed row carries no non-destructive cleanup state") {
+        let item = FailedMeetingPresentation.item(
+            from: FailedTranscription(
+                micAudioURL: URL(fileURLWithPath: "/nonexistent/microphone.wav"),
+                systemAudioURL: nil,
+                errorMessage: "Model not loaded"
+            ),
+            isRetrying: false
+        )
+        let fields = Mirror(reflecting: item).children.compactMap(\.label)
+
+        assertTrue(fields.contains("audioURLs"), "the reflection should see the row's stored fields")
         assertFalse(
-            source.contains("deletionRemovesAudio"),
-            "failed rows should not carry an impossible non-destructive cleanup state"
+            fields.contains("deletionRemovesAudio"),
+            "cleaning up a failed row always deletes its audio, so the row has no flag saying otherwise"
+        )
+    }
+
+    runSuite("A failed row carries the failure's identity, copy, typed kind, and audio verdict") {
+        let longMessage = "Transcription stopped because something unexpected happened in the pipeline "
+            + "while it was working through the recording."
+        let failed = FailedTranscription(
+            timestamp: Date(timeIntervalSince1970: 1_780_000_000),
+            micAudioURL: URL(fileURLWithPath: "/nonexistent/microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: longMessage,
+            errorKind: .missingSystemAudio
+        )
+        let item = FailedMeetingPresentation.item(from: failed, isRetrying: false, usableAudio: .absent)
+
+        assertEqual(item.id, failed.id)
+        assertEqual(item.timestamp, failed.timestamp)
+        assertEqual(item.failureKind, .systemAudioPermission, "the typed error kind wins over the message text")
+        assertTrue(item.isRetryable, "a single-source failure keeps its saved audio retryable")
+        assertFalse(item.isRetrying)
+        assertEqual(item.usableAudio, .absent, "the audio probe verdict reaches the row")
+        assertEqual(
+            item.detail,
+            String(longMessage.prefix(97)) + "...",
+            "unmapped failures show the shortened error, not the whole message"
         )
     }
 
@@ -475,46 +552,125 @@ func testFailedMeetingPresentation() {
         )
     }
 
-    runSuite("FailedMeetingPresentation labels retained WAVs as raw audio") {
-        let source = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
-            encoding: .utf8
-        )) ?? ""
+    runSuite("Failed-meeting metadata calls retained WAVs raw audio and counts only files still on disk") {
+        let directory = makeFailedMeetingPresentationTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        assertTrue(
-            source.contains("pathExtension.localizedCaseInsensitiveCompare(\"wav\")"),
-            "failed meeting metadata should detect retained WAV audio"
+        // Size and timestamp text are read while the files exist. The size is
+        // whatever the shared formatter prints, so the test doesn't pin it.
+        func meta(mic: String, system: String?, onDisk: Set<String>) -> (meta: String, stamp: String, size: String) {
+            for name in onDisk { _ = writeFailedMeetingAudio(in: directory, named: name) }
+            defer {
+                for name in onDisk { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
+            }
+            let failed = FailedTranscription(
+                micAudioURL: directory.appendingPathComponent(mic),
+                systemAudioURL: system.map { directory.appendingPathComponent($0) },
+                errorMessage: "Model not loaded"
+            )
+            let item = FailedMeetingPresentation.item(from: failed, isRetrying: false)
+            return (item.meta, failed.formattedTimestamp, failed.formattedFileSize)
+        }
+
+        let wav = meta(mic: "microphone.wav", system: "system_audio.wav", onDisk: ["microphone.wav", "system_audio.wav"])
+        assertTrue(wav.size != "Unknown", "both files on disk should give a known size")
+        assertEqual(
+            wav.meta,
+            "\(wav.stamp) • \(wav.size) raw audio kept",
+            "retained WAVs read as raw audio with their size"
         )
-        assertTrue(
-            source.contains("availableAudioURLs.contains"),
-            "failed meeting metadata should label raw audio from files that still exist"
+
+        let upper = meta(mic: "microphone.m4a", system: "system_audio.WAV", onDisk: ["microphone.m4a", "system_audio.WAV"])
+        assertEqual(
+            upper.meta,
+            "\(upper.stamp) • \(upper.size) raw audio kept",
+            "the WAV check ignores extension case"
         )
-        assertTrue(
-            source.contains("\"Raw audio kept\"")
-                && source.contains("\"\\(sizeText) raw audio kept\""),
-            "failed meeting metadata should label retained WAVs as raw audio"
+
+        let compressed = meta(mic: "microphone.m4a", system: "system_audio.m4a", onDisk: ["microphone.m4a", "system_audio.m4a"])
+        assertEqual(
+            compressed.meta,
+            "\(compressed.stamp) • \(compressed.size) kept",
+            "compressed audio is kept audio, not raw audio"
         )
+
+        let rawNoSize = meta(mic: "microphone.wav", system: "system_audio.wav", onDisk: ["system_audio.wav"])
+        assertEqual(
+            rawNoSize.meta,
+            "\(rawNoSize.stamp) • Raw audio kept",
+            "a WAV whose total size can't be read still reads as raw audio"
+        )
+
+        let keptNoSize = meta(mic: "microphone.m4a", system: "system_audio.m4a", onDisk: ["system_audio.m4a"])
+        assertEqual(
+            keptNoSize.meta,
+            "\(keptNoSize.stamp) • Audio kept",
+            "compressed audio with no readable size still says audio was kept"
+        )
+
+        let deletedWAV = meta(mic: "microphone.wav", system: "system_audio.m4a", onDisk: ["system_audio.m4a"])
+        assertEqual(
+            deletedWAV.meta,
+            "\(deletedWAV.stamp) • Audio kept",
+            "a WAV that is no longer on disk must not make the row claim raw audio"
+        )
+
+        let nothing = meta(mic: "microphone.wav", system: "system_audio.wav", onDisk: [])
+        assertEqual(nothing.meta, nothing.stamp, "no audio on disk means no kept-audio label")
     }
 
-    runSuite("FailedMeetingPresentation exposes queued retry state in row metadata") {
-        let source = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
-            encoding: .utf8
-        )) ?? ""
+    runSuite("Failed-meeting rows show the meeting title, retry count, and a running retry") {
+        let noAudio = URL(fileURLWithPath: "/nonexistent/microphone.wav")
+        func row(
+            title: String? = nil,
+            message: String = "Model not loaded",
+            errorKind: PipelineErrorKind? = nil,
+            retryCount: Int = 0,
+            isRetrying: Bool = false
+        ) -> (item: FailedMeetingPresentation.FailedMeetingItem, failed: FailedTranscription) {
+            let failed = FailedTranscription(
+                micAudioURL: noAudio,
+                systemAudioURL: nil,
+                errorMessage: message,
+                meetingTitle: title,
+                retryCount: retryCount,
+                errorKind: errorKind
+            )
+            return (FailedMeetingPresentation.item(from: failed, isRetrying: isRetrying), failed)
+        }
 
-        assertTrue(
-            source.contains("title(for: failed, fallback: copy.title)"),
-            "failed meeting rows should keep the queued meeting title when one exists"
+        assertEqual(row(title: "  Weekly sync \n").item.title, "Weekly sync", "a queued meeting keeps its own title, trimmed")
+        assertEqual(
+            row(title: "   ", message: "Something unexpected happened.").item.title,
+            "Meeting transcript failed",
+            "an untitled generic retry reads as a failed meeting transcript"
         )
-        assertTrue(
-            source.contains("if failed.retryCount > 0")
-                && source.contains("failed.retryCount == 1 ? \"1 retry\" : \"\\(failed.retryCount) retries\""),
-            "retry attempts should stay visible in failed meeting metadata"
+        assertEqual(
+            row(message: "Something unexpected happened.", errorKind: .recordingTooShort).item.title,
+            "Recording needs attention",
+            "an untitled non-retryable failure keeps its copy title"
         )
-        assertTrue(
-            source.contains("if isRetrying")
-                && source.contains("parts.append(\"Retrying now\")"),
-            "active retry progress should stay visible in failed meeting metadata"
+        assertEqual(
+            row(message: "No speech detected").item.title,
+            "No speech found",
+            "an untitled row with specific copy uses that copy's title"
+        )
+
+        let fresh = row()
+        assertEqual(fresh.item.meta, fresh.failed.formattedTimestamp, "a row never retried shows no retry count")
+
+        let once = row(retryCount: 1)
+        assertEqual(once.item.meta, "\(once.failed.formattedTimestamp) • 1 retry")
+
+        let many = row(retryCount: 3)
+        assertEqual(many.item.meta, "\(many.failed.formattedTimestamp) • 3 retries")
+
+        let running = row(retryCount: 1, isRetrying: true)
+        assertTrue(running.item.isRetrying, "the row knows a retry is running")
+        assertEqual(
+            running.item.meta,
+            "\(running.failed.formattedTimestamp) • 1 retry • Retrying now",
+            "a running retry shows last in the row metadata"
         )
     }
 }
@@ -524,4 +680,10 @@ private func makeFailedMeetingPresentationTestDirectory() -> URL {
         .appendingPathComponent("FailedMeetingPresentationTests-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
+}
+
+private func writeFailedMeetingAudio(in directory: URL, named name: String) -> URL {
+    let url = directory.appendingPathComponent(name)
+    FileManager.default.createFile(atPath: url.path, contents: Data(repeating: 0x2A, count: 4096))
+    return url
 }

@@ -446,6 +446,8 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/FailedMeetingUsableAudio.swift"
+    "Sources/Meeting/FailedMeetingItem.swift"
+    "Sources/Meeting/FailedMeetingPresentation.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
     "Sources/Meeting/MeetingPromptRecordAction.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"

@@ -5,9 +5,9 @@
 // MeetingSessionController still owns the `@Published var failedMeetings`
 // surface and supplies narrow callbacks for the state transitions it owns.
 //
-// MeetingSessionController.FailedMeetingItem stays resolvable via a typealias
-// on the controller so every existing call site (Settings/Home UI,
-// FailedMeetingPresentation) keeps compiling unchanged.
+// The row type itself lives in FailedMeetingItem.swift. This store and
+// MeetingSessionController keep a `FailedMeetingItem` typealias so every
+// existing call site (Settings/Home UI) keeps compiling unchanged.
 
 import Foundation
 import TranscriptedCore
@@ -15,19 +15,7 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class FailedMeetingStore {
-    struct FailedMeetingItem: Identifiable, Equatable {
-        let id: UUID
-        let timestamp: Date
-        let title: String
-        let detail: String
-        let meta: String
-        let failureKind: MeetingFailureKind
-        let isRetryable: Bool
-        let isRetrying: Bool
-        let hasAudioFiles: Bool
-        let audioURLs: [URL]
-        var usableAudio: FailedMeetingUsableAudio = .unknown
-    }
+    typealias FailedMeetingItem = FailedMeetingPresentation.FailedMeetingItem
 
     private let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
