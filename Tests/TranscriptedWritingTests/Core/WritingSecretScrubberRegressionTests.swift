@@ -1,0 +1,116 @@
+import Testing
+@testable import TranscriptedWritingCore
+
+/// Inputs an independent review found on the first version: ordinary
+/// writing that was redacted (and that the one-time rescrub would have made
+/// permanent), and labelled secrets that got through.
+@Suite("Writing secret scrubber review regressions")
+struct WritingSecretScrubberRegressionTests {
+    private static let slack = "com.tinyspeck.slackmacgap"
+    private static let messages = "com.apple.MobileSMS"
+
+    static let ordinary: [String] = [
+        "we need basic end-to-end tests",
+        "a basic follow-up and basic real-time sync",
+        "security code review 2024 is tomorrow",
+        "The offer expires 12/31",
+        "the code was 1500 lines long",
+        "pin 100 items to the board",
+        "code freeze tickets:\nAPP-123\nAPP-456",
+        "Python3",
+        "macOS26",
+        "covid19",
+        "Windows11",
+        "Q3-2026",
+        "FY27",
+        // Second review round.
+        "First pass: v2 of the doc",
+        "basic Real-Time sync and a Basic Follow-Up Plan",
+        "the password for the router is written on the box",
+        "the code was 1500 lines long\nnext line",
+        "we shipped 1000 items",
+    ]
+
+    @Test("Ordinary writing the first version redacted comes back unchanged", arguments: ordinary)
+    func ordinaryKept(_ text: String) {
+        for app in [Self.slack, Self.messages] {
+            let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: app)
+            #expect(result.clean == text, "\(app)")
+            #expect(result.kinds.isEmpty)
+        }
+    }
+
+    struct Leak: CustomTestStringConvertible, Sendable {
+        let text: String
+        let secrets: [String]
+        let kept: String
+        var testDescription: String { text }
+    }
+
+    static let leaks: [Leak] = [
+        Leak(text: "password: $unshine1", secrets: ["$unshine1"], kept: "password: "),
+        Leak(text: "token: `abc123def456`", secrets: ["abc123def456"], kept: "token: `"),
+        Leak(text: "SECRET_KEY: `s3cr3t-value`", secrets: ["s3cr3t-value"], kept: "SECRET_KEY: `"),
+        Leak(text: "password: abc'123x", secrets: ["abc'123x", "123x"], kept: "password: "),
+        Leak(text: "password: (hunter22)", secrets: ["hunter22"], kept: "password: ("),
+        Leak(text: "pass: hunter22", secrets: ["hunter22"], kept: "pass: "),
+        Leak(text: "the password for the guest wifi is sunshine42", secrets: ["sunshine42"], kept: "the password for the guest wifi is "),
+        Leak(text: "4111 1111-1111 1111 is my card", secrets: ["4111", "1111"], kept: " is my card"),
+        Leak(
+            text: "4111 1111 1111 1111 12/28 123",
+            secrets: ["4111", "12/28", "123"],
+            kept: "\u{27E8}redacted:card\u{27E9} \u{27E8}redacted:card\u{27E9} \u{27E8}redacted:code\u{27E9}"
+        ),
+        // Second review round: a code or PIN followed by more words or a new line.
+        Leak(text: "PIN 4821\nsee you tonight", secrets: ["4821"], kept: "see you tonight"),
+        Leak(text: "code: 4821\nthanks", secrets: ["4821"], kept: "thanks"),
+        Leak(text: "Your code: 482913\nDo not share it", secrets: ["482913"], kept: "Do not share it"),
+        Leak(text: "the gate code is 4821 thanks", secrets: ["4821"], kept: " thanks"),
+        Leak(text: "the code is 482913 hurry", secrets: ["482913"], kept: " hurry"),
+        Leak(text: "the code is 4821 for the front door", secrets: ["4821"], kept: " for the front door"),
+        Leak(text: "wifi password:\nSummer2024", secrets: ["Summer2024"], kept: "wifi password:"),
+    ]
+
+    @Test("Labelled secrets the first version let through are removed", arguments: leaks)
+    func leakRemoved(_ leak: Leak) {
+        let result = WritingSecretScrubber.scrub(leak.text, appBundleIdentifier: Self.slack)
+        for secret in leak.secrets {
+            #expect(!result.clean.contains(secret), "\(secret) survived")
+        }
+        #expect(result.clean.contains(leak.kept))
+        #expect(!result.kinds.isEmpty)
+    }
+
+    @Test("In a terminal, a word with a number is a password unless it's a versioned tool")
+    func wordWithNumberInTerminal() {
+        let terminal = "com.apple.Terminal"
+        #expect(WritingSecretScrubber.scrub("./install.sh\nTigers2024", appBundleIdentifier: terminal).clean
+            == "./install.sh\n\u{27E8}redacted:password\u{27E9}")
+        for tool in ["python3", "pip3", "node20"] {
+            #expect(WritingSecretScrubber.scrub(tool, appBundleIdentifier: terminal).kinds.isEmpty, "\(tool)")
+        }
+    }
+
+    @Test("Card boxes: a code over multi-digit boxes, month and year boxes, and an exp line after the card")
+    func boxesAfterCard() {
+        let chrome = "com.google.Chrome"
+        #expect(WritingSecretScrubber.scrub("482\n913", appBundleIdentifier: chrome).isOnlyRedactions)
+        #expect(WritingSecretScrubber.scrub("4829\n1375", appBundleIdentifier: chrome).isOnlyRedactions)
+        let months = WritingSecretScrubber.scrub("4111\n1111\n1111\n1111\n12\n28\n123", appBundleIdentifier: chrome)
+        #expect(months.isOnlyRedactions)
+        #expect(!months.clean.contains { $0.isNumber })
+        let expLine = WritingSecretScrubber.scrub("my card 4111 1111 1111 1111\nexp 12/28", appBundleIdentifier: chrome)
+        #expect(!expLine.clean.contains("12/28"))
+        // Two numbers in a conversation aren't a split code.
+        #expect(WritingSecretScrubber.scrub("how many?\n100\n200", appBundleIdentifier: "com.apple.MobileSMS").kinds.isEmpty)
+    }
+
+    @Test("A word with a number on the end is a password in a browser, and common password words are everywhere")
+    func wordWithNumberByApp() {
+        #expect(WritingSecretScrubber.scrub("macOS26", appBundleIdentifier: "com.google.Chrome").kinds == [.password])
+        #expect(WritingSecretScrubber.scrub("macOS26", appBundleIdentifier: Self.slack).kinds.isEmpty)
+        for common in ["hunter22", "qwerty123", "Password123!", "letmein1"] {
+            #expect(WritingSecretScrubber.scrub(common, appBundleIdentifier: Self.slack).kinds == [.password], "\(common)")
+        }
+    }
+}

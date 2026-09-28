@@ -154,6 +154,14 @@ struct DiagnosticsMetadataRedactorTests {
         #expect(DiagnosticsMetadataRedactor.logSafeEvent("private event\ntext") == "event-redacted")
     }
 
+    @Test("The day-file rescrub logs its file counts and nothing else")
+    func rescrubCounts() {
+        #expect(field("scanned", "12") == "scanned=12")
+        #expect(field("changed", "1") == "changed=1")
+        #expect(field("failures", "0") == "failures=0")
+        #expect(field("changed", "Writing_2026-09-25.md") != "changed=Writing_2026-09-25.md")
+    }
+
     private func field(_ key: String, _ value: String) -> String {
         DiagnosticsMetadataRedactor.logSafeField(forKey: key, value: value)
     }

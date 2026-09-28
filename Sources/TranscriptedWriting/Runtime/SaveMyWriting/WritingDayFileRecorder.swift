@@ -160,6 +160,31 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         }
     }
 
+    /// Scrubs day files an older build wrote (`WritingDayFileRescrubber`).
+    /// Each file on the same queue as appends, one at a time, so it never
+    /// races an append and keyboard batches wait at most one file. Stops
+    /// between files once `shouldContinue` says so (Writing stopping). Each
+    /// rewritten file is announced through `didWrite`, like an append.
+    @discardableResult
+    func rescrubExistingDayFiles(
+        shouldContinue: () -> Bool = { true }
+    ) -> WritingDayFileRescrubber.Outcome {
+        let folder = directory()
+        var outcome = WritingDayFileRescrubber.Outcome()
+        for name in WritingDayFileStore.dayFileNames(in: folder) {
+            guard shouldContinue() else {
+                outcome.failures += 1
+                break
+            }
+            let result = queue.sync {
+                WritingDayFileRescrubber.rescrub(dayFile: name, in: folder, timeZone: timeZone(), locale: locale)
+            }
+            outcome.record(result)
+            if case let .changed(url) = result { didWrite(url) }
+        }
+        return outcome
+    }
+
     private func ingestOnQueue(_ events: [PersonalHistoryEvent]) {
         let gate = gate()
         guard gate.enabled else {

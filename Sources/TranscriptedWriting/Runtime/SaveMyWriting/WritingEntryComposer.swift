@@ -12,7 +12,12 @@ import Foundation
 /// isn't saved. A scrap (under 3 words, like "yeah I can") doesn't end at a
 /// segment break when the same app's next segment starts within a minute:
 /// it folds into that entry on its own line, so quick chat replies don't
-/// each become an entry. Pure: the caller passes the clock. Not part of Tilde.
+/// each become an entry. Box fragments (one character, or a few digits with
+/// no letters, like a card or OTP box) don't count toward the 3 words, so a
+/// card typed over four boxes stays one entry the scrubber can see whole. Every closed entry goes through
+/// `WritingSecretScrubber` before it's returned; an entry that was nothing
+/// but a secret isn't returned at all. Pure: the caller passes the clock.
+/// Not part of Tilde.
 struct WritingEntryComposer {
     static let idleGapMilliseconds: Int64 = 120_000
     static let minimumCharacters = 2
@@ -74,8 +79,30 @@ struct WritingEntryComposer {
         }
     }
 
+    /// The last few lines each app's previous entries ended with, kept in
+    /// memory only, so the scrubber can see the command a password answers:
+    /// in a terminal, `sudo apt update` ends its entry at Return and the
+    /// password starts the next one. Per app, so a Slack reply in between
+    /// doesn't lose the Terminal context.
+    private struct RecentLines {
+        let lastActivityMilliseconds: Int64
+        let lines: [String]
+    }
+
+    private struct ContextKey: Hashable {
+        let appBundleIdentifier: String
+        let historyIdentifier: String
+    }
+
+    static let contextLineLimit = 6
+    /// How long a previous entry counts as context: sudo waits 5 minutes
+    /// for its password.
+    static let contextWindowMilliseconds: Int64 = 300_000
+    private static let contextAppLimit = 16
+
     private let makeEntryID: @Sendable (Int64) -> String
     private var open: OpenEntry?
+    private var recent: [ContextKey: RecentLines] = [:]
 
     /// `makeEntryID` gets the first keystroke's time in milliseconds.
     init(makeEntryID: @escaping @Sendable (Int64) -> String) {
@@ -139,13 +166,32 @@ struct WritingEntryComposer {
     /// Drops the open entry unsaved: Save my writing went off, or delete all.
     mutating func discardOpenEntry() {
         open = nil
+        recent.removeAll()
     }
 
     private mutating func closeOpen() -> Entry? {
         guard let entry = open else { return nil }
         open = nil
-        let text = entry.pieces.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = entry.pieces.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = precedingLines(for: entry)
+        remember(
+            RecentLines(
+                lastActivityMilliseconds: entry.lastActivityMilliseconds,
+                lines: Array((context + typed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+                    .suffix(Self.contextLineLimit))
+            ),
+            for: Self.contextKey(entry)
+        )
+        guard typed.count >= Self.minimumCharacters else { return nil }
+        let scrubbed = WritingSecretScrubber.scrub(
+            typed,
+            appBundleIdentifier: entry.appBundleIdentifier,
+            precedingLines: context
+        )
+        guard !scrubbed.isOnlyRedactions else { return nil }
+        let text = scrubbed.clean.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= Self.minimumCharacters else { return nil }
+        let wordCount = Self.wordCount(text)
         return Entry(
             entryID: entry.entryID,
             capturedAtMilliseconds: entry.firstTimestampMilliseconds,
@@ -153,10 +199,36 @@ struct WritingEntryComposer {
             historyIdentifier: entry.historyIdentifier,
             consentIdentifier: entry.consentIdentifier,
             text: text,
-            wordCount: Self.wordCount(text),
+            wordCount: wordCount,
             characterCount: text.count,
-            acceptedWordCount: entry.pieces.filter(\.accepted).reduce(0) { $0 + Self.wordCount($1.text) }
+            acceptedWordCount: min(
+                wordCount,
+                entry.pieces.filter(\.accepted).reduce(0) { $0 + Self.wordCount($1.text) }
+            )
         )
+    }
+
+    /// The previous entry's tail when it was the same app and history and
+    /// ended within the idle gap of this entry's first keystroke.
+    private func precedingLines(for entry: OpenEntry) -> [String] {
+        guard let recent = recent[Self.contextKey(entry)],
+              entry.firstTimestampMilliseconds - recent.lastActivityMilliseconds <= Self.contextWindowMilliseconds else {
+            return []
+        }
+        return recent.lines
+    }
+
+    private mutating func remember(_ lines: RecentLines, for key: ContextKey) {
+        recent[key] = lines
+        guard recent.count > Self.contextAppLimit,
+              let oldest = recent.min(by: { $0.value.lastActivityMilliseconds < $1.value.lastActivityMilliseconds }) else {
+            return
+        }
+        recent[oldest.key] = nil
+    }
+
+    private static func contextKey(_ entry: OpenEntry) -> ContextKey {
+        ContextKey(appBundleIdentifier: entry.appBundleIdentifier, historyIdentifier: entry.historyIdentifier)
     }
 
     private static func continues(_ entry: OpenEntry, with event: PersonalHistoryEvent) -> Bool {
@@ -175,7 +247,7 @@ struct WritingEntryComposer {
             && entry.historyIdentifier == event.historyIdentifier
             && entry.consentIdentifier == event.consentIdentifier
             && event.timestampMilliseconds - entry.lastActivityMilliseconds <= scrapMergeGapMilliseconds
-            && wordCount(entry.text) < scrapWordLimit
+            && scrapWordCount(entry.text) < scrapWordLimit
     }
 
     /// When `event` is from a new segment chain, puts the new segment on its
@@ -195,6 +267,14 @@ struct WritingEntryComposer {
         case .acceptedSuggestion: entry.append(event.text, accepted: true)
         case .deletion: entry.deleteLast(event.deletedCharacters ?? 0)
         }
+    }
+
+    /// Words toward the scrap limit: box fragments (one character, or up to
+    /// 5 characters with no letters: `4111`, `12/28`, `4`) don't count.
+    private static func scrapWordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).filter { word in
+            !(word.count == 1 || (word.count <= 5 && !word.contains(where: \.isLetter)))
+        }.count
     }
 
     private static func wordCount(_ text: String) -> Int {
