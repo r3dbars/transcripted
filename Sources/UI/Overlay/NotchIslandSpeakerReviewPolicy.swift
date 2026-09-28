@@ -8,7 +8,8 @@ import Foundation
 
 enum NotchIslandSpeakerReviewPolicy {
     /// The Later button's ring. Touching the review (play, Yes, No, typing)
-    /// stops it, so the island never closes on someone mid-answer.
+    /// stops it, so the island never closes on someone mid-answer. It only
+    /// runs while the review is on screen (`laterCountdownRuns`).
     static let laterSeconds: Double = 20
     /// How long "Everyone's named" stays before the island closes itself.
     static let doneLingerSeconds: Double = 6
@@ -25,8 +26,8 @@ enum NotchIslandSpeakerReviewPolicy {
     }
 
     /// A voice with a suggested name gets a yes/no question; one without
-    /// gets a name box. The pipeline only sends voices it isn't sure about,
-    /// so a suggestion here is always worth confirming, never assumed.
+    /// gets a name box. Voices the pipeline named by itself don't come
+    /// through here: they're listed as recognized, with a hover correction.
     static func question(currentName: String?, needsConfirmation: Bool) -> Question {
         let trimmed = currentName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if needsConfirmation, !trimmed.isEmpty {
@@ -104,6 +105,100 @@ enum NotchIslandSpeakerReviewPolicy {
         }
     }
 
+    // MARK: The name box
+
+    /// One row in the list under the name box.
+    enum NameBoxRow: Equatable {
+        /// A saved person or invitee from the suggestions.
+        case saved(String)
+        /// What was typed, saved as someone new.
+        case newPerson(String)
+
+        var label: String {
+            switch self {
+            case .saved(let label), .newPerson(let label): return label
+            }
+        }
+    }
+
+    /// The rows under the name box: the suggestions, then what was typed as
+    /// a new person unless a suggestion already is exactly that name.
+    static func nameBoxRows(typed: String, suggestions: [Suggestion]) -> [NameBoxRow] {
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var rows = suggestions.map { NameBoxRow.saved($0.label) }
+        if exactMatchIndex(typed: trimmed, suggestions: suggestions) == nil {
+            rows.append(.newPerson(trimmed))
+        }
+        return rows
+    }
+
+    /// The row Return picks when nobody used the arrows: an exact match if
+    /// there is one, otherwise the typed name as a new person. Never a
+    /// longer saved name, so "Chris" can't turn into "Christina".
+    static func defaultHighlight(typed: String, suggestions: [Suggestion]) -> Int? {
+        let rows = nameBoxRows(typed: typed, suggestions: suggestions)
+        guard !rows.isEmpty else { return nil }
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return exactMatchIndex(typed: trimmed, suggestions: suggestions) ?? (rows.count - 1)
+    }
+
+    /// ↓ / ↑ from `highlighted` (nil = the default row), kept inside the rows.
+    static func movedHighlight(from highlighted: Int?, by delta: Int, typed: String, suggestions: [Suggestion]) -> Int? {
+        let rows = nameBoxRows(typed: typed, suggestions: suggestions)
+        guard !rows.isEmpty,
+              let start = highlighted ?? defaultHighlight(typed: typed, suggestions: suggestions) else { return nil }
+        return min(max(start + delta, 0), rows.count - 1)
+    }
+
+    /// What Return or Tab saves: the row the person arrowed to, else the
+    /// default row. Nil for an empty box.
+    static func nameToSave(typed: String, suggestions: [Suggestion], highlighted: Int?) -> String? {
+        let rows = nameBoxRows(typed: typed, suggestions: suggestions)
+        if let highlighted, rows.indices.contains(highlighted) {
+            return rows[highlighted].label
+        }
+        guard let index = defaultHighlight(typed: typed, suggestions: suggestions) else { return nil }
+        return rows[index].label
+    }
+
+    /// The name a voice ends up with when Done or Later is pressed: one
+    /// already submitted, else whatever is sitting in its name box, read the
+    /// same way Return would. No typed name is lost.
+    static func answerOnFinish(committed: String?, typed: String, suggestions: [Suggestion], highlighted: Int?) -> String? {
+        if let committed { return committed }
+        return nameToSave(typed: typed, suggestions: suggestions, highlighted: highlighted)
+    }
+
+    private static func exactMatchIndex(typed: String, suggestions: [Suggestion]) -> Int? {
+        let key = SpeakerNameSelectionPolicy.normalizedSearchText(typed)
+        return suggestions.firstIndex { SpeakerNameSelectionPolicy.normalizedSearchText($0.label) == key }
+    }
+
+    // MARK: Timing
+
+    /// The Later ring (and the review's own close) counts down only while
+    /// the review is on screen and the pointer is off it. Hidden behind a
+    /// dictation or a busy meeting, it waits.
+    static func laterCountdownRuns(visible: Bool, hovered: Bool) -> Bool {
+        visible && !hovered
+    }
+
+    // MARK: Recognized voices
+
+    /// The hover offer on a voice Transcripted named by itself.
+    static func correctionPrompt(name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let first = trimmed.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? trimmed
+        return "Not \(first)?"
+    }
+
+    /// Done on a list where everyone was recognized just closes unless
+    /// something was corrected; a review that asked always sums up.
+    static func doneShowsSummary(recognizedOnly: Bool, updates: Int) -> Bool {
+        !recognizedOnly || updates > 0
+    }
+
     /// The title and line the island shows after Done.
     static func doneCopy(leftForLater: Int) -> (title: String, detail: String) {
         if leftForLater <= 0 {
@@ -114,8 +209,13 @@ enum NotchIslandSpeakerReviewPolicy {
     }
 
     /// The header question, with the meeting's name when it is known.
-    static func headerTitle(meetingTitle: String?) -> String {
+    /// When every voice was recognized nothing is asked, so the header just
+    /// says who was on it.
+    static func headerTitle(meetingTitle: String?, recognizedOnly: Bool = false) -> String {
         let trimmed = meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if recognizedOnly {
+            return trimmed.isEmpty ? "On this call" : "On \(trimmed)"
+        }
         return trimmed.isEmpty ? "Who was on this call?" : "Who was on \(trimmed)?"
     }
 }

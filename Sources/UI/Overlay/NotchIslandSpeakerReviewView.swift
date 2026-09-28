@@ -1,9 +1,12 @@
 // NotchIslandSpeakerReviewView.swift
 // "Who was on this call?" inside the notch island, in place of the speaker
-// review window. It opens by itself when a saved meeting has voices the
-// pipeline isn't sure about:
+// review window. It opens by itself after every saved meeting with a remote
+// voice:
 //
-//   - voices Transcripted named on its own show as "recognized"
+//   - voices Transcripted named on its own show as "recognized"; hovering
+//     one offers "Not Taylor?", which opens a name box to correct it
+//   - when every voice was recognized nothing is asked: the island lists
+//     who was on the call and closes itself (Done, or its ring running out)
 //   - a likely match asks "Is this Maya?" with Yes and No
 //   - No, or a voice with no guess, opens a name box with the calendar
 //     invitees as one-tap names (an arrow shows more than three) and
@@ -14,7 +17,9 @@
 // Done saves the answers through the same `SpeakerNameUpdate`s the review
 // window builds, then shows "Everyone's named" with Open transcript. Later
 // (or its 20 s ring running out) saves whatever was answered and leaves
-// the rest for Speakers. The rules live in NotchIslandSpeakerReviewPolicy.
+// the rest for Speakers. A name typed but not submitted counts on both. The
+// ring only runs while the review is on screen. The rules live in
+// NotchIslandSpeakerReviewPolicy.
 
 import AppKit
 import TranscriptedCore
@@ -39,21 +44,34 @@ final class NotchIslandSpeakerReviewView: NSView {
     let requestID: UUID
     private let request: SpeakerNamingRequest
     private let stack = NSStackView()
+    /// Voices the review asks about.
     private var rows: [NotchIslandVoiceRowView] = []
+    /// Voices named on their own, listed with a hover correction.
+    private var recognizedRows: [NotchIslandVoiceRowView] = []
+    /// Recognized names with no clip to correct from (shown, not editable).
+    private var plainRecognizedNames: [String] = []
+    /// Everyone was recognized: nothing to ask, just who was on the call.
+    let isRecognizedOnly: Bool
     private var meetingTitle: String?
     private var invitees: [String] = []
-    private var laterButton: NotchIslandButton?
+    /// The button carrying the countdown ring: Later, or Done when nothing is asked.
+    private var countdownButton: NotchIslandButton?
     private var laterTask: Task<Void, Never>?
     private var laterDeadline: Date?
-    private var laterPausedRemaining: TimeInterval?
+    /// Time left on the ring while it isn't running.
+    private var laterRemaining: TimeInterval = NotchIslandSpeakerReviewPolicy.laterSeconds
     private var laterStopped = false
     private var lingerTask: Task<Void, Never>?
     private var isHovered = false
+    /// The island is showing this review (not waiting behind a dictation or
+    /// a busy meeting). The controller reports it; until then it waits.
+    private var isOnScreen = false
     private(set) var isFinished = false
 
     init(request: SpeakerNamingRequest) {
         self.request = request
         self.requestID = request.id
+        self.isRecognizedOnly = request.speakers.isEmpty
         super.init(frame: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 10))
         translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
@@ -71,20 +89,33 @@ final class NotchIslandSpeakerReviewView: NSView {
         // Doubtful suggestions first: the first answer teaches the matcher most.
         let ranked = SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .system })
             + SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .mic })
-        rows = ranked.map { entry in
-            let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople)
-            row.onChange = { [weak self] in self?.rowChanged() }
-            row.onInteract = { [weak self] in self?.stopLaterCountdown() }
-            row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
-            row.onSubmit = { [weak self, weak row] in self?.focusNextOpenRow(after: row) }
-            return row
+        rows = ranked.map { makeRow(for: $0, recognized: false) }
+        recognizedRows = request.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
+        let correctable = Set(request.recognizedSpeakers.compactMap {
+            $0.currentName.map(SpeakerNameSelectionPolicy.normalizedSearchText)
+        })
+        plainRecognizedNames = request.recognizedSpeakerNames.filter {
+            !correctable.contains(SpeakerNameSelectionPolicy.normalizedSearchText($0))
         }
         rebuild()
-        startLaterCountdown()
-        trackShown()
+        // The ring waits until the island reports the review on screen.
+        if !isRecognizedOnly { trackShown() }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: nil))
+        setAccessibilityLabel(headerTitle)
+    }
+
+    private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
+        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople, recognized: recognized)
+        row.onChange = { [weak self] in self?.rowChanged() }
+        row.onInteract = { [weak self] in self?.stopLaterCountdown() }
+        row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
+        row.onSubmit = { [weak self, weak row] in self?.focusNextOpenRow(after: row) }
+        return row
+    }
+
+    private var headerTitle: String {
+        NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: meetingTitle, recognizedOnly: isRecognizedOnly)
     }
 
     @available(*, unavailable)
@@ -103,8 +134,8 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     func setMeetingTitle(_ title: String?) {
         meetingTitle = title
-        setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: title))
         guard !isFinished else { return }
+        setAccessibilityLabel(headerTitle)
         rebuild()
     }
 
@@ -113,24 +144,21 @@ final class NotchIslandSpeakerReviewView: NSView {
         refreshInvitees()
     }
 
+    /// The island is (or stopped) showing this review. The Later ring only
+    /// runs while it is on screen, so a review hidden behind a dictation or
+    /// the next meeting never closes unseen.
+    func setOnScreen(_ onScreen: Bool) {
+        guard onScreen != isOnScreen else { return }
+        isOnScreen = onScreen
+        updateLaterClock()
+    }
+
     /// The pointer is over the island: hold the Later ring and the
     /// "Everyone's named" linger.
     func setHovered(_ hovered: Bool) {
         guard hovered != isHovered else { return }
         isHovered = hovered
-        if !laterStopped {
-            laterButton?.setCountdownPaused(hovered)
-            if hovered {
-                if let laterDeadline {
-                    laterPausedRemaining = max(1, laterDeadline.timeIntervalSinceNow)
-                }
-                laterTask?.cancel()
-                laterTask = nil
-            } else if let remaining = laterPausedRemaining {
-                laterPausedRemaining = nil
-                scheduleLater(after: remaining)
-            }
-        }
+        updateLaterClock()
         if isFinished {
             if hovered {
                 lingerTask?.cancel()
@@ -148,7 +176,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         if isFinished { return }
 
         let header = NotchIslandPalette.label(
-            NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: meetingTitle),
+            headerTitle,
             font: .systemFont(ofSize: 15, weight: .semibold),
             color: NotchIslandPalette.primaryText
         )
@@ -157,25 +185,37 @@ final class NotchIslandSpeakerReviewView: NSView {
         stack.addArrangedSubview(header)
         stack.setCustomSpacing(10, after: header)
 
-        for name in request.recognizedSpeakerNames {
-            stack.addArrangedSubview(recognizedRow(name))
+        var lastRow: NSView = header
+        for row in recognizedRows {
+            stack.addArrangedSubview(row)
+            lastRow = row
+        }
+        for name in plainRecognizedNames {
+            let row = recognizedRow(name)
+            stack.addArrangedSubview(row)
+            lastRow = row
         }
         for row in rows {
             stack.addArrangedSubview(row)
+            lastRow = row
         }
         refreshInvitees()
 
-        let later = NotchIslandButton(title: "Later", style: .plain, height: 30)
-        later.onPress = { [weak self] in self?.finishLater() }
-        later.setAccessibilityHelp("Save what you answered and name the rest later in Speakers.")
-        if !laterStopped {
-            later.startCountdown(seconds: max(1, laterDeadline.map { $0.timeIntervalSinceNow } ?? NotchIslandSpeakerReviewPolicy.laterSeconds))
-            if isHovered { later.setCountdownPaused(true) }
-        }
-        laterButton = later
         let done = NotchIslandButton(title: "Done", style: .accent, height: 30)
         done.onPress = { [weak self] in self?.finishDone() }
-        let buttons = NSStackView(views: [later, done])
+        let buttons: NSStackView
+        if isRecognizedOnly {
+            // Nothing to put off: Done carries the ring and closes the list.
+            done.setAccessibilityHelp("Close. Names are already saved.")
+            buttons = NSStackView(views: [done])
+            startCountdownRing(on: done)
+        } else {
+            let later = NotchIslandButton(title: "Later", style: .plain, height: 30)
+            later.onPress = { [weak self] in self?.finishLater() }
+            later.setAccessibilityHelp("Save what you answered and name the rest later in Speakers.")
+            startCountdownRing(on: later)
+            buttons = NSStackView(views: [later, done])
+        }
         buttons.orientation = .horizontal
         buttons.spacing = 8
         let footer = NSStackView(views: [NSView(), buttons])
@@ -183,8 +223,15 @@ final class NotchIslandSpeakerReviewView: NSView {
         footer.distribution = .fill
         footer.translatesAutoresizingMaskIntoConstraints = false
         footer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
-        stack.setCustomSpacing(12, after: rows.last ?? header)
+        stack.setCustomSpacing(12, after: lastRow)
         stack.addArrangedSubview(footer)
+    }
+
+    private func startCountdownRing(on button: NotchIslandButton) {
+        countdownButton = button
+        guard !laterStopped else { return }
+        button.startCountdown(seconds: max(1, laterDeadline.map { $0.timeIntervalSinceNow } ?? laterRemaining))
+        button.setCountdownPaused(!laterRuns)
     }
 
     private func recognizedRow(_ name: String) -> NSView {
@@ -208,8 +255,8 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func refreshInvitees() {
-        let used = Set(rows.compactMap(\.chosenName) + request.recognizedSpeakerNames)
-        for row in rows {
+        let used = Set((recognizedRows + rows).compactMap(\.chosenName) + plainRecognizedNames)
+        for row in recognizedRows + rows {
             row.setInvitees(invitees, alreadyUsed: used)
         }
     }
@@ -228,8 +275,25 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     // MARK: Later ring
 
-    private func startLaterCountdown() {
-        scheduleLater(after: NotchIslandSpeakerReviewPolicy.laterSeconds)
+    private var laterRuns: Bool {
+        NotchIslandSpeakerReviewPolicy.laterCountdownRuns(visible: isOnScreen, hovered: isHovered)
+    }
+
+    /// Runs or holds the ring to match `laterRuns`, keeping the time left.
+    private func updateLaterClock() {
+        guard !laterStopped, !isFinished else { return }
+        let runs = laterRuns
+        countdownButton?.setCountdownPaused(!runs)
+        if runs {
+            if laterTask == nil { scheduleLater(after: laterRemaining) }
+        } else if laterTask != nil {
+            if let laterDeadline {
+                laterRemaining = max(1, laterDeadline.timeIntervalSinceNow)
+            }
+            laterTask?.cancel()
+            laterTask = nil
+            laterDeadline = nil
+        }
     }
 
     private func scheduleLater(after seconds: TimeInterval) {
@@ -249,14 +313,16 @@ final class NotchIslandSpeakerReviewView: NSView {
         laterTask?.cancel()
         laterTask = nil
         laterDeadline = nil
-        laterPausedRemaining = nil
-        laterButton?.stopCountdown()
+        countdownButton?.stopCountdown()
     }
 
     // MARK: Finishing
 
+    /// Every answer, including a name left typed in an open box. Recognized
+    /// voices only add an update when they were corrected; `unanswered`
+    /// counts the asked voices still unnamed.
     private func collectUpdates() -> (updates: [SpeakerNameUpdate], unanswered: Int) {
-        var updates: [SpeakerNameUpdate] = []
+        var updates = recognizedRows.compactMap { $0.buildUpdate() }
         var unanswered = 0
         for row in rows {
             if let update = row.buildUpdate() {
@@ -274,17 +340,33 @@ final class NotchIslandSpeakerReviewView: NSView {
         laterTask?.cancel()
         SpeakerClipPlayback.stop()
         let updates = collectUpdates().updates
-        trackSubmitted(completionKind: "review_later", updates: updates)
+        if isRecognizedOnly {
+            trackMatchOutcomes(updates)
+        } else {
+            trackSubmitted(completionKind: "review_later", updates: updates)
+        }
         onLater?(updates)
     }
 
     private func finishDone() {
         guard !isFinished else { return }
+        let result = collectUpdates()
+        guard NotchIslandSpeakerReviewPolicy.doneShowsSummary(
+            recognizedOnly: isRecognizedOnly,
+            updates: result.updates.count
+        ) else {
+            // Everyone was recognized and nothing changed: just close.
+            finishLater()
+            return
+        }
         isFinished = true
         laterTask?.cancel()
         SpeakerClipPlayback.stop()
-        let result = collectUpdates()
-        trackSubmitted(completionKind: "save", updates: result.updates)
+        if isRecognizedOnly {
+            trackMatchOutcomes(result.updates)
+        } else {
+            trackSubmitted(completionKind: "save", updates: result.updates)
+        }
         showDone(leftForLater: result.unanswered)
         onDone?(result.updates, result.unanswered)
     }
@@ -402,7 +484,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         case none
         /// Yes to "Is this …?"
         case confirmed
-        /// No to the suggestion (the name box opens).
+        /// No to the suggestion, or "Not Taylor?" on a recognized voice
+        /// (the name box opens).
         case rejected
         /// A name typed or picked for this voice.
         case named(String)
@@ -415,6 +498,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
     private let entry: SpeakerNamingEntry
     private let question: NotchIslandSpeakerReviewPolicy.Question
+    /// Named on its own in this meeting: shown as recognized, corrected on
+    /// hover, never asked about.
+    private let isRecognized: Bool
     private let knownPeopleByLabel: [String: SpeakerIdentityOption]
     private let knownPeople: [(label: String, callCount: Int)]
     private var answer: Answer = .none
@@ -422,7 +508,11 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     private var showAllInvitees = false
     private var invitees: [String] = []
     private var usedNames: Set<String> = []
-    private var highlightedSuggestion = 0
+    /// The row under the name box the arrows moved to; nil means the
+    /// default (an exact match, else the typed name as a new person).
+    private var highlightedRow: Int?
+    private var isPointerInside = false
+    private var hoverArea: NSTrackingArea?
 
     private let stack = NSStackView()
     private let clip: NotchIslandClipButton
@@ -439,8 +529,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return field
     }()
 
-    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
+    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption], recognized: Bool = false) {
         self.entry = entry
+        self.isRecognized = recognized && !(entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         self.question = NotchIslandSpeakerReviewPolicy.question(
             currentName: entry.currentName,
             needsConfirmation: entry.needsConfirmation
@@ -473,10 +564,19 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         clip.onPress = { [weak self] in self?.onInteract?() }
-        if case .name = question { isEditing = true }
+        if case .name = question, !isRecognized { isEditing = true }
         rebuild()
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
+        if isRecognized, let name = entry.currentName {
+            // VoiceOver can't hover: offer the correction as an action.
+            setAccessibilityCustomActions([
+                NSAccessibilityCustomAction(name: NotchIslandSpeakerReviewPolicy.correctionPrompt(name: name)) { [weak self] in
+                    self?.reject()
+                    return true
+                },
+            ])
+        }
     }
 
     @available(*, unavailable)
@@ -487,7 +587,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     var isAnswered: Bool {
         switch answer {
         case .confirmed, .named: return true
-        case .none, .rejected: return false
+        case .none: return isRecognized
+        case .rejected: return false
         }
     }
 
@@ -497,7 +598,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         switch answer {
         case .confirmed: return entry.currentName
         case .named(let label): return knownPeopleByLabel[label]?.displayName ?? label
-        case .none, .rejected: return nil
+        case .none: return isRecognized ? entry.currentName : nil
+        case .rejected: return nil
         }
     }
 
@@ -518,6 +620,38 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         focusField()
     }
 
+    // MARK: Hover (recognized voices)
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard isRecognized else { return }
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setPointerInside(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setPointerInside(false)
+    }
+
+    private func setPointerInside(_ inside: Bool) {
+        guard isRecognized, inside != isPointerInside else { return }
+        isPointerInside = inside
+        // Only the resting "recognized" line changes on hover.
+        guard answer == .none, !isEditing else { return }
+        replaceTopLine()
+    }
+
     // MARK: Building
 
     private func rebuild() {
@@ -534,6 +668,14 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         needsLayout = true
     }
 
+    private func replaceTopLine() {
+        guard let first = stack.arrangedSubviews.first else { return rebuild() }
+        stack.removeArrangedSubview(first)
+        first.removeFromSuperview()
+        stack.insertArrangedSubview(topLine(), at: 0)
+        needsLayout = true
+    }
+
     private func topLine() -> NSView {
         var views: [NSView] = [clip]
         let text = NSStackView()
@@ -546,7 +688,10 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             text.addArrangedSubview(caption("confirmed"))
         case (.named(let label), _):
             text.addArrangedSubview(title(knownPeopleByLabel[label]?.displayName ?? label))
-            text.addArrangedSubview(caption("named"))
+            text.addArrangedSubview(caption(isRecognized ? "corrected" : "named"))
+        case (.none, _) where isRecognized:
+            text.addArrangedSubview(title(entry.currentName ?? ""))
+            text.addArrangedSubview(caption("recognized"))
         case (_, .confirm(let name)) where answer == .none:
             text.addArrangedSubview(title("Is this \(name)?"))
             text.addArrangedSubview(caption(quote))
@@ -558,6 +703,24 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         views.append(NSView())
 
         switch (answer, question) {
+        case (.none, _) where isRecognized:
+            if isPointerInside, let name = entry.currentName {
+                let correct = pill(NotchIslandSpeakerReviewPolicy.correctionPrompt(name: name), style: .subtle) { [weak self] in
+                    self?.reject()
+                }
+                correct.setAccessibilityHelp("Correct the name Transcripted gave this voice.")
+                views.append(correct)
+            } else {
+                views.append(checkmark())
+            }
+        case (.rejected, _) where isRecognized:
+            if let name = entry.currentName {
+                let keep = pill("Keep \(Self.firstName(name))", style: .subtle) { [weak self] in
+                    self?.keepRecognized()
+                }
+                keep.setAccessibilityHelp("It was \(name) after all.")
+                views.append(keep)
+            }
         case (.none, .confirm):
             views.append(pill("No", style: .plain) { [weak self] in self?.reject() })
             views.append(pill("Yes", style: .accent) { [weak self] in self?.confirm() })
@@ -572,7 +735,22 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         line.spacing = 10
         line.translatesAutoresizingMaskIntoConstraints = false
         line.widthAnchor.constraint(equalToConstant: NotchIslandSpeakerReviewView.contentWidth - 20).isActive = true
+        // Same height whether the hover pill or the check shows.
+        line.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
         return line
+    }
+
+    private func checkmark() -> NSView {
+        let check = NSImageView(image: NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .bold)) ?? NSImage())
+        check.contentTintColor = NotchIslandPalette.secondaryText
+        check.setContentHuggingPriority(.required, for: .horizontal)
+        return check
+    }
+
+    private static func firstName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? trimmed
     }
 
     private func fieldLine() -> NSView {
@@ -624,9 +802,11 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     }
 
     private func suggestionList() -> NSView? {
+        let typed = nameField.stringValue
         let suggestions = currentSuggestions
-        let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !typed.isEmpty else { return nil }
+        let rows = NotchIslandSpeakerReviewPolicy.nameBoxRows(typed: typed, suggestions: suggestions)
+        guard !rows.isEmpty else { return nil }
+        let highlighted = highlightedRow ?? NotchIslandSpeakerReviewPolicy.defaultHighlight(typed: typed, suggestions: suggestions)
         let list = NSStackView()
         list.orientation = .vertical
         list.alignment = .leading
@@ -636,14 +816,14 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         list.layer?.backgroundColor = NotchIslandPalette.buttonSubtle.cgColor
         list.layer?.cornerRadius = 10
         let width = NotchIslandSpeakerReviewView.contentWidth - 60
-        for (index, suggestion) in suggestions.enumerated() {
-            list.addArrangedSubview(suggestionRow(suggestion.label, detail: suggestion.detail, highlighted: index == highlightedSuggestion, width: width - 8))
-        }
-        let exactMatch = suggestions.contains {
-            SpeakerNameSelectionPolicy.normalizedSearchText($0.label) == SpeakerNameSelectionPolicy.normalizedSearchText(typed)
-        }
-        if !exactMatch {
-            list.addArrangedSubview(suggestionRow(typed, detail: "new person", highlighted: suggestions.isEmpty, width: width - 8))
+        let details = Dictionary(suggestions.map { ($0.label, $0.detail) }, uniquingKeysWith: { first, _ in first })
+        for (index, row) in rows.enumerated() {
+            let detail: String
+            switch row {
+            case .saved(let label): detail = details[label] ?? ""
+            case .newPerson: detail = "new person"
+            }
+            list.addArrangedSubview(suggestionRow(row.label, detail: detail, highlighted: index == highlighted, width: width - 8))
         }
         list.translatesAutoresizingMaskIntoConstraints = false
         list.widthAnchor.constraint(equalToConstant: width).isActive = true
@@ -708,7 +888,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     private var accessibilitySummary: String {
         switch (answer, question) {
         case (.confirmed, _): return "\(entry.currentName ?? "Voice"), confirmed"
-        case (.named(let label), _): return "\(knownPeopleByLabel[label]?.displayName ?? label), named"
+        case (.named(let label), _):
+            return "\(knownPeopleByLabel[label]?.displayName ?? label), \(isRecognized ? "corrected" : "named")"
+        case (.none, _) where isRecognized: return "\(entry.currentName ?? "Voice"), recognized"
         case (.none, .confirm(let name)): return "Is this \(name)?"
         default: return "Unnamed voice"
         }
@@ -738,16 +920,30 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         answer = .rejected
         isEditing = true
         nameField.stringValue = ""
+        highlightedRow = nil
         rebuild()
         onChange?()
         focusField()
     }
 
+    /// "Keep Taylor": the recognized name was right after all.
+    private func keepRecognized() {
+        onInteract?()
+        answer = .none
+        isEditing = false
+        nameField.stringValue = ""
+        highlightedRow = nil
+        window?.makeFirstResponder(nil)
+        rebuild()
+        onChange?()
+    }
+
     private func change() {
         onInteract?()
-        answer = question == .name ? .none : .rejected
+        answer = (question == .name && !isRecognized) ? .none : .rejected
         isEditing = true
         nameField.stringValue = ""
+        highlightedRow = nil
         rebuild()
         onChange?()
         focusField()
@@ -758,8 +954,12 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         stopClipIfPlaying()
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if isRecognized, Self.sameName(trimmed, entry.currentName) {
+            keepRecognized()
+            return
+        }
         if case .confirm(let suggested) = question,
-           SpeakerNameSelectionPolicy.normalizedSearchText(trimmed) == SpeakerNameSelectionPolicy.normalizedSearchText(suggested),
+           Self.sameName(trimmed, suggested),
            entry.currentName != nil {
             confirm()
             return
@@ -767,11 +967,16 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         answer = .named(trimmed)
         isEditing = false
         nameField.stringValue = ""
-        highlightedSuggestion = 0
+        highlightedRow = nil
         window?.makeFirstResponder(nil)
         rebuild()
         onChange?()
         onSubmit?()
+    }
+
+    private static func sameName(_ a: String, _ b: String?) -> Bool {
+        guard let b else { return false }
+        return SpeakerNameSelectionPolicy.normalizedSearchText(a) == SpeakerNameSelectionPolicy.normalizedSearchText(b)
     }
 
     private func focusField() {
@@ -783,71 +988,100 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     }
 
     /// The same `SpeakerNameUpdate` the review window would build for this
-    /// row, or nil when the voice was left unnamed.
+    /// row, or nil when the voice was left unnamed (or, for a recognized
+    /// voice, left as it was). A name still sitting in an open box counts,
+    /// read the way Return would read it.
     func buildUpdate() -> SpeakerNameUpdate? {
         switch answer {
         case .confirmed:
-            guard let current = entry.currentName, !current.isEmpty else { return nil }
-            if let suggestedProfileId = entry.suggestedProfileId {
-                return SpeakerNameUpdate(
-                    persistentSpeakerId: entry.id,
-                    diarizerSpeakerId: entry.diarizerSpeakerId,
-                    channel: entry.channel,
-                    newName: current,
-                    action: .merged(targetProfileId: suggestedProfileId)
-                )
+            return confirmedUpdate()
+        case .named(let label):
+            return namedUpdate(label)
+        case .none, .rejected:
+            guard isEditing,
+                  let pending = NotchIslandSpeakerReviewPolicy.answerOnFinish(
+                    committed: nil,
+                    typed: nameField.stringValue,
+                    suggestions: currentSuggestions,
+                    highlighted: highlightedRow
+                  ) else { return nil }
+            if isRecognized, Self.sameName(pending, entry.currentName) { return nil }
+            if case .confirm(let suggested) = question, Self.sameName(pending, suggested) {
+                return confirmedUpdate()
             }
+            return namedUpdate(pending)
+        }
+    }
+
+    private func confirmedUpdate() -> SpeakerNameUpdate? {
+        guard let current = entry.currentName, !current.isEmpty else { return nil }
+        if let suggestedProfileId = entry.suggestedProfileId {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
                 diarizerSpeakerId: entry.diarizerSpeakerId,
                 channel: entry.channel,
                 newName: current,
-                previousName: current,
-                action: .confirmed
+                action: .merged(targetProfileId: suggestedProfileId)
             )
-        case .named(let label):
-            return SpeakerNamingPolicy.typedNameUpdate(
-                entry: entry,
-                typedName: label,
-                optionsByLabel: knownPeopleByLabel
-            )
-        case .none, .rejected:
-            return nil
         }
+        return SpeakerNameUpdate(
+            persistentSpeakerId: entry.id,
+            diarizerSpeakerId: entry.diarizerSpeakerId,
+            channel: entry.channel,
+            newName: current,
+            previousName: current,
+            action: .confirmed
+        )
+    }
+
+    /// A typed or picked name. On a recognized voice this is a correction:
+    /// a new name saves as `.corrected`, and a saved person as a merge that
+    /// the naming coordinator turns into a correction of the recognized
+    /// person (their match is undone and disputed, the pick learns the voice).
+    private func namedUpdate(_ label: String) -> SpeakerNameUpdate? {
+        SpeakerNamingPolicy.typedNameUpdate(
+            entry: entry,
+            typedName: label,
+            optionsByLabel: knownPeopleByLabel
+        )
     }
 
     // MARK: Typing
 
     func controlTextDidChange(_ obj: Notification) {
         onInteract?()
-        highlightedSuggestion = 0
+        highlightedRow = nil
         refreshSuggestions()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)):
-            let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !typed.isEmpty else { return commandSelector == #selector(NSResponder.insertNewline(_:)) }
-            let suggestions = currentSuggestions
-            if suggestions.indices.contains(highlightedSuggestion) {
-                pick(suggestions[highlightedSuggestion].label)
-            } else {
-                pick(typed)
+            // The row arrowed to, else an exact match, else what was typed
+            // as a new person. Never a longer saved name nobody picked.
+            guard let name = NotchIslandSpeakerReviewPolicy.nameToSave(
+                typed: nameField.stringValue,
+                suggestions: currentSuggestions,
+                highlighted: highlightedRow
+            ) else {
+                return commandSelector == #selector(NSResponder.insertNewline(_:))
             }
+            pick(name)
             return true
-        case #selector(NSResponder.moveDown(_:)):
-            let count = currentSuggestions.count
-            guard count > 0 else { return false }
-            highlightedSuggestion = min(highlightedSuggestion + 1, count - 1)
-            refreshSuggestions()
-            return true
-        case #selector(NSResponder.moveUp(_:)):
-            highlightedSuggestion = max(0, highlightedSuggestion - 1)
+        case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)):
+            let delta = commandSelector == #selector(NSResponder.moveDown(_:)) ? 1 : -1
+            guard let moved = NotchIslandSpeakerReviewPolicy.movedHighlight(
+                from: highlightedRow,
+                by: delta,
+                typed: nameField.stringValue,
+                suggestions: currentSuggestions
+            ) else { return false }
+            highlightedRow = moved
             refreshSuggestions()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
             nameField.stringValue = ""
+            highlightedRow = nil
             refreshSuggestions()
             window?.makeFirstResponder(nil)
             return true

@@ -765,7 +765,58 @@ extension TranscriptionTaskManager {
             try await rollback.checkCancellation()
         }
 
-        if !namingEntries.isEmpty {
+        // Remote voices named silently in this meeting. They aren't asked
+        // about, but the review lists them with a clip each so a wrong
+        // auto-name can be corrected ("Not Taylor?") and land as a correction
+        // on the lifeline. A meeting where everyone was recognized still gets
+        // this list.
+        var recognizedEntries: [SpeakerNamingEntry] = []
+        if !autoAcceptedIds.isEmpty {
+            do {
+                let recognizedUtterances = result.systemUtterances.filter {
+                    autoAcceptedIds.contains(String($0.speakerId))
+                }
+                let clips = try SpeakerClipExtractor.extractClips(
+                    sourceAudioURL: systemURL,
+                    utterances: recognizedUtterances,
+                    channel: .system,
+                    speakerDB: speakerDB,
+                    clipsDirectory: transcription.speakerClipsDirectory
+                )
+                for clip in clips {
+                    guard let name = clip.currentName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !name.isEmpty else {
+                        _ = removeManagedCleanupFile(clip.clipURL, label: "unnamed recognized speaker clip")
+                        continue
+                    }
+                    let context = result.systemSpeakerContexts[clip.diarizerSpeakerId]
+                    recognizedEntries.append(SpeakerNamingEntry(
+                        id: clip.persistentSpeakerId,
+                        diarizerSpeakerId: clip.diarizerSpeakerId,
+                        channel: .system,
+                        clipURL: clip.clipURL,
+                        sampleText: clip.sampleText,
+                        currentName: name,
+                        matchSimilarity: clip.matchSimilarity,
+                        matchSecondSimilarity: context?.matchSecondSimilarity,
+                        callCount: context?.matchedProfileSnapshot?.callCount ?? 0,
+                        needsNaming: false,
+                        needsConfirmation: false,
+                        sessionEmbedding: context?.sessionEmbedding,
+                        matchedProfileSnapshot: context?.matchedProfileSnapshot
+                    ))
+                }
+                Self.registerSpeakerClipsRollback(clips.map(\.clipURL), channel: "recognized", into: rollback)
+            } catch {
+                AppLogger.pipeline.warning("Recognized clip extraction failed, recognized voices can't be corrected from the review", ["error": error.localizedDescription])
+            }
+            try await rollback.checkCancellation()
+        }
+
+        if SpeakerNamingPolicy.shouldQueueSpeakerReview(
+            askedVoices: namingEntries.count,
+            recognizedVoices: recognizedEntries.count
+        ) {
             // Seed knownPeople with existing named DB profiles so the sheet's combobox has
             // suggestions. Previously this was always empty — users typed blind.
             let allProfiles = speakerDB.allSpeakers()
@@ -790,6 +841,7 @@ extension TranscriptionTaskManager {
             }.count
 
             let capturedEntries = namingEntries
+            let capturedRecognizedEntries = recognizedEntries
             // Voices auto-named in this meeting, once each, in the order heard.
             var seenRecognizedNames: Set<String> = []
             let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in
@@ -811,6 +863,7 @@ extension TranscriptionTaskManager {
                     knownPeople: knownPeople,
                     recognizedPeopleCount: recognizedPeopleCount,
                     recognizedSpeakerNames: recognizedSpeakerNames,
+                    recognizedSpeakers: capturedRecognizedEntries,
                     transcriptURL: savedURL,
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,
@@ -821,6 +874,16 @@ extension TranscriptionTaskManager {
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                     importedRecoverySession: importedRecoverySession,
                     onComplete: { [weak self] updates in
+                        // A recognized voice joins the save only when it was
+                        // corrected; otherwise its auto-name stands.
+                        let reviewed = SpeakerNamingPolicy.reviewEntriesToFinalize(
+                            asked: capturedEntries,
+                            recognized: capturedRecognizedEntries,
+                            updates: updates
+                        )
+                        for entry in reviewed.discardClips {
+                            _ = self?.removeManagedCleanupFile(entry.clipURL, label: "recognized speaker clip")
+                        }
                         self?.handleNamingComplete(
                             updates: updates,
                             transcriptURL: savedURL,
@@ -833,7 +896,7 @@ extension TranscriptionTaskManager {
                             shouldRemoveMicAudio: shouldRemoveMicScratchAudio,
                             shouldRemoveSystemAudio: shouldRemoveSystemScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-                            clips: capturedEntries,
+                            clips: reviewed.finalize,
                             importedRecoverySession: importedRecoverySession,
                             requestId: speakerNamingRequestId
                         )
@@ -871,6 +934,7 @@ extension TranscriptionTaskManager {
 
             AppLogger.pipeline.info("Speaker naming requested", [
                 "total": "\(namingEntries.count)",
+                "recognized": "\(recognizedEntries.count)",
                 "mic": "\(namingEntries.filter { $0.channel == .mic }.count)",
                 "system": "\(namingEntries.filter { $0.channel == .system }.count)"
             ])
