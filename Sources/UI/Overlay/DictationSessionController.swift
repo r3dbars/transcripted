@@ -269,6 +269,26 @@ class DictationSessionController: ObservableObject {
     ///   alone cannot tell a retry apart from the press that preceded it, and
     ///   a user who taps Try Again four times would otherwise read as five
     ///   independent attempts in the denominator.
+    /// A clipboard too big to set aside kept paste-back from running. Copy
+    /// replaces it with the words, at the user's request, and then the usual
+    /// "Not pasted" notice takes over (Paste, or ⌘V where they go).
+    private func showClipboardBusy(_ text: String, message: String, overlayController: FloatingOverlayController) {
+        overlayController.showClipboardBusyNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+            guard let self, let overlayController else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setString(text, forType: .string) else {
+                overlayController.showError("Couldn't copy your words. They're saved in Dictations.")
+                return
+            }
+            self.showNotPasted(
+                text,
+                message: "Your words are on the clipboard. Press ⌘V to paste them.",
+                overlayController: overlayController
+            )
+        }
+    }
+
     /// The "Not pasted" notice, whose Paste button pastes into whatever app
     /// is in front now (the user clicks where the words go first).
     private func showNotPasted(_ text: String, message: String, overlayController: FloatingOverlayController) {
@@ -1705,7 +1725,12 @@ class DictationSessionController: ObservableObject {
                 } else {
                     combinedMessage = message
                 }
-                overlayController.showError(combinedMessage)
+                if saveFailureMessage == nil, pasteOutcome.notPastedOffer == .clipboardBusy {
+                    // The words never went on the clipboard; offer them back.
+                    self.showClipboardBusy(text, message: combinedMessage, overlayController: overlayController)
+                } else {
+                    overlayController.showError(combinedMessage)
+                }
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")

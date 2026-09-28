@@ -781,7 +781,11 @@ final class NotchIslandDropView: NSView {
             add(titleBlock(title, detail, wrapsDetail: true))
         case .dictationMessage(let message) where message.preview != nil:
             add(body("“\(message.preview ?? "")”", maxLines: 2))
-            add(NotchIslandPalette.label("Click where it goes, then press ⌘V.", font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText))
+            add(NotchIslandPalette.label(
+                message.hint ?? "Click where it goes, then press ⌘V.",
+                font: .systemFont(ofSize: 12),
+                color: NotchIslandPalette.secondaryText
+            ))
             let dismiss = NotchIslandButton(title: "Dismiss", style: .plain)
             dismiss.onPress = { [weak self] in self?.onAction?(.dictationDismissMessage) }
             dismiss.setContentHuggingPriority(.required, for: .horizontal)

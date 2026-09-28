@@ -42,6 +42,9 @@ struct NotchIslandDictationContent: Equatable {
         /// Seconds until the message closes on its own, drawn as a ring
         /// around Dismiss.
         var dismissSeconds: Double? = nil
+        /// The line under the words; nil reads "Click where it goes, then
+        /// press ⌘V."
+        var hint: String? = nil
     }
 
     var phase: Phase
