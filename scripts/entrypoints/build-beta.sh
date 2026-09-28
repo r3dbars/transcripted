@@ -502,6 +502,36 @@ else
     fi
 fi
 
+# Bundle the Nemotron 3 diarizer (the default speaker separation since the
+# YODAS3 speaker lab). Without it the first meeting after an update downloads
+# ~190 MB inside the 120 s model-wait budget, and a slow link fails the job.
+# NemotronDiarizationRunner loads `nemotron-diarizer-models/` flat: the preset's
+# .mlmodelc plus learnable_sil_emb.bin. Same flags as the pyannote bundle.
+NEMOTRON_PRESET_BUNDLE="Nemotron3Diarizer_fast128.mlmodelc"
+NEMOTRON_SRC="$HOME/Library/Application Support/FluidAudio/Models/nemotron-3-diarization"
+NEMOTRON_DEST="$APP_BUNDLE/Contents/Resources/nemotron-diarizer-models"
+if [ "$BUNDLE_DIARIZER_MODELS" = "0" ]; then
+    echo "⚠️  Skipping bundled Nemotron diarizer because BUNDLE_DIARIZER_MODELS=0"
+elif [ -f "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE/coremldata.bin" ] \
+    && [ -f "$NEMOTRON_SRC/learnable_sil_emb.bin" ] \
+    && [ -f "$NEMOTRON_SRC/.fluidaudio-nemotron3-weights" ]; then
+    echo "Bundling Nemotron diarizer ($(cat "$NEMOTRON_SRC/.fluidaudio-nemotron3-weights") weights)..."
+    rm -rf "$NEMOTRON_DEST"
+    mkdir -p "$NEMOTRON_DEST"
+    ditto "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE" "$NEMOTRON_DEST/$NEMOTRON_PRESET_BUNDLE"
+    cp "$NEMOTRON_SRC/learnable_sil_emb.bin" "$NEMOTRON_DEST/learnable_sil_emb.bin"
+else
+    if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
+        echo "⚠️  Nemotron diarizer not cached — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
+        echo "   The first meeting will download it."
+    else
+        echo "❌ Missing local Nemotron diarizer: $NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE"
+        echo "   Run one meeting (or the speaker lab) on this Mac so FluidAudio caches it,"
+        echo "   or rerun with REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 for a thin test build."
+        exit 1
+    fi
+fi
+
 # Bundle the ERes2Net speaker-embedding CoreML model — OFF by default for
 # DISTRIBUTION builds. The weights derive from VoxCeleb2 (research-only license),
 # so a shipped/notarized build must NOT redistribute them. The app resolves the
