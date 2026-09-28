@@ -88,11 +88,58 @@ struct WritingEntryComposerTests {
     func segmentBreak() {
         var composer = Self.composer()
         let closed = composer.ingest([
-            Self.typed("First message", session: "chain-a", at: Self.start),
+            Self.typed("The first full message", session: "chain-a", at: Self.start),
             Self.typed("Second message", session: "chain-b", at: Self.start + 1_000),
         ], receivedAt: Self.date(Self.start + 2_000))
-        #expect(closed.map(\.text) == ["First message"])
+        #expect(closed.map(\.text) == ["The first full message"])
         #expect(composer.closeAll().map(\.text) == ["Second message"])
+    }
+
+    @Test("A scrap folds into the same app's next segment within a minute")
+    func scrapFolds() throws {
+        var composer = Self.composer()
+        let closed = composer.ingest([
+            Self.typed("yeah ", session: "chain-a", at: Self.start),
+            Self.typed("sure", source: .acceptedSuggestion, session: "chain-a", at: Self.start + 500),
+            Self.typed("see you at the game", session: "chain-c", at: Self.start + 40_000),
+            try Self.deletion(4, session: "chain-c", at: Self.start + 41_000),
+            Self.typed("show", session: "chain-c", at: Self.start + 42_000),
+        ], receivedAt: Self.date(Self.start + 43_000))
+        #expect(closed.isEmpty)
+        // Once the fold reaches 3 words it's no longer a scrap.
+        let next = composer.ingest(
+            [Self.typed("ok", session: "chain-d", at: Self.start + 50_000)],
+            receivedAt: Self.date(Self.start + 50_500)
+        )
+        let entry = try #require(next.first)
+        #expect(entry.text == "yeah sure\nsee you at the show")
+        #expect(entry.capturedAtMilliseconds == Self.start)
+        #expect(entry.wordCount == 7)
+        #expect(entry.acceptedWordCount == 1)
+    }
+
+    @Test("A scrap stays its own entry after a minute, an app switch, or a deletion")
+    func scrapDoesNotFold() throws {
+        var composer = Self.composer()
+        var closed = composer.ingest([
+            Self.typed("sounds good", session: "chain-a", at: Self.start),
+            Self.typed("A new thought much later", session: "chain-b", at: Self.start + 60_001),
+        ], receivedAt: Self.date(Self.start + 61_000))
+        #expect(closed.map(\.text) == ["sounds good"])
+        _ = composer.closeAll()
+
+        closed = composer.ingest([
+            Self.typed("on it", session: "chain-a", at: Self.start + 100_000),
+            Self.typed("Email in Mail", session: "mail-chain", app: Self.mail, at: Self.start + 101_000),
+        ], receivedAt: Self.date(Self.start + 102_000))
+        #expect(closed.map(\.text) == ["on it"])
+        _ = composer.closeAll()
+
+        closed = composer.ingest([
+            Self.typed("thanks!", session: "chain-a", at: Self.start + 200_000),
+            try Self.deletion(1, session: "chain-b", at: Self.start + 201_000),
+        ], receivedAt: Self.date(Self.start + 202_000))
+        #expect(closed.map(\.text) == ["thanks!"])
     }
 
     @Test("Two minutes idle ends an entry")

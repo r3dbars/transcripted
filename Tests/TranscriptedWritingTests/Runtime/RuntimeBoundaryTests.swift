@@ -13,7 +13,7 @@ struct RuntimeBoundaryTests {
         #expect(LlamaRuntimeSnapshot.retrying(.healthTimeout).menuLine == "⚠️ Engine didn't become ready — retrying")
         #expect(LlamaRuntimeSnapshot.retrying(.processExited).menuLine == "⚠️ Engine stopped — retrying")
         #expect(LlamaRuntimeSnapshot.retrying(.completionFailed).menuLine == "⚠️ Engine stopped responding — retrying")
-        #expect(LlamaRuntimeSnapshot.failed(.assetsMissing).menuLine == "⚠️ Engine files missing — reinstall Tilde")
+        #expect(LlamaRuntimeSnapshot.failed(.assetsMissing).menuLine == "⚠️ Engine files missing — reinstall Transcripted")
         #expect(LlamaRuntimeSnapshot.retrying(.healthTimeout).restartReasonAfterExit == .healthTimeout)
         #expect(LlamaRuntimeSnapshot.ready.restartReasonAfterExit == .processExited)
     }

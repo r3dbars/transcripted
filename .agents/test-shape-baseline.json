@@ -56,7 +56,7 @@
     "Tests/TranscriptedCoreTests/AudioTests/MicStopTailHandoffTests.swift": 1,
     "Tests/TranscriptedCoreTests/AudioTests/SystemAudioStopTailHandoffTests.swift": 1,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 182,
+    "Tests/UIAutomationSurfaceContractTests.swift": 195,
     "Tests/WhisperCustomDictionaryTests.swift": 1
   },
   "wall-clock": {

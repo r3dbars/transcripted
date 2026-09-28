@@ -14,6 +14,7 @@ struct TranscriptedSettingsView: View {
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogSink
+    private let writingController: WritingController
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
@@ -115,6 +116,7 @@ struct TranscriptedSettingsView: View {
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
         self.appLogger = appState.logger
+        self.writingController = appState.writingController
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
@@ -448,6 +450,8 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
+        case .writing:
+            writingPage
         case .general:
             settingsPage
         case .people:
@@ -2908,6 +2912,17 @@ struct TranscriptedSettingsView: View {
         AgentConnectionSettingsPage()
     }
 
+    private var writingPage: some View {
+        WritingSettingsPage(
+            controller: writingController,
+            isCaptureBusy: {
+                sttRouter.isRecording
+                    || meetingSession.isCaptureSessionActive
+                    || meetingSession.hasRuntimeDiagnosticsWork
+            }
+        )
+    }
+
     private var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
@@ -3194,6 +3209,10 @@ struct TranscriptedSettingsView: View {
             return .speakerReview
         case .connectAgent:
             return .agentSetup
+        case .writing:
+            // No discovery area for Writing yet; its page views still
+            // arrive as `settings_page_viewed` with page_id `writing`.
+            return nil
         case .general:
             // The combined settings page spans capture-library, update, and
             // permission surfaces; no single discovery area fits it.

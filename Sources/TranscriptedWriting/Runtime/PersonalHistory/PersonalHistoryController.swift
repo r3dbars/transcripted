@@ -84,7 +84,7 @@ enum PersonalHistoryStorageHealth: String, Equatable, Sendable {
         case .healthy: return nil
         case .storeCorrupt, .keyUnavailable: return "History: not saving — reset required"
         case .storageUnavailable: return "History: not saving — storage unavailable"
-        case .internalError: return "History: not saving — restart Tilde"
+        case .internalError: return "History: not saving — restart Transcripted"
         }
     }
 }

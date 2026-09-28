@@ -56,6 +56,7 @@ func testFocusOrderContract() {
                     "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
                     "transcripted.settings.sidebar.dictations",
+                    "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
                     "transcripted.settings.sidebar.connect-agent",
                 ],
@@ -131,7 +132,7 @@ func testFocusOrderContract() {
             )
         }
 
-        // The five primary navigation pages are the ones with a ⌘1–⌘5 "Go"
+        // The primary navigation pages are the ones with a ⌘1–⌘6 "Go"
         // shortcut; in shortcut order they must be exactly the declared Tab order.
         let shortcutOrder = TranscriptedSettingsPage.allCases
             .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
@@ -140,7 +141,7 @@ func testFocusOrderContract() {
         assertEqual(
             shortcutOrder,
             FocusOrderContract.settingsSidebarOrder,
-            "the ⌘1–⌘5 navigation pages should stay in the settings navigation surface, in the declared focus order"
+            "the ⌘1–⌘6 navigation pages should stay in the settings navigation surface, in the declared focus order"
         )
 
         // The sidebar row is a SwiftUI view this runner does not compile, so
@@ -150,10 +151,19 @@ func testFocusOrderContract() {
             sidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
         )
+        // The sidebar view isn't compiled here either, so its row order is
+        // still read from source until the sidebar takes its pages as data.
+        assertTrue(
+            sidebarSource.contains("pages: [.today, .home, .dictations, .writing, .people, .connectAgent]"),
+            "the sidebar's primary rows should list the pages in the focus order the contract pins"
+        )
+        // The primary pages are the ones with a ⌘ shortcut, in page order.
         assertEqual(
-            FocusOrderContract.settingsSidebarOrder.count,
-            5,
-            "settings sidebar focus order should cover the five primary navigation pages"
+            FocusOrderContract.settingsSidebarOrder,
+            TranscriptedSettingsPage.allCases
+                .filter { $0.navigationShortcutKey != nil }
+                .map(\.automationIdentifier),
+            "settings sidebar focus order should cover the six primary navigation pages in ⌘1–⌘6 order"
         )
     }
 }

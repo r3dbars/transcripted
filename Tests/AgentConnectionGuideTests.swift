@@ -65,7 +65,7 @@ func testAgentConnectionGuide() {
             "local agent prompt should not include web/Cowork routing"
         )
         assertTrue(
-            prompt.contains("Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files."),
+            prompt.contains("Prefer Transcripted direct tools when available; otherwise search meetings, dictations, and writing together from files."),
             "prompt should support direct-tool retrieval and folder fallback"
         )
         assertTrue(
@@ -101,6 +101,15 @@ func testAgentConnectionGuide() {
             "prompt should include the dictations folder"
         )
         assertTrue(
+            prompt.contains("Writing:\n- \(AgentConnectionGuide.writingFolder.path)"),
+            "prompt should include the writing folder"
+        )
+        assertEqual(
+            AgentConnectionGuide.writingFolder.lastPathComponent,
+            "writing",
+            "writing folder should be the capture library's writing/ folder"
+        )
+        assertTrue(
             prompt.contains("If helpful, start with this meeting:\nPlanning Sync.md"),
             "meeting-specific prompt should preserve the selected filename"
         )
@@ -134,6 +143,10 @@ func testAgentConnectionGuide() {
 
         assertTrue(readme.contains("Transcripted Codex Inbox"), "README should name the Codex Inbox")
         assertTrue(agents.contains("Process only new unprocessed meetings"), "AGENTS should tell Codex not to backfill by default")
+        assertTrue(
+            agents.contains("- Writing: \(AgentConnectionGuide.writingFolder.path)"),
+            "AGENTS should list the writing folder next to meetings and dictations"
+        )
         assertTrue(setup.contains("transcripted-inbox-watch"), "setup prompt should name the heartbeat automation")
         assertTrue(state.contains("\"processedMeetings\": []"), "state should start with no processed meetings")
         assertTrue(state.contains("\"installedAt\""), "state should create a setup baseline")
@@ -146,6 +159,10 @@ func testAgentConnectionGuide() {
         assertTrue(prompt.contains("Transcripted Codex Inbox Setup"), "prompt should title the setup clearly")
         assertTrue(prompt.contains(inboxURL.path), "prompt should include the inbox path")
         assertTrue(prompt.contains(AgentConnectionGuide.meetingsFolder.path), "prompt should include the meetings folder")
+        assertTrue(
+            prompt.contains("- Writing: \(AgentConnectionGuide.writingFolder.path)"),
+            "prompt should include the writing folder"
+        )
         assertTrue(prompt.contains("Monday through Friday"), "prompt should ask for a weekday schedule")
         assertTrue(prompt.contains(":05 and :35"), "prompt should ask for checks after the hour and half-hour")
         assertTrue(prompt.contains("stay quiet"), "prompt should keep empty checks silent")
@@ -205,11 +222,13 @@ func testAgentConnectionGuide() {
         UserDefaults.standard.set(firstLibrary.path, forKey: key)
         let firstMeetings = AgentConnectionGuide.meetingsFolder.path
         let firstDictations = AgentConnectionGuide.dictationsFolder.path
+        let firstWriting = AgentConnectionGuide.writingFolder.path
         let firstText = AgentConnectionGuide.folderPathsText
 
         UserDefaults.standard.set(secondLibrary.path, forKey: key)
         let secondMeetings = AgentConnectionGuide.meetingsFolder.path
         let secondDictations = AgentConnectionGuide.dictationsFolder.path
+        let secondWriting = AgentConnectionGuide.writingFolder.path
         let secondText = AgentConnectionGuide.folderPathsText
 
         assertTrue(
@@ -218,8 +237,10 @@ func testAgentConnectionGuide() {
         )
         assertTrue(firstText.contains(firstMeetings), "folder copy should include current meetings path")
         assertTrue(firstText.contains(firstDictations), "folder copy should include current dictations path")
+        assertTrue(firstText.contains(firstWriting), "folder copy should include current writing path")
         assertTrue(
-            secondText.contains(secondMeetings) && secondText.contains(secondDictations),
+            secondText.contains(secondMeetings) && secondText.contains(secondDictations)
+                && secondText.contains(secondWriting),
             "folder path copy should follow a relocated capture library"
         )
         assertFalse(

@@ -227,7 +227,7 @@ struct OutcomeLedgerReasonTests {
         #expect(summary.keystrokesSavedToday == 0)
 
         #expect(OutcomeLedgerPresentation.heldBackLine(summary: summary, screenAccessGranted: true)
-            == "Tilde held back 10 times today, mostly because you kept typing.")
+            == "Autocomplete held back 10 times today, mostly because you kept typing.")
     }
 
     @Test("A tie breaks toward the most actionable reason")
@@ -249,7 +249,7 @@ struct OutcomeLedgerReasonTests {
             summary: summary,
             screenAccessGranted: true
         )
-        #expect(line == "Tilde held back 4 times today because it was not ready. Open Tilde to check the model and Screen Access.")
+        #expect(line == "Autocomplete held back 4 times today because it was not ready. Check the model status and Screen Recording.")
 
         let blocked = OutcomeLedgerPresentation.heldBackLine(
             summary: summary,
@@ -257,9 +257,9 @@ struct OutcomeLedgerReasonTests {
         )
         // Access went off part-way through a day that already has evidence:
         // the line must not claim the whole day was silent.
-        #expect(blocked == "Screen Access is off now, so Tilde is not suggesting. Turn it on to get suggestions back.")
+        #expect(blocked == "Screen Recording is off now, so autocomplete is not suggesting. Turn it on to get suggestions back.")
         #expect(OutcomeLedgerPresentation.heldBackLine(summary: .empty, screenAccessGranted: false)
-            == "Screen Access is off now, so Tilde is not suggesting. Turn it on to get suggestions back.")
+            == "Screen Recording is off now, so autocomplete is not suggesting. Turn it on to get suggestions back.")
 
         // A quiet, healthy day says nothing at all.
         #expect(OutcomeLedgerPresentation.heldBackLine(
@@ -295,19 +295,19 @@ struct OutcomeLedgerReasonTests {
             summary: stalled,
             wordsToday: 40,
             screenAccessGranted: true
-        ) == "5 keystrokes saved today · quiet 1×, Tilde was not ready")
+        ) == "5 keystrokes saved today · quiet 1×, autocomplete was not ready")
 
         // No ledger evidence yet: the old words line, unchanged.
         #expect(OutcomeLedgerPresentation.menuDetail(
             summary: .empty,
             wordsToday: 40,
             screenAccessGranted: true
-        ) == "40 words with Tilde today")
+        ) == "40 words with autocomplete today")
         #expect(OutcomeLedgerPresentation.menuDetail(
             summary: .empty,
             wordsToday: 40,
             screenAccessGranted: false
-        ) == "Screen Access is off now — Tilde is not suggesting")
+        ) == "Screen Recording is off now — autocomplete is not suggesting")
     }
 }
 
