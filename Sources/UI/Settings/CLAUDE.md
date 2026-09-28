@@ -44,15 +44,20 @@ settings-side agent connection flow.
   and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
   automation ids, analytics `page_id`, and source pins stay stable.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
-  `Pages/TodaySettingsPage.swift` - the Today page. Counts, the rolling
-  seven-day tape, and Recent context all come from local capture files: the
-  cached meeting index (`RecentMeetingsScanner.loadSearchIndex`) and the
-  dictation day files (`DictationTranscriptStore.savedDictationDayCounts`).
+  `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
+  rolling seven-day tape, and Recent context all come from local capture
+  files: the cached meeting index (`RecentMeetingsScanner.loadSearchIndex`),
+  the dictation day files (`DictationTranscriptStore.savedDictationDayCounts`),
+  and Save my writing's `Writing_<date>.md` files (`TodayWritingParser`).
+  Picking a day in the week strip retitles the header and swaps in that
+  day's numbers (`TodayTapeBuilder.dayStats`). Writing bars are estimated
+  from word count, since the files keep only the first keystroke; a writing
+  click opens its day file until the Writing tab lands.
   No network, no new analytics event (only `settings_action_clicked` action
   ids). Meeting clicks reuse the pill's `requestHomeRevealMeeting` path;
   dictation clicks open Dictations. The tape copies the Context app's Days
   view (week cells with mini lines, full day below, 6 AM to midnight) and
-  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`).
+  its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`).
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
   page plus the ⌘F Home find-focus token.
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the

@@ -130,4 +130,82 @@ func testTodayPresentation() {
         assertEqual(TodayCopy.rowWhen(for: date(10), now: now, locale: locale, calendar: calendar), "Sep 10", "older uses a short date")
         assertTrue(TodayCopy.rowWhen(for: date(24, 14, 5), now: now, locale: locale, calendar: calendar).contains("2:05"), "today uses the time")
     }
+
+    runSuite("TodayWritingParser - day files") {
+        let file = """
+        ---
+        title: "Writing for September 24, 2026"
+        capture_type: writing_day
+        format_version: 1
+        ---
+
+        # Writing for September 24, 2026
+
+        ## 10:42 AM - Pushing the launch to Thursday
+
+        Entry ID: `writing-1`
+        Captured: 2026-09-24T15:42:11.387Z
+        Source app: Slack
+        Bundle ID: `com.tinyspeck.slackmacgap`
+        Words: 12
+        Characters: 65
+        Accepted words: 3
+
+        Pushing the launch to Thursday so QA
+        \\## can finish.
+
+        ## 11:05 AM - Notes
+
+        Entry ID: `writing-2`
+        Captured: 2026-09-24T16:05:00Z
+        Source app: Notes
+        Words: 2
+        Characters: 9
+        Accepted words: 0
+
+        two words
+        """
+        let entries = TodayWritingParser.entries(fromDayFile: file)
+        assertEqual(entries.map(\.entryID), ["writing-1", "writing-2"], "both entries, in file order")
+        assertEqual(entries.first?.appName, "Slack", "source app")
+        assertEqual(entries.first?.words, 12, "words from the file")
+        assertEqual(entries.first?.acceptedWords, 3, "accepted words")
+        assertEqual(entries.first?.text, "Pushing the launch to Thursday so QA\n## can finish.", "body keeps lines and unescapes a heading")
+        assertEqual(entries.last?.date, ISO8601DateFormatter().date(from: "2026-09-24T16:05:00Z"), "Captured without milliseconds")
+        assertEqual(TodayWritingParser.estimatedSeconds(words: 5), 60, "at least a minute")
+        assertEqual(TodayWritingParser.estimatedSeconds(words: 5_000), 3_600, "at most an hour")
+
+        let stats = TodayStatsBuilder.build(
+            meetings: [TodayMeetingFact(date: date(24, 9), durationSeconds: 42 * 60)],
+            dictationDays: [],
+            writing: entries.map { TodayWritingFact(entryID: $0.entryID, date: date(24, 11), appName: $0.appName, words: $0.words, acceptedWords: $0.acceptedWords, text: $0.text) },
+            now: now,
+            calendar: calendar
+        )
+        assertEqual(stats.todayWritingWords, 14, "today's written words")
+        assertEqual(stats.todayWritingApps.map(\.appName), ["Slack", "Notes"], "apps by words written")
+        let parts = TodayTapeBuilder.headerParts(stats).map(\.text)
+        assertEqual(parts, ["1 meeting (42m)", "14 words written"], "header skips empty streams")
+
+        let item = { (kind: TodayRecentItem.Kind, id: String, seconds: Int?, app: String?, words: Int?) in
+            TodayRecentItem(kind: kind, id: id, title: id, date: date(20, 10), durationSeconds: seconds, transcriptURL: nil, appName: app, words: words)
+        }
+        let friday = TodayTapeBuilder.days(
+            captures: [
+                item(.meeting, "m", 30 * 60, nil, nil),
+                item(.dictation, "d", nil, nil, 8),
+                item(.writing, "w1", 60, "Notes", 40),
+                item(.writing, "w2", 60, "Slack", 60),
+            ],
+            now: now,
+            calendar: calendar
+        ).first { calendar.isDate($0.day, inSameDayAs: date(20)) }
+        let dayStats = friday.map(TodayTapeBuilder.dayStats)
+        assertEqual(dayStats?.todayMeetings, 1, "the day's meetings")
+        assertEqual(dayStats?.todayMeetingMinutes, 30, "the day's meeting minutes")
+        assertEqual(dayStats?.todayDictations, 1, "the day's dictations")
+        assertEqual(dayStats?.todayWritingWords, 100, "the day's words written")
+        assertEqual(dayStats?.todayWritingApps.map(\.appName), ["Slack", "Notes"], "the day's apps by words")
+        assertEqual(TodayCopy.weekdayLong(for: date(20), locale: locale, calendar: calendar), "Sunday", "long weekday")
+    }
 }

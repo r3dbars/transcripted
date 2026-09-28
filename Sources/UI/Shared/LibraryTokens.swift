@@ -38,6 +38,10 @@ enum LibraryTokens {
         dark: NSColor(red: 0.478, green: 0.733, blue: 0.647, alpha: 1),
         light: NSColor(red: 0.184, green: 0.365, blue: 0.314, alpha: 1)
     ))
+    static let writingStream = Color(nsColor: dynamicColor(
+        dark: NSColor(red: 0.878, green: 0.659, blue: 0.416, alpha: 1),
+        light: NSColor(red: 0.620, green: 0.373, blue: 0.118, alpha: 1)
+    ))
 
     /// Secondary ink for meta text (durations, counts, status lines).
     static let ink2 = Color.primary.opacity(0.55)
