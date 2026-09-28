@@ -43,6 +43,7 @@ enum WritingHelperHealthProbe {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 2
+        host.accessKey.authorize(&request)
         guard let (data, response) = try? await LocalhostURLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               http.statusCode == 200 else { return false }

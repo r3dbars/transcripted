@@ -23,6 +23,7 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
     typealias Perform = @Sendable (URLRequest) async -> Bool
 
     private let baseURL: URL
+    private let accessKey: LlamaServerAccessKey?
     private let quietPeriod: TimeInterval
     private let now: @Sendable () -> TimeInterval
     private let perform: Perform
@@ -35,11 +36,13 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
 
     init(
         baseURL: URL,
+        accessKey: LlamaServerAccessKey? = nil,
         quietPeriod: TimeInterval = 2.0,
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         perform: Perform? = nil
     ) {
         self.baseURL = baseURL
+        self.accessKey = accessKey
         self.quietPeriod = quietPeriod
         self.now = now
         self.perform = perform ?? Self.performOverLoopback
@@ -144,6 +147,7 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 5
+        accessKey?.authorize(&request)
         return request
     }
 

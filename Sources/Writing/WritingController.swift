@@ -326,7 +326,10 @@ final class WritingController {
         let runtime = Runtime(
             models: models,
             llamaServerHost: llamaServerHost,
-            scaffoldPrewarmer: ScaffoldPrewarmer(baseURL: llamaServerHost.baseURL),
+            scaffoldPrewarmer: ScaffoldPrewarmer(
+                baseURL: llamaServerHost.baseURL,
+                accessKey: llamaServerHost.accessKey
+            ),
             personalHistoryController: PersonalHistoryController(
                 store: EncryptedPersonalHistoryStore(),
                 settings: settings,
