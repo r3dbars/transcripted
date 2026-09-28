@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// The Today page: what the app captured today and this week, the week as
-/// tape, and the latest captures. Pure view assembly; loading lives in
-/// `TodayViewModel`, numbers and copy in `TodayPresentation.swift`, and every
-/// navigation or capture action is injected by the settings shell.
+/// The Today page: one sentence for the day, the week as a strip, the picked
+/// day as three lanes (meetings, dictation, writing) with a preview of the
+/// picked capture under them, then the latest captures. Pure view assembly;
+/// loading lives in `TodayViewModel`, numbers and copy in
+/// `TodayPresentation.swift`, and every navigation or capture action is
+/// injected by the settings shell.
 struct TodaySettingsPage: View {
     @ObservedObject var todayViewModel: TodayViewModel
     let now: Date
@@ -15,8 +17,14 @@ struct TodaySettingsPage: View {
     let onImportAudioFile: () -> Void
     let onStartDictation: () -> Void
 
+    /// Shared by the week strip and the day card; nil means today.
+    @State private var selectedDayID: TimeInterval?
+
     private var snapshot: TodaySnapshot { todayViewModel.snapshot }
     private var stats: TodayContextStats { snapshot.stats }
+    private var selectedDay: TodayTapeDay? {
+        snapshot.tapeDays.first { $0.id == selectedDayID } ?? snapshot.tapeDays.last
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
@@ -25,7 +33,9 @@ struct TodaySettingsPage: View {
             if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
                 emptyState
             } else {
-                countsSection
+                if let selectedDay {
+                    TodayDayCard(day: selectedDay, now: now, onOpen: onOpenRecentItem)
+                }
                 recentSection
             }
         }
@@ -34,53 +44,38 @@ struct TodaySettingsPage: View {
 
     // MARK: Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Today")
-                .font(LibraryTokens.title)
-            Text(TodayCopy.dateLine(for: now))
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink2)
-        }
+    /// Today's numbers, or the picked day's from its tape.
+    private var headerStats: TodayContextStats {
+        guard let selectedDay, !selectedDay.isToday else { return stats }
+        return TodayTapeBuilder.dayStats(selectedDay)
     }
 
-    // MARK: Counts and the week
-
-    private var countsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                TodayStatTile(
-                    systemImage: "bubble.left.and.bubble.right.fill",
-                    tint: LibraryTokens.meetingsStream,
-                    value: "\(stats.todayMeetings)",
-                    label: stats.todayMeetings == 1 ? "meeting today" : "meetings today",
-                    detail: "\(stats.weekMeetings) this week",
-                    automationIdentifier: "transcripted.today.stat.meetings",
-                    action: onShowMeetings
-                )
-                TodayStatTile(
-                    systemImage: "mic.fill",
-                    tint: LibraryTokens.dictationStream,
-                    value: "\(stats.todayDictations)",
-                    label: stats.todayDictations == 1 ? "dictation today" : "dictations today",
-                    detail: "\(stats.weekDictations) this week · \(TodayCopy.words(stats.weekDictationWords))",
-                    automationIdentifier: "transcripted.today.stat.dictations",
-                    action: onShowDictations
-                )
-                TodayStatTile(
-                    systemImage: "clock.fill",
-                    tint: LibraryTokens.meetingsStream,
-                    value: TodayCopy.duration(minutes: stats.todayMeetingMinutes),
-                    label: "in meetings today",
-                    detail: "\(TodayCopy.duration(minutes: stats.weekMeetingMinutes)) this week",
-                    automationIdentifier: "transcripted.today.stat.minutes",
-                    action: nil
-                )
+    private var header: some View {
+        let day = selectedDay
+        let isToday = day?.isToday ?? true
+        return HStack(alignment: .bottom, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(TodayCopy.dateLine(for: day?.day ?? now))
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? now))
+                    .font(LibraryTokens.title)
+                    .contentTransition(.opacity)
+                TodaySentence(stats: headerStats, isToday: isToday)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if !snapshot.tapeDays.isEmpty {
-                TodayDayTapeCard(days: snapshot.tapeDays, now: now, onOpen: onOpenRecentItem)
-                    .padding(.top, 4)
+                HStack(spacing: 4) {
+                    ForEach(snapshot.tapeDays) { day in
+                        TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id) {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                selectedDayID = day.isToday ? nil : day.id
+                            }
+                        }
+                    }
+                }
+                .frame(width: 330)
             }
         }
     }
@@ -89,7 +84,7 @@ struct TodaySettingsPage: View {
 
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionLabel("RECENT CONTEXT", help: "The latest meetings and dictations saved on this Mac")
+            sectionLabel("RECENT CONTEXT", help: "The latest meetings, dictations and writing saved on this Mac")
 
             if snapshot.recent.isEmpty {
                 Text(todayViewModel.hasLoaded ? "Nothing saved yet." : "Loading…")
@@ -153,94 +148,162 @@ struct TodaySettingsPage: View {
 
 // MARK: - Pieces
 
-private struct TodayStatTile: View {
-    let systemImage: String
-    let tint: Color
-    let value: String
-    let label: String
-    let detail: String
-    let automationIdentifier: String
-    let action: (() -> Void)?
-
-    @State private var isHovering = false
-
-    var body: some View {
-        let content = VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(tint)
-            Text(value)
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            Text(label)
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink2)
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(LibraryTokens.ink3)
-                .lineLimit(1)
+extension TodayRecentItem.Kind {
+    var streamColor: Color {
+        switch self {
+        case .meeting: return LibraryTokens.meetingsStream
+        case .dictation: return LibraryTokens.dictationStream
+        case .writing: return LibraryTokens.writingStream
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .fill(isHovering && action != nil ? LibraryTokens.rowHover : LibraryTokens.raisedFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(LibraryTokens.raisedStroke, lineWidth: 0.5)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous))
-        .onHover { isHovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier(automationIdentifier)
+    }
 
-        if let action {
-            Button(action: action) { content }
-                .buttonStyle(.plain)
-        } else {
-            content
+    var systemImage: String {
+        switch self {
+        case .meeting: return "bubble.left.and.bubble.right"
+        case .dictation: return "mic"
+        case .writing: return "pencil"
         }
     }
 }
 
-/// The week as tape, after the Context app's Days view: seven small day
-/// cards across the top, each with one mini line per stream, and the picked
-/// day (today to start) drawn full width below it, 6 AM to midnight. A
-/// meeting is a capsule as long as the meeting, a dictation is a dot. Hover a
-/// mark to see what it is; click it to open it on its own page.
-private struct TodayDayTapeCard: View {
-    let days: [TodayTapeDay]
+/// "4 meetings (2h 10m), 12 dictations, and 1,280 words written across 5
+/// apps." Each stream in its color; the app count opens a per-app breakdown.
+private struct TodaySentence: View {
+    let stats: TodayContextStats
+    let isToday: Bool
+
+    @State private var showsApps = false
+
+    var body: some View {
+        let parts = TodayTapeBuilder.headerParts(stats)
+        HStack(spacing: 0) {
+            if parts.isEmpty {
+                Text(isToday ? "Nothing saved yet today." : "Nothing saved this day.")
+                    .foregroundStyle(LibraryTokens.ink2)
+            } else {
+                sentence(parts)
+                if stats.todayWritingApps.count > 1 {
+                    Text(" ")
+                    Button {
+                        showsApps.toggle()
+                    } label: {
+                        Text("across \(stats.todayWritingApps.count) apps")
+                            .underline(pattern: .dot)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { showsApps = $0 }
+                    .popover(isPresented: $showsApps, arrowEdge: .bottom) { appBreakdown }
+                    .accessibilityIdentifier("transcripted.today.header.apps")
+                }
+                Text(".")
+            }
+        }
+        .font(.system(size: 15))
+        .lineLimit(1)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("transcripted.today.header.sentence")
+    }
+
+    private func sentence(_ parts: [(kind: TodayRecentItem.Kind, text: String)]) -> Text {
+        var text = Text("")
+        for (index, part) in parts.enumerated() {
+            if index > 0 {
+                text = text + Text(index == parts.count - 1 ? (parts.count > 2 ? ", and " : " and ") : ", ")
+            }
+            text = text + Text(part.text).foregroundColor(part.kind.streamColor)
+        }
+        return text
+    }
+
+    private var appBreakdown: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(stats.todayWritingApps, id: \.appName) { app in
+                HStack {
+                    Text(app.appName)
+                    Spacer(minLength: 16)
+                    Text(TodayCopy.words(app.words))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .font(LibraryTokens.meta)
+        .padding(12)
+        .frame(width: 220)
+    }
+}
+
+/// The picked day as three lanes, 6 AM to midnight, after the Context app's
+/// Days view. A meeting or a writing entry is a capsule, a dictation is a dot.
+/// Click a mark to pick it: it lights up, the rest dim, and the card under
+/// the lanes shows what it was. Prev and Next step through the day.
+private struct TodayDayCard: View {
+    let day: TodayTapeDay
     let now: Date
     let onOpen: (TodayRecentItem) -> Void
 
-    @State private var selectedDayID: TimeInterval?
+    @State private var pickedMarkID: String?
     @State private var hoveredMarkID: String?
 
-    private var selectedDay: TodayTapeDay? {
-        days.first { $0.id == selectedDayID } ?? days.last
+    private static let laneLabelWidth: CGFloat = 84
+
+    /// The picked mark, or the day's latest one.
+    private var picked: TodayTapeMark? {
+        let marks = day.allMarks
+        return marks.first { $0.id == pickedMarkID } ?? marks.max { $0.item.date < $1.item.date }
+    }
+
+    /// What the preview shows: the hovered mark, else the picked one.
+    private var shown: TodayTapeMark? {
+        day.allMarks.first { $0.id == hoveredMarkID } ?? picked
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 6) {
-                ForEach(days) { day in
-                    TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id) {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            selectedDayID = day.id
-                            hoveredMarkID = nil
-                        }
-                    }
+            HStack {
+                Text("YOUR DAY")
+                    .font(LibraryTokens.label)
+                    .tracking(LibraryTokens.labelTracking)
+                    .foregroundStyle(LibraryTokens.ink3)
+                Spacer()
+                if day.isToday {
+                    Text("Now \(TodayCopy.rowWhen(for: now, now: now))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                } else {
+                    Text(TodayCopy.dateLine(for: day.day))
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
                 }
             }
 
-            if let selectedDay {
-                fullTape(selectedDay)
+            VStack(alignment: .leading, spacing: 9) {
+                lane("Meetings", kind: .meeting, marks: day.meetings)
+                lane("Dictation", kind: .dictation, marks: day.dictations)
+                lane("Writing", kind: .writing, marks: day.writing)
+                HStack(spacing: 0) {
+                    ForEach(TodayTapeBuilder.hourLabels, id: \.self) { hour in
+                        Text(hour)
+                            .font(.system(size: 10))
+                            .foregroundStyle(LibraryTokens.ink3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.leading, Self.laneLabelWidth + 12)
             }
+
+            Group {
+                if let shown {
+                    preview(shown)
+                } else {
+                    Text(day.isToday ? "Nothing saved yet today." : "Nothing saved this day.")
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                }
+            }
+            .padding(.leading, Self.laneLabelWidth + 12)
         }
-        .padding(14)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
@@ -250,48 +313,14 @@ private struct TodayDayTapeCard: View {
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .stroke(LibraryTokens.raisedStroke, lineWidth: 0.5)
         )
+        .onChange(of: day.id) { _, _ in pickedMarkID = nil }
         .accessibilityIdentifier("transcripted.today.day-tape")
     }
 
-    private func fullTape(_ day: TodayTapeDay) -> some View {
-        let hovered = (day.meetings + day.dictations).first { $0.id == hoveredMarkID }
-        return VStack(alignment: .leading, spacing: 9) {
-            lane("Meetings", color: LibraryTokens.meetingsStream, marks: day.meetings, day: day)
-            lane("Dictation", color: LibraryTokens.dictationStream, marks: day.dictations, day: day)
-            HStack(spacing: 0) {
-                ForEach(TodayTapeBuilder.hourLabels, id: \.self) { hour in
-                    Text(hour)
-                        .font(.system(size: 10))
-                        .foregroundStyle(LibraryTokens.ink3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(.leading, Self.laneLabelWidth + 12)
-
-            Group {
-                if let hovered {
-                    Text(TodayTapeBuilder.markDescription(hovered, now: now) + "  \u{00B7}  Click to open")
-                } else if day.isEmpty {
-                    Text(day.isToday ? "Nothing saved yet today." : "Nothing saved this day.")
-                } else {
-                    Text("Hover a mark to see it. Click to open it.")
-                }
-            }
-            .font(LibraryTokens.meta)
-            .foregroundStyle(LibraryTokens.ink2)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.leading, Self.laneLabelWidth + 12)
-        }
-        .padding(.top, 2)
-    }
-
-    private static let laneLabelWidth: CGFloat = 80
-
-    private func lane(_ title: String, color: Color, marks: [TodayTapeMark], day: TodayTapeDay) -> some View {
+    private func lane(_ title: String, kind: TodayRecentItem.Kind, marks: [TodayTapeMark]) -> some View {
         HStack(spacing: 12) {
             HStack(spacing: 7) {
-                Circle().fill(color).frame(width: 7, height: 7)
+                Circle().fill(kind.streamColor).frame(width: 7, height: 7)
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(LibraryTokens.ink2)
@@ -304,39 +333,45 @@ private struct TodayDayTapeCard: View {
                         .fill(Color.primary.opacity(0.08))
                         .frame(height: 2)
                     ForEach(marks) { mark in
-                        markView(mark, color: color, width: geo.size.width)
+                        markView(mark, color: kind.streamColor, width: geo.size.width)
                     }
                     if day.isToday {
-                        let nowFraction = TodayTapeBuilder.fraction(of: now, onDayStarting: day.day)
                         Rectangle()
                             .fill(LibraryTokens.accent)
                             .frame(width: 2, height: 22)
-                            .offset(x: geo.size.width * nowFraction - 1)
+                            .offset(x: geo.size.width * TodayTapeBuilder.fraction(of: now, onDayStarting: day.day) - 1)
                             .allowsHitTesting(false)
                     }
                 }
-                .frame(height: 18)
+                .frame(height: 20)
             }
-            .frame(height: 18)
+            .frame(height: 20)
         }
     }
 
     private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat) -> some View {
         let markWidth: CGFloat = mark.isDot ? 10 : max(8, width * CGFloat((mark.end ?? mark.start) - mark.start))
+        let isPicked = shown?.id == mark.id
         let isHovered = hoveredMarkID == mark.id
         return Button {
-            onOpen(mark.item)
+            withAnimation(.easeOut(duration: 0.12)) { pickedMarkID = mark.id }
         } label: {
             Capsule()
                 .fill(color)
-                .frame(width: markWidth, height: 10)
-                .scaleEffect(isHovered ? 1.2 : 1)
-                .frame(height: 18)
+                .frame(width: markWidth, height: isPicked ? 14 : 12)
+                .opacity(isPicked || isHovered ? 1 : 0.42)
+                .overlay(
+                    Capsule()
+                        .stroke(color, lineWidth: 1.5)
+                        .padding(-3.5)
+                        .opacity(isPicked ? 1 : 0)
+                )
+                .frame(height: 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .offset(x: min(width * CGFloat(mark.start), max(0, width - markWidth)))
-        .zIndex(isHovered ? 1 : 0)
+        .zIndex(isPicked ? 2 : (isHovered ? 1 : 0))
         .onHover { hovering in
             if hovering {
                 hoveredMarkID = mark.id
@@ -346,8 +381,131 @@ private struct TodayDayTapeCard: View {
         }
         .help(TodayTapeBuilder.markDescription(mark, now: now))
         .accessibilityLabel(TodayTapeBuilder.markDescription(mark, now: now))
-        .accessibilityHint(mark.item.kind == .meeting ? "Opens the meeting" : "Opens Dictations")
+        .accessibilityHint("Shows it below the timeline")
+        .accessibilityAddTraits(isPicked ? .isSelected : [])
         .accessibilityIdentifier("transcripted.today.tape.mark")
+    }
+
+    private func preview(_ mark: TodayTapeMark) -> some View {
+        let item = mark.item
+        let marks = day.allMarks
+        let index = marks.firstIndex { $0.id == mark.id }
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.kind.systemImage)
+                .font(.system(size: 13))
+                .foregroundStyle(item.kind.streamColor)
+                .frame(width: 16)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Text(TodayPreviewCopy.meta(for: item, now: now))
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .lineLimit(1)
+                }
+                if let body = TodayPreviewCopy.body(for: item) {
+                    Text(body)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 2) {
+                arrowButton("chevron.left", label: "Previous") {
+                    if let index, index > 0 { pickedMarkID = marks[index - 1].id }
+                }
+                .disabled(index == nil || index == 0)
+                .accessibilityIdentifier("transcripted.today.preview.prev")
+                arrowButton("chevron.right", label: "Next") {
+                    if let index, index + 1 < marks.count { pickedMarkID = marks[index + 1].id }
+                }
+                .disabled(index == nil || index == marks.count - 1)
+                .accessibilityIdentifier("transcripted.today.preview.next")
+                arrowButton("arrow.up.right", label: "Open") { onOpen(item) }
+                    .accessibilityIdentifier("transcripted.today.preview.open")
+            }
+            .padding(.top, -2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .fill(LibraryTokens.contentBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("transcripted.today.preview")
+    }
+}
+
+/// A small borderless arrow for the preview card.
+private func arrowButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+    TodayArrowButton(systemImage: systemImage, label: label, action: action)
+}
+
+private struct TodayArrowButton: View {
+    let systemImage: String
+    let label: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isEnabled ? (isHovering ? Color.primary : LibraryTokens.ink2) : LibraryTokens.ink3.opacity(0.5))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                        .fill(isHovering && isEnabled ? LibraryTokens.rowHover : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
+    }
+}
+
+/// Meta line and body for the preview card.
+private enum TodayPreviewCopy {
+    static func meta(for item: TodayRecentItem, now: Date) -> String {
+        var parts: [String] = []
+        switch item.kind {
+        case .meeting:
+            parts.append("Meeting")
+            parts.append(TodayCopy.rowWhen(for: item.date, now: now))
+            if let duration = TodayCopy.rowDuration(seconds: item.durationSeconds) { parts.append(duration) }
+        case .dictation:
+            parts.append(item.appName ?? "Dictation")
+            parts.append(TodayCopy.rowWhen(for: item.date, now: now))
+            if let words = item.words { parts.append(TodayCopy.words(words)) }
+        case .writing:
+            parts.append(item.appName ?? "Writing")
+            parts.append(TodayCopy.rowWhen(for: item.date, now: now))
+            if let words = item.words {
+                let accepted = item.acceptedWords ?? 0
+                parts.append(TodayCopy.words(words) + (accepted > 0 ? ", \(accepted) from Tab" : ""))
+            }
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    static func body(for item: TodayRecentItem) -> String? {
+        guard let preview = item.preview else { return nil }
+        let collapsed = preview.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return collapsed.isEmpty ? nil : collapsed
     }
 }
 
@@ -371,16 +529,17 @@ private struct TodayWeekCell: View {
                 VStack(spacing: 4) {
                     miniLane(day.meetings, color: LibraryTokens.meetingsStream)
                     miniLane(day.dictations, color: LibraryTokens.dictationStream)
+                    miniLane(day.writing, color: LibraryTokens.writingStream)
                 }
                 .padding(.top, 6)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 7)
             .padding(.top, 7)
             .padding(.bottom, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? LibraryTokens.contentBackground : (isHovering ? LibraryTokens.rowHover : Color.clear))
+                    .fill(isSelected ? LibraryTokens.raisedFill : (isHovering ? LibraryTokens.rowHover : Color.clear))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -391,7 +550,7 @@ private struct TodayWeekCell: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(TodayCopy.dateLine(for: day.day))
-        .accessibilityLabel("\(TodayCopy.dateLine(for: day.day)): \(TodayCopy.count(day.meetings.count, singular: "meeting", plural: "meetings")), \(TodayCopy.count(day.dictations.count, singular: "dictation", plural: "dictations"))")
+        .accessibilityLabel("\(TodayCopy.dateLine(for: day.day)): \(TodayCopy.count(day.meetings.count, singular: "meeting", plural: "meetings")), \(TodayCopy.count(day.dictations.count, singular: "dictation", plural: "dictations")), \(TodayCopy.count(day.writing.count, singular: "writing entry", plural: "writing entries"))")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("transcripted.today.week-cell")
     }
@@ -423,9 +582,9 @@ private struct TodayRecentRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: item.kind == .meeting ? "bubble.left.and.bubble.right" : "mic")
+                Image(systemName: item.kind.systemImage)
                     .font(.system(size: 12))
-                    .foregroundStyle(LibraryTokens.ink2)
+                    .foregroundStyle(item.kind.streamColor)
                     .frame(width: 18)
                 Text(item.title)
                     .font(LibraryTokens.rowTitle)
@@ -453,13 +612,27 @@ private struct TodayRecentRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help(item.kind == .meeting ? "Open in Meetings" : "Open in Dictations")
+        .help(helpText)
         .accessibilityIdentifier("transcripted.today.recent.row")
+    }
+
+    private var helpText: String {
+        switch item.kind {
+        case .meeting: return "Open in Meetings"
+        case .dictation: return "Open in Dictations"
+        case .writing: return "Open the day's writing file"
+        }
     }
 
     private var meta: String {
         let when = TodayCopy.rowWhen(for: item.date, now: now)
-        guard let duration = TodayCopy.rowDuration(seconds: item.durationSeconds) else { return when }
-        return "\(duration) · \(when)"
+        switch item.kind {
+        case .writing:
+            let app = item.appName.map { "\($0) \u{00B7} " } ?? ""
+            return "\(app)\(when)"
+        case .meeting, .dictation:
+            guard let duration = TodayCopy.rowDuration(seconds: item.durationSeconds) else { return when }
+            return "\(duration) \u{00B7} \(when)"
+        }
     }
 }

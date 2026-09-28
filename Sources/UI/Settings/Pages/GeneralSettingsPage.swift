@@ -71,6 +71,10 @@ struct GeneralSettingsPage<
 
                 DictationOverlayModeRow(selection: $dictationOverlayMode)
 
+                if dictationOverlayMode == .notchIsland {
+                    NotchIslandScreenSharingRow()
+                }
+
                 GeneralToggleRow(
                     title: "Clean up pasted text",
                     isOn: $dictationCleanupEnabled,

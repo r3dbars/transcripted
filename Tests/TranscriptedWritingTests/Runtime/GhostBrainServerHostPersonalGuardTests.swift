@@ -185,8 +185,11 @@ struct GhostBrainServerHostPersonalLookupTimingTests {
     func slowTaskReportsTimeout() async {
         let (sink, events) = recordingDiagnostics()
         let race = GhostBrainServerHost.PersonalLookupRace()
+        // Far past the 250ms deadline, so a loaded CI runner can't close the
+        // gap between "timed out" and "waited for the provider".
+        let slowProviderSeconds: TimeInterval = 5
         let slow = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(slowProviderSeconds * 1_000_000_000))
             race.resolve(PersonalNextWordPrediction(word: "late", support: 4, total: 4))
         }
         let started = Date()
@@ -199,7 +202,8 @@ struct GhostBrainServerHostPersonalLookupTimingTests {
         let logged = events.values.first { $0.0 == "personal-lookup-timing" }
         #expect(logged?.1["outcome"] == "timeout")
         // The deadline is a real bound: nothing waited for the slow provider.
-        #expect(Date().timeIntervalSince(started) < 1.5)
+        // Half its sleep leaves seconds of slack for scheduler load.
+        #expect(Date().timeIntervalSince(started) < slowProviderSeconds / 2)
         slow.cancel()
     }
 
