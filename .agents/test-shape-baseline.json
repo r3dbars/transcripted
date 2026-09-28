@@ -18,7 +18,7 @@
     "Tests/DictationRecordingStartOverlayPolicyTests.swift": 8,
     "Tests/DictationSessionCapTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 4,
-    "Tests/DictationStartReadinessTests.swift": 10,
+    "Tests/DictationStartReadinessTests.swift": 8,
     "Tests/DictationStartedTelemetryContractTests.swift": 2,
     "Tests/DictationStoppedAudioRecoveryTests.swift": 6,
     "Tests/DictationTerminationCheckpointTests.swift": 2,

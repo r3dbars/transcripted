@@ -136,18 +136,10 @@ func testDictationStartReadiness() async {
         // `hotkeyTriggerRawValues` is raw strings so the policy stays free of
         // the AppKit-bound controller, which means nothing in the type system
         // catches a renamed raw value — escalation would just silently stop
-        // happening. Pin the strings against the enum's own declaration.
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        let triggerEnum = sourceSlice(
-            source,
-            from: "enum DictationTrigger: String {",
-            to: "@Published var isDictating"
-        )
-        assertFalse(triggerEnum.isEmpty, "the DictationTrigger declaration should be findable")
-
+        // happening. Check the strings against the real enum.
         for raw in DictationStartReadinessPolicy.hotkeyTriggerRawValues {
-            assertTrue(
-                triggerEnum.contains("= \"\(raw)\""),
+            assertNotNil(
+                DictationTrigger(rawValue: raw),
                 "\(raw) must still be a DictationTrigger raw value or escalation dies silently"
             )
         }
@@ -155,16 +147,10 @@ func testDictationStartReadiness() async {
         // The raw values the suites below assert are NOT hotkeys have to be
         // real cases too, or those assertions pass for the wrong reason.
         for raw in ["keyboard_shortcut", "right_option_tap", "menu", "overlay_button", "onboarding", "session_cap"] {
-            assertTrue(
-                triggerEnum.contains("= \"\(raw)\""),
-                "\(raw) must still be a DictationTrigger raw value"
-            )
+            assertNotNil(DictationTrigger(rawValue: raw), "\(raw) must still be a DictationTrigger raw value")
         }
 
-        assertTrue(
-            triggerEnum.contains("case physicalKey = \"physical_key\""),
-            "the one global-hotkey trigger, named exactly"
-        )
+        assertEqual(DictationTrigger.physicalKey.rawValue, "physical_key", "the one global-hotkey trigger, named exactly")
     }
 
     runSuite("The App Nap assertion is not labelled with a stale profile") {
