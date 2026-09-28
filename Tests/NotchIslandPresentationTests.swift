@@ -107,6 +107,29 @@ func testNotchIslandPresentation() {
         }
     }
 
+    runSuite("NotchIslandPresentation shows the words of a dictation that didn't paste") {
+        let message = NotchIslandDictationContent.Message(
+            tone: .notice,
+            text: "Not pasted",
+            actionTitle: "Paste",
+            preview: "send me the notes",
+            dismissSeconds: 15
+        )
+        assertEqual(NotchIslandPresentation.messageLabel(message), "Not pasted")
+        let content = NotchIslandDictationContent(phase: .message(message))
+        let layout = notchLayout(dictation: content)
+        assertEqual(layout.left, [.symbol(.clipboard, .accent), .text("Not pasted", .title)])
+        assertEqual(layout.drop, .dictationMessage(message), "the words and the Paste button open by themselves")
+
+        var next = message
+        next.preview = "a different take"
+        assertTrue(
+            NotchIslandPresentation.stickyKey(dictation: content, meeting: nil, callPrompt: nil)
+                != NotchIslandPresentation.stickyKey(dictation: NotchIslandDictationContent(phase: .message(next)), meeting: nil, callPrompt: nil),
+            "closing one missed paste doesn't keep the next one closed"
+        )
+    }
+
     runSuite("NotchIslandPresentation splits a dictation over a live meeting") {
         let layout = notchLayout(dictation: listening(), meeting: recording())
         assertEqual(layout.left, [.recordingDot, .live(.meetingTimer, .title)], "the meeting keeps the left wing")

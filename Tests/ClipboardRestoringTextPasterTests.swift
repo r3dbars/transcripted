@@ -357,8 +357,19 @@ func testClipboardRestoringTextPaster() async {
             )
             assertTrue(
                 source.contains("case .copied(let message, reason: _):")
-                    && source.contains("overlayController.showClipboardNotice(message)"),
+                    && source.contains("self.showNotPasted(text, message: message, overlayController: overlayController)")
+                    && source.contains("overlayController.showNotPastedNotice(text, fallbackMessage: message)"),
                 "copied fallbacks should use a calm clipboard notice instead of a warning"
+            )
+            // The island's Paste is offered only next to the words themselves,
+            // so a user can see whether an ambiguous paste already landed.
+            let overlaySource = try! String(
+                contentsOfFile: "Sources/UI/Overlay/FloatingOverlayController.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                overlaySource.contains("preview: notPastedText,"),
+                "the Not pasted notice shows the dictation it would paste"
             )
             assertFalse(
                 source.contains("pasteConfirmationUnavailable"),
