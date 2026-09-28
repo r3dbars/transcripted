@@ -672,7 +672,8 @@ final class MeetingOverlayRootView: NSView {
         systemAudioUnverified: Bool = false,
         finishDetail: String = "",
         hasFailedMeetingRowForError: Bool = false,
-        micOnlyNotice: MeetingMicOnlyNotice? = nil
+        micOnlyNotice: MeetingMicOnlyNotice? = nil,
+        systemAudioPermissionDenied: Bool = false
     ) {
         currentState = state
         // This view survives recording, transcription, saved, and error states.
@@ -709,6 +710,12 @@ final class MeetingOverlayRootView: NSView {
         } else {
             errorOffersOpen = false
         }
+        // A start macOS refused for System Audio Recording offers its Settings
+        // pane in the same slot, instead of Open.
+        let errorOffersGrant = isErrorState && systemAudioPermissionDenied
+        recordButton.setAccessibilityIdentifier(
+            errorOffersGrant ? "transcripted.meeting-overlay.grant-system-audio-access" : nil
+        )
         statusDot.isHidden = isPreparing || state == .recording
         titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing
@@ -719,7 +726,7 @@ final class MeetingOverlayRootView: NSView {
         // A notice with no primary title (call audio is back) only informs
         // and hides itself, so it keeps just its dismiss button.
         let promptHasPrimary = !(prompt?.primaryTitle.isEmpty ?? false)
-        recordButton.isHidden = !((isPrompting && promptHasPrimary) || state == .saved || errorOffersOpen)
+        recordButton.isHidden = !((isPrompting && promptHasPrimary) || state == .saved || errorOffersOpen || errorOffersGrant)
         checkAccessButton.isHidden = !(isPrompting && prompt?.tertiaryTitle != nil)
         self.micOnlyNotice = state == .recording && !systemAudioUnverified ? micOnlyNotice : nil
         showsMicOnlyNote = self.micOnlyNotice != nil
@@ -879,7 +886,13 @@ final class MeetingOverlayRootView: NSView {
             closeButton.contentTintColor = MeetingOverlayTokens.textSecondary
             closeButton.setAccessibilityLabel("Dismiss meeting error")
             closeButton.setAccessibilityHelp("Keeps the failed meeting available on the Meetings page.")
-            if errorOffersOpen {
+            if errorOffersGrant {
+                // Short on the button so the title keeps its room; the full
+                // name is what VoiceOver reads.
+                recordButton.attributedTitle = primaryButtonTitle("Grant Access")
+                recordButton.setAccessibilityLabel("Grant System Audio Access")
+                recordButton.setAccessibilityHelp("Opens System Audio Recording in System Settings. Try recording again after granting access.")
+            } else if errorOffersOpen {
                 recordButton.attributedTitle = primaryButtonTitle("Open")
                 recordButton.setAccessibilityLabel(openMeetingsTooltip)
                 recordButton.setAccessibilityHelp("Opens Transcripted's Meetings page, where the saved audio can be transcribed again.")

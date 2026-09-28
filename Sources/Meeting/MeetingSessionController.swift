@@ -186,6 +186,11 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var isMicBoostPromptVisible = false
     @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
     @Published private(set) var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    /// The start failed because macOS denied System Audio Recording (a typed
+    /// missing grant or an observed capture denial, never a silent or
+    /// timed-out probe). The overlays offer Grant System Audio Access for it.
+    /// Set with the `.error` it belongs to; message matching is not proof.
+    private(set) var systemAudioPermissionRecoveryNeeded = false
     /// The quiet "Mic only" note on the recording pill, set for a recording
     /// that never built the system-audio tap. See `MeetingMicOnlyNotice`.
     @Published private(set) var micOnlyNotice: MeetingMicOnlyNotice?
@@ -404,7 +409,11 @@ final class MeetingSessionController: ObservableObject {
     /// doesn't recognize is logged rather than asserted — see that type's
     /// header comment for why a hand-written table this permissive isn't
     /// worth crashing a recording over.
-    private func transition(to newState: State, reason: StaticString) {
+    private func transition(
+        to newState: State,
+        reason: StaticString,
+        systemAudioPermissionRecoveryNeeded: Bool = false
+    ) {
         #if DEBUG
         if !MeetingSessionStateMachine.isLegalTransition(from: state, to: newState) {
             DiagnosticsTrail.record(
@@ -422,6 +431,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         #endif
+        self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
         state = newState
     }
 
@@ -444,9 +454,17 @@ final class MeetingSessionController: ObservableObject {
     /// capture is live, this is a silent no-op: the diagnostics event that
     /// led here already ran at the call site, and the recording lifecycle
     /// keeps driving `state` normally.
-    private func reportUnrelatedFailure(_ message: String, reason: StaticString) {
+    private func reportUnrelatedFailure(
+        _ message: String,
+        reason: StaticString,
+        systemAudioPermissionRecoveryNeeded: Bool = false
+    ) {
         guard MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: state) else { return }
-        transition(to: .error(message), reason: reason)
+        transition(
+            to: .error(message),
+            reason: reason,
+            systemAudioPermissionRecoveryNeeded: systemAudioPermissionRecoveryNeeded
+        )
     }
 
     /// `displayStatus`'s single writer. `source` only distinguishes the two
@@ -867,7 +885,10 @@ final class MeetingSessionController: ObservableObject {
                 reportUnrelatedFailure(
                     startDecision.errorMessage
                         ?? "Turn on the required permissions in System Settings before recording a meeting.",
-                    reason: "start_blocked_permission"
+                    reason: "start_blocked_permission",
+                    systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
+                        missingPermissions: startDecision.missingPermissions
+                    )
                 )
             }
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_permission")
@@ -964,7 +985,13 @@ final class MeetingSessionController: ObservableObject {
                 modelState: state.diagnosticName,
                 context: failureProperties
             )
-            transition(to: .error(failureMessage), reason: "capture_start_failed")
+            transition(
+                to: .error(failureMessage),
+                reason: "capture_start_failed",
+                systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
+                    explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
+                )
+            )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
             trackDetectedPromptOutcome(
                 .recordingStartFailed,

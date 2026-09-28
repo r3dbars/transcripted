@@ -59,7 +59,9 @@ struct NotchIslandMeetingContent: Equatable {
         case recording
         case transcribing(progress: Double?, detail: String)
         case saved(title: String?)
-        case error(title: String, message: String, canOpen: Bool)
+        /// `grantsSystemAudio`: the start failed on a confirmed System Audio
+        /// Recording denial, so the drop-down offers the Settings pane.
+        case error(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
     }
 
     struct Prompt: Equatable {
@@ -216,7 +218,7 @@ enum NotchIslandDrop: Equatable {
     case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
-    case meetingError(title: String, message: String, canOpen: Bool)
+    case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
     case callPrompt(title: String, detail: String)
 
     /// Identifies an auto-opened drop-down, so closing one keeps it closed
@@ -225,7 +227,7 @@ enum NotchIslandDrop: Equatable {
         switch self {
         case .dictationMessage(let message): return "dictation-message:\(message.text)\(message.preview.map { "|\($0)" } ?? "")"
         case .meetingPrompt(let prompt): return "meeting-prompt:\(prompt.title)"
-        case .meetingError(let title, let message, _): return "meeting-error:\(title)|\(message)"
+        case .meetingError(let title, let message, _, _): return "meeting-error:\(title)|\(message)"
         case .callPrompt(let title, _): return "call:\(title)"
         case .dictationTarget, .dictationLoading, .justInserted, .meetingPreparing,
              .meetingControls, .meetingSaved:
@@ -370,8 +372,8 @@ enum NotchIslandPresentation {
         if let prompt = meeting?.prompt {
             return .meetingPrompt(prompt)
         }
-        if case .error(let title, let message, let canOpen)? = meeting?.phase {
-            return .meetingError(title: title, message: message, canOpen: canOpen)
+        if case .error(let title, let message, let canOpen, let grantsSystemAudio)? = meeting?.phase {
+            return .meetingError(title: title, message: message, canOpen: canOpen, grantsSystemAudio: grantsSystemAudio)
         }
         return nil
     }

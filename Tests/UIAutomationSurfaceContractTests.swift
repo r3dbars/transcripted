@@ -69,6 +69,18 @@ func testUIAutomationSurfaceContract() {
         assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
             "Saved health must include failures discovered while draining the tail")
     }
+    runSuite("Confirmed system-audio denial offers a grant action") {
+        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
+        let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
+        assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
+            "the recovery action should come from typed permission evidence")
+        assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
+            "the overlay should render the action only for a typed denial")
+        assertTrue(view.contains("Grant System Audio Access")
+            && view.contains("transcripted.meeting-overlay.grant-system-audio-access"),
+            "the denial action should be clear and accessible")
+    }
     runSuite("Meeting stop visual keeps its generous hit target") {
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
