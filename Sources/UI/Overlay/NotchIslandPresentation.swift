@@ -273,6 +273,13 @@ struct NotchIslandLayout: Equatable {
     var showsEdgeProgress = false
 
     var isEmpty: Bool { left.isEmpty && right.isEmpty && drop == nil }
+
+    /// "Who was on this call?" is on screen (not waiting behind a dictation,
+    /// a call prompt, or a meeting that is starting or recording).
+    var showsSpeakerReview: Bool {
+        if case .speakerReview? = drop { return true }
+        return false
+    }
 }
 
 /// The call-detected prompt's side of the island. A protocol so the capture

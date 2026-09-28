@@ -27,6 +27,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// The pointer entered or left the island while "Who was on this call?"
     /// is up, so its Later ring and "Everyone's named" linger can pause.
     var speakerReviewHoverHandler: ((Bool) -> Void)?
+    /// "Who was on this call?" went on or off screen (a dictation, a call
+    /// prompt, or the next meeting hides it), so its Later ring only runs
+    /// while someone can see it.
+    var speakerReviewVisibilityHandler: ((Bool) -> Void)? {
+        didSet { reportedSpeakerReviewVisible = nil }
+    }
 
     private static let hoverOpenDelay: UInt64 = 120_000_000
     private static let hoverCloseDelay: UInt64 = 380_000_000
@@ -37,6 +43,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private var meeting: NotchIslandMeetingContent?
     private var callPrompt: NotchIslandCallPromptContent?
     private var speakerReview: NotchIslandSpeakerReviewContent?
+    private var reportedSpeakerReviewVisible: Bool?
     private var recentInsert: NotchIslandRecentInsert?
     private var targetApp: NSRunningApplication?
     private var listeningSince: Date?
@@ -234,6 +241,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         render()
     }
 
+    private func reportSpeakerReviewVisibility(_ visible: Bool) {
+        guard reportedSpeakerReviewVisible != visible else { return }
+        reportedSpeakerReviewVisible = visible
+        speakerReviewVisibilityHandler?(visible)
+    }
+
     /// The review's rows grew or shrank.
     func speakerReviewLayoutChanged() {
         guard isShown, speakerReview != nil else { return }
@@ -262,6 +275,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             speakerReview: speakerReview
         )
         lastLayout = layout
+        reportSpeakerReviewVisibility(layout.showsSpeakerReview)
         guard !layout.isEmpty else {
             hide(animated: animated)
             return

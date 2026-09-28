@@ -90,6 +90,14 @@ final class SpeakerNamingSheet {
             presentInIsland(request: request, island: island)
             return
         }
+        // Everyone was recognized: the window has nothing to ask, so it
+        // doesn't open and the meeting finishes saving as before. (The
+        // island lists who was on the call instead.)
+        if request.speakers.isEmpty {
+            gate.windowClosed(requestID: request.id)
+            request.onComplete([])
+            return
+        }
         // Avoid stacking — if a previous sheet is still open, close it first.
         currentWindowController?.close()
 
@@ -215,6 +223,7 @@ final class SpeakerNamingSheet {
             self?.finishIslandReview(requestID: requestID)
         }
         island.speakerReviewHoverHandler = { [weak view] hovered in view?.setHovered(hovered) }
+        island.speakerReviewVisibilityHandler = { [weak view] onScreen in view?.setOnScreen(onScreen) }
         islandReviewView = view
         islandReviewContent = content
         island.showSpeakerReview(content, view: view)
@@ -241,6 +250,7 @@ final class SpeakerNamingSheet {
         islandReviewView = nil
         islandReviewContent = nil
         island?.speakerReviewHoverHandler = nil
+        island?.speakerReviewVisibilityHandler = nil
         island?.showSpeakerReview(nil, view: nil)
     }
 }

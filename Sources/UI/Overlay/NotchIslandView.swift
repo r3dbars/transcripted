@@ -147,7 +147,12 @@ final class NotchIslandButton: NSButton {
     }
 
     func setCountdownPaused(_ paused: Bool) {
-        guard countdownStarted, paused != countdownPaused else { return }
+        guard paused != countdownPaused else { return }
+        guard countdownStarted else {
+            // Not laid out yet: the ring starts held (see layout()).
+            countdownPaused = paused
+            return
+        }
         countdownPaused = paused
         if paused {
             let now = ring.convertTime(CACurrentMediaTime(), from: nil)
@@ -194,6 +199,10 @@ final class NotchIslandButton: NSButton {
         run.duration = seconds
         ring.strokeEnd = 0
         ring.add(run, forKey: "countdown")
+        if countdownPaused {
+            ring.speed = 0
+            ring.timeOffset = ring.convertTime(CACurrentMediaTime(), from: nil)
+        }
     }
 
     private var foreground: NSColor {

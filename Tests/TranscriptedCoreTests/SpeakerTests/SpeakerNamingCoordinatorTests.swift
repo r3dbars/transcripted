@@ -3219,6 +3219,102 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(correctedProfile?.callCount ?? 0, targetBefore?.callCount ?? 0)
     }
 
+    /// "Not Taylor?" on a voice the pipeline named silently: the island's
+    /// correction must land as a correction of the recognized person, so the
+    /// lifeline and dispute count see the mistake.
+    @MainActor
+    func testCorrectingSilentlyRecognizedVoiceRecordsCorrectionAgainstRecognizedPerson() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let taylor = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.2, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(id: taylor.id, name: "Taylor Wolf", source: NameSource.userManual)
+        guard let taylorSnapshot = harness.speakerDB.getSpeaker(id: taylor.id) else {
+            XCTFail("Expected recognized profile snapshot")
+            return
+        }
+
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Recognized correction.md")
+        let clipURL = tempDirectory.appendingPathComponent("recognized-correction.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-recognized.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-recognized.wav")
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: taylor.id, name: "Taylor Wolf", confidence: "high", source: "db")
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Taylor Wolf", text: "Morning, everyone.")
+        ]
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [BreakdownEntry(name: "Taylor Wolf", utterances: 1, wordCount: 2, duration: "00:02")]
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        // What the pipeline hands the review for a silently recognized voice.
+        let recognized = SpeakerNamingEntry(
+            id: taylor.id,
+            diarizerSpeakerId: "1",
+            clipURL: clipURL,
+            sampleText: "Morning, everyone.",
+            currentName: "Taylor Wolf",
+            matchSimilarity: 0.93,
+            needsNaming: false,
+            needsConfirmation: false,
+            sessionEmbedding: [Float](repeating: 0.7, count: 256),
+            matchedProfileSnapshot: taylorSnapshot
+        )
+        guard let correction = SpeakerNamingPolicy.typedNameUpdate(
+            entry: recognized,
+            typedName: "Jordan Lee",
+            optionsByLabel: [:]
+        ) else {
+            XCTFail("Typing a different name must produce an update")
+            return
+        }
+        let reviewed = SpeakerNamingPolicy.reviewEntriesToFinalize(asked: [], recognized: [recognized], updates: [correction])
+        XCTAssertEqual(reviewed.finalize.map(\.id), [taylor.id], "a corrected recognized voice joins the save")
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            recognizedSpeakerNames: ["Taylor Wolf"],
+            recognizedSpeakers: [recognized],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+        harness.manager.handleNamingComplete(
+            updates: [correction],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: reviewed.finalize
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let saved = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(saved.contains("Jordan Lee"), "the transcript takes the corrected name")
+        let taylorAfter = harness.speakerDB.getSpeaker(id: taylor.id)
+        XCTAssertEqual(taylorAfter?.displayName, "Taylor Wolf", "Taylor keeps her name")
+        XCTAssertEqual(taylorAfter?.disputeCount, taylorSnapshot.disputeCount + 1, "the wrong match is disputed")
+        let outcomes = harness.speakerDB.recentMatchOutcomes(profileId: taylor.id, limit: 10).map(\.kind)
+        XCTAssertTrue(outcomes.contains(.corrected), "the lifeline records a correction against the recognized person")
+    }
+
     @MainActor
     func testHandleNamingCompleteSucceedsWithoutJSONSidecar() async throws {
         let harness = try makeHarness()

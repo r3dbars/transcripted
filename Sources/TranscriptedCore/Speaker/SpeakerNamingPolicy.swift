@@ -247,6 +247,37 @@ public enum SpeakerNamingPolicy {
         )
     }
 
+    /// A meeting gets a review when a voice needs an answer, and also when
+    /// every voice was recognized, so the person always sees who was on the
+    /// call and can correct a wrong name.
+    public static func shouldQueueSpeakerReview(askedVoices: Int, recognizedVoices: Int) -> Bool {
+        askedVoices > 0 || recognizedVoices > 0
+    }
+
+    /// Which review rows go to the naming coordinator when a review closes.
+    /// Asked voices always go (an unanswered one is marked for Speakers).
+    /// A recognized voice goes only when the review corrected it; otherwise
+    /// its silent auto-name stands, and its clip is only thrown away.
+    public static func reviewEntriesToFinalize(
+        asked: [SpeakerNamingEntry],
+        recognized: [SpeakerNamingEntry],
+        updates: [SpeakerNameUpdate]
+    ) -> (finalize: [SpeakerNamingEntry], discardClips: [SpeakerNamingEntry]) {
+        let askedKeys = Set(asked.map { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) })
+        let updatedKeys = Set(updates.map { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) })
+        var finalize = asked
+        var discard: [SpeakerNamingEntry] = []
+        for entry in recognized {
+            let key = entry.channel.speakerKey(diarizerSpeakerId: entry.diarizerSpeakerId)
+            if updatedKeys.contains(key), !askedKeys.contains(key) {
+                finalize.append(entry)
+            } else {
+                discard.append(entry)
+            }
+        }
+        return (finalize, discard)
+    }
+
     /// Row-level manual names should stay row-level edits, even when a mic row
     /// is manually set to "You". Only the sheet-wide "Keep as You" toggle
     /// should emit `.collapsedToMe`.

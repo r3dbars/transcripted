@@ -110,4 +110,112 @@ func testNotchIslandSpeakerReviewPolicy() {
         )
         assertNil(dictating.drop, "it waits while a dictation runs")
     }
+
+    runSuite("Return in the name box never swaps a typed name for a longer saved one") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let christina = [Policy.Suggestion(label: "Christina Park", detail: "4 calls")]
+
+        let rows = Policy.nameBoxRows(typed: "Chris", suggestions: christina)
+        assertEqual(rows, [.saved("Christina Park"), .newPerson("Chris")], "the typed name is offered as a new person under the saved match")
+        assertEqual(Policy.defaultHighlight(typed: "Chris", suggestions: christina), 1, "with no exact match the new-person row is highlighted")
+        assertEqual(
+            Policy.nameToSave(typed: "Chris", suggestions: christina, highlighted: nil),
+            "Chris",
+            "Return saves what was typed, not the top suggestion"
+        )
+        assertEqual(
+            Policy.nameToSave(typed: "Chris", suggestions: christina, highlighted: 0),
+            "Christina Park",
+            "Return saves the saved person when you arrowed to them"
+        )
+        assertEqual(
+            Policy.nameToSave(typed: "Chris", suggestions: christina, highlighted: 1),
+            "Chris",
+            "arrowing to the new-person row saves the typed name"
+        )
+    }
+
+    runSuite("Return in the name box picks an exact saved match") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let people = [
+            Policy.Suggestion(label: "Christina Park", detail: "4 calls"),
+            Policy.Suggestion(label: "Chris", detail: "2 calls"),
+        ]
+        assertEqual(Policy.nameBoxRows(typed: " chris ", suggestions: people), [.saved("Christina Park"), .saved("Chris")], "no new-person row when a saved person is exactly the typed name")
+        assertEqual(Policy.defaultHighlight(typed: " chris ", suggestions: people), 1, "the exact match is highlighted, even when it isn't first")
+        assertEqual(Policy.nameToSave(typed: " chris ", suggestions: people, highlighted: nil), "Chris", "Return saves the exact match under its saved spelling")
+        assertEqual(Policy.nameToSave(typed: "Émile", suggestions: [Policy.Suggestion(label: "emile", detail: "1 call")], highlighted: nil), "emile", "case and accents don't make a new person")
+        assertNil(Policy.nameToSave(typed: "   ", suggestions: people, highlighted: nil), "a blank box saves nothing")
+        assertNil(Policy.defaultHighlight(typed: "", suggestions: []), "nothing to highlight in an empty box")
+        assertEqual(Policy.nameToSave(typed: "Dana", suggestions: [], highlighted: nil), "Dana", "no suggestions: the typed name is a new person")
+    }
+
+    runSuite("Arrow keys reach every row under the name box, including the new person") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let suggestions = [
+            Policy.Suggestion(label: "Christina Park", detail: ""),
+            Policy.Suggestion(label: "Christopher Lee", detail: ""),
+        ]
+        // Rows: Christina, Christopher, new "Chris". Default highlight is the new person (2).
+        assertEqual(Policy.movedHighlight(from: nil, by: -1, typed: "Chris", suggestions: suggestions), 1, "up from the default goes to the row above it")
+        assertEqual(Policy.movedHighlight(from: 0, by: 1, typed: "Chris", suggestions: suggestions), 1)
+        assertEqual(Policy.movedHighlight(from: 1, by: 1, typed: "Chris", suggestions: suggestions), 2, "down reaches the new-person row")
+        assertEqual(Policy.movedHighlight(from: 2, by: 1, typed: "Chris", suggestions: suggestions), 2, "down stops at the last row")
+        assertEqual(Policy.movedHighlight(from: 0, by: -1, typed: "Chris", suggestions: suggestions), 0, "up stops at the first row")
+        assertNil(Policy.movedHighlight(from: nil, by: 1, typed: "", suggestions: []), "nothing to move through in an empty box")
+    }
+
+    runSuite("Done and Later keep a name that was typed but not submitted") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let christina = [Policy.Suggestion(label: "Christina Park", detail: "")]
+        assertEqual(
+            Policy.answerOnFinish(committed: nil, typed: "Chris", suggestions: christina, highlighted: nil),
+            "Chris",
+            "an open name box with text counts as that name, resolved like Return"
+        )
+        assertEqual(
+            Policy.answerOnFinish(committed: nil, typed: "Chris", suggestions: christina, highlighted: 0),
+            "Christina Park",
+            "the arrowed-to suggestion counts, like Return"
+        )
+        assertEqual(
+            Policy.answerOnFinish(committed: "Maya Chen", typed: "", suggestions: [], highlighted: nil),
+            "Maya Chen",
+            "a submitted name stands"
+        )
+        assertNil(Policy.answerOnFinish(committed: nil, typed: "  ", suggestions: [], highlighted: nil), "an empty box leaves the voice unnamed")
+    }
+
+    runSuite("The Later ring only runs while the review is on screen and not hovered") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.laterCountdownRuns(visible: true, hovered: false), "on screen and left alone: it counts down")
+        assertFalse(Policy.laterCountdownRuns(visible: false, hovered: false), "hidden behind a dictation or a busy meeting: it waits")
+        assertFalse(Policy.laterCountdownRuns(visible: true, hovered: true), "the pointer is on it: it waits")
+
+        let review = NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: nil, stage: .naming)
+        let shown = NotchIslandPresentation.layout(
+            dictation: nil, meeting: nil, callPrompt: nil, recentInsert: nil, expanded: false, speakerReview: review
+        )
+        assertTrue(shown.showsSpeakerReview, "a saved meeting's review is on screen")
+        let hiddenByDictation = NotchIslandPresentation.layout(
+            dictation: NotchIslandDictationContent(phase: .listening), meeting: nil, callPrompt: nil, recentInsert: nil, expanded: false, speakerReview: review
+        )
+        assertFalse(hiddenByDictation.showsSpeakerReview, "a dictation hides the review")
+        let hiddenByRecording = NotchIslandPresentation.layout(
+            dictation: nil, meeting: NotchIslandMeetingContent(phase: .recording), callPrompt: nil, recentInsert: nil, expanded: false, speakerReview: review
+        )
+        assertFalse(hiddenByRecording.showsSpeakerReview, "a new recording hides the review")
+    }
+
+    runSuite("A meeting where everyone was recognized still says who was on it") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.headerTitle(meetingTitle: nil, recognizedOnly: true), "On this call")
+        assertEqual(Policy.headerTitle(meetingTitle: "Design sync", recognizedOnly: true), "On Design sync")
+        assertEqual(Policy.headerTitle(meetingTitle: "Design sync", recognizedOnly: false), "Who was on Design sync?", "a review that asks still asks")
+        assertEqual(Policy.correctionPrompt(name: "Taylor Wolf"), "Not Taylor?", "hover offers a correction by first name")
+        assertEqual(Policy.correctionPrompt(name: "  Cher "), "Not Cher?")
+        assertFalse(Policy.doneShowsSummary(recognizedOnly: true, updates: 0), "nothing corrected: Done just closes")
+        assertTrue(Policy.doneShowsSummary(recognizedOnly: true, updates: 1), "a correction gets the saved summary")
+        assertTrue(Policy.doneShowsSummary(recognizedOnly: false, updates: 0), "a review that asked always sums up")
+    }
 }

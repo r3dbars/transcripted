@@ -252,6 +252,12 @@ public struct SpeakerNamingRequest {
     /// returning speakers), so a review can show them as already known
     /// next to the voices it asks about. Display only; never re-saved.
     public let recognizedSpeakerNames: [String]
+    /// The remote voices behind those names, with a clip each, so a review
+    /// can offer "Not Taylor?" and save a correction. They are never asked
+    /// about: a request can have only these (everyone was recognized), and
+    /// the review window skips such a request while the notch island lists
+    /// who was on the call.
+    public let recognizedSpeakers: [SpeakerNamingEntry]
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL?
@@ -268,6 +274,7 @@ public struct SpeakerNamingRequest {
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
         recognizedSpeakerNames: [String] = [],
+        recognizedSpeakers: [SpeakerNamingEntry] = [],
         transcriptURL: URL,
         transcriptId: UUID,
         systemAudioURL: URL,
@@ -284,6 +291,7 @@ public struct SpeakerNamingRequest {
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount
         self.recognizedSpeakerNames = recognizedSpeakerNames
+        self.recognizedSpeakers = recognizedSpeakers
         self.transcriptURL = transcriptURL
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
