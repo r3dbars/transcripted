@@ -1,0 +1,75 @@
+{
+  "benches": [
+    {
+      "id": "demo-synthetic-latency",
+      "kind": "synthetic",
+      "synthetic": {
+        "seed": "demo-latency",
+        "noise": 0.03,
+        "metrics": [
+          {
+            "id": "stop_to_text_s",
+            "direction": "lower",
+            "weights": {
+              "demo.chunk_seconds": 1.0,
+              "demo.encoder": 0.15,
+              "demo.prewarm": 0.25
+            },
+            "optimum": {
+              "demo.chunk_seconds": 18.0,
+              "demo.encoder": "all",
+              "demo.prewarm": true
+            }
+          },
+          {
+            "id": "accuracy",
+            "direction": "higher",
+            "scale": 0.9,
+            "weights": {
+              "demo.chunk_seconds": 0.2
+            },
+            "optimum": {
+              "demo.chunk_seconds": 30.0
+            },
+            "noise": 0.002
+          }
+        ],
+        "gates": [
+          {
+            "id": "lost_text",
+            "knob": "demo.chunk_seconds",
+            "below": 8.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-synthetic-naming",
+      "kind": "synthetic",
+      "synthetic": {
+        "seed": "demo-naming",
+        "noise": 0.0,
+        "metrics": [
+          {
+            "id": "recognized_rate",
+            "direction": "higher",
+            "scale": 0.8,
+            "weights": {
+              "demo.match_threshold": 1.0
+            },
+            "optimum": {
+              "demo.match_threshold": 0.65
+            }
+          }
+        ],
+        "gates": [
+          {
+            "id": "false_name",
+            "knob": "demo.match_threshold",
+            "below": 0.62
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -693,6 +693,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
+
+        #if TRANSCRIPTED_LAB_CONTROL
+        // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
+        LabControlChannel.startIfRequested(appDelegate: self)
+        #endif
     }
 
     /// macOS tags a login-item start on the open-application event.

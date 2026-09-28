@@ -1,0 +1,8 @@
+{
+  "id": "stt-clips",
+  "title": "Speech model clips with truth transcripts",
+  "salt": "stt-clips-v1",
+  "holdout_fraction": 0.3,
+  "items_file": "~/Library/Application Support/Transcripted Lab/HillClimb/suites/stt-clips.items.json",
+  "notes": "Mac-local items {\"id\", \"audio\", \"truth\"} as read by scripts/stt-shootout/hillclimb_bench.py (PR #1788). Ids must not contain file names."
+}
