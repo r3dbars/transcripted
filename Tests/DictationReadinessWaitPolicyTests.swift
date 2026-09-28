@@ -171,6 +171,47 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .startRecording, "after the hard recovery budget is spent the policy should stay bounded")
     }
 
+    runSuite("DictationReadinessWaitPolicy — ready-start hard recoveries stop exactly at the budget") {
+        // The next hard recovery is due at 2 × (attempts + 1) ready-start failures.
+        let belowFailureThreshold = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 3,
+            forcedRecoveryAttempts: 1,
+            maxForcedRecoveryAttempts: 2
+        )
+        assertEqual(belowFailureThreshold, .startRecording, "one failure short of the next threshold should keep starting normally")
+
+        let lastAllowedRecovery = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 4,
+            forcedRecoveryAttempts: 1,
+            maxForcedRecoveryAttempts: 2
+        )
+        assertEqual(lastAllowedRecovery, .forceInputRecovery, "one attempt below the budget should still allow a hard recovery")
+
+        for failures in [6, 7, 100] {
+            let budgetSpent = DictationReadinessWaitPolicy.action(
+                isRecovering: false,
+                inputFormatReady: true,
+                readyStartFailures: failures,
+                forcedRecoveryAttempts: 2,
+                maxForcedRecoveryAttempts: 2
+            )
+            assertEqual(budgetSpent, .startRecording, "with the budget spent, \(failures) ready-start failures must not force another recovery")
+        }
+
+        let defaultBudget = TranscriptedConstants.dictationReadinessForcedRecoveryAttempts
+        let defaultBudgetSpent = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 2 * (defaultBudget + 1),
+            forcedRecoveryAttempts: defaultBudget
+        )
+        assertEqual(defaultBudgetSpent, .startRecording, "the default budget should stop hard recoveries once it is spent")
+    }
+
     runSuite("DictationReadinessWaitPolicy — recovery starts do not count as ready failures") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
@@ -317,6 +358,25 @@ func testDictationReadinessWaitPolicy() {
         )
 
         assertTrue(timedOut, "refresh should time out once it reaches the timeout window")
+    }
+
+    runSuite("DictationReadinessRefreshTimeoutPolicy — gives up at exactly the timeout") {
+        // 10.5 - 10.0 and (t + 0) - 0 are exact in binary floating point,
+        // so these hit the boundary itself rather than a hair past it.
+        assertFalse(
+            DictationReadinessRefreshTimeoutPolicy.timedOut(startedAt: 10.0, now: 10.25, timeout: 0.5),
+            "a refresh half-way through its window is still live"
+        )
+        assertTrue(
+            DictationReadinessRefreshTimeoutPolicy.timedOut(startedAt: 10.0, now: 10.5, timeout: 0.5),
+            "a refresh exactly at its timeout should give up"
+        )
+
+        let defaultTimeout = TranscriptedConstants.dictationReadinessRefreshTimeout
+        assertTrue(
+            DictationReadinessRefreshTimeoutPolicy.timedOut(startedAt: 0, now: defaultTimeout),
+            "a refresh exactly at the default timeout should give up"
+        )
     }
 
     runSuite("DictationReadinessRefreshTimeoutPolicy — missing start never times out") {
