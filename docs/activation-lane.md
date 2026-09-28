@@ -60,8 +60,6 @@ For the broader 100 WAU dashboard, reliability funnels, the agent/Markdown
 value loop, and release-health view, use
 `docs/posthog-100-wau-dashboard.md`.
 
-For the full product-learning telemetry map, current event taxonomy, blind
-spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
 For reusable 100 WAU, activation, reliability, feature-adoption, and
 release-health query specs, use:
 

@@ -50,9 +50,6 @@ Historical planning docs were removed from the live tree so it reads like the
 current app surface. Git history remains the source for retired plans and
 point-in-time reviews.
 
-Some older drafting-era utility folders have now been trimmed out of the live
-app target entirely. If a historical doc still mentions `Sources/Text/` or
-`Sources/Style/`, prefer the current file tree.
 
 ## Read before editing
 

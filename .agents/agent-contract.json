@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "start_doc": "AGENT_START.md",
+  "start_doc": "AGENTS.md",
   "test_matrix": ".agents/test-matrix.yml",
   "proof_classes": {
     "deterministic": "A command completed against the exact branch head.",
@@ -176,8 +176,8 @@
     {
       "id": "agent-workflow",
       "path_prefixes": [".agents/", ".github/", "scripts/dev/"],
-      "exact_paths": ["AGENT_START.md", "AGENTS.md", "CLAUDE.md", "WORKFLOW.md"],
-      "docs": ["AGENT_START.md", "docs/agent-closeout.md"],
+      "exact_paths": ["AGENTS.md", "CLAUDE.md", "WORKFLOW.md"],
+      "docs": ["AGENTS.md", "docs/agent-closeout.md"],
       "keywords": ["agent", "codex", "claude", "preflight", "workflow", "review", "context"],
       "owns": "Agent routing, path-to-check selection, review policy, and handoff proof.",
       "invariants": [
@@ -270,7 +270,7 @@
         "CONTRIBUTING.md",
         "SECURITY.md"
       ],
-      "docs": ["docs/docs.md"],
+      "docs": ["docs/repo-layout.md"],
       "keywords": ["documentation", "readme", "guide"],
       "owns": "Product, engineering, support, and release documentation.",
       "invariants": [

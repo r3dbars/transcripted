@@ -72,7 +72,7 @@ SQLite. No RNG — fully deterministic (splits by sorted meeting/quality order).
 
 - Repo: `r3dbars/transcripted`, branch `eval/exemplar-delta-2026-07`, off `main@17601969` (both
   #1487 and #1488 merged: `eb1ecf19`, `aa74fed8`).
-- Harness (new): [`Tests/TranscriptedCoreTests/SpeakerExemplarDeltaEvalTests.swift`](../Tests/TranscriptedCoreTests/SpeakerExemplarDeltaEvalTests.swift)
+- Harness (new): [`Tests/TranscriptedCoreTests/SpeakerTests/SpeakerExemplarDeltaEvalTests.swift`](../Tests/TranscriptedCoreTests/SpeakerTests/SpeakerExemplarDeltaEvalTests.swift)
 - Feature code under test:
   - `Sources/TranscriptedCore/Speaker/SpeakerExemplarPolicy.swift`,
     `SpeakerVectorMath.bestSimilarity` (multi-exemplar, #1488)

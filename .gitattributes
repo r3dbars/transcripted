@@ -16,6 +16,5 @@
 # Swift test/code blocks.
 *.psv merge=union
 docs/privacy-first-observability.md merge=union
-docs/posthog-product-learning-plan.md merge=union
 docs/install-attribution-map.md merge=union
 docs/activation-lane.md merge=union

@@ -298,7 +298,7 @@ def print_human(context: dict[str, Any]) -> None:
     for area in context["areas"]:
         print(f"- {area['id']}: {area['owns']}")
     if not context["areas"]:
-        print("- no matching area; use AGENT_START.md and inspect the nearest owner")
+        print("- no matching area; use AGENTS.md and inspect the nearest owner")
     print()
     print("Read:")
     for doc in context["docs"]:
@@ -333,7 +333,7 @@ def self_test(contract_path: Path) -> None:
         "build.sh": {"build-system"},
         "scripts/entrypoints/build-beta.sh": {"beta-release", "build-system"},
         "scripts/download_ami.sh": {"scripts"},
-        "docs/agent-onboarding.md": {"documentation"},
+        "docs/storage-paths.md": {"documentation"},
         "docs/release-packaging.md": {"beta-release", "documentation"},
         "Resources/Transcripted.icns": {"resources-config"},
         "archive/README.md": {"repository-fallback"},

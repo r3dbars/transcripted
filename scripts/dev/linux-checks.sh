@@ -194,6 +194,8 @@ check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-tes
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
 check "missing-source explainer self-test" "python3 scripts/dev/explain-missing-sources.py --self-test"
 check "concurrency census self-test" "python3 scripts/dev/concurrency-census.py --self-test"
+check "doc paths self-test" "python3 scripts/dev/check-doc-paths.py --self-test"
+check "doc paths (every path a doc names exists; entry files in budget)" "python3 scripts/dev/check-doc-paths.py"
 check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-test"
 check "known traps (Tools CI wiring, root commands documented)" "python3 scripts/dev/check-known-traps.py"
 

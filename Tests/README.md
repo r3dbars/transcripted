@@ -133,8 +133,8 @@ To run a single suite instead of the whole set, pass `--filter`:
 bash run-tests.sh --filter <entryFn|File>
 ```
 
-The selector matches an entry function (`testJSONLWriter`), a file name
-(`JSONLWriterTests.swift` or `JSONLWriterTests`), or a case-insensitive
+The selector matches an entry function (`testObservabilityLogWriter`), a file name
+(`ObservabilityLogWriterTests.swift` or `ObservabilityLogWriterTests`), or a case-insensitive
 substring of either. `--only` is an alias. To see the known entry functions:
 
 ```bash
@@ -153,6 +153,21 @@ bash run-tests.sh --coverage
 This uses the same convention-driven runner with LLVM coverage instrumentation
 and writes `summary.txt`, `coverage.profdata`, raw `.profraw`, and
 `report.lcov` under `build/coverage/fast-tests/`.
+
+## Running one test
+
+`bash run-tests.sh --filter <entryFn|File>` runs one fast-test file; the
+selector matches an entry function, a file name, or a case-insensitive
+substring of either. Compiled app sources are cached under
+`build/fast-tests-cache/` (keyed by the source list, file contents, compiler
+and flags), so later filtered runs skip that work;
+`TRANSCRIPTED_FAST_TESTS_NO_CACHE=1` forces a clean compile.
+
+`Tests/TranscriptedCoreTests/` is split into five package test targets:
+`AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests`.
+Scope a loop with `swift test --filter '^SpeakerTests\.'`, or one class with
+`swift test --filter <ClassName>`. Plain `swift test` runs them all, which is
+what CI does.
 
 ## Core Package Tests
 
