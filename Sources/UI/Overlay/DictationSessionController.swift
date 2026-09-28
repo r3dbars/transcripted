@@ -2308,29 +2308,24 @@ class DictationSessionController: ObservableObject {
         var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
         timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            var didAnnounceSessionCap = false
-            while !Task.isCancelled {
-                let now = ProcessInfo.processInfo.systemUptime
-                if timeout.isExpired(at: now) { break }
-                let remainingSeconds = timeout.remaining(at: now) ?? 0
-                let inWarningWindow = DictationSessionCapWarningPolicy.shouldWarn(remainingSeconds: remainingSeconds)
-                if inWarningWindow,
-                   self?.showSessionCapCountdown(
-                       remainingSeconds: remainingSeconds,
-                       announce: !didAnnounceSessionCap
-                   ) == true {
-                    didAnnounceSessionCap = true
-                }
-                // Inside the warning window, tick every second so the pill
-                // counts down live. Before it, sleep until the window opens.
-                let secondsUntilNextCheck = inWarningWindow
-                    ? min(remainingSeconds, 1)
-                    : remainingSeconds - DictationSessionCapWarningPolicy.warningWindowSeconds
-                let checkNanos = UInt64((secondsUntilNextCheck * 1_000_000_000).rounded(.up))
-                let sleepNanos = min(checkNanos, Self.sessionTimeoutPollIntervalNanos)
-                if sleepNanos == 0 { break }
-                try? await Task.sleep(nanoseconds: sleepNanos)
-            }
+            // DictationSessionCapTimer sleeps until the last 30 seconds, then
+            // ticks every second so the pill counts down live, and returns at
+            // the cap (or on cancel).
+            await DictationSessionCapTimer.run(
+                DictationSessionCapTimer.Steps(
+                    timeout: timeout,
+                    pollIntervalNanos: Self.sessionTimeoutPollIntervalNanos,
+                    uptime: { ProcessInfo.processInfo.systemUptime },
+                    sleep: { nanoseconds in try? await Task.sleep(nanoseconds: nanoseconds) },
+                    isCancelled: { Task.isCancelled },
+                    showCountdown: { remainingSeconds, announce in
+                        self?.showSessionCapCountdown(
+                            remainingSeconds: remainingSeconds,
+                            announce: announce
+                        ) == true
+                    }
+                )
+            )
             guard !Task.isCancelled, let self = self else { return }
             if self.isDictating {
                 let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false
