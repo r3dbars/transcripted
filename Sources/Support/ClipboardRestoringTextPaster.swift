@@ -327,6 +327,24 @@ struct DictationPasteTarget: Equatable {
 }
 
 enum FocusedTextPasteConfirmationPolicy {
+    /// Roles where a paste can't land: pages, windows, controls, lists.
+    /// Any of them still counts as text entry when its value is settable or
+    /// it sits inside an editable region. A selection range is no signal:
+    /// web pages report one on plain, uneditable text.
+    static let nonTextEntryRoles: Set<String> = [
+        "AXWebArea", "AXWindow", "AXApplication", "AXButton", "AXList", "AXOutline",
+        "AXTable", "AXRow", "AXCell", "AXScrollArea", "AXImage", "AXStaticText",
+        "AXLink", "AXMenuItem", "AXGroup", "AXSplitGroup", "AXToolbar", "AXTabGroup",
+    ]
+
+    /// True only when the focus plainly can't take text. An unknown role
+    /// never counts, so an app that exposes little to Accessibility keeps
+    /// today's likely-paste behavior.
+    static func isClearlyNotTextEntry(role: String?, valueIsSettable: Bool, hasEditableAncestor: Bool) -> Bool {
+        guard let role, nonTextEntryRoles.contains(role) else { return false }
+        return !valueIsSettable && !hasEditableAncestor
+    }
+
     struct SelectionRange: Equatable {
         let location: Int
         let length: Int
@@ -538,9 +556,20 @@ private struct FocusedTextPasteConfirmation {
     private let replacedSelectionLength: Int
     private let initialSelectionRange: FocusedTextPasteConfirmationPolicy.SelectionRange?
     private let changeObserver: FocusedTextChangeObserver?
+    private let focusedRole: String?
+    private let valueIsSettable: Bool
+    private let hasEditableAncestor: Bool
 
     var canObservePaste: Bool {
         initialValue != nil || initialSelectionRange != nil || changeObserver != nil
+    }
+
+    var focusIsClearlyNotTextEntry: Bool {
+        FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+            role: focusedRole,
+            valueIsSettable: valueIsSettable,
+            hasEditableAncestor: hasEditableAncestor
+        )
     }
 
     static func capture() -> FocusedTextPasteConfirmation? {
@@ -576,7 +605,22 @@ private struct FocusedTextPasteConfirmation {
             initialValue: stringAttribute(kAXValueAttribute as CFString, from: element),
             replacedSelectionLength: stringAttribute(kAXSelectedTextAttribute as CFString, from: element)?.utf16.count ?? 0,
             initialSelectionRange: selectionRangeAttribute(from: element),
-            changeObserver: FocusedTextChangeObserver.start(for: element)
+            changeObserver: FocusedTextChangeObserver.start(for: element),
+            focusedRole: stringAttribute(kAXRoleAttribute as CFString, from: element),
+            valueIsSettable: {
+                var settable = DarwinBoolean(false)
+                return AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success
+                    && settable.boolValue
+            }(),
+            hasEditableAncestor: {
+                // Web content lists these on anything inside a text box or
+                // editable region (Muse routes a paste from a button inside
+                // one), and not on the page around it (Claude's transcript).
+                var names: CFArray?
+                guard AXUIElementCopyAttributeNames(element, &names) == .success,
+                      let names = names as? [String] else { return false }
+                return names.contains("AXEditableAncestor") || names.contains("AXHighestEditableAncestor")
+            }()
         )
     }
 
@@ -665,9 +709,18 @@ private struct FocusedTextPasteConfirmation {
     }
 }
 
+/// Sources that can't tell make no claim, so they never overrule a paste.
+@MainActor
+extension ClipboardPasteConfirmationSource {
+    var focusIsClearlyNotTextEntry: Bool { false }
+}
+
 @MainActor
 protocol ClipboardPasteConfirmationSource {
     var canObservePaste: Bool { get }
+    /// True only when the focus is plainly somewhere text can't go (a web
+    /// page, a button, a list). Unknown focus is not "clearly not".
+    var focusIsClearlyNotTextEntry: Bool { get }
 
     func confirmationMode(
         _ text: String,
@@ -1145,7 +1198,18 @@ final class ClipboardRestoringTextPaster {
             // so if something else read first, the target may still be reading:
             // wait the longer fallback delay, not the short one used after a
             // proven paste, before the old clipboard replaces the dictation.
-            if clipboardReadSuggestsPaste {
+            // Some apps (Claude, other Electron apps) read the clipboard on
+            // Cmd+V even with no text box focused, so a quick read only counts
+            // as a paste when the focus could take text. A caller that decides
+            // confirmation itself (`pasteConfirmed`) also owns this call.
+            let focusRefutesPaste = pasteConfirmed == nil
+                && accessibilityConfirmation?.focusIsClearlyNotTextEntry == true
+            diagnostics["focus_refutes_paste"] = "\(focusRefutesPaste)"
+            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                event: "dictation_paste_confirmation_diagnostics",
+                context: diagnostics
+            )
+            if clipboardReadSuggestsPaste && !focusRefutesPaste {
                 guard isCurrentOperation() else { return cancelledOutcome }
                 scheduleClipboardRestore(
                     savedItems,

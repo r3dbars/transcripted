@@ -1,15 +1,33 @@
 import Foundation
 
 func testDictationOverlayPresentationPreferences() {
-    runSuite("DictationOverlayPresentationPreferences defaults to text-box overlay") {
+    runSuite("Someone who never picked a dictation window gets the Notch island") {
         let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
             DictationOverlayPresentationPreferences.mode(userDefaults: defaults),
-            .nearText,
-            "overlay should default to the existing text-box anchored presentation"
+            .notchIsland,
+            "with nothing saved, dictation uses the Notch island"
         )
+        assertNil(
+            defaults.string(forKey: DictationOverlayPresentationPreferences.modeKey),
+            "reading the default saves nothing, so a later default change still reaches this user"
+        )
+    }
+
+    runSuite("A window someone picked survives the Notch island default") {
+        for picked in DictationOverlayPresentationMode.allCases {
+            let (defaults, suiteName) = makeDictationOverlayPresentationDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+
+            DictationOverlayPresentationPreferences.setMode(picked, userDefaults: defaults)
+            assertEqual(
+                DictationOverlayPresentationPreferences.mode(userDefaults: defaults),
+                picked,
+                "\(picked.rawValue) stays picked"
+            )
+        }
     }
 
     runSuite("DictationOverlayPresentationPreferences persists mini cursor mode") {
@@ -72,8 +90,8 @@ func testDictationOverlayPresentationPreferences() {
         defaults.set("floatyThing", forKey: DictationOverlayPresentationPreferences.modeKey)
         assertEqual(
             DictationOverlayPresentationPreferences.mode(userDefaults: defaults),
-            .nearText,
-            "unknown stored mode should not change the overlay behavior"
+            .notchIsland,
+            "an unreadable stored mode falls back to the default window"
         )
     }
 

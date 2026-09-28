@@ -234,22 +234,19 @@ func testDictationStoppedAudioRecovery() {
                 return
             }
             assertTrue(persistRange.lowerBound < modelWaitRange.lowerBound, "durable checkpoint must precede the model failure boundary")
-            guard let snapshotRange = source.range(of: "snapshotRecordedSamplesForPersistence()"),
-                  let commitGuardRange = source.range(
-                    of: "DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(",
-                    range: snapshotRange.upperBound..<persistRange.lowerBound
-                  ) else {
-                assertTrue(false, "controller should revalidate session ownership after snapshot resampling and before persistence")
-                return
+            // The session re-check between snapshot and write, and writing the
+            // WAV off the main actor, are behavior tests now in
+            // DictationStopCheckpointTests.swift. The controller still has to
+            // give that stage the real ownership check.
+            if let isCurrent = source.range(of: "isCurrent: {"),
+               let nextStep = source.range(of: "stopMicrophone:", range: isCurrent.upperBound..<source.endIndex) {
+                let check = source[isCurrent.upperBound..<nextStep.lowerBound]
+                assertTrue(check.contains("DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(")
+                           && check.contains("taskCancelled: Task.isCancelled"),
+                           "the stop checkpoint's session check must be the stop task's cancellation plus session ownership")
+            } else {
+                assertTrue(false, "the controller must pass DictationStopCheckpoint a session check")
             }
-            assertTrue(
-                snapshotRange.lowerBound < commitGuardRange.lowerBound && commitGuardRange.lowerBound < persistRange.lowerBound,
-                "cancel/session guard must run after the detached snapshot and before recovery persistence"
-            )
-            assertTrue(
-                source.contains("let recovery = try await Task.detached(priority: .userInitiated)"),
-                "WAV encoding and disk writes must stay off the main actor"
-            )
             assertTrue(
                 source.contains("preparedRecording: stoppedRecordingSnapshot"),
                 "transcription should reuse the already-resampled stopped recording snapshot"

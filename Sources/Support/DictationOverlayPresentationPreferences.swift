@@ -35,7 +35,10 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
 
 enum DictationOverlayPresentationPreferences {
     static let modeKey = "dictationOverlayPresentationMode"
-    static let defaultMode: DictationOverlayPresentationMode = .nearText
+    /// The Notch island since 1.1.67. Only read when nothing is saved, so
+    /// anyone who picked a window keeps it, and the others stay available
+    /// in Settings.
+    static let defaultMode: DictationOverlayPresentationMode = .notchIsland
 
     static func mode(userDefaults: UserDefaults = .standard) -> DictationOverlayPresentationMode {
         guard
