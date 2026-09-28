@@ -154,8 +154,32 @@ public class DiarizationService: ObservableObject {
         }
 
         offlineDiarizerManager = manager
+        baseOfflineConfig = offlineConfig
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
         AppLogger.transcription.info("Offline diarizer models loaded", ["elapsed": elapsed])
+    }
+
+    /// Speaker-lab seam (Tools/SpeakerEvalHarness): bounds on how many speakers the
+    /// offline diarizer may return. FluidAudio re-clusters to fit when the count it
+    /// finds falls outside them. The lab sets this per meeting to test a speaker-count
+    /// hint taken from the calendar invite; while set it applies to every offline
+    /// call. The app never sets it.
+    public var labSpeakerBounds: DiarizationSpeakerBounds?
+    private var baseOfflineConfig: OfflineDiarizerConfig?
+
+    /// A one-off manager with the loaded settings plus `bounds`, loading models the
+    /// same way `initializeOffline` does (CoreML's compile cache keeps this quick).
+    private func boundedManager(_ bounds: DiarizationSpeakerBounds) async throws -> OfflineDiarizerManager? {
+        guard var config = baseOfflineConfig else { return nil }
+        config.clustering.minSpeakers = bounds.min
+        config.clustering.maxSpeakers = bounds.max
+        let manager = OfflineDiarizerManager(config: config)
+        if let bundlePath = bundleProvider("offline-diarizer-models") {
+            manager.initialize(models: try await OfflineDiarizerModels.load(from: bundlePath))
+        } else {
+            try await manager.prepareModels()
+        }
+        return manager
     }
 
     // MARK: - Offline Diarization (PyAnnote)
@@ -163,10 +187,14 @@ public class DiarizationService: ObservableObject {
     /// Run offline speaker diarization on audio samples using PyAnnote pipeline.
     /// Supports unlimited speakers. Samples should be 16kHz mono Float32.
     nonisolated public func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
-        guard let manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
+        guard var manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
             throw NSError(domain: "DiarizationService", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Offline diarizer model not loaded"
             ])
+        }
+        if let bounds = await MainActor.run(body: { self.labSpeakerBounds }),
+           let bounded = try await self.boundedManager(bounds) {
+            manager = bounded
         }
 
         AppLogger.transcription.info("Offline diarization starting", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
@@ -317,3 +345,14 @@ public class DiarizationService: ObservableObject {
 // Empty extension — protocol signatures match DiarizationService's existing methods exactly.
 
 extension DiarizationService: DiarizationEngine {}
+
+/// Speaker-count bounds for `DiarizationService.labSpeakerBounds` (speaker lab only).
+public struct DiarizationSpeakerBounds: Sendable, Equatable {
+    public let min: Int?
+    public let max: Int?
+
+    public init(min: Int?, max: Int?) {
+        self.min = min
+        self.max = max
+    }
+}

@@ -359,6 +359,9 @@ extension TranscriptionTaskManager {
         )
 
         AppLogger.pipeline.info("Phase 1 complete: Local transcription done", ["micUtterances": "\(result.micUtteranceCount)", "systemUtterances": "\(result.systemUtteranceCount)"])
+        if let observer = await MainActor.run(body: { self.pipelineResultObserver }) {
+            observer(result)
+        }
 
         // Phase 1.5: Identify speakers from DB knowledge
         var speakerMappings: [String: SpeakerMapping] = [:]

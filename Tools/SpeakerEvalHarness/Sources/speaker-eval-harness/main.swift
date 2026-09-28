@@ -312,13 +312,22 @@ struct Main {
         let args = Array(CommandLine.arguments.dropFirst())
         guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
-            die("usage: speaker-eval-harness <dump|replay|autoeval|autoeval-self-test> ...")
+            die("usage: speaker-eval-harness <dump|replay|autoeval|autoeval-self-test|meeting-series> ...")
         }
         switch cmd {
         case "dump": await runDump(Array(args.dropFirst()))
         case "replay": await runReplay(Array(args.dropFirst()))
         case "autoeval": runAutoResearch(Array(args.dropFirst()))
         case "autoeval-self-test": runAutoResearchSelfTests()
+        case "meeting-series":
+            guard #available(macOS 26.0, *) else { die("meeting-series requires macOS 26+") }
+            await runMeetingSeries(Array(args.dropFirst()))
+        case "dump-e2e":
+            guard #available(macOS 26.0, *) else { die("dump-e2e requires macOS 26+") }
+            await runDumpE2E(Array(args.dropFirst()))
+        case "dump-set":
+            guard #available(macOS 26.0, *) else { die("dump-set requires macOS 26+") }
+            await runDumpSet(Array(args.dropFirst()))
         default: die("unknown command \(cmd)")
         }
     }

@@ -163,6 +163,11 @@ public class TranscriptionTaskManager: ObservableObject {
     /// recovery would otherwise archive and unlink audio a queued job is about
     /// to open. Set by the app layer; nil in Core-only contexts and tests.
     public var reservedAudioURLsProvider: (() -> [URL])?
+    /// Speaker-lab hook: receives each live meeting's Phase 1 result (exact
+    /// utterance times, channels, diarizer and saved-speaker IDs) before speaker
+    /// classification, so `Tools/SpeakerEvalHarness` can score naming rows
+    /// against a simulated answer key. The app never sets it.
+    public var pipelineResultObserver: (@Sendable (TranscriptionResult) -> Void)?
 
     /// Scratch-directory mic placeholders minted for system-only failures,
     /// keyed by task. When the archive pass later mints a second placeholder

@@ -534,8 +534,12 @@ rules:
       - "scripts/speaker_autoresearch_contract.py"
       - "scripts/speaker_autoresearch_runtime.py"
       - "scripts/test_speaker_autoresearch.py"
+      - "scripts/speaker_lab/**"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/speaker_lab/download_yodas.sh"
+      - "bash -n scripts/speaker_lab/run_set.sh"
+      - "python3 -m py_compile scripts/speaker_lab/voicebank.py scripts/speaker_lab/meeting_sim.py scripts/speaker_lab/score.py scripts/speaker_lab/naming_replay.py"
       - "bash -n scripts/download_ami.sh"
       - "bash -n scripts/run_speaker_eval.sh"
       - "python3 -m py_compile scripts/score_speaker_eval.py"
