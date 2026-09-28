@@ -7,17 +7,6 @@ import Combine
 
 @MainActor
 class DictationSessionController: ObservableObject {
-    enum DictationTrigger: String {
-        case rightOptionTap = "right_option_tap"
-        case physicalKey = "physical_key"
-        case keyboardShortcut = "keyboard_shortcut"
-        case overlayButton = "overlay_button"
-        case menu = "menu"
-        case onboarding = "onboarding"
-        case sessionCap = "session_cap"
-        case unknown = "unknown"
-    }
-
     /// Issue #1743: the App Nap suppression assertion is balanced on this
     /// property's transitions rather than on individual start/stop paths.
     /// A dictation session ends in a dozen different places (success, cancel,
