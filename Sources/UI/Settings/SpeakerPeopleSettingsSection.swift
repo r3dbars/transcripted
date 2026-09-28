@@ -126,18 +126,28 @@ struct SpeakerDuplicateCandidate: Identifiable {
 final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
-    @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = []
+    @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = [] {
+        didSet { rebuildReviewStack() }
+    }
+    /// The "Name these people" cards and what they hide from Everyone,
+    /// rebuilt only when the queue, a skip, or Later changes it. The page,
+    /// the Everyone list, and Home's attention row all read this one value.
+    @Published private(set) var reviewStack = SpeakerReviewStack.empty
     @Published private(set) var hasLoadedProfiles = false
     /// Bumped to ask the "Search speakers" field to take focus (⌘F).
     @Published private(set) var searchFocusRequestToken = 0
     /// Voice groups the user dismissed with "Skip". Session-only (not
     /// persisted): there is no existing skip/dismiss field on the transcript
     /// frontmatter or `SpeakerProfile` this could route through, so a skipped
-    /// row simply drops out of `pendingVoiceGroups` for the rest of this
+    /// row simply drops out of `reviewStack` for the rest of this
     /// launch and reappears on next relaunch or once genuinely renamed.
-    @Published private(set) var skippedVoiceGroupIDs: Set<UUID> = []
+    @Published private(set) var skippedVoiceGroupIDs: Set<UUID> = [] {
+        didSet { rebuildReviewStack() }
+    }
     /// Calls skipped with "Skip this call". Saved, so they stay skipped.
-    @Published private(set) var skippedCallKeys: Set<String> = SpeakerReviewSkippedCalls.load()
+    @Published private(set) var skippedCallKeys: Set<String> = SpeakerReviewSkippedCalls.load() {
+        didSet { rebuildReviewStack() }
+    }
     /// Calendar invitees per call, offered as one-tap names on its card.
     @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
     private var inviteeLookupsStarted: Set<String> = []
@@ -178,32 +188,26 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         refresh()
     }
 
-    var pendingVoiceGroups: [SpeakerPendingVoiceGroup] {
-        SpeakerReviewQueueScanner.groupedByVoice(reviewQueueItems)
+    private func rebuildReviewStack() {
+        let voices = SpeakerReviewQueueScanner.groupedByVoice(reviewQueueItems)
             .filter { !skippedVoiceGroupIDs.contains($0.id) }
+        reviewStack = SpeakerReviewStack(
+            voices: voices,
+            skippedCallKeys: skippedCallKeys,
+            laterCallKeys: laterCallKeys
+        )
     }
 
-    /// Dismisses a queued voice from "Needs a name" for this session without
+    /// Dismisses a queued voice from its review card for this session without
     /// touching its saved profile or transcripts. See `skippedVoiceGroupIDs`.
     func skip(_ group: SpeakerPendingVoiceGroup) {
         skippedVoiceGroupIDs.insert(group.id)
     }
 
-    /// "Name these people": one card per call with voices still unnamed,
-    /// newest call first, minus calls someone skipped. Calls sent to the
-    /// back with Later go last, in the order they were sent.
-    var pendingMeetingGroups: [SpeakerPendingMeetingGroup] {
-        let groups = SpeakerReviewQueueScanner.groupedByMeeting(pendingVoiceGroups)
-            .filter { !skippedCallKeys.contains($0.id) }
-        guard !laterCallKeys.isEmpty else { return groups }
-        let later = Set(laterCallKeys)
-        let now = groups.filter { !later.contains($0.id) }
-        let back = laterCallKeys.compactMap { key in groups.first { $0.id == key } }
-        return now + back
-    }
-
     /// Later on the top card: it goes to the back of the stack for now.
-    @Published private(set) var laterCallKeys: [String] = []
+    @Published private(set) var laterCallKeys: [String] = [] {
+        didSet { rebuildReviewStack() }
+    }
 
     func sendCallToBack(_ group: SpeakerPendingMeetingGroup) {
         laterCallKeys.removeAll { $0 == group.id }
@@ -230,33 +234,25 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    /// The "Everyone" directory: named voices, plus unnamed voices that are
-    /// not currently sitting in the "Needs a name" queue above. A voice lives
-    /// in exactly one section — it graduates to Everyone when named — but an
-    /// unnamed voice with no queue row left (deleted transcripts, or skipped
-    /// for this session) stays reachable here for merge/delete instead of
-    /// vanishing from both sections.
+    /// The "Everyone" directory: every voice except the ones on the open
+    /// review card right above it (named, deleted, or "This is me" there).
+    /// Voices on cards further down the stack stay here, badged "Waiting in
+    /// review", so they can be renamed, merged, or deleted without cycling
+    /// the stack, and a search never hides a match.
+    /// See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
-        let queuedUnnamedIds = queuedVoiceIDs
-        return filteredProfiles.filter { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) }
+        reviewStack.directory(filteredProfiles, isSearching: isSearching)
     }
 
     /// Directory membership count independent of the search filter, used for
     /// the "N people" trailing label and to decide whether the Everyone
     /// section renders at all.
     var directoryCount: Int {
-        let queuedUnnamedIds = queuedVoiceIDs
-        return profiles.count(where: { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) })
+        reviewStack.directory(profiles, isSearching: false).count
     }
 
-    /// Voices shown on a "Name these people" card right now.
-    private var queuedVoiceIDs: Set<UUID> {
-        Set(pendingMeetingGroups.flatMap { $0.voices.map(\.id) })
-    }
-
-    private static func isInDirectory(_ profile: SpeakerProfile, queuedUnnamedIds: Set<UUID>) -> Bool {
-        let isNamed = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return isNamed || !queuedUnnamedIds.contains(profile.id)
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var filteredProfiles: [SpeakerProfile] {
@@ -539,6 +535,17 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             // Merge Into tools, so nothing is silently lost.
             self.merge(source: renamedProfile, into: existingOwnerProfile)
             completion?(true)
+        }
+    }
+
+    /// Rename from an Everyone row. A voice still waiting for a name goes
+    /// through the same path as naming it on its review card; see
+    /// `SpeakerReviewStack.reviewItemForRename`.
+    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String) {
+        if let item = SpeakerReviewStack.reviewItemForRename(of: profile, in: reviewQueueItems) {
+            namePendingReviewItem(item, to: newName)
+        } else {
+            rename(profile: profile, to: newName)
         }
     }
 
@@ -1073,9 +1080,9 @@ struct SpeakerPeopleSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Evaluated once per render: each of these model properties redoes
-            // the O(n) voice grouping (and sort/filter) on every access.
-            let meetingGroups = model.pendingMeetingGroups
+            // Evaluated once per render: the directory properties sort and
+            // filter every profile on each access.
+            let meetingGroups = model.reviewStack.calls
             let directoryCount = model.directoryCount
             let directoryProfiles = model.directoryProfiles
 
@@ -1125,9 +1132,10 @@ struct SpeakerPeopleSettingsSection: View {
                 .accessibilityIdentifier("transcripted.speakers.inbox")
             }
 
-            // A voice appears in exactly one section: the queue above until
-            // it's named, Everyone after. When every voice is still waiting
-            // for a name the directory stays hidden entirely.
+            // Voices on the open card above are left out of Everyone; voices
+            // on cards further down stay listed, badged, so they can be
+            // renamed, merged, or deleted without cycling the stack. When the
+            // open card holds every voice the directory stays hidden.
             if model.profiles.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     LibrarySectionLabel(text: "Everyone")
@@ -2233,7 +2241,7 @@ private struct SpeakerPersonRow: View {
     private func commitRename() {
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        model.rename(profile: profile, to: trimmed)
+        model.renameFromEveryone(profile, to: trimmed)
         expandedPersonID = nil
     }
 
@@ -2243,6 +2251,9 @@ private struct SpeakerPersonRow: View {
         }
         if profile.disputeCount > 0 {
             return "Check name"
+        }
+        if model.reviewStack.isWaitingForReview(profile) {
+            return SpeakerReviewStack.waitingBadgeTitle
         }
         return nil
     }
