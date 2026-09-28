@@ -48,6 +48,8 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     let port: Int
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
+    /// Rotated on every launch; every request to the helper carries it.
+    let accessKey = LlamaServerAccessKey()
     var snapshot: LlamaRuntimeSnapshot { lifecycle.sync { runtimeSnapshot } }
 
     struct Assets: Sendable {
@@ -190,16 +192,21 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     /// The child is published only after Process.run() succeeds.
     private func launchPrepared(_ assets: Assets) {
         guard !stopped, process == nil else { return }
+        guard let apiKey = accessKey.rotate() else {
+            DiagnosticsLog.shared.record("llama-server-unavailable", metadata: ["reason": "launch-failed"])
+            scheduleRestart(reason: .launchFailed, wasHealthy: false, uptime: 0)
+            return
+        }
+        let launch = Self.launchConfiguration(
+            model: assets.model,
+            port: port,
+            apiKey: apiKey,
+            inheritedEnvironment: ProcessInfo.processInfo.environment
+        )
         let child = Process()
         child.executableURL = URL(fileURLWithPath: assets.binary)
-        child.arguments = [
-            "-m", assets.model,
-            "--host", "127.0.0.1",
-            "--port", String(port),
-            "-c", "4096",
-            "--swa-full",
-            "--cache-reuse", "256",
-        ]
+        child.arguments = launch.arguments
+        child.environment = launch.environment
         child.standardOutput = FileHandle.nullDevice
         child.standardError = FileHandle.nullDevice
         if let modelInput = assets.modelInput { child.standardInput = modelInput }
@@ -219,6 +226,38 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         launchedAt = Date()
         DiagnosticsLog.shared.record("llama-server-start", metadata: [:])
         pollHealth(of: child)
+    }
+
+    struct LaunchConfiguration: Equatable, Sendable {
+        let arguments: [String]
+        let environment: [String: String]
+    }
+
+    /// Transcripted divergence from Tilde: the helper requires a per-launch
+    /// API key and runs with its web UI off (see `LlamaServerAccessKey`).
+    /// The key goes in the environment, never argv, so `ps` can't show it.
+    /// `/health` stays public in llama-server, so the readiness probe works
+    /// either way; the app sends the key there too.
+    static func launchConfiguration(
+        model: String,
+        port: Int,
+        apiKey: String,
+        inheritedEnvironment: [String: String]
+    ) -> LaunchConfiguration {
+        var environment = inheritedEnvironment
+        environment[LlamaServerAccessKey.environmentVariable] = apiKey
+        return LaunchConfiguration(
+            arguments: [
+                "-m", model,
+                "--host", "127.0.0.1",
+                "--port", String(port),
+                "-c", "4096",
+                "--swa-full",
+                "--cache-reuse", "256",
+                "--no-webui",
+            ],
+            environment: environment
+        )
     }
 
     private func handleExit(_ child: Process) {
@@ -321,6 +360,7 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 2
+        accessKey.authorize(&request)
         guard let (data, response) = try? await LocalhostURLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               http.statusCode == 200,
