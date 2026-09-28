@@ -139,6 +139,12 @@ settings-side agent connection flow.
   call" is saved (`SpeakerReviewSkippedCalls`) and moves its voices to
   Everyone. Then compact duplicate-merge suggestions and the searchable
   all-speakers list with per-row play/rename/merge/delete.
+- `SpeakerReviewStack.swift` - Foundation-pure card stack behind that page:
+  call order (skipped calls out, Later ones last), which voices Everyone
+  hides (only the open top card's, never during a search, so voices on
+  cards further down stay reachable with a "Waiting in review" badge), and
+  Home's "speakers need names" count (skipped calls don't count). The model
+  rebuilds it once when the queue, a skip, or Later changes.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
   held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
   its header names the meeting. When the recording started with a calendar event

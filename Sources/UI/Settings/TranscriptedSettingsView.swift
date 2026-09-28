@@ -1975,7 +1975,7 @@ struct TranscriptedSettingsView: View {
             )
         }
 
-        let reviewCount = speakerPeopleModel.pendingVoiceGroups.count
+        let reviewCount = speakerPeopleModel.reviewStack.voiceCount
         if reviewCount > 0 {
             issues.append(
                 HomeAttentionIssue(
