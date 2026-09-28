@@ -124,6 +124,28 @@ assignment + elimination cuts naming work 103 → 38 (**−63%**), silent naming
 above today's 0.92 auto bar; only the margin rule stopped a wrong name. That's the argument for
 naming silently only against the invite lineup.
 
+## Finding 7: NVIDIA Nemotron 3 Diarization is the strongest separator tested
+
+Nemotron 3 Diarization (NVIDIA, released 2026-09-23, up to 8 speakers, OpenMDW license) runs on
+Apple Silicon through FluidAudio 0.17.4. The app is on 0.15.4, so it runs in an isolated probe
+(`scripts/speaker_lab/nemotron-probe/`, own `Package.swift`, never linked into the app) and is
+scored with `scripts/speaker_lab/nemotron_cleanup.py` (fold voices under 5 s into the voice that
+talks nearest in time; optional invite cap). Same 45 holdout meetings, `fast128` preset:
+
+| Call | Words right: today / PyAnnote new / **Nemotron + fold** | Exactly right: today / PyAnnote new / **Nemotron + fold** |
+|---|---|---|
+| 1:1 | 92.4 / 92.4 / **96.2%** | 80 / 93 / **100%** (with cap; 87% without) |
+| 3–4 remote | 80.5 / 80.3 / **92.4%** | 83 / 75 / **92%** (no cap) |
+| 6–8 remote | 54.8 / 78.2 / **91.7%** | 0 / 60 / **80%** |
+| Stress | 56.4 / 78.9 / **82.5%** | 0 / **75** / 50–62% |
+
+It gets 12–14 more points of words right on group calls. Two things stand between this and the
+app: it produces no voice fingerprints, so cross-meeting naming needs a hybrid (embed each
+Nemotron speaker's segments with WeSpeaker and reuse the existing matcher and
+`SpeakerSeparation`); and FluidAudio 0.17.x was held in #1789 for speech-to-text regressions
+(slow noisy blank takes, short-clip WER). The cap helps 1:1s but hurts 3–4 person calls with
+no-shows, so apply it only to one-person invites.
+
 ## What changed in the app (behind two beta toggles, off by default)
 
 - **Separate voices on calls (beta)** → `Sources/TranscriptedCore/Speaker/SpeakerSeparation.swift` +
