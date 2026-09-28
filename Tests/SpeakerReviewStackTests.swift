@@ -73,6 +73,34 @@ func testSpeakerReviewStack() {
         assertFalse(stack.isWaitingForReview(renamedAda))
     }
 
+    runSuite("Renaming a voice from Everyone names it the way its review card would") {
+        let fixture = ReviewStackFixture()
+        let queue = fixture.queue
+
+        assertEqual(
+            SpeakerReviewStack.reviewItemForRename(of: fixture.profile(fixture.dee), in: queue)?.speakerId,
+            fixture.dee,
+            "a voice waiting on a later card is named through its review row"
+        )
+        assertEqual(
+            SpeakerReviewStack.reviewItemForRename(of: fixture.profile(fixture.bea), in: queue)?.meetingTitle,
+            "Standup",
+            "so is a voice whose call was skipped; skipping hides the card, not the unnamed transcript"
+        )
+        assertNil(
+            SpeakerReviewStack.reviewItemForRename(of: makeStackProfile(id: fixture.dee, name: "Dee"), in: queue),
+            "a voice that already has a name gets a plain rename"
+        )
+        assertNil(
+            SpeakerReviewStack.reviewItemForRename(of: fixture.profile(fixture.named), in: queue),
+            "a named person on no card gets a plain rename"
+        )
+        assertNil(
+            SpeakerReviewStack.reviewItemForRename(of: makeStackProfile(id: UUID(), name: nil), in: queue),
+            "an unnamed voice with no saved review row gets a plain rename"
+        )
+    }
+
     runSuite("With nothing to review Everyone lists every voice") {
         let fixture = ReviewStackFixture()
         let stack = SpeakerReviewStack.empty
@@ -111,13 +139,17 @@ private struct ReviewStackFixture {
         SpeakerReviewStack(voices: voices, skippedCallKeys: skipped, laterCallKeys: later)
     }
 
-    private var voices: [SpeakerPendingVoiceGroup] {
-        SpeakerReviewQueueScanner.groupedByVoice([
+    var queue: [SpeakerPendingReviewItem] {
+        [
             item(ada, call: designId, title: "Design sync", day: 3),
             item(bea, call: standupId, title: "Standup", day: 2),
             item(cal, call: standupId, title: "Standup", day: 2),
             item(dee, call: retroId, title: "Retro", day: 1),
-        ])
+        ]
+    }
+
+    private var voices: [SpeakerPendingVoiceGroup] {
+        SpeakerReviewQueueScanner.groupedByVoice(queue)
     }
 
     private func item(_ speakerId: UUID, call: UUID, title: String, day: Double) -> SpeakerPendingReviewItem {

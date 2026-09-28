@@ -405,7 +405,7 @@ struct TranscriptedSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .onChange(of: speakerInboxScrollRequest) { _, _ in
-                    speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                    speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewStack.calls.isEmpty
                     scrollToSpeakerInbox(using: proxy)
                 }
                 .onChange(of: settingsScrollTargetID) { _, target in
@@ -418,7 +418,7 @@ struct TranscriptedSettingsView: View {
                         settingsScrollTargetID = nil
                     }
                 }
-                .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                .onChange(of: speakerPeopleModel.reviewStack.calls.count) { oldCount, newCount in
                     guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
                     speakerInboxScrollAwaitingQueue = false
                     scrollToSpeakerInbox(using: proxy)

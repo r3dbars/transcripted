@@ -53,6 +53,18 @@ struct SpeakerReviewStack {
         !Self.isNamed(profile) && queuedVoiceIDs.contains(profile.id)
     }
 
+    /// The saved-transcript row to name when someone renames this voice from
+    /// Everyone, or nil for a plain rename. A voice that still needs a name
+    /// (on a card, or in a skipped call) is named the way its card names it,
+    /// so its transcripts and confirmations come out the same either way.
+    static func reviewItemForRename(
+        of profile: SpeakerProfile,
+        in queue: [SpeakerPendingReviewItem]
+    ) -> SpeakerPendingReviewItem? {
+        guard !isNamed(profile) else { return nil }
+        return queue.first { $0.speakerId == profile.id }
+    }
+
     private static func isNamed(_ profile: SpeakerProfile) -> Bool {
         profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }

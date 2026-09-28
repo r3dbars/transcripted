@@ -235,9 +235,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     /// The "Everyone" directory: every voice except the ones on the open
-    /// review card right above it. Voices on cards further down the stack
-    /// stay here (badged "Waiting in review"), and a search shows every
-    /// match, so no voice is ever out of reach for rename, merge, or delete.
+    /// review card right above it (named, deleted, or "This is me" there).
+    /// Voices on cards further down the stack stay here, badged "Waiting in
+    /// review", so they can be renamed, merged, or deleted without cycling
+    /// the stack, and a search never hides a match.
     /// See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
         reviewStack.directory(filteredProfiles, isSearching: isSearching)
@@ -450,6 +451,17 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             // Merge Into tools, so nothing is silently lost.
             self.merge(source: renamedProfile, into: existingOwnerProfile)
             completion?(true)
+        }
+    }
+
+    /// Rename from an Everyone row. A voice still waiting for a name goes
+    /// through the same path as naming it on its review card; see
+    /// `SpeakerReviewStack.reviewItemForRename`.
+    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String) {
+        if let item = SpeakerReviewStack.reviewItemForRename(of: profile, in: reviewQueueItems) {
+            namePendingReviewItem(item, to: newName)
+        } else {
+            rename(profile: profile, to: newName)
         }
     }
 
@@ -2124,7 +2136,7 @@ private struct SpeakerPersonRow: View {
     private func commitRename() {
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        model.rename(profile: profile, to: trimmed)
+        model.renameFromEveryone(profile, to: trimmed)
         expandedPersonID = nil
     }
 
