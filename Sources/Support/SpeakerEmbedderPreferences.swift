@@ -82,13 +82,13 @@ enum SpeakerEmbedderPreferences {
         NotificationCenter.default.post(name: .speakerEmbedderPreferenceDidChange, object: nil)
     }
 
-    /// Speaker-database filename for a given *loaded* embedder identifier. A nil
-    /// identifier — the default WeSpeaker path, or an ERes2Net model that was
-    /// selected but could not be loaded — maps to the legacy `speakers.sqlite`.
+    /// Speaker-database filename for the embedder the meeting stack is built
+    /// around. A nil identifier (WeSpeaker, or a chosen model whose file is missing
+    /// or that failed to load on this build) maps to the legacy `speakers.sqlite`.
     /// Any other embedder gets its own `speakers_<id>.sqlite` so vectors of
-    /// different dimensions can never share a database row. Keying on the loaded
-    /// embedder (not mere model-file presence) is what keeps the per-model DBs
-    /// dimension-pure even when a present model fails to load.
+    /// different dimensions can never share a database row. A model that fails its
+    /// background load after launch produces no vectors at all, so its database
+    /// stays dimension-pure too (SpeakerEmbedderFactory).
     static func speakerDBFileName(forEmbedderIdentifier identifier: String?) -> String {
         guard let identifier, !identifier.isEmpty else { return "speakers.sqlite" }
         return "speakers_\(identifier).sqlite"

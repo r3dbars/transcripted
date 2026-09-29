@@ -169,6 +169,7 @@ public final class SpeakerVoiceprintMigrationGate: ObservableObject {
             case .targetDatabaseUnavailable: return "target_database_unavailable"
             case .thresholdsMismatch: return "thresholds_mismatch"
             case .alreadyRunning: return "already_running"
+            case .embedderUnavailable: return "embedder_unavailable"
             }
         case let error as SpeakerDatabase.SQLiteOperationError:
             return "sqlite_\(error.code)"

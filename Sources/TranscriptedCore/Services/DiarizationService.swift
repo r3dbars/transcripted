@@ -172,6 +172,11 @@ public class DiarizationService: ObservableObject {
         modelState = .loading
         AppLogger.transcription.info("Diarization initializing offline models")
 
+        // A background-loaded voiceprint loads alongside the diarizer models, off
+        // this actor, and the service only reports ready once it has settled.
+        let embedderLoad: Task<Void, Never>? = (segmentEmbedder as? any BackgroundLoadingSpeakerSegmentEmbedder)
+            .map { loading in Task.detached(priority: .utility) { _ = await loading.waitUntilLoaded() } }
+
         do {
             switch backend {
             case .pyannote:
@@ -192,6 +197,7 @@ public class DiarizationService: ObservableObject {
                 }
             }
 
+            await embedderLoad?.value
             modelState = .ready
             AppLogger.transcription.info("Offline diarization models loaded and ready")
         } catch {
@@ -385,6 +391,7 @@ public class DiarizationService: ObservableObject {
             }
         }
 
+        await waitForBackgroundSegmentEmbedder()
         let finalSegments = reembedIfNeeded(segments: segments, samples: samples, sampleRate: sampleRate)
         MeetingPipelineTimings.current?.add(
             .diarize,
@@ -405,6 +412,14 @@ public class DiarizationService: ObservableObject {
         return message == "no speech detected"
             || message == "no speech detected in audio"
             || message == "no speech detected in the audio."
+    }
+
+    /// Waits for a background-loaded `segmentEmbedder` to finish loading, so the
+    /// re-embedding that follows never blocks a thread on the load. Returns at
+    /// once for any other embedder, or once the load has ended.
+    nonisolated func waitForBackgroundSegmentEmbedder() async {
+        guard let loading = segmentEmbedder as? any BackgroundLoadingSpeakerSegmentEmbedder else { return }
+        _ = await loading.waitUntilLoaded()
     }
 
     /// Re-derive each segment's embedding with `segmentEmbedder` when present.
@@ -483,6 +498,7 @@ public class DiarizationService: ObservableObject {
         let loadedRunner = await MainActor.run(body: { self.nemotronRunner })
         let activeEmbedder: (any SpeakerSegmentEmbedder)?
         if let injected = segmentEmbedder {
+            await waitForBackgroundSegmentEmbedder()
             activeEmbedder = injected
         } else {
             activeEmbedder = await MainActor.run(body: { self.nemotronFallbackEmbedder })
