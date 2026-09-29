@@ -245,6 +245,8 @@ final class MeetingPromptDetector {
             await evaluate(forceCalendarRefresh: true)
             finishEvaluation()
 
+            // Later poll passes aren't counted as in flight: they are the
+            // slow safety net, not something a caller is waiting on.
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
                 guard !Task.isCancelled else { return }
