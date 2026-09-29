@@ -234,4 +234,90 @@ func testPhysicalShortcutMatcher() {
             "a press during a dictation stops and pastes it, which a combo can't undo, so it waits for release"
         )
     }
+
+    // The detector's session tap consumes the Right Option flagsChanged
+    // event, so the OS key state never sees Option go down. These feed the
+    // tracker only the events the tap sees, the way the tap does, with no
+    // physical-key lookup to lean on.
+    let rightOption = UInt32(kVK_RightOption)
+    let leftOption = UInt32(kVK_Option)
+    let rightShift = UInt32(kVK_RightShift)
+
+    runSuite("Right Option then M while it's held drops the dictation the press started") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertTrue(tracker.keyDown(), "Option+M must report a combo so the stray dictation is dropped")
+    }
+
+    runSuite("Right Option then E or an arrow while it's held drops the dictation the press started") {
+        var accent = HandsFreeModifierComboTracker()
+        accent.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertTrue(accent.keyDown(), "typing é with Option+E must report a combo")
+
+        var arrow = HandsFreeModifierComboTracker()
+        arrow.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertTrue(arrow.keyDown(), "Option+arrow must report a combo")
+    }
+
+    runSuite("Holding Right Option alone and letting go keeps the dictation") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertTrue(
+            tracker.flagsChanged(keyCode: rightOption, modifiers: 0, isHandsFreeRelease: true),
+            "the key's own release ends the press and is the tap's to consume"
+        )
+        assertFalse(tracker.keyDown(), "typing after the key is back up is dictation, not a combo")
+    }
+
+    runSuite("A combo drops the dictation once, not on every later key") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertTrue(tracker.keyDown(), "the first key makes the press a combo")
+        assertFalse(tracker.keyDown(), "a second key while still held has nothing left to drop")
+        assertFalse(
+            tracker.flagsChanged(keyCode: rightOption, modifiers: 0, isHandsFreeRelease: true),
+            "the release after a combo isn't a tracked release anymore"
+        )
+    }
+
+    runSuite("Adding Shift under Right Option still lets the next key make a combo") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        assertFalse(
+            tracker.flagsChanged(
+                keyCode: rightShift,
+                modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift,
+                isHandsFreeRelease: false
+            ),
+            "Shift going down isn't Option's release"
+        )
+        assertTrue(tracker.keyDown(), "Option+Shift+V is still a combo")
+    }
+
+    runSuite("Right Option let go under a held Left Option doesn't drop a later dictation") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        // Right Option comes up but Left Option keeps the option flag set,
+        // so this isn't the binding's release.
+        _ = tracker.flagsChanged(
+            keyCode: rightOption,
+            modifiers: PhysicalDictationTriggerModifiers.option,
+            isHandsFreeRelease: false
+        )
+        _ = tracker.flagsChanged(keyCode: leftOption, modifiers: 0, isHandsFreeRelease: false)
+        assertFalse(tracker.keyDown(), "once no Option key is down, a later key is not a combo")
+    }
+
+    runSuite("A hands-free key no other shortcut shares never drops its dictation") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: false)
+        assertFalse(tracker.keyDown(), "with no Option chord bound, Right Option plus a key is just dictation plus typing")
+    }
+
+    runSuite("A key after the event tap was disabled doesn't drop the dictation") {
+        var tracker = HandsFreeModifierComboTracker()
+        tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
+        tracker.reset()
+        assertFalse(tracker.keyDown(), "the release may have been missed while the tap was off")
+    }
 }

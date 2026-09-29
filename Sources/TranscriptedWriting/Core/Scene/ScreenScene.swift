@@ -38,7 +38,7 @@ public enum ScreenScene {
         var centerX: Double { x + width / 2 }
     }
 
-    /// One block of OCR'd text from a full-display capture, as Phase 1's
+    /// One block of screen text from a focused-window capture, as
     /// `ScreenCaptureService` would emit it: text plus where on screen it
     /// sat and, where SCWindow metadata resolved it, which window it came
     /// from. `windowOwnerBundleID` is `nil` when attribution wasn't
@@ -151,7 +151,7 @@ public enum ScreenScene {
     // MARK: - Classification
 
     /// - Parameters:
-    ///   - blocks: every OCR block from the latest snapshot, full-display.
+    ///   - blocks: every text block from the latest snapshot.
     ///   - frontmostBundleID: the app the user is typing into right now.
     ///   - fieldText: the text already in the field (IMKit already has
     ///     this; used only to dedupe and to find "the current sentence").
@@ -176,8 +176,8 @@ public enum ScreenScene {
             // Only positively-attributed frontmost-window blocks may enter a
             // reply thread. `nil` attribution means "unknown," and treating
             // unknown as "frontmost" is a fail-open path: an unattributed
-            // block from some other visible app (full-display capture sees
-            // all of them) could get folded into the conversation as if the
+            // block from some other visible app (older full-display capture
+            // saw all of them) could get folded into the conversation as if the
             // user's own chat partner said it. Drop-on-doubt beats guessing.
             let ownWindowBlocks = blocks.filter {
                 guard $0.windowOwnerBundleID == frontmostBundleID else { return false }

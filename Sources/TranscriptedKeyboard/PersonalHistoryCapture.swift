@@ -89,6 +89,13 @@ final class PersonalHistoryCapture: @unchecked Sendable {
             sensitiveInputBegan()
             return nil
         }
+        // Transcripted: a pause is decided when the key is typed. Checking it
+        // only when the batch reaches the app let text typed during a pause
+        // through whenever the pause had ended by delivery.
+        guard !PersonalHistorySettingsContract.isPaused(
+            pausedUntil: defaults.double(forKey: PersonalHistorySettingsContract.pausedUntilKey),
+            now: now()
+        ) else { return nil }
         guard defaults.bool(forKey: PersonalHistorySettingsContract.enabledKey),
               let historyIdentifier = defaults.string(
                 forKey: PersonalHistorySettingsContract.historyIdentifierKey

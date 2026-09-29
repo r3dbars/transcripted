@@ -270,7 +270,7 @@ Source: Tilde `f36f6562`. "Same" means a straight port, with only identities and
 | --- | --- |
 | Required for any suggestion; silent without it | Same |
 | Capture triggers and spacing; blocked on lock, secure input, no field, or any visible excluded window | Same |
-| Accessibility tree first, then ScreenCaptureKit plus Vision OCR; full display only in narrow cases | Same |
+| Accessibility tree first, then ScreenCaptureKit plus Vision OCR; full display only in narrow cases | Changed (owner decision 2026-09-29): reads only the focused window of the app being typed in, never the full display. `FocusedWindowCapturePolicy` picks it and captures nothing when it can't prove the window is focused, in scope and not excluded |
 | Memory only, 20 s staleness | Same |
 | Rules-only redaction at prompt build (`SecretRules`) | Same |
 | Scene classification and the sensitive, suggestion, echo and factual-grounding policies | Same |

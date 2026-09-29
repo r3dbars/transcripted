@@ -20,8 +20,8 @@ public enum SpeakerVoiceprintMigrationStatus: String, Sendable, Codable, CaseIte
     /// Voiceprint rebuilt, name and counts carried, but their audio disagreed
     /// with itself under the new model (or was one clip, so it couldn't be
     /// checked). Their confirmations wait in the ledger, so the new model won't
-    /// silently name them; the first time the user confirms them, the next run
-    /// restores the confirmations.
+    /// silently name them; the first time the user confirms them, that
+    /// confirmation restores the rest.
     case held
     /// No usable audio left: no profile could be built. Listed so the host can
     /// ask for one confirmation instead of the person silently disappearing.
@@ -207,23 +207,52 @@ extension SpeakerDatabase {
     /// them at least once under the new model (a confirmation row now exists for
     /// their profile, or for the profile they were merged into). Returns the ids
     /// released. Held people whose profile was deleted stay held.
+    ///
+    /// The migration runs this at launch. `recordUserConfirmations` runs the
+    /// same rules for the profiles it just confirmed, so a held person is
+    /// released in the session the user confirms them, not at the next launch.
     func releaseHeldVoiceprintConfirmations() throws -> [UUID] {
         var released: [UUID] = []
         try performMutationBatch {
-            for (profileId, record) in try heldVoiceprintRecordsImpl() {
-                var holder = profileId
-                var seen: Set<UUID> = [profileId]
-                while let next = mergeSurvivorId(of: holder), seen.insert(next).inserted {
-                    holder = next
-                }
-                guard getSpeakerImpl(id: holder) != nil,
-                      try voiceprintConfirmationCountImpl(profileId: holder) > 0 else { continue }
-                try insertVoiceprintConfirmationsImpl(profileId: holder, record.confirmations)
-                try markVoiceprintReleasedImpl(profileId: profileId)
-                released.append(profileId)
-            }
+            released = try releaseHeldVoiceprintConfirmationsImpl(holders: nil)
         }
         return released
+    }
+
+    /// The release rules, on `queue` inside a mutation batch. `holders` limits
+    /// the pass to held people whose profile now resolves (through merges) to
+    /// one of those ids; nil checks every held person.
+    func releaseHeldVoiceprintConfirmationsImpl(holders: Set<UUID>?) throws -> [UUID] {
+        var released: [UUID] = []
+        for (profileId, record) in try heldVoiceprintRecordsImpl() {
+            var holder = profileId
+            var seen: Set<UUID> = [profileId]
+            while let next = mergeSurvivorId(of: holder), seen.insert(next).inserted {
+                holder = next
+            }
+            if let holders, !holders.contains(holder) { continue }
+            guard getSpeakerImpl(id: holder) != nil,
+                  try voiceprintConfirmationCountImpl(profileId: holder) > 0 else { continue }
+            try insertVoiceprintConfirmationsImpl(profileId: holder, record.confirmations)
+            try markVoiceprintReleasedImpl(profileId: profileId)
+            released.append(profileId)
+        }
+        return released
+    }
+
+    /// Whether this database has a voiceprint migration ledger. Only a database
+    /// a migration wrote into has one. On `queue`.
+    func hasVoiceprintMigrationLedgerImpl() throws -> Bool {
+        let statement = try prepareStatement(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;",
+            operation: "look up voiceprint migration ledger"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (Self.voiceprintMigrationTable as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return false }
+        guard step == SQLITE_ROW else { throw voiceprintLedgerError("look up voiceprint migration ledger", step) }
+        return true
     }
 
     // MARK: - Implementation (on `queue`, inside a mutation batch)
@@ -267,17 +296,26 @@ extension SpeakerDatabase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var records: [(UUID, SpeakerVoiceprintHeldRecord)] = []
+        var unreadable = 0
         while true {
             let step = sqlite3_step(statement)
-            if step == SQLITE_DONE { return records }
+            if step == SQLITE_DONE { break }
             guard step == SQLITE_ROW else { throw voiceprintLedgerError("read held voiceprint migrations", step) }
             guard let id = sqlite3_column_text(statement, 0).flatMap({ UUID(uuidString: String(cString: $0)) }),
                   let json = sqlite3_column_text(statement, 1).map({ String(cString: $0) }),
                   let record = try? decoder.decode(SpeakerVoiceprintHeldRecord.self, from: Data(json.utf8)) else {
+                unreadable += 1
                 continue
             }
             records.append((id, record))
         }
+        if unreadable > 0 {
+            // A count only: these rows hold names and meeting ids.
+            AppLogger.speakers.warning("Held voiceprint ledger rows could not be read; they stay held", [
+                "unreadable_count": "\(unreadable)",
+            ])
+        }
+        return records
     }
 
     private func voiceprintConfirmationCountImpl(profileId: UUID) throws -> Int {

@@ -143,6 +143,18 @@ BUNDLE_VOICEPRINT_MODEL=0`. `build.sh` bundles it when the cache has it (even
 `--thin`; `BUNDLE_VOICEPRINT_MODEL=0` leaves it out) and says so when it
 doesn't.
 
+The Release Candidate workflow's runner has neither model, so it runs
+`scripts/release/provision-release-models.sh` before `build-beta.sh`. That
+script checks every file against pinned sha256s and fails the job on any
+mismatch. It takes each model from the previous release's app when that copy
+matches the pins (so the bytes, and the Sparkle deltas, stay stable), else
+Nemotron from `FluidInference/nemotron-3-diarization-coreml` at a pinned commit
+and ReDimNet2 from the `models-redimnet2-b4-slim-v1` GitHub release asset.
+When FluidAudio bumps its Nemotron weights or you ship a new ReDimNet2 build,
+update the pins (and upload a new ReDimNet2 asset under a new tag) in the same
+PR. On any Mac you can fill a cache with
+`bash scripts/release/provision-release-models.sh "$HOME/Library/Application Support/FluidAudio/Models"`.
+
 If you deliberately want a thin local test artifact, make every opt-out explicit:
 
 ```bash

@@ -28,7 +28,8 @@
 //     be checked), the profile is still written with name and counts, but its
 //     confirmations are held in the ledger, so the new model can't silently
 //     name them. The first time the user confirms them under the new model,
-//     the next run restores the confirmations.
+//     that confirmation's write restores them (`recordUserConfirmations`); a
+//     run also checks at start, for confirmations saved before that existed.
 //   - People with no usable audio get a ledger row (`needs_confirmation`) and
 //     are listed in the report instead of silently disappearing.
 //
@@ -175,6 +176,8 @@ public enum SpeakerVoiceprintMigrationError: Error, Equatable {
     /// The target database was opened with another model's thresholds.
     case thresholdsMismatch
     case alreadyRunning
+    /// The new model's background load failed, so nothing can be re-embedded.
+    case embedderUnavailable
 }
 
 @available(macOS 14.0, *)
@@ -291,6 +294,12 @@ public actor SpeakerVoiceprintMigration {
 
         guard target.isOpenForVoiceprintMigration else {
             throw SpeakerVoiceprintMigrationError.targetDatabaseUnavailable
+        }
+        // A background-loaded model finishes loading before anyone moves. If it
+        // can't load, nobody is written to the ledger, so the next launch retries.
+        if let loading = embedder as? any BackgroundLoadingSpeakerSegmentEmbedder,
+           await !loading.waitUntilLoaded() {
+            throw SpeakerVoiceprintMigrationError.embedderUnavailable
         }
         let snapshot = try loadSnapshot()
         try target.ensureVoiceprintMigrationLedger()

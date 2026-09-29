@@ -289,6 +289,20 @@ extension SpeakerDatabase {
             sqlite3_bind_text(statement, 5, (confirmedAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
             try requireDone(statement, operation: "step speaker confirmation insert")
         }
+
+        // Someone the voiceprint migration held gets their carried confirmations
+        // back as soon as the user confirms them, in this same transaction,
+        // instead of at the next launch's migration run.
+        if try hasVoiceprintMigrationLedgerImpl() {
+            let released = try releaseHeldVoiceprintConfirmationsImpl(
+                holders: Set(confirmations.map(\.profileId))
+            )
+            if !released.isEmpty {
+                AppLogger.speakers.info("Released held voiceprint confirmations after a user confirmation", [
+                    "released_count": "\(released.count)",
+                ])
+            }
+        }
     }
 
     func deleteConfirmationsImpl(profileId: UUID) {

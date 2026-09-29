@@ -8,10 +8,13 @@
 //
 // These options let the diarizer split more (a higher clustering threshold) and
 // then clean up the extra pieces with evidence the diarizer does not use:
-//   1. fold voices with almost no talk time into the voice they sound most like
+//   1. fold voices with almost no talk time into the voice they sound most like,
+//      when they sound enough like it
 //   2. merge voices whose fingerprints are close
 //   3. if the calendar invite says how many people were on the call, fold the
-//      quietest voices until the count fits
+//      quietest voices that sound like someone else until the count fits
+// A voice that doesn't sound like anyone left stays its own speaker: an extra
+// row costs one review click, but two people under one name can't be split.
 // On for every meeting. The app picks the options per meeting through
 // `TranscriptionTaskManager.speakerSeparationProvider` (`tuned(for:invitedPeople:)`).
 
@@ -24,29 +27,44 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
     /// Voices with less total talk time than this (seconds) are folded into the
     /// voice they sound most like. nil turns the fold off.
     public var foldBelowSeconds: Double?
+    /// A short voice is folded only when its fingerprint is at least this similar
+    /// (cosine) to the voice it would join; otherwise it stays its own speaker. A
+    /// short voice with no fingerprint is never folded. nil folds into the closest
+    /// fingerprint with no floor.
+    public var foldSimilarity: Double?
     /// Voices whose fingerprints are at least this similar (cosine) are merged.
     /// nil turns the merge off.
     public var mergeSimilarity: Double?
     /// At most this many voices on the call channel (from the calendar invite).
     /// nil means no cap.
     public var maxSpeakers: Int?
+    /// The cap folds a voice only when its fingerprint is at least this similar
+    /// (cosine) to the voice it would join; a voice that clears nobody stays even
+    /// if that leaves more voices than the cap. nil folds regardless (a voice with
+    /// no fingerprint joins the one that talked most).
+    public var capFoldSimilarity: Double?
 
     public init(
         clusteringThreshold: Double? = nil,
         foldBelowSeconds: Double? = nil,
+        foldSimilarity: Double? = nil,
         mergeSimilarity: Double? = nil,
-        maxSpeakers: Int? = nil
+        maxSpeakers: Int? = nil,
+        capFoldSimilarity: Double? = nil
     ) {
         self.clusteringThreshold = clusteringThreshold
         self.foldBelowSeconds = foldBelowSeconds
+        self.foldSimilarity = foldSimilarity
         self.mergeSimilarity = mergeSimilarity
         self.maxSpeakers = maxSpeakers
+        self.capFoldSimilarity = capFoldSimilarity
     }
 
     /// The settings the speaker lab picked: split at 0.70, fold voices under 5 s,
     /// merge fingerprints at the voiceprint model's `separationMerge` and up (0.6 for
     /// WeSpeaker), and cap at the invite size when there is one. The 0.70 is the
-    /// diarizer's own clustering setting, not a voiceprint bar.
+    /// diarizer's own clustering setting, not a voiceprint bar. The fold and cap
+    /// bars are the same as Nemotron's (see `nemotronTuned`).
     public static func labTuned(
         maxSpeakers: Int?,
         thresholds: SpeakerEmbeddingThresholds = .weSpeaker
@@ -54,8 +72,10 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
         SpeakerSeparationOptions(
             clusteringThreshold: 0.70,
             foldBelowSeconds: 5.0,
+            foldSimilarity: Double(thresholds.microAbsorb),
             mergeSimilarity: thresholds.separationMerge,
-            maxSpeakers: maxSpeakers
+            maxSpeakers: maxSpeakers,
+            capFoldSimilarity: thresholds.separationMerge
         )
     }
 
@@ -64,8 +84,23 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
     /// merge only cost it people, so: fold voices under 5 s, and cap at one voice
     /// only when the invite is a one-on-one (a bigger invite's cap folded real people
     /// who talked little).
-    public static func nemotronTuned(invitedPeople: Int?) -> SpeakerSeparationOptions {
-        SpeakerSeparationOptions(foldBelowSeconds: 5.0, maxSpeakers: invitedPeople == 1 ? 1 : nil)
+    ///
+    /// Both folds need the voices to sound alike. A short voice joins another only at
+    /// the voiceprint model's `microAbsorb` bar (the clusterer's bar for absorbing a
+    /// very short cluster, 0.62 for WeSpeaker), so a real line from someone else stays
+    /// theirs. The one-on-one cap folds only at `separationMerge` (the bar that says
+    /// two call voices are one person), so a third person, or a different call during a
+    /// recurring one-on-one's slot, isn't collapsed into the invitee.
+    public static func nemotronTuned(
+        invitedPeople: Int?,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> SpeakerSeparationOptions {
+        SpeakerSeparationOptions(
+            foldBelowSeconds: 5.0,
+            foldSimilarity: Double(thresholds.microAbsorb),
+            maxSpeakers: invitedPeople == 1 ? 1 : nil,
+            capFoldSimilarity: thresholds.separationMerge
+        )
     }
 
     /// The tuned settings for `backend`, capped from the invite size when there is one.
@@ -78,7 +113,7 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
     ) -> SpeakerSeparationOptions {
         switch backend {
         case .nemotron:
-            return nemotronTuned(invitedPeople: invitedPeople)
+            return nemotronTuned(invitedPeople: invitedPeople, thresholds: thresholds)
         case .pyannote:
             return labTuned(
                 maxSpeakers: invitedPeople.flatMap { speakerCap(invitedPeople: $0) },
@@ -117,11 +152,16 @@ public enum SpeakerSeparation {
             }
         }
 
-        // 1. Fold near-silent voices, quietest first.
+        // 1. Fold near-silent voices that sound like someone, quietest first.
         if let floor = options.foldBelowSeconds {
             for id in voices.keys.sorted(by: { order(voices, $0, $1) }) {
                 guard voices.count >= 2, let voice = voices[id], voice.seconds < floor else { continue }
-                if let target = closestVoice(to: id, in: voices) {
+                if let target = closestVoice(
+                    to: id,
+                    in: voices,
+                    minimumSimilarity: options.foldSimilarity,
+                    unfingerprintedJoinsLoudest: false
+                ) {
                     fold(id, into: target)
                 }
             }
@@ -147,12 +187,22 @@ public enum SpeakerSeparation {
             }
         }
 
-        // 3. Calendar cap: fold the quietest voice until the count fits.
+        // 3. Calendar cap: fold the quietest voice that sounds like someone until
+        //    the count fits. Voices that clear nobody's bar stay.
         if let cap = options.maxSpeakers {
-            while voices.count > max(1, cap) {
-                guard let quietest = voices.keys.min(by: { order(voices, $0, $1) }),
-                      let target = closestVoice(to: quietest, in: voices) else { break }
-                fold(quietest, into: target)
+            capLoop: while voices.count > max(1, cap) {
+                for id in voices.keys.sorted(by: { order(voices, $0, $1) }) {
+                    if let target = closestVoice(
+                        to: id,
+                        in: voices,
+                        minimumSimilarity: options.capFoldSimilarity,
+                        unfingerprintedJoinsLoudest: options.capFoldSimilarity == nil
+                    ) {
+                        fold(id, into: target)
+                        continue capLoop
+                    }
+                }
+                break
             }
         }
 
@@ -228,9 +278,17 @@ public enum SpeakerSeparation {
         return v.map { $0 / norm }
     }
 
-    /// The voice `id` sounds most like. A voice without a fingerprint goes to the
-    /// voice with the most talk time. Ties break toward the lower id.
-    static func closestVoice(to id: Int, in voices: [Int: Voice]) -> Int? {
+    /// The voice `id` sounds most like, or nil when it clears nobody.
+    /// `minimumSimilarity` is the cosine the best match must reach (nil: no floor).
+    /// With `unfingerprintedJoinsLoudest`, a voice that has no fingerprint, or no
+    /// fingerprinted voice to compare with, goes to the voice with the most talk
+    /// time; without it, it clears nobody. Ties break toward the lower id.
+    static func closestVoice(
+        to id: Int,
+        in voices: [Int: Voice],
+        minimumSimilarity: Double?,
+        unfingerprintedJoinsLoudest: Bool
+    ) -> Int? {
         let others = voices.keys.filter { $0 != id }.sorted()
         guard !others.isEmpty else { return nil }
         if let embedding = voices[id]?.embedding {
@@ -239,9 +297,11 @@ public enum SpeakerSeparation {
                 return (Transcription.cosineSimilarityStatic(embedding, e), other)
             }
             if let best = scored.max(by: { $0.0 < $1.0 || ($0.0 == $1.0 && $0.1 > $1.1) }) {
+                if let minimumSimilarity, best.0 < minimumSimilarity { return nil }
                 return best.1
             }
         }
+        guard unfingerprintedJoinsLoudest else { return nil }
         return others.max { (voices[$0]?.seconds ?? 0, -$0) < (voices[$1]?.seconds ?? 0, -$1) }
     }
 

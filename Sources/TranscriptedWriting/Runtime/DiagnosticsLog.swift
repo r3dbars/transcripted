@@ -14,6 +14,11 @@ final class DiagnosticsLog: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.justinbetker.draft.diagnostics")
     private let logURL: URL
     private let enabled: Bool
+    /// Past this size the log rolls to `<name>.1` before the next append, so
+    /// disk use stays near twice the cap. Same rename-to-`.1` strategy as the
+    /// app's observability logs; Runtime can't import that helper.
+    private let maxBytes: UInt64
+    static let defaultMaxBytes: UInt64 = 4 * 1024 * 1024
     private let timestampFormatter = ISO8601DateFormatter()
 
     private init() {
@@ -30,6 +35,7 @@ final class DiagnosticsLog: @unchecked Sendable {
             environment: ProcessInfo.processInfo.environment,
             arguments: CommandLine.arguments
         )
+        self.maxBytes = Self.defaultMaxBytes
     }
 
     static func shouldDisableFileWrites(environment: [String: String], arguments: [String]) -> Bool {
@@ -47,19 +53,21 @@ final class DiagnosticsLog: @unchecked Sendable {
         return NSClassFromString("XCTestCase") != nil
     }
 
-    init(logURL: URL, enabled: Bool = true) {
+    init(logURL: URL, enabled: Bool = true, maxBytes: UInt64 = DiagnosticsLog.defaultMaxBytes) {
         self.logURL = logURL
         self.enabled = enabled
+        self.maxBytes = maxBytes
     }
+
+    /// Where the previous generation goes when the log rolls.
+    var rolledLogURL: URL { logURL.appendingPathExtension("1") }
 
     func record(_ event: String, metadata: [String: String] = [:]) {
         guard enabled else { return }
         queue.async { [self, logURL] in
             do {
                 let line = format(event: event, metadata: metadata)
-                guard let handle = SecureLocalStorage.openFileForAppending(at: logURL) else {
-                    return
-                }
+                guard let handle = openRollingIfNeeded() else { return }
                 defer { try? handle.close() }
                 try handle.write(contentsOf: Data(line.utf8))
             } catch {
@@ -73,6 +81,19 @@ final class DiagnosticsLog: @unchecked Sendable {
     /// final events — exactly the crash-vs-quit ambiguity they exist to solve.
     func flush() {
         queue.sync {}
+    }
+
+    /// Opens the log for appending, first rolling it to `.1` when it has
+    /// reached the cap. The size comes from the opened descriptor, so the
+    /// check can't be fooled by a path swapped underneath it; rename(2) moves
+    /// a directory entry and never follows a symlink. If the rename fails the
+    /// log keeps growing rather than going silent.
+    private func openRollingIfNeeded() -> FileHandle? {
+        guard let handle = SecureLocalStorage.openFileForAppending(at: logURL) else { return nil }
+        guard let size = try? handle.seekToEnd(), size >= maxBytes else { return handle }
+        try? handle.close()
+        _ = rename(logURL.path, rolledLogURL.path)
+        return SecureLocalStorage.openFileForAppending(at: logURL)
     }
 
     private func format(event: String, metadata: [String: String]) -> String {

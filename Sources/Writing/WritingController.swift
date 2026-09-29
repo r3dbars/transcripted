@@ -282,7 +282,20 @@ final class WritingController {
     func startIfEnabled(log: @escaping (String) -> Void) {
         self.log = log
         activationAllowed = true
+        reapOrphanedHelperAtLaunch()
         applyRunState()
+    }
+
+    /// A helper orphaned by a crash would otherwise hold its port and memory
+    /// until the next Autocomplete start. Reaps only this app's own helper
+    /// binary, and only once it's re-parented to launchd; the probes shell
+    /// out, so it runs off the main thread.
+    private func reapOrphanedHelperAtLaunch() {
+        guard WritingActivation.reapsOrphanedHelperAtLaunch(setupCompleted: setupCompleted) else { return }
+        let port = TildeProductProfile.current.llamaServerPort
+        Task.detached(priority: .utility) {
+            LlamaServerProcessHost.reapOrphanedHelper(port: port)
+        }
     }
 
     /// Brings the runtime in line with the saved setup: starts it when
@@ -377,7 +390,6 @@ final class WritingController {
         // The keyboard is only as smart as this process is alive.
         ProcessInfo.processInfo.disableAutomaticTermination(Self.automaticTerminationReason)
 
-        startObservingFrontmostAppForScreenMemory()
         let prewarmer = runtime.scaffoldPrewarmer
         prewarmer.noteFrontmostApp(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         llamaServerHost.setReadinessObserver { ready in
@@ -391,6 +403,7 @@ final class WritingController {
             autocompleteRuntimeActive = true
             startModelPreparation()
         }
+        applyFrontWindowWatch()
         installKeyboard()
         // Any start means the brain is wanted again: lift the keyboard's
         // stay-quiet flag from a deliberate quit.
@@ -443,13 +456,8 @@ final class WritingController {
                 Task.detached(priority: .userInitiated) { host.stop() }
             }
         }
-        if let frontmostAppObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(frontmostAppObserver)
-            self.frontmostAppObserver = nil
-        }
-        windowIdentityPollTimer?.invalidate()
-        windowIdentityPollTimer = nil
-        lastFrontWindowIdentity = nil
+        stopObservingAppActivation()
+        stopPollingFrontWindow()
         modelTask?.cancel()
         modelTask = nil
         modelTaskID = nil
@@ -771,6 +779,9 @@ final class WritingController {
     private func applyAutocompleteToRuntime() {
         guard isRunning, let runtime else { return }
         let wanted = Self.settings().suggestionsEnabled
+        // Runs on every exit, so the off branch tears the watchers down and
+        // a Screen Memory change alone still starts or stops the poll.
+        defer { applyFrontWindowWatch() }
         guard wanted != autocompleteRuntimeActive else { return }
         autocompleteRuntimeActive = wanted
         if wanted {
@@ -930,15 +941,31 @@ final class WritingController {
 
     // MARK: - Screen Memory observation
 
+    /// Starts or stops the frontmost-app observer and the window poll to
+    /// match `WritingFrontWindowWatch`: nothing for Save-only, the observer
+    /// while Autocomplete runs, and the 1 Hz poll only with Screen Memory on
+    /// too.
+    private func applyFrontWindowWatch() {
+        let plan = WritingFrontWindowWatch.plan(
+            running: isRunning && runtime != nil,
+            autocompleteActive: autocompleteRuntimeActive,
+            screenMemoryEnabled: Self.settings().screenMemoryEnabled
+        )
+        if plan.observesAppActivation { startObservingAppActivation() } else { stopObservingAppActivation() }
+        if plan.pollsFrontWindow { startPollingFrontWindow() } else { stopPollingFrontWindow() }
+    }
+
     /// The window-change trigger: macOS already tells every app when a
     /// different app becomes frontmost, so Screen Memory needs no IME/socket
     /// changes to observe it — `NSWorkspace` gives it directly. This alone
     /// misses same-app window changes (see `windowIdentityPollTimer`'s doc
     /// comment), so a lightweight poll backs it up.
-    private func startObservingFrontmostAppForScreenMemory() {
-        guard let runtime else { return }
+    private func startObservingAppActivation() {
+        guard frontmostAppObserver == nil, let runtime else { return }
         let prewarmer = runtime.scaffoldPrewarmer
         let screenCaptureService = runtime.screenCaptureService
+        // Autocomplete may have been off through app switches.
+        prewarmer.noteFrontmostApp(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         frontmostAppObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -946,16 +973,33 @@ final class WritingController {
         ) { notification in
             let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             prewarmer.noteFrontmostApp(bundleIdentifier: activated?.bundleIdentifier)
+            guard Self.settings().screenMemoryEnabled else { return }
             Task {
                 let target = Self.currentTypingTarget(sessionIdentifier: "")
                 guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else { return }
                 await screenCaptureService.noteWindowChanged(target: target)
             }
         }
+    }
+
+    private func stopObservingAppActivation() {
+        guard let frontmostAppObserver else { return }
+        NSWorkspace.shared.notificationCenter.removeObserver(frontmostAppObserver)
+        self.frontmostAppObserver = nil
+    }
+
+    private func startPollingFrontWindow() {
+        guard windowIdentityPollTimer == nil else { return }
         lastFrontWindowIdentity = Self.currentFrontWindowIdentity()
         windowIdentityPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pollFrontWindowIdentityForScreenMemory() }
         }
+    }
+
+    private func stopPollingFrontWindow() {
+        windowIdentityPollTimer?.invalidate()
+        windowIdentityPollTimer = nil
+        lastFrontWindowIdentity = nil
     }
 
     /// Fires the window-changed trigger whenever the true frontmost window

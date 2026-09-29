@@ -143,6 +143,47 @@ enum NotchIslandGeometry {
     }
 }
 
+// MARK: - Which display
+
+/// Picks the display the island opens on. A dictation opens on the display
+/// with the focused text field, so the island (and the "Not pasted" Paste
+/// and Copy buttons) sit where the words go; otherwise the display under the
+/// pointer, then the main display. The island keeps it while shown.
+enum NotchIslandScreenChoice {
+    /// Reading the focused field costs an Accessibility round trip to the
+    /// target app, so only a dictation opening the island asks, and only
+    /// when there is more than one display to choose between.
+    static func looksUpFocusedField(dictationOpensIsland: Bool, screenCount: Int) -> Bool {
+        dictationOpensIsland && screenCount > 1
+    }
+
+    /// `focusedFieldRect` is in global Cocoa coordinates. Returns one of
+    /// `screenFrames`, or `mainScreenFrame`, or nil with no displays at all.
+    static func screenFrame(
+        focusedFieldRect: CGRect?,
+        mouseLocation: CGPoint,
+        screenFrames: [CGRect],
+        mainScreenFrame: CGRect?
+    ) -> CGRect? {
+        if let field = focusedFieldRect, field.width > 0, field.height > 0 {
+            let center = CGPoint(x: field.midX, y: field.midY)
+            if let screen = screenFrames.first(where: { $0.contains(center) }) {
+                return screen
+            }
+        }
+        if let screen = screenFrames.first(where: { pointer(mouseLocation, isIn: $0) }) {
+            return screen
+        }
+        return mainScreenFrame ?? screenFrames.first
+    }
+
+    /// `NSMouseInRect` for unflipped screen coordinates: the pointer pinned
+    /// to a display's top edge reports y == maxY and still counts as on it.
+    private static func pointer(_ point: CGPoint, isIn rect: CGRect) -> Bool {
+        point.x >= rect.minX && point.x < rect.maxX && point.y > rect.minY && point.y <= rect.maxY
+    }
+}
+
 // MARK: - Shape and motion
 
 extension NotchIslandGeometry {

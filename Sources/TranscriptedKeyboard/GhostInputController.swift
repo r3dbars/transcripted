@@ -205,11 +205,19 @@ final class GhostInputController: IMKInputController {
         let typedGrapheme = printableGrapheme(from: event)
         let defaults = UserDefaults.standard
         let suggestionsEnabled = defaults.object(forKey: "GhostSuggestionsEnabled") as? Bool ?? true
-        let paused = defaults.double(forKey: "GhostPausedUntil") > Date().timeIntervalSince1970
+        let paused = PersonalHistorySettingsContract.isPaused(
+            pausedUntil: defaults.double(forKey: PersonalHistorySettingsContract.pausedUntilKey),
+            now: Date()
+        )
         guard suggestionsEnabled, !paused else {
             dismiss(client)
             resetFallback()
-            if let typedGrapheme {
+            if paused {
+                // Transcripted: nothing typed during a pause is captured,
+                // whenever it would have reached the app. Suggestions merely
+                // off (Save my writing alone) still capture below.
+                breakHistorySegment()
+            } else if let typedGrapheme {
                 capturePersonalHistory(
                     typedGrapheme,
                     source: .typed,

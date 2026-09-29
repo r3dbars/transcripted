@@ -290,6 +290,9 @@ protocol NotchIslandCallPromptPresenting: AnyObject {
     /// The pointer entered or left the island while the call prompt is up,
     /// so the prompt's own timeout can pause with the ring around Not now.
     var callHoverHandler: ((Bool) -> Void)? { get set }
+    /// The call prompt went on or off screen (it waits behind a dictation),
+    /// so its timeout only runs while someone can see it.
+    var callVisibilityHandler: ((Bool) -> Void)? { get set }
     func updateCallPrompt(_ content: NotchIslandCallPromptContent?)
     func updateCallPromptSeconds(_ secondsLeft: Int)
 }
@@ -306,6 +309,26 @@ enum NotchIslandPresentation {
         speakerReview: NotchIslandSpeakerReviewContent? = nil
     ) -> String? {
         stickyDrop(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview)?.stickyKey
+    }
+
+    /// The call prompt is on screen unless a dictation (or its message) has
+    /// the island; it waits behind one and comes back once the words land.
+    static func callPromptIsOnScreen(
+        dictation: NotchIslandDictationContent?,
+        callPrompt: NotchIslandCallPromptContent?
+    ) -> Bool {
+        callPrompt != nil && dictation == nil
+    }
+
+    /// The island keeps the keyboard only while "Who was on this call?" is
+    /// asking for names and is on screen. Once naming ends, the review is
+    /// replaced, or something else covers it, the keyboard goes back to the
+    /// app the person was typing in.
+    static func speakerReviewKeepsKeyboard(
+        _ speakerReview: NotchIslandSpeakerReviewContent?,
+        onScreen: Bool
+    ) -> Bool {
+        speakerReview?.stage == .naming && onScreen
     }
 
     /// Composes the island from whatever is active. Dictation owns the right

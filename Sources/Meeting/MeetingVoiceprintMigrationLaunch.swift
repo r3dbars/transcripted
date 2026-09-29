@@ -20,10 +20,11 @@ enum MeetingVoiceprintMigrationLaunch {
     /// people in would give them a second copy of everyone.
     static let modelsCarryingSavedPeople: Set<String> = [ReDimNet2Embedder.identifier]
 
-    /// Starts the carry-over when the loaded embedder is one of
+    /// Starts the carry-over when the chosen embedder is one of
     /// `modelsCarryingSavedPeople` and `speakers.sqlite` exists; otherwise the
     /// gate stays open. `targetDatabase` must be the database that embedder's
-    /// meetings write, already open with its thresholds.
+    /// meetings write, already open with its thresholds. The embedder may still be
+    /// loading in the background: the gate closes now and the run waits for it.
     static func start(
         _ gate: SpeakerVoiceprintMigrationGate,
         embedder: (any SpeakerSegmentEmbedder)?,
