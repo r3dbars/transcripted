@@ -280,9 +280,12 @@ def build(model_id: str, meta: dict, model_dir: Path) -> Built:
                                frame_length=int(float(om.get("window_size_ms", 25)) * 16),
                                frame_shift=int(float(om.get("window_stride_ms", 10)) * 16))
             net = OnnxModule(onnx_path, outputs=["embs"])
+            # the ONNX graph's length masks leave an enum build on the CPU (~200 ms per 4 s);
+            # static functions run on the GPU (~4 ms)
             return Built(FbankOnnxFused(fe, net, True, None).eval(), int(meta["dim"]),
                          fp32_scopes=["frontend"], frontend={"kind": "sherpa_knf_nemo", **fe.cfg},
-                         notes=["front end = sherpa-onnx NeMo path (knf is_librosa, snip_edges, per_feature norm)"])
+                         notes=["front end = sherpa-onnx NeMo path (knf is_librosa, snip_edges, per_feature norm)"],
+                         default_shapes="multi")
         if fw in ("3d-speaker", "3dspeaker"):
             norm_samples = om.get("normalize_samples", "1") in ("1", "true", "True")
             fnt = om.get("feature_normalize_type", "")

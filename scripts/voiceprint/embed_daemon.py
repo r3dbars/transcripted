@@ -9,7 +9,7 @@ baseline models first, so the headline numbers land early.
 Live controls (read every loop):
   VP/logs/daemon.slots   number of parallel jobs (default 5)
   VP/logs/daemon.stop    exit once running jobs finish
-  VP/logs/daemon.hold    model_id prefixes to skip for now, one per line
+  VP/logs/daemon.hold    exact model_ids to skip for now, one per line
   VP/logs/daemon.clean_only  model_id prefixes that only get clean audio (weak screens)
 Status: VP/logs/daemon.status.json. Per-job logs: VP/logs/embed/.
 An embedding whose recorded model_sig no longer matches model.json + the runtime
@@ -61,18 +61,18 @@ def full_models() -> list[str]:
 
 
 def tier(model: dict, set_name: str, cond: str, full: list[str]):
-    """Scheduling tier, lower first; None = don't run. Clean on the human sets for every
-    model, then call audio (opus12, noisy) for the contenders, then yodas clean, then
-    phone, then yodas call audio."""
+    """Scheduling tier, lower first; None = don't run. Contenders (daemon.full + baseline)
+    get clean and call audio (opus12, noisy) on the human sets first; then every other
+    model's clean screen; then yodas clean; then phone; then yodas call audio."""
     human = set_name in HUMAN_SETS
     is_full = model["model_id"] in full or model.get("baseline", False)
+    if is_full:
+        if human:
+            return {"clean": 0, "opus12": 1, "noisy": 1, "phone": 4}[cond]
+        return 3 if cond == "clean" else 5
     if cond == "clean":
-        return 0 if human else 2
-    if not is_full:
-        return None
-    if cond in ("opus12", "noisy"):
-        return 1 if human else 4
-    return 3 if human else 5
+        return 2 if human else 3
+    return None
 
 
 def ready_models() -> list[dict]:
@@ -85,7 +85,7 @@ def ready_models() -> list[dict]:
             continue
         if meta.get("status") == "ready" and (Path(__file__).parent / "runtimes" / f"{meta.get('runtime')}.py").exists():
             meta.setdefault("model_id", path.parent.name)
-            if not any(meta["model_id"].startswith(h) for h in hold):
+            if meta["model_id"] not in hold:
                 out.append(meta)
     # Baselines first, then the contenders (daemon.full), then smaller models.
     full = set(full_models())
@@ -157,8 +157,27 @@ def slots() -> int:
         return 5
 
 
+def claim_single_instance() -> bool:
+    """Only one daemon at a time: VP/logs/daemon.pid names the live one."""
+    pid_file = VP / "logs" / "daemon.pid"
+    try:
+        other = int(pid_file.read_text().strip())
+        if other != os.getpid():
+            os.kill(other, 0)
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(other)], capture_output=True, text=True).stdout
+            if "embed_daemon.py" in cmd:
+                print(f"another daemon is running (pid {other}); exiting", flush=True)
+                return False
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        pass
+    pid_file.write_text(str(os.getpid()))
+    return True
+
+
 def main() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
+    if not claim_single_instance():
+        return
     running: dict[str, subprocess.Popen] = {}
     running_device: dict[str, str] = {}
     attempts: dict[str, int] = {}

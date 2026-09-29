@@ -14,8 +14,15 @@ Usage:
 Steps:
   1. build the fused torch module; gate it against the model's Python runtime
      (scripts/voiceprint/runtimes/<runtime>.py) on a few clips (cosine >= 0.9999)
-  2. trace + convert (mlprogram, macOS 14+). Input length: enumerated shapes by
-     default (--shapes enum, --enum-sec), or a RangeDim (--shapes range)
+  2. trace + convert (mlprogram). Input length, --shapes:
+       enum   one graph, EnumeratedShapes (--enum-sec). Default. Core ML runs it on
+              ANE / GPU only if the graph has no runtime-computed shapes: true for the
+              WeSpeaker ResNets, and for ReDimNet2 after builders' static-shape patch
+       multi  one static-shape function per length in one multifunction package
+              (weights shared; Swift picks MLModelConfiguration.functionName
+              "len_<samples>"). For graphs full of mask / shape math (TitaNet, CAM++)
+              whose enum build Core ML keeps on the CPU
+       range  RangeDim (CPU only in practice)
   3. precision "auto": fp16 (front end kept fp32) if parity holds, else fp32
   4. parity on 60 clean clips (vox1o / ami / libri, 2/4/8 s) vs the Python runtime,
      for compute units ALL and CPU_ONLY; ALL vs CPU_ONLY; latency 4 s / 10 s
