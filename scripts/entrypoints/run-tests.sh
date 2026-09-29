@@ -433,6 +433,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationAudioRecovery.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Speech/SharedMeetingMicRecorder.swift"
+    "Sources/Speech/SharedMeetingMicLevelMeter.swift"
     "Sources/Speech/SharedMeetingMicClaim.swift"
     "Sources/Speech/DictationAudioLevelMeter.swift"
     # SupersessionEpoch.swift now arrives via SHARED_PASTEBACK_SUPPORT_SOURCES

@@ -7,33 +7,49 @@ enum DictationAudioLevelMeter {
         floorDB: Float = TranscriptedConstants.audioLevelFloorDB,
         ceilingDB: Float = TranscriptedConstants.audioLevelCeilingDB
     ) -> Float {
+        normalizedLevel(
+            from: buffer,
+            frames: 0..<Int(buffer.frameLength),
+            floorDB: floorDB,
+            ceilingDB: ceilingDB
+        )
+    }
+
+    /// Level of one slice of `buffer`, on the same scale as the whole-buffer
+    /// meter. Borrowed meeting-mic dictation uses it to meter a long relayed
+    /// buffer in dictation-sized windows.
+    static func normalizedLevel(
+        from buffer: AVAudioPCMBuffer,
+        frames: Range<Int>,
+        floorDB: Float = TranscriptedConstants.audioLevelFloorDB,
+        ceilingDB: Float = TranscriptedConstants.audioLevelCeilingDB
+    ) -> Float {
         guard ceilingDB > floorDB else { return 0 }
         guard let channelData = buffer.floatChannelData else { return 0 }
 
-        let frameCount = Int(buffer.frameLength)
+        let frames = frames.clamped(to: 0..<Int(buffer.frameLength))
         let channelCount = Int(buffer.format.channelCount)
-        guard frameCount > 0, channelCount > 0 else { return 0 }
+        guard !frames.isEmpty, channelCount > 0 else { return 0 }
 
         var sumOfSquares: Float = 0
         var sampleCount = 0
 
         if buffer.format.isInterleaved {
             let samples = channelData[0]
-            let totalSamples = frameCount * channelCount
-            for index in 0..<totalSamples {
+            for index in (frames.lowerBound * channelCount)..<(frames.upperBound * channelCount) {
                 let sample = samples[index]
                 sumOfSquares += sample * sample
             }
-            sampleCount = totalSamples
+            sampleCount = frames.count * channelCount
         } else {
             for channel in 0..<channelCount {
                 let samples = channelData[channel]
-                for frame in 0..<frameCount {
+                for frame in frames {
                     let sample = samples[frame]
                     sumOfSquares += sample * sample
                 }
             }
-            sampleCount = frameCount * channelCount
+            sampleCount = frames.count * channelCount
         }
 
         guard sampleCount > 0 else { return 0 }

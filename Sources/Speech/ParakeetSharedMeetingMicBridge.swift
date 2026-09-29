@@ -40,6 +40,7 @@ extension ParakeetEngine {
         }
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         sharedMeetingMicRecorder.begin()
+        sharedMeetingMicLevelMeter.begin()
         sharedMeetingMicTransition.beginSharedRecording()
         sharedMeetingMicClaim = claim
         isRecording = true
@@ -54,19 +55,32 @@ extension ParakeetEngine {
         return true
     }
 
-    /// Called from MeetingCaptureBridge's off-tap relay queue.
+    /// Called from MeetingCaptureBridge's off-tap relay queue (Core's host
+    /// PCM fan-out), not the CoreAudio real-time thread. The waveform level is
+    /// metered from these same buffers at dictation's own cadence and scale,
+    /// not taken from the meeting's slower published mic level.
     nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
         sharedMeetingMicRecorder.append(buffer)
+        for reading in sharedMeetingMicLevelMeter.levels(for: buffer) {
+            Task { @MainActor [weak self] in
+                if reading.delay > 0 {
+                    try? await Task.sleep(for: .seconds(reading.delay))
+                }
+                self?.updateSharedMeetingMicAudioLevel(reading)
+            }
+        }
     }
 
-    func updateSharedMeetingMicAudioLevel(_ level: Float) {
+    func updateSharedMeetingMicAudioLevel(_ reading: SharedMeetingMicLevelMeter.Reading) {
         // Presence-only: a claim on file, dead or alive, still means there is
         // no local AVAudioEngine feeding this level meter, so this must stay
         // behavior-identical to the old bare Bool. See
         // resolveSharedMeetingMicClaimStatus()'s header for why this does not
-        // go through the staleness check.
-        guard sharedMeetingMicClaim != nil else { return }
-        audioLevel = max(0, min(1, level))
+        // go through the staleness check. The session check drops a reading
+        // that was still hopping here when its borrow ended.
+        guard sharedMeetingMicClaim != nil,
+              sharedMeetingMicLevelMeter.isCurrent(session: reading.session) else { return }
+        audioLevel = reading.level
     }
 
     /// If meeting capture ends first, preserve everything already borrowed and
@@ -122,6 +136,7 @@ extension ParakeetEngine {
 
     func finishSharedMeetingMicRecording(keepRecordingState: Bool) {
         sharedMeetingMicClaim = nil
+        sharedMeetingMicLevelMeter.end()
         var timeline = sharedMeetingMicRecorder.finish()
         for segment in timeline.drain() {
             recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
