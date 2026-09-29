@@ -871,8 +871,10 @@ func testMeetingPromptDetector() async {
             return true
         }
 
-        // Nothing else happens after this push, so only the detector's own
-        // re-check can produce the prompt.
+        // Nothing else happens after this push, so normally only the
+        // detector's own re-check can produce the prompt. On a badly loaded
+        // Mac the first pass can itself land past the 1 s wait and prompt;
+        // the "held back" suite above covers the wait on its own.
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation(detector, until: { box.promptCount > 0 })
 
