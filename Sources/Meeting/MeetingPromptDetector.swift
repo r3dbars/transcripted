@@ -91,6 +91,11 @@ final class MeetingPromptDetector {
     // state on return — the same assumption the existing TTL-based skip already relies on.
     private var isFetchingCalendarSnapshots = false
     private var pollingTask: Task<Void, Never>?
+    // Evaluation passes that have been started and not finished yet, counting
+    // the title reads that re-run evaluate when they land. Lets callers wait
+    // for the detector to settle instead of guessing how long it takes.
+    private var evaluationsInFlight = 0
+    private var settledWaiters: [CheckedContinuation<Void, Never>] = []
     private var workspaceObservers: [NSObjectProtocol] = []
     private var calendarStoreObserver: NSObjectProtocol?
     private var snoozedUntil: [String: Date] = [:]
@@ -233,10 +238,12 @@ final class MeetingPromptDetector {
         installWorkspaceObservers()
         installCalendarStoreObserver()
 
+        evaluationsInFlight += 1
         pollingTask = Task { [weak self] in
             guard let self else { return }
 
             await evaluate(forceCalendarRefresh: true)
+            finishEvaluation()
 
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -268,9 +275,33 @@ final class MeetingPromptDetector {
     /// re-evaluate on their own edges; this covers the case where a call
     /// started during dictation and would otherwise wait for the poll.
     func requestEvaluation() {
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
+        scheduleEvaluation()
+    }
+
+    /// Returns once every evaluation already started (and any title read or
+    /// evaluation those start in turn) has finished. Timed re-checks that are
+    /// still sleeping don't count.
+    func waitUntilEvaluationsSettle() async {
+        while evaluationsInFlight > 0 {
+            await withCheckedContinuation { settledWaiters.append($0) }
         }
+    }
+
+    private func scheduleEvaluation(forceCalendarRefresh: Bool = false) {
+        evaluationsInFlight += 1
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.evaluate(forceCalendarRefresh: forceCalendarRefresh)
+            self.finishEvaluation()
+        }
+    }
+
+    private func finishEvaluation() {
+        evaluationsInFlight -= 1
+        guard evaluationsInFlight == 0 else { return }
+        let waiters = settledWaiters
+        settledWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
 
     @discardableResult
@@ -622,9 +653,9 @@ final class MeetingPromptDetector {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 self?.calendarSnapshotsNeedRefresh = true
-                await self?.evaluate(forceCalendarRefresh: true)
+                self?.scheduleEvaluation(forceCalendarRefresh: true)
             }
         }
     }
@@ -661,9 +692,7 @@ final class MeetingPromptDetector {
               provider.supportsNativeRuntimePrompt else { return }
 
         recentNativeActivity[provider] = Date()
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
-        }
+        scheduleEvaluation()
     }
 
     private func seedNativeActivityIfNeeded(frontmostBundleID: String?, now: Date) {
@@ -731,9 +760,7 @@ final class MeetingPromptDetector {
         } else if browserMicSince != nil, browserMicEndTask == nil {
             scheduleBrowserMicSessionEnd()
         }
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
-        }
+        scheduleEvaluation()
     }
 
     /// Pushed by `MicActivityMonitor` with the browser processes playing audio
@@ -743,9 +770,7 @@ final class MeetingPromptDetector {
         guard bundleIDs != browserOutputActiveBundleIDs else { return }
         browserOutputActiveBundleIDs = bundleIDs
         guard browserMicSince != nil else { return }
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
-        }
+        scheduleEvaluation()
     }
 
     /// Pushed by `CameraActivityMonitor`: `true` when a camera is confirmed in
@@ -761,9 +786,7 @@ final class MeetingPromptDetector {
             // A camera-only browser call just ended; forget its title verdict.
             endBrowserMicSession()
         }
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
-        }
+        scheduleEvaluation()
     }
 
     /// Pushed by `MicActivityMonitor`'s output side with the set of native
@@ -773,9 +796,7 @@ final class MeetingPromptDetector {
     func updateAudioOutputUsers(_ bundleIDs: Set<String>) {
         guard bundleIDs != audioOutputActiveBundleIDs else { return }
         audioOutputActiveBundleIDs = bundleIDs
-        Task { @MainActor [weak self] in
-            await self?.evaluate()
-        }
+        scheduleEvaluation()
     }
 
     // MARK: - Detected-call session (missed-call nudge)
@@ -1184,9 +1205,12 @@ final class MeetingPromptDetector {
         let token = browserTitleReadCounter
         let provider = browserWindowTitlesProvider
         browserTitles?.readToken = token
+        evaluationsInFlight += 1
         browserTitles?.readTask = Task { @MainActor [weak self] in
             let titles = await provider(families)
-            guard !Task.isCancelled, let self, self.browserTitles?.readToken == token else { return }
+            guard let self else { return }
+            defer { self.finishEvaluation() }
+            guard !Task.isCancelled, self.browserTitles?.readToken == token else { return }
             self.applyBrowserTitles(titles, now: Date())
             await self.evaluate()
         }
@@ -1224,7 +1248,9 @@ final class MeetingPromptDetector {
             guard !Task.isCancelled, let self else { return }
             self.browserEvidenceRecheckAt = nil
             self.browserEvidenceRecheckTask = nil
+            self.evaluationsInFlight += 1
             await self.evaluate()
+            self.finishEvaluation()
         }
     }
 
