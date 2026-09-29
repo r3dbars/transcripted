@@ -348,6 +348,44 @@ func testNotchIslandPresentation() {
         assertEqual(NotchIslandAction.callRecord.owner, .callPrompt)
         assertEqual(NotchIslandAction.callRemind.owner, .callPrompt)
     }
+
+    runSuite("The call prompt is off screen while a dictation has the island, and back once it lands") {
+        let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
+        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: nil)
+        let covering: [NotchIslandDictationContent] = [
+            NotchIslandDictationContent(phase: .starting),
+            listening(),
+            NotchIslandDictationContent(phase: .message(message)),
+        ]
+        for dictation in covering {
+            assertFalse(
+                NotchIslandPresentation.callPromptIsOnScreen(dictation: dictation, callPrompt: prompt),
+                "a prompt behind \(dictation.phase) can't be seen"
+            )
+            let layout = notchLayout(dictation: dictation, callPrompt: prompt)
+            assertFalse(layout.drop == .callPrompt(title: prompt.title, detail: prompt.detail), "and isn't drawn")
+            assertFalse(layout.left.contains(.text("Call", .title)), "not even in the wings")
+        }
+        assertTrue(NotchIslandPresentation.callPromptIsOnScreen(dictation: nil, callPrompt: prompt))
+        assertEqual(
+            notchLayout(callPrompt: prompt).drop,
+            .callPrompt(title: prompt.title, detail: prompt.detail),
+            "on screen means it is drawn"
+        )
+        assertFalse(NotchIslandPresentation.callPromptIsOnScreen(dictation: nil, callPrompt: nil), "no prompt, nothing on screen")
+    }
+
+    runSuite("The island keeps the keyboard only while it is asking for names on screen") {
+        let naming = NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: "Standup", stage: .naming)
+        let done = NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: "Standup", stage: .done(leftForLater: 0))
+        assertTrue(NotchIslandPresentation.speakerReviewKeepsKeyboard(naming, onScreen: true), "typing a name keeps it")
+        assertFalse(
+            NotchIslandPresentation.speakerReviewKeepsKeyboard(naming, onScreen: false),
+            "a dictation or the next meeting covering the review gives it back"
+        )
+        assertFalse(NotchIslandPresentation.speakerReviewKeepsKeyboard(done, onScreen: true), "Everyone's named gives it back")
+        assertFalse(NotchIslandPresentation.speakerReviewKeepsKeyboard(nil, onScreen: false), "a finished or replaced review gives it back")
+    }
 }
 
 private func notchLayout(

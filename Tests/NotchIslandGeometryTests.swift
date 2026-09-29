@@ -159,4 +159,94 @@ func testNotchIslandGeometry() {
         assertEqual(NotchIslandGeometry.wingWidth(content: 0), 0, "an empty wing takes no room")
         assertEqual(NotchIslandGeometry.wingWidth(content: 30), 54)
     }
+
+    runSuite("A dictation opens the island on the display with the focused text field") {
+        let builtIn = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let monitor = CGRect(x: 1512, y: 0, width: 2560, height: 1440)
+        let screens = [builtIn, monitor]
+        let pointerOnBuiltIn = CGPoint(x: 700, y: 400)
+        let fieldOnMonitor = CGRect(x: 2200, y: 600, width: 500, height: 24)
+
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: fieldOnMonitor,
+                mouseLocation: pointerOnBuiltIn,
+                screenFrames: screens,
+                mainScreenFrame: builtIn
+            ),
+            monitor,
+            "the words go to the monitor, so the island and its Paste/Copy buttons go there too"
+        )
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: nil,
+                mouseLocation: CGPoint(x: 3000, y: 700),
+                screenFrames: screens,
+                mainScreenFrame: builtIn
+            ),
+            monitor,
+            "no readable field: the display under the pointer"
+        )
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: CGRect(x: -5000, y: -5000, width: 300, height: 20),
+                mouseLocation: pointerOnBuiltIn,
+                screenFrames: screens,
+                mainScreenFrame: monitor
+            ),
+            builtIn,
+            "a field on no display falls back to the pointer"
+        )
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: CGRect(x: 2200, y: 600, width: 0, height: 0),
+                mouseLocation: pointerOnBuiltIn,
+                screenFrames: screens,
+                mainScreenFrame: monitor
+            ),
+            builtIn,
+            "an empty field rect says nothing about where it is"
+        )
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: nil,
+                mouseLocation: CGPoint(x: 2000, y: 1440),
+                screenFrames: screens,
+                mainScreenFrame: builtIn
+            ),
+            monitor,
+            "a pointer pinned to the monitor's top edge is on the monitor"
+        )
+        assertEqual(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: nil,
+                mouseLocation: CGPoint(x: 9000, y: 9000),
+                screenFrames: screens,
+                mainScreenFrame: monitor
+            ),
+            monitor,
+            "nothing to go on: the main display"
+        )
+        assertNil(
+            NotchIslandScreenChoice.screenFrame(
+                focusedFieldRect: nil,
+                mouseLocation: .zero,
+                screenFrames: [],
+                mainScreenFrame: nil
+            ),
+            "no displays at all"
+        )
+    }
+
+    runSuite("The island reads the focused field only for a dictation with more than one display") {
+        assertTrue(NotchIslandScreenChoice.looksUpFocusedField(dictationOpensIsland: true, screenCount: 2))
+        assertFalse(
+            NotchIslandScreenChoice.looksUpFocusedField(dictationOpensIsland: true, screenCount: 1),
+            "one display: nothing to choose, so no Accessibility round trip on the key press"
+        )
+        assertFalse(
+            NotchIslandScreenChoice.looksUpFocusedField(dictationOpensIsland: false, screenCount: 3),
+            "a meeting or call prompt opens under the pointer"
+        )
+    }
 }
