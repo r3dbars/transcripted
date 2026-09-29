@@ -18,6 +18,14 @@
 //
 // The accepted lengths come from the model's input shape (a flexible range, a list
 // of enumerated lengths, or one fixed length); the configuration may narrow them.
+//
+// A multifunction model (one fixed-length function per input length, such as the
+// ReDimNet2 builds' `len_<samples>` functions; weights shared) accepts exactly its
+// functions' lengths. Each call runs on the function whose input has that call's
+// length (`MLModelConfiguration.functionName`); each function is loaded on first use
+// and kept. Function names are read from the model, else from
+// `CoreMLSpeakerEmbedderConfiguration.functionsByLength`. A single-function model
+// lists no functions and is loaded as before.
 // A window whose output is the wrong size, NaN/Inf, or all zeros counts as failed;
 // `embed` returns nil when every window failed, and DiarizationService then drops
 // that segment's embedding rather than mixing models.
@@ -61,6 +69,10 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
     public var hopSamples: Int?
     public var pooling: SpeakerEmbeddingPooling
     public var computeUnits: MLComputeUnits
+    /// Multifunction model only: the function to run for each input length, in
+    /// samples. Used when the model's own function list can't be read or has fewer
+    /// than two functions; nil for a single-function model.
+    public var functionsByLength: [Int: String]?
 
     public init(
         modelURL: URL,
@@ -74,7 +86,8 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
         windowSamples: Int? = nil,
         hopSamples: Int? = nil,
         pooling: SpeakerEmbeddingPooling = .talkTimeWeighted,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits = .all,
+        functionsByLength: [Int: String]? = nil
     ) {
         self.modelURL = modelURL
         self.identifier = identifier
@@ -88,6 +101,7 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
         self.hopSamples = hopSamples
         self.pooling = pooling
         self.computeUnits = computeUnits
+        self.functionsByLength = functionsByLength
     }
 }
 
@@ -105,6 +119,22 @@ public enum CoreMLVoiceprintInputLengths: Sendable, Equatable {
     case range(ClosedRange<Int>)
     /// Only these lengths (an EnumeratedShapes model).
     case enumerated([Int])
+
+    /// Whether a call of `sampleCount` samples fits.
+    public func accepts(_ sampleCount: Int) -> Bool {
+        switch self {
+        case .range(let range): return range.contains(sampleCount)
+        case .enumerated(let lengths): return lengths.contains(sampleCount)
+        }
+    }
+
+    /// The one length a fixed-shape input takes; nil when it takes several.
+    var fixedLength: Int? {
+        switch self {
+        case .range(let range): return range.lowerBound == range.upperBound ? range.lowerBound : nil
+        case .enumerated(let lengths): return lengths.count == 1 ? lengths.first : nil
+        }
+    }
 }
 
 /// The resolved length policy for one model: how audio is fitted to it.
@@ -220,39 +250,84 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
     public let identifier: String
     public let thresholds: SpeakerEmbeddingThresholds
     public let plan: CoreMLSpeakerEmbeddingPlan
+    /// Multifunction model: the function each input length runs on. nil for a
+    /// single-function model.
+    public let functionsByLength: [Int: String]?
 
     /// One model call: exactly one window's samples in, the raw output out.
     private let predict: @Sendable ([Float]) -> [Float]?
 
     /// Loads `configuration.modelURL` and checks it against the configuration.
     public convenience init(configuration: CoreMLSpeakerEmbedderConfiguration) throws {
+        let functions = try CoreMLVoiceprintFunctions.resolve(
+            modelFunctions: CoreMLVoiceprintFunctions.readModelFunctions(
+                at: configuration.modelURL, inputName: configuration.inputName),
+            configured: configuration.functionsByLength)
+        if let functions {
+            let lengthByName = Dictionary(functions.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+            let router = CoreMLVoiceprintFunctionRouter(functionsByLength: functions) { name in
+                let runner = try CoreMLSpeakerSegmentEmbedder.loadModel(configuration, functionName: name)
+                if let length = lengthByName[name], !(runner.inputLengths?.accepts(length) ?? true) {
+                    throw CoreMLSpeakerEmbedderError("function \(name) does not take \(length) samples")
+                }
+                return { runner.predict($0) }
+            }
+            let plan = try CoreMLSpeakerEmbeddingPlan.resolve(
+                minSamples: configuration.minSamples, maxSamples: configuration.maxSamples,
+                windowSamples: configuration.windowSamples, hopSamples: configuration.hopSamples,
+                pooling: configuration.pooling, modelLengths: .enumerated(router.lengths))
+            // Fail fast on the function most calls use: it must load and fit the
+            // configured input, output and size. The others load on first use.
+            try router.preload(length: plan.windowSamples)
+            try self.init(
+                identifier: configuration.identifier, dimension: configuration.dimension,
+                thresholds: configuration.thresholds, plan: plan, functionsByLength: functions,
+                predict: { router.predict($0) })
+            AppLogger.speakers.info("Core ML speaker embedder loaded", [
+                "embedder": identifier, "functions": "\(functions.count)",
+                "dim": "\(dimension)", "minSamples": "\(plan.minSamples)", "maxSamples": "\(plan.maxSamples)",
+                "lengths": plan.allowedLengths.map { "\($0.count)" } ?? "any",
+                "window": "\(plan.windowSamples)", "hop": "\(plan.hopSamples)", "pooling": plan.pooling.rawValue,
+            ])
+        } else {
+            let runner = try CoreMLSpeakerSegmentEmbedder.loadModel(configuration, functionName: nil)
+            let plan = try CoreMLSpeakerEmbeddingPlan.resolve(
+                minSamples: configuration.minSamples, maxSamples: configuration.maxSamples,
+                windowSamples: configuration.windowSamples, hopSamples: configuration.hopSamples,
+                pooling: configuration.pooling, modelLengths: runner.inputLengths)
+            try self.init(
+                identifier: configuration.identifier, dimension: configuration.dimension,
+                thresholds: configuration.thresholds, plan: plan,
+                predict: { runner.predict($0) })
+            AppLogger.speakers.info("Core ML speaker embedder loaded", [
+                "embedder": identifier, "input": runner.inputName, "output": runner.outputName,
+                "dim": "\(dimension)", "minSamples": "\(plan.minSamples)", "maxSamples": "\(plan.maxSamples)",
+                "lengths": plan.allowedLengths.map { "\($0.count)" } ?? "any",
+                "window": "\(plan.windowSamples)", "hop": "\(plan.hopSamples)", "pooling": plan.pooling.rawValue,
+            ])
+        }
+    }
+
+    /// Loads the model (one function of it, for a multifunction model) and checks
+    /// its input, output and size against the configuration.
+    private static func loadModel(
+        _ configuration: CoreMLSpeakerEmbedderConfiguration, functionName: String?
+    ) throws -> CoreMLVoiceprintModel {
         let modelConfiguration = MLModelConfiguration()
         modelConfiguration.computeUnits = configuration.computeUnits
+        if let functionName { modelConfiguration.functionName = functionName }
         let model: MLModel
         do {
             model = try MLModel(contentsOf: configuration.modelURL, configuration: modelConfiguration)
         } catch {
             // Domain and code only: Core ML's message can include the model's path.
             let nsError = error as NSError
-            throw CoreMLSpeakerEmbedderError("Core ML model failed to load (\(nsError.domain) \(nsError.code))")
+            let what = functionName.map { "Core ML model function \($0)" } ?? "Core ML model"
+            throw CoreMLSpeakerEmbedderError("\(what) failed to load (\(nsError.domain) \(nsError.code))")
         }
-        let runner = try CoreMLVoiceprintModel(
+        return try CoreMLVoiceprintModel(
             model: model, inputName: configuration.inputName, outputName: configuration.outputName,
             dimension: configuration.dimension)
-        let plan = try CoreMLSpeakerEmbeddingPlan.resolve(
-            minSamples: configuration.minSamples, maxSamples: configuration.maxSamples,
-            windowSamples: configuration.windowSamples, hopSamples: configuration.hopSamples,
-            pooling: configuration.pooling, modelLengths: runner.inputLengths)
-        try self.init(
-            identifier: configuration.identifier, dimension: configuration.dimension,
-            thresholds: configuration.thresholds, plan: plan,
-            predict: { runner.predict($0) })
-        AppLogger.speakers.info("Core ML speaker embedder loaded", [
-            "embedder": identifier, "input": runner.inputName, "output": runner.outputName,
-            "dim": "\(dimension)", "minSamples": "\(plan.minSamples)", "maxSamples": "\(plan.maxSamples)",
-            "lengths": plan.allowedLengths.map { "\($0.count)" } ?? "any",
-            "window": "\(plan.windowSamples)", "hop": "\(plan.hopSamples)", "pooling": plan.pooling.rawValue,
-        ])
     }
 
     /// The model-free core, so the fitting and pooling can be exercised with a
@@ -262,6 +337,7 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         dimension: Int,
         thresholds: SpeakerEmbeddingThresholds,
         plan: CoreMLSpeakerEmbeddingPlan,
+        functionsByLength: [Int: String]? = nil,
         predict: @escaping @Sendable ([Float]) -> [Float]?
     ) throws {
         guard Self.isValidIdentifier(identifier) else {
@@ -274,6 +350,7 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         self.dimension = dimension
         self.thresholds = thresholds
         self.plan = plan
+        self.functionsByLength = functionsByLength
         self.predict = predict
     }
 
@@ -481,5 +558,170 @@ final class CoreMLVoiceprintModel: @unchecked Sendable {
             guard let fixed = constraint.shape.last?.intValue, fixed > 0 else { return nil }
             return .range(fixed...fixed)
         }
+    }
+}
+
+// MARK: - Multifunction models
+
+/// Finds the functions of a multifunction voiceprint model and the input length
+/// each one takes.
+enum CoreMLVoiceprintFunctions {
+    /// The length in a `len_<samples>` function name (how the bake-off converter
+    /// names them); nil for any other name.
+    static func length(fromFunctionName name: String) -> Int? {
+        let prefix = "len_"
+        guard name.hasPrefix(prefix) else { return nil }
+        let digits = name.dropFirst(prefix.count)
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber),
+              let length = Int(digits), length > 0 else { return nil }
+        return length
+    }
+
+    /// The length -> function map to run, or nil for a single-function model.
+    /// A model that lists two or more functions wins: each is keyed by the one input
+    /// length it declares, else the length in its `len_<samples>` name, and functions
+    /// with neither are left out. Otherwise the configured map is used. Throws when
+    /// two functions take the same length, when none of the model's functions has a
+    /// length, or when the configured map has a non-positive length or empty name.
+    static func resolve(
+        modelFunctions: [(name: String, inputLength: Int?)]?, configured: [Int: String]?
+    ) throws -> [Int: String]? {
+        if let modelFunctions, modelFunctions.count >= 2 {
+            var map: [Int: String] = [:]
+            for function in modelFunctions {
+                guard let samples = function.inputLength ?? Self.length(fromFunctionName: function.name),
+                      samples > 0 else { continue }
+                if let other = map[samples] {
+                    throw CoreMLSpeakerEmbedderError(
+                        "model functions \(other) and \(function.name) both take \(samples) samples")
+                }
+                map[samples] = function.name
+            }
+            guard !map.isEmpty else {
+                throw CoreMLSpeakerEmbedderError(
+                    "none of the model's \(modelFunctions.count) functions takes one fixed input length")
+            }
+            return map
+        }
+        guard let configured else { return nil }
+        guard !configured.isEmpty, configured.allSatisfy({ $0.key > 0 && !$0.value.isEmpty }) else {
+            throw CoreMLSpeakerEmbedderError("functionsByLength needs positive lengths and function names")
+        }
+        return configured
+    }
+
+    /// The compiled model's functions, each with the one input length its input
+    /// declares (nil when that input takes several lengths). A single-function model
+    /// lists at most one function; nil when the list can't be read. Only listed
+    /// names are ever asked about: Core ML raises an exception for an unknown one.
+    static func readModelFunctions(at url: URL, inputName: String?) -> [(name: String, inputLength: Int?)]? {
+        guard let asset = try? MLModelAsset(url: url) else { return nil }
+        let reply: [String]?? = waitForCallback { done in
+            asset.functionNames { functionNames, _ in done(functionNames) }
+        }
+        guard let listed = reply ?? nil else { return nil }
+        guard listed.count >= 2 else {
+            return listed.map { (name: $0, inputLength: Int?.none) }
+        }
+        return listed.map { functionName -> (name: String, inputLength: Int?) in
+            let declared: Int?? = waitForCallback { done in
+                asset.modelDescription(ofFunctionNamed: functionName) { modelDescription, _ in
+                    done(modelDescription.flatMap {
+                        CoreMLVoiceprintFunctions.fixedInputLength(of: $0, inputName: inputName)
+                    })
+                }
+            }
+            return (name: functionName, inputLength: declared ?? nil)
+        }
+    }
+
+    /// The one length the voiceprint input of `description` takes, if it takes one.
+    static func fixedInputLength(of description: MLModelDescription, inputName: String?) -> Int? {
+        let inputs = description.inputDescriptionsByName
+        let feature = inputName.flatMap { inputs[$0] } ?? inputs["audio"]
+            ?? (inputs.count == 1 ? inputs.values.first : nil)
+        guard let constraint = feature?.multiArrayConstraint else { return nil }
+        return CoreMLVoiceprintModel.inputLengths(of: constraint)?.fixedLength
+    }
+
+    /// Runs a completion-handler Core ML call synchronously (model setup only; never
+    /// on a real-time thread). nil if it doesn't call back within 30 s.
+    private static func waitForCallback<T: Sendable>(
+        _ start: (@escaping @Sendable (T) -> Void) -> Void
+    ) -> T? {
+        let box = CoreMLCallbackBox<T>()
+        let semaphore = DispatchSemaphore(value: 0)
+        start { value in
+            box.lock.lock()
+            box.value = value
+            box.lock.unlock()
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + 30) == .success else { return nil }
+        box.lock.lock()
+        defer { box.lock.unlock() }
+        return box.value
+    }
+}
+
+/// Holds one callback's value for `CoreMLVoiceprintFunctions.waitForCallback`.
+private final class CoreMLCallbackBox<T>: @unchecked Sendable {
+    let lock = NSLock()
+    var value: T?
+}
+
+/// Sends each model call to the function built for its length. A function loads on
+/// its first call and is kept; one that fails to load fails its calls from then on
+/// without being loaded again.
+final class CoreMLVoiceprintFunctionRouter: @unchecked Sendable {
+    typealias Predictor = @Sendable ([Float]) -> [Float]?
+
+    /// The lengths that have a function, ascending.
+    let lengths: [Int]
+
+    private let functionsByLength: [Int: String]
+    private let load: (_ functionName: String) throws -> Predictor
+    private let lock = NSLock()
+    private var loaded: [Int: Result<Predictor, Error>] = [:]
+
+    init(
+        functionsByLength: [Int: String],
+        load: @escaping (_ functionName: String) throws -> Predictor
+    ) {
+        self.functionsByLength = functionsByLength
+        self.lengths = functionsByLength.keys.sorted()
+        self.load = load
+    }
+
+    /// Loads the function for `length` now; throws if there is none or it fails.
+    func preload(length: Int) throws {
+        _ = try predictor(forLength: length).get()
+    }
+
+    /// Runs `window` on the function for its length; nil if there is none or it
+    /// failed to load.
+    func predict(_ window: [Float]) -> [Float]? {
+        guard case .success(let run) = predictor(forLength: window.count) else { return nil }
+        return run(window)
+    }
+
+    private func predictor(forLength length: Int) -> Result<Predictor, Error> {
+        guard let name = functionsByLength[length] else {
+            AppLogger.speakers.error("Core ML speaker embedder: no function for this length", [
+                "samples": "\(length)",
+            ])
+            return .failure(CoreMLSpeakerEmbedderError("no model function takes \(length) samples"))
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = loaded[length] { return cached }
+        let result = Result { try load(name) }
+        if case .failure(let error) = result {
+            AppLogger.speakers.error("Core ML speaker embedder: model function failed to load", [
+                "function": name, "error": (error as? CoreMLSpeakerEmbedderError)?.message ?? "load failed",
+            ])
+        }
+        loaded[length] = result
+        return result
     }
 }
