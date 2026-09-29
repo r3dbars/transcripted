@@ -327,14 +327,22 @@ struct DictationPasteTarget: Equatable {
 }
 
 enum FocusedTextPasteConfirmationPolicy {
-    /// Roles where a paste can't land: pages, windows, controls, lists.
-    /// Any of them still counts as text entry when its value is settable or
-    /// it sits inside an editable region. A selection range is no signal:
-    /// web pages report one on plain, uneditable text.
+    /// Roles where a paste can't land: a web page body, plain text, links,
+    /// images, and controls like buttons and menus. Any of them still counts
+    /// as text entry when its value is settable or it sits inside an editable
+    /// region. A selection range is no signal: web pages report one on plain,
+    /// uneditable text.
+    ///
+    /// Containers stay out on purpose. A selected spreadsheet cell (Numbers,
+    /// Excel, Sheets) reports AXCell, AXRow or AXTable, and GPU terminals
+    /// (kitty, Alacritty, Ghostty, Warp) report their window or a group, yet
+    /// all of them take a paste. Refuting those told people "Not pasted" after
+    /// the text landed.
     static let nonTextEntryRoles: Set<String> = [
-        "AXWebArea", "AXWindow", "AXApplication", "AXButton", "AXList", "AXOutline",
-        "AXTable", "AXRow", "AXCell", "AXScrollArea", "AXImage", "AXStaticText",
-        "AXLink", "AXMenuItem", "AXGroup", "AXSplitGroup", "AXToolbar", "AXTabGroup",
+        "AXWebArea", "AXStaticText", "AXLink", "AXImage",
+        "AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
+        "AXDisclosureTriangle", "AXSlider",
+        "AXMenu", "AXMenuItem", "AXMenuBar", "AXMenuBarItem", "AXToolbar",
     ]
 
     /// True only when the focus plainly can't take text. An unknown role

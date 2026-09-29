@@ -828,7 +828,9 @@ class FloatingOverlayController {
     }
 
     /// Watches for the user's own ⌘V in another app while the words are
-    /// still on the clipboard.
+    /// still on the clipboard. Seeing the keypress proves nothing about where
+    /// the words went, so the notice just steps aside. It never turns into
+    /// "Pasted".
     private func watchForManualPaste(of text: String) {
         notPastedKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -836,8 +838,7 @@ class FloatingOverlayController {
             Task { @MainActor [weak self] in
                 guard let self, self.notPastedText == text, self.state == .drafting,
                       NSPasteboard.general.string(forType: .string) == text else { return }
-                self.clearNotPasted()
-                self.showSuccessAndDismiss(title: "Pasted")
+                self.dismissError()
             }
         }
     }
