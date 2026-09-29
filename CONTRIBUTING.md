@@ -21,7 +21,8 @@ state already exists.
 ### Prerequisites
 
 - macOS 26+
-- Xcode command line tools
+- Xcode 26 or later (`build.sh` compiles the app icon with `actool`, which the
+  command line tools alone don't include)
 - Apple Silicon
 
 ### Getting Started

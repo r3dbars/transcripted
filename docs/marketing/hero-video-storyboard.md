@@ -27,7 +27,8 @@ README web editor to get a `user-attachments` URL that plays inline).
    visible app (Notes or a code editor). Caption: "One hotkey. Speak. Words
    land where you were typing."
 6. **(28–31s) End card.** App icon + "Never lose what was said." +
-   "Free · Open source · Nothing leaves your Mac" + transcripted.app.
+   "Free · Open source" + transcripted.app. (Not "Nothing leaves your Mac":
+   crash reports and usage stats are on by default.)
 
 ## Recording rules
 
