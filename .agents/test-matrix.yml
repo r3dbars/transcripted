@@ -68,10 +68,12 @@ rules:
   - paths:
       - "scripts/release/generate-sparkle-appcast.sh"
       - "scripts/release/verify-sparkle-release.sh"
+      - "scripts/release/provision-release-models.sh"
       - ".github/workflows/release-candidate.yml"
     checks:
       - "bash -n scripts/release/generate-sparkle-appcast.sh"
       - "bash -n scripts/release/verify-sparkle-release.sh"
+      - "bash -n scripts/release/provision-release-models.sh"
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
 
   - paths:

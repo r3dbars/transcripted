@@ -142,8 +142,28 @@ jobs:
             "$model_root/parakeet-tdt-0.6b-v3"
           ditto "$mount_point/Transcripted.app/Contents/Resources/offline-diarizer-models/speaker-diarization" \
             "$model_root/speaker-diarization"
+          # Releases from 1.1.67 on also bundle Nemotron and ReDimNet2. Keep
+          # the previous copies so the next step reuses the same bytes.
+          previous_resources="$RUNNER_TEMP/previous-release-resources"
+          mkdir -p "$previous_resources"
+          for bundled in nemotron-diarizer-models redimnet2-voiceprint; do
+            if [ -d "$mount_point/Transcripted.app/Contents/Resources/$bundled" ]; then
+              ditto "$mount_point/Transcripted.app/Contents/Resources/$bundled" "$previous_resources/$bundled"
+            fi
+          done
           hdiutil detach "$mount_point"
           trap - EXIT
+
+      # build-beta.sh refuses to build without the Nemotron diarizer and the
+      # ReDimNet2 voiceprint model. The script checks every file against pinned
+      # sha256s and fails the job on any mismatch.
+      - name: Provision Nemotron and ReDimNet2 models
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release/provision-release-models.sh \
+            "$HOME/Library/Application Support/FluidAudio/Models" \
+            --previous-resources "$RUNNER_TEMP/previous-release-resources"
 
       - name: Fingerprint Swift toolchain
         id: swift-toolchain
@@ -205,7 +225,8 @@ jobs:
       # folder, so clients on a recent version download only what changed
       # (about 1-3 MB) instead of the full ~510 MB DMG. The models are copied
       # from the previous release above, so their bytes never change between
-      # releases. A missing old DMG only means no delta for that version.
+      # releases (1.1.67 adds Nemotron and ReDimNet2, so its deltas are
+      # bigger once). A missing old DMG only means no delta for that version.
       - name: Download recent releases for delta updates
         shell: bash
         run: |
