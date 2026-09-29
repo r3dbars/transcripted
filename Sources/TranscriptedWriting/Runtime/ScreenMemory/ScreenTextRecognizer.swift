@@ -2,6 +2,7 @@
 import TranscriptedWritingCore
 #endif
 import CoreGraphics
+import Foundation
 import Vision
 
 /// Runs on-device Vision OCR over a native-resolution captured frame. The
@@ -32,7 +33,12 @@ enum ScreenTextRecognizer {
     }
 
     private static func recognizeNow(image: CGImage) async throws -> [RecognizedBlock] {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { checked in
+            // Vision can both call the request's completion handler with an
+            // error and throw that error from `perform`. Resuming a checked
+            // continuation twice traps, which crashed the app (2026-09-29),
+            // so only the first answer counts.
+            let continuation = OneShotContinuation(checked)
             let request = VNRecognizeTextRequest { request, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -69,6 +75,33 @@ enum ScreenTextRecognizer {
             } catch {
                 continuation.resume(throwing: error)
             }
+        }
+    }
+
+    /// Resumes a checked continuation at most once; later answers are
+    /// dropped instead of trapping.
+    final class OneShotContinuation<Value: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Value, Error>?
+
+        init(_ continuation: CheckedContinuation<Value, Error>) {
+            self.continuation = continuation
+        }
+
+        func resume(returning value: Value) {
+            take()?.resume(returning: value)
+        }
+
+        func resume(throwing error: Error) {
+            take()?.resume(throwing: error)
+        }
+
+        private func take() -> CheckedContinuation<Value, Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            let taken = continuation
+            continuation = nil
+            return taken
         }
     }
 
