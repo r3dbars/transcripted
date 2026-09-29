@@ -479,7 +479,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     func mergePendingReviewItem(
         _ item: SpeakerPendingReviewItem,
         into target: SpeakerProfile,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         if deferUntilVoiceprintMigrationEnds({ [weak self] in
             self?.mergePendingReviewItem(item, into: target, completion: completion)
@@ -544,14 +544,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             } catch {
                 Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
             }
+            let merged = didMerge
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 self?.applySnapshot(snapshot)
-                completion?(didMerge)
+                completion?(merged)
             }
         }
     }
