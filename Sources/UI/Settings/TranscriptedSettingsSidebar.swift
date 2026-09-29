@@ -38,6 +38,25 @@ struct SidebarQuietButtonStyle: ButtonStyle {
     }
 }
 
+/// One sidebar destination: a plain button around `SettingsSidebarRow`.
+/// The automation identifier sits on the button, the single element AX
+/// exposes for the row. Put on the row's HStack instead, SwiftUI copies it
+/// onto each child and the button joins them, so a row with the "New" badge
+/// reads `…sidebar.writing-…sidebar.writing` and UI smoke can't find it.
+struct SettingsSidebarButton: View {
+    let page: TranscriptedSettingsPage
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            SettingsSidebarRow(page: page, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(page.automationIdentifier)
+    }
+}
+
 struct SettingsSidebarRow: View {
     let page: TranscriptedSettingsPage
     let isSelected: Bool
@@ -71,7 +90,6 @@ struct SettingsSidebarRow: View {
                         : (isHovering ? Color.primary.opacity(0.045) : Color.clear)
                 )
         )
-        .accessibilityIdentifier(page.automationIdentifier)
         .help(page.navigationHelp)
         .onHover { isHovering = $0 }
     }
