@@ -14,7 +14,8 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         let speakerPeopleModel = SpeakerPeopleSettingsViewModel(
             speakerDatabase: speakerDatabase,
             transcriptDirectory: MeetingStoragePaths.transcriptsFolder,
-            preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder
+            preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder,
+            voiceprintMigrationGate: appState.meetingSession.voiceprintMigrationGate
         )
         self.speakerPeopleModel = speakerPeopleModel
         self.navigationModel = TranscriptedSettingsNavigationModel()

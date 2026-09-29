@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import TranscriptedCore
 
 enum SpeakerPeopleSettingsPolishContract {
@@ -152,6 +153,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
     private var inviteeLookupsStarted: Set<String> = []
 
+    /// Mirrors the meeting controller's voiceprint migration gate: saved people
+    /// moving into a new voice model's database. Edits made meanwhile wait in
+    /// `editsWaitingForVoiceprintMigration` and run once it ends.
+    @Published private(set) var voiceprintMigrationPhase: SpeakerVoiceprintMigrationGate.Phase = .idle
+    private var voiceprintMigrationObservation: AnyCancellable?
+    private var editsWaitingForVoiceprintMigration: [() -> Void] = []
+
     private let speakerDatabase: SpeakerDatabase
     private let transcriptDirectory: URL
     private let preferredClipsDirectory: URL
@@ -179,13 +187,68 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         speakerDatabase: SpeakerDatabase,
         transcriptDirectory: URL = TranscriptSaver.defaultSaveDirectory,
         preferredClipsDirectory: URL,
-        legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips
+        legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
+        voiceprintMigrationGate: SpeakerVoiceprintMigrationGate? = nil
     ) {
         self.speakerDatabase = speakerDatabase
         self.transcriptDirectory = transcriptDirectory
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
+        if let voiceprintMigrationGate {
+            voiceprintMigrationPhase = voiceprintMigrationGate.phase
+            // Synchronous on purpose: the mirror changes in the same step as
+            // the gate, so an edit can never slip between the two.
+            voiceprintMigrationObservation = voiceprintMigrationGate.$phase
+                .dropFirst()
+                .sink { [weak self] phase in
+                    self?.voiceprintMigrationPhaseChanged(to: phase)
+                }
+        }
         refresh()
+    }
+
+    // MARK: - Voice model migration
+
+    var isMovingPeopleToNewVoiceModel: Bool {
+        if case .moving = voiceprintMigrationPhase { return true }
+        return false
+    }
+
+    /// The quiet line at the top of Speakers while saved people move to a new
+    /// voice model, and afterwards while some of them need one confirmation.
+    var voiceprintMigrationStatusLine: String? {
+        switch voiceprintMigrationPhase {
+        case .moving(let completed, let total?) where total > 0:
+            return "Moving your saved people to the new voice model… \(completed) of \(total)"
+        case .moving:
+            return "Moving your saved people to the new voice model…"
+        case .finished(let summary) where summary.peopleNeedingConfirmation > 0:
+            let count = summary.peopleNeedingConfirmation
+            let who = count == 1 ? "1 saved person needs" : "\(count) saved people need"
+            return "\(who) one confirmation with the new voice model. Confirm them when a meeting asks who they are."
+        case .failed:
+            return "Your saved people haven't moved to the new voice model yet. Transcripted tries again the next time it opens."
+        case .idle, .finished:
+            return nil
+        }
+    }
+
+    private func voiceprintMigrationPhaseChanged(to phase: SpeakerVoiceprintMigrationGate.Phase) {
+        voiceprintMigrationPhase = phase
+        guard !isMovingPeopleToNewVoiceModel else { return }
+        refresh()
+        let edits = editsWaitingForVoiceprintMigration
+        editsWaitingForVoiceprintMigration.removeAll()
+        edits.forEach { $0() }
+    }
+
+    /// Speaker edits never race the migration's writes: while it runs, `edit`
+    /// is kept and run as soon as it ends. True when it was kept, so the caller
+    /// stops here; false to go ahead now.
+    private func deferUntilVoiceprintMigrationEnds(_ edit: @escaping () -> Void) -> Bool {
+        guard isMovingPeopleToNewVoiceModel else { return false }
+        editsWaitingForVoiceprintMigration.append(edit)
+        return true
     }
 
     private func rebuildReviewStack() {
@@ -336,6 +399,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         to newName: String,
         completion: ((Bool) -> Void)? = nil
     ) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.namePendingReviewItem(item, to: newName, completion: completion)
+        }) { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             completion?(false)
@@ -415,6 +481,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         into target: SpeakerProfile,
         completion: ((Bool) -> Void)? = nil
     ) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.mergePendingReviewItem(item, into: target, completion: completion)
+        }) { return }
         let sourceId = item.speakerId
         let targetId = target.id
         guard sourceId != targetId else {
@@ -566,6 +635,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         to newName: String,
         completion: ((Bool) -> Void)? = nil
     ) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.rename(profile: profile, to: newName, completion: completion)
+        }) { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             completion?(false)
@@ -647,6 +719,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         into target: SpeakerProfile,
         completion: ((Bool) -> Void)? = nil
     ) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.merge(source: source, into: target, completion: completion)
+        }) { return }
         guard source.id != target.id else {
             completion?(false)
             return
@@ -720,6 +795,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func delete(profile: SpeakerProfile, completion: ((Bool) -> Void)? = nil) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.delete(profile: profile, completion: completion)
+        }) { return }
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
@@ -764,6 +842,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// voice profiles from the embeddings retained at merge time. Past transcripts keep
     /// the merged name — un-merge restores future voice matching, not transcript text.
     func unmerge(into profile: SpeakerProfile, completion: ((Bool) -> Void)? = nil) {
+        if deferUntilVoiceprintMigrationEnds({ [weak self] in
+            self?.unmerge(into: profile, completion: completion)
+        }) { return }
         let targetId = profile.id
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
@@ -1098,6 +1179,15 @@ struct SpeakerPeopleSettingsSection: View {
             let directoryCount = model.directoryCount
             let directoryProfiles = model.directoryProfiles
 
+            // Read-only: saved people moving to a new voice model, or how many
+            // of them still need one confirmation there.
+            if let migrationLine = model.voiceprintMigrationStatusLine {
+                Text(migrationLine)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let current = meetingGroups.first {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1149,9 +1239,12 @@ struct SpeakerPeopleSettingsSection: View {
             // renamed, merged, or deleted without cycling the stack. When the
             // open card holds every voice the directory stays hidden.
             if model.profiles.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    LibrarySectionLabel(text: "Everyone")
-                    SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
+                // While people are still moving in, "No speakers yet" would be wrong.
+                if !model.isMovingPeopleToNewVoiceModel {
+                    VStack(alignment: .leading, spacing: 12) {
+                        LibrarySectionLabel(text: "Everyone")
+                        SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
+                    }
                 }
             } else if directoryCount > 0 {
                 VStack(alignment: .leading, spacing: 12) {

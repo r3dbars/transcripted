@@ -265,7 +265,15 @@ final class TranscriptionQueueCoordinator {
     }
 
     private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {
-        let modelsReady = await ensureModelsReadyForQueuedTranscription(job)
+        // Saved people may still be moving into a new voiceprint model's
+        // database (SpeakerVoiceprintMigrationGate). Hold the job until that's
+        // done so it never names speakers against a half-filled database. This
+        // only waits; the job keeps its place and never fails for it.
+        await controller.voiceprintMigrationGate.waitUntilOpen()
+        var modelsReady = false
+        if !Task.isCancelled {
+            modelsReady = await ensureModelsReadyForQueuedTranscription(job)
+        }
 
         // A cancelled task must not touch shared state: a newer
         // startQueuedTranscription has already taken ownership of
