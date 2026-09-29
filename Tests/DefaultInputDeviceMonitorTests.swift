@@ -222,9 +222,11 @@ func testDefaultInputDeviceMonitor() {
         let callback = DispatchSemaphore(value: 0)
         _ = registry.add { isSelfWrite in delivered.append("first:\(isSelfWrite)") }
         _ = registry.add { isSelfWrite in delivered.append("second:\(isSelfWrite)") }
+        // The lookup timeout isn't what this checks. At 250 ms a loaded Mac
+        // could hit it, deliver a nil device, and fail the flag for no reason.
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "test.default-input-order",
-            timeoutNanoseconds: 250_000_000,
+            timeoutNanoseconds: 30_000_000_000,
             lookup: {
                 Thread.sleep(forTimeInterval: 0.05)
                 return 42
@@ -242,7 +244,7 @@ func testDefaultInputDeviceMonitor() {
         )
 
         dispatcher.submit(at: 100.1, pendingSelfWrite: token)
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "lookup must deliver")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "lookup must deliver")
         assertEqual(lock.withLock { delivered }, ["first:true", "second:true"],
                     "all observers must receive the self-write flag in registration order despite async completion")
         dispatcher.close()

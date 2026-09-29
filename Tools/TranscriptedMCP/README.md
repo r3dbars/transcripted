@@ -111,3 +111,17 @@ Each returns JSON receipts shaped around `meetingId`, `timestamp`, and `quote`.
 Summary-derived receipts have `timestamp: null` until exact audio anchors are
 available; raw utterance search includes the transcript timestamp. These tools
 use only the local SQLite index and saved summary/parser output.
+
+## MCP Bundle and Registry
+
+Each release can also ship the helper as an MCP Bundle
+(`transcripted-mcp.mcpb`) for clients that install bundles directly, and list
+it in the official MCP Registry as `io.github.r3dbars/transcripted`.
+
+The `Publish MCP Bundle` workflow does both. It copies the signed helper out of
+the release DMG, packs it with [`mcpb/manifest.json`](mcpb/manifest.json),
+attaches the bundle to the release, then fills in and publishes the root
+`server.json`. It runs when a release is published, or by hand with a tag.
+Nothing is rebuilt, so the bundle keeps the notarized app's signature.
+
+`glama.json` at the repo root claims the Glama listing for the maintainer.
