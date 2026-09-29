@@ -59,6 +59,7 @@ class ParakeetEngine: ObservableObject {
     /// `isSharedMeetingMicClaimCurrent` instead.
     var sharedMeetingMicClaim: SharedMeetingMicClaim?
     nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
+    nonisolated let sharedMeetingMicLevelMeter = SharedMeetingMicLevelMeter()
     var sharedMeetingMicTransition = SharedMeetingMicTransitionState()
     // Completed tap batches and recovery segments share one rate-aware timeline.
     private var recordingIdentity = UUID()
@@ -3118,6 +3119,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
+        sharedMeetingMicLevelMeter.end()
         sharedMeetingMicClaim = nil
         discardPinnedDictationRecording()
         cancelAudioWatchdog()
@@ -3161,6 +3163,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
+        sharedMeetingMicLevelMeter.end()
         sharedMeetingMicClaim = nil
         discardPinnedDictationRecording()
         let didReplaceBlockedGraph = cancelAudioWatchdog()
@@ -3200,6 +3203,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
+        sharedMeetingMicLevelMeter.end()
         sharedMeetingMicClaim = nil
         discardPinnedDictationRecording()
         cancelAudioWatchdog()
@@ -3310,6 +3314,7 @@ class ParakeetEngine: ObservableObject {
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
+        sharedMeetingMicLevelMeter.end()
         sharedMeetingMicClaim = nil
         isShuttingDown = true
         discardPinnedDictationRecording()

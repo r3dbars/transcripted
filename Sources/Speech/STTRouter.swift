@@ -352,10 +352,6 @@ class STTRouter: ObservableObject {
         await parakeetEngine.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
     }
 
-    func updateSharedMeetingMicAudioLevel(_ level: Float) {
-        parakeetEngine.updateSharedMeetingMicAudioLevel(level)
-    }
-
     func refreshInputReadiness() async {
         await parakeetEngine.prewarm()
     }

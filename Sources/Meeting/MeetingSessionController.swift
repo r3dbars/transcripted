@@ -3029,7 +3029,6 @@ final class MeetingSessionController: ObservableObject {
                 guard let self else { return }
                 self.audioLevel = level
                 self.latestMicLevel = level
-                self.sttRouter.updateSharedMeetingMicAudioLevel(level)
                 self.observeAudioActivity()
             }
             .store(in: &cancellables)
