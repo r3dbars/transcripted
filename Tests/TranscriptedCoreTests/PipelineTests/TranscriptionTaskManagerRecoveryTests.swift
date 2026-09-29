@@ -379,12 +379,8 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let failedID = UUID()
         try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
         try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
-        for url in [primaryURL, recoveryURL] {
-            try FileManager.default.setAttributes(
-                [.modificationDate: clock.startDate],
-                ofItemAtPath: url.path
-            )
-        }
+        try stamp(primaryURL, modifiedAt: clock.startDate)
+        try stamp(recoveryURL, modifiedAt: clock.startDate)
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: primaryURL.lastPathComponent,
@@ -437,10 +433,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let rewriteAt: TimeInterval = 0.05
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_repeated_write_mic.wav")
         try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate],
-            ofItemAtPath: micURL.path
-        )
+        try stamp(micURL, modifiedAt: clock.startDate)
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: micURL.lastPathComponent,
@@ -450,17 +443,14 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         )
 
         var passCount = 0
-        manager.orphanedRecordingRecoveryPassObserver = {
+        manager.orphanedRecordingRecoveryPassObserver = { [self] in
             passCount += 1
             guard passCount == 1 else { return }
             // The first scan already saw the file live. The recorder writes
             // again partway through the wait that scan starts, so the rescan
             // finds the audio live a second time.
             do {
-                try FileManager.default.setAttributes(
-                    [.modificationDate: clock.startDate.addingTimeInterval(rewriteAt)],
-                    ofItemAtPath: micURL.path
-                )
+                try stamp(micURL, modifiedAt: clock.startDate.addingTimeInterval(rewriteAt))
             } catch {
                 XCTFail("Could not refresh recovery fixture: \(type(of: error))")
             }
@@ -526,10 +516,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let futureLead: TimeInterval = 1
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_future_mic.wav")
         try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate.addingTimeInterval(futureLead)],
-            ofItemAtPath: futureMicURL.path
-        )
+        try stamp(futureMicURL, modifiedAt: clock.startDate.addingTimeInterval(futureLead))
         let futureJournalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: futureMicURL.lastPathComponent,
@@ -594,15 +581,10 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         try writeMonoWAV(to: newerMicURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
         // The older file ages out 50 ms into recovery, the newer one only
         // after a whole liveness window.
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate.addingTimeInterval(-0.45)],
-            ofItemAtPath: olderMicURL.path
-        )
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate],
-            ofItemAtPath: newerMicURL.path
-        )
+        let olderAgesOutAt: TimeInterval = 0.05
         let newerAgesOutAt = livenessWindow
+        try stamp(olderMicURL, modifiedAt: clock.startDate.addingTimeInterval(olderAgesOutAt - livenessWindow))
+        try stamp(newerMicURL, modifiedAt: clock.startDate)
         _ = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: olderMicURL.lastPathComponent,
@@ -644,7 +626,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(passCount, 2)
         XCTAssertLessThan(
             try XCTUnwrap(secondPassAt),
-            newerAgesOutAt,
+            (olderAgesOutAt + newerAgesOutAt) / 2,
             "the rescan must follow the earliest retry, not wait for the newer file"
         )
     }
@@ -656,10 +638,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let livenessWindow: TimeInterval = 0.05
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_joined_future_mic.wav")
         try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate.addingTimeInterval(5)],
-            ofItemAtPath: futureMicURL.path
-        )
+        try stamp(futureMicURL, modifiedAt: clock.startDate.addingTimeInterval(5))
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: futureMicURL.lastPathComponent,
@@ -694,8 +673,8 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         )
         let joinsSentWhenOwnerReturned = joinsSent
         clock.afterSleep = nil
-        for joinedRequest in joinedRequests {
-            _ = await joinedRequest.value
+        while !joinedRequests.isEmpty {
+            _ = await joinedRequests.removeFirst().value
         }
 
         XCTAssertEqual(recovered, 0)
@@ -1003,10 +982,11 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
     }
 
     private func backdate(_ url: URL) throws {
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date(timeIntervalSinceNow: -3_600)],
-            ofItemAtPath: url.path
-        )
+        try stamp(url, modifiedAt: Date(timeIntervalSinceNow: -3_600))
+    }
+
+    private func stamp(_ url: URL, modifiedAt date: Date) throws {
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
     }
 
     private func corruptHeaderSizes(at url: URL) throws {
