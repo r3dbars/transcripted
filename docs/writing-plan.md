@@ -259,6 +259,7 @@ Source: Tilde `f36f6562`. "Same" means a straight port, with only identities and
 | --- | --- |
 | Captures typed and accepted text with app, time and segment. Segments break on caret or app change, deletion, modifiers and secure input | Same, gated by **Save my writing** and the app scope |
 | Built-in password-manager exclusions plus the user's list | Same. **New:** an allowlist mode for "Only apps I pick" |
+| Secrets typed where secure input is off (sudo prompts, codes, cards) reach the log and the predictor | **Changed:** Personal History takes an entry only after Save my writing's scrubber finds nothing in it (`docs/writing-port-ledger.md`, "Secrets in Personal History") |
 | Encrypted log and model with the key in Keychain | **Changed** per decision 6. See [Storage](#storage) |
 | Delete all | Same, and it also deletes the writing Markdown files |
 | Personal n-gram predictor, and its rules for replacing the model's ghost | Same logic. Its default is an open question |
