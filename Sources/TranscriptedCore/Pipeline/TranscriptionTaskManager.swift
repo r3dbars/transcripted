@@ -200,6 +200,9 @@ public class TranscriptionTaskManager: ObservableObject {
     var orphanedRecordingRecoveryTaskCreatedObserver: (() -> Void)?
     /// Deterministic pause point for recovery interleaving tests.
     var orphanedRecordingRecoveryPassObserver: (() -> Void)?
+    /// Time source for recovery deadlines, rescan waits, and liveness checks.
+    /// Read once per recovery owner; tests swap in a virtual clock.
+    var orphanedRecordingRecoveryClock = OrphanedRecordingRecoveryClock.live
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -1652,22 +1655,24 @@ public class TranscriptionTaskManager: ObservableObject {
         // One monotonic deadline belongs to the single-flight owner. Joined
         // requests can ask it to rescan, but cannot extend its lifetime.
         let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
+        let clock = orphanedRecordingRecoveryClock
         let recoveryTask = Task { [weak self] in
             guard let self else { return 0 }
             // Start the budget when the stored owner actually begins running.
             // A busy MainActor must not consume the entire recovery window
             // before the first directory scan has even started.
-            let waitDeadline = ContinuousClock.now.advanced(
+            let waitDeadline = clock.now().advanced(
                 by: .seconds(maximumWaitInterval)
             )
             var totalRecovered = 0
-            while ContinuousClock.now < waitDeadline {
+            while clock.now() < waitDeadline {
                 let ownerRequestGeneration = self.orphanedRecordingRecoveryRequestGeneration
                 totalRecovered += await self.performOrphanedRecordingRecovery(
                     in: scratchDirectory,
                     livenessWindow: livenessWindow,
                     waitForRecentJournals: waitForRecentJournals,
-                    waitDeadline: waitDeadline
+                    waitDeadline: waitDeadline,
+                    clock: clock
                 )
                 if self.orphanedRecordingRecoveryRequestGeneration == ownerRequestGeneration {
                     break
@@ -1685,7 +1690,8 @@ public class TranscriptionTaskManager: ObservableObject {
         in scratchDirectory: URL,
         livenessWindow: TimeInterval,
         waitForRecentJournals: Bool,
-        waitDeadline: ContinuousClock.Instant
+        waitDeadline: ContinuousClock.Instant,
+        clock: OrphanedRecordingRecoveryClock
     ) async -> Int {
         let canonicalScratchDirectory = Self.canonicalDirectoryURL(scratchDirectory)
         guard cleanupDirectories.contains(where: { root in
@@ -1701,7 +1707,7 @@ public class TranscriptionTaskManager: ObservableObject {
             let candidates = await Task.detached(priority: .utility) {
                 Self.collectOrphanedRecordingCandidates(
                     in: canonicalScratchDirectory,
-                    now: Date(),
+                    now: clock.date(),
                     livenessWindow: livenessWindow
                 )
             }.value
@@ -1828,7 +1834,7 @@ public class TranscriptionTaskManager: ObservableObject {
             }
 
             if orphanedRecordingRecoveryRequestGeneration != passRequestGeneration {
-                guard ContinuousClock.now < waitDeadline else { return totalRecovered }
+                guard clock.now() < waitDeadline else { return totalRecovered }
                 continue
             }
 
@@ -1845,9 +1851,9 @@ public class TranscriptionTaskManager: ObservableObject {
                     max(0.01, retryAfter + 0.01),
                     maximumRetryInterval
                 )
-                let now = ContinuousClock.now
+                let now = clock.now()
                 guard now < waitDeadline else { return totalRecovered }
-                try await Task.sleep(for: min(
+                try await clock.sleep(min(
                     .seconds(boundedRetryInterval),
                     now.duration(to: waitDeadline)
                 ))

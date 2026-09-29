@@ -486,11 +486,18 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     func testFutureDatedAudioCannotPinRecoveryOwnerOrBlockLaterJournalScan() async throws {
         let (manager, paths) = makeManager()
+        // Recovery runs on virtual time: its waits advance this clock instead
+        // of sleeping, so a loaded Mac can't burn the owner's budget before
+        // the second scan. The future-dated file only ages out if the owner
+        // waits on it, which is the bug this test guards against.
+        let clock = VirtualRecoveryClock()
+        manager.orphanedRecordingRecoveryClock = clock.recoveryClock
         let livenessWindow: TimeInterval = 0.02
+        let futureLead: TimeInterval = 1
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_future_mic.wav")
         try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
         try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(1)],
+            [.modificationDate: clock.startDate.addingTimeInterval(futureLead)],
             ofItemAtPath: futureMicURL.path
         )
         let futureJournalURL = try writeJournal(
@@ -539,6 +546,11 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(laterJournalURL).path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: futureMicURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: futureJournalURL.path))
+        XCTAssertLessThan(
+            clock.advancedSeconds,
+            futureLead,
+            "the owner must give up before the future-dated audio would age out"
+        )
     }
 
     func testRecoveryUsesEarliestCandidateRetry() async throws {
@@ -1011,4 +1023,32 @@ private final class RecoveryStubDiarizationEngine: DiarizationEngine {
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] { [] }
     func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] { [] }
     func cleanup() {}
+}
+
+/// Virtual time for orphaned-recording recovery. A recovery wait advances this
+/// clock at once instead of sleeping, and the owner's deadline and its
+/// "recently written" check both read the same advanced time, so how many
+/// scans fit in the budget never depends on how busy the Mac is. The lock is
+/// there because the scan reads the date off the main actor.
+private final class VirtualRecoveryClock: @unchecked Sendable {
+    let startDate = Date()
+    private let startInstant = ContinuousClock.now
+    private let lock = NSLock()
+    private var advanced: Duration = .zero
+
+    var advancedSeconds: TimeInterval {
+        lock.withLock { advanced } / .seconds(1)
+    }
+
+    var recoveryClock: OrphanedRecordingRecoveryClock {
+        OrphanedRecordingRecoveryClock(
+            now: { self.startInstant.advanced(by: self.lock.withLock { self.advanced }) },
+            date: { self.startDate.addingTimeInterval(self.advancedSeconds) },
+            sleep: { interval in
+                try Task.checkCancellation()
+                self.lock.withLock { self.advanced += interval }
+                await Task.yield()
+            }
+        )
+    }
 }
