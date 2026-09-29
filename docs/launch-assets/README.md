@@ -17,14 +17,18 @@ Static screenshots:
 Motion assets:
 
 - `docs/assets/launch/transcripted-hero.gif` - 18s composed README hero
-  (pain hook -> transcript -> Claude Q&A -> dictation -> end card); replace
-  with a real recording using `docs/marketing/hero-video-storyboard.md`
+  (pain hook -> no bot -> transcript -> Claude Q&A -> dictation -> end card
+  with the current app icon); replace with a real recording using
+  `docs/marketing/hero-video-storyboard.md`
 - `docs/assets/launch/transcripted-dictation-recording.mov` - dictation recording control
 - `docs/assets/launch/transcripted-dictation-recording.mp4` - lightweight social/video upload
-- `docs/assets/launch/transcripted-dictation-recording.gif` - in the README dictation section
+- `docs/assets/launch/transcripted-dictation-recording.gif` - the "Near text box"
+  Listening window (the Notch island is the default from 1.1.67); no longer in
+  the README
 - `docs/assets/launch/transcripted-demo.mov` / `.mp4` / `.gif` - 4-frame fast
   tour; too fast for the README (superseded by the hero GIF), still usable as
   raw material
+
 Social preview:
 
 - `docs/assets/social-preview.png` - 1280x640 for the GitHub repo Settings ->
