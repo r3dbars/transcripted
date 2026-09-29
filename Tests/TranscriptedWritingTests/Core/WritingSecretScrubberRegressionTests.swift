@@ -29,6 +29,20 @@ struct WritingSecretScrubberRegressionTests {
         "the password for the router is written on the box",
         "the code was 1500 lines long\nnext line",
         "we shipped 1000 items",
+        // Third review round: product names, `basic` and `pin` as words,
+        // course numbers, a network name.
+        "GPT-4o",
+        "Wi-Fi6",
+        "iOS26.1",
+        "HDMI2.1",
+        "M2Ultra",
+        "x86_64",
+        "learning basic JavaScript",
+        "basic PostgreSQL and basic WordPress",
+        "pin 2025 roadmap to the channel",
+        "can you pin 4821 up top",
+        "taking CSC 1301 and CID 2040 this fall",
+        "wifi:\nMyHomeNetwork5G",
     ]
 
     @Test("Ordinary writing the first version redacted comes back unchanged", arguments: ordinary)
@@ -69,6 +83,13 @@ struct WritingSecretScrubberRegressionTests {
         Leak(text: "the code is 482913 hurry", secrets: ["482913"], kept: " hurry"),
         Leak(text: "the code is 4821 for the front door", secrets: ["4821"], kept: " for the front door"),
         Leak(text: "wifi password:\nSummer2024", secrets: ["Summer2024"], kept: "wifi password:"),
+        // Third review round: the stricter rules still take these.
+        Leak(text: "my pin 4821", secrets: ["4821"], kept: "my pin "),
+        Leak(text: "CSC: 123", secrets: ["123"], kept: "CSC: "),
+        Leak(text: "card ends 4242, csc 123", secrets: ["123"], kept: "card ends 4242, csc "),
+        Leak(text: "Authorization: Basic dXNlcjpwYXNz", secrets: ["dXNlcjpwYXNz"], kept: "Authorization: Basic "),
+        Leak(text: "use Basic dXNlcjpwYXNzd29yZDEyMzQ= here", secrets: ["dXNlcjpwYXNzd29yZDEyMzQ="], kept: " here"),
+        Leak(text: "here you go\n8f3Kd9Lq", secrets: ["8f3Kd9Lq"], kept: "here you go\n"),
     ]
 
     @Test("Labelled secrets the first version let through are removed", arguments: leaks)
@@ -105,12 +126,29 @@ struct WritingSecretScrubberRegressionTests {
         #expect(WritingSecretScrubber.scrub("how many?\n100\n200", appBundleIdentifier: "com.apple.MobileSMS").kinds.isEmpty)
     }
 
-    @Test("A word with a number on the end is a password in a browser, and common password words are everywhere")
+    @Test("A word with a number on the end is a product name in a browser too, unless a password label came first; common password words count everywhere")
     func wordWithNumberByApp() {
-        #expect(WritingSecretScrubber.scrub("macOS26", appBundleIdentifier: "com.google.Chrome").kinds == [.password])
+        let chrome = "com.google.Chrome"
+        // Address and search bars are full of these.
+        for name in ["macOS26", "iPhone15", "iOS26.1", "HDMI2.1", "GPT-4o"] {
+            #expect(WritingSecretScrubber.scrub(name, appBundleIdentifier: chrome).kinds.isEmpty, "\(name)")
+        }
         #expect(WritingSecretScrubber.scrub("macOS26", appBundleIdentifier: Self.slack).kinds.isEmpty)
+        #expect(WritingSecretScrubber.scrub("password:\nmacOS26", appBundleIdentifier: chrome).clean
+            == "password:\n\u{27E8}redacted:password\u{27E9}")
         for common in ["hunter22", "qwerty123", "Password123!", "letmein1"] {
             #expect(WritingSecretScrubber.scrub(common, appBundleIdentifier: Self.slack).kinds == [.password], "\(common)")
+            #expect(WritingSecretScrubber.scrub(common, appBundleIdentifier: chrome).kinds == [.password], "\(common)")
+        }
+    }
+
+    @Test("Outside terminals and browsers, a one-token line needs a strong symbol or a random look to be a password")
+    func otherAppsNeedStrongSignal() {
+        for kept in ["M2Ultra", "x86_64", "Wi-Fi6", "abc123def"] {
+            #expect(WritingSecretScrubber.scrub(kept, appBundleIdentifier: Self.messages).kinds.isEmpty, "\(kept)")
+        }
+        for secret in ["Tr0ub4dor&3", "P@ssw0rd", "8f3Kd9Lq", "S3cr3tv4lue"] {
+            #expect(WritingSecretScrubber.scrub(secret, appBundleIdentifier: Self.messages).kinds == [.password], "\(secret)")
         }
     }
 }

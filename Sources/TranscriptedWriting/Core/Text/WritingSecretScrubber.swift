@@ -138,9 +138,10 @@ public enum WritingSecretScrubber {
         "com.panic.nova",
     ]
 
-    /// Where "show password" fields are. A word with a number on the end
-    /// (`password1`, `hunter22`) counts as a password only here; in chat,
-    /// mail and notes it's usually a name (`Python3`, `macOS26`, `covid19`).
+    /// Where "show password" fields are, and also address and search bars
+    /// full of product names (`macOS26`, `M2Ultra`), so a word with a number
+    /// on the end counts only when it's built on a common password word or
+    /// follows a `password:` line.
     private static let browserBundleIdentifiers: Set<String> = [
         "com.google.chrome", "com.google.chrome.beta", "com.google.chrome.canary", "com.apple.safari",
         "com.apple.safaritechnologypreview", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition",
@@ -202,13 +203,51 @@ public enum WritingSecretScrubber {
         return trimmed.count == 1
     }
 
-    private struct PromptState {
-        var answersLeft: Int
-        var answered: Int
-        var allowsSpaces: Bool
+    /// What a prompting command asks for: how many answer lines it can
+    /// take, how many of those may be any one-word line (the rest have to
+    /// repeat the first answer or look like a password on their own), and
+    /// whether the first answer is a passphrase that may have spaces.
+    private struct Prompt {
+        let answers: Int
+        let looseAnswers: Int
+        let passphrase: Bool
+
+        /// `passwd`: old, new, confirm. Several answers is the protocol.
+        static let passwordChange = Prompt(answers: 3, looseAnswers: 3, passphrase: false)
+        /// `docker login`, `git clone https://…`: a username, then a password.
+        static let usernameAndPassword = Prompt(answers: 2, looseAnswers: 2, passphrase: false)
+        /// `sudo`: one password, then retries only when they look like one.
+        static let elevation = Prompt(answers: 3, looseAnswers: 1, passphrase: false)
+        /// `ssh`, `psql`: one password. With keys and agents most never ask.
+        static let single = Prompt(answers: 1, looseAnswers: 1, passphrase: false)
+        /// `ssh-keygen`, `read -s`: a passphrase, then its confirmation.
+        static let passphraseAndConfirm = Prompt(answers: 2, looseAnswers: 1, passphrase: true)
+
+        func merged(with other: Prompt) -> Prompt {
+            Prompt(
+                answers: max(answers, other.answers),
+                looseAnswers: max(looseAnswers, other.looseAnswers),
+                passphrase: passphrase || other.passphrase
+            )
+        }
     }
 
-    private static let maximumPromptAnswers = 3
+    private struct PromptState {
+        var answersLeft: Int
+        let looseAnswers: Int
+        var answered: Int
+        let allowsSpaces: Bool
+        /// The first answer, so typing it again (a confirmation) counts.
+        var firstAnswer: String?
+
+        mutating func consume(_ answer: String) -> PromptState? {
+            answersLeft -= 1
+            answered += 1
+            if firstAnswer == nil { firstAnswer = answer }
+            return answersLeft > 0 ? self : nil
+        }
+    }
+
     private static let cardFollowUpUnits = 4
 
     private static func applyLineRules(
@@ -242,21 +281,28 @@ public enum WritingSecretScrubber {
 
             // Answers to a terminal password prompt.
             if var state = prompt {
+                // An answer an earlier pass already redacted (a day file
+                // being rescrubbed) used up that answer, so running the
+                // rules again over their own output changes nothing.
+                if trimmed == token(for: .password) {
+                    prompt = state.consume(trimmed)
+                    previousMentionsCode = false
+                    continue
+                }
                 if isPromptAnswer(trimmed, state: state, terminal: terminal) {
                     mark(.password)
-                    state.answersLeft -= 1
-                    state.answered += 1
-                    prompt = state.answersLeft > 0 ? state : nil
+                    prompt = state.consume(trimmed)
                     previousMentionsCode = false
                     continue
                 }
                 prompt = nil
             }
-            if terminal != .none, let spaces = promptingCommand(trimmed) {
+            if terminal != .none, let asked = promptingCommand(trimmed) {
                 prompt = PromptState(
-                    answersLeft: maximumPromptAnswers,
+                    answersLeft: asked.answers,
+                    looseAnswers: asked.looseAnswers,
                     answered: 0,
-                    allowsSpaces: spaces && terminal == .terminal
+                    allowsSpaces: asked.passphrase && terminal == .terminal
                 )
                 previousMentionsCode = mentionsCode(trimmed)
                 continue
@@ -330,7 +376,10 @@ public enum WritingSecretScrubber {
             previousAsksPassword = firstMatch(trimmed, asksPasswordPattern) != nil
             // An editor line is code, not a field someone typed a password into.
             if terminal != .editor,
-               let kind = standalonePasswordKind(trimmed, wordWithNumberCounts: inBrowser || terminal == .terminal) {
+               let kind = standalonePasswordKind(
+                   trimmed,
+                   app: terminal == .terminal ? .terminal : inBrowser ? .browser : .other
+               ) {
                 mark(kind)
                 previousMentionsCode = false
                 continue
@@ -362,6 +411,8 @@ public enum WritingSecretScrubber {
         // Under 4 characters also covers `y`, `n`, `yes`, `no`, `q`.
         guard line.count >= 4 else { return false }
         guard !line.hasPrefix(tokenOpen) else { return false }
+        // The same answer again: a new password or passphrase confirmed.
+        if let first = state.firstAnswer, line == first { return true }
         let firstWord = line.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? line
         if knownShellWords.contains(firstWord.lowercased()) || isPathLike(firstWord) { return false }
         if line.contains(where: \.isWhitespace) {
@@ -369,6 +420,12 @@ public enum WritingSecretScrubber {
             return state.allowsSpaces && state.answered == 0
         }
         if terminal == .editor, looksLikeCode(line) { return false }
+        // Past the answers the prompt surely asks for (sudo's retry after a
+        // wrong password), the line has to look like a password by itself:
+        // `pytest` or `lazygit` after sudo had cached credentials stays.
+        if state.answered >= state.looseAnswers {
+            return standalonePasswordKind(line, app: .terminal) != nil
+        }
         return true
     }
 
@@ -400,25 +457,16 @@ public enum WritingSecretScrubber {
         "systemctl", "service", "journalctl", "quit", "apt", "apt-get", "yum", "dnf", "pacman", "fi", "done",
         "esac", "then", "else", "elif", "do", "end", "true", "false", "wait", "time", "watch", "tree",
         "wc", "sort", "uniq", "awk", "sed", "cut", "tr", "xargs", "diff", "patch", "stat", "file",
+        // Dev tools people run bare, often right after ssh or a cached sudo.
+        "pytest", "ruff", "mypy", "black", "isort", "tox", "nox", "poetry", "pipx", "conda", "jest",
+        "vitest", "eslint", "prettier", "tsc", "turbo", "bazel", "ninja", "lazygit", "lazydocker", "tig",
+        "fzf", "jq", "yq", "just", "ncdu", "ranger", "glances", "nvtop", "neofetch", "fastfetch",
+        "zellij", "ollama", "rsync", "vagrant", "ansible", "pulumi", "gcloud",
     ]
 
-    /// Whether `line` runs a command that asks for a password, and whether
-    /// that prompt takes a passphrase (spaces allowed in the answer). `nil`
-    /// when nothing on the line prompts.
-    private static func promptingCommand(_ line: String) -> Bool? {
-        var prompts = false
-        var passphrase = false
-        for command in simpleCommands(in: line) {
-            guard let kind = promptKind(of: command) else { continue }
-            prompts = true
-            if kind == .passphrase { passphrase = true }
-        }
-        return prompts ? passphrase : nil
-    }
-
-    private enum PromptKind {
-        case password
-        case passphrase
+    /// What `line`'s commands ask for, or `nil` when nothing on it prompts.
+    private static func promptingCommand(_ line: String) -> Prompt? {
+        simpleCommands(in: line).compactMap(prompt(of:)).reduce(nil) { $0?.merged(with: $1) ?? $1 }
     }
 
     private static let commandSeparators = CharacterSet(charactersIn: ";|&")
@@ -429,25 +477,40 @@ public enum WritingSecretScrubber {
             .filter { !$0.isEmpty }
     }
 
-    private static let alwaysPrompting: Set<String> = [
-        "sudo", "su", "doas", "sudoedit", "pkexec", "passwd", "login", "kinit", "htpasswd", "keytool",
-        "fdesetup", "ssh", "scp", "sftp", "mosh", "telnet", "ftp", "psql", "mysql_secure_installation",
-        "vncpasswd", "smbpasswd", "chpass", "dscl",
+    /// Commands that always prompt, by what they ask for.
+    private static let alwaysPrompting: [String: Prompt] = [
+        "passwd": .passwordChange, "smbpasswd": .passwordChange, "vncpasswd": .passwordChange,
+        "htpasswd": .passwordChange, "chpass": .passwordChange, "keytool": .passwordChange,
+        "dscl": .passwordChange,
+        "sudo": .elevation, "su": .elevation, "doas": .elevation, "sudoedit": .elevation, "pkexec": .elevation,
+        "login": .usernameAndPassword, "telnet": .usernameAndPassword, "ftp": .usernameAndPassword,
+        "fdesetup": .usernameAndPassword,
+        "ssh": .single, "scp": .single, "sftp": .single, "mosh": .single, "kinit": .single, "psql": .single,
+        "mysql_secure_installation": .single,
+        "ssh-keygen": .passphraseAndConfirm, "ssh-add": .passphraseAndConfirm, "gpg": .passphraseAndConfirm,
+        "gpg2": .passphraseAndConfirm, "openssl": .passphraseAndConfirm, "age": .passphraseAndConfirm,
     ]
 
-    private static let passphrasePrompting: Set<String> = ["ssh-keygen", "ssh-add", "gpg", "gpg2", "openssl", "age"]
+    private static let loginSubcommands: [String: (subcommands: Set<String>, prompt: Prompt)] = [
+        "docker": (["login"], .usernameAndPassword), "podman": (["login"], .usernameAndPassword),
+        "npm": (["login", "adduser"], .usernameAndPassword), "yarn": (["login"], .usernameAndPassword),
+        "pnpm": (["login"], .usernameAndPassword), "vault": (["login"], .single), "op": (["signin"], .single),
+        "security": (["unlock-keychain"], .single),
+        "svn": (["checkout", "co", "commit", "update"], .usernameAndPassword),
+        "hdiutil": (["attach"], .single), "aws": (["configure"], .usernameAndPassword),
+        "diskutil": (["unlockvolume", "apfs"], .single),
+    ]
 
-    private static let loginSubcommands: [String: Set<String>] = [
-        "docker": ["login"], "podman": ["login"], "npm": ["login", "adduser"], "yarn": ["login"],
-        "pnpm": ["login"], "vault": ["login"], "op": ["signin"], "security": ["unlock-keychain"],
-        "git": ["push", "pull", "clone", "fetch"], "svn": ["checkout", "co", "commit", "update"],
-        "hg": ["push", "pull", "clone"], "hdiutil": ["attach"], "aws": ["configure"],
-        "diskutil": ["unlockvolume", "apfs"],
+    /// `git push` and friends ask only over an https remote with no
+    /// credential helper; over ssh, or with a helper or the keychain, they
+    /// don't. Only an http(s) URL on the line counts.
+    private static let remoteSubcommands: [String: Set<String>] = [
+        "git": ["push", "pull", "clone", "fetch"], "hg": ["push", "pull", "clone"],
     ]
 
     private static let commandPrefixes: Set<String> = ["time", "env", "nohup", "command", "exec", "builtin", "caffeinate"]
 
-    private static func promptKind(of words: [String]) -> PromptKind? {
+    private static func prompt(of words: [String]) -> Prompt? {
         var remaining = words[...]
         while let first = remaining.first,
               commandPrefixes.contains(first) || (first.contains("=") && !first.hasPrefix("-")) {
@@ -456,24 +519,27 @@ public enum WritingSecretScrubber {
         guard let first = remaining.first else { return nil }
         let command = (first.split(separator: "/").last.map(String.init) ?? first).lowercased()
         let arguments = Array(remaining.dropFirst())
-        if alwaysPrompting.contains(command) { return .password }
-        if passphrasePrompting.contains(command) { return .passphrase }
+        if let prompt = alwaysPrompting[command] { return prompt }
         if ["mysql", "mariadb", "mysqldump", "mysqladmin"].contains(command) {
-            return arguments.contains("-p") || arguments.contains("--password") ? .password : nil
+            return arguments.contains("-p") || arguments.contains("--password") ? .single : nil
         }
         if command == "read" {
             let silent = arguments.contains { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("s") }
-            return silent ? .passphrase : nil
+            return silent ? .passphraseAndConfirm : nil
         }
         if command.hasPrefix("ansible") {
-            let asks = arguments.contains { ["--ask-pass", "--ask-become-pass", "-k", "-K"].contains($0) }
-            return asks ? .password : nil
+            // One prompt per flag: the SSH password, then the become password.
+            let asks = arguments.filter { ["--ask-pass", "--ask-become-pass", "-k", "-K"].contains($0) }.count
+            return asks == 0 ? nil : asks == 1 ? .single : .usernameAndPassword
         }
-        if command == "gh", arguments.prefix(2) == ["auth", "login"] { return .password }
-        if let subcommands = loginSubcommands[command],
-           let sub = arguments.first(where: { !$0.hasPrefix("-") })?.lowercased(),
-           subcommands.contains(sub) {
-            return .password
+        if command == "gh", arguments.prefix(2) == ["auth", "login"] { return .single }
+        let sub = arguments.first(where: { !$0.hasPrefix("-") })?.lowercased()
+        if let login = loginSubcommands[command], let sub, login.subcommands.contains(sub) {
+            return login.prompt
+        }
+        if let subcommands = remoteSubcommands[command], let sub, subcommands.contains(sub),
+           arguments.contains(where: { $0.lowercased().hasPrefix("https://") || $0.lowercased().hasPrefix("http://") }) {
+            return .usernameAndPassword
         }
         return nil
     }
@@ -587,13 +653,30 @@ public enum WritingSecretScrubber {
     private static let trailingPunctuation = CharacterSet(charactersIn: ".,!?;:…)\"'\u{2019}\u{201D}")
     private static let leadingPunctuation = CharacterSet(charactersIn: "(\"'\u{2018}\u{201C}")
 
+    /// Where a one-token line was typed, for how sure the standalone rule
+    /// has to be.
+    private enum StandaloneApp {
+        /// Every line is a shell line; `Tigers2024` is an answer to something.
+        case terminal
+        /// A "show password" field is likely, but so is an address bar.
+        case browser
+        /// Chat, mail, notes: product names (`M2Ultra`, `x86_64`) are
+        /// everyday words, so only a random-looking token counts.
+        case other
+    }
+
+    /// Letter-digit switches a token needs outside terminals and browsers
+    /// (`Tr0ub4dor`, `8f3Kd9Lq`), unless it has a strong symbol inside or is
+    /// built on a common password word. `M2Ultra` and `GPT-4o` have fewer.
+    private static let otherAppLetterDigitSwitches = 3
+
     /// A line that is a single password-shaped token. Mixed letters and
     /// digits, or letters with a strong symbol inside the word. Upper-case
     /// letters and digits only reads as a code (`B7X9QK`). Things that are
     /// usually not secrets are left alone: URLs, emails, hosts and file
     /// names, paths, flags, handles, hashtags, versions, dates and times,
     /// ticket IDs, amounts, units, git hashes.
-    private static func standalonePasswordKind(_ line: String, wordWithNumberCounts: Bool) -> Kind? {
+    private static func standalonePasswordKind(_ line: String, app: StandaloneApp) -> Kind? {
         guard (6...64).contains(line.count), !line.contains(where: \.isWhitespace) else { return nil }
         guard !line.hasPrefix(tokenOpen), !isStructuredSecret(line) else { return nil }
         if let first = line.first, "@#/~-$€£:\\`<[{".contains(first) || line.hasPrefix("./") || line.hasPrefix("../") {
@@ -634,12 +717,28 @@ public enum WritingSecretScrubber {
             let stem = core.prefix { $0.isLetter }.lowercased()
             // In a terminal a versioned tool (`python3`, `pip3`) is a command.
             if knownShellWords.contains(stem) || versionedToolStems.contains(stem) { return nil }
-            if !wordWithNumberCounts, !commonPasswordStems.contains(stem) { return nil }
+            if app != .terminal, !commonPasswordStems.contains(stem) { return nil }
+        } else if app == .other, !hasStrongSymbolInside,
+                  letterDigitSwitches(core) < otherAppLetterDigitSwitches {
+            return nil
         }
         if !hasLower, !hasStrongSymbolInside, core.count <= 12, core.allSatisfy({ $0.isLetter || $0.isNumber }) {
             return .code
         }
         return .password
+    }
+
+    /// How often `text` goes from a letter to a digit or back.
+    private static func letterDigitSwitches(_ text: String) -> Int {
+        var switches = 0
+        var previous: Character?
+        for character in text {
+            if let previous, (previous.isLetter && isDigit(character)) || (isDigit(previous) && character.isLetter) {
+                switches += 1
+            }
+            previous = character
+        }
+        return switches
     }
 
     private static func isStructuredSecret(_ line: String) -> Bool {
@@ -770,6 +869,15 @@ public enum WritingSecretScrubber {
                 && !isPlaceholderOrCode(value)
         }
         add(pinPattern, group: 1, kind: .code) { _, match in !isCountedNumber(match, group: 1, in: text) }
+        add(barePinPattern, group: 2, kind: .code) { _, match in
+            // `PIN 4821`, or a number that ends the line (`my pin 4821`), not
+            // pin the verb: "pin 2025 roadmap to the channel".
+            let label = substring(match, group: 1, in: text) ?? ""
+            let after = (text as NSString).substring(from: match.range.location + match.range.length)
+            let restOfLine = after.prefix { $0 != "\n" }
+            let endsLine = restOfLine.allSatisfy { !$0.isLetter && !$0.isNumber }
+            return (label == "PIN" || endsLine) && !isCountedNumber(match, group: 2, in: text)
+        }
         add(codeLabelPattern, group: 1, kind: .code) { value, _ in value.contains(where: isDigit) }
         add(otpLabelPattern, group: 1, kind: .code) { value, _ in value.contains(where: isDigit) }
         add(bareCodePattern, group: 2, kind: .code) { _, match in
@@ -777,6 +885,14 @@ public enum WritingSecretScrubber {
             return !notSecretCodeWords.contains(before) && !isCountedNumber(match, group: 2, in: text)
         }
         add(cvvLabelPattern, group: 1, kind: .code)
+        add(cscLabelPattern, group: 2, kind: .code) { _, match in
+            // `CSC 101` and `CID 2040` are course and case numbers: only
+            // with a separator (`CSC: 123`) or a card on the line.
+            let separator = substring(match, group: 1, in: text) ?? ""
+            let line = lineContaining(match.range, in: text)
+            return separator.contains(":") || separator.contains("=")
+                || lineHoldsCard(line) || firstMatch(line, cardOnlyWordPattern) != nil
+        }
         add(expiryLabelPattern, group: 1, kind: .card) { _, match in
             // "The offer expires 12/31" isn't a card's expiry.
             let line = lineContaining(match.range, in: text)
@@ -790,10 +906,20 @@ public enum WritingSecretScrubber {
             !value.hasPrefix("-") && !isPlaceholderOrCode(value) && !matchesWhole(value, placeholderNamePattern)
         }
         add(bearerPattern, group: 1, kind: .secret) { value, _ in
-            // Credentials, not hyphenated words: `basic end-to-end` and
-            // `bearer token-based` stay.
+            // Credentials, not hyphenated words: `bearer token-based` stays.
             !matchesWhole(value.lowercased(), placeholderNamePattern)
                 && (value.contains { $0.isNumber || "+/=".contains($0) } || hasInnerUppercase(value))
+        }
+        add(basicPattern, group: 1, kind: .secret) { value, match in
+            // `basic` is an everyday word ("basic JavaScript", "basic
+            // end-to-end tests"): a Basic credential is a long base64 run,
+            // or sits on a line that talks about auth.
+            let line = lineContaining(match.range, in: text)
+            if firstMatch(line, authMentionPattern) != nil {
+                return !matchesWhole(value.lowercased(), placeholderNamePattern)
+                    && (value.contains { $0.isNumber || "+/=".contains($0) } || hasInnerUppercase(value))
+            }
+            return value.count >= 16 && value.contains { $0.isNumber || "+/=".contains($0) }
         }
         add(secretKeyPattern, group: 3, kind: .secret) { value, match in
             let key = substring(match, group: 1, in: text) ?? ""
@@ -1003,12 +1129,15 @@ public enum WritingSecretScrubber {
         wholeLine(#"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.[A-Za-z]{2,10}(/\S*)?"#),
         // Version.
         wholeLine(#"[vV]?\d+(\.\d+)+([-+][A-Za-z0-9.]+)?"#),
+        // A name with a dotted version on it: `iOS26.1`, `HDMI2.1`, `Python3.12`.
+        wholeLine(#"[A-Za-z]{1,12}\d+(\.\d+)+"#),
         // Date.
         wholeLine(#"\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}"#),
         // Time.
         wholeLine(#"\d{1,2}:\d{2}(:\d{2})?([aApP][mM])?"#),
-        // Ticket or model ID: letters, a hyphen, digits.
-        wholeLine(#"[A-Za-z]{2,10}-\d+"#),
+        // Ticket or model ID: letters, a hyphen, digits (`JIRA-1234`,
+        // `GPT-4o`).
+        wholeLine(#"[A-Za-z]{2,10}-\d+[a-z]?"#),
         // Quarter or fiscal year: `Q3-2026`, `FY27`.
         wholeLine(#"(?:[Qq][1-4]|FY|fy)[-' ]?\d{2,4}"#),
         // Ordinal, amount with a unit, resolution.
@@ -1033,8 +1162,9 @@ public enum WritingSecretScrubber {
     ]
 
     /// A line ending in a password label, with the value on the next line.
+    /// Not `wifi:`, which is usually followed by the network's name.
     private static let asksPasswordPattern = regex(
-        #"\b(?:password|passwd|passcode|passphrase|pw|pin|wi-?fi)[^\S\n]*:[^\S\n]*$"#,
+        #"\b(?:password|passwd|passcode|passphrase|pw|pin)[^\S\n]*:[^\S\n]*$"#,
         caseInsensitive: true
     )
 
@@ -1092,12 +1222,15 @@ public enum WritingSecretScrubber {
         caseInsensitive: true
     )
 
-    /// `PIN: 4821`, `pin is 4821`, `PIN number 4821`, `PIN 4821`. "pin 1000
-    /// items" stays (`isCountedNumber`).
+    /// `PIN: 4821`, `pin is 4821`, `PIN number 4821`, `pin code 4821`.
+    /// "pin 1000 items" stays (`isCountedNumber`).
     private static let pinPattern = regex(
-        #"\bpin(?:[^\S\n]+(?:code|number))?(?:[^\S\n]*[:=][^\S\n]*|[^\S\n]+(?:is|was)[^\S\n]+|[^\S\n]+)(\d{4,8})\b"#,
+        #"\bpin(?:[^\S\n]*[:=][^\S\n]*|[^\S\n]+(?:is|was)[^\S\n]+|[^\S\n]+(?:code|number)(?:[^\S\n]*[:=][^\S\n]*|[^\S\n]+(?:is|was)[^\S\n]+|[^\S\n]+))(\d{4,8})\b"#,
         caseInsensitive: true
     )
+
+    /// `PIN 4821` with nothing between: group 1 is `pin` as typed.
+    private static let barePinPattern = regex(#"\b(pin)[^\S\n]+(\d{4,8})\b"#, caseInsensitive: true)
 
     /// `verification code: 482913`, `my 2fa code is 4829 13`.
     private static let codeLabelPattern = regex(
@@ -1120,7 +1253,16 @@ public enum WritingSecretScrubber {
     ]
 
     /// `CVC 123`, `cvv: 1234`.
-    private static let cvvLabelPattern = regex(#"\b(?:cvv2?|cvc2?|csc|cid)[^\S\n]*[:=]?[^\S\n]*(\d{3,4})\b"#, caseInsensitive: true)
+    private static let cvvLabelPattern = regex(#"\b(?:cvv2?|cvc2?)[^\S\n]*[:=]?[^\S\n]*(\d{3,4})\b"#, caseInsensitive: true)
+
+    /// `CSC: 123`, `CID 1234`: group 1 is what separates label and value.
+    private static let cscLabelPattern = regex(#"\b(?:csc|cid)([^\S\n]*[:=]?[^\S\n]*)(\d{3,4})\b"#, caseInsensitive: true)
+
+    /// Words that put a CSC or CID next to a card (not `csc` itself).
+    private static let cardOnlyWordPattern = regex(
+        #"\b(?:card|cvv2?|cvc2?|visa|mastercard|amex|discover|exp|expiry|expires)\b"#,
+        caseInsensitive: true
+    )
 
     /// `exp 04/28`, `expires: 4/2028`.
     private static let expiryLabelPattern = regex(
@@ -1158,8 +1300,17 @@ public enum WritingSecretScrubber {
         caseInsensitive: true
     )
 
-    /// `Authorization: Bearer X`, `Basic X`.
-    private static let bearerPattern = regex(#"\b(?:bearer|basic)[^\S\n]+([A-Za-z0-9._~+/=-]{8,})"#, caseInsensitive: true)
+    /// `Authorization: Bearer X`.
+    private static let bearerPattern = regex(#"\bbearer[^\S\n]+([A-Za-z0-9._~+/=-]{8,})"#, caseInsensitive: true)
+
+    /// `Authorization: Basic X`.
+    private static let basicPattern = regex(#"\bbasic[^\S\n]+([A-Za-z0-9._~+/=-]{8,})"#, caseInsensitive: true)
+
+    /// A line about HTTP auth, where `Basic X` is a credential.
+    private static let authMentionPattern = regex(
+        #"\b(?:auth|authorization|authenticate|authentication|header|credentials?)\b|-H[^\S\n]"#,
+        caseInsensitive: true
+    )
 
     /// `KEY_NAME=value`, `github_token: value`, `"apiKey": "value"`.
     private static let secretKeyPattern = regex(

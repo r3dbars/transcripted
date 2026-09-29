@@ -8,14 +8,23 @@ import Foundation
 /// straight into them, and the agent tools read those files. Each section's
 /// text is scrubbed the way a new entry is (its own app, the previous
 /// section as context). A section that changes gets its title and counts
-/// redone from the clean text; one left with nothing but redactions is
-/// removed. Everything else stays byte for byte, and a file with nothing to
-/// scrub isn't rewritten. Not part of Tilde.
+/// redone from the clean text. One left with nothing but redactions keeps
+/// its heading with just the tokens as its text: removing it would put the
+/// command before it next to the line after it, and a later pass would
+/// read that line as the prompt's answer. So a second pass over a
+/// rescrubbed file changes nothing. Everything else stays byte for byte,
+/// and a file with nothing to scrub isn't rewritten. Not part of Tilde.
 enum WritingDayFileRescrubber {
     struct Outcome: Equatable, Sendable {
         var filesScanned = 0
         var filesChanged = 0
+        /// Worth another try next launch: Writing stopped part way, or the
+        /// file changed or couldn't be written.
         var failures = 0
+        /// Never readable as a day file (a symlink, not owner-only, not
+        /// UTF-8). Trying again next launch wouldn't help, so these don't
+        /// hold the rules version back.
+        var skipped = 0
 
         mutating func record(_ result: FileResult) {
             filesScanned += 1
@@ -23,6 +32,7 @@ enum WritingDayFileRescrubber {
             case .unchanged: break
             case .changed: filesChanged += 1
             case .failed: failures += 1
+            case .skipped: skipped += 1
             }
         }
     }
@@ -31,6 +41,7 @@ enum WritingDayFileRescrubber {
         case unchanged
         case changed(URL)
         case failed
+        case skipped
     }
 
     /// Scrubs every `Writing_*.md` directly inside `directory`, rewriting
@@ -45,11 +56,18 @@ enum WritingDayFileRescrubber {
 
     /// Scrubs one day file. A file that changed on disk between the read
     /// and the write is left alone and counts as a failure, so the next
-    /// launch tries again.
+    /// launch tries again. One that can't be read as a day file at all is
+    /// skipped.
     static func rescrub(dayFile name: String, in directory: URL, timeZone: TimeZone, locale: Locale) -> FileResult {
+        let data: Data
         do {
-            guard let data = try WritingDayFileStore.contents(ofDayFile: name, in: directory) else { return .unchanged }
-            guard let text = String(data: data, encoding: .utf8) else { return .failed }
+            guard let contents = try WritingDayFileStore.contents(ofDayFile: name, in: directory) else { return .unchanged }
+            data = contents
+        } catch {
+            return .skipped
+        }
+        guard let text = String(data: data, encoding: .utf8) else { return .skipped }
+        do {
             guard let scrubbed = rescrubbed(text, timeZone: timeZone, locale: locale) else { return .unchanged }
             let url = try WritingDayFileStore.replace(
                 dayFile: name,
@@ -102,7 +120,8 @@ enum WritingDayFileRescrubber {
             }
             changed = true
             let clean = result.clean.trimmingCharacters(in: .whitespacesAndNewlines)
-            if result.isOnlyRedactions || clean.count < WritingEntryComposer.minimumCharacters { continue }
+            // Only tokens left: kept as tokens (see the type's comment).
+            if !result.isOnlyRedactions, clean.count < WritingEntryComposer.minimumCharacters { continue }
             blocks.append(section.rebuilt(with: clean, timeZone: timeZone, locale: locale))
         }
         guard changed else { return nil }
@@ -146,7 +165,8 @@ enum WritingDayFileRescrubber {
         }
 
         /// Same heading time and metadata, with the title, `Words:` and
-        /// `Characters:` redone from `clean`.
+        /// `Characters:` redone from `clean`, and `Accepted words:` no more
+        /// than the new word count.
         func rebuilt(with clean: String, timeZone: TimeZone, locale: Locale) -> [String] {
             var newHeading = heading
             if let separator = heading.range(of: " - ") {
@@ -160,9 +180,14 @@ enum WritingDayFileRescrubber {
                 ).replacingOccurrences(of: "\n", with: " ")
                 newHeading = String(heading[..<separator.upperBound]) + title
             }
+            let words = clean.split(whereSeparator: \.isWhitespace).count
             let newMetadata = metadata.map { line -> String in
-                if line.hasPrefix("Words: ") { return "Words: \(clean.split(whereSeparator: \.isWhitespace).count)" }
+                if line.hasPrefix("Words: ") { return "Words: \(words)" }
                 if line.hasPrefix("Characters: ") { return "Characters: \(clean.count)" }
+                if line.hasPrefix("Accepted words: "),
+                   let accepted = Int(line.dropFirst("Accepted words: ".count)), accepted > words {
+                    return "Accepted words: \(words)"
+                }
                 return line
             }
             return [newHeading] + newMetadata + [""] + [WritingDayFileFormatter.body(clean)]
