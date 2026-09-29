@@ -311,7 +311,7 @@ extension TranscriptionTaskManager {
         )
     }
 
-    /// Local pipeline: selected STT + PyAnnote diarization → Speaker identification → Save.
+    /// Local pipeline: selected STT + diarization (Nemotron or pyannote) → Speaker identification → Save.
     /// When `splitLocalSpeakers` is true, mic-channel diarization runs too, and local
     /// speakers thread through the same classification + naming flow as remote speakers.
     /// Note: nonisolated to keep heavy async work off the main thread
@@ -340,9 +340,13 @@ extension TranscriptionTaskManager {
             transcription.parakeet.transcriptionEngineDescriptor
         }
 
-        AppLogger.pipeline.info("Using local \(speechEngine.displayName) + PyAnnote pipeline", [
+        // Read after the models load, so a Nemotron load failure logs pyannote.
+        let diarizationRun = await MainActor.run { transcription.diarization.activeRunDescriptor }
+        AppLogger.pipeline.info("Using local \(speechEngine.displayName) + \(diarizationRun.backend.transcriptEngineIdentifier) pipeline", [
             "splitLocalSpeakers": "\(splitLocalSpeakers)",
-            "transcription_engine": speechEngine.identifier
+            "transcription_engine": speechEngine.identifier,
+            "diarization_engine": diarizationRun.backend.transcriptEngineIdentifier,
+            "voiceprint_model": diarizationRun.voiceprintModel ?? "none"
         ])
 
         // An imported file's date says when the file was made or copied, not

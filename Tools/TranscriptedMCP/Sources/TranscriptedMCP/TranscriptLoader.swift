@@ -36,7 +36,8 @@ enum TranscriptLoader {
                 droppedSegments: parsed.droppedSegments,
                 engines: AgentEngines(
                     stt: parsed.sttEngine,
-                    diarization: parsed.diarizationEngine
+                    diarization: parsed.diarizationEngine,
+                    voiceprintModel: parsed.voiceprintModel
                 )
             ),
             speakers: parsed.speakers.map { speaker in

@@ -39,7 +39,8 @@ final class MeetingMarkdownGoldenTests: XCTestCase {
                 utterance(12.4, 15.0, channel: 1, speaker: 1, "I'll send the summary after this."),
             ],
             duration: 15,
-            processingTime: 2.4
+            processingTime: 2.4,
+            diarization: DiarizationRunDescriptor(backend: .nemotron, voiceprintModel: "redimnet2-b4")
         )
         let markdown = TranscriptSaver.formatTranscriptMarkdown(
             result: result,
@@ -56,6 +57,8 @@ final class MeetingMarkdownGoldenTests: XCTestCase {
         try assertMatchesGolden(markdown, named: "two-person-call")
     }
 
+    /// No diarizer runs on a mic-only meeting without speaker split, so the
+    /// file says `diarization_engine: none` and has no `voiceprint_model`.
     func testMicOnlyRoomMeetingMatchesApprovedMarkdown() throws {
         let result = TranscriptionResult(
             micUtterances: [
@@ -85,7 +88,9 @@ final class MeetingMarkdownGoldenTests: XCTestCase {
             ],
             duration: 11,
             processingTime: 1.7,
-            microphoneAudioOutcome: .notProvided
+            microphoneAudioOutcome: .notProvided,
+            // A Nemotron load that fell back: pyannote with its own voiceprints.
+            diarization: DiarizationRunDescriptor(backend: .pyannote, voiceprintModel: "wespeaker")
         )
         let markdown = TranscriptSaver.formatTranscriptMarkdown(
             result: result,

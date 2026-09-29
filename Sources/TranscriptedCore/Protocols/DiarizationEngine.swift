@@ -45,12 +45,21 @@ public protocol DiarizationEngine: ObservableObject {
     /// Cosine thresholds for the active embedding model, used by the speaker
     /// identity stack. `nonisolated` so the off-main-actor pipeline can read it.
     nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds { get }
+
+    /// The backend and voiceprint model the next `diarizeOffline` call runs.
+    /// The pipeline records it in the saved transcript.
+    var activeRunDescriptor: DiarizationRunDescriptor { get }
 }
 
 @available(macOS 14.0, *)
 public extension DiarizationEngine {
     /// Default: the diarizer's native (WeSpeaker) thresholds.
     nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds { .weSpeaker }
+
+    /// Default: pyannote with no named voiceprint model.
+    var activeRunDescriptor: DiarizationRunDescriptor {
+        DiarizationRunDescriptor(backend: .pyannote, voiceprintModel: nil)
+    }
 
     /// Default: no clustering knob, so the threshold is ignored.
     func diarizeOffline(samples: [Float], sampleRate: Int, clusteringThreshold: Double?) async throws -> [SpeakerSegment] {

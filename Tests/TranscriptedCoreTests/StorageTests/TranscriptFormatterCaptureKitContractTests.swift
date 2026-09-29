@@ -33,7 +33,8 @@ final class TranscriptFormatterCaptureKitContractTests: XCTestCase {
             micUtterances: [mic],
             systemUtterances: [system],
             duration: 9,
-            processingTime: 1.2
+            processingTime: 1.2,
+            diarization: DiarizationRunDescriptor(backend: .nemotron, voiceprintModel: "redimnet2-b4")
         )
         let mappings: [String: SpeakerMapping] = [
             "system_0": SpeakerMapping(
@@ -61,7 +62,8 @@ final class TranscriptFormatterCaptureKitContractTests: XCTestCase {
 
         XCTAssertEqual(values["capture_type"], "meeting", "kit reads capture_type")
         XCTAssertEqual(values["transcription_engine"], "parakeet_local", "kit reads transcription_engine -> sttEngine")
-        XCTAssertEqual(values["diarization_engine"], "pyannote_offline", "kit reads diarization_engine")
+        XCTAssertEqual(values["diarization_engine"], "nemotron_offline", "kit reads diarization_engine")
+        XCTAssertEqual(values["voiceprint_model"], "redimnet2-b4", "kit reads voiceprint_model")
         XCTAssertEqual(values["total_word_count"], "8")
         XCTAssertEqual(TranscriptFrontmatter.durationSeconds(from: values["duration"]) ?? -1, 9)
     }

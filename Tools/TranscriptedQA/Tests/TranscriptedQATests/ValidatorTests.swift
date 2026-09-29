@@ -123,6 +123,37 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(engineResult.detail, "Expected supported local STT engine, got parakeet_unknown_local")
     }
 
+    func testTranscriptValidatorAcceptsCurrentAndLegacyDiarizationEngines() throws {
+        for engine in ["nemotron_offline", "pyannote_offline", "none"] {
+            try writeTranscript(named: "Call_diarize_\(engine)", replacing: "diarization_engine: nemotron_offline", with: "diarization_engine: \(engine)")
+        }
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+        let engineResults = results.filter { $0.check == "transcript/yaml-engine-diarize" }
+        XCTAssertEqual(engineResults.count, 3)
+        XCTAssertTrue(engineResults.allSatisfy { $0.status == .pass })
+    }
+
+    func testTranscriptValidatorRejectsUnknownDiarizationEngine() throws {
+        try writeTranscript(named: "Call_diarize_unknown", replacing: "diarization_engine: nemotron_offline", with: "diarization_engine: sortformer_cloud")
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+        let engineResult = try XCTUnwrap(results.first { $0.check == "transcript/yaml-engine-diarize" })
+        XCTAssertEqual(engineResult.status, .fail)
+        XCTAssertEqual(engineResult.detail, "Expected supported diarization engine, got sortformer_cloud")
+    }
+
+    private func writeTranscript(named name: String, replacing target: String, with replacement: String) throws {
+        try TestDataGenerator(outputDir: tempRoot).generateTranscript(
+            name: name, utteranceCount: 1, speakerCount: 1
+        )
+        let file = tempRoot.appendingPathComponent("\(name).md")
+        let original = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(original.contains(target), "generator output changed; update this test's target line")
+        try original.replacingOccurrences(of: target, with: replacement)
+            .write(to: file, atomically: true, encoding: .utf8)
+    }
+
     private func writeTranscriptWithEngine(_ engine: String) throws {
         let name = "Call_\(engine)"
         try TestDataGenerator(outputDir: tempRoot).generateTranscript(

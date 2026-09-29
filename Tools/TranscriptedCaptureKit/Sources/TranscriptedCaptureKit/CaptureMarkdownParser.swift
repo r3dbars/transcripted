@@ -31,7 +31,12 @@ public struct ParsedMeetingCapture {
     public let durationSeconds: Int
     public let droppedSegments: Int
     public let sttEngine: String
+    /// `diarization_engine` frontmatter: `pyannote_offline`, `nemotron_offline`,
+    /// `none`, or any later value, kept as written. `unknown` when absent.
     public let diarizationEngine: String
+    /// `voiceprint_model` frontmatter (e.g. `redimnet2-b4`). Absent in files
+    /// saved before 2026-09-29 and when no diarizer ran.
+    public let voiceprintModel: String?
     /// `format_version` frontmatter when present. Absent means the file predates
     /// capture-format versioning and parses as version 1 (docs/capture-format.md).
     public let formatVersion: Int?
@@ -306,6 +311,7 @@ public enum CaptureMarkdownParser {
             droppedSegments: Int(document.values["dropped_segments"] ?? "") ?? 0,
             sttEngine: document.values["transcription_engine"] ?? "unknown",
             diarizationEngine: document.values["diarization_engine"] ?? "unknown",
+            voiceprintModel: document.values["voiceprint_model"].flatMap { $0.isEmpty ? nil : $0 },
             formatVersion: Int(document.values["format_version"] ?? ""),
             transcriptStyle: document.values["transcript_style"],
             speakers: speakers,

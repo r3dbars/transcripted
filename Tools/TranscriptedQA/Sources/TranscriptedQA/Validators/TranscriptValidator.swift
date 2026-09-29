@@ -11,6 +11,14 @@ struct TranscriptValidator {
         "parakeet_ultra_local",
     ]
 
+    /// `pyannote_offline` is every file saved before 2026-09-29 and a Nemotron
+    /// load fallback; `none` is a meeting no diarizer ran on.
+    private let validDiarizationEngines: Set<String> = [
+        "pyannote_offline",
+        "nemotron_offline",
+        "none",
+    ]
+
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
         let fm = FileManager.default
@@ -71,10 +79,11 @@ struct TranscriptValidator {
                 results.append(.fail("transcript/yaml-engine-stt", target: name, detail: "Expected supported local STT engine, got \(yaml.value(for: "transcription_engine") ?? "nil")"))
             }
 
-            if yaml.value(for: "diarization_engine") == "pyannote_offline" {
+            if let diarizationEngine = yaml.value(for: "diarization_engine"),
+               validDiarizationEngines.contains(diarizationEngine) {
                 results.append(.pass("transcript/yaml-engine-diarize", target: name))
             } else {
-                results.append(.fail("transcript/yaml-engine-diarize", target: name, detail: "Expected pyannote_offline, got \(yaml.value(for: "diarization_engine") ?? "nil")"))
+                results.append(.fail("transcript/yaml-engine-diarize", target: name, detail: "Expected supported diarization engine, got \(yaml.value(for: "diarization_engine") ?? "nil")"))
             }
 
             // Sources

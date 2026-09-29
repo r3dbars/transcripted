@@ -65,6 +65,9 @@ public struct TranscriptionResult: Sendable {
     public let microphoneAudioOutcome: MicrophoneAudioOutcome
     public let systemAudioOutcome: SystemAudioOutcome
     public let languageContext: TranscriptionLanguageContext?
+    /// What diarized this meeting, or nil when no diarizer ran (for example a
+    /// mic-only meeting without local speaker split).
+    public let diarization: DiarizationRunDescriptor?
 
     public init(
         micUtterances: [TranscriptionUtterance],
@@ -77,7 +80,8 @@ public struct TranscriptionResult: Sendable {
         droppedSegments: Int = 0,
         microphoneAudioOutcome: MicrophoneAudioOutcome = .usable,
         systemAudioOutcome: SystemAudioOutcome = .usable,
-        languageContext: TranscriptionLanguageContext? = nil
+        languageContext: TranscriptionLanguageContext? = nil,
+        diarization: DiarizationRunDescriptor? = nil
     ) {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
@@ -90,6 +94,7 @@ public struct TranscriptionResult: Sendable {
         self.microphoneAudioOutcome = microphoneAudioOutcome
         self.systemAudioOutcome = systemAudioOutcome
         self.languageContext = languageContext
+        self.diarization = diarization
     }
 
     /// All utterances merged and sorted by start time

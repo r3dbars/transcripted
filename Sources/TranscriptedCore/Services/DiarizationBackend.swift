@@ -8,13 +8,48 @@ import Foundation
 /// Which speaker-diarization model splits meeting audio into speaker turns.
 public enum DiarizationBackend: String, CaseIterable, Sendable, Codable {
     /// FluidAudio's offline pyannote community-1 pipeline (segmentation +
-    /// WeSpeaker + VBx). Today's default; emits a native 256-d WeSpeaker
-    /// embedding per segment.
+    /// WeSpeaker + VBx). The Core default and Nemotron's load fallback; emits a
+    /// native 256-d WeSpeaker embedding per segment.
     case pyannote
     /// NVIDIA Nemotron 3 Diarization via FluidAudio (streaming Sortformer
-    /// successor, up to 8 speakers, 10 ms frames). Experimental and off by
-    /// default. It emits no speaker embeddings, so `DiarizationService` derives
+    /// successor, up to 8 speakers, 10 ms frames). The app's default. It emits no speaker embeddings, so `DiarizationService` derives
     /// one per turn with the injected `SpeakerSegmentEmbedder`, or with
     /// `FluidWeSpeakerSegmentEmbedder` when none is injected.
     case nemotron
+}
+
+extension DiarizationBackend {
+    /// The `diarization_engine` frontmatter value for a meeting this backend
+    /// diarized. `pyannote_offline` predates the switch, so it stays as is.
+    public var transcriptEngineIdentifier: String {
+        switch self {
+        case .pyannote: return "pyannote_offline"
+        case .nemotron: return "nemotron_offline"
+        }
+    }
+
+    /// Name for the raw transcript footer. `PyAnnote` keeps the footer older
+    /// files carry; the frontmatter key is the one to read for model identity.
+    public var footerDisplayName: String {
+        switch self {
+        case .pyannote: return "PyAnnote"
+        case .nemotron: return "Nemotron"
+        }
+    }
+}
+
+/// What actually diarized one meeting: the backend that ran (a Nemotron load
+/// failure reads `.pyannote`) and the voiceprint model that embedded its turns.
+/// The pipeline takes it from the diarizer right before diarizing, and the
+/// transcript writes it as `diarization_engine` / `voiceprint_model`.
+public struct DiarizationRunDescriptor: Sendable, Equatable {
+    public let backend: DiarizationBackend
+    /// The embedder's identifier (e.g. `redimnet2-b4`, `wespeaker`), or nil
+    /// when the engine doesn't say.
+    public let voiceprintModel: String?
+
+    public init(backend: DiarizationBackend, voiceprintModel: String?) {
+        self.backend = backend
+        self.voiceprintModel = voiceprintModel
+    }
 }
