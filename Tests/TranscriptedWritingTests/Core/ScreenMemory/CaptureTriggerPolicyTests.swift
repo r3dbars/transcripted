@@ -99,7 +99,7 @@ struct CaptureTriggerPolicyTests {
         ) == .capture)
     }
 
-    @Test("A non-frontmost excluded window still blocks capture — capture is full-display")
+    @Test("A non-frontmost excluded window still blocks capture, even though only the focused window is read")
     func nonFrontmostExclusionBlocks() {
         // Signal sits behind the frontmost editor; frontmost is not excluded,
         // but Signal is, and it is still on screen.

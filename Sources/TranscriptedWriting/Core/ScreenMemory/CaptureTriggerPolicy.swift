@@ -68,9 +68,11 @@ public enum CaptureTriggerPolicy {
     /// - Parameters:
     ///   - visibleWindowOwnerBundleIdentifiers: Bundle identifiers of every
     ///     currently visible window's owning app — not just the frontmost
-    ///     one. Capture is full-display, so a Signal window sitting behind
-    ///     the focused editor still excludes the capture if Signal is on the
-    ///     exclusion list.
+    ///     one. Capture now reads only the focused window
+    ///     (`FocusedWindowCapturePolicy`, which also refuses an excluded
+    ///     focused window), but this stays the conservative rule: a Signal
+    ///     window sitting behind the focused editor still blocks the capture
+    ///     if Signal is on the exclusion list.
     public static func decision(
         for trigger: Trigger,
         enabled: Bool,

@@ -340,7 +340,6 @@ struct ScreenCaptureServiceTests {
             ),
         ])
         await service.setLatestSnapshotForTesting(snapshot)
-        await service.setLatestWindowSnapshotForTesting(snapshot)
         #expect(
             await service.freshScene(
                 frontmostBundleID: slack,
@@ -364,7 +363,6 @@ struct ScreenCaptureServiceTests {
         // toggle back on cannot resurrect the old look at the screen.
         await service.forgetCapturedScreenState(now: t0.addingTimeInterval(3))
         #expect(await service.latestSnapshot == nil)
-        #expect(await service.latestWindowSnapshot == nil)
         enabled.value = true
         #expect(
             await service.freshScene(
@@ -381,12 +379,10 @@ struct ScreenCaptureServiceTests {
         let t0 = Date(timeIntervalSince1970: 1_700_000_000)
         let snapshot = ScreenSnapshot(capturedAt: t0, displayID: 1, blocks: [])
         await service.setLatestSnapshotForTesting(snapshot)
-        await service.setLatestWindowSnapshotForTesting(snapshot)
 
         await service.forgetCapturedScreenState(now: t0)
 
         #expect(await service.latestSnapshot == nil)
-        #expect(await service.latestWindowSnapshot == nil)
         // A capture that lands after the clear is behind the reset
         // watermark, so it is the wrong conversation and never served.
         await service.setLatestSnapshotForTesting(
@@ -440,38 +436,6 @@ struct ScreenCaptureServiceTests {
         #expect(stale == nil)
     }
 
-    @Test("freshScene prefers a fresh window read with a conversation over a later display read without one")
-    func freshScenePrefersWindowConversation() async {
-        let service = makeService()
-        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
-        let slack = "com.tinyspeck.slackmacgap"
-        let frame = NormalizedDisplayRect(x: 0.3, y: 0.2, width: 0.4, height: 0.5)
-        let windowRead = ScreenSnapshot(capturedAt: t0, displayID: 1, blocks: [
-            ScreenSnapshot.TextBlock(text: "want me to grab it for you?",
-                boundingBox: NormalizedDisplayRect(x: 0.31, y: 0.30, width: 0.20, height: 0.03),
-                windowOwnerBundleIdentifier: slack, windowFrame: frame),
-            ScreenSnapshot.TextBlock(text: "yes please",
-                boundingBox: NormalizedDisplayRect(x: 0.48, y: 0.50, width: 0.20, height: 0.03),
-                windowOwnerBundleIdentifier: slack, windowFrame: frame),
-        ])
-        // A later full-display read whose attribution missed the window.
-        let displayRead = ScreenSnapshot(capturedAt: t0.addingTimeInterval(2), displayID: 1, blocks: [
-            ScreenSnapshot.TextBlock(text: "want me to grab it for you?",
-                boundingBox: NormalizedDisplayRect(x: 0.31, y: 0.30, width: 0.20, height: 0.03),
-                windowOwnerBundleIdentifier: nil, windowFrame: nil),
-        ])
-        await service.setLatestWindowSnapshotForTesting(windowRead)
-        await service.setLatestSnapshotForTesting(displayRead)
-
-        let scene = await service.freshScene(frontmostBundleID: slack, fieldText: "", now: t0.addingTimeInterval(3))
-        #expect(scene?.mode == .replying)
-        #expect(scene?.conversationTurns.count == 2)
-
-        // Once the window read is stale, the latest read is all there is.
-        let later = await service.freshScene(frontmostBundleID: slack, fieldText: "", now: t0.addingTimeInterval(21))
-        #expect(later?.mode != .replying)
-    }
-
     @Test("AX reader thresholds fall back to OCR rather than trusting thin trees")
     func axReaderThresholds() {
         // The walk itself needs a live AX tree; what unit tests can pin is
@@ -499,7 +463,6 @@ struct ScreenCaptureServiceTests {
                 windowOwnerBundleIdentifier: slack, windowFrame: frame),
         ])
         await service.setLatestSnapshotForTesting(snapshot)
-        await service.setLatestWindowSnapshotForTesting(snapshot)
 
         // Fresh and valid before the reset...
         let before = await service.freshScene(frontmostBundleID: slack, fieldText: "", now: t0.addingTimeInterval(2))
@@ -659,6 +622,66 @@ struct ScreenCaptureServiceTests {
     // outside ScreenCaptureKit — script/capture_power_probe.sh and
     // script/screen_capture_probe.swift are the real, live callers that
     // exercise the full instrumented path per docs/plans/screen-memory.md.
+
+    @Test("A focused-window refusal skips: out of scope reads as excluded, anything unprovable as no target window")
+    func focusedWindowRefusalOutcomes() {
+        let app = "com.example.chat"
+        #expect(ScreenCaptureService.blockReason(for: .excluded(bundleIdentifier: app))
+            == .excludedWindow(appBundleIdentifier: app))
+        #expect(ScreenCaptureService.blockReason(for: .outOfScope(bundleIdentifier: app))
+            == .excludedWindow(appBundleIdentifier: app))
+        for refusal: FocusedWindowCapturePolicy.Refusal in [
+            .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+            .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
+        ] {
+            #expect(ScreenCaptureService.blockReason(for: refusal) == .noTargetWindow)
+        }
+    }
+
+    @Test("Every focused-window refusal logs its own readable reason, never the app's bundle ID")
+    func focusedWindowRefusalLogReasons() {
+        let app = "com.example.chat"
+        let refusals: [FocusedWindowCapturePolicy.Refusal] = [
+            .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+            .excluded(bundleIdentifier: app), .outOfScope(bundleIdentifier: app),
+            .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
+        ]
+        let reasons = refusals.map(ScreenCaptureService.skipReason(for:))
+        // Distinct per refusal, so a skip in the log says which check closed the door.
+        #expect(Set(reasons).count == refusals.count)
+        for reason in reasons {
+            #expect(!reason.contains(app))
+            // The log writer keeps it literal instead of redacting it to a length.
+            #expect(DiagnosticsMetadataRedactor.logSafeField(forKey: "reason", value: reason) == "reason=\(reason)")
+        }
+    }
+
+    @Test("Moving to another window or leaving the field drops the held window text")
+    func heldTextFollowsTheTypingWindow() async {
+        let service = makeService()
+        let session = "field-1"
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        func target(window: UInt32) -> TypingTargetIdentity {
+            TypingTargetIdentity(bundleIdentifier: "com.apple.TextEdit", processIdentifier: 7,
+                                 windowIdentifier: window, fieldSessionIdentifier: session, generation: 0)
+        }
+        let held = ScreenSnapshot(capturedAt: t0, displayID: 1, blocks: [])
+
+        _ = await service.noteTextFieldFocused(sessionIdentifier: session, target: target(window: 1))
+        await service.setLatestSnapshotForTesting(held)
+        // A repeat pulse for the same window keeps it.
+        _ = await service.noteTypingPaused(sessionIdentifier: session, target: target(window: 1))
+        #expect(await service.latestSnapshot == held)
+
+        // Another window: the first window's text is gone.
+        _ = await service.noteWindowChanged(target: target(window: 2))
+        #expect(await service.latestSnapshot == nil)
+
+        // Leaving the field: gone too.
+        await service.setLatestSnapshotForTesting(held)
+        await service.noteTextFieldBlurred(sessionIdentifier: session)
+        #expect(await service.latestSnapshot == nil)
+    }
 
     @Test("Capture requests backing pixels, not points, on Retina displays")
     func pixelScaleUsesBackingSize() {

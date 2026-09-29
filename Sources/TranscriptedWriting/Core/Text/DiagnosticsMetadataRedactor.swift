@@ -17,7 +17,13 @@ public enum DiagnosticsMetadataRedactor {
         // in the log regardless of cause.
         "disabled", "no-permission", "screen-locked", "secure-input", "no-active-text-field",
         "no-active-session", "below-threshold", "excluded-app", "cadence",
-        "enumeration-failed", "no-display",
+        "enumeration-failed", "no-display", "no-target-window", "target-changed",
+        // `FocusedWindowCapturePolicy` refusals (`ScreenCaptureService.skipReason`):
+        // which check kept Screen Memory off a window it couldn't prove was
+        // the one being typed in. Never the app, title or window itself.
+        "window-not-visible", "owner-mismatch", "not-normal-window", "unknown-app",
+        "out-of-scope", "not-frontmost-app", "keyboard-focus-elsewhere",
+        "keyboard-focus-unknown", "not-focused-window",
         // The 2026-08-16 first-launch Screen Recording permission prompt's
         // outcome vocabulary from the setup permission flow.
         "requested", "settings-opened", "dismissed",
@@ -42,12 +48,14 @@ public enum DiagnosticsMetadataRedactor {
         // engine's word actually reached the user, never the word itself.
         "base", "personal", "agreed",
         // `screen-capture-completed`/`screen-capture-failed`'s `kind` field
-        // (`ScreenCaptureService.performWindowCapture`/`performFullDisplayCapture`)
-        // — which capture path ran, never any captured text.
+        // (`ScreenCaptureService.performWindowCapture`, or `ax` for the
+        // Accessibility read) — which capture path ran, never any captured
+        // text. `display` is the retired full-display path, kept so older
+        // log lines still read.
         "window", "display", "ax",
         // `screen-capture-completed`'s `ocrScope` field (incremental OCR,
-        // `ScreenCaptureService.performWindowCapture`/`performFullDisplayCapture`,
-        // backed by `CaptureChangeDetector`) — how much of the frame the OCR
+        // `ScreenCaptureService.performWindowCapture`, backed by
+        // `CaptureChangeDetector`) — how much of the frame the OCR
         // pass actually covered this capture: the whole frame, a bounded
         // region, or none at all because nothing changed. Never any
         // captured text or the region's coordinates.
