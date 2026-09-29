@@ -1507,10 +1507,10 @@ func testClipboardRestoringTextPaster() async {
     }
 
     runSuite("A focused element counts as somewhere text can't go only when it plainly can't take text") {
-        // Claude's transcript: a page region, not editable, in no text box.
+        // Claude, Chrome: the page body has focus, in no text box.
         assertTrue(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
-            role: "AXGroup", valueIsSettable: false, hasEditableAncestor: false
-        ), "a page region outside any text box can't take a paste")
+            role: "AXWebArea", valueIsSettable: false, hasEditableAncestor: false
+        ), "a web page body outside any text box can't take a paste")
         assertTrue(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
             role: "AXButton", valueIsSettable: false, hasEditableAncestor: false
         ), "a plain button can't take a paste")
@@ -1530,6 +1530,40 @@ func testClipboardRestoringTextPaster() async {
         assertFalse(FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
             role: "AXSomethingNew", valueIsSettable: false, hasEditableAncestor: false
         ), "a role we don't know isn't treated as a dead end")
+    }
+
+    runSuite("Spreadsheet cells, terminal windows and groups are never ruled out as paste targets") {
+        // Each row: what AX reports for the focus, and whether a quick
+        // clipboard read there is overruled as "Not pasted".
+        let rows: [(target: String, role: String, settable: Bool, editableAncestor: Bool, refutes: Bool)] = [
+            ("selected spreadsheet cell (Numbers, Excel)", "AXCell", false, false, false),
+            ("spreadsheet row", "AXRow", false, false, false),
+            ("spreadsheet table", "AXTable", false, false, false),
+            ("GPU terminal whose focus is its window (kitty, Alacritty)", "AXWindow", false, false, false),
+            ("GPU terminal whose focus is a group (Ghostty, Warp)", "AXGroup", false, false, false),
+            ("outline", "AXOutline", false, false, false),
+            ("list", "AXList", false, false, false),
+            ("split group", "AXSplitGroup", false, false, false),
+            ("tab group", "AXTabGroup", false, false, false),
+            ("scroll area", "AXScrollArea", false, false, false),
+            ("web page body with no text box", "AXWebArea", false, false, true),
+            ("web page body inside an editable region", "AXWebArea", false, true, false),
+            ("web page body that is itself editable", "AXWebArea", true, false, false),
+            ("plain text on a page", "AXStaticText", false, false, true),
+            ("a link", "AXLink", false, false, true),
+            ("an image", "AXImage", false, false, true),
+            ("a menu item", "AXMenuItem", false, false, true),
+            ("a toolbar", "AXToolbar", false, false, true),
+        ]
+        for row in rows {
+            assertEqual(
+                FocusedTextPasteConfirmationPolicy.isClearlyNotTextEntry(
+                    role: row.role, valueIsSettable: row.settable, hasEditableAncestor: row.editableAncestor
+                ),
+                row.refutes,
+                "refutes a paste into: \(row.target) (\(row.role))"
+            )
+        }
     }
 
     await runSuite("A quick clipboard read counts as a paste only when the focus could take text") {
