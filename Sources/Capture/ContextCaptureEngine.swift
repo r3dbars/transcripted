@@ -80,9 +80,9 @@ private final class PhysicalShortcutDetector {
     private var pendingModifierShortcut: PendingModifierShortcut?
     private var pendingModifierGeneration: UInt64 = 0
     /// A hands-free modifier that other shortcuts share (Right Option vs
-    /// Option+M) and that fired on press. Set until it's released, so a key
-    /// that goes down meanwhile can report `.comboInterrupted`.
-    private var pressFiredHandsFreeKeyCode: UInt32?
+    /// Option+M) and that fired on press, followed until it's released so a
+    /// key that goes down meanwhile reports `.comboInterrupted`.
+    private var handsFreeComboTracker = HandsFreeModifierComboTracker()
     /// When a key was last typed, so a hands-free modifier pressed mid-typing
     /// still waits for release (see `firesSharedModifierOnPress`).
     private var lastTypedKeyDownUptime: TimeInterval = -.infinity
@@ -214,7 +214,7 @@ private final class PhysicalShortcutDetector {
     private func resetState() {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
-        pressFiredHandsFreeKeyCode = nil
+        handsFreeComboTracker.reset()
         activePushToTalkKeyCode = nil
         consumedKeyCodes.removeAll()
     }
@@ -244,11 +244,11 @@ private final class PhysicalShortcutDetector {
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             // A key while a press-fired hands-free modifier is still held
             // makes that press a combo (Option+M, or typing é with Option+E).
-            if let comboModifierKeyCode = pressFiredHandsFreeKeyCode {
-                pressFiredHandsFreeKeyCode = nil
-                if Self.isExactPhysicalKeyDown(comboModifierKeyCode) {
-                    onShortcut?(.dictationHandsFree, .comboInterrupted)
-                }
+            // No physical key-state check here: this tap consumed the
+            // modifier's flagsChanged, so the session state never saw it
+            // go down (see HandsFreeModifierComboTracker).
+            if handsFreeComboTracker.keyDown() {
+                onShortcut?(.dictationHandsFree, .comboInterrupted)
             }
             lastTypedKeyDownUptime = ProcessInfo.processInfo.systemUptime
             if isRepeat, consumedKeyCodes.contains(keyCode) {
@@ -296,9 +296,11 @@ private final class PhysicalShortcutDetector {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            if pressFiredHandsFreeKeyCode == keyCode,
-               matchesRelease(for: .dictationHandsFree, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
-                pressFiredHandsFreeKeyCode = nil
+            if handsFreeComboTracker.flagsChanged(
+                keyCode: keyCode,
+                modifiers: modifiers,
+                isHandsFreeRelease: matchesRelease(for: .dictationHandsFree, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+            ) {
                 return nil
             }
 
@@ -344,7 +346,7 @@ private final class PhysicalShortcutDetector {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationHandsFree)
                 } else {
                     cancelPendingModifierShortcut()
-                    pressFiredHandsFreeKeyCode = sharesModifier ? keyCode : nil
+                    handsFreeComboTracker.firedOnPress(keyCode: keyCode, sharesModifier: sharesModifier)
                     onShortcut?(.dictationHandsFree, .press)
                 }
             case .meeting:
@@ -456,7 +458,7 @@ private final class PhysicalShortcutDetector {
     private func reconcileActivePushToTalkAfterTapDisabled() {
         cancelPendingModifierShortcut()
         // Its release may have been missed while the tap was off.
-        pressFiredHandsFreeKeyCode = nil
+        handsFreeComboTracker.reset()
 
         if PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
             activeKeyCode: activePushToTalkKeyCode,

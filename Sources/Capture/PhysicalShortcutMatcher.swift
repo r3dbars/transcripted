@@ -30,6 +30,56 @@ struct DelayedModifierShortcutPress: Equatable {
     let action: PhysicalShortcutAction
 }
 
+/// Follows a hands-free modifier that fired on press while other shortcuts
+/// share it (Right Option vs Option+M) until it's let go, so a key that goes
+/// down in between turns that press into a combo and its dictation is dropped.
+///
+/// It trusts the event stream alone. The detector's session tap consumes the
+/// modifier's own flagsChanged event, so the session key state
+/// (`CGEventSource.keyState(.combinedSessionState, ...)`) never sees it go
+/// down. Gating on that check left every Option+M, Option+E, and
+/// Option+arrow with a stray dictation running.
+struct HandsFreeModifierComboTracker {
+    private var heldKeyCode: UInt32?
+
+    /// A hands-free modifier fired on press. Only one other shortcuts also
+    /// use can turn out to be a combo.
+    mutating func firedOnPress(keyCode: UInt32, sharesModifier: Bool) {
+        heldKeyCode = sharesModifier ? keyCode : nil
+    }
+
+    /// A non-modifier key went down. True when that makes the held press a
+    /// combo. It reports once per press.
+    mutating func keyDown() -> Bool {
+        guard heldKeyCode != nil else { return false }
+        heldKeyCode = nil
+        return true
+    }
+
+    /// A modifier changed. `isHandsFreeRelease` says whether the event
+    /// matches the hands-free binding's release. Returns true when it was the
+    /// tracked key's own release, which the tap consumes. Tracking also ends
+    /// once no modifier of that kind is left down (Right Option let go under
+    /// a held Left Option, then Left Option let go).
+    mutating func flagsChanged(keyCode: UInt32, modifiers: UInt32, isHandsFreeRelease: Bool) -> Bool {
+        guard let heldKeyCode else { return false }
+        if heldKeyCode == keyCode, isHandsFreeRelease {
+            self.heldKeyCode = nil
+            return true
+        }
+        if let mask = PhysicalDictationTriggerPreferences.primaryModifierMask(for: heldKeyCode),
+           modifiers & mask == 0 {
+            self.heldKeyCode = nil
+        }
+        return false
+    }
+
+    /// The tap was off, so the release may have been missed.
+    mutating func reset() {
+        heldKeyCode = nil
+    }
+}
+
 enum PhysicalShortcutMatcher {
     /// A typed key this recent means the user is mid-typing, where a
     /// hands-free modifier press is likely the start of a combo (typing é
