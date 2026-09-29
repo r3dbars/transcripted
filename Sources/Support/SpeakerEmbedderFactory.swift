@@ -1,7 +1,14 @@
 // SpeakerEmbedderFactory.swift
 // App-layer resolution of the optional speaker-embedding model. Keeps Bundle.main
 // / filesystem lookups out of TranscriptedCore (which stays injection-only) and
-// hands the meeting controller a ready `SpeakerSegmentEmbedder` or nil.
+// hands the meeting controller a `SpeakerSegmentEmbedder` or nil.
+//
+// Nothing here loads a model. The meeting controller is built on the main actor at
+// launch, and `MLModel(contentsOf:)` (plus a GPU compile the first launch after an
+// update) froze the menubar there. The choice, and with it the speaker database, is
+// made from model-file presence; the model loads on a background queue the first
+// time the diarizer's warmup, a meeting, or the voiceprint migration waits for it
+// (`BackgroundLoadedSpeakerSegmentEmbedder`).
 
 import Foundation
 import TranscriptedCore
@@ -19,46 +26,91 @@ enum SpeakerEmbedderFactory {
     private static let reDimNet2BundleDirName = "redimnet2-voiceprint"
     private static let reDimNet2CacheDirName = "redimnet2-b4-slim"
 
-    /// One ReDimNet2 instance per process: the meeting controller and the Settings
-    /// DB-path lookup share it, so the model loads once. Its idle release frees the
-    /// GPU memory between meetings.
-    private static let reDimNet2Lock = NSLock()
-    nonisolated(unsafe) private static var reDimNet2Resolved = false
-    nonisolated(unsafe) private static var reDimNet2Embedder: (any SpeakerSegmentEmbedder)?
+    /// One resolution per model per process: the meeting controller and the
+    /// Settings DB-path lookup share it, so the model loads once and both agree on
+    /// the database for the whole launch, even after a failed load. ReDimNet2's
+    /// idle release frees the GPU memory between meetings.
+    private static let resolutionLock = NSLock()
+    nonisolated(unsafe) private static var resolvedEmbedders: [SpeakerEmbedderChoice: (any SpeakerSegmentEmbedder)?] = [:]
 
-    /// Build the segment embedder for `choice`, or nil to use the diarizer's
-    /// native WeSpeaker embedding. Returns nil (falling back to WeSpeaker, and the
-    /// default `speakers.sqlite`) if the chosen model can't be located or loaded.
+    /// The segment embedder for `choice`, or nil to use the diarizer's native
+    /// WeSpeaker embedding (and the default `speakers.sqlite`). Never loads the
+    /// model: returns a background-loading embedder when the model file is present
+    /// and the model hasn't failed to load on this build, else nil. A load that
+    /// fails later leaves this launch on the chosen model's database with no
+    /// voiceprints and makes the next launch return nil
+    /// (`SpeakerEmbedderLoadFailureMemory`).
     static func makeEmbedder(for choice: SpeakerEmbedderChoice) -> (any SpeakerSegmentEmbedder)? {
         guard #available(macOS 14.0, *) else { return nil }
+        resolutionLock.lock()
+        defer { resolutionLock.unlock() }
+        if let resolved = resolvedEmbedders[choice] { return resolved }
+        let embedder: (any SpeakerSegmentEmbedder)?
         switch choice {
         case .weSpeaker:
-            return nil
+            embedder = nil
         case .reDimNet2:
-            return sharedReDimNet2()
+            embedder = backgroundEmbedder(
+                name: "ReDimNet2",
+                modelURL: reDimNet2ModelURL(),
+                configuration: ReDimNet2Embedder.configuration(modelURL:),
+                load: { ReDimNet2Embedder.load(modelURL: $0) }
+            )
         case .eRes2Net:
-            break
+            embedder = backgroundEmbedder(
+                name: "ERes2Net",
+                modelURL: resolveModelURL(),
+                configuration: ERes2NetEmbedder.configuration(modelURL:),
+                load: { ERes2NetEmbedder(modelURL: $0) }
+            )
         }
-        guard let url = resolveModelURL() else {
-            AppLog.speakerEmbedder("ERes2Net model not found in bundle or cache; using WeSpeaker")
-            return nil
-        }
-        guard let embedder = ERes2NetEmbedder(modelURL: url) else {
-            AppLog.speakerEmbedder("ERes2Net model failed to load at \(url.lastPathComponent); using WeSpeaker")
-            return nil
-        }
-        AppLog.speakerEmbedder("ERes2Net speaker embedder active (dim \(embedder.dimension))")
+        resolvedEmbedders[choice] = .some(embedder)
         return embedder
     }
 
-    /// Speaker DB path that matches a *resolved* embedder. ERes2Net (192-dim) gets
-    /// its own file, named from the embedder's identifier; a nil embedder (WeSpeaker,
-    /// or an ERes2Net model that could not be loaded) uses the default
-    /// `speakers.sqlite`. Deriving the path from the embedder that actually loaded —
-    /// not from mere model-file existence — guarantees a DB never receives a vector
-    /// of the wrong dimension (e.g. a present-but-unloadable model must NOT route
-    /// 256-d WeSpeaker vectors into the 192-d ERes2Net database). Kept here (not in
-    /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
+    /// A background-loading embedder for the model at `modelURL`, or nil (WeSpeaker)
+    /// when the file is missing or the model failed to load on this build.
+    @available(macOS 14.0, *)
+    private static func backgroundEmbedder(
+        name: String,
+        modelURL: URL?,
+        configuration: (URL) -> CoreMLSpeakerEmbedderConfiguration,
+        failureMemory: SpeakerEmbedderLoadFailureMemory = SpeakerEmbedderLoadFailureMemory(),
+        load: @escaping @Sendable (URL) -> (any SpeakerSegmentEmbedder)?
+    ) -> (any SpeakerSegmentEmbedder)? {
+        guard let modelURL else {
+            AppLog.speakerEmbedder("\(name) model not found in bundle or cache; using WeSpeaker")
+            return nil
+        }
+        let declared = configuration(modelURL)
+        guard failureMemory.launchModelIdentifier(chosen: declared.identifier, modelFileIsPresent: true) != nil else {
+            AppLog.speakerEmbedder("\(name) model failed to load on this build; using WeSpeaker")
+            return nil
+        }
+        let identifier = declared.identifier
+        let dimension = declared.dimension
+        return BackgroundLoadedSpeakerSegmentEmbedder(
+            identifier: identifier,
+            dimension: dimension,
+            thresholds: declared.thresholds,
+            onLoadEnded: { loaded in
+                failureMemory.recordLoadEnded(identifier, loaded: loaded)
+                AppLog.speakerEmbedder(loaded
+                    ? "\(name) speaker embedder loaded (dim \(dimension))"
+                    : "\(name) model failed to load; no voiceprints this launch, WeSpeaker from the next")
+            },
+            load: { load(modelURL) }
+        )
+    }
+
+    /// Speaker DB path that matches a *resolved* embedder (`makeEmbedder`). A
+    /// 192-dim model gets its own file, named from the embedder's identifier; a nil
+    /// embedder (WeSpeaker, or a chosen model that is missing or failed to load on
+    /// this build) uses the default `speakers.sqlite`. A DB never receives a vector
+    /// of the wrong dimension: a background load that fails after launch makes the
+    /// embedder return no vectors, rather than routing 256-d WeSpeaker vectors into
+    /// a 192-d database. Kept here (not in MeetingStoragePaths) so the low-level
+    /// storage-paths file stays dependency-free.
     ///
     /// The Nemotron diarization backend has no voiceprints of its own. With no
     /// injected embedder, Core fills them with the pyannote pipeline's own offline
@@ -83,8 +135,8 @@ enum SpeakerEmbedderFactory {
     }
 
     /// DB path for the active selection where the embedder isn't already in hand
-    /// (e.g. the Settings → People fallback). Resolves the embedder by actually
-    /// loading it so the path agrees with what the meeting pipeline will use.
+    /// (e.g. the Settings → People fallback). Shares `makeEmbedder`'s resolution, so
+    /// the path agrees with what the meeting pipeline uses, without loading a model.
     static func activeSpeakerDBURL() -> URL {
         speakerDBURL(
             for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()),
@@ -104,25 +156,6 @@ enum SpeakerEmbedderFactory {
     /// tell whether the build has the model).
     static func reDimNet2ModelURL() -> URL? {
         resolveModelURL(bundleDirName: reDimNet2BundleDirName, cacheDirName: reDimNet2CacheDirName)
-    }
-
-    @available(macOS 14.0, *)
-    private static func sharedReDimNet2() -> (any SpeakerSegmentEmbedder)? {
-        reDimNet2Lock.lock()
-        defer { reDimNet2Lock.unlock() }
-        if reDimNet2Resolved { return reDimNet2Embedder }
-        reDimNet2Resolved = true
-        guard let url = reDimNet2ModelURL() else {
-            AppLog.speakerEmbedder("ReDimNet2 model not found in bundle or cache; using WeSpeaker")
-            return nil
-        }
-        guard let embedder = ReDimNet2Embedder.load(modelURL: url) else {
-            AppLog.speakerEmbedder("ReDimNet2 model failed to load; using WeSpeaker")
-            return nil
-        }
-        AppLog.speakerEmbedder("ReDimNet2 speaker embedder active (dim \(embedder.dimension))")
-        reDimNet2Embedder = embedder
-        return embedder
     }
 
     /// First match wins: app bundle Resources, then the shared FluidAudio Models

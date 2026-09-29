@@ -175,6 +175,8 @@ public enum SpeakerVoiceprintMigrationError: Error, Equatable {
     /// The target database was opened with another model's thresholds.
     case thresholdsMismatch
     case alreadyRunning
+    /// The new model's background load failed, so nothing can be re-embedded.
+    case embedderUnavailable
 }
 
 @available(macOS 14.0, *)
@@ -291,6 +293,12 @@ public actor SpeakerVoiceprintMigration {
 
         guard target.isOpenForVoiceprintMigration else {
             throw SpeakerVoiceprintMigrationError.targetDatabaseUnavailable
+        }
+        // A background-loaded model finishes loading before anyone moves. If it
+        // can't load, nobody is written to the ledger, so the next launch retries.
+        if let loading = embedder as? any BackgroundLoadingSpeakerSegmentEmbedder,
+           await !loading.waitUntilLoaded() {
+            throw SpeakerVoiceprintMigrationError.embedderUnavailable
         }
         let snapshot = try loadSnapshot()
         try target.ensureVoiceprintMigrationLedger()

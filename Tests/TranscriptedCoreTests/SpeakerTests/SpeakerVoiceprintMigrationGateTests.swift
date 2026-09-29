@@ -12,7 +12,11 @@ import XCTest
 ///   - a second launch after a finished move embeds nothing and changes nothing;
 ///   - with nothing to move the gate never closes;
 ///   - a waiter that is cancelled (app quitting) is let go while the move runs;
-///   - "needs one confirmation" counts people until they are confirmed or named again.
+///   - "needs one confirmation" counts people until they are confirmed or named again;
+///   - a model still loading in the background holds writers from launch, and the
+///     move runs once it has loaded;
+///   - a model that fails to load lets everyone through, moves nobody, and the next
+///     launch tries again.
 ///
 /// Everything lives in a temp folder. The fake embedder turns constant-level
 /// audio into a one-hot vector, so a person's "voice" is their clip's level.
@@ -346,6 +350,92 @@ final class SpeakerVoiceprintMigrationGateTests: XCTestCase {
         XCTAssertEqual(speakersAfter.map(\.displayName), speakersBefore.map(\.displayName))
         XCTAssertEqual(speakersAfter.map(\.confirmedMeetingCount), speakersBefore.map(\.confirmedMeetingCount))
         XCTAssertEqual(try sourceBytes(library), sourceBefore, "the old database is never written")
+    }
+
+    /// `LevelEmbedder` behind a background load that waits for `release`.
+    private func backgroundLoaded(
+        _ embedder: LevelEmbedder?,
+        release: DispatchSemaphore? = nil
+    ) -> BackgroundLoadedSpeakerSegmentEmbedder {
+        BackgroundLoadedSpeakerSegmentEmbedder(
+            identifier: "test-level-voiceprint",
+            dimension: 8,
+            thresholds: .eRes2Net,
+            load: {
+                release?.wait()
+                return embedder
+            }
+        )
+    }
+
+    @MainActor
+    func testModelStillLoadingHoldsWritersFromLaunchAndMovesOnceLoaded() async throws {
+        let library = try makeLibrary()
+        let model = LevelEmbedder()
+        let release = DispatchSemaphore(value: 0)
+        let loading = backgroundLoaded(model, release: release)
+        let database = SpeakerDatabase(path: library.targetURL.path, thresholds: loading.thresholds)
+        let gate = SpeakerVoiceprintMigrationGate()
+
+        gate.start(
+            sourceDatabaseURL: library.sourceURL,
+            targetDatabase: database,
+            embedder: loading,
+            sources: library.sources
+        )
+        XCTAssertFalse(gate.isOpen, "writers are held from launch, before the model has loaded")
+
+        let transcription = Task { @MainActor () -> UUID? in
+            await gate.waitUntilOpen()
+            return database.matchSpeaker(embedding: LevelEmbedder.vector(level: 0.1), threshold: 0.9)?.profile.id
+        }
+        await settle { gate.waitingCount == 1 }
+        XCTAssertEqual(gate.waitingCount, 1, "a queued meeting waits")
+        XCTAssertEqual(model.calls, 0, "nothing is embedded before the model loads")
+
+        release.signal()
+        let named = await transcription.value
+
+        XCTAssertEqual(named, library.ann, "the meeting ran against the moved people")
+        guard case .finished(let summary) = gate.phase else {
+            return XCTFail("expected a finished move, got \(gate.phase)")
+        }
+        XCTAssertEqual(summary.movedThisRun, 3)
+    }
+
+    @MainActor
+    func testModelThatFailsToLoadLetsEveryoneThroughMovesNobodyAndRetriesNextLaunch() async throws {
+        let library = try makeLibrary()
+        let sourceBefore = try sourceBytes(library)
+        let failing = backgroundLoaded(nil)
+        let database = SpeakerDatabase(path: library.targetURL.path, thresholds: failing.thresholds)
+        let gate = SpeakerVoiceprintMigrationGate()
+
+        gate.start(
+            sourceDatabaseURL: library.sourceURL,
+            targetDatabase: database,
+            embedder: failing,
+            sources: library.sources
+        )
+        await gate.waitUntilOpen()
+
+        XCTAssertEqual(gate.phase, .failed(reason: "embedder_unavailable"))
+        XCTAssertTrue(database.voiceprintMigrationLedger().isEmpty, "nobody is marked as moved")
+        XCTAssertTrue(database.allSpeakers().isEmpty)
+        XCTAssertEqual(try sourceBytes(library), sourceBefore, "the old database is never written")
+
+        let nextLaunch = SpeakerVoiceprintMigrationGate()
+        nextLaunch.start(
+            sourceDatabaseURL: library.sourceURL,
+            targetDatabase: database,
+            embedder: backgroundLoaded(LevelEmbedder()),
+            sources: library.sources
+        )
+        await nextLaunch.waitUntilOpen()
+        guard case .finished(let summary) = nextLaunch.phase else {
+            return XCTFail("expected the next launch to finish, got \(nextLaunch.phase)")
+        }
+        XCTAssertEqual(summary.movedThisRun, 3)
     }
 
     @MainActor

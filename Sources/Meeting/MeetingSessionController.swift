@@ -589,11 +589,13 @@ final class MeetingSessionController: ObservableObject {
         // after diarization to drive same-voice consolidation + cross-call matching;
         // WeSpeaker (256-dim, diarizer-native) is the default. The two produce
         // different-dimension vectors, so each gets its own speaker database file —
-        // a SpeakerProfile row must never mix dimensions. The DB path is derived from
-        // the *actually-loaded* embedder (not mere model-file presence): if ERes2Net
-        // is selected but its model can't be loaded, makeEmbedder returns nil and we
-        // transparently fall back to the WeSpeaker path — native embedding AND the
-        // default speakers.sqlite — so 256-d vectors can never land in the 192-d DB.
+        // a SpeakerProfile row must never mix dimensions. makeEmbedder loads nothing
+        // here on the main actor: it picks the model (and so the DB path) from
+        // model-file presence and returns an embedder that loads in the background;
+        // the diarizer's warmup, each meeting and the voiceprint migration await it.
+        // A missing model, or one that failed to load on this build, returns nil:
+        // native WeSpeaker embedding AND the default speakers.sqlite. A load that
+        // fails later yields no vectors, so 256-d vectors never land in a 192-d DB.
         let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
         // Nemotron by default, with a hidden switch back to pyannote
