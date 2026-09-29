@@ -378,10 +378,31 @@ Details:
   switch, after 2 minutes idle, or on a caret jump or segment break the
   keyboard reports. A scrap under 3 words (a quick "sounds good") doesn't end
   at a segment break when the same app's next segment starts within a
-  minute: it folds into that entry, each segment on its own line. Entries
-  under 2 characters after trimming aren't saved.
+  minute: it folds into that entry, each segment on its own line. Box
+  fragments (one character, or up to 5 characters with no letters, like a
+  card or code box) don't count toward the 3 words, so a card or code typed
+  over several boxes stays one entry. Entries under 2 characters after
+  trimming aren't saved.
 - Nothing is written for secure input, excluded apps (password managers
   always), apps outside the user's scope, or while Save my writing is off.
+- Secrets are scrubbed before an entry is written: a password typed at a
+  terminal prompt (`sudo`, `ssh`, `passwd`, `read -s`, …), a line that is only
+  a password-shaped token, one-time codes and PINs, card numbers (also split
+  across boxes, with the expiry and CVV after them), values after labels like
+  `password:`, `API_KEY=`, `--token` or `Bearer`, credentials in URLs, and
+  known token formats. Each becomes `⟨redacted:<kind>⟩`, where kind is
+  `password`, `code`, `card`, `secret`, `api-key`, `jwt`, `pem`, `iban` or
+  `ssn`. Emails and phone numbers are kept. An entry that was nothing but a
+  secret isn't saved. `Words:` and `Characters:` count the scrubbed text, and
+  the heading title comes from it.
+- Day files written before the scrubber (or under older rules) are
+  rescrubbed once when Writing starts: changed sections get their title and
+  counts redone, sections that were only a secret are removed, and files with
+  nothing to scrub aren't touched. A file that changes while it's being
+  rescrubbed is left for the next launch. The rules version it ran with is
+  remembered per Mac (`WritingDayFilesScrubbedRulesVersion`), so day files
+  that arrive later from another Mac aren't rescrubbed until the next rules
+  bump, and nothing runs while Writing is off.
 - Files are created 0600 and the `writing/` folder 0700.
 
 ## Parser guidance

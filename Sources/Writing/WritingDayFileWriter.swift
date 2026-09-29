@@ -26,6 +26,8 @@ final class WritingDayFileWriter {
 
     let recorder: WritingDayFileRecorder
     private var idleTimer: Timer?
+    /// Cleared at `stop()` so a rescrub still running stops between files.
+    private let rescrubAllowed = RescrubFlag()
 
     /// `problemStarted` runs on the main actor once per write problem (see
     /// `WritingDayFileRecorder.lastWriteFailure`), with the error case only.
@@ -53,19 +55,61 @@ final class WritingDayFileWriter {
         )
     }
 
+    /// The `WritingSecretScrubber.rulesVersion` the day files on disk were
+    /// last scrubbed with.
+    nonisolated static let scrubbedRulesVersionKey = "WritingDayFilesScrubbedRulesVersion"
+
     func start() {
         guard idleTimer == nil else { return }
         let recorder = recorder
         idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleSweepInterval, repeats: true) { _ in
             DispatchQueue.global(qos: .utility).async { recorder.closeIdleEntries() }
         }
+        rescrubOlderDayFilesIfNeeded()
+    }
+
+    /// Once per scrubber rules version: files written before the scrubber
+    /// (or under older rules) get the current rules. Retried next launch if
+    /// any file couldn't be read or written.
+    private func rescrubOlderDayFilesIfNeeded() {
+        let version = WritingSecretScrubber.rulesVersion
+        guard UserDefaults.standard.integer(forKey: Self.scrubbedRulesVersionKey) < version else { return }
+        let recorder = recorder
+        let allowed = rescrubAllowed
+        allowed.set(true)
+        DispatchQueue.global(qos: .utility).async {
+            let outcome = recorder.rescrubExistingDayFiles(shouldContinue: { allowed.value })
+            DiagnosticsLog.shared.record(
+                "writing-day-files-rescrubbed",
+                metadata: [
+                    "scanned": String(outcome.filesScanned),
+                    "changed": String(outcome.filesChanged),
+                    "failures": String(outcome.failures),
+                ]
+            )
+            guard outcome.failures == 0 else { return }
+            UserDefaults.standard.set(version, forKey: Self.scrubbedRulesVersionKey)
+        }
     }
 
     /// The final flush. Synchronous on purpose: it runs from the app's quit.
     func stop() {
+        rescrubAllowed.set(false)
         idleTimer?.invalidate()
         idleTimer = nil
         recorder.flush()
+    }
+}
+
+/// A flag the rescrub reads from its background queue.
+private final class RescrubFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+
+    var value: Bool { lock.withLock { stored } }
+
+    func set(_ newValue: Bool) {
+        lock.withLock { stored = newValue }
     }
 }
 

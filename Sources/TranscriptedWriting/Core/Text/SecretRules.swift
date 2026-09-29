@@ -35,17 +35,33 @@ public enum SecretRules {
         }
     }
 
-    /// Which optional categories participate. Structured secrets (card,
-    /// IBAN, SSN, API-key shapes, JWT, PEM) are always scrubbed regardless
-    /// of this config — only email/phone are configurable, since they are
-    /// also genuinely useful personal vocabulary.
+    /// Which optional categories participate. Structured secrets (IBAN,
+    /// SSN, the AWS/OpenAI/GitHub key shapes, JWT, PEM) are always scrubbed
+    /// regardless of this config. Email/phone are configurable since they
+    /// are also genuinely useful personal vocabulary; the loose card scan and
+    /// the generic high-entropy rule are on unless a caller runs stricter
+    /// versions of its own.
     public struct ScrubConfig: Equatable, Sendable {
         public var scrubEmails: Bool
         public var scrubPhones: Bool
+        /// Transcripted: the loose shapes, on by default. The generic
+        /// high-entropy rule also takes long paths and SCREAMING_SNAKE names,
+        /// and the card scan takes digit groups inside UUIDs and IDs that
+        /// happen to pass Luhn. Save my writing's scrubber turns both off and
+        /// runs stricter versions of its own (`WritingSecretScrubber`).
+        public var scrubGenericTokens: Bool
+        public var scrubCardNumbers: Bool
 
-        public init(scrubEmails: Bool, scrubPhones: Bool) {
+        public init(
+            scrubEmails: Bool,
+            scrubPhones: Bool,
+            scrubGenericTokens: Bool = true,
+            scrubCardNumbers: Bool = true
+        ) {
             self.scrubEmails = scrubEmails
             self.scrubPhones = scrubPhones
+            self.scrubGenericTokens = scrubGenericTokens
+            self.scrubCardNumbers = scrubCardNumbers
         }
 
         /// Text about to be written into the encrypted Personal History
@@ -121,13 +137,17 @@ public enum SecretRules {
             Rule(type: .pem, priority: 0, matches: pemMatches),
             Rule(type: .jwt, priority: 1, matches: jwtMatches),
             Rule(type: .iban, priority: 2, matches: ibanMatches),
-            Rule(type: .creditCard, priority: 3, matches: creditCardMatches),
             Rule(type: .ssn, priority: 4, matches: ssnMatches),
             Rule(type: .apiKey, priority: 5, matches: awsAccessKeyMatches),
             Rule(type: .apiKey, priority: 6, matches: openAIKeyMatches),
             Rule(type: .apiKey, priority: 7, matches: githubTokenMatches),
-            Rule(type: .apiKey, priority: 8, matches: highEntropyTokenMatches),
         ]
+        if config.scrubCardNumbers {
+            list.append(Rule(type: .creditCard, priority: 3, matches: creditCardMatches))
+        }
+        if config.scrubGenericTokens {
+            list.append(Rule(type: .apiKey, priority: 8, matches: highEntropyTokenMatches))
+        }
         if config.scrubEmails {
             list.append(Rule(type: .email, priority: 9, matches: emailMatches))
         }

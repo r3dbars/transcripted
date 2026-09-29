@@ -1,7 +1,7 @@
 import Foundation
 
-/// The disk side of Save my writing: appends one section to a day file and
-/// deletes the day files. The folder comes from the caller (the bridge's
+/// The disk side of Save my writing: appends one section to a day file,
+/// rewrites a day file when older text is scrubbed, and deletes the day files. The folder comes from the caller (the bridge's
 /// injected closure); nothing here decides where the capture library is.
 ///
 /// Every write is atomic: the whole new file goes to an owner-only temporary
@@ -32,6 +32,44 @@ enum WritingDayFileStore {
 
         let existing = try existingContents(of: destination)
         let contents = WritingDayFileFormatter.contents(appending: section, to: existing, header: header)
+        try writeAtomically(contents, to: destination, in: folder)
+        return destination
+    }
+
+    /// Reads a day file directly inside `directory`. `nil` when it doesn't
+    /// exist; throws when it exists but isn't a readable regular file.
+    static func contents(ofDayFile fileName: String, in directory: URL) throws -> Data? {
+        guard isDayFileName(fileName) else { throw StoreError.unreadableDayFile }
+        return try existingContents(of: resolved(directory).appendingPathComponent(fileName, isDirectory: false))
+    }
+
+    /// Replaces an existing day file's whole contents, atomically, the same
+    /// way an append does, but only while it still holds `expected`: a file
+    /// that changed or vanished since it was read (an append from another
+    /// recorder, delete all) is left alone. Used to scrub files an older
+    /// build wrote. Returns the file's URL.
+    @discardableResult
+    static func replace(dayFile fileName: String, in directory: URL, expected: Data, with contents: Data) throws -> URL {
+        guard isDayFileName(fileName) else { throw StoreError.writeFailed }
+        let folder = resolved(directory)
+        guard SecureLocalStorage.ensureOwnerOnlyDirectory(at: folder) else { throw StoreError.folderUnavailable }
+        let destination = folder.appendingPathComponent(fileName, isDirectory: false)
+        guard try existingContents(of: destination) == expected else { throw StoreError.writeFailed }
+        try writeAtomically(contents, to: destination, in: folder)
+        return destination
+    }
+
+    /// The names of the `Writing_*.md` files directly inside `directory`.
+    /// Refuses a folder not named `writing`, like `deleteAll`.
+    static func dayFileNames(in directory: URL) -> [String] {
+        guard directory.lastPathComponent == folderName else { return [] }
+        let folder = resolved(directory)
+        guard folder.lastPathComponent == folderName,
+              let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
+        return names.filter(isDayFileName).sorted()
+    }
+
+    private static func writeAtomically(_ contents: Data, to destination: URL, in folder: URL) throws {
         let temporary = folder.appendingPathComponent(
             temporaryPrefix + UUID().uuidString.lowercased() + temporarySuffix,
             isDirectory: false
@@ -52,7 +90,6 @@ enum WritingDayFileStore {
             _ = SecureLocalStorage.removeOwnerOnlyFile(at: temporary)
             throw StoreError.writeFailed
         }
-        return destination
     }
 
     /// Deletes every `Writing_*.md` in the writing folder, plus temporary files
