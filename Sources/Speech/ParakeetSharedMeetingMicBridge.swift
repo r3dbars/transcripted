@@ -61,9 +61,13 @@ extension ParakeetEngine {
     /// not taken from the meeting's slower published mic level.
     nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
         sharedMeetingMicRecorder.append(buffer)
-        guard let reading = sharedMeetingMicLevelMeter.levelIfDue(for: buffer) else { return }
-        Task { @MainActor [weak self] in
-            self?.updateSharedMeetingMicAudioLevel(reading)
+        for reading in sharedMeetingMicLevelMeter.levels(for: buffer) {
+            Task { @MainActor [weak self] in
+                if reading.delay > 0 {
+                    try? await Task.sleep(for: .seconds(reading.delay))
+                }
+                self?.updateSharedMeetingMicAudioLevel(reading)
+            }
         }
     }
 
