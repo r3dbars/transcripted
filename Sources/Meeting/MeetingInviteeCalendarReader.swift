@@ -28,6 +28,18 @@ final class MeetingInviteeCalendarReader: @unchecked Sendable {
         )?.inviteeNames ?? []
     }
 
+    /// How many people besides you are on that same event, including ones
+    /// with no usable name; nil when there is no access or no single event.
+    func invitedPeopleCount(recordingStart: Date) async -> Int? {
+        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+        let events = await eventSnapshots(recordingStart: recordingStart)
+        guard let event = MeetingInviteeSuggestionPolicy.matchingEvent(
+            recordingStart: recordingStart,
+            among: events
+        ) else { return nil }
+        return event.invitedPeopleCount ?? event.inviteeNames.count
+    }
+
     /// Every event running at any point in the window where a matching event
     /// could start; the policy keeps only the ones that actually start in it.
     private func eventSnapshots(recordingStart: Date) async -> [MeetingInviteeEventSnapshot] {
@@ -66,7 +78,8 @@ final class MeetingInviteeCalendarReader: @unchecked Sendable {
             startDate: startDate,
             endDate: endDate,
             isAllDay: event.isAllDay,
-            inviteeNames: MeetingInviteeSuggestionPolicy.inviteeNames(from: participants)
+            inviteeNames: MeetingInviteeSuggestionPolicy.inviteeNames(from: participants),
+            invitedPeopleCount: MeetingInviteeSuggestionPolicy.invitedPeopleCount(from: participants)
         )
     }
 }

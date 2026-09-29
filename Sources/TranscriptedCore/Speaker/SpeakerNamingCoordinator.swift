@@ -709,6 +709,15 @@ extension TranscriptionTaskManager {
         return hasPendingSpeakerNamingReview(transcriptURL: transcriptURL)
     }
 
+    /// A review that still needs answers is on screen or queued. A review
+    /// that only lists recognized voices (the island's "who was on the call")
+    /// doesn't count: nothing in it needs an answer, so it must not hold back
+    /// a failed-meeting retry or an update install.
+    public var hasSpeakerReviewAwaitingAnswers: Bool {
+        speakerNamingRequest?.asksAboutVoices == true
+            || pendingSpeakerNamingRequests.contains { $0.asksAboutVoices }
+    }
+
     public func hasPendingSpeakerNamingReview(transcriptId: UUID) -> Bool {
         speakerNamingRequest?.transcriptId == transcriptId
             || pendingSpeakerNamingRequests.contains { $0.transcriptId == transcriptId }
@@ -738,7 +747,7 @@ extension TranscriptionTaskManager {
                 }
             }
         }
-        cleanupSpeakerClips(request.speakers)
+        cleanupSpeakerClips(request.speakers + request.recognizedSpeakers)
     }
 
     func clearCompletedSpeakerNamingRequest(

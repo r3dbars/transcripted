@@ -9,6 +9,10 @@ final class CapturePillController {
     private var dismissTask: Task<Void, Never>?
     private var countdownTask: Task<Void, Never>?
     private var eventMonitor: Any?
+    /// When the unanswered prompt closes by itself, and how much was left
+    /// when the pointer paused it over the island.
+    private var dismissDeadline: Date?
+    private var pausedTimeRemaining: TimeInterval?
 
     var onRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
@@ -27,6 +31,28 @@ final class CapturePillController {
                 default: break
                 }
             }
+            island?.callHoverHandler = { [weak self] hovered in
+                self?.setTimeoutPaused(hovered)
+            }
+        }
+    }
+
+    /// The island's ring around Not now stops while the pointer is over the
+    /// island; the timeout behind it stops too, so the prompt never closes
+    /// while someone is reading it.
+    private func setTimeoutPaused(_ paused: Bool) {
+        guard representedCandidate != nil else { return }
+        if paused {
+            guard pausedTimeRemaining == nil, let dismissDeadline else { return }
+            pausedTimeRemaining = max(1, dismissDeadline.timeIntervalSinceNow)
+            dismissTask?.cancel()
+            dismissTask = nil
+            countdownTask?.cancel()
+            countdownTask = nil
+        } else if let remaining = pausedTimeRemaining {
+            pausedTimeRemaining = nil
+            scheduleDismiss(timeout: remaining)
+            scheduleCountdown(seconds: max(1, Int(ceil(remaining))))
         }
     }
 
@@ -50,6 +76,7 @@ final class CapturePillController {
         guard let panel, let pillView else { return false }
 
         representedCandidate = candidate
+        pausedTimeRemaining = nil
         let timeoutSeconds = max(1, Int(ceil(timeout)))
         if let island, DictationOverlayPresentationPreferences.mode() == .notchIsland {
             island.updateCallPrompt(NotchIslandCallPromptContent(
@@ -85,6 +112,8 @@ final class CapturePillController {
             self.eventMonitor = nil
         }
 
+        dismissDeadline = nil
+        pausedTimeRemaining = nil
         let candidate = representedCandidate
         representedCandidate = nil
         panel?.orderOut(nil)
@@ -130,6 +159,7 @@ final class CapturePillController {
 
     private func scheduleDismiss(timeout: TimeInterval) {
         dismissTask?.cancel()
+        dismissDeadline = Date().addingTimeInterval(max(1, timeout))
         dismissTask = Task { @MainActor [weak self] in
             let nanoseconds = UInt64(max(1, timeout) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanoseconds)

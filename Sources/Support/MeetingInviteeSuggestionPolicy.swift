@@ -9,6 +9,11 @@ struct MeetingInviteeEventSnapshot: Equatable {
     let isAllDay: Bool
     /// Everyone invited except you, already cleaned by `inviteeNames(from:)`.
     let inviteeNames: [String]
+    /// How many people besides you are on the invite, from
+    /// `invitedPeopleCount(from:)`. Counts invitees `inviteeNames` leaves out
+    /// (an email that doesn't read as a name), so a call is never mistaken
+    /// for a one-on-one. Nil = unknown; use `inviteeNames.count`.
+    var invitedPeopleCount: Int? = nil
 }
 
 /// One raw invitee as EventKit reports it, before cleaning.
@@ -75,6 +80,32 @@ enum MeetingInviteeSuggestionPolicy {
             names.append(name)
         }
         return names
+    }
+
+    /// How many people besides you are on the invite: rooms and groups left
+    /// out, the organizer listed twice counted once. Unlike `inviteeNames`,
+    /// someone with only an email like "jsmith@…" still counts, since they
+    /// can still talk.
+    static func invitedPeopleCount(from participants: [MeetingInviteeRawParticipant]) -> Int {
+        var seen: Set<String> = []
+        for participant in participants where participant.isPerson && !participant.isCurrentUser {
+            if let name = participant.name, SpeakerNameSelectionPolicy.isOwnerLabel(name) { continue }
+            let email = participant.email?
+                .replacingOccurrences(of: "mailto:", with: "", options: [.caseInsensitive, .anchored])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let key: String
+            if let email, !email.isEmpty {
+                key = "email:" + email
+            } else if let name = displayName(for: participant) {
+                key = "name:" + SpeakerNameSelectionPolicy.normalizedSearchText(name)
+            } else {
+                // Nothing to tell this person apart by; count them anyway.
+                key = "unknown:\(seen.count)"
+            }
+            seen.insert(key)
+        }
+        return seen.count
     }
 
     static func displayName(for participant: MeetingInviteeRawParticipant) -> String? {

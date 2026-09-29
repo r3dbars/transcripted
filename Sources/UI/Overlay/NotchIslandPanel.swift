@@ -41,7 +41,12 @@ final class NotchIslandPanel: NSPanel {
         self.sharingType = .none
     }
 
-    override var canBecomeKey: Bool { false }
+    /// On only while the island asks who was on a call and someone clicks a
+    /// name box to type. The island otherwise never takes keyboard focus
+    /// from the app being dictated into.
+    var acceptsKeyForTyping = false
+
+    override var canBecomeKey: Bool { acceptsKeyForTyping }
     override var canBecomeMain: Bool { false }
 
     /// AppKit keeps windows out of the menu bar; the island belongs there.

@@ -768,15 +768,23 @@ class FloatingOverlayController {
     /// island shows the words, a Paste button, and a ring that runs down to
     /// the close; pressing ⌘V elsewhere turns it into "Pasted". Other
     /// overlay modes keep the plain clipboard notice.
-    func showNotPastedNotice(_ text: String, fallbackMessage: String, paste: @escaping () -> Void) {
+    /// `unconfirmed` is for a paste that may well have landed (the target
+    /// read the clipboard too late to prove it): the island says "Maybe
+    /// pasted" so the Paste button doesn't read as the fix and double it.
+    func showNotPastedNotice(
+        _ text: String,
+        fallbackMessage: String,
+        unconfirmed: Bool = false,
+        paste: @escaping () -> Void
+    ) {
         guard isIslandMode else {
             showClipboardNotice(fallbackMessage)
             return
         }
-        showMessage("Not pasted", tone: .notice, notPasted: NotPastedNotice(
+        showMessage(unconfirmed ? "Maybe pasted" : "Not pasted", tone: .notice, notPasted: NotPastedNotice(
             text: text,
             actionTitle: "Paste",
-            hint: nil,
+            hint: unconfirmed ? "If the words aren\u{2019}t there, paste them again." : nil,
             watchesForManualPaste: true,
             action: paste
         ))

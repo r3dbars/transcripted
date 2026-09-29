@@ -105,7 +105,11 @@ final class GhostBrainServerHost: @unchecked Sendable {
             completionProfile: productProfile,
             modelIdentifier: "unspecified"
         )
-        self.engine = LlamaCompletionEngine(baseURL: runtime.baseURL, productProfile: productProfile)
+        self.engine = LlamaCompletionEngine(
+            baseURL: runtime.baseURL,
+            accessKey: runtime.accessKey,
+            productProfile: productProfile
+        )
         self.personalHistory = personalHistory
         self.sceneProvider = sceneProvider
         self.targetProvider = targetProvider

@@ -502,6 +502,60 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(groups.last?.meetingCount, 1, "a voice heard once should count one meeting")
     }
 
+    runSuite("SpeakerReviewQueueScanner groups voices under the call they were last heard in") {
+        let repeatedId = UUID()
+        let otherId = UUID()
+        let newestURL = URL(fileURLWithPath: "/tmp/Design_sync.md")
+        let olderURL = URL(fileURLWithPath: "/tmp/Standup.md")
+        let designSyncId = UUID()
+        let newest = SpeakerReviewQueueScanner.pendingItems(
+            in: deferredMarkdown(speakerId: repeatedId, title: "Design sync", transcriptId: designSyncId, date: "2026-05-21", speakerName: "Speaker 1", sampleText: "Newest line.")
+                .replacingOccurrences(of: "capture_type: meeting", with: "capture_type: meeting\nduration: \"42:10\""),
+            transcriptURL: newestURL,
+            profilesById: [repeatedId: makeReviewQueueProfile(id: repeatedId, name: nil, calls: 2)],
+            clipURLsByProfileID: [:]
+        )
+        let older = SpeakerReviewQueueScanner.pendingItems(
+            in: deferredMarkdown(speakerId: repeatedId, title: "Standup", date: "2026-05-19", speakerName: "Speaker 1", sampleText: "Older line."),
+            transcriptURL: olderURL,
+            profilesById: [repeatedId: makeReviewQueueProfile(id: repeatedId, name: nil, calls: 2)],
+            clipURLsByProfileID: [:]
+        )
+        let otherInNewest = SpeakerReviewQueueScanner.pendingItems(
+            in: deferredMarkdown(speakerId: otherId, title: "Design sync", transcriptId: designSyncId, date: "2026-05-21", speakerName: "Speaker 2", sampleText: "Second voice."),
+            transcriptURL: newestURL,
+            profilesById: [otherId: makeReviewQueueProfile(id: otherId, name: nil)],
+            clipURLsByProfileID: [:]
+        )
+
+        let voices = SpeakerReviewQueueScanner.groupedByVoice(newest + otherInNewest + older)
+        let calls = SpeakerReviewQueueScanner.groupedByMeeting(voices)
+
+        assertEqual(calls.count, 1, "a voice heard in two calls shows once, under its newest call")
+        assertEqual(calls.first?.meetingTitle, "Design sync")
+        assertEqual(calls.first?.voices.map(\.id), [repeatedId, otherId], "both voices from that call, in queue order")
+        assertEqual(calls.first?.durationSeconds, 42 * 60 + 10, "the card knows how long the call was")
+        assertFalse(calls.first?.isImported ?? true, "a recorded call can look up its invitees")
+    }
+
+    runSuite("SpeakerReviewSkippedCalls remembers a skipped call") {
+        let suite = "speaker-review-skip-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID()
+        let key = SpeakerReviewSkippedCalls.key(transcriptId: id, transcriptURL: URL(fileURLWithPath: "/tmp/Call.md"))
+        assertEqual(key, id.uuidString, "a call is keyed by its transcript id so a rename keeps the skip")
+        assertEqual(
+            SpeakerReviewSkippedCalls.key(transcriptId: nil, transcriptURL: URL(fileURLWithPath: "/tmp/Call.md")),
+            "/tmp/Call.md",
+            "an old transcript without an id falls back to its path"
+        )
+        assertTrue(SpeakerReviewSkippedCalls.load(defaults: defaults).isEmpty)
+        SpeakerReviewSkippedCalls.add(key, defaults: defaults)
+        SpeakerReviewSkippedCalls.add(key, defaults: defaults)
+        assertEqual(SpeakerReviewSkippedCalls.load(defaults: defaults), [key], "skipping twice stores it once, and it survives a reload")
+    }
+
     runSuite("SpeakerReviewQueueScanner voice groups fall back to any usable sample text") {
         let speakerId = UUID()
         let noSample = SpeakerReviewQueueScanner.pendingItems(

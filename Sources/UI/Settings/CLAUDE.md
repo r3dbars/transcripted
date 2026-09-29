@@ -132,9 +132,13 @@ settings-side agent connection flow.
   download progress until the voice model is on this Mac. After a Don't Allow
   on the microphone, the permissions step offers "Skip for now" so people can
   still reach file import; the Done screen then says the mic is off.
-- `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
-  queue (one row per distinct voice), compact duplicate-merge suggestions, and
-  the searchable all-speakers list with per-row play/rename/merge/delete.
+- `SpeakerPeopleSettingsSection.swift` - speakers surface: "Name these
+  people", one card per call (name, day, length) with the voices still
+  unnamed from it (a voice heard in several calls shows once, under the most
+  recent) and that call's calendar invitees as one-tap names; "Skip this
+  call" is saved (`SpeakerReviewSkippedCalls`) and moves its voices to
+  Everyone. Then compact duplicate-merge suggestions and the searchable
+  all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
   held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
   its header names the meeting. When the recording started with a calendar event
@@ -142,6 +146,9 @@ settings-side agent connection flow.
   its invitees show as one-click name buttons on each row and lead the name
   list, and a 1:1 pre-fills the one remote voice
   (`MeetingInviteeSuggestionPolicy`). Suggestions only; the user still saves.
+  With the Notch island selected the review asks in the island instead
+  (`Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift`); Later there saves
+  what was answered and the rest waits in Speakers.
 - `SpeakerReviewPresentationGate.swift` - Foundation-pure rule for when the
   speaker review window may appear (waits for Stop while a meeting records).
 - `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow

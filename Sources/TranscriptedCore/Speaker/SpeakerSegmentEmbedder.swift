@@ -34,3 +34,11 @@ public protocol SpeakerSegmentEmbedder: Sendable {
     /// speaker identity stack (cross-call matching + within-meeting clustering).
     var thresholds: SpeakerEmbeddingThresholds { get }
 }
+
+/// An embedder that can use the audio around a segment as context (the pyannote
+/// pipeline embeds a speaker within a real 10 s window, masked to that speaker).
+/// `DiarizationService` prefers this entry point when the embedder offers it.
+public protocol ContextualSpeakerSegmentEmbedder: SpeakerSegmentEmbedder {
+    /// Embed `startSample..<endSample` of the whole recording `audio`.
+    func embed(audio: [Float], sampleRate: Int, startSample: Int, endSample: Int) -> [Float]?
+}

@@ -90,6 +90,30 @@ func testMeetingInviteeSuggestionPolicy() {
         )
     }
 
+    runSuite("MeetingInviteeSuggestionPolicy counts every invited person, named or not") {
+        // One named colleague plus three guests whose emails don't read as
+        // names: only one name to show, but four people who can talk.
+        let participants = [
+            MeetingInviteeRawParticipant(name: "Justin", email: "mailto:me@example.com", isCurrentUser: true, isPerson: true),
+            MeetingInviteeRawParticipant(name: "Sam Lee", email: "mailto:sam.lee@example.com", isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: nil, email: "mailto:jsmith@client.com", isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: nil, email: "mailto:sam@corp.io", isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: "ops@corp.io", email: nil, isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: "Room 4B", email: nil, isCurrentUser: false, isPerson: false),
+        ]
+        assertEqual(MeetingInviteeSuggestionPolicy.inviteeNames(from: participants), ["Sam Lee"], "only one invitee has a showable name")
+        assertEqual(MeetingInviteeSuggestionPolicy.invitedPeopleCount(from: participants), 4, "every person but you counts toward the call size")
+
+        // The organizer is often listed again among the attendees.
+        let oneOnOne = [
+            MeetingInviteeRawParticipant(name: "Sam Lee", email: "mailto:Sam.Lee@example.com", isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: "Sam Lee", email: "mailto:sam.lee@example.com", isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: "You", email: nil, isCurrentUser: false, isPerson: true),
+            MeetingInviteeRawParticipant(name: "Justin", email: "mailto:me@example.com", isCurrentUser: true, isPerson: true),
+        ]
+        assertEqual(MeetingInviteeSuggestionPolicy.invitedPeopleCount(from: oneOnOne), 1, "a real one-on-one still counts as one")
+    }
+
     runSuite("MeetingInviteeSuggestionPolicy maps invitees onto saved people") {
         let sam = makeInviteeTestPerson(name: "Sam Lee", calls: 3)
         let taylorA = makeInviteeTestPerson(name: "Taylor Wolfe", calls: 2)

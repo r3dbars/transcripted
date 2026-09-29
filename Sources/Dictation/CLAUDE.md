@@ -7,6 +7,7 @@
 ## Files
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
+- `DictationSessionCapTimer.swift` — the clock behind the 5-minute cap: sleep until the last 30 seconds, then tick every second so the pill counts down (telling VoiceOver once, the first time the countdown shows), and return at the cap or on cancel. `DictationSessionController.installSessionTimeout` runs it on the real uptime clock and then finalizes the take; `Tests/DictationSessionCapTimerTests.swift` runs it on a fake clock
 - `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session
 - `DictationStoppedAudioCheckpointSignal.swift` — marks checkpoint completion, with bounded cancellation-aware waits for Quit and retry admission; completion alone does not prove persistence
 - `DictationStopCheckpoint.swift` — the first stage of stopping a dictation: stop the mic, play the stop click, then write the private recovery WAV off the main actor before anything waits on the model, re-checking the session after each step. `DictationSessionController` runs it with the real router, sound and store; `Tests/DictationStopCheckpointTests.swift` runs it with fakes
@@ -74,6 +75,7 @@ Each section captures:
 ## Test coverage
 
 - `Tests/DictationSessionTimeoutTests.swift`
+- `Tests/DictationSessionCapTimerTests.swift`
 - `Tests/DictationStoppedAudioRecoveryTests.swift`
 - `Tests/DictationStopCheckpointTests.swift`
 - `Tests/DictationEmptyTranscriptPolicyTests.swift`

@@ -163,6 +163,30 @@ public class TranscriptionTaskManager: ObservableObject {
     /// recovery would otherwise archive and unlink audio a queued job is about
     /// to open. Set by the app layer; nil in Core-only contexts and tests.
     public var reservedAudioURLsProvider: (() -> [URL])?
+    /// Speaker-lab hook: receives each live meeting's Phase 1 result (exact
+    /// utterance times, channels, diarizer and saved-speaker IDs) before speaker
+    /// classification, so `Tools/SpeakerEvalHarness` can score naming rows
+    /// against a simulated answer key. The app never sets it.
+    public var pipelineResultObserver: (@Sendable (TranscriptionResult) -> Void)?
+    /// Per-meeting speaker separation for the call channel (SpeakerSeparation.swift).
+    /// The app sets this to turn on "split generously, then merge smartly" and to pass
+    /// a speaker cap from the calendar invite. Called once per transcription run with
+    /// the meeting's recording date, or nil for an imported file (whose date can't
+    /// name a meeting); nil (the default) keeps the shipped behavior.
+    public var speakerSeparationProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerSeparationOptions?)?
+    /// Lineup naming: who is expected in this meeting (the calendar invite, else the
+    /// people heard most recently). When a voice's best match is on the lineup, silent
+    /// naming uses `SpeakerNamingPolicy.InviteeBars` instead of the stricter default
+    /// bars. The app sets this only when the feature is on; nil keeps today's behavior.
+    /// Called once per transcription run with the meeting's recording date; imported
+    /// files never call it (their date can't name a meeting).
+    public var lineupNamingProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerNamingPolicy.LineupRequest?)?
+    /// True when the speaker review lists voices that were named on their own
+    /// (the Notch island's "who was on the call"). Only then does the pipeline
+    /// cut a clip for each recognized voice and queue a review for a meeting
+    /// where everyone was recognized. Nil or false (the review window, Core-only
+    /// contexts, tests) finishes such a meeting at once, as before.
+    public var reviewListsRecognizedVoicesProvider: (@MainActor () -> Bool)?
 
     /// Scratch-directory mic placeholders minted for system-only failures,
     /// keyed by task. When the archive pass later mints a second placeholder

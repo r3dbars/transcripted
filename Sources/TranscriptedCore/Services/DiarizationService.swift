@@ -1,7 +1,12 @@
 // DiarizationService.swift
-// Offline speaker diarization using FluidAudio's PyAnnote pipeline.
-//   - OfflineDiarizerManager, PyAnnote segmentation + WeSpeaker + VBx clustering.
-//   - Unlimited speakers, ~15% DER on VoxConverse via CoreML.
+// Offline speaker diarization through FluidAudio. Two backends (`DiarizationBackend`):
+//   - .nemotron (the app's default): NVIDIA Nemotron 3 Diarization, up to 8
+//     speakers at 10 ms resolution. Frame probabilities become exclusive turns via
+//     `NemotronTurnBuilder`; voiceprints come from the injected segment embedder or
+//     `FluidOfflineWeSpeakerSegmentEmbedder` (the pyannote path's own WeSpeaker
+//     model), since Nemotron emits none. If Nemotron can't load, pyannote stands in.
+//   - .pyannote: OfflineDiarizerManager, PyAnnote segmentation + WeSpeaker + VBx
+//     clustering. Unlimited speakers, ~15% DER on VoxConverse via CoreML.
 
 import Foundation
 @preconcurrency import FluidAudio
@@ -37,9 +42,25 @@ public enum DiarizationModelState: Equatable {
 public class DiarizationService: ObservableObject {
     @Published public var modelState: DiarizationModelState = .notLoaded
 
+    /// Which diarization model this service was asked to run. Fixed for the service's lifetime.
+    public nonisolated let backend: DiarizationBackend
+
+    /// The model actually loaded: `backend`, unless Nemotron failed to load (offline
+    /// on first use, a bad download) and pyannote stood in so meetings still get
+    /// speakers. Reset by `cleanup()`, so the next initialize tries Nemotron again.
+    /// Both paths embed with the same offline WeSpeaker model, so the speaker
+    /// database stays the same either way.
+    public private(set) var activeBackend: DiarizationBackend
+
     // Offline pipeline (PyAnnote) — for post-recording transcripts
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineInitializationTask: Task<Void, Never>?
+
+    // Nemotron backend. The runner owns the non-thread-safe Nemotron3Diarizer.
+    // The fallback embedder is loaded only when no `segmentEmbedder` was injected,
+    // because Nemotron produces no voiceprints of its own.
+    private var nemotronRunner: NemotronDiarizationRunner?
+    private var nemotronFallbackEmbedder: (any SpeakerSegmentEmbedder)?
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
@@ -52,29 +73,60 @@ public class DiarizationService: ObservableObject {
     /// off-main-actor `diarizeOffline` path can read it without an actor hop.
     private nonisolated let segmentEmbedder: (any SpeakerSegmentEmbedder)?
 
+    /// - Parameter backend: which diarization model to run. `.nemotron` also reads
+    ///   the lab-only `TRANSCRIPTED_NEMOTRON_PRESET` environment override when it
+    ///   initializes (see `NemotronDiarizationRunner.presetEnvironmentKey`).
     public init(
         bundleProvider: @escaping ModelBundleProvider = defaultModelBundleProvider,
-        segmentEmbedder: (any SpeakerSegmentEmbedder)? = nil
+        segmentEmbedder: (any SpeakerSegmentEmbedder)? = nil,
+        backend: DiarizationBackend = .pyannote
     ) {
         self.bundleProvider = bundleProvider
         self.segmentEmbedder = segmentEmbedder
+        self.backend = backend
+        self.activeBackend = backend
+        // Before any diarizer model loads: keep 0.15.x-era (and bundled) pyannote
+        // caches valid under FluidAudio 0.17's pinned revision.
+        FluidAudioCompatibility.keepUnpinnedDiarizerCaches()
     }
 
     /// Cosine thresholds for the active embedding model: the injected embedder's
     /// calibrated set, or the WeSpeaker defaults when the diarizer's native
-    /// embedding is in use. `nonisolated` so the off-main-actor pipeline reads it
+    /// embedding is in use. The Nemotron backend's fallback embedder
+    /// (`FluidWeSpeakerSegmentEmbedder`) is WeSpeaker too, so the default holds
+    /// there as well. `nonisolated` so the off-main-actor pipeline reads it
     /// without an actor hop.
     public nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds {
         segmentEmbedder?.thresholds ?? .weSpeaker
     }
 
-    public var isReady: Bool { modelState == .ready && offlineDiarizerManager != nil }
+    /// The Nemotron preset the `.nemotron` backend loads for `environment`: the lab-only
+    /// `TRANSCRIPTED_NEMOTRON_PRESET` override when it names a known preset, otherwise the
+    /// default (`fast128`). Unknown names fall back to the default, as `initialize()` does.
+    /// Lets tools such as the speaker lab record the preset that actually ran.
+    public nonisolated static func resolvedNemotronPresetName(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        NemotronDiarizationRunner.resolvePresetName(environment: environment)
+    }
+
+    public var isReady: Bool { modelState == .ready && backendModelsLoaded }
+
+    /// Whether the active backend's models are in memory.
+    private var backendModelsLoaded: Bool {
+        switch activeBackend {
+        case .pyannote:
+            return offlineDiarizerManager != nil
+        case .nemotron:
+            return nemotronRunner != nil && (segmentEmbedder != nil || nemotronFallbackEmbedder != nil)
+        }
+    }
 
     // MARK: - Model Initialization
 
     /// Load the offline diarization models required by the current meeting pipeline.
     public func initialize() async {
-        guard offlineDiarizerManager == nil else {
+        guard !backendModelsLoaded else {
             modelState = .ready
             AppLogger.transcription.debug("Offline diarization already initialized")
             return
@@ -104,7 +156,24 @@ public class DiarizationService: ObservableObject {
         AppLogger.transcription.info("Diarization initializing offline models")
 
         do {
-            try await initializeOffline()
+            switch backend {
+            case .pyannote:
+                try await initializeOffline()
+            case .nemotron:
+                do {
+                    try await initializeNemotron()
+                    activeBackend = .nemotron
+                } catch {
+                    let kind = ModelDownloadService.classifyError(error)
+                    AppLogger.transcription.warning("Nemotron diarizer failed to load; using pyannote", [
+                        "error": "\(error.localizedDescription)", "kind": kind.title
+                    ])
+                    nemotronRunner = nil
+                    nemotronFallbackEmbedder = nil
+                    try await initializeOffline()
+                    activeBackend = .pyannote
+                }
+            }
 
             modelState = .ready
             AppLogger.transcription.info("Offline diarization models loaded and ready")
@@ -119,27 +188,10 @@ public class DiarizationService: ObservableObject {
     private func initializeOffline() async throws {
         let loadStart = Date()
 
-        // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
-        // Key win: Fa 0.07→0.25 (~halves DER by letting VBx reconsider speaker assignments).
-        // The four LabKnobOverrides values return these exact defaults unless the
-        // hill-climb lab sets TRANSCRIPTED_LAB_KNOBS_FILE (see LabKnobOverrides.swift).
-        let offlineConfig = OfflineDiarizerConfig(
-            clusteringThreshold: LabKnobOverrides.double("diarization.clustering_threshold", default: 0.6),
-            Fa: LabKnobOverrides.double("diarization.vbx_fa", default: 0.25),
-            Fb: LabKnobOverrides.double("diarization.vbx_fb", default: 0.63),
-            windowDuration: 10.0,
-            segmentationStepRatio: 0.266,
-            embeddingBatchSize: 32,
-            embeddingExcludeOverlap: true,
-            minSegmentDuration: LabKnobOverrides.double("diarization.min_segment_duration", default: 1.1821),
-            minGapDuration: 0.2874,
-            speechOnsetThreshold: 0.4472,
-            speechOffsetThreshold: 0.4472,
-            segmentationMinDurationOn: 0.0,
-            segmentationMinDurationOff: 0.2738,
-            maxVBxIterations: 24,
-            convergenceTolerance: 0.0001
-        )
+        // Tuned config with FluidAudio 0.17's two clustering changes undone, plus the
+        // hill-climb lab's LabKnobOverrides knobs; see
+        // FluidAudioCompatibility.tunedOfflineDiarizerConfig().
+        let offlineConfig = FluidAudioCompatibility.tunedOfflineDiarizerConfig()
         let manager = OfflineDiarizerManager(config: offlineConfig)
 
         if let bundlePath = bundleProvider("offline-diarizer-models") {
@@ -154,8 +206,107 @@ public class DiarizationService: ObservableObject {
         }
 
         offlineDiarizerManager = manager
+        baseOfflineConfig = offlineConfig
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
         AppLogger.transcription.info("Offline diarizer models loaded", ["elapsed": elapsed])
+    }
+
+    /// Speaker-lab seam (Tools/SpeakerEvalHarness): bounds on how many speakers the
+    /// offline diarizer may return. FluidAudio re-clusters to fit when the count it
+    /// finds falls outside them. The lab sets this per meeting to test a speaker-count
+    /// hint taken from the calendar invite; while set it applies to every offline
+    /// call. The app never sets it.
+    public var labSpeakerBounds: DiarizationSpeakerBounds?
+    private var baseOfflineConfig: OfflineDiarizerConfig?
+
+    /// A one-off manager with the loaded settings plus `bounds`, loading models the
+    /// same way `initializeOffline` does (CoreML's compile cache keeps this quick).
+    private func boundedManager(_ bounds: DiarizationSpeakerBounds) async throws -> OfflineDiarizerManager? {
+        guard var config = baseOfflineConfig else { return nil }
+        config.clustering.minSpeakers = bounds.min
+        config.clustering.maxSpeakers = bounds.max
+        let manager = OfflineDiarizerManager(config: config)
+        if let bundlePath = bundleProvider("offline-diarizer-models") {
+            manager.initialize(models: try await OfflineDiarizerModels.load(from: bundlePath))
+        } else {
+            try await manager.prepareModels()
+        }
+        return manager
+    }
+
+    /// Managers that differ from the loaded one only in clustering threshold
+    /// (`SpeakerSeparationOptions.clusteringThreshold`). They share one copy of the
+    /// models, loaded from the same place `initializeOffline` loads them.
+    private var thresholdManagers: [Double: OfflineDiarizerManager] = [:]
+    private var sharedOfflineModels: OfflineDiarizerModels?
+
+    private func manager(clusteringThreshold: Double) async throws -> OfflineDiarizerManager? {
+        if let cached = thresholdManagers[clusteringThreshold] { return cached }
+        guard var config = baseOfflineConfig else { return nil }
+        // Our threshold is a cosine similarity (0.15.x semantics); FluidAudio 0.17
+        // reads a cut distance.
+        config.clusteringThreshold = FluidAudioCompatibility.clusteringDistance(fromCosineSimilarity: clusteringThreshold)
+        let models: OfflineDiarizerModels
+        if let shared = sharedOfflineModels {
+            models = shared
+        } else {
+            models = try await OfflineDiarizerModels.load(
+                from: bundleProvider("offline-diarizer-models") ?? OfflineDiarizerModels.defaultModelsDirectory()
+            )
+            sharedOfflineModels = models
+        }
+        let manager = OfflineDiarizerManager(config: config)
+        manager.initialize(models: models)
+        thresholdManagers[clusteringThreshold] = manager
+        AppLogger.transcription.info("Offline diarizer ready at a custom clustering threshold", [
+            "threshold": String(format: "%.2f", clusteringThreshold)
+        ])
+        return manager
+    }
+
+    /// Load the Nemotron preset and, when no embedder was injected, the WeSpeaker
+    /// fallback embedder. Both must load for the backend to report ready: without
+    /// voiceprints the pipeline cannot give speakers persistent identities.
+    private func initializeNemotron() async throws {
+        let loadStart = Date()
+        let presetName = NemotronDiarizationRunner.resolvePresetName()
+        AppLogger.transcription.info("Nemotron diarizer initializing", [
+            "backend": backend.rawValue, "preset": presetName
+        ])
+
+        let runner = try await NemotronDiarizationRunner.load(presetName: presetName, bundleProvider: bundleProvider)
+
+        // Voiceprints come from the same offline WeSpeaker model the pyannote backend
+        // uses, so Nemotron turns match the people already in speakers.sqlite
+        // (FluidOfflineWeSpeakerSegmentEmbedder). TRANSCRIPTED_NEMOTRON_EMBEDDER=online
+        // (lab only) switches to #1789's online-model embedder for comparison.
+        var fallbackEmbedder: (any SpeakerSegmentEmbedder)?
+        if segmentEmbedder == nil {
+            if ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online" {
+                if let bundleDirectory = bundleProvider(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName) {
+                    fallbackEmbedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: bundleDirectory)
+                } else {
+                    fallbackEmbedder = try await ModelDownloadService.withRetry {
+                        try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: nil)
+                    }
+                }
+            } else {
+                let bundled = bundleProvider("offline-diarizer-models")
+                fallbackEmbedder = try await ModelDownloadService.withRetry {
+                    try await FluidOfflineWeSpeakerSegmentEmbedder.load(directory: bundled)
+                }
+            }
+        }
+
+        nemotronRunner = runner
+        nemotronFallbackEmbedder = fallbackEmbedder
+        let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
+        AppLogger.transcription.info("Nemotron diarizer models loaded", [
+            "backend": backend.rawValue,
+            "preset": presetName,
+            "embedder": segmentEmbedder?.identifier ?? fallbackEmbedder?.identifier ?? "none",
+            "elapsed": elapsed
+        ])
     }
 
     // MARK: - Offline Diarization (PyAnnote)
@@ -163,10 +314,32 @@ public class DiarizationService: ObservableObject {
     /// Run offline speaker diarization on audio samples using PyAnnote pipeline.
     /// Supports unlimited speakers. Samples should be 16kHz mono Float32.
     nonisolated public func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
-        guard let manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
+        try await diarizeOffline(samples: samples, sampleRate: sampleRate, clusteringThreshold: nil)
+    }
+
+    /// Same as `diarizeOffline(samples:sampleRate:)`, at `clusteringThreshold` when
+    /// it is set (a cosine similarity; higher splits more; nil keeps the shipped 0.6).
+    /// The Nemotron backend has no clustering step, so it ignores the threshold.
+    nonisolated public func diarizeOffline(
+        samples: [Float],
+        sampleRate: Int,
+        clusteringThreshold: Double?
+    ) async throws -> [SpeakerSegment] {
+        if await MainActor.run(body: { self.activeBackend }) == .nemotron {
+            return try await diarizeWithNemotron(samples: samples, sampleRate: sampleRate)
+        }
+
+        guard var manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
             throw NSError(domain: "DiarizationService", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Offline diarizer model not loaded"
             ])
+        }
+        if let clusteringThreshold, let custom = try await self.manager(clusteringThreshold: clusteringThreshold) {
+            manager = custom
+        }
+        if let bounds = await MainActor.run(body: { self.labSpeakerBounds }),
+           let bounded = try await self.boundedManager(bounds) {
+            manager = bounded
         }
 
         AppLogger.transcription.info("Offline diarization starting", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
@@ -226,7 +399,20 @@ public class DiarizationService: ObservableObject {
     /// `internal` (not `private`) so unit tests can exercise the bounds/slicing
     /// logic directly with a stub embedder, without standing up the real diarizer.
     nonisolated func reembedIfNeeded(segments: [SpeakerSegment], samples: [Float], sampleRate: Int) -> [SpeakerSegment] {
-        guard let embedder = segmentEmbedder, !segments.isEmpty else { return segments }
+        guard let embedder = segmentEmbedder else { return segments }
+        return reembed(segments: segments, samples: samples, sampleRate: sampleRate, using: embedder)
+    }
+
+    /// Replace each segment's embedding with `embedder`'s vector for the segment's
+    /// audio slice. The body of `reembedIfNeeded`, shared with the Nemotron path,
+    /// which always embeds (its turns arrive with no embedding at all).
+    nonisolated func reembed(
+        segments: [SpeakerSegment],
+        samples: [Float],
+        sampleRate: Int,
+        using embedder: any SpeakerSegmentEmbedder
+    ) -> [SpeakerSegment] {
+        guard !segments.isEmpty else { return segments }
         let total = samples.count
         var replaced = 0
         func withoutEmbedding(_ segment: SpeakerSegment) -> SpeakerSegment {
@@ -242,8 +428,13 @@ public class DiarizationService: ObservableObject {
             let a = max(0, Int(segment.startTime * Double(sampleRate)))
             let b = min(total, Int(segment.endTime * Double(sampleRate)))
             guard b > a else { return withoutEmbedding(segment) }
-            let slice = Array(samples[a..<b])
-            guard let emb = embedder.embed(samples: slice, sampleRate: sampleRate) else {
+            let embedding: [Float]?
+            if let contextual = embedder as? any ContextualSpeakerSegmentEmbedder {
+                embedding = contextual.embed(audio: samples, sampleRate: sampleRate, startSample: a, endSample: b)
+            } else {
+                embedding = embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate)
+            }
+            guard let emb = embedding else {
                 return withoutEmbedding(segment)
             }
             replaced += 1
@@ -267,10 +458,99 @@ public class DiarizationService: ObservableObject {
         return try await diarizeOffline(samples: samples, sampleRate: 16000)
     }
 
+    // MARK: - Nemotron Diarization
+
+    /// Nemotron path of `diarizeOffline(samples:sampleRate:)`: frame probabilities
+    /// → exclusive turns (`NemotronTurnBuilder`) → one voiceprint per turn.
+    private nonisolated func diarizeWithNemotron(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] {
+        let loadedRunner = await MainActor.run(body: { self.nemotronRunner })
+        let activeEmbedder: (any SpeakerSegmentEmbedder)?
+        if let injected = segmentEmbedder {
+            activeEmbedder = injected
+        } else {
+            activeEmbedder = await MainActor.run(body: { self.nemotronFallbackEmbedder })
+        }
+        guard let runner = loadedRunner, let embedder = activeEmbedder else {
+            throw NSError(domain: "DiarizationService", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Offline diarizer model not loaded"
+            ])
+        }
+        guard sampleRate > 0 else {
+            throw NSError(domain: "DiarizationService", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid diarization sample rate"
+            ])
+        }
+
+        // Nemotron's mel frontend is fixed at 16 kHz.
+        let modelSampleRate = 16000
+        let audio = sampleRate == modelSampleRate
+            ? samples
+            : AudioResampler.resample(samples, from: Double(sampleRate), to: Double(modelSampleRate))
+        guard !audio.isEmpty else { throw DiarizationResultError.noSpeechDetected }
+
+        AppLogger.transcription.info("Offline diarization starting", [
+            "backend": backend.rawValue,
+            "preset": runner.presetName,
+            "samples": "\(audio.count)",
+            "duration": "\(String(format: "%.1f", Double(audio.count) / Double(modelSampleRate)))s"
+        ])
+        let started = Date()
+
+        let frames = try await runner.run(samples: audio)
+        try Task.checkCancellation()
+        let inferenceElapsed = Date().timeIntervalSince(started)
+
+        let turns = NemotronTurnBuilder.turns(
+            probabilities: frames.probabilities,
+            frameCount: frames.frameCount,
+            numSpeakers: frames.numSpeakers,
+            frameSeconds: frames.frameSeconds
+        )
+        guard !turns.isEmpty else {
+            AppLogger.transcription.info("Nemotron diarization found no speech", [
+                "backend": backend.rawValue, "frames": "\(frames.frameCount)"
+            ])
+            throw DiarizationResultError.noSpeechDetected
+        }
+
+        // speakerId is 1-based to match the pyannote backend's "S1", "S2", ... ids.
+        // Quality is the turn's mean winning probability (>= the 0.5 activity
+        // threshold by construction), so the pipeline's < 0.3 quality gate never
+        // discards a Nemotron turn on its own; its < 1 s duration gate still does.
+        let segments = turns.map { turn in
+            SpeakerSegment(
+                speakerId: turn.speakerIndex + 1,
+                startTime: turn.startTime,
+                endTime: turn.endTime,
+                embedding: nil,
+                qualityScore: min(max(turn.meanActiveProbability, 0), 1)
+            )
+        }
+        let finalSegments = reembed(segments: segments, samples: audio, sampleRate: modelSampleRate, using: embedder)
+
+        let speakerIds = Set(finalSegments.map { $0.speakerId })
+        AppLogger.transcription.info("Offline diarization complete", [
+            "backend": backend.rawValue,
+            "preset": runner.presetName,
+            "segments": "\(finalSegments.count)",
+            "speakers": "\(speakerIds.count)",
+            "inference": String(format: "%.1fs", inferenceElapsed),
+            "elapsed": String(format: "%.1fs", Date().timeIntervalSince(started))
+        ])
+        logSpeakerSummaries(finalSegments)
+
+        return finalSegments
+    }
+
     // MARK: - Cleanup
 
     public func cleanup() {
         offlineDiarizerManager = nil
+        thresholdManagers = [:]
+        sharedOfflineModels = nil
+        nemotronRunner = nil
+        nemotronFallbackEmbedder = nil
+        activeBackend = backend
         modelState = .notLoaded
     }
 
@@ -317,3 +597,14 @@ public class DiarizationService: ObservableObject {
 // Empty extension — protocol signatures match DiarizationService's existing methods exactly.
 
 extension DiarizationService: DiarizationEngine {}
+
+/// Speaker-count bounds for `DiarizationService.labSpeakerBounds` (speaker lab only).
+public struct DiarizationSpeakerBounds: Sendable, Equatable {
+    public let min: Int?
+    public let max: Int?
+
+    public init(min: Int?, max: Int?) {
+        self.min = min
+        self.max = max
+    }
+}

@@ -136,6 +136,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// row simply drops out of `pendingVoiceGroups` for the rest of this
     /// launch and reappears on next relaunch or once genuinely renamed.
     @Published private(set) var skippedVoiceGroupIDs: Set<UUID> = []
+    /// Calls skipped with "Skip this call". Saved, so they stay skipped.
+    @Published private(set) var skippedCallKeys: Set<String> = SpeakerReviewSkippedCalls.load()
+    /// Calendar invitees per call, offered as one-tap names on its card.
+    @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
+    private var inviteeLookupsStarted: Set<String> = []
 
     private let speakerDatabase: SpeakerDatabase
     private let transcriptDirectory: URL
@@ -184,6 +189,47 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         skippedVoiceGroupIDs.insert(group.id)
     }
 
+    /// "Name these people": one card per call with voices still unnamed,
+    /// newest call first, minus calls someone skipped. Calls sent to the
+    /// back with Later go last, in the order they were sent.
+    var pendingMeetingGroups: [SpeakerPendingMeetingGroup] {
+        let groups = SpeakerReviewQueueScanner.groupedByMeeting(pendingVoiceGroups)
+            .filter { !skippedCallKeys.contains($0.id) }
+        guard !laterCallKeys.isEmpty else { return groups }
+        let later = Set(laterCallKeys)
+        let now = groups.filter { !later.contains($0.id) }
+        let back = laterCallKeys.compactMap { key in groups.first { $0.id == key } }
+        return now + back
+    }
+
+    /// Later on the top card: it goes to the back of the stack for now.
+    @Published private(set) var laterCallKeys: [String] = []
+
+    func sendCallToBack(_ group: SpeakerPendingMeetingGroup) {
+        laterCallKeys.removeAll { $0 == group.id }
+        laterCallKeys.append(group.id)
+    }
+
+    /// Skips a whole call. Its voices move to Everyone (still unnamed, still
+    /// mergeable) and the card stays gone after a restart.
+    func skipCall(_ group: SpeakerPendingMeetingGroup) {
+        SpeakerReviewSkippedCalls.add(group.id)
+        skippedCallKeys.insert(group.id)
+    }
+
+    /// Looks up who was invited to this call, once, for its name chips.
+    /// Never asks for calendar access; imported recordings have no slot.
+    func loadInvitees(for group: SpeakerPendingMeetingGroup) {
+        guard !group.isImported, let start = group.recordedAt,
+              inviteeLookupsStarted.insert(group.id).inserted else { return }
+        let key = group.id
+        Task { @MainActor [weak self] in
+            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: start)
+            guard let self, !names.isEmpty else { return }
+            self.inviteesByCallKey[key] = names
+        }
+    }
+
     /// The "Everyone" directory: named voices, plus unnamed voices that are
     /// not currently sitting in the "Needs a name" queue above. A voice lives
     /// in exactly one section — it graduates to Everyone when named — but an
@@ -191,7 +237,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// for this session) stays reachable here for merge/delete instead of
     /// vanishing from both sections.
     var directoryProfiles: [SpeakerProfile] {
-        let queuedUnnamedIds = Set(pendingVoiceGroups.map(\.id))
+        let queuedUnnamedIds = queuedVoiceIDs
         return filteredProfiles.filter { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) }
     }
 
@@ -199,8 +245,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// the "N people" trailing label and to decide whether the Everyone
     /// section renders at all.
     var directoryCount: Int {
-        let queuedUnnamedIds = Set(pendingVoiceGroups.map(\.id))
+        let queuedUnnamedIds = queuedVoiceIDs
         return profiles.count(where: { Self.isInDirectory($0, queuedUnnamedIds: queuedUnnamedIds) })
+    }
+
+    /// Voices shown on a "Name these people" card right now.
+    private var queuedVoiceIDs: Set<UUID> {
+        Set(pendingMeetingGroups.flatMap { $0.voices.map(\.id) })
     }
 
     private static func isInDirectory(_ profile: SpeakerProfile, queuedUnnamedIds: Set<UUID>) -> Bool {
@@ -352,6 +403,90 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
                 completion?(didSave)
+            }
+        }
+    }
+
+    /// A queued voice was given the name of a person already saved (an invitee
+    /// chip or a typed "Alice"), so it joins them instead of becoming a second
+    /// Alice. One transaction does what naming the voice and merging it would:
+    /// each queued row is named with a `user_manual` source, every reference
+    /// moves to the kept person, and each queued meeting records a confirmation
+    /// for them, the same as a `.merged` answer in the island or review window.
+    /// Transcripts roll back if the database step fails.
+    func mergePendingReviewItem(
+        _ item: SpeakerPendingReviewItem,
+        into target: SpeakerProfile,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        let sourceId = item.speakerId
+        let targetId = target.id
+        guard sourceId != targetId else {
+            completion?(false)
+            return
+        }
+        let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == sourceId }
+        let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
+        let reviewedRows = matchingReviewItems.map { reviewItem in
+            TranscriptSaver.DeferredSpeakerNameUpdate(
+                transcriptURL: reviewItem.transcriptURL,
+                dbId: sourceId,
+                diarizerSpeakerId: reviewItem.diarizerSpeakerId,
+                channel: reviewItem.channel
+            )
+        }
+        let confirmedTranscriptIds = matchingReviewItems.compactMap(\.transcriptId)
+        let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var didMerge = false
+            do {
+                let outcome = try SpeakerIdentityMutationService.apply(
+                    .mergeReviewedVoice(
+                        sourceId: sourceId,
+                        targetId: targetId,
+                        reviewedRows: reviewedRows,
+                        confirmedTranscriptIds: confirmedTranscriptIds
+                    ),
+                    speakerDB: speakerDatabase,
+                    directory: transcriptDirectory,
+                    clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
+                        onMergeCommitted: { sourceId, targetId in
+                            Self.promoteClipIfNeeded(
+                                from: sourceId,
+                                to: targetId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                            Self.deleteClips(
+                                for: sourceId,
+                                preferredClipsDirectory: preferredClipsDirectory,
+                                legacyClipsDirectory: legacyClipsDirectory
+                            )
+                        }
+                    )
+                )
+                if !outcome.succeeded {
+                    AppLogger.speakers.error("Queued voice merge into saved person failed", [
+                        "sourceId": sourceId.uuidString,
+                        "targetId": targetId.uuidString
+                    ])
+                }
+                didMerge = outcome.succeeded
+            } catch {
+                Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
+            }
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
+            DispatchQueue.main.async {
+                self?.applySnapshot(snapshot)
+                completion?(didMerge)
             }
         }
     }
@@ -940,33 +1075,51 @@ struct SpeakerPeopleSettingsSection: View {
         VStack(alignment: .leading, spacing: 24) {
             // Evaluated once per render: each of these model properties redoes
             // the O(n) voice grouping (and sort/filter) on every access.
-            let voiceGroups = model.pendingVoiceGroups
+            let meetingGroups = model.pendingMeetingGroups
             let directoryCount = model.directoryCount
             let directoryProfiles = model.directoryProfiles
 
-            if !voiceGroups.isEmpty {
+            if let current = meetingGroups.first {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        LibrarySectionLabel(text: "Needs a name")
+                        LibrarySectionLabel(
+                            text: "Review and name these people",
+                            trailing: meetingGroups.count == 1 ? "1 call left" : "\(meetingGroups.count) calls left"
+                        )
 
-                        Text("Play a clip. If you recognize the voice, type their name — it updates every meeting they're in.")
+                        Text("One call at a time. Play a clip, then tap a name from the invite or type one. It updates every meeting they're in.")
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
-                            SpeakerVoiceToNameRow(group: group, model: model)
+                    // A stack of work: only the top call is open; the edges
+                    // of the next ones peek out underneath. When the top
+                    // call's voices are all named it drops out of the queue
+                    // and the next card springs up.
+                    VStack(spacing: 0) {
+                        SpeakerCallReviewCard(
+                            group: current,
+                            model: model,
+                            position: 1,
+                            total: meetingGroups.count
+                        )
+                        .id(current.id)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                        .zIndex(2)
 
-                            if index < voiceGroups.count - 1 {
-                                Rectangle()
-                                    .fill(LibraryTokens.hairline)
-                                    .frame(height: 1)
-                                    .padding(.vertical, 12)
-                            }
+                        if meetingGroups.count > 1 {
+                            stackEdge(inset: 12, opacity: 1)
+                                .zIndex(1)
+                        }
+                        if meetingGroups.count > 2 {
+                            stackEdge(inset: 24, opacity: 0.6)
                         }
                     }
+                    .animation(.spring(response: 0.34, dampingFraction: 0.74), value: current.id)
                 }
                 .id(ScrollTarget.reviewQueue)
                 .accessibilityIdentifier("transcripted.speakers.inbox")
@@ -1013,6 +1166,28 @@ struct SpeakerPeopleSettingsSection: View {
             expandedPersonID = nil
             SpeakerClipPlayback.stop()
         }
+    }
+
+    /// The lower edge of a card waiting under the top one.
+    private func stackEdge(inset: CGFloat, opacity: Double) -> some View {
+        UnevenRoundedRectangle(
+            bottomLeadingRadius: LibraryTokens.radiusRaised,
+            bottomTrailingRadius: LibraryTokens.radiusRaised,
+            style: .continuous
+        )
+        .fill(LibraryTokens.raisedFill)
+        .overlay(
+            UnevenRoundedRectangle(
+                bottomLeadingRadius: LibraryTokens.radiusRaised,
+                bottomTrailingRadius: LibraryTokens.radiusRaised,
+                style: .continuous
+            )
+            .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
+        )
+        .frame(height: 8)
+        .padding(.horizontal, inset)
+        .opacity(opacity)
+        .accessibilityHidden(true)
     }
 
     private func everyoneTrailing(count: Int) -> String? {
@@ -1078,9 +1253,107 @@ private struct SpeakersEmptyStateView: View {
 
 // MARK: - Voices to name
 
+/// One call in "Name these people": its name, day and length, then each
+/// voice still waiting for a name, with the call's invitees as one-tap names.
+private struct SpeakerCallReviewCard: View {
+    let group: SpeakerPendingMeetingGroup
+    @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    var position = 1
+    var total = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.meetingTitle)
+                        .font(LibraryTokens.rowTitle)
+                        .lineLimit(1)
+                    Text(metaLine)
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink2)
+                }
+                Spacer(minLength: 0)
+                if total > 1 {
+                    Text("\(position) of \(total)")
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                    SpeakerQuietLinkButton(title: "Later") {
+                        model.sendCallToBack(group)
+                    }
+                    .help("Put this call at the back of the stack.")
+                    .accessibilityIdentifier("transcripted.speakers.call-review.later")
+                }
+                SpeakerQuietLinkButton(title: "Skip this call") {
+                    model.skipCall(group)
+                }
+                .help("Stop asking about this call. Its voices stay under Everyone.")
+                .accessibilityIdentifier("transcripted.speakers.call-review.skip")
+            }
+            ForEach(group.voices) { voice in
+                SpeakerVoiceToNameRow(
+                    group: voice,
+                    model: model,
+                    showsMeeting: false,
+                    invitees: model.inviteesByCallKey[group.id] ?? []
+                )
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .fill(LibraryTokens.raisedFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
+        )
+        .onAppear { model.loadInvitees(for: group) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(group.meetingTitle), \(group.voices.count == 1 ? "1 voice" : "\(group.voices.count) voices") to name")
+    }
+
+    private var metaLine: String {
+        var parts: [String] = []
+        let date = group.recordedAt ?? group.fallbackDate
+        if date != .distantPast {
+            parts.append(Self.dateFormatter.string(from: date))
+        }
+        if let seconds = group.durationSeconds, seconds > 0 {
+            parts.append(Self.durationText(seconds))
+        }
+        let voices = group.voices.count == 1 ? "1 person to name" : "\(group.voices.count) people to name"
+        parts.append(voices)
+        return parts.joined(separator: " · ")
+    }
+
+    static func durationText(_ seconds: Int) -> String {
+        let minutes = Int((Double(seconds) / 60).rounded())
+        if minutes < 1 { return "under a minute" }
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
 private struct SpeakerVoiceToNameRow: View {
     let group: SpeakerPendingVoiceGroup
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    /// Inside a call's card the meeting name and day are already on top.
+    var showsMeeting = true
+    /// That call's calendar invitees, offered as one-tap names.
+    var invitees: [String] = []
+    @State private var showsAllInvitees = false
     /// Observed directly so play/stop/finish reliably re-renders THIS row.
     /// A traced repro showed the earlier notification → parent @State bump
     /// scheme landing in the section without LazyVStack ever re-running the
@@ -1162,6 +1435,33 @@ private struct SpeakerVoiceToNameRow: View {
             }
             .padding(.leading, 44)
 
+            if !inviteeChoices.shown.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(inviteeChoices.shown, id: \.self) { name in
+                        Button(name) {
+                            nameDraft = name
+                            saveName()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("\(name) was on the calendar invite.")
+                        .disabled(isSaving)
+                    }
+                    if inviteeChoices.hidden > 0 {
+                        Button {
+                            showsAllInvitees = true
+                        } label: {
+                            Image(systemName: "chevron.right")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityLabel("Show \(inviteeChoices.hidden) more invitees")
+                    }
+                }
+                .padding(.leading, 44)
+                .accessibilityIdentifier("transcripted.speakers.voice-to-name.invitees")
+            }
+
             if let saveErrorMessage {
                 Text(saveErrorMessage)
                     .font(LibraryTokens.meta)
@@ -1204,6 +1504,14 @@ private struct SpeakerVoiceToNameRow: View {
         } message: {
             Text(SpeakerVoiceRowMenuPolicy.deleteConfirmationMessage)
         }
+    }
+
+    private var inviteeChoices: (shown: [String], hidden: Int) {
+        NotchIslandSpeakerReviewPolicy.inviteeChips(
+            invitees: invitees,
+            alreadyUsed: [],
+            showAll: showsAllInvitees
+        )
     }
 
     private var nameSuggestions: [SpeakerIdentityOption] {
@@ -1297,9 +1605,12 @@ private struct SpeakerVoiceToNameRow: View {
 
     private var metaLine: String {
         let item = group.representative
-        var parts = [item.meetingTitle]
-        if let dateText = Self.dateFormatter.stringIfAvailable(from: item.recordedAt ?? item.fallbackDate) {
-            parts.append(dateText)
+        var parts: [String] = []
+        if showsMeeting {
+            parts.append(item.meetingTitle)
+            if let dateText = Self.dateFormatter.stringIfAvailable(from: item.recordedAt ?? item.fallbackDate) {
+                parts.append(dateText)
+            }
         }
         parts.append(item.channel == .mic ? "In the room" : "Remote")
         if group.meetingCount > 1 {
@@ -1317,6 +1628,27 @@ private struct SpeakerVoiceToNameRow: View {
         guard canSave, !isSaving else { return }
         isSaving = true
         saveErrorMessage = nil
+        // A name that already belongs to one saved person (an invitee chip
+        // or a typed "Alice") adds this voice to them, like the island and
+        // the review window do, instead of making a second Alice.
+        let voice = group.representative.profile
+        if let existing = SpeakerNameSelectionPolicy.uniqueSavedPerson(
+            named: nameDraft,
+            among: model.profiles,
+            excluding: voice.id,
+            id: \.id,
+            displayName: \.displayName
+        ) {
+            model.mergePendingReviewItem(group.representative, into: existing) { didSave in
+                isSaving = false
+                if didSave {
+                    nameDraft = ""
+                } else {
+                    saveErrorMessage = "Couldn't save — the meeting file may have moved."
+                }
+            }
+            return
+        }
         model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
             isSaving = false
             if didSave {

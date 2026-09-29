@@ -49,10 +49,11 @@ struct Batch: AsyncParsableCommand {
         if let configPath = config {
             diarizerConfig = try ConfigLoader.load(from: configPath)
         } else {
-            diarizerConfig = OfflineDiarizerConfig.default
+            diarizerConfig = DiarizerCompatibility.legacyDefaultConfig
         }
 
         // Initialize diarizer once
+        DiarizerCompatibility.keepUnpinnedDiarizerCaches()
         let manager = OfflineDiarizerManager(config: diarizerConfig)
         if let dir = modelsDir {
             let models = try await OfflineDiarizerModels.load(from: URL(fileURLWithPath: dir))

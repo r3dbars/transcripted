@@ -956,7 +956,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(until: { box.candidate != nil })
         assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "the first prompt is the generic browser call")
         if let candidate = box.candidate {
             _ = detector.dismiss(candidate: candidate)
@@ -966,7 +966,7 @@ func testMeetingPromptDetector() async {
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(until: { box.promptCount == 2 })
 
         assertEqual(box.promptCount, 2, "a real Meet tab right after a Not now to ChatGPT-style mic use should still prompt")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the second prompt is the named Meet call")
@@ -1352,6 +1352,17 @@ private final class CandidateBox {
 // updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a
 // few times so it can run before we assert.
 @MainActor
+/// Waits for the detector's async evaluation to reach `condition`, up to about
+/// five seconds. Use it where a prompt is expected: a fixed wait (below) is
+/// outrun by a loaded CI runner, and the suite then fails for no reason.
+private func waitForPromptEvaluation(until condition: () -> Bool) async {
+    for _ in 0..<1_000 {
+        if condition() { return }
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+}
+
 private func waitForPromptEvaluation(extraMilliseconds: UInt64 = 0) async {
     if extraMilliseconds > 0 {
         try? await Task.sleep(nanoseconds: extraMilliseconds * 1_000_000)

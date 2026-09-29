@@ -248,6 +248,16 @@ public struct SpeakerNamingRequest {
     /// Named, mature, undisputed profiles at request time — the sheet's
     /// "Transcripted recognizes N people automatically" payoff line.
     public let recognizedPeopleCount: Int
+    /// Names this meeting's voices were given automatically (confident
+    /// returning speakers), so a review can show them as already known
+    /// next to the voices it asks about. Display only; never re-saved.
+    public let recognizedSpeakerNames: [String]
+    /// The remote voices behind those names, with a clip each, so a review
+    /// can offer "Not Taylor?" and save a correction. They are never asked
+    /// about: a request can have only these (everyone was recognized), and
+    /// the review window skips such a request while the notch island lists
+    /// who was on the call.
+    public let recognizedSpeakers: [SpeakerNamingEntry]
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL?
@@ -263,6 +273,8 @@ public struct SpeakerNamingRequest {
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
         recognizedPeopleCount: Int = 0,
+        recognizedSpeakerNames: [String] = [],
+        recognizedSpeakers: [SpeakerNamingEntry] = [],
         transcriptURL: URL,
         transcriptId: UUID,
         systemAudioURL: URL,
@@ -278,6 +290,8 @@ public struct SpeakerNamingRequest {
         self.speakers = speakers
         self.knownPeople = knownPeople
         self.recognizedPeopleCount = recognizedPeopleCount
+        self.recognizedSpeakerNames = recognizedSpeakerNames
+        self.recognizedSpeakers = recognizedSpeakers
         self.transcriptURL = transcriptURL
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
@@ -293,6 +307,10 @@ public struct SpeakerNamingRequest {
     }
 
     public let transcriptId: UUID
+
+    /// True when the review has voices to ask about. A request that only
+    /// lists recognized voices has nothing that needs an answer.
+    public var asksAboutVoices: Bool { !speakers.isEmpty }
 }
 
 /// A single speaker needing naming or confirmation
