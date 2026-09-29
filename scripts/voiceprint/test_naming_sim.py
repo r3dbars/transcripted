@@ -11,6 +11,7 @@ Promises checked:
      (type, confirm, then silent), and two people with the same voice produce a counted wrong name
      when the bars are forced low.
   4. Missing embeddings are skipped, not fatal.
+  5. Clips on the answer-key audit's drop list are excluded (and can be kept with drops=False).
 
 Run: data/eval/voiceprint/venv/bin/python scripts/voiceprint/test_naming_sim.py
 """
@@ -226,6 +227,31 @@ class Helpers(unittest.TestCase):
         self.assertAlmostEqual(bars.wb_confident, 0.95 + 0.7 * 0.05)
         fixed = ns.make_bars(0.97, 0.99, 0.99, squeezed, fixed_margins=True)
         self.assertEqual(fixed.margin_global, 0.12)
+
+    def test_audit_drop_list_removes_clips_and_can_turn_a_speaker_into_a_stranger(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="naming_sim_drops_") as tmp:
+            root = Path(tmp)
+            rows = seg_rows("dd", "ann", "s1", False) + seg_rows("dd", "ann", "s2", False) + seg_rows("dd", "bob", "s3", False)
+            write_set(root, "dd", rows)
+            (root / "results" / "audit").mkdir(parents=True)
+            dropped = [r["seg_id"] for r in rows if r["session"] == "dd:s2"] + [rows[-1]["seg_id"]]
+            (root / "results" / "audit" / "drop_dd.txt").write_text("\n".join(dropped) + "\n")
+            old = os.environ.get("VP_ROOT")
+            os.environ["VP_ROOT"] = str(root)
+            try:
+                si = ns.load_set("dd")
+                kept = ns.load_set("dd", drops=False)
+            finally:
+                if old is None:
+                    os.environ.pop("VP_ROOT", None)
+                else:
+                    os.environ["VP_ROOT"] = old
+            self.assertEqual(si.dropped, 4)
+            self.assertEqual(si.sessions_of["dd:ann"], ["dd:s1"])
+            self.assertIn("dd:ann", si.stranger_only)      # one session left: only useful as a stranger
+            self.assertEqual(len(si.clips[("dd:bob", "dd:s3")]), 2)
+            self.assertEqual(kept.dropped, 0)
+            self.assertNotIn("dd:ann", kept.stranger_only)
 
     def test_group_keys(self) -> None:
         self.assertEqual(ns.group_key("ami:ES2002a"), "ES2002")

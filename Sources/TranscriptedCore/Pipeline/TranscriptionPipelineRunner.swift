@@ -384,6 +384,8 @@ extension TranscriptionTaskManager {
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { transcription.speakerDB }
+        // The active voiceprint model's cosine bars: the naming ladder and lineup bars below.
+        let speakerThresholds = await MainActor.run { transcription.diarization.activeSpeakerThresholds }
         let dbKnowledge = Self.speakerClassificationKnowledge(
             speakerIds: speakerIds,
             utterances: result.systemUtterances,
@@ -423,7 +425,9 @@ extension TranscriptionTaskManager {
                     secondBestSimilarity: entry.secondSimilarity,
                     recentOutcomes: cachedRecentOutcomes(entry.profile),
                     marginSimilarities: entry.marginSimilarities,
-                    inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                    inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                    thresholds: speakerThresholds
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
@@ -452,7 +456,9 @@ extension TranscriptionTaskManager {
                 secondBestSimilarity: entry.secondSimilarity,
                 recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                 marginSimilarities: entry.marginSimilarities,
-                inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                    for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                thresholds: speakerThresholds
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -485,7 +491,9 @@ extension TranscriptionTaskManager {
                         secondBestSimilarity: entry.secondSimilarity,
                         recentOutcomes: cachedRecentOutcomes(entry.profile),
                         marginSimilarities: entry.marginSimilarities,
-                        inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                        inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                            for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                        thresholds: speakerThresholds
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
@@ -519,7 +527,9 @@ extension TranscriptionTaskManager {
                     secondBestSimilarity: entry.secondSimilarity,
                     recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                     marginSimilarities: entry.marginSimilarities,
-                    inviteeBars: SpeakerNamingPolicy.inviteeBars(for: entry.profile, invitedNameKeys: invitedNameKeys)
+                    inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                    thresholds: speakerThresholds
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"

@@ -34,6 +34,10 @@ public final class SpeakerDatabase: @unchecked Sendable {
     // its caller can roll back related transcript changes.
     var pendingMutationError: SQLiteOperationError?
     let dbPath: URL
+    /// Cosine bars of the voiceprint model this database holds (one database file per model).
+    /// Used by the decisions made inside the store: the multi-exemplar same-condition bar on
+    /// write-back, the duplicate-profile merge bar, and `matchSpeaker`'s guards.
+    public let thresholds: SpeakerEmbeddingThresholds
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
     private let queueSpecificKey = DispatchSpecificKey<UInt8>()
 
@@ -44,8 +48,11 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Public initializer that accepts a custom SQLite path.
     /// Used by tests and by callers that want to store the database outside the default
     /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
-    public init(path: String) {
+    /// `thresholds` are the bars of the voiceprint model whose vectors this file holds; pass the
+    /// diarizer's `activeSpeakerThresholds`. The default is WeSpeaker's.
+    public init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker) {
         dbPath = URL(fileURLWithPath: path)
+        self.thresholds = thresholds
         queue.setSpecific(key: queueSpecificKey, value: 1)
         try? FileManager.default.createDirectory(
             at: dbPath.deletingLastPathComponent(),

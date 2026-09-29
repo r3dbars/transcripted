@@ -14,14 +14,18 @@ public enum SpeakerNamingPolicy {
     /// Within-meeting consolidation legitimately uses a *lower* bar (0.88) — it has
     /// temporal/contextual evidence two same-meeting clusters are one speaker — so the
     /// invariant is now `sameVoiceConsolidationThreshold <= autoAcceptSimilarityThreshold`.
-    public static let autoAcceptSimilarityThreshold: Double = 0.92
+    ///
+    /// Per model: `SpeakerEmbeddingThresholds.autoAcceptSimilarity` (the pipeline passes the
+    /// active model's set). This static is the WeSpeaker value.
+    public static let autoAcceptSimilarityThreshold: Double = SpeakerEmbeddingThresholds.weSpeaker.autoAcceptSimilarity
 
     /// Minimum required gap between the best and second-best profile similarity before a
     /// returning speaker is auto-accepted. Degraded audio inflates the top similarity but
     /// rarely the *gap* to the runner-up, so this "clear winner" margin is the primary guard
     /// against silently naming the wrong person. A nil/absent runner-up (only one candidate
     /// cleared the match floor) is treated as unambiguous and passes.
-    public static let autoAcceptMarginMin: Double = 0.12
+    /// Per model: `SpeakerEmbeddingThresholds.autoAcceptMarginMin`; this is the WeSpeaker value.
+    public static let autoAcceptMarginMin: Double = SpeakerEmbeddingThresholds.weSpeaker.autoAcceptMarginMin
 
     /// A person must be explicitly confirmed in this many distinct meetings
     /// before Transcripted may silently apply their name.
@@ -44,7 +48,18 @@ public enum SpeakerNamingPolicy {
             self.marginMin = marginMin
         }
 
-        public static let labTuned = InviteeBars(requiredConfirmedMeetings: 2, similarity: 0.80, marginMin: 0.10)
+        /// The lab-tuned lineup bars for a voiceprint model: its `inviteeSimilarity` and
+        /// `inviteeMarginMin`, and two confirmed meetings.
+        public static func labTuned(for thresholds: SpeakerEmbeddingThresholds) -> InviteeBars {
+            InviteeBars(
+                requiredConfirmedMeetings: 2,
+                similarity: thresholds.inviteeSimilarity,
+                marginMin: thresholds.inviteeMarginMin
+            )
+        }
+
+        /// The lab-tuned lineup bars at WeSpeaker scale.
+        public static let labTuned = labTuned(for: .weSpeaker)
     }
 
     /// Who counts as "expected" in a meeting for lineup naming: the calendar invite,
@@ -79,10 +94,15 @@ public enum SpeakerNamingPolicy {
     }
 
     /// Invitee bars for `profile` when its name is on the invite, else nil (today's bars).
-    public static func inviteeBars(for profile: SpeakerProfile, invitedNameKeys: Set<String>) -> InviteeBars? {
+    /// `thresholds` is the active voiceprint model's set, which supplies the cosine bars.
+    public static func inviteeBars(
+        for profile: SpeakerProfile,
+        invitedNameKeys: Set<String>,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> InviteeBars? {
         guard !invitedNameKeys.isEmpty, let name = profile.displayName, !name.isEmpty,
               invitedNameKeys.contains(nameKey(name)) else { return nil }
-        return .labTuned
+        return .labTuned(for: thresholds)
     }
 
     /// Profile-level eligibility for silent recognition, shared by the
@@ -121,12 +141,15 @@ public enum SpeakerNamingPolicy {
     ///     is withheld (routed to suggest/ask). Legacy callers and single-average profiles (where
     ///     average == best exemplar) pass `nil` and behave exactly as before. See
     ///     `docs/speaker-eval-exemplar-delta-2026-07.md`.
+    ///   - thresholds: the active voiceprint model's bars. Without invitee bars, silent naming
+    ///     needs `autoAcceptSimilarity` and `autoAcceptMarginMin`.
     public static func shouldAutoAccept(
         profile: SpeakerProfile,
         similarity: Double,
         secondBestSimilarity: Double?,
         marginSimilarities: (best: Double, secondBest: Double)? = nil,
-        inviteeBars: InviteeBars? = nil
+        inviteeBars: InviteeBars? = nil,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Bool {
         let marginTop = marginSimilarities?.best ?? similarity
         let marginRunnerUp: Double? = marginSimilarities.map { $0.secondBest } ?? secondBestSimilarity
@@ -139,14 +162,14 @@ public enum SpeakerNamingPolicy {
         case .some(let second) where second < 0:
             marginOK = true   // no confusable runner-up cleared the match floor
         case .some(let second):
-            marginOK = (marginTop - second) >= (inviteeBars?.marginMin ?? autoAcceptMarginMin)
+            marginOK = (marginTop - second) >= (inviteeBars?.marginMin ?? thresholds.autoAcceptMarginMin)
         }
         return isAutoRecognizable(
             profile: profile,
             recentOutcomes: [],
             requiredConfirmations: inviteeBars?.requiredConfirmedMeetings ?? requiredConfirmedMeetings
         )
-            && similarity > (inviteeBars?.similarity ?? autoAcceptSimilarityThreshold)
+            && similarity > (inviteeBars?.similarity ?? thresholds.autoAcceptSimilarity)
             && marginOK
     }
 
@@ -161,7 +184,8 @@ public enum SpeakerNamingPolicy {
         secondBestSimilarity: Double?,
         recentOutcomes: [SpeakerMatchOutcomeKind],
         marginSimilarities: (best: Double, secondBest: Double)? = nil,
-        inviteeBars: InviteeBars? = nil
+        inviteeBars: InviteeBars? = nil,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Bool {
         guard isAutoRecognizable(
             profile: profile,
@@ -175,12 +199,18 @@ public enum SpeakerNamingPolicy {
             similarity: similarity,
             secondBestSimilarity: secondBestSimilarity,
             marginSimilarities: marginSimilarities,
-            inviteeBars: inviteeBars
+            inviteeBars: inviteeBars,
+            thresholds: thresholds
         )
     }
 
-    public static func confidence(similarity: Double, callCount: Int) -> SpeakerConfidence {
-        similarity > 0.85 && callCount > 3 ? .high : .medium
+    /// High above the model's `highConfidenceSimilarity` for a person heard in more than 3 calls.
+    public static func confidence(
+        similarity: Double,
+        callCount: Int,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> SpeakerConfidence {
+        similarity > thresholds.highConfidenceSimilarity && callCount > 3 ? .high : .medium
     }
 
     public static func initialMapping(
@@ -190,7 +220,8 @@ public enum SpeakerNamingPolicy {
         secondBestSimilarity: Double?,
         recentOutcomes: [SpeakerMatchOutcomeKind] = [],
         marginSimilarities: (best: Double, secondBest: Double)? = nil,
-        inviteeBars: InviteeBars? = nil
+        inviteeBars: InviteeBars? = nil,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> SpeakerMapping {
         guard shouldAutoAccept(
             profile: profile,
@@ -198,7 +229,8 @@ public enum SpeakerNamingPolicy {
             secondBestSimilarity: secondBestSimilarity,
             recentOutcomes: recentOutcomes,
             marginSimilarities: marginSimilarities,
-            inviteeBars: inviteeBars
+            inviteeBars: inviteeBars,
+            thresholds: thresholds
         ),
               let name = profile.displayName,
               !name.isEmpty else {
@@ -208,7 +240,7 @@ public enum SpeakerNamingPolicy {
         return SpeakerMapping(
             speakerId: speakerId,
             identifiedName: name,
-            confidence: confidence(similarity: similarity, callCount: profile.callCount),
+            confidence: confidence(similarity: similarity, callCount: profile.callCount, thresholds: thresholds),
             isConfirmedIdentity: true
         )
     }

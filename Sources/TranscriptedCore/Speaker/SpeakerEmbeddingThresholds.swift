@@ -28,9 +28,73 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
     public let perSegmentSplit: Float       // DB-informed split of a mixed cluster
     public let knownProfileConflict: Float  // "these centroids may be different known people"
 
+    // MARK: Identity bars (matching guards, write-back, naming ladder, cleanup)
+    //
+    // Every other cosine bar the speaker stack compares a voiceprint against. They
+    // were tuned on WeSpeaker and used for every model until now, so both presets
+    // keep exactly those values (the init defaults below), and a calibration file
+    // may set any of them for a new model.
+
+    /// Match guard: extra similarity a profile heard in 2 or fewer calls must clear
+    /// on top of the adaptive match floor (`Transcription.matchAgainstProfiles`).
+    public let immatureProfileMatchBonus: Double
+    /// Match guard: extra similarity for a profile heard in 3–4 calls.
+    public let developingProfileMatchBonus: Double
+    /// Match guard: a runner-up profile this close to the winner makes the match ambiguous.
+    public let ambiguousMatchMargin: Double
+    /// Negative-exemplar veto floor (`SpeakerNegativeExemplarPolicy`).
+    public let negativeVetoFloor: Double
+    /// Write-back: minimum margin to the runner-up before a match may adapt the voiceprint
+    /// (`SpeakerWritePathPolicy`).
+    public let writeBackMarginMin: Double
+    /// Write-back: at or above this a match adapts the voiceprint at the full rate.
+    public let confidentWriteBack: Double
+    /// Write-back: at or above this (and below `confidentWriteBack`) it adapts slowly.
+    public let cautiousWriteBack: Double
+    /// Two clusters that matched the same profile fuse only at or above this
+    /// cluster-to-cluster cosine (`SpeakerWritePathPolicy.shouldFuseMatchedClusters`).
+    public let crossClusterLink: Double
+    /// Multi-exemplar voiceprints: at or above this a new session mean counts as the same
+    /// capture condition as an existing representative (`SpeakerExemplarPolicy`).
+    public let exemplarSameCondition: Double
+    /// Naming ladder: silent auto-accept needs similarity above this (`SpeakerNamingPolicy`).
+    public let autoAcceptSimilarity: Double
+    /// Naming ladder: and at least this margin to the runner-up.
+    public let autoAcceptMarginMin: Double
+    /// Lineup naming: the lower similarity bar for a person on the meeting's lineup
+    /// (`SpeakerNamingPolicy.InviteeBars`).
+    public let inviteeSimilarity: Double
+    /// Lineup naming: the lower margin bar for a person on the meeting's lineup.
+    public let inviteeMarginMin: Double
+    /// An auto-named speaker is labeled high confidence above this similarity
+    /// (`SpeakerNamingPolicy.confidence`).
+    public let highConfidenceSimilarity: Double
+    /// After-meeting cleanup merges two saved profiles at or above this cosine
+    /// (`SpeakerDatabase.mergeDuplicates`).
+    public let duplicateProfileMerge: Double
+    /// Speaker separation merges two call-channel voices at or above this cosine
+    /// (`SpeakerSeparationOptions.labTuned`).
+    public let separationMerge: Double
+
     public init(matchOneSegment: Double, matchFewSegments: Double, matchManySegments: Double,
                 ghostMergeFloor: Double, consolidation: Float, absorb: Float, microAbsorb: Float,
-                perSegmentSplit: Float, knownProfileConflict: Float) {
+                perSegmentSplit: Float, knownProfileConflict: Float,
+                immatureProfileMatchBonus: Double = 0.08,
+                developingProfileMatchBonus: Double = 0.04,
+                ambiguousMatchMargin: Double = 0.05,
+                negativeVetoFloor: Double = 0.80,
+                writeBackMarginMin: Double = 0.12,
+                confidentWriteBack: Double = 0.80,
+                cautiousWriteBack: Double = 0.72,
+                crossClusterLink: Double = 0.78,
+                exemplarSameCondition: Double = 0.80,
+                autoAcceptSimilarity: Double = 0.92,
+                autoAcceptMarginMin: Double = 0.12,
+                inviteeSimilarity: Double = 0.80,
+                inviteeMarginMin: Double = 0.10,
+                highConfidenceSimilarity: Double = 0.85,
+                duplicateProfileMerge: Double = 0.6,
+                separationMerge: Double = 0.6) {
         self.matchOneSegment = matchOneSegment
         self.matchFewSegments = matchFewSegments
         self.matchManySegments = matchManySegments
@@ -40,6 +104,22 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
         self.microAbsorb = microAbsorb
         self.perSegmentSplit = perSegmentSplit
         self.knownProfileConflict = knownProfileConflict
+        self.immatureProfileMatchBonus = immatureProfileMatchBonus
+        self.developingProfileMatchBonus = developingProfileMatchBonus
+        self.ambiguousMatchMargin = ambiguousMatchMargin
+        self.negativeVetoFloor = negativeVetoFloor
+        self.writeBackMarginMin = writeBackMarginMin
+        self.confidentWriteBack = confidentWriteBack
+        self.cautiousWriteBack = cautiousWriteBack
+        self.crossClusterLink = crossClusterLink
+        self.exemplarSameCondition = exemplarSameCondition
+        self.autoAcceptSimilarity = autoAcceptSimilarity
+        self.autoAcceptMarginMin = autoAcceptMarginMin
+        self.inviteeSimilarity = inviteeSimilarity
+        self.inviteeMarginMin = inviteeMarginMin
+        self.highConfidenceSimilarity = highConfidenceSimilarity
+        self.duplicateProfileMerge = duplicateProfileMerge
+        self.separationMerge = separationMerge
     }
 
     /// Adaptive DB-match threshold for a speaker whose mean embedding came from
@@ -57,6 +137,7 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
     /// the default path is unchanged. `consolidation` and `absorb` go through
     /// LabKnobOverrides, which returns these exact defaults unless the hill-climb
     /// lab sets TRANSCRIPTED_LAB_KNOBS_FILE; the value is fixed at first use.
+    /// The identity bars are the init defaults, the values they were tuned at.
     public static let weSpeaker = SpeakerEmbeddingThresholds(
         matchOneSegment: 0.85, matchFewSegments: 0.78, matchManySegments: 0.70,
         ghostMergeFloor: 0.72,
@@ -69,6 +150,8 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
     /// remap of the WeSpeaker operating points). Lower absolute values because
     /// ERes2Net's different-speaker cosines are much tighter. `consolidation` and
     /// `absorb` go through LabKnobOverrides (defaults unchanged, see weSpeaker).
+    /// The identity bars were never recalibrated for ERes2Net: it keeps the
+    /// WeSpeaker-scale init defaults it has always run with.
     public static let eRes2Net = SpeakerEmbeddingThresholds(
         matchOneSegment: 0.70, matchFewSegments: 0.62, matchManySegments: 0.55,
         ghostMergeFloor: 0.55,
@@ -91,7 +174,8 @@ public struct SpeakerEmbeddingThresholdsFileError: Error, LocalizedError, Equata
 /// Thresholds for a new voiceprint model come from a calibration file, so a
 /// candidate can be tested without code changes. The presets above never read one.
 ///
-/// File format: one JSON object with all nine fields, in snake_case or camelCase:
+/// File format: one JSON object with the nine match and clustering fields, in
+/// snake_case or camelCase:
 ///
 ///     {"match_one_segment": 0.70, "match_few_segments": 0.62, "match_many_segments": 0.55,
 ///      "ghost_merge_floor": 0.55, "consolidation": 0.65, "absorb": 0.55, "micro_absorb": 0.45,
@@ -99,12 +183,29 @@ public struct SpeakerEmbeddingThresholdsFileError: Error, LocalizedError, Equata
 ///
 /// The same object may instead sit under a top-level `"thresholds"` key, next to
 /// provenance such as the model id and the false-accept rates it was matched to.
-/// Other keys are ignored. A missing field, or a value that is not a cosine in
-/// [-1, 1], is an error: a file never silently falls back to another model's bars.
+/// Other keys are ignored. A missing one of those nine, or any value that is not a
+/// cosine in [-1, 1], is an error: a file never silently falls back to another
+/// model's match or clustering bars.
+///
+/// The identity bars are optional, and one that is left out keeps its WeSpeaker
+/// value (what every model used before they were per-model):
+/// `immature_profile_match_bonus`, `developing_profile_match_bonus`,
+/// `ambiguous_match_margin`, `negative_veto_floor`, `write_back_margin_min`,
+/// `confident_write_back`, `cautious_write_back`, `cross_cluster_link`,
+/// `exemplar_same_condition`, `auto_accept_similarity`, `auto_accept_margin_min`,
+/// `invitee_similarity`, `invitee_margin_min`, `high_confidence_similarity`,
+/// `duplicate_profile_merge`, `separation_merge`.
 extension SpeakerEmbeddingThresholds: Codable {
     enum CodingKeys: String, CodingKey {
         case matchOneSegment, matchFewSegments, matchManySegments, ghostMergeFloor
         case consolidation, absorb, microAbsorb, perSegmentSplit, knownProfileConflict
+        case immatureProfileMatchBonus, developingProfileMatchBonus, ambiguousMatchMargin
+        case negativeVetoFloor
+        case writeBackMarginMin, confidentWriteBack, cautiousWriteBack, crossClusterLink
+        case exemplarSameCondition
+        case autoAcceptSimilarity, autoAcceptMarginMin, inviteeSimilarity, inviteeMarginMin
+        case highConfidenceSimilarity
+        case duplicateProfileMerge, separationMerge
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,6 +219,11 @@ extension SpeakerEmbeddingThresholds: Codable {
             }
             return value
         }
+        // Optional identity bar: absent keeps the WeSpeaker value; present must be a cosine.
+        let wespeaker = SpeakerEmbeddingThresholds.weSpeaker
+        func identityBar(_ key: CodingKeys, _ fallback: Double) throws -> Double {
+            container.contains(key) ? try cosine(key) : fallback
+        }
         self.init(
             matchOneSegment: try cosine(.matchOneSegment),
             matchFewSegments: try cosine(.matchFewSegments),
@@ -127,7 +233,23 @@ extension SpeakerEmbeddingThresholds: Codable {
             absorb: Float(try cosine(.absorb)),
             microAbsorb: Float(try cosine(.microAbsorb)),
             perSegmentSplit: Float(try cosine(.perSegmentSplit)),
-            knownProfileConflict: Float(try cosine(.knownProfileConflict)))
+            knownProfileConflict: Float(try cosine(.knownProfileConflict)),
+            immatureProfileMatchBonus: try identityBar(.immatureProfileMatchBonus, wespeaker.immatureProfileMatchBonus),
+            developingProfileMatchBonus: try identityBar(.developingProfileMatchBonus, wespeaker.developingProfileMatchBonus),
+            ambiguousMatchMargin: try identityBar(.ambiguousMatchMargin, wespeaker.ambiguousMatchMargin),
+            negativeVetoFloor: try identityBar(.negativeVetoFloor, wespeaker.negativeVetoFloor),
+            writeBackMarginMin: try identityBar(.writeBackMarginMin, wespeaker.writeBackMarginMin),
+            confidentWriteBack: try identityBar(.confidentWriteBack, wespeaker.confidentWriteBack),
+            cautiousWriteBack: try identityBar(.cautiousWriteBack, wespeaker.cautiousWriteBack),
+            crossClusterLink: try identityBar(.crossClusterLink, wespeaker.crossClusterLink),
+            exemplarSameCondition: try identityBar(.exemplarSameCondition, wespeaker.exemplarSameCondition),
+            autoAcceptSimilarity: try identityBar(.autoAcceptSimilarity, wespeaker.autoAcceptSimilarity),
+            autoAcceptMarginMin: try identityBar(.autoAcceptMarginMin, wespeaker.autoAcceptMarginMin),
+            inviteeSimilarity: try identityBar(.inviteeSimilarity, wespeaker.inviteeSimilarity),
+            inviteeMarginMin: try identityBar(.inviteeMarginMin, wespeaker.inviteeMarginMin),
+            highConfidenceSimilarity: try identityBar(.highConfidenceSimilarity, wespeaker.highConfidenceSimilarity),
+            duplicateProfileMerge: try identityBar(.duplicateProfileMerge, wespeaker.duplicateProfileMerge),
+            separationMerge: try identityBar(.separationMerge, wespeaker.separationMerge))
     }
 
     /// Reads a calibration file (format above).

@@ -471,7 +471,10 @@ func runMeetingSeries(_ args: [String]) async {
             log("[lab] \(meeting.id): audio copy failed: \(error.localizedDescription)"); continue
         }
 
-        let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
+        // The voiceprint model's bars (a custom model's come from --embedder-thresholds)
+        // drive the store's own decisions and the separation merge bar too.
+        let speakerThresholds = diarization.activeSpeakerThresholds
+        let speakerDB = SpeakerDatabase(path: paths.speakerDB.path, thresholds: speakerThresholds)
         let box = LabResultBox()
         let manager = await MainActor.run { () -> TranscriptionTaskManager in
             let m = TranscriptionTaskManager(
@@ -503,7 +506,9 @@ func runMeetingSeries(_ args: [String]) async {
                 let cap = separation == "nocap" ? nil : labInvitedPeople(meetingDir: meetingDir).flatMap {
                     SpeakerSeparationOptions.speakerCap(invitedPeople: $0)
                 }
-                m.speakerSeparationProvider = { _ in SpeakerSeparationOptions.labTuned(maxSpeakers: cap) }
+                m.speakerSeparationProvider = { _ in
+                    SpeakerSeparationOptions.labTuned(maxSpeakers: cap, thresholds: speakerThresholds)
+                }
             }
             if calendarNaming {
                 let names = noInvite ? [] : labInviteeNames(meetingDir: meetingDir)

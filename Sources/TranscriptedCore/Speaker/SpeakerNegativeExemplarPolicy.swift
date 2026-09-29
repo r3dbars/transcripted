@@ -28,7 +28,8 @@ public enum SpeakerNegativeExemplarPolicy {
     /// A candidate this close (cosine) to a previously-rejected sample is treated as "probably that
     /// rejected voice again". Set high — near the strictest positive match floors — so only a strong
     /// resemblance to an *explicitly rejected* sample can veto. Coincidental similarity never fires.
-    public static let vetoFloor: Double = 0.80
+    /// Per model: `SpeakerEmbeddingThresholds.negativeVetoFloor`; this is the WeSpeaker value.
+    public static let vetoFloor: Double = SpeakerEmbeddingThresholds.weSpeaker.negativeVetoFloor
 
     /// How far to transport a rejected sample along one of a profile's observed condition shifts when
     /// deriving a cross-condition negative representation (see the transported `maxNegativeSimilarity`
@@ -147,12 +148,14 @@ public enum SpeakerNegativeExemplarPolicy {
     ///     positive floors already accepted).
     ///   - negativeSimilarity: `maxNegativeSimilarity` of the candidate against the profile's
     ///     rejected samples, or a negative value when the profile has no usable negative exemplars.
+    ///   - thresholds: the voiceprint model's bars; `negativeVetoFloor` is the absolute floor.
     /// - Returns: `true` to drop the profile from candidacy entirely (best *and* runner-up).
     public static func shouldVeto(
         positiveSimilarity: Double,
-        negativeSimilarity: Double
+        negativeSimilarity: Double,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Bool {
-        guard negativeSimilarity >= vetoFloor else { return false }
+        guard negativeSimilarity >= thresholds.negativeVetoFloor else { return false }
         return negativeSimilarity >= positiveSimilarity
     }
 
@@ -161,11 +164,16 @@ public enum SpeakerNegativeExemplarPolicy {
     public static func shouldVeto(
         candidate embedding: [Float],
         positiveSimilarity: Double,
-        negativeExemplars: [[Float]]
+        negativeExemplars: [[Float]],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Bool {
         guard !negativeExemplars.isEmpty else { return false }
         let negativeSimilarity = maxNegativeSimilarity(embedding, negativeExemplars: negativeExemplars)
-        return shouldVeto(positiveSimilarity: positiveSimilarity, negativeSimilarity: negativeSimilarity)
+        return shouldVeto(
+            positiveSimilarity: positiveSimilarity,
+            negativeSimilarity: negativeSimilarity,
+            thresholds: thresholds
+        )
     }
 
     /// Cross-condition-aware veto: same rule as above, but the negative similarity is computed with
@@ -180,7 +188,8 @@ public enum SpeakerNegativeExemplarPolicy {
         positiveSimilarity: Double,
         negativeExemplars: [[Float]],
         profileAverage: [Float],
-        positiveExemplars: [[Float]]
+        positiveExemplars: [[Float]],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Bool {
         guard !negativeExemplars.isEmpty else { return false }
         let negativeSimilarity = maxNegativeSimilarity(
@@ -189,6 +198,10 @@ public enum SpeakerNegativeExemplarPolicy {
             profileAverage: profileAverage,
             positiveExemplars: positiveExemplars
         )
-        return shouldVeto(positiveSimilarity: positiveSimilarity, negativeSimilarity: negativeSimilarity)
+        return shouldVeto(
+            positiveSimilarity: positiveSimilarity,
+            negativeSimilarity: negativeSimilarity,
+            thresholds: thresholds
+        )
     }
 }

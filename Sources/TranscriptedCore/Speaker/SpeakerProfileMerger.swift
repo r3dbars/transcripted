@@ -373,11 +373,12 @@ extension SpeakerDatabase {
     /// Scan all profiles for likely duplicates and merge them.
     /// Keeps the profile with more calls (better embedding). Transfers display name if the
     /// weaker profile has one and the stronger doesn't. Call after each recording.
-    public func mergeDuplicates(threshold: Double = 0.6) {
+    /// Without a `threshold` the bar is this database's `thresholds.duplicateProfileMerge`.
+    public func mergeDuplicates(threshold: Double) {
         mergeDuplicates(threshold: threshold, protecting: [])
     }
 
-    public func mergeDuplicates(threshold: Double = 0.6, protecting protectedIds: Set<UUID>) {
+    public func mergeDuplicates(threshold: Double, protecting protectedIds: Set<UUID>) {
         queue.sync {
             mergeDuplicatesImpl(threshold: threshold, protectedIds: protectedIds)
         }
@@ -387,11 +388,11 @@ extension SpeakerDatabase {
     /// Swift's witness matching does not accept default-argumented methods, so the store
     /// protocol sees this zero-arg variant which forwards to the threshold-parameterized impl.
     public func mergeDuplicates() {
-        mergeDuplicates(threshold: 0.6)
+        mergeDuplicates(threshold: thresholds.duplicateProfileMerge)
     }
 
     public func mergeDuplicates(protecting protectedIds: Set<UUID>) {
-        mergeDuplicates(threshold: 0.6, protecting: protectedIds)
+        mergeDuplicates(threshold: thresholds.duplicateProfileMerge, protecting: protectedIds)
     }
 
     private func mergeDuplicatesImpl(threshold: Double, protectedIds: Set<UUID>) {

@@ -45,6 +45,12 @@ Leakage checks (the set is excluded and the run exits 2 when any fail):
   - two different seg_ids whose clean clips hold identical audio (sha1 of the PCM data)
   - duplicate seg_id rows, a trial that pairs a clip with itself, label/speaker mismatches
 
+Drop lists: seg_ids in VP/results/audit/drop_<set>.txt (the answer-key audit: duplicate videos,
+label errors, second talkers) are removed before trials are built, and the trial cache is keyed
+on the drop-list content. --no-drops scores the sets as built and writes every output with a
+"_nodrops" suffix (results/verify_nodrops/, verify_summary_nodrops.*, trials/*__nodrops.npz), so
+it never overwrites the default results.
+
 Outputs:
   VP/results/verify/<model_id>.json        full detail for one model
   VP/results/verify_summary.csv            long format: model x scope x group x mode x metric
@@ -77,7 +83,7 @@ from pathlib import Path  # noqa: E402
 import numpy as np  # noqa: E402
 from scipy import sparse  # noqa: E402
 
-SCORER_VERSION = "1.2"
+SCORER_VERSION = "1.4"
 TRIALS_VERSION = "2"  # trial file format
 SEED_VERSION = "1"  # sampling seeds; changing it reshuffles every trial list
 REPO = Path(__file__).resolve().parents[2]
@@ -107,6 +113,7 @@ BOOT_CHUNK = 100
 BOOT_GRID = 1500  # rank-spaced ROC points per bootstrap replicate (plus exact points at low FAR)
 BOOT_EXACT_FAR = 0.02  # below this FAR every operating point is kept, so TAR@FAR and minDCF stay exact
 ENUMERATE_PAIRS_MAX = 4_000_000
+AUDIT_DIR = Path("results") / "audit"
 
 
 class DataError(Exception):
@@ -318,7 +325,12 @@ class SetState:
     src: np.ndarray
     bucket: np.ndarray
     clip: list
-    fp: str
+    fp: str  # kept rows + drop-list content: keys the trial cache
+    fp_full: str = ""  # every row of segments.jsonl: keys the audio-hash cache
+    all_ids: list = field(default_factory=list)  # every row, including dropped ones
+    all_clips: list = field(default_factory=list)
+    dropped: frozenset = frozenset()
+    drop_info: dict = field(default_factory=dict)
     hash_hex: np.ndarray | None = None
     hash_id: np.ndarray | None = None
     trials: dict = field(default_factory=dict)
@@ -339,7 +351,27 @@ class SetState:
         return self._mult[n_boot]
 
 
-def load_segments(vp: Path, name: str) -> SetState:
+def load_drops(vp: Path, name: str) -> dict:
+    """seg_ids listed in VP/results/audit/drop_<set>.txt (blank lines and # comments ignored)."""
+    path = vp / AUDIT_DIR / f"drop_{name}.txt"
+    if not path.exists():
+        return {"file": None, "ids": frozenset(), "sha1": "none"}
+    text = path.read_text()
+    ids = frozenset(l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#"))
+    return {"file": str(path.relative_to(vp)), "ids": ids, "sha1": hashlib.sha1(text.encode()).hexdigest()}
+
+
+def canon_fp(rows: list, extra: str = "") -> str:
+    canon = sorted(
+        f"{r['seg_id']}\t{r['speaker']}\t{r['session']}\t{int(r['bucket'])}\t{int(bool(r.get('stranger_only')))}"
+        f"\t{(r.get('src') or {}).get('file') or ''}\t{r['clip']}"
+        for r in rows
+    )
+    return hashlib.sha1(("\n".join(canon) + extra).encode()).hexdigest()
+
+
+def load_segments(vp: Path, name: str, drops: dict | None = None) -> SetState:
+    """Load segments.jsonl; with `drops` (from load_drops), those seg_ids are removed first."""
     path = vp / "sets" / name / "segments.jsonl"
     rows = []
     for ln, line in enumerate(path.read_text().splitlines(), 1):
@@ -364,6 +396,20 @@ def load_segments(vp: Path, name: str) -> SetState:
                 break
             seen.add(s)
         raise LeakageError(f"{name}: duplicate seg_id rows in segments.jsonl (e.g. {dup})")
+    fp_full = canon_fp(rows)
+    all_ids, all_clips = seg_ids, [str(r["clip"]) for r in rows]
+    drop_ids = frozenset(drops["ids"]) if drops else frozenset()
+    drop_info = {"applied": drops is not None, "file": drops["file"] if drops else None,
+                 "listed": len(drop_ids), "removed": 0, "not_found": 0}
+    if drop_ids:
+        present = set(seg_ids)
+        rows = [r for r in rows if str(r["seg_id"]) not in drop_ids]
+        seg_ids = [str(r["seg_id"]) for r in rows]
+        drop_info["removed"] = len(all_ids) - len(rows)
+        drop_info["not_found"] = len(drop_ids - present)
+        if not rows:
+            raise DataError(f"{name}: the drop list removes every clip")
+    fp = canon_fp(rows, f"\n#drops {drops['sha1']}" if drops else "")
     spk_names, spk_inv = np.unique([str(r["speaker"]) for r in rows], return_inverse=True)
     _, sess_inv = np.unique([str(r["session"]) for r in rows], return_inverse=True)
     src_files = [str((r.get("src") or {}).get("file") or "") for r in rows]
@@ -378,16 +424,15 @@ def load_segments(vp: Path, name: str) -> SetState:
         bucket = np.array([int(r["bucket"]) for r in rows], dtype=np.int32)
     except (TypeError, ValueError):
         raise DataError(f"{name}: non-integer bucket") from None
-    canon = sorted(
-        f"{r['seg_id']}\t{r['speaker']}\t{r['session']}\t{int(r['bucket'])}\t{int(bool(r.get('stranger_only')))}\t{f}\t{r['clip']}"
-        for r, f in zip(rows, src_files)
-    )
-    fp = hashlib.sha1("\n".join(canon).encode()).hexdigest()
     st = SetState(
         name=name, seg_ids=np.array(seg_ids), index={s: i for i, s in enumerate(seg_ids)},
         spk=spk_inv.astype(np.int32), spk_names=list(spk_names), spk_stranger=spk_stranger,
         sess=sess_inv.astype(np.int32), src=src_inv, bucket=bucket, clip=[str(r["clip"]) for r in rows], fp=fp,
+        fp_full=fp_full, all_ids=all_ids, all_clips=all_clips,
+        dropped=frozenset(set(all_ids) - set(seg_ids)), drop_info=drop_info,
     )
+    if drop_info["not_found"]:
+        st.warnings.append(f"{drop_info['not_found']} seg_ids in {drop_info['file']} are not in segments.jsonl")
     bad_set = sum(1 for r in rows if r.get("set") not in (None, name))
     if bad_set:
         st.warnings.append(f"{bad_set} rows have a 'set' field other than {name!r}")
@@ -411,32 +456,32 @@ def hash_clip(path: Path) -> str:
 
 
 def audit_audio(vp: Path, st: SetState, force: bool = False) -> None:
-    """Hash every clean clip (cached); raise LeakageError if two seg_ids share identical audio."""
+    """Hash every clean clip (cached, over every row, dropped or not); raise LeakageError if two
+    kept seg_ids share identical audio."""
     cache = vp / "results" / "trials" / f"{st.name}__audit.npz"
-    key = f"{st.fp}|{file_sig(vp / 'sets' / st.name / 'READY')}"
-    hashes = None
+    key = f"{st.fp_full}|{file_sig(vp / 'sets' / st.name / 'READY')}"
+    idx = None
     if cache.exists() and not force:
         try:
             z = np.load(cache, allow_pickle=False)
             if str(z["key"]) == key:
                 idx = {s: h for s, h in zip(z["seg_id"].astype(str), z["sha1"].astype(str))}
-                if all(s in idx for s in st.seg_ids):
-                    hashes = np.array([idx[s] for s in st.seg_ids])
+                if not all(s in idx for s in st.seg_ids):
+                    idx = None
         except Exception:
-            hashes = None
-    if hashes is None:
-        missing, out = [], []
-        for clip in st.clip:
+            idx = None
+    if idx is None:
+        idx, missing = {}, []
+        for sid, clip in zip(st.all_ids, st.all_clips):
             p = vp / clip
-            if not p.exists():
+            if p.exists():
+                idx[sid] = hash_clip(p)
+            elif sid not in st.dropped:
                 missing.append(clip)
-                out.append("")
-            else:
-                out.append(hash_clip(p))
         if missing:
             raise DataError(f"{st.name}: {len(missing)} clean clips missing (e.g. {missing[0]})")
-        hashes = np.array(out)
-        save_npz(cache, key=np.array(key), seg_id=st.seg_ids, sha1=hashes)
+        save_npz(cache, key=np.array(key), seg_id=np.array(list(idx)), sha1=np.array(list(idx.values())))
+    hashes = np.array([idx[s] for s in st.seg_ids])
     st.hash_hex = hashes
     uniq, inv, counts = np.unique(hashes, return_inverse=True, return_counts=True)
     st.hash_id = inv.astype(np.int64)
@@ -521,12 +566,13 @@ def build_trials(st: SetState, bucket: int, max_per_class: int) -> Trials:
     return Trials(bucket=int(bucket), e=e, t=t, y=y, meta=meta)
 
 
-def trials_path(vp: Path, set_name: str, bucket: int) -> Path:
-    return vp / "results" / "trials" / f"{set_name}__b{bucket}.npz"
+def trials_path(vp: Path, set_name: str, bucket: int, ns: str = "") -> Path:
+    return vp / "results" / "trials" / f"{set_name}__b{bucket}{'__' + ns if ns else ''}.npz"
 
 
-def load_or_build_trials(vp: Path, st: SetState, bucket: int, max_per_class: int, force: bool = False) -> Trials:
-    path = trials_path(vp, st.name, bucket)
+def load_or_build_trials(vp: Path, st: SetState, bucket: int, max_per_class: int, force: bool = False,
+                         ns: str = "") -> Trials:
+    path = trials_path(vp, st.name, bucket, ns)
     if path.exists() and not force:
         try:
             z = np.load(path, allow_pickle=False)
@@ -597,7 +643,10 @@ def list_sets(vp: Path) -> list[str]:
     return sorted(p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith((".", "_")))
 
 
-def prepare_sets(vp: Path, max_per_class: int, force: bool, notes: list, errors: list) -> dict[str, SetState]:
+def prepare_sets(vp: Path, max_per_class: int, force: bool, notes: list, errors: list,
+                 use_drops: bool = True, ns: str = "") -> dict[str, SetState]:
+    """Load, drop, audit and build trials for every READY set. ns names the output namespace
+    ("" by default, "nodrops" for --no-drops) so the two trial lists never overwrite each other."""
     states = {}
     for name in list_sets(vp):
         sd = vp / "sets" / name
@@ -605,7 +654,7 @@ def prepare_sets(vp: Path, max_per_class: int, force: bool, notes: list, errors:
             notes.append(f"set {name}: not READY, skipped")
             continue
         try:
-            st = load_segments(vp, name)
+            st = load_segments(vp, name, load_drops(vp, name) if use_drops else None)
         except DataError as exc:
             errors.append(str(exc))
             continue
@@ -613,7 +662,7 @@ def prepare_sets(vp: Path, max_per_class: int, force: bool, notes: list, errors:
         try:
             audit_audio(vp, st, force=force)
             for b in sorted(np.unique(st.bucket).tolist()):
-                tr = load_or_build_trials(vp, st, int(b), max_per_class, force=force)
+                tr = load_or_build_trials(vp, st, int(b), max_per_class, force=force, ns=ns)
                 verify_trials(st, tr)
                 st.trials[int(b)] = tr
         except LeakageError as exc:
@@ -671,7 +720,11 @@ def load_emb(vp: Path, model: str, st: SetState, cond: str) -> tuple[Emb | None,
         return None, f"bad shape {X.shape} for {len(ids)} ids"
     rows = np.array([st.index.get(s, -1) for s in ids], dtype=np.int64)
     if (rows < 0).any():
-        return None, f"stale: {int((rows < 0).sum())} seg_ids are not in segments.jsonl"
+        unknown = [s for s, r in zip(ids, rows) if r < 0 and s not in st.dropped]
+        if unknown:
+            return None, f"stale: {len(unknown)} seg_ids are not in segments.jsonl"
+        keep_rows = rows >= 0  # the rest are on the set's drop list
+        ids, X, rows = ids[keep_rows], X[keep_rows], rows[keep_rows]
     if len(np.unique(rows)) != len(rows):
         return None, "duplicate seg_ids in npz"
     norms = np.linalg.norm(X, axis=1)
@@ -719,6 +772,13 @@ class Config:
     n_boot: int = N_BOOT
     asnorm: bool = True
     force: bool = False
+    ns: str = ""  # output namespace: "" (drop lists applied) or "nodrops"
+
+    def verify_dir(self, vp: Path) -> Path:
+        return vp / "results" / ("verify" + (f"_{self.ns}" if self.ns else ""))
+
+    def summary_path(self, vp: Path, ext: str) -> Path:
+        return vp / "results" / (f"verify_summary{'_' + self.ns if self.ns else ''}.{ext}")
 
 
 def cache_key(vp: Path, model: str, st: SetState, cfg: Config) -> dict:
@@ -738,8 +798,25 @@ def cache_key(vp: Path, model: str, st: SetState, cfg: Config) -> dict:
     }
 
 
-def cells_dir(vp: Path, model: str) -> Path:
-    return vp / "results" / "verify" / "_cells" / model
+def find_stale(vp: Path, states: dict) -> list[str]:
+    """Embedding files older than their set's or condition's READY. The daemon only embeds missing
+    files, so these stay stale until someone deletes them."""
+    out = []
+    d = vp / "emb"
+    if not d.exists():
+        return out
+    for mdir in sorted(p for p in d.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
+        for name in sorted(states):
+            for c in CONDS:
+                f = emb_path(vp, mdir.name, name, c)
+                r = ready_path(vp, name, c)
+                if f.exists() and r.exists() and f.stat().st_mtime < r.stat().st_mtime:
+                    out.append(str(f.relative_to(vp)))
+    return out
+
+
+def cells_dir(vp: Path, model: str, cfg: Config) -> Path:
+    return cfg.verify_dir(vp) / "_cells" / model
 
 
 def score_model_set(vp: Path, model: str, st: SetState, states: dict, cfg: Config, emb_cache: dict):
@@ -762,7 +839,10 @@ def score_model_set(vp: Path, model: str, st: SetState, states: dict, cfg: Confi
         elif why != "missing":
             notes.append(f"{st.name}__{c}: {why}")
     if not embs:
-        return None, None
+        if not notes:
+            return None, None  # nothing embedded for this set yet
+        return {"set": st.name, "cells": [], "notes": notes, "near_dup_clean": {}, "asnorm": bool(cfg.asnorm),
+                "conds": [], "dim": None}, {}
     base_dim = embs.get("clean", next(iter(embs.values()))).dim
     for c in list(embs):
         if embs[c].dim != base_dim:
@@ -774,14 +854,22 @@ def score_model_set(vp: Path, model: str, st: SetState, states: dict, cfg: Confi
     centered_info = None
     cname = cohort_set_for(st.name)
     cst = states.get(cname)
+    def why_not(e, why):
+        if e is None:
+            return "not embedded yet" if why == "missing" else ("stale" if why.startswith("stale") else why)
+        if e.dim != base_dim:
+            return f"dim {e.dim} != {base_dim}"
+        return None
+
     if cst is None or cst.hash_hex is None:
         notes.append(f"centering and AS-norm off for {st.name}: cohort set {cname} not ready")
     else:
         shared = np.isin(cst.hash_hex, st.hash_hex)
         # centered: one fixed mean vector per model (the clean cohort mean), as the app would ship it
-        ce, _ = get(cst, "clean")
-        if ce is None or ce.dim != base_dim or int((ce.present & ~shared).sum()) < MIN_COHORT:
-            notes.append(f"centering off for {st.name}: no usable {cname} clean cohort embeddings")
+        ce, why = get(cst, "clean")
+        bad = why_not(ce, why) or (None if int((ce.present & ~shared).sum()) >= MIN_COHORT else "too few clips")
+        if bad:
+            notes.append(f"centering off for {st.name}: {cname} clean cohort {bad}")
         else:
             keep = ce.present & ~shared
             mean = ce.raw[keep].astype(np.float64).mean(axis=0)
@@ -790,24 +878,27 @@ def score_model_set(vp: Path, model: str, st: SetState, states: dict, cfg: Confi
                              "mean_norm": float(np.linalg.norm(mean)),
                              "mean_norm_over_avg_norm": float(np.linalg.norm(mean) / np.linalg.norm(ce.raw[keep], axis=1).mean())}
         if cfg.asnorm:
+            off: dict[str, list] = {}
             for c in embs:
                 cc = c
-                ce, _ = get(cst, c)
+                ce, why = get(cst, c)
                 if ce is None and c != "clean":
-                    ce, _ = get(cst, "clean")
+                    ce, why = get(cst, "clean")
                     cc = "clean"
-                if ce is None or ce.dim != base_dim:
-                    notes.append(f"AS-norm off for {st.name}__{c}: no {cname} cohort embeddings")
+                bad = why_not(ce, why)
+                keep = ce.present & ~shared if not bad else None
+                if not bad and int(keep.sum()) < MIN_COHORT:
+                    bad = "too few clips"
+                if bad:
+                    off.setdefault(bad, []).append(c)
                     continue
-                keep = ce.present & ~shared
                 C = ce.E[keep]
-                if len(C) < MIN_COHORT:
-                    notes.append(f"AS-norm off for {st.name}__{c}: cohort has {len(C)} clips")
-                    continue
                 k = min(cfg.topk, len(C))
                 mu, sd = asnorm_stats(embs[c].E, embs[c].present, C, k)
                 stats[c] = (mu, sd, {"set": cname, "cond": cc, "size": int(len(C)), "topk": int(k),
                                      "dropped_shared_audio": int((ce.present & shared).sum())})
+            for bad, conds in off.items():
+                notes.append(f"AS-norm off for {st.name} ({', '.join(conds)}): {cname} cohort {bad}")
 
     mult = st.mult(cfg.n_boot)
     cells, arrays = [], {}
@@ -957,7 +1048,7 @@ def collect_model(vp: Path, model: str, states: dict, cfg: Config, recompute_set
                   may_recompute: bool) -> ModelResult:
     res = ModelResult(model_id=model, meta=model_meta(vp, model))
     emb_cache: dict = {}
-    cdir = cells_dir(vp, model)
+    cdir = cells_dir(vp, model, cfg)
     for name, st in sorted(states.items()):
         if st.error or not st.trials:
             continue
@@ -1134,7 +1225,7 @@ def paired_delta(res: ModelResult, mode: str, base: ModelResult, base_mode: str,
 
 def write_outputs(vp: Path, results: dict, states: dict, baseline: str | None, rank_mode: str,
                   errors: list, notes: list, cfg: Config) -> None:
-    out_dir = vp / "results" / "verify"
+    out_dir = cfg.verify_dir(vp)
     out_dir.mkdir(parents=True, exist_ok=True)
     scopes = scope_defs(sorted(states))
     base = results.get(baseline) if baseline else None
@@ -1169,7 +1260,8 @@ def write_outputs(vp: Path, results: dict, states: dict, baseline: str | None, r
             "scorer_version": SCORER_VERSION, "generated_at": now,
             "config": {"max_per_class": cfg.max_per_class, "asnorm_topk": cfg.topk, "n_boot": cfg.n_boot,
                        "p_target": P_TARGET, "fars": FARS, "human_sets": HUMAN_SETS, "reported_separately": BIASED_SETS,
-                       "rank_mode": rank_mode},
+                       "rank_mode": rank_mode,
+                       "drops": {n: st.drop_info for n, st in sorted(states.items())}},
             "headline": {"metric": f"human / {hgroup} / tar@1e-3", "group": hgroup, "mode": mode,
                          "value": head["value"] if head else None,
                          "ci": head["ci"] if head else None, "by_mode": by_mode,
@@ -1214,12 +1306,14 @@ def write_outputs(vp: Path, results: dict, states: dict, baseline: str | None, r
                             continue
                         w.writerow([m, isb, hm, f"{sname}+one_threshold", g, mode, metric, num(e[metric]), "", "",
                                     "", "", "", "", "", e["n_target"], e["n_nontarget"]])
-    save_text(vp / "results" / "verify_summary.csv", buf.getvalue())
-    save_text(vp / "results" / "verify_summary.md",
-              render_md(results, tables, heads, deltas, states, baseline, rank_mode, expected, errors, notes, cfg, now))
+    save_text(cfg.summary_path(vp, "csv"), buf.getvalue())
+    save_text(cfg.summary_path(vp, "md"),
+              render_md(results, tables, heads, deltas, states, baseline, rank_mode, expected, errors, notes, cfg, now,
+                        find_stale(vp, states)))
 
 
-def render_md(results, tables, heads, deltas, states, baseline, rank_mode, expected, errors, notes, cfg, now) -> str:
+def render_md(results, tables, heads, deltas, states, baseline, rank_mode, expected, errors, notes, cfg, now,
+              stale=()) -> str:
     L = []
     human_present = [s for s in HUMAN_SETS if s in states and states[s].trials]
     variant_txt = ("each model's best of raw cosine, centered cosine and AS-norm (column \"variant\")"
@@ -1232,6 +1326,18 @@ def render_md(results, tables, heads, deltas, states, baseline, rank_mode, expec
         f"({', '.join(human_present) or 'none yet'}). Brackets are 95% bootstrap CIs over speakers "
         f"({cfg.n_boot} replicates). Δ compares each model's headline variant with the baseline's headline variant, "
         f"paired, on the cells both have; `*` means its CI excludes 0. TAR, EER and AUC are in %.\n")
+    applied = [(n, st.drop_info) for n, st in sorted(states.items()) if st.drop_info.get("applied")]
+    if applied:
+        parts = []
+        for n, d in applied:
+            txt = f"{n} {d['removed']}" if d["file"] else f"{n} 0 (no list)"
+            if d.get("not_found"):
+                txt += f" ({d['not_found']} listed ids not in the set)"
+            parts.append(txt)
+        L.append("Drop lists applied (`results/audit/drop_<set>.txt`, from the answer-key audit), clips removed before "
+                 "trials were built: " + ", ".join(parts) + ".\n")
+    elif states:
+        L.append("Drop lists **not** applied (`--no-drops`): every clip of every set is scored.\n")
     if errors:
         L.append("## Errors\n")
         for e in errors:
@@ -1366,8 +1472,18 @@ def render_md(results, tables, heads, deltas, states, baseline, rank_mode, expec
             ex_txt = "; ".join(f"{a} / {b} ({c})" for a, b, c in sorted(ex, key=lambda x: -x[2])[:3])
             extra.append(f"`{m}`: {nd} clean target trials (different sessions) score cosine ≥ {DUP_COS}; check them "
                          f"for the same audio under two sessions: {ex_txt}")
-        for n in r.notes:
-            extra.append(f"`{m}`: {n}")
+    by_note: dict[str, list] = {}
+    for m in ranked:
+        for n in results[m].notes:
+            by_note.setdefault(n, []).append(m)
+    for n, ms in by_note.items():
+        who = ", ".join(f"`{m}`" for m in ms) if len(ms) <= 3 else f"{len(ms)} models"
+        extra.append(f"{n} ({who})")
+    if stale:
+        sets_ = sorted({Path(f).name.split("__")[0] for f in stale})
+        extra.insert(0, f"**{len(stale)} embedding files are stale** (older than their READY, so they are skipped, and the "
+                        f"daemon will not redo them until they are deleted; sets: {', '.join(sets_)}): "
+                        + ", ".join(f"`{f}`" for f in stale[:12]) + (" …" if len(stale) > 12 else ""))
     if notes or extra:
         L.append("## Notes\n")
         for n in notes + extra[:60]:
@@ -1395,17 +1511,20 @@ def main(argv: list[str] | None = None) -> int:
                     help="scoring variant for the headline: best (each model's best of the three, default), cos, centered, asnorm")
     ap.add_argument("--baseline", default=None, help="reference model for Δ (default: model.json baseline: true)")
     ap.add_argument("--force", action="store_true", help="ignore caches (audit, trials, per-model cells)")
+    ap.add_argument("--no-drops", action="store_true",
+                    help="ignore VP/results/audit/drop_<set>.txt; outputs get a _nodrops suffix")
     args = ap.parse_args(argv)
 
     vp = Path(args.vp).resolve()
-    cfg = Config(max_per_class=args.max_trials, topk=args.topk, n_boot=args.boot, asnorm=not args.no_asnorm, force=args.force)
+    cfg = Config(max_per_class=args.max_trials, topk=args.topk, n_boot=args.boot, asnorm=not args.no_asnorm,
+                 force=args.force, ns="nodrops" if args.no_drops else "")
     t0 = time.time()
     notes: list[str] = []
     errors: list[str] = []
     want_sets = {s for s in args.sets.split(",") if s} or None
     want_models = {m for m in args.models.split(",") if m} or None
 
-    states = prepare_sets(vp, cfg.max_per_class, cfg.force, notes, errors)
+    states = prepare_sets(vp, cfg.max_per_class, cfg.force, notes, errors, use_drops=not args.no_drops, ns=cfg.ns)
     if want_sets:
         for s in sorted(want_sets - set(states)):
             notes.append(f"set {s}: requested but not ready")
@@ -1427,7 +1546,7 @@ def main(argv: list[str] | None = None) -> int:
     write_outputs(vp, results, states, baseline, args.rank_mode, errors, notes, cfg)
     log(f"scored {len(results)} models; recomputed "
         f"{sum(len(r.recomputed) for r in results.values())} (model, set) pairs in {time.time() - t0:.1f}s")
-    log(f"wrote {vp / 'results' / 'verify_summary.md'}")
+    log(f"wrote {cfg.summary_path(vp, 'md')}")
     if errors:
         bar = "!" * 78
         log(f"\n{bar}")

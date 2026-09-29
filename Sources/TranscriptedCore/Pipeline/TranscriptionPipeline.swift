@@ -428,7 +428,7 @@ extension Transcription {
                 // so a cluster that turns out to be a distinct voice (spun off) never blends into
                 // the shared profile. Matching reads only the `existingProfiles` snapshot, so
                 // deferring the blend cannot change any match decision.
-                if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
+                if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile, thresholds: speakerThresholds) {
                     speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
                     let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
@@ -463,7 +463,8 @@ extension Transcription {
                 matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
                 matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
                 meanBySpeaker: matchedMeanPerSpeaker,
-                segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
+                segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count },
+                thresholds: speakerThresholds
             )
             // Spin-off representatives: a distinct voice (or fragments of one) that only resembled the
             // matched profile — give it its own identity so review names it separately. Removed from
@@ -499,7 +500,7 @@ extension Transcription {
             if !linkPlan.spinOffs.isEmpty {
                 AppLogger.transcription.info("Cross-cluster fusion declined — distinct voices spun off", [
                     "spunOff": linkPlan.spinOffs.map { "spk\($0)" }.joined(separator: "+"),
-                    "linkFloor": String(format: "%.2f", SpeakerWritePathPolicy.crossClusterLinkFloor)
+                    "linkFloor": String(format: "%.2f", speakerThresholds.crossClusterLink)
                 ])
             }
 
@@ -512,7 +513,8 @@ extension Transcription {
                 guard let meanEmbedding = matchedMeanPerSpeaker[speakerId] else { continue }
                 let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
                     similarity: match.similarity,
-                    secondBestSimilarity: match.secondSimilarity
+                    secondBestSimilarity: match.secondSimilarity,
+                    thresholds: speakerThresholds
                 )
                 _ = speakerDB.addOrUpdateSpeaker(
                     embedding: meanEmbedding,
@@ -1215,9 +1217,9 @@ extension Transcription {
 
     /// Ghost speakers only have a best-effort embedding from segments that were
     /// too short, low-quality, or contaminated for normal profile matching. Keep
-    /// the auto-merge floor high enough that uncertain voices survive to review.
-    nonisolated static let ghostSpeakerMergeSimilarityFloor: Double = 0.72
-
+    /// the auto-merge floor high enough that uncertain voices survive to review:
+    /// callers compare against the active model's
+    /// `SpeakerEmbeddingThresholds.ghostMergeFloor`.
     nonisolated static func bestGhostSpeakerMergeCandidate(
         for meanEmbedding: [Float],
         nonGhostMeans: [Int: [Float]]
@@ -1385,7 +1387,7 @@ extension Transcription {
             // rationale as the system path: matching reads only the existingProfiles snapshot, so
             // deferring the blend changes no match decision, and a spun-off distinct voice never
             // contaminates the shared profile).
-            if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
+            if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile, thresholds: speakerThresholds) {
                 speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
             } else {
                 let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
@@ -1401,7 +1403,8 @@ extension Transcription {
             matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
             matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
             meanBySpeaker: nonGhostMeans,
-            segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
+            segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count },
+            thresholds: speakerThresholds
         )
         for rep in micLinkPlan.spinOffs {
             let repMean = nonGhostMeans[rep]
@@ -1425,7 +1428,8 @@ extension Transcription {
             guard let meanEmbedding = nonGhostMeans[speakerId] else { continue }
             let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
                 similarity: match.similarity,
-                secondBestSimilarity: match.secondSimilarity
+                secondBestSimilarity: match.secondSimilarity,
+                thresholds: speakerThresholds
             )
             _ = speakerDB.addOrUpdateSpeaker(
                 embedding: meanEmbedding,

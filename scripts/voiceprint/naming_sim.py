@@ -312,12 +312,27 @@ class SetInfo:
     natural: bool
     group_of: dict[str, str] = field(default_factory=dict)     # session -> meeting series (from rows)
     order_of: dict[str, tuple] = field(default_factory=dict)   # session -> sort key inside its series
+    dropped: int = 0                                            # clips excluded by the audit drop list
 
 
-def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> SetInfo | None:
+def drop_path(name: str) -> Path:
+    return vp_root() / "results" / "audit" / f"drop_{name}.txt"
+
+
+def load_drops(name: str) -> set[str]:
+    """seg_ids the answer-key audit wants excluded (VP/results/audit/drop_<set>.txt); empty if none."""
+    p = drop_path(name)
+    if not p.exists():
+        return set()
+    return {ln.strip() for ln in p.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+
+
+def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES, drops: bool = True) -> SetInfo | None:
     path = vp_root() / "sets" / name / "segments.jsonl"
     if not path.exists():
         return None
+    dropset = load_drops(name) if drops else set()
+    n_dropped = 0
     clips: dict[tuple[str, str], list[str]] = defaultdict(list)
     stranger: set[str] = set()
     dur: dict[str, float] = {}
@@ -327,6 +342,9 @@ def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> S
         if not line.strip():
             continue
         r = json.loads(line)
+        if r["seg_id"] in dropset:
+            n_dropped += 1
+            continue
         clips[(r["speaker"], r["session"])].append(r["seg_id"])
         dur[r["seg_id"]] = float(r.get("dur", r.get("bucket", 0)) or 0)
         if r.get("stranger_only"):
@@ -347,7 +365,8 @@ def load_set(name: str, natural_prefixes: Iterable[str] = NATURAL_PREFIXES) -> S
                                     for p in natural_prefixes)
     return SetInfo(name, {k: sorted(v) for k, v in clips.items()},
                    {k: sorted(v) for k, v in sessions_of.items()},
-                   {k: sorted(v) for k, v in speakers_of.items()}, stranger, dur, natural, group_of, order_of)
+                   {k: sorted(v) for k, v in speakers_of.items()}, stranger, dur, natural, group_of, order_of,
+                   n_dropped)
 
 
 def components(pairs_by_session: dict[str, list[str]], nodes: Iterable[str]) -> list[list[str]]:
@@ -1257,9 +1276,12 @@ def find_baseline() -> str | None:
     return cands[0] if cands else None
 
 
-def input_fingerprint(store: EmbStore, sets: list[str]) -> dict:
+def input_fingerprint(store: EmbStore, sets: list[str], drops: bool = True) -> dict:
     fp = {}
     for s in sets:
+        if drops and drop_path(s).exists():
+            st = drop_path(s).stat()
+            fp[f"{s}/drops"] = [int(st.st_mtime), st.st_size]
         seg = vp_root() / "sets" / s / "segments.jsonl"
         if not seg.exists():
             continue
@@ -1280,7 +1302,9 @@ class Options:
     reps: int = 4
     world_size: int = 40
     tail_reps: float = TAIL_REPS
-    fixed_margins: bool = False
+    fixed_margins: bool = False          # headline variant uses the app's literal 0.12/0.10 margins
+    secondary_fixed: bool = True         # also score the fixed-margin variant as a secondary result
+    drops: bool = True                   # exclude VP/results/audit/drop_<set>.txt
     natural: tuple[str, ...] = NATURAL_PREFIXES
     mixed: bool = True
 
@@ -1306,7 +1330,7 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
             conds = [c for c in conds if c in opts.conds]
         if not conds:
             continue
-        si = load_set(s, opts.natural)
+        si = load_set(s, opts.natural, opts.drops)
         if si is None:
             continue
         loaded = [c for c in conds if store.get(s, c) is not None]
@@ -1340,8 +1364,7 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
                                 continue
                             for mode in opts.modes:
                                 specs[split].append(Spec(s, split, cond, talk, mode, ms))
-    folds = []
-    rows = []
+    fold_inputs = []
     for fold, (cal, test) in enumerate(((0, 1), (1, 0))):
         imp_parts, anchor_m, anchor_b, anchor_pairs = [], ([], []), ([], []), []
         for s, si in sets.items():
@@ -1370,30 +1393,44 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
                 geo = Geometry(note=f"identity (no genuine/impostor gap vs {baseline_id})")
         else:
             geo = Geometry(note="identity (no baseline embeddings on these sets)")
-        cal_specs = specs[cal]
-        if not cal_specs:
-            continue
-        log(f"{model_id}: fold {fold} calibrating on {len(cal_specs)} runs")
-        bars, info = calibrate(cal_specs, imp, geo, opts.tail_reps, opts.fixed_margins)
-        info["geometry"] = geo.public()
-        info["impostor_pairs"] = int(len(imp))
-        look = {}
-        for s_name, si in sets.items():
-            spk_test = {p for p, v in split_maps[s_name].items() if v == test}
-            for cond in conds_of[s_name]:
-                if cond != "mixed":
-                    look[f"{s_name}__{cond}"] = lookalike_pairs(si, store, cond, spk_test, bars.auto_lineup)
-        folds.append({"fold": fold, "calib_split": cal, "test_split": test, "bars": bars.public(), "calibration": info,
-                      "test_lookalikes": look,
-                      "test_lookalike_pairs_over_bar": sum(v["pairs_over_bar"] for v in look.values()),
-                      "test_lookalike_pairs_checked": sum(v["pairs_checked"] for v in look.values())})
-        for split_name, split in (("calib", cal), ("test", test)):
-            for sp in specs[split]:
-                r = simulate(sp.meetings, bars, sp.mode)
-                rows.append({"set": sp.set, "cond": sp.cond, "talk": sp.talk, "mode": sp.mode, "fold": fold,
-                             "split": split_name, "counts": dict(r.counts), "first_auto": dict(r.first_auto),
-                             "wrong_names": r.wrong_names})
-    rows = merge_rows(rows)
+        if specs[cal]:
+            fold_inputs.append((fold, cal, test, imp, geo))
+
+    def run_variant(fixed_margins: bool) -> tuple[list[dict], list[dict]]:
+        folds, rows = [], []
+        for fold, cal, test, imp, geo in fold_inputs:
+            log(f"{model_id}: fold {fold} calibrating on {len(specs[cal])} runs"
+                f"{' (fixed margins)' if fixed_margins else ''}")
+            bars, info = calibrate(specs[cal], imp, geo, opts.tail_reps, fixed_margins)
+            info["geometry"] = geo.public()
+            info["impostor_pairs"] = int(len(imp))
+            look = {}
+            for s_name, si in sets.items():
+                spk_test = {p for p, v in split_maps[s_name].items() if v == test}
+                for cond in conds_of[s_name]:
+                    if cond != "mixed":
+                        look[f"{s_name}__{cond}"] = lookalike_pairs(si, store, cond, spk_test, bars.auto_lineup)
+            folds.append({"fold": fold, "calib_split": cal, "test_split": test, "bars": bars.public(), "calibration": info,
+                          "test_lookalikes": look,
+                          "test_lookalike_pairs_over_bar": sum(v["pairs_over_bar"] for v in look.values()),
+                          "test_lookalike_pairs_checked": sum(v["pairs_checked"] for v in look.values())})
+            for split_name, split in (("calib", cal), ("test", test)):
+                for sp in specs[split]:
+                    r = simulate(sp.meetings, bars, sp.mode)
+                    rows.append({"set": sp.set, "cond": sp.cond, "talk": sp.talk, "mode": sp.mode, "fold": fold,
+                                 "split": split_name, "counts": dict(r.counts), "first_auto": dict(r.first_auto),
+                                 "wrong_names": r.wrong_names})
+        return folds, merge_rows(rows)
+
+    folds, rows = run_variant(opts.fixed_margins)
+    secondary = None
+    if opts.secondary_fixed and not opts.fixed_margins and not is_baseline_scale(fold_inputs):
+        f2, r2 = run_variant(True)
+        secondary = {"fixed_margins": True, "folds": [{k: f[k] for k in ("fold", "bars", "test_lookalike_pairs_over_bar",
+                                                                         "test_lookalike_pairs_checked")} for f in f2],
+                     "pooled": {sp: {k: v for k, v in pv.items() if k in ("all", "clean", "call", "by_set", "by_mode")}
+                                for sp, pv in pooled_views(r2, []).items()},
+                     "wrong_silent_name_events": wrong_name_events(r2)}
     app_rows = []
     if is_baseline:
         for split in (0, 1):
@@ -1406,11 +1443,17 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
     out = {
         "model_id": model_id, "baseline": is_baseline, "family": meta.get("family"), "dim": meta.get("dim") or store.dim,
         "params_m": meta.get("params_m"), "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "inputs": input_fingerprint(store, list(sets)), "sets": {s: conds_of[s] for s in sets}, "splits": split_info,
+        "inputs": input_fingerprint(store, list(sets), opts.drops), "sets": {s: conds_of[s] for s in sets},
+        "splits": split_info,
         "options": {"talks": list(opts.talks), "modes": list(opts.modes), "reps": opts.reps, "world_size": opts.world_size,
-                    "tail_reps": opts.tail_reps, "fixed_margins": opts.fixed_margins},
+                    "tail_reps": opts.tail_reps, "fixed_margins": opts.fixed_margins,
+                    "secondary_fixed": opts.secondary_fixed, "drops": opts.drops},
         "policy": {"app_constants": APP, "cost": COST, "far_grid": FAR_GRID, "app_bars": APP_BARS.public()},
         "voices_dropped_missing_embeddings": dropped,
+        "audit_drops": ({s: {"clips_dropped": si.dropped, "file": str(drop_path(s).relative_to(vp_root()))}
+                         for s, si in sets.items()} if opts.drops else "disabled (--no-drops)"),
+        "fixed_margin_variant": secondary if secondary is not None else
+            ("same as headline (scale 1: margins unchanged)" if not opts.fixed_margins else "headline is fixed margins"),
         "folds": folds,
         "pooled": pooled_views(rows, app_rows),
         "wrong_silent_name_events": wrong_name_events(rows),
@@ -1434,6 +1477,11 @@ def merge_rows(rows: list[dict]) -> list[dict]:
         out[k]["first_auto"].update(r["first_auto"])
         out[k]["wrong_names"].extend(r.get("wrong_names") or [])
     return [{**v, "counts": dict(v["counts"]), "first_auto": dict(v["first_auto"])} for v in out.values()]
+
+
+def is_baseline_scale(fold_inputs: list) -> bool:
+    """True when every fold's geometry is identity-scaled, so fixed margins would change nothing."""
+    return all(abs(geo.scale - 1.0) < 1e-9 for *_, geo in fold_inputs)
 
 
 def finish_row(r: dict) -> dict:
@@ -1525,7 +1573,21 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
              "(calendar invite / 12 most recent). Clean = `clean`; call = opus12, phone, noisy and mixed.", "",
              "Ranked by the share of a regular's appearances named automatically from their 3rd meeting on, "
              "among models with zero wrong silent names (then models with look-alike pairs over their bar, then "
-             "models with wrong names). **Wrong silent names must be 0.**", ""]
+             "models with wrong names). **Wrong silent names must be 0.** Headline: every cosine constant, margins "
+             "included, carried to each model's scale; last column: the app's literal 0.12/0.10 margins.", ""]
+    drops: dict[str, int] = {}
+    no_drops = []
+    for d in docs:
+        ad = d.get("audit_drops")
+        if isinstance(ad, dict):
+            for st, v in ad.items():
+                drops[st] = max(drops.get(st, 0), v["clips_dropped"])
+        else:
+            no_drops.append(d["model_id"])
+    if drops:
+        lines += ["Answer-key audit drops applied (`VP/results/audit/drop_<set>.txt`, clips excluded before building "
+                  "meetings): " + ", ".join(f"{st} {n}" for st, n in sorted(drops.items())) + "."
+                  + (f" Run without drops: {', '.join(no_drops)}." if no_drops else ""), ""]
     if not docs:
         lines.append("No results yet.")
         text = "\n".join(lines) + "\n"
@@ -1547,8 +1609,9 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
     docs.sort(key=key)
     lines += ["| # | model | wrong silent names clean / call | look-alike pairs over bar | strangers wrongly named | wrong suggestions | "
               "auto from mtg 3+ clean | auto from mtg 3+ call | first auto median / p90 clean | first auto median / p90 call | "
-              "work per meeting clean / call | coverage | bars fold 0; fold 1 (suggest / lineup / global) |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+              "work per meeting clean / call | coverage | bars fold 0; fold 1 (suggest / lineup / global) | "
+              "fixed margins 0.12/0.10: wrong clean / call · auto from mtg 3+ clean / call |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, d in enumerate(docs, 1):
         t = d["pooled"]["test"]
         cl, ca, al = t["clean"], t["call"], t["all"]
@@ -1559,6 +1622,16 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
         bars = "; ".join(f"{f['bars']['floor']:.2f} / {f['bars']['auto_lineup']:.2f} / {f['bars']['auto_global']:.2f}"
                          for f in d.get("folds", []))
         cov = f"{len(d['sets'])} sets, {sum(len(v) for v in d['sets'].values())} set×cond"
+        fv = d.get("fixed_margin_variant")
+        if isinstance(fv, dict):
+            ft = fv["pooled"]["test"]
+            fcl, fca = ft.get("clean") or {}, ft.get("call") or {}
+            fixed = (f"{fcl.get('wrong_silent_names', '–')} / {fca.get('wrong_silent_names', '–')} · "
+                     f"{fmt(fcl.get('auto_share_from_meeting3'), pct=True)} / {fmt(fca.get('auto_share_from_meeting3'), pct=True)}")
+            if (ft.get("all") or {}).get("wrong_silent_names"):
+                fixed = f"**{fixed}**"
+        else:
+            fixed = "same" if fv else "–"
         look_over = sum(f.get("test_lookalike_pairs_over_bar", 0) for f in d.get("folds", []))
         look_n = sum(f.get("test_lookalike_pairs_checked", 0) for f in d.get("folds", []))
         look = f"{look_over} / {look_n}" if look_n else "–"
@@ -1569,7 +1642,7 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
             f"{fmt((al or {}).get('wrong_suggestions'))} ({fmt((al or {}).get('wrong_suggestion_rate'), pct=True)}) | "
             f"{fmt((cl or {}).get('auto_share_from_meeting3'), pct=True)} | {fmt((ca or {}).get('auto_share_from_meeting3'), pct=True)} | "
             f"{first_auto_cell(cl)} | {first_auto_cell(ca)} | "
-            f"{fmt((cl or {}).get('work_per_meeting'))} / {fmt((ca or {}).get('work_per_meeting'))} | {cov} | {bars} |")
+            f"{fmt((cl or {}).get('work_per_meeting'))} / {fmt((ca or {}).get('work_per_meeting'))} | {cov} | {bars} | {fixed} |")
     base = [d for d in docs if d.get("baseline") and d["pooled"].get("app_bars")]
     if base:
         lines += ["", "Baseline with the app's production bars (0.70 / 0.80 / 0.92), both halves, no calibration:", "",
@@ -1651,14 +1724,16 @@ def run_one(args: tuple[str, Options, bool]) -> tuple[str, str]:
     out_dir = vp_root() / "results" / "naming"
     out_path = out_dir / f"{model_id}.json"
     store = EmbStore(model_id)
-    fp = input_fingerprint(store, opts.sets or discover_sets())
+    fp = input_fingerprint(store, opts.sets or discover_sets(), opts.drops)
     if not fp:
         return model_id, "skipped: no embeddings"
     if out_path.exists() and not force:
         try:
             old = json.loads(out_path.read_text())
-            if (old.get("inputs") == fp and old.get("options", {}).get("tail_reps") == opts.tail_reps
-                    and old.get("options", {}).get("fixed_margins", False) == opts.fixed_margins):
+            o = old.get("options", {})
+            if (old.get("inputs") == fp and o.get("tail_reps") == opts.tail_reps
+                    and o.get("fixed_margins", False) == opts.fixed_margins and o.get("drops", False) == opts.drops
+                    and o.get("secondary_fixed", False) == opts.secondary_fixed and o.get("reps") == opts.reps):
                 return model_id, "up to date"
         except Exception:
             pass
@@ -1687,7 +1762,11 @@ def main() -> int:
     ap.add_argument("--tail-reps", type=float, default=TAIL_REPS,
                     help="auto bars must hold for this many calibration halves' worth of impostors (tail extrapolation)")
     ap.add_argument("--fixed-margins", action="store_true",
-                    help="keep the app's margins at 0.12/0.10 in every model's units instead of scaling them")
+                    help="headline uses the app's margins at 0.12/0.10 in every model's units instead of scaling them")
+    ap.add_argument("--no-fixed-variant", action="store_true",
+                    help="skip the secondary fixed-margin variant (halves the run time)")
+    ap.add_argument("--no-drops", action="store_true",
+                    help="keep the clips listed in VP/results/audit/drop_<set>.txt")
     ap.add_argument("--jobs", type=int, default=2, help="models in parallel (max 2 heavy processes per agent)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--summary-only", action="store_true")
@@ -1700,7 +1779,8 @@ def main() -> int:
                        conds=args.conds.split(",") if args.conds else None,
                        talks=tuple(args.talks.split(",")), modes=tuple(args.modes.split(",")),
                        reps=args.reps, world_size=args.world_size, tail_reps=args.tail_reps,
-                       fixed_margins=args.fixed_margins)
+                       fixed_margins=args.fixed_margins, secondary_fixed=not args.no_fixed_variant,
+                       drops=not args.no_drops)
         models = args.models.split(",") if args.models else discover_models()
         if not models:
             log("no models with embeddings yet")

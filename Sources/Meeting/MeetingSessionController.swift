@@ -607,8 +607,12 @@ final class MeetingSessionController: ObservableObject {
         // with it (e.g. ERes2Net) before the speaker identity stack runs.
         self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder, backend: diarizationBackend)
 
-        // Speaker store: app-owned SQLite file under state/.
-        self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
+        // Speaker store: app-owned SQLite file under state/. It holds one voiceprint
+        // model's vectors, so it uses that model's cosine bars.
+        self.speakerDatabase = SpeakerDatabase(
+            path: storagePaths.speakerDB.path,
+            thresholds: diarization.activeSpeakerThresholds
+        )
         self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
@@ -681,9 +685,14 @@ final class MeetingSessionController: ObservableObject {
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
         }
-        // Tuned for the backend picked at launch (MeetingSpeakerSeparation).
+        // Tuned for the backend and voiceprint model picked at launch (MeetingSpeakerSeparation).
+        let speakerThresholds = diarization.activeSpeakerThresholds
         taskManager.speakerSeparationProvider = { recordingDate in
-            await MeetingSpeakerSeparation.resolve(backend: diarizationBackend, recordingStart: recordingDate)
+            await MeetingSpeakerSeparation.resolve(
+                backend: diarizationBackend,
+                thresholds: speakerThresholds,
+                recordingStart: recordingDate
+            )
         }
         // Expected people get named sooner (MeetingCalendarNaming).
         taskManager.lineupNamingProvider = { recordingDate in

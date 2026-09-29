@@ -4,21 +4,30 @@ import TranscriptedCore
 /// Chooses the speaker separation for one live meeting: the tuned settings for the
 /// diarization backend this app runs, capped from the calendar invite the recording
 /// started with. The invite count comes from the same lookup speaker review uses for
-/// its name buttons, so no invite (or no calendar access) simply means no cap.
+/// its name buttons, so no invite (or no calendar access) simply means no cap. The
+/// fingerprint merge bar comes from the active voiceprint model's thresholds.
 enum MeetingSpeakerSeparation {
-    /// Pure decision: backend and invited people in, options out.
-    static func options(backend: DiarizationBackend, invitedPeople: Int?) -> SpeakerSeparationOptions {
-        SpeakerSeparationOptions.tuned(for: backend, invitedPeople: invitedPeople)
+    /// Pure decision: backend, voiceprint thresholds and invited people in, options out.
+    static func options(
+        backend: DiarizationBackend,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker,
+        invitedPeople: Int?
+    ) -> SpeakerSeparationOptions {
+        SpeakerSeparationOptions.tuned(for: backend, invitedPeople: invitedPeople, thresholds: thresholds)
     }
 
     /// Reads the invite for `recordingStart` and returns the options for `backend`.
-    static func resolve(backend: DiarizationBackend, recordingStart: Date?) async -> SpeakerSeparationOptions {
+    static func resolve(
+        backend: DiarizationBackend,
+        thresholds: SpeakerEmbeddingThresholds,
+        recordingStart: Date?
+    ) async -> SpeakerSeparationOptions {
         var invitedPeople: Int?
         if let recordingStart {
             let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recordingStart)
             invitedPeople = names.isEmpty ? nil : names.count
         }
-        return options(backend: backend, invitedPeople: invitedPeople)
+        return options(backend: backend, thresholds: thresholds, invitedPeople: invitedPeople)
     }
 }
 

@@ -474,6 +474,50 @@ class EndToEndTests(FixtureCase):
         self.assertNotIn("clean>opus12", {c["cond"] for c in doc["cells"]})
         self.assertTrue(any("stale" in n for n in doc["notes"]))
 
+    def test_drop_lists(self):
+        info = build_fixture(self.root, {"vox1o": {"n_spk": 12, "n_sess": 3, "clips": 2}},
+                             {"m": {"rho": 0.4, "dim": 64, "baseline": True}})
+        drop = [r["seg_id"] for r in info["vox1o"] if r["session"] == "vox1o:v0000_1"]
+        audit = self.root / "results" / "audit"
+        audit.mkdir(parents=True)
+        (audit / "drop_vox1o.txt").write_text("# audit drops\n" + "\n".join(drop) + "\nvox1o:not:a:clip\n")
+        (audit / "drop_vox1o_extra.txt").write_text(info["vox1o"][0]["seg_id"] + "\n")  # not a set name: ignored
+        code, err = run(self.root, "--boot", "20", "--no-asnorm")
+        self.assertEqual(code, 0, err)
+        res = self.root / "results"
+        used = set()
+        for b in (2, 4, 8):
+            z = np.load(sv.trials_path(self.root, "vox1o", b), allow_pickle=False)
+            used |= set(z["seg_ids"].astype(str))
+        self.assertFalse(used & set(drop))
+        self.assertIn(info["vox1o"][0]["seg_id"], used)  # drop_vox1o_extra.txt is not a set's list: ignored
+        doc = json.loads((res / "verify" / "m.json").read_text())
+        d = doc["config"]["drops"]["vox1o"]
+        self.assertEqual((d["removed"], d["not_found"]), (len(drop), 1))
+        self.assertEqual({c["cond"] for c in doc["cells"]}, set(sv.TRIAL_CONDS))  # npz still lists dropped ids: not stale
+        md = (res / "verify_summary.md").read_text()
+        self.assertIn(f"Drop lists applied", md)
+        self.assertIn(f"vox1o {len(drop)} (1 listed ids not in the set)", md)
+        fp_before = json.loads(str(np.load(sv.trials_path(self.root, "vox1o", 2))["meta"]))["fingerprint"]
+
+        stamp = (res / "verify_summary.md").stat().st_mtime_ns
+        code, err = run(self.root, "--boot", "20", "--no-asnorm", "--no-drops")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((res / "verify_summary.md").stat().st_mtime_ns, stamp)  # default results untouched
+        self.assertIn("not** applied", (res / "verify_summary_nodrops.md").read_text())
+        self.assertTrue((res / "verify_nodrops" / "m.json").exists())
+        z = np.load(sv.trials_path(self.root, "vox1o", 2, "nodrops"), allow_pickle=False)
+        self.assertTrue(set(z["seg_ids"].astype(str)) & set(drop))
+
+        # the trial cache is keyed on the drop-list content
+        with open(audit / "drop_vox1o.txt", "a") as fh:
+            fh.write("# reviewed again\n")
+        code, err = run(self.root, "--boot", "20", "--no-asnorm")
+        self.assertEqual(code, 0, err)
+        fp_after = json.loads(str(np.load(sv.trials_path(self.root, "vox1o", 2))["meta"]))["fingerprint"]
+        self.assertNotEqual(fp_before, fp_after)
+        self.assertIn("rebuilding", err)
+
     def test_clean_only_models_still_rank(self):
         # the daemon embeds clean first: before any degraded file exists, rank on clean trials
         build_fixture(self.root, {"vox1o": {"n_spk": 20, "n_sess": 3, "clips": 2},

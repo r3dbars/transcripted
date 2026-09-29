@@ -514,6 +514,8 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Pipeline/PipelineFailureDisplayCopy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
+    "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift"
+    "Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFormatOptions.swift"
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
