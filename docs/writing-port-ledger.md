@@ -76,7 +76,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeCore/Scene/ScreenSceneSnapshotBridge.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenSceneSnapshotBridge.swift` | ported | 1 |  |
 | `Sources/TildeCore/Scene/SensitiveScenePolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SensitiveScenePolicy.swift` | ported | 1 |  |
 | `Sources/TildeCore/ScreenMemory/CaptureChangeDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureChangeDetector.swift` | ported | 1 |  |
-| `Sources/TildeCore/ScreenMemory/CaptureKindPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureKindPolicy.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/CaptureKindPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/FocusedWindowCapturePolicy.swift` | replaced | 1 | Owner decision 2026-09-29: Screen Memory reads only the focused window, so there is no full-display read to choose. `FocusedWindowCapturePolicy` picks that window instead. |
 | `Sources/TildeCore/ScreenMemory/CaptureTriggerPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureTriggerPolicy.swift` | ported | 1 |  |
 | `Sources/TildeCore/ScreenMemory/ContextResetDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ContextResetDetector.swift` | ported | 1 |  |
 | `Sources/TildeCore/ScreenMemory/DefaultExcludedApps.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/DefaultExcludedApps.swift` | ported | 1 |  |
@@ -132,19 +132,19 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/Runtime/PreviewModelSelection.swift` | `—` | not-ported | 2 | Preview builds only. Strip call sites. |
 | `Sources/TildeApp/Runtime/ScaffoldPrewarmer.swift` | `Sources/TranscriptedWriting/Runtime/ScaffoldPrewarmer.swift` | ported | 2 | Sends the helper's bearer key. |
 | `Sources/TildeApp/Runtime/TildeModelSelection.swift` | `Sources/TranscriptedWriting/Runtime/WritingModelSelection.swift` | ported | 2 | Type name kept (`TildeModelSelection`). Release-proof and `PreviewModelSelection` paths stripped. Qwen greyed out under 16 GB: P2-B. |
-| `Sources/TildeApp/ScreenMemory/AXWindowTextReader.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AXWindowTextReader.swift` | ported | 2 | Fable porter. |
+| `Sources/TildeApp/ScreenMemory/AXWindowTextReader.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AXWindowTextReader.swift` | ported | 2 | Fable porter. Reads only the focused window whose frame matches the chosen one; no other-window search or unmatched fallback (2026-09-29). |
 | `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AccessibilityPermission.swift` | ported | 2 | No launch-time prompt; Transcripted already holds Accessibility. `request()` stays; callers decide. |
 | `Sources/TildeApp/ScreenMemory/GLiNERRedactionHelperHost.swift` | `—` | not-ported | 2 | Dev-only GLiNER. |
 | `Sources/TildeApp/ScreenMemory/LocalOCREvaluationStore.swift` | `—` | not-ported | 2 | Dev-only. Strip call sites. |
 | `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/LuminanceGridSampler.swift` | ported | 2 | Unreferenced once the incremental-OCR flag is gone; kept as a ported unit. |
 | `Sources/TildeApp/ScreenMemory/RedactionEvalCommand.swift` | `—` | not-ported | 2 | Dev-only. |
 | `Sources/TildeApp/ScreenMemory/RedactionService.swift` | `—` | not-ported | 2 | Only used by eval and proof paths. |
-| `Sources/TildeApp/ScreenMemory/ScreenCaptureService.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift` | ported | 2 | Fable porter. OCR evaluation store and incremental-OCR flag stripped, so every Vision pass is a full OCR (the flag's default). |
+| `Sources/TildeApp/ScreenMemory/ScreenCaptureService.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift` | ported | 2 | Fable porter. OCR evaluation store and incremental-OCR flag stripped, so every Vision pass is a full OCR (the flag's default). Full-display capture removed 2026-09-29 (owner decision): it reads only the focused window `FocusedWindowCapturePolicy` picks, or nothing. |
 | `Sources/TildeApp/ScreenMemory/ScreenLockObserver.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenLockObserver.swift` | ported | 2 |  |
 | `Sources/TildeApp/ScreenMemory/ScreenMemoryProofStimulus.swift` | `—` | not-ported | 2 | Release-proof only. |
 | `Sources/TildeApp/ScreenMemory/ScreenRecordingPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenRecordingPermission.swift` | ported | 2 | Not in the global permission enum (plan: Permissions changes). `request()` stays; callers decide. |
 | `Sources/TildeApp/ScreenMemory/ScreenTextRecognizer.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenTextRecognizer.swift` | ported | 2 |  |
-| `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | ported | 2 |  |
+| `Sources/TildeApp/ScreenMemory/WindowAttribution.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/WindowAttribution.swift` | replaced | 2 | Only `mapWindowRelativeBox` is left. Multi-window `attribute` went with full-display capture (focused window only, 2026-09-29). |
 
 ## Deviations from Tilde (recorded after the phase 2 review)
 
@@ -205,7 +205,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeCoreTests/SceneEchoPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneEchoPolicyTests.swift` | ported | 1 | Trimmed `.preview26B`/`.modelPreview` from the shipping-profiles loop (profiles not ported). |
 | `Tests/TildeCoreTests/SceneSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneSuggestionPolicyTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/CaptureChangeDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureChangeDetectorTests.swift` | ported | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/CaptureKindPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureKindPolicyTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/CaptureKindPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/FocusedWindowCapturePolicyTests.swift` | replaced | 1 | Removed with `CaptureKindPolicy` (focused window only, 2026-09-29). |
 | `Tests/TildeCoreTests/ScreenMemory/CaptureTriggerPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureTriggerPolicyTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/ContextResetDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ContextResetDetectorTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/DefaultExcludedAppsTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/DefaultExcludedAppsTests.swift` | ported | 1 | |
@@ -255,7 +255,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeAppTests/ScreenMemory/RedactionServiceTests.swift` | — | not-ported | 2 | Tests `RedactionService` (not-ported; eval and proof paths only). |
 | `Tests/TildeAppTests/ScreenMemory/ScreenCaptureServiceTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/ScreenCaptureServiceTests.swift` | ported | 2 | Trimmed the paired OCR evaluation tests (`pairedEvaluationGatesAndFilters`, `pairedEvaluationRechecksSafety`, `pairedEvaluationSuppressesConcurrentReferencePasses`, `pairedEvaluationReferenceFailure`) with their `evaluationBlock`, `EvaluationRecordBox` and `AsyncTestGate` helpers: the OCR evaluation store and its init params are stripped. |
 | `Tests/TildeAppTests/ScreenMemory/ScreenMemoryProofStimulusTests.swift` | — | not-ported | 2 | Tests a dev-only path. |
-| `Tests/TildeAppTests/ScreenMemory/WindowAttributionTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/WindowAttributionTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/ScreenMemory/WindowAttributionTests.swift` | `Tests/TranscriptedWritingTests/Runtime/ScreenMemory/WindowAttributionTests.swift` | replaced | 2 | The `attribute` tests went with it; the `mapWindowRelativeBox` tests stay. |
 | `Tests/TildeAppTests/SecureLocalStorageTests.swift` | `Tests/TranscriptedWritingTests/Runtime/SecureLocalStorageTests.swift` | ported | 2 |  |
 | `Tests/TildeAppTests/StatusMenuPresentationTests.swift` | — | not-ported | 2 | Tests `StatusMenuHost.Presentation` (not-ported, decision 12). |
 | `Tests/TildeAppTests/TildeApplicationStateTests.swift` | — | replaced | 2 | Tests `TildeApplicationState`, replaced by `WritingController`. |

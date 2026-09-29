@@ -5,7 +5,7 @@ import TranscriptedWritingCore
 #endif
 import ScreenCaptureKit
 
-/// Reads the frontmost window's text through the Accessibility tree — the
+/// Reads the focused window's text through the Accessibility tree — the
 /// exact strings the app itself draws, with real frames, in ~1ms — instead
 /// of screenshotting and OCRing pixels. Reading only: the covenant's ban on
 /// an Accessibility *insertion* path stands. Used only when the user has
@@ -125,28 +125,25 @@ enum AXWindowTextReader {
         return Result(blocks: blocks, completed: completed, confidence: completed ? 1 : 0.9)
     }
 
+    /// The app's focused window, and only when it sits exactly where the
+    /// window the capture policy chose does. Screen Memory reads only the
+    /// window the user is typing in, so this never walks the app's other
+    /// windows looking for a frame match, and never falls back to a window
+    /// it can't match: nil sends the caller to OCR of the chosen window.
     private static func matchWindow(app: AXUIElement, frame: CGRect) -> AXUIElement? {
-        var windows: CFTypeRef?
-        if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows) == .success,
-           let list = windows as? [AXUIElement] {
-            for candidate in list {
-                let attrs = batched(candidate)
-                if let f = self.frame(
-                       position: attrs[kAXPositionAttribute as String],
-                       size: attrs[kAXSizeAttribute as String]
-                   ),
-                   abs(f.origin.x - frame.origin.x) < 4, abs(f.origin.y - frame.origin.y) < 4,
-                   abs(f.width - frame.width) < 8, abs(f.height - frame.height) < 8 {
-                    return candidate
-                }
-            }
-        }
         var focused: CFTypeRef?
-        if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focused) == .success,
-           CFGetTypeID(focused) == AXUIElementGetTypeID() {
-            return (focused as! AXUIElement)
-        }
-        return nil
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+              let focused,
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let candidate = focused as! AXUIElement
+        let attrs = batched(candidate)
+        guard let f = self.frame(
+                  position: attrs[kAXPositionAttribute as String],
+                  size: attrs[kAXSizeAttribute as String]
+              ),
+              abs(f.origin.x - frame.origin.x) < 4, abs(f.origin.y - frame.origin.y) < 4,
+              abs(f.width - frame.width) < 8, abs(f.height - frame.height) < 8 else { return nil }
+        return candidate
     }
 
     /// Visible children when the app exposes them (scroll areas, lists,

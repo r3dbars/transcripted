@@ -6,18 +6,26 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
-/// Owns Screen Memory's capture pipeline end to end: ScreenCaptureKit
-/// full-display capture, Vision OCR, per-window attribution. Memory-only in
-/// this phase — nothing here persists a `ScreenSnapshot` anywhere; the
-/// latest one lives in `latestSnapshot` until the next capture replaces it
-/// or the process exits.
+/// Owns Screen Memory's capture pipeline end to end: the focused window's
+/// Accessibility text, or a ScreenCaptureKit capture of that one window plus
+/// Vision OCR. Memory-only — nothing here persists a `ScreenSnapshot`
+/// anywhere; the latest one lives in `latestSnapshot` until the next capture
+/// replaces it or the process exits.
 ///
-/// Every capture attempt is routed through `CaptureTriggerPolicy` (Core,
-/// pure) with freshly observed state, so the covenant's non-negotiables —
-/// the user's own master toggle (on by default, always visible and
-/// switchable), Secure Event Input, screen lock, per-app exclusion against
-/// every visible window, an active text field, and the 1/2s cadence cap —
-/// are enforced by tested logic, not re-derived here.
+/// Screen Memory reads ONLY the window the user is typing in (owner
+/// decision 2026-09-29; setup says "Reads the window you're replying in").
+/// There is no full-display capture. `FocusedWindowCapturePolicy` (Core,
+/// pure) picks that window at capture time and refuses — capturing
+/// nothing — when it can't prove the window is the focused window of the
+/// frontmost app, in the Writing app scope, and not excluded.
+///
+/// Every capture attempt is also routed through `CaptureTriggerPolicy`
+/// (Core, pure) with freshly observed state, so the covenant's
+/// non-negotiables — the user's own master toggle, Secure Event Input,
+/// screen lock, per-app exclusion (still checked against every visible
+/// window, the conservative rule from full-display days), an active text
+/// field, and the cadence cap — are enforced by tested logic, not
+/// re-derived here.
 actor ScreenCaptureService {
     enum CaptureOutcome: Equatable, Sendable {
         case captured(blockCount: Int)
@@ -35,33 +43,11 @@ actor ScreenCaptureService {
     private var lastContentResetAt: Date?
     private var lastActivityAt: Date?
     private(set) var latestSnapshot: ScreenSnapshot?
-    /// The most recent window-only capture, kept separately from
-    /// `latestSnapshot` so a full-display read landing a second later can
-    /// never replace a good conversation read with a weaker one (display
-    /// reads attribute blocks to windows best-effort; window reads are
-    /// exact). `freshScene` asks this one first.
-    private(set) var latestWindowSnapshot: ScreenSnapshot?
     private var pendingTextFieldCaptureTask: Task<Void, Never>?
     private var activeTextFieldSessionIdentifier: String?
     private var activeTypingTarget: TypingTargetIdentity?
     private var typingTargetGeneration: UInt64 = 0
     private var textFieldRequiresFullRefresh = false
-
-    /// Counts every capture that reaches `performCapture` (cadence/exclusion
-    /// already cleared it). Referencing needs OTHER windows' text, which a
-    /// single-window capture can never see by construction — the filter
-    /// physically excludes every other window's pixels — so this forces a
-    /// full-display pass on every Nth capture to keep referencing fed. `3` is
-    /// a simple, documented choice: frequent enough that referenceSnippets
-    /// stay usable within the 20s staleness window (`ScreenScene`'s
-    /// `defaultStalenessCapSeconds`), infrequent enough that most captures
-    /// still get the window-only path's ~2x OCR speedup and exact
-    /// attribution.
-    /// Window-first capture (`CaptureKindPolicy`): the display is read only
-    /// when the last window capture found no conversation and the previous
-    /// display read has aged past the scene staleness window.
-    private var lastWindowSceneHadConversation: Bool?
-    private var lastFullDisplayCaptureAt: Date?
 
     /// Injectable for tests: the real system checks (TCC, lock screen,
     /// secure input, ScreenCaptureKit itself) are not something a unit test
@@ -88,10 +74,25 @@ actor ScreenCaptureService {
     private let now: @Sendable () -> Date
     private let diagnostics: @Sendable (String, [String: String]) -> Void
     private let axWindowText: @Sendable (SCWindow, SCDisplay) -> AXWindowTextReader.Result?
+    /// The Writing app scope, re-checked on the chosen window at capture
+    /// time. The app bridge already gates each trigger on it; this makes
+    /// the actor that reads the screen refuse on its own too.
+    private let appInScope: @Sendable (String) -> Bool
+    private let frontmostApplicationProcessIdentifier: @Sendable () -> Int32?
+    private let keyboardFocusProcessIdentifier: @Sendable () -> Int32?
 
     init(
         enabled: @escaping @Sendable () -> Bool,
         excludedApps: @escaping @Sendable () -> Set<String>,
+        appInScope: @escaping @Sendable (String) -> Bool = {
+            WritingPreferences().allows(appBundleIdentifier: $0)
+        },
+        frontmostApplicationProcessIdentifier: @escaping @Sendable () -> Int32? = {
+            KeyboardFocusProbe.frontmostApplicationProcessIdentifier()
+        },
+        keyboardFocusProcessIdentifier: @escaping @Sendable () -> Int32? = {
+            KeyboardFocusProbe.keyboardFocusProcessIdentifier()
+        },
         permissionGranted: @escaping @Sendable () -> Bool = { ScreenRecordingPermission.isGranted() },
         screenLocked: @escaping @Sendable () -> Bool = { ScreenLockObserver.isLocked() },
         secureInputActive: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
@@ -111,6 +112,9 @@ actor ScreenCaptureService {
     ) {
         self.enabled = enabled
         self.excludedApps = excludedApps
+        self.appInScope = appInScope
+        self.frontmostApplicationProcessIdentifier = frontmostApplicationProcessIdentifier
+        self.keyboardFocusProcessIdentifier = keyboardFocusProcessIdentifier
         self.permissionGranted = permissionGranted
         self.screenLocked = screenLocked
         self.secureInputActive = secureInputActive
@@ -132,10 +136,6 @@ actor ScreenCaptureService {
         return await attemptCapture(trigger: .windowChanged)
     }
 
-    /// A real IMKit input session became active. The first refresh uses the
-    /// full display so Vision's `.accurate` recognizer rebuilds a complete
-    /// scene. The safety gates and two-second heavy-capture ceiling still
-    /// apply.
     /// The conversation changed in place. Everything captured before this
     /// moment is the WRONG conversation: serving it beats nothing only if
     /// wrong beats silence, and it does not. Invalidate first, then try to
@@ -157,6 +157,9 @@ actor ScreenCaptureService {
         return outcome
     }
 
+    /// A real IMKit input session became active. The first refresh reads
+    /// the focused window from scratch. The safety gates and cadence
+    /// ceiling still apply.
     @discardableResult
     func noteTextFieldFocused(
         sessionIdentifier: String,
@@ -200,6 +203,8 @@ actor ScreenCaptureService {
         guard activeTextFieldSessionIdentifier == sessionIdentifier else { return }
         activeTextFieldSessionIdentifier = nil
         activeTypingTarget = nil
+        // Nothing is being typed into, so no window's text stays held.
+        latestSnapshot = nil
         pendingTextFieldCaptureTask?.cancel()
         pendingTextFieldCaptureTask = nil
     }
@@ -273,28 +278,14 @@ actor ScreenCaptureService {
             )
         }
         let classificationStart = self.now()
-        // Window read first: it is the exact read of the app being typed
-        // into. Only when it holds no conversation does the latest read of
-        // any kind get a turn — that is where reference snippets from
-        // other windows come from.
-        var scene: ScreenScene.Scene?
-        if latestWindowSnapshot != latestSnapshot,
-           let windowScene = ScreenScene.freshScene(
-               from: filtered(latestWindowSnapshot),
-               now: now,
-               frontmostBundleID: frontmostBundleID,
-               fieldText: fieldText
-           ),
-           windowScene.mode == .replying {
-            scene = windowScene
-        } else {
-            scene = ScreenScene.freshScene(
-                from: filtered(latestSnapshot),
-                now: now,
-                frontmostBundleID: frontmostBundleID,
-                fieldText: fieldText
-            )
-        }
+        // Every snapshot is a read of the focused window alone, so there is
+        // only one to classify.
+        let scene = ScreenScene.freshScene(
+            from: filtered(latestSnapshot),
+            now: now,
+            frontmostBundleID: frontmostBundleID,
+            fieldText: fieldText
+        )
         // Count-only diagnostics (2026-08-16 dogfood fix): mode plus two
         // integers, never the OCR'd text itself, so a classification going
         // wrong live is never opaque again — this was the exact gap that
@@ -327,8 +318,8 @@ actor ScreenCaptureService {
     /// `ScreenScene.defaultStalenessCapSeconds` after it was taken, so a
     /// toggle that only blocked future captures would leave the last look at
     /// the screen answering completions for another twenty seconds. This
-    /// drops everything the actor is holding — both snapshots, the pending
-    /// capture task, and the typing target they were attributed to — so
+    /// drops everything the actor is holding — the snapshot, the pending
+    /// capture task, and the typing target it was attributed to — so
     /// there is nothing left to serve if the toggle comes back on.
     ///
     /// `lastContentResetAt` is moved forward rather than cleared: it is the
@@ -338,12 +329,9 @@ actor ScreenCaptureService {
         pendingTextFieldCaptureTask?.cancel()
         pendingTextFieldCaptureTask = nil
         latestSnapshot = nil
-        latestWindowSnapshot = nil
         activeTypingTarget = nil
         activeTextFieldSessionIdentifier = nil
         textFieldRequiresFullRefresh = false
-        lastWindowSceneHadConversation = nil
-        lastFullDisplayCaptureAt = nil
         lastContentResetAt = moment
     }
 
@@ -371,10 +359,6 @@ actor ScreenCaptureService {
         latestSnapshot = snapshot
     }
 
-    func setLatestWindowSnapshotForTesting(_ snapshot: ScreenSnapshot?) {
-        latestWindowSnapshot = snapshot
-    }
-
     func setLastContentResetAtForTesting(_ date: Date?) {
         lastContentResetAt = date
     }
@@ -387,6 +371,8 @@ actor ScreenCaptureService {
     /// typing pulse a new generation. A real window/session/content change
     /// invalidates older snapshots immediately; silence beats serving the
     /// previous conversation while the replacement capture is in flight.
+    /// The old window's text is dropped, not just hidden: Screen Memory
+    /// holds only the window the user is typing in now.
     private func adoptTarget(
         _ proposed: TypingTargetIdentity?,
         sessionIdentifier: String,
@@ -398,8 +384,8 @@ actor ScreenCaptureService {
             if forceNewGeneration || activeTypingTarget != nil {
                 typingTargetGeneration &+= 1
                 activeTypingTarget = nil
+                latestSnapshot = nil
                 lastContentResetAt = now()
-                latestWindowSnapshot = nil
                 textFieldRequiresFullRefresh = true
             }
             return
@@ -421,8 +407,8 @@ actor ScreenCaptureService {
             fieldSessionIdentifier: sessionIdentifier,
             generation: typingTargetGeneration
         )
+        latestSnapshot = nil
         lastContentResetAt = now()
-        latestWindowSnapshot = nil
         textFieldRequiresFullRefresh = true
     }
 
@@ -432,7 +418,6 @@ actor ScreenCaptureService {
     ) async -> CaptureOutcome {
         let outcome = await attemptCapture(
             trigger: trigger,
-            forceFullDisplay: textFieldRequiresFullRefresh,
             forceFullOCR: textFieldRequiresFullRefresh
         )
         if case .captured = outcome {
@@ -459,7 +444,6 @@ actor ScreenCaptureService {
 
     private func attemptCapture(
         trigger: CaptureTriggerPolicy.Trigger,
-        forceFullDisplay: Bool = false,
         forceFullOCR: Bool = false
     ) async -> CaptureOutcome {
         let moment = now()
@@ -549,7 +533,6 @@ actor ScreenCaptureService {
                 content: content,
                 moment: moment,
                 target: captureTarget,
-                forceFullDisplay: forceFullDisplay,
                 forceFullOCR: forceFullOCR
             )
             if case .captured = outcome {
@@ -597,100 +580,110 @@ actor ScreenCaptureService {
         lastCaptureAt = moment
     }
 
-    /// Chooses window-only vs full-display capture and dispatches to the
-    /// matching path. `CaptureKindPolicy` decides when the display is worth
-    /// reading (see its doc comment); on any capture that isn't forced full,
-    /// `frontmostWindow` still has to actually find a layer-0 window or this
-    /// falls back to full-display anyway — a window-only capture is never
-    /// attempted blind.
+    /// Reads the focused window and nothing else. `FocusedWindowCapturePolicy`
+    /// must name the target window first — the focused window of the
+    /// frontmost app, in scope and not excluded — or nothing is captured.
+    /// Then Accessibility text for that window, or a capture of that one
+    /// window plus OCR. There is no full-display fallback.
     private func performCapture(
         content: SCShareableContent,
         moment: Date,
         target: TypingTargetIdentity,
-        forceFullDisplay: Bool,
         forceFullOCR: Bool
     ) async -> CaptureOutcome {
-        guard let targetWindow = Self.targetWindow(for: target, among: content.windows),
-              let display = Self.display(containing: targetWindow, in: content.displays) else {
+        let zRanks = Self.onScreenZOrderRanks()
+        let candidates = content.windows.compactMap { window -> FocusedWindowCapturePolicy.Window? in
+            guard let owner = window.owningApplication else { return nil }
+            return FocusedWindowCapturePolicy.Window(
+                windowIdentifier: window.windowID,
+                processIdentifier: owner.processID,
+                bundleIdentifier: owner.bundleIdentifier,
+                layer: window.windowLayer,
+                zOrderRank: zRanks[window.windowID]
+            )
+        }
+        let choice = FocusedWindowCapturePolicy.choose(
+            target: target,
+            windows: candidates,
+            focus: FocusedWindowCapturePolicy.FocusEvidence(
+                frontmostApplicationProcessIdentifier: frontmostApplicationProcessIdentifier(),
+                keyboardFocusProcessIdentifier: keyboardFocusProcessIdentifier()
+            ),
+            excludedApps: excludedApps(),
+            appInScope: appInScope
+        )
+        guard case let .capture(windowIdentifier) = choice,
+              let targetWindow = content.windows.first(where: { $0.windowID == windowIdentifier }) else {
+            let reason = Self.blockReason(for: choice)
+            record(.skip(reason))
+            return .skipped(reason)
+        }
+        guard let display = Self.display(containing: targetWindow, in: content.displays) else {
             diagnostics("screen-capture-skipped", ["reason": "no-display"])
             return .captureFailed
         }
 
-        let kind = CaptureKindPolicy.kind(
-            forcedFullDisplay: forceFullDisplay,
-            lastWindowSceneHadConversation: lastWindowSceneHadConversation,
-            secondsSinceLastFullDisplay: lastFullDisplayCaptureAt.map { moment.timeIntervalSince($0) },
-            stalenessCapSeconds: ScreenScene.defaultStalenessCapSeconds
-        )
-        let zRanks = Self.onScreenZOrderRanks()
-
-        if kind == .window {
-            // Accessibility-first: the exact strings the app draws, in ~1ms,
-            // when the user granted the permission and the app's tree
-            // carries real text. Anything less falls straight through to
-            // the screenshot+OCR path unchanged.
-            let axStart = now()
-            if let result = axWindowText(targetWindow, display) {
-                let snapshot = ScreenSnapshot(
-                    capturedAt: moment,
-                    displayID: display.displayID,
-                    blocks: result.blocks,
-                    evidence: ScreenTextExtractionEvidence(
-                        source: .accessibility,
-                        completed: result.completed,
-                        confidence: result.confidence,
-                        observedAt: moment,
-                        recognizedAt: moment,
-                        target: target
-                    )
+        // Accessibility-first: the exact strings the app draws, in ~1ms,
+        // when the user granted the permission and the app's tree carries
+        // real text. Anything less falls through to capturing and OCRing
+        // the same window.
+        let axStart = now()
+        if let result = axWindowText(targetWindow, display) {
+            let snapshot = ScreenSnapshot(
+                capturedAt: moment,
+                displayID: display.displayID,
+                blocks: result.blocks,
+                evidence: ScreenTextExtractionEvidence(
+                    source: .accessibility,
+                    completed: result.completed,
+                    confidence: result.confidence,
+                    observedAt: moment,
+                    recognizedAt: moment,
+                    target: target
                 )
-                guard retainsCapturedScreenText() else { return .skipped(.disabled) }
-                latestSnapshot = snapshot
-                latestWindowSnapshot = snapshot
-                commitCaptureSlot(at: moment)
-                lastWindowSceneHadConversation = ScreenScene.classify(
-                    snapshot: snapshot,
-                    frontmostBundleID: target.bundleIdentifier,
-                    fieldText: ""
-                ).mode == .replying
-                diagnostics(
-                    "screen-capture-completed",
-                    [
-                        "blocks": String(result.blocks.count),
-                        "duration_ms": String(Self.milliseconds(from: axStart, to: now())),
-                        "ocrMilliseconds": "0",
-                        "kind": "ax",
-                        "ocrScope": "skipped",
-                    ]
-                )
-                return .captured(blockCount: result.blocks.count)
-            }
-            return await performWindowCapture(
-                window: targetWindow,
-                display: display,
-                moment: moment,
-                target: target,
-                forceFullOCR: forceFullOCR
             )
+            guard retainsCapturedScreenText() else { return .skipped(.disabled) }
+            latestSnapshot = snapshot
+            commitCaptureSlot(at: moment)
+            diagnostics(
+                "screen-capture-completed",
+                [
+                    "blocks": String(result.blocks.count),
+                    "duration_ms": String(Self.milliseconds(from: axStart, to: now())),
+                    "ocrMilliseconds": "0",
+                    "kind": "ax",
+                    "ocrScope": "skipped",
+                ]
+            )
+            return .captured(blockCount: result.blocks.count)
         }
-        return await performFullDisplayCapture(
-            content: content,
+        return await performWindowCapture(
+            window: targetWindow,
             display: display,
-            zRanks: zRanks,
             moment: moment,
             target: target,
             forceFullOCR: forceFullOCR
         )
     }
 
-    /// Captures ONLY the frontmost app's frontmost layer-0 window
+    /// Logged reasons stay the fixed vocabulary: never a bundle ID, title
+    /// or path. An app outside the scope reads as excluded, since for
+    /// Screen Memory that's what it is.
+    static func blockReason(for choice: FocusedWindowCapturePolicy.Choice) -> CaptureTriggerPolicy.BlockReason {
+        switch choice {
+        case let .refuse(.excluded(bundleIdentifier)), let .refuse(.outOfScope(bundleIdentifier)):
+            return .excludedWindow(appBundleIdentifier: bundleIdentifier)
+        case .capture, .refuse:
+            return .noTargetWindow
+        }
+    }
+
+    /// Captures ONLY the window `FocusedWindowCapturePolicy` chose
     /// (`SCContentFilter(desktopIndependentWindow:)`) — the captured image
-    /// physically contains that one window's pixels, so every OCR block is
-    /// stamped with that window's bundle id and frame directly, with no
-    /// per-block attribution guessing (contrast `performFullDisplayCapture`,
-    /// which still needs `WindowAttribution` because it can see several
-    /// windows at once). Roughly halves OCR latency too: Vision has one
-    /// window's worth of pixels to walk instead of the whole display.
+    /// holds that one window's own pixels, never whatever overlaps it, so
+    /// every OCR block is stamped with that window's bundle id and frame
+    /// directly. Vision also has one window's worth of pixels to walk
+    /// instead of the whole display.
     private func performWindowCapture(
         window: SCWindow,
         display: SCDisplay,
@@ -784,16 +777,7 @@ actor ScreenCaptureService {
             )
             guard retainsCapturedScreenText() else { return .skipped(.disabled) }
             latestSnapshot = snapshot
-            latestWindowSnapshot = snapshot
             commitCaptureSlot(at: moment)
-            // Count-free probe of the thing the display read would add:
-            // if this window already reads as a conversation, other
-            // windows' reference snippets are never consulted.
-            lastWindowSceneHadConversation = ScreenScene.classify(
-                snapshot: snapshot,
-                frontmostBundleID: window.owningApplication?.bundleIdentifier,
-                fieldText: ""
-            ).mode == .replying
             diagnostics(
                 "screen-capture-completed",
                 [
@@ -811,152 +795,6 @@ actor ScreenCaptureService {
                 "screen-capture-failed",
                 ["duration_ms": String(dutyCycleMilliseconds), "kind": "window"]
             )
-            return .captureFailed
-        }
-    }
-
-    /// The original full-display path, unchanged in behavior: captures the
-    /// active display, OCRs everything visible on it, and attributes each
-    /// block to a window via `WindowAttribution`'s z-order-aware geometry
-    /// match. This is what keeps "referencing" fed — it is the only path
-    /// that can ever see a window other than the frontmost one.
-    private func performFullDisplayCapture(
-        content: SCShareableContent,
-        display: SCDisplay,
-        zRanks: [CGWindowID: Int],
-        moment: Date,
-        target: TypingTargetIdentity,
-        forceFullOCR: Bool
-    ) async -> CaptureOutcome {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
-        let configuration = SCStreamConfiguration()
-        let scale = Self.pixelScale(of: display)
-        configuration.width = Int((Double(display.width) * scale).rounded())
-        configuration.height = Int((Double(display.height) * scale).rounded())
-        configuration.showsCursor = false
-        configuration.capturesAudio = false
-
-        // Duty-cycle instrumentation (Phase 1b, docs/plans/screen-memory.md):
-        // wall-clock time for capture+OCR only, in whole milliseconds, no
-        // screen text. This is the number the power probe harness
-        // (script/capture_power_probe.sh) reads back out of the diagnostics
-        // log to check the <250ms OCR p95 budget — reuses the same
-        // injectable `now` clock tests already control, rather than adding a
-        // second time source.
-        let dutyCycleStart = now()
-
-        do {
-            let image = try await SCScreenshotManager.captureImage(
-                contentFilter: filter,
-                configuration: configuration
-            )
-            // `SCShareableContent.windows` documents no ordering guarantee,
-            // and `windowLayer` alone cannot recover z-order: every normal
-            // app window is layer 0, so sorting by layer is a no-op there
-            // and the list order decides attribution. That misattributes
-            // whole regions when several windows occupy the same frame (a
-            // user who stacks half-screen windows — live bug 2026-08-18:
-            // the visible chat's blocks attributed to a same-position
-            // window BEHIND it, so the own-window filter discarded the
-            // whole conversation). `CGWindowListCopyWindowInfo` with
-            // `.optionOnScreenOnly` IS documented front-to-back; rank by
-            // it, keeping `windowLayer` only as the fallback for windows
-            // missing from that list. `zRanks` is a parameter here (computed
-            // once in `performCapture`, the same ranks used to pick the
-            // frontmost window for the window-only path) rather than
-            // recomputed. Building this list is pure/cheap geometry, needed
-            // regardless of OCR scope.
-            let frontToBackWindows = content.windows.sorted {
-                Self.frontToBackPrecedes($0, $1, zRanks: zRanks)
-            }
-            let windows = frontToBackWindows.map { window in
-                WindowAttribution.WindowInfo(
-                    bundleIdentifier: window.owningApplication?.bundleIdentifier,
-                    windowIdentifier: window.windowID,
-                    title: window.title,
-                    frame: Self.normalize(window.frame, in: display.frame)
-                )
-            }
-
-            // "P99 at every section" (2026-08-18): `ocrStart` marks the
-            // moment the screenshot finished, so `ocrMilliseconds` isolates
-            // `recognizeText` from the screenshot half of the duty cycle —
-            // same purpose and same injectable clock as `performWindowCapture`'s
-            // split. Each new block is attributed to a window the same way
-            // the original full-display path always did — `boundingBox`
-            // here is already display-relative, unlike the window path, so
-            // no window-frame remap is needed.
-            func fullDisplayOCR() async throws -> ([ScreenSnapshot.TextBlock], Int) {
-                let ocrStart = now()
-                let recognized = try await recognizeText(image)
-                let ocrMilliseconds = Self.milliseconds(from: ocrStart, to: now())
-                let mapped = recognized.map { block -> ScreenSnapshot.TextBlock in
-                    let owner = WindowAttribution.attribute(boundingBox: block.boundingBox, frontToBackWindows: windows)
-                    return ScreenSnapshot.TextBlock(
-                        text: block.text,
-                        boundingBox: block.boundingBox,
-                        windowOwnerBundleIdentifier: owner?.bundleIdentifier,
-                        windowIdentifier: owner?.windowIdentifier,
-                        windowTitle: owner?.title,
-                        windowFrame: owner?.frame,
-                        confidence: block.confidence
-                    )
-                }
-                return (mapped, ocrMilliseconds)
-            }
-
-            let (blocks, ocrMilliseconds) = try await fullDisplayOCR()
-            let ocrScope = "full"
-
-            let dutyCycleMilliseconds = Self.milliseconds(from: dutyCycleStart, to: now())
-            let source: ScreenTextExtractionSource = .visionFull
-            let reuseCount = 0
-            let recognizedAt = moment
-            guard activeTypingTarget == target else {
-                record(.skip(.targetChanged))
-                return .skipped(.targetChanged)
-            }
-            if let current = latestSnapshot,
-               current.evidence.target == target,
-               current.capturedAt > moment {
-                return .captured(blockCount: blocks.count)
-            }
-            let snapshot = ScreenSnapshot(
-                capturedAt: moment,
-                displayID: display.displayID,
-                blocks: blocks,
-                evidence: ScreenTextExtractionEvidence(
-                    source: source,
-                    completed: true,
-                    confidence: Self.aggregateConfidence(of: blocks),
-                    observedAt: moment,
-                    recognizedAt: recognizedAt,
-                    reuseCount: reuseCount,
-                    target: target
-                )
-            )
-            guard retainsCapturedScreenText() else { return .skipped(.disabled) }
-            latestSnapshot = snapshot
-            commitCaptureSlot(at: moment)
-            lastFullDisplayCaptureAt = moment
-            diagnostics(
-                "screen-capture-completed",
-                [
-                    "blocks": String(blocks.count),
-                    "duration_ms": String(dutyCycleMilliseconds),
-                    "ocrMilliseconds": String(ocrMilliseconds),
-                    "kind": "display",
-                    "ocrScope": ocrScope,
-                ]
-            )
-            return .captured(blockCount: blocks.count)
-        } catch {
-            // Failed attempts still spent wall-clock time in
-            // ScreenCaptureKit/Vision (e.g. a slow timeout) and count toward
-            // the duty cycle the power probe measures, so the same
-            // duration_ms field is attached here too.
-            let dutyCycleMilliseconds = Self.milliseconds(from: dutyCycleStart, to: now())
-            diagnostics("screen-capture-failed", ["duration_ms": String(dutyCycleMilliseconds), "kind": "display"])
             return .captureFailed
         }
     }
@@ -1016,20 +854,6 @@ actor ScreenCaptureService {
         }
     }
 
-    private static func targetWindow(
-        for target: TypingTargetIdentity,
-        among windows: [SCWindow]
-    ) -> SCWindow? {
-        guard let windowIdentifier = target.windowIdentifier,
-              let processIdentifier = target.processIdentifier else { return nil }
-        return windows.first {
-            $0.windowID == windowIdentifier
-                && $0.owningApplication?.processID == processIdentifier
-                && (target.bundleIdentifier == nil
-                    || $0.owningApplication?.bundleIdentifier == target.bundleIdentifier)
-        }
-    }
-
     private static func display(containing window: SCWindow, in displays: [SCDisplay]) -> SCDisplay? {
         let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
         return displays.first(where: { $0.frame.contains(center) }) ?? displays.first
@@ -1051,23 +875,6 @@ actor ScreenCaptureService {
             }
         }
         return ranks
-    }
-
-    /// Documented z-order rank first. A window missing from the on-screen
-    /// list sorts behind every ranked one — "not on screen" must never win
-    /// an attribution over a visible window — with the old layer proxy only
-    /// breaking ties between two unranked windows.
-    private static func frontToBackPrecedes(
-        _ a: SCWindow,
-        _ b: SCWindow,
-        zRanks: [CGWindowID: Int]
-    ) -> Bool {
-        switch (zRanks[a.windowID], zRanks[b.windowID]) {
-        case let (rankA?, rankB?): return rankA < rankB
-        case (.some, nil): return true
-        case (nil, .some): return false
-        case (nil, nil): return a.windowLayer < b.windowLayer
-        }
     }
 
     /// `SCWindow.frame` is in global desktop points; `display.frame` is that
