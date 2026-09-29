@@ -28,7 +28,8 @@
 //     be checked), the profile is still written with name and counts, but its
 //     confirmations are held in the ledger, so the new model can't silently
 //     name them. The first time the user confirms them under the new model,
-//     the next run restores the confirmations.
+//     that confirmation's write restores them (`recordUserConfirmations`); a
+//     run also checks at start, for confirmations saved before that existed.
 //   - People with no usable audio get a ledger row (`needs_confirmation`) and
 //     are listed in the report instead of silently disappearing.
 //

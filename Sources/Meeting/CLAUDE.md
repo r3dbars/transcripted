@@ -47,6 +47,8 @@
 - `MeetingSessionState.swift` — `MeetingSessionState`, the meeting session's high-level state enum (`idle`/`loadingModels`/`ready`/`startingRecording`/`recording`/`stoppingRecording`/`transcribing`/`error`); `MeetingSessionController.State` is a typealias onto it
 - `MeetingSessionStateMachine.swift` — pure legal-transition table over `MeetingSessionState` plus the `isCaptureSessionActive`/`isSteadyStateRecording`/`mayReportUnrelatedFailureAsError` queries, consulted by `MeetingSessionController.transition(to:reason:)`
 - `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
+- `MeetingSpeakerSeparation.swift` — picks each meeting's call-channel speaker separation (`SpeakerSeparationOptions.tuned`) from the backend, the voiceprint model's bars and the calendar invite size; also the lineup for lineup naming
+- `MeetingSpeakerSeparationProvider.swift` — builds the task manager's separation provider so every meeting reads the diarizer's `activeBackend` when it runs (pyannote after a Nemotron load failure), never the backend asked for at launch
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStartFailureClassifier.swift` — stable analytics classifier for meeting-recording start failures
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders

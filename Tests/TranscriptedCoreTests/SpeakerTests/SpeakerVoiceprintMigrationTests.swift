@@ -1,6 +1,7 @@
 import Accelerate
 import AVFoundation
 import Foundation
+import SQLite3
 import XCTest
 @testable import TranscriptedCore
 
@@ -14,7 +15,8 @@ import XCTest
 ///   - the source database file is never written;
 ///   - a cancelled run, run again, ends exactly where an uninterrupted run does;
 ///   - someone whose audio disagrees with itself under the new model keeps their
-///     name but can't be silently named until the user confirms them once.
+///     name but can't be silently named until the user confirms them once, and
+///     that confirmation gives their carried confirmations back right away.
 ///
 /// Everything lives in a temp folder. The fake embedder maps a stretch of
 /// constant-level audio to a known one-hot vector, so each fixture person's
@@ -527,17 +529,95 @@ final class SpeakerVoiceprintMigrationTests: XCTestCase {
         let danReport = try XCTUnwrap(report.people.first { $0.profileId == fixture.dan })
         XCTAssertLessThan(try XCTUnwrap(danReport.selfSimilarity), embedder.thresholds.matchManySegments)
 
-        // The user confirms Dan once under the new model; the next pass gives back
-        // his two carried confirmations on top of the new one.
+        // The user confirms Dan once under the new model. His two carried
+        // confirmations come back with that confirmation, in the same session,
+        // not at the next launch.
         try target.recordUserConfirmations([
             SpeakerUserConfirmation(profileId: fixture.dan, transcriptId: UUID(), kind: .confirmed),
         ])
-        let next = try await migrate(fixture, into: target, with: LevelEmbedder())
 
-        XCTAssertEqual(next.released, [fixture.dan])
         XCTAssertEqual(target.getSpeaker(id: fixture.dan)?.confirmedMeetingCount, 3)
         XCTAssertEqual(target.getSpeaker(id: fixture.eve)?.confirmedMeetingCount, 0, "Eve wasn't confirmed yet")
         XCTAssertEqual(statuses(target)[fixture.dan], .carried)
+        XCTAssertNotNil(target.voiceprintMigrationLedger().first { $0.profileId == fixture.dan }?.releasedAt)
+
+        // The next launch's run has nothing left to release and changes nothing.
+        let next = try await migrate(fixture, into: target, with: LevelEmbedder())
+        XCTAssertEqual(next.released, [])
+        XCTAssertEqual(target.getSpeaker(id: fixture.dan)?.confirmedMeetingCount, 3)
+        XCTAssertEqual(statuses(target)[fixture.eve], .held)
+    }
+
+    func testConfirmingSomeoneElseReleasesNobody() async throws {
+        let fixture = try makeFixture()
+        let embedder = LevelEmbedder()
+        let target = makeTarget(fixture, embedder)
+        _ = try await migrate(fixture, into: target, with: embedder)
+
+        try target.recordUserConfirmations([
+            SpeakerUserConfirmation(profileId: fixture.ann, transcriptId: UUID(), kind: .confirmed),
+        ])
+
+        XCTAssertEqual(target.getSpeaker(id: fixture.ann)?.confirmedMeetingCount, 6)
+        XCTAssertEqual(statuses(target)[fixture.dan], .held)
+        XCTAssertEqual(statuses(target)[fixture.eve], .held)
+        XCTAssertEqual(target.getSpeaker(id: fixture.dan)?.confirmedMeetingCount, 0)
+        XCTAssertEqual(target.getSpeaker(id: fixture.eve)?.confirmedMeetingCount, 0)
+    }
+
+    func testConfirmingThePersonAHeldProfileWasMergedIntoReleasesIt() async throws {
+        let fixture = try makeFixture()
+        let embedder = LevelEmbedder()
+        let target = makeTarget(fixture, embedder)
+        _ = try await migrate(fixture, into: target, with: embedder)
+        // In review the user says Eve's voice is really Bob, then confirms Bob.
+        try target.mergeProfiles(sourceId: fixture.eve, into: fixture.bob)
+        let bobBefore = try XCTUnwrap(target.getSpeaker(id: fixture.bob)).confirmedMeetingCount
+
+        try target.recordUserConfirmations([
+            SpeakerUserConfirmation(profileId: fixture.bob, transcriptId: UUID(), kind: .confirmed),
+        ])
+
+        XCTAssertEqual(statuses(target)[fixture.eve], .carried, "Eve's hold ends where her voice went")
+        XCTAssertEqual(
+            target.getSpeaker(id: fixture.bob)?.confirmedMeetingCount, bobBefore + 2,
+            "the new confirmation plus Eve's one carried confirmation"
+        )
+        XCTAssertEqual(statuses(target)[fixture.dan], .held)
+    }
+
+    func testAnUnreadableHeldRowStaysHeldAndDoesNotBlockTheConfirmation() async throws {
+        let fixture = try makeFixture()
+        let embedder = LevelEmbedder()
+        let target = makeTarget(fixture, embedder)
+        _ = try await migrate(fixture, into: target, with: embedder)
+        try corruptHeldRecord(of: fixture.eve, in: fixture)
+
+        try target.recordUserConfirmations([
+            SpeakerUserConfirmation(profileId: fixture.eve, transcriptId: UUID(), kind: .confirmed),
+            SpeakerUserConfirmation(profileId: fixture.dan, transcriptId: UUID(), kind: .confirmed),
+        ])
+
+        XCTAssertEqual(target.getSpeaker(id: fixture.eve)?.confirmedMeetingCount, 1, "the user's own confirmation is kept")
+        XCTAssertEqual(statuses(target)[fixture.eve], .held)
+        XCTAssertEqual(statuses(target)[fixture.dan], .carried, "one bad row doesn't hold anyone else back")
+        XCTAssertEqual(target.getSpeaker(id: fixture.dan)?.confirmedMeetingCount, 3)
+    }
+
+    /// Overwrites one held person's saved record with bytes that don't decode,
+    /// through a second connection to the temp target database.
+    private func corruptHeldRecord(of profileId: UUID, in fixture: Fixture) throws {
+        let path = fixture.root.appendingPathComponent("state/speakers_test-level.sqlite").path
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw XCTSkip("could not open the temp target database")
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 5_000)
+        let sql = "UPDATE speaker_voiceprint_migrations SET held_record = 'not json' WHERE profile_id = '\(profileId.uuidString)';"
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_changes(db), 1)
     }
 
     func testInventoryCountsEachPersonsClipsMeetingsAndSpeech() async throws {
