@@ -715,11 +715,16 @@ final class MeetingSessionController: ObservableObject {
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
         }
-        // Tuned for the backend and voiceprint model picked at launch (MeetingSpeakerSeparation).
+        // Tuned for the backend that actually loaded (pyannote when Nemotron failed
+        // to), read per meeting, and the voiceprint model picked at launch
+        // (MeetingSpeakerSeparation, MeetingSpeakerSeparationProvider).
         let speakerThresholds = diarization.activeSpeakerThresholds
-        taskManager.speakerSeparationProvider = { recordingDate in
+        let diarizer = diarization
+        taskManager.speakerSeparationProvider = MeetingSpeakerSeparationProvider.make(
+            activeBackend: { await diarizer.activeBackend }
+        ) { backend, recordingDate in
             await MeetingSpeakerSeparation.resolve(
-                backend: diarizationBackend,
+                backend: backend,
                 thresholds: speakerThresholds,
                 recordingStart: recordingDate
             )

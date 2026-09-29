@@ -77,10 +77,68 @@ final class SpeakerSeparationTests: XCTestCase {
         }
     }
 
-    func testANearSilentVoiceWithNoFingerprintJoinsTheVoiceThatTalkedMost() {
+    func testANearSilentVoiceWithNoFingerprintStaysItsOwnSpeaker() {
+        // Nothing says who voice 1 sounds like, so it must not go to whoever
+        // talked most.
         let input = [seg(0, 0, 10, a), seg(1, 10, 11, nil), seg(2, 11, 70, b)]
-        let output = SpeakerSeparation.apply(input, options: SpeakerSeparationOptions(foldBelowSeconds: 5))
-        XCTAssertEqual(ids(output), [0, 2, 2])
+        XCTAssertEqual(ids(SpeakerSeparation.apply(input, options: SpeakerSeparationOptions(foldBelowSeconds: 5))), [0, 1, 2])
+        XCTAssertEqual(ids(SpeakerSeparation.apply(input, options: .nemotronTuned(invitedPeople: nil))), [0, 1, 2])
+    }
+
+    func testAShortLineFromSomeoneElseKeepsItsOwnSpeaker() {
+        // The hardware case: a real 3.4 s line from a third person, under the
+        // 5 s fold, sounds like neither of the two people who talked more.
+        let input = [seg(0, 0, 40, a), seg(1, 40, 43.4, c), seg(2, 43.4, 100, b)]
+        for thresholds in [SpeakerEmbeddingThresholds.weSpeaker, .reDimNet2B4] {
+            let output = SpeakerSeparation.apply(input, options: .nemotronTuned(invitedPeople: nil, thresholds: thresholds))
+            XCTAssertEqual(ids(output), [0, 1, 2])
+        }
+    }
+
+    func testAShortPieceOfSomeoneWhoTalkedMoreStillFolds() {
+        // The fold floor only stops folds between voices that don't sound alike.
+        let input = [seg(0, 0, 40, a), seg(1, 40, 43.4, a2), seg(2, 43.4, 100, b)]
+        let output = SpeakerSeparation.apply(input, options: .nemotronTuned(invitedPeople: nil, thresholds: .reDimNet2B4))
+        XCTAssertEqual(ids(output), [0, 0, 2])
+    }
+
+    func testAShortVoiceFoldsOnlyWhenItClearsTheFoldBar() {
+        // Voice 1 is about 0.71 like voice 0: in under a 0.6 bar, out under a 0.8 bar.
+        let halfway: [Float] = [0.7, 0, 0, 0.7]
+        let input = [seg(0, 0, 40, a), seg(1, 40, 43, halfway), seg(2, 43, 100, b)]
+        XCTAssertEqual(
+            ids(SpeakerSeparation.apply(input, options: SpeakerSeparationOptions(foldBelowSeconds: 5, foldSimilarity: 0.6))),
+            [0, 0, 2]
+        )
+        XCTAssertEqual(
+            ids(SpeakerSeparation.apply(input, options: SpeakerSeparationOptions(foldBelowSeconds: 5, foldSimilarity: 0.8))),
+            [0, 1, 2]
+        )
+    }
+
+    func testAOneOnOneCapNeverCollapsesADifferentPersonIntoTheInvitee() {
+        // A 1:1 on the calendar, but a third person is on the call (or it's a
+        // different call in the 1:1's slot). Voice 1 is another piece of voice 0
+        // and folds; voice 2 sounds like nobody and stays, even though that leaves
+        // two voices under a cap of one.
+        let input = [seg(0, 0, 60, a), seg(1, 60, 80, a2), seg(2, 80, 88, b)]
+        for thresholds in [SpeakerEmbeddingThresholds.weSpeaker, .reDimNet2B4] {
+            let output = SpeakerSeparation.apply(input, options: .nemotronTuned(invitedPeople: 1, thresholds: thresholds))
+            XCTAssertEqual(ids(output), [0, 0, 2])
+        }
+    }
+
+    func testACapWithABarKeepsAVoiceWithNoFingerprint() {
+        let input = [seg(0, 0, 60, a), seg(1, 60, 70, nil)]
+        let output = SpeakerSeparation.apply(input, options: SpeakerSeparationOptions(maxSpeakers: 1, capFoldSimilarity: 0.6))
+        XCTAssertEqual(ids(output), [0, 1])
+    }
+
+    func testAOneOnOneWithOnlyTheInviteeStillEndsWithOneVoice() {
+        // What the 1:1 cap is for: Nemotron split one remote person in two.
+        let input = [seg(0, 0, 60, a), seg(1, 60, 75, a2)]
+        let output = SpeakerSeparation.apply(input, options: .nemotronTuned(invitedPeople: 1, thresholds: .reDimNet2B4))
+        XCTAssertEqual(Set(ids(output)), [0])
     }
 
     func testTheSameInputAlwaysGivesTheSameOutput() {
@@ -104,6 +162,8 @@ final class SpeakerSeparationTests: XCTestCase {
         XCTAssertEqual(options.foldBelowSeconds, 5.0)
         XCTAssertEqual(options.mergeSimilarity, 0.6)
         XCTAssertEqual(options.maxSpeakers, 4)
+        XCTAssertEqual(options.foldSimilarity, Double(SpeakerEmbeddingThresholds.weSpeaker.microAbsorb))
+        XCTAssertEqual(options.capFoldSimilarity, SpeakerEmbeddingThresholds.weSpeaker.separationMerge)
     }
 
     func testNemotronFoldsTinyVoicesAndCapsOnlyOneOnOnes() {
@@ -114,6 +174,13 @@ final class SpeakerSeparationTests: XCTestCase {
         XCTAssertNil(noInvite.maxSpeakers)
         XCTAssertEqual(SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: 1).maxSpeakers, 1)
         XCTAssertNil(SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: 5).maxSpeakers)
+    }
+
+    func testFoldAndCapBarsComeFromTheActiveVoiceprintModel() {
+        let thresholds = SpeakerEmbeddingThresholds.reDimNet2B4
+        let options = SpeakerSeparationOptions.tuned(for: .nemotron, invitedPeople: 1, thresholds: thresholds)
+        XCTAssertEqual(options.foldSimilarity, Double(thresholds.microAbsorb))
+        XCTAssertEqual(options.capFoldSimilarity, thresholds.separationMerge)
     }
 
     func testPyannoteKeepsTheLabSettingsWithTheInviteCap() {
