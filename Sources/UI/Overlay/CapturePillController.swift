@@ -1,5 +1,70 @@
 import AppKit
 
+/// When an unanswered call prompt closes by itself. The clock stops while
+/// the pointer is over the island or while the prompt waits behind a
+/// dictation, and picks up where it left off. Plain values in and out so the
+/// fast tests can drive it with their own clock.
+struct CallPromptTimeoutClock: Equatable {
+    enum Step: Equatable {
+        /// Nothing to change.
+        case keepGoing
+        /// Stop the running timeout and countdown.
+        case hold
+        /// (Re)start the timeout and countdown for this long.
+        case run(seconds: TimeInterval)
+    }
+
+    private(set) var deadline: Date?
+    /// How much was left when the clock stopped; nil while it runs.
+    private(set) var heldRemaining: TimeInterval?
+    private var hovered = false
+    private var offScreen = false
+
+    var isHeld: Bool { heldRemaining != nil }
+
+    /// A new prompt gets the full timeout, unless it is already waiting
+    /// off screen (a newer prompt replacing one behind a dictation).
+    mutating func start(timeout: TimeInterval, now: Date) -> Step {
+        // Hover is reported only when it changes; a new prompt starts
+        // unhovered, as the old pill did.
+        hovered = false
+        heldRemaining = nil
+        let seconds = max(1, timeout)
+        deadline = now.addingTimeInterval(seconds)
+        let step = settle(now: now)
+        return step == .keepGoing ? .run(seconds: seconds) : step
+    }
+
+    mutating func setHovered(_ hovered: Bool, now: Date) -> Step {
+        guard deadline != nil else { return .keepGoing }
+        self.hovered = hovered
+        return settle(now: now)
+    }
+
+    mutating func setOnScreen(_ onScreen: Bool, now: Date) -> Step {
+        guard deadline != nil else { return .keepGoing }
+        offScreen = !onScreen
+        return settle(now: now)
+    }
+
+    /// The prompt was answered, expired, or taken down.
+    mutating func stop() {
+        self = CallPromptTimeoutClock()
+    }
+
+    private mutating func settle(now: Date) -> Step {
+        if hovered || offScreen {
+            guard heldRemaining == nil, let deadline else { return .keepGoing }
+            heldRemaining = max(1, deadline.timeIntervalSince(now))
+            return .hold
+        }
+        guard let remaining = heldRemaining else { return .keepGoing }
+        heldRemaining = nil
+        deadline = now.addingTimeInterval(remaining)
+        return .run(seconds: remaining)
+    }
+}
+
 @available(macOS 14.0, *)
 @MainActor
 final class CapturePillController {
@@ -9,10 +74,9 @@ final class CapturePillController {
     private var dismissTask: Task<Void, Never>?
     private var countdownTask: Task<Void, Never>?
     private var eventMonitor: Any?
-    /// When the unanswered prompt closes by itself, and how much was left
-    /// when the pointer paused it over the island.
-    private var dismissDeadline: Date?
-    private var pausedTimeRemaining: TimeInterval?
+    /// When the unanswered prompt closes by itself; it holds while the
+    /// island is hovered or the prompt waits behind a dictation.
+    private var timeoutClock = CallPromptTimeoutClock()
 
     var onRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
@@ -32,27 +96,32 @@ final class CapturePillController {
                 }
             }
             island?.callHoverHandler = { [weak self] hovered in
-                self?.setTimeoutPaused(hovered)
+                guard let self, self.representedCandidate != nil else { return }
+                self.apply(self.timeoutClock.setHovered(hovered, now: Date()))
+            }
+            island?.callVisibilityHandler = { [weak self] onScreen in
+                guard let self, self.representedCandidate != nil else { return }
+                self.apply(self.timeoutClock.setOnScreen(onScreen, now: Date()))
             }
         }
     }
 
     /// The island's ring around Not now stops while the pointer is over the
     /// island; the timeout behind it stops too, so the prompt never closes
-    /// while someone is reading it.
-    private func setTimeoutPaused(_ paused: Bool) {
-        guard representedCandidate != nil else { return }
-        if paused {
-            guard pausedTimeRemaining == nil, let dismissDeadline else { return }
-            pausedTimeRemaining = max(1, dismissDeadline.timeIntervalSinceNow)
+    /// while someone is reading it, or while it waits behind a dictation
+    /// where no one can see it.
+    private func apply(_ step: CallPromptTimeoutClock.Step) {
+        switch step {
+        case .keepGoing:
+            break
+        case .hold:
             dismissTask?.cancel()
             dismissTask = nil
             countdownTask?.cancel()
             countdownTask = nil
-        } else if let remaining = pausedTimeRemaining {
-            pausedTimeRemaining = nil
-            scheduleDismiss(timeout: remaining)
-            scheduleCountdown(seconds: max(1, Int(ceil(remaining))))
+        case .run(let seconds):
+            scheduleDismiss(timeout: seconds)
+            scheduleCountdown(seconds: max(1, Int(ceil(seconds))))
         }
     }
 
@@ -76,16 +145,16 @@ final class CapturePillController {
         guard let panel, let pillView else { return false }
 
         representedCandidate = candidate
-        pausedTimeRemaining = nil
         let timeoutSeconds = max(1, Int(ceil(timeout)))
         if let island, DictationOverlayPresentationPreferences.mode() == .notchIsland {
+            // Start the clock first: showing the prompt reports whether it
+            // is on screen, which may hold it straight away.
+            apply(timeoutClock.start(timeout: timeout, now: Date()))
             island.updateCallPrompt(NotchIslandCallPromptContent(
                 title: candidate.suggestedTranscriptTitle ?? candidate.title,
                 detail: detailOverride ?? candidate.detail,
                 secondsLeft: timeoutSeconds
             ))
-            scheduleDismiss(timeout: timeout)
-            scheduleCountdown(seconds: timeoutSeconds)
             return true
         }
         pillView.update(candidate: candidate, timeoutSeconds: timeoutSeconds, detailOverride: detailOverride)
@@ -96,8 +165,7 @@ final class CapturePillController {
         panel.orderFrontRegardless()
 
         installEventMonitor()
-        scheduleDismiss(timeout: timeout)
-        scheduleCountdown(seconds: timeoutSeconds)
+        apply(timeoutClock.start(timeout: timeout, now: Date()))
         return true
     }
 
@@ -112,8 +180,7 @@ final class CapturePillController {
             self.eventMonitor = nil
         }
 
-        dismissDeadline = nil
-        pausedTimeRemaining = nil
+        timeoutClock.stop()
         let candidate = representedCandidate
         representedCandidate = nil
         panel?.orderOut(nil)
@@ -159,7 +226,6 @@ final class CapturePillController {
 
     private func scheduleDismiss(timeout: TimeInterval) {
         dismissTask?.cancel()
-        dismissDeadline = Date().addingTimeInterval(max(1, timeout))
         dismissTask = Task { @MainActor [weak self] in
             let nanoseconds = UInt64(max(1, timeout) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanoseconds)

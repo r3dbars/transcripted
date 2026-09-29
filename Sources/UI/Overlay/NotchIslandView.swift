@@ -727,6 +727,9 @@ final class NotchIslandDropView: NSView {
     private var callLane: NotchIslandBarsView?
     private var promptCountdownLabel: NSTextField?
     private var countdownButton: NotchIslandButton?
+    /// A dictation message's words and hint. A click on them is someone
+    /// reading, so it never reaches the island's click-to-dismiss.
+    private var readableText: [NSView] = []
 
     func setCountdownPaused(_ paused: Bool) {
         countdownButton?.setCountdownPaused(paused)
@@ -801,12 +804,15 @@ final class NotchIslandDropView: NSView {
         case .dictationLoading(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
         case .dictationMessage(let message) where message.preview != nil:
-            add(body("“\(message.preview ?? "")”", maxLines: 2))
-            add(NotchIslandPalette.label(
+            let quote = body("“\(message.preview ?? "")”", maxLines: 2)
+            let hint = NotchIslandPalette.label(
                 message.hint ?? "Click where it goes, then press ⌘V.",
                 font: .systemFont(ofSize: 12),
                 color: NotchIslandPalette.secondaryText
-            ))
+            )
+            readableText = [quote, hint]
+            add(quote)
+            add(hint)
             let dismiss = NotchIslandButton(title: "Dismiss", style: .plain)
             dismiss.onPress = { [weak self] in self?.onAction?(.dictationDismissMessage) }
             dismiss.setContentHuggingPriority(.required, for: .horizontal)
@@ -819,7 +825,9 @@ final class NotchIslandDropView: NSView {
                 button(message.actionTitle ?? "Paste", .accent, .dictationMessageAction),
             ]))
         case .dictationMessage(let message):
-            add(body(message.text))
+            let text = body(message.text)
+            readableText = [text]
+            add(text)
             var trailing = [button("Dismiss", .plain, .dictationDismissMessage)]
             if let actionTitle = message.actionTitle {
                 trailing.append(button(actionTitle, .accent, .dictationMessageAction))
@@ -926,6 +934,16 @@ final class NotchIslandDropView: NSView {
                 stack.addArrangedSubview(speakerReviewView)
             }
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        // A control-click still reaches the island for its menu.
+        if !event.modifierFlags.contains(.control),
+           readableText.contains(where: { $0.convert($0.bounds, to: self).contains(point) }) {
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     private func add(_ view: NSView) {

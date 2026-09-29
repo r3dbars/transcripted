@@ -3,7 +3,8 @@
 // prompt (Settings › Dictation window › Notch island). Each controller keeps
 // its own state machine, timers and actions and pushes a plain snapshot here
 // (NotchIsland*Content). This composes them with NotchIslandPresentation,
-// sizes the panel for the screen under the pointer with NotchIslandGeometry,
+// sizes the panel with NotchIslandGeometry for the display it picks (the one
+// with the focused text field for a dictation, else the one under the pointer),
 // grows it out of the notch (or down from the top edge of a display without
 // one), and routes taps back to whichever controller owns them.
 
@@ -33,6 +34,11 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var speakerReviewVisibilityHandler: ((Bool) -> Void)? {
         didSet { reportedSpeakerReviewVisible = nil }
     }
+    /// The call prompt went on or off screen (it waits behind a dictation),
+    /// so its timeout only runs while someone can see it.
+    var callVisibilityHandler: ((Bool) -> Void)? {
+        didSet { reportedCallPromptVisible = nil }
+    }
 
     private static let hoverOpenDelay: UInt64 = 120_000_000
     private static let hoverCloseDelay: UInt64 = 380_000_000
@@ -44,6 +50,10 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private var callPrompt: NotchIslandCallPromptContent?
     private var speakerReview: NotchIslandSpeakerReviewContent?
     private var reportedSpeakerReviewVisible: Bool?
+    private var reportedCallPromptVisible: Bool?
+    /// The app that was in front when a name box took the keyboard. It gets
+    /// the keyboard back once naming ends.
+    private var keyboardReturnApp: NSRunningApplication?
     private var recentInsert: NotchIslandRecentInsert?
     private var targetApp: NSRunningApplication?
     private var listeningSince: Date?
@@ -233,11 +243,9 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         let (panel, islandView) = ensurePanel()
         speakerReview = content
         islandView.speakerReviewView = content == nil ? nil : view
-        let isNaming = content?.stage == .naming
-        panel.acceptsKeyForTyping = isNaming
-        if !isNaming, panel.isKeyWindow {
-            panel.makeFirstResponder(nil)
-        }
+        // Once naming ends (Done, Later, or a newer review), the name boxes
+        // can't take the keyboard again; render() hands it back if they had it.
+        panel.acceptsKeyForTyping = content?.stage == .naming
         render()
     }
 
@@ -245,6 +253,18 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard reportedSpeakerReviewVisible != visible else { return }
         reportedSpeakerReviewVisible = visible
         speakerReviewVisibilityHandler?(visible)
+    }
+
+    private func reportCallPromptVisibility() {
+        guard callPrompt != nil else {
+            // The next prompt reports afresh.
+            reportedCallPromptVisible = nil
+            return
+        }
+        let visible = NotchIslandPresentation.callPromptIsOnScreen(dictation: dictation, callPrompt: callPrompt)
+        guard reportedCallPromptVisible != visible else { return }
+        reportedCallPromptVisible = visible
+        callVisibilityHandler?(visible)
     }
 
     /// The review's rows grew or shrank.
@@ -256,7 +276,53 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// A name box was clicked: take the keyboard, only while the review asks.
     func makeKeyForTyping() {
         guard let panel, panel.acceptsKeyForTyping else { return }
+        if !panel.isKeyWindow {
+            // The panel is non-activating, so the app the person was in is
+            // still the frontmost app while they type a name here.
+            keyboardReturnApp = Self.frontmostOtherApp()
+        }
         panel.makeKey()
+    }
+
+    /// Gives the keyboard back to the app the person was in, without hiding
+    /// the island and without activating Transcripted.
+    ///
+    /// The island is a non-activating panel: clicking a name box made it the
+    /// key window but left the other app active (its menu bar stays up). So
+    /// only key focus has to move back. AppKit has no public "stop being key"
+    /// for a window that stays on screen (`resignKey()` is documented as
+    /// never to be called directly and only updates AppKit's side), but
+    /// ordering a key non-activating panel out hands key focus back to the
+    /// active app, which is what `hide()` has always relied on. The panel can
+    /// no longer become key at this point, so ordering it straight back in,
+    /// in the same pass with its layers untouched, leaves the island where it
+    /// was. Re-activating the app that was frontmost then asks it to take its
+    /// key window back, in case the window server has not already; it never
+    /// activates Transcripted.
+    private func returnKeyboardIfHeld() {
+        guard let panel, panel.isKeyWindow else {
+            keyboardReturnApp = nil
+            return
+        }
+        let returnTo = keyboardReturnApp ?? Self.frontmostOtherApp()
+        keyboardReturnApp = nil
+        panel.makeFirstResponder(nil)
+        let couldTakeKey = panel.acceptsKeyForTyping
+        panel.acceptsKeyForTyping = false
+        if panel.isVisible {
+            panel.orderOut(nil)
+            panel.orderFrontRegardless()
+        }
+        panel.acceptsKeyForTyping = couldTakeKey
+        if let returnTo, !returnTo.isTerminated {
+            returnTo.activate(options: [])
+        }
+    }
+
+    private static func frontmostOtherApp() -> NSRunningApplication? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+        return app
     }
 
     // MARK: - Rendering
@@ -276,6 +342,10 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         )
         lastLayout = layout
         reportSpeakerReviewVisibility(layout.showsSpeakerReview)
+        reportCallPromptVisibility()
+        if !NotchIslandPresentation.speakerReviewKeepsKeyboard(speakerReview, onScreen: layout.showsSpeakerReview) {
+            returnKeyboardIfHeld()
+        }
         guard !layout.isEmpty else {
             hide(animated: animated)
             return
@@ -407,7 +477,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         }
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.pointerMoved() }
+            Task { @MainActor [weak self] in self?.pointerMoved() }
         }) {
             pointerMonitors.append(global)
         }
@@ -468,6 +538,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         let finish = { [weak self] in
             guard let self, self.hideGeneration == generation, !self.isShown else { return }
             self.panel?.orderOut(nil)
+            self.keyboardReturnApp = nil
             self.screen = nil
         }
         guard animated, !NotchIslandPalette.reduceMotion, let screen else {
@@ -511,13 +582,25 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         return (panel, view)
     }
 
+    /// The display the island is on, chosen once per show and kept while it
+    /// is up (see `NotchIslandScreenChoice`).
     private func currentScreen() -> NotchIslandScreenInfo {
         if let screen { return screen }
-        let mouse = NSEvent.mouseLocation
+        let screens = NSScreen.screens
+        let focusedField = NotchIslandScreenChoice.looksUpFocusedField(
+            dictationOpensIsland: dictation != nil,
+            screenCount: screens.count
+        ) ? focusedFieldRect() : nil
+        let chosenFrame = NotchIslandScreenChoice.screenFrame(
+            focusedFieldRect: focusedField,
+            mouseLocation: NSEvent.mouseLocation,
+            screenFrames: screens.map(\.frame),
+            mainScreenFrame: NSScreen.main?.frame
+        )
         let resolved: NotchIslandScreenInfo
-        if let nsScreen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) })
+        if let nsScreen = chosenFrame.flatMap({ frame in screens.first { $0.frame == frame } })
             ?? NSScreen.main
-            ?? NSScreen.screens.first {
+            ?? screens.first {
             resolved = NotchIslandGeometry.screenInfo(
                 frame: nsScreen.frame,
                 safeAreaTop: nsScreen.safeAreaInsets.top,
@@ -533,6 +616,19 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         }
         screen = resolved
         return resolved
+    }
+
+    /// Where the focused text field of the app the words go to sits, in
+    /// global Cocoa coordinates. One Accessibility round trip, bounded by
+    /// `AccessibilityBridge`'s timeout; `currentScreen()` asks once per show.
+    /// A "Not pasted" notice with no dictation app pastes into whatever is in
+    /// front, so that app's field counts then.
+    private func focusedFieldRect() -> CGRect? {
+        guard let app = targetApp ?? Self.frontmostOtherApp(),
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let axRect = AccessibilityBridge.focusedTextFieldRect(for: app),
+              let primaryFrame = NSScreen.screens.first?.frame else { return nil }
+        return DictationOverlayPlacementPolicy.cocoaRect(fromAccessibilityRect: axRect, primaryScreenFrame: primaryFrame)
     }
 
     private func updateTicker() {
