@@ -26,6 +26,14 @@ struct AgentRecording: Codable {
 struct AgentEngines: Codable {
     let stt: String
     let diarization: String
+    /// Left out of the JSON for transcripts that don't record one.
+    let voiceprintModel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case stt
+        case diarization
+        case voiceprintModel = "voiceprint_model"
+    }
 }
 
 struct AgentSpeaker: Codable {

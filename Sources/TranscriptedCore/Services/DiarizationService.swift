@@ -100,6 +100,23 @@ public class DiarizationService: ObservableObject {
         segmentEmbedder?.thresholds ?? .weSpeaker
     }
 
+    /// What the next `diarizeOffline` call runs: `activeBackend` (so a Nemotron
+    /// load failure reads pyannote) and the model that embeds its turns — the
+    /// injected embedder, else Nemotron's fallback embedder, else pyannote's
+    /// native offline WeSpeaker.
+    public var activeRunDescriptor: DiarizationRunDescriptor {
+        let voiceprintModel: String?
+        if let segmentEmbedder {
+            voiceprintModel = segmentEmbedder.identifier
+        } else {
+            switch activeBackend {
+            case .pyannote: voiceprintModel = FluidOfflineWeSpeakerSegmentEmbedder.embedderIdentifier
+            case .nemotron: voiceprintModel = nemotronFallbackEmbedder?.identifier
+            }
+        }
+        return DiarizationRunDescriptor(backend: activeBackend, voiceprintModel: voiceprintModel)
+    }
+
     /// The Nemotron preset the `.nemotron` backend loads for `environment`: the lab-only
     /// `TRANSCRIPTED_NEMOTRON_PRESET` override when it names a known preset, otherwise the
     /// default (`fast128`). Unknown names fall back to the default, as `initialize()` does.
@@ -311,7 +328,7 @@ public class DiarizationService: ObservableObject {
 
     // MARK: - Offline Diarization (PyAnnote)
 
-    /// Run offline speaker diarization on audio samples using PyAnnote pipeline.
+    /// Run offline speaker diarization on audio samples with the active backend.
     /// Supports unlimited speakers. Samples should be 16kHz mono Float32.
     nonisolated public func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         try await diarizeOffline(samples: samples, sampleRate: sampleRate, clusteringThreshold: nil)
@@ -342,7 +359,7 @@ public class DiarizationService: ObservableObject {
             manager = bounded
         }
 
-        AppLogger.transcription.info("Offline diarization starting", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
+        AppLogger.transcription.info("Offline diarization starting", ["backend": DiarizationBackend.pyannote.rawValue, "samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
 
         let diarizeStart = ProcessInfo.processInfo.systemUptime
         let result = try await {

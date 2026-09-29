@@ -12,12 +12,12 @@ extension Transcription {
     ///
     /// Pipeline:
     /// 1. Load & resample the captured audio files to 16kHz mono
-    /// 2. Run PyAnnote offline diarization on system audio -> speaker segments with embeddings
+    /// 2. Run offline diarization (Nemotron or pyannote) on system audio -> speaker segments with embeddings
     /// 3. Transcribe each system-audio speaker segment with Parakeet
     /// 4. When present, transcribe mic audio with Parakeet.
     ///    - If `splitLocalSpeakers` is false (default), splits by silence and tags
     ///      every utterance as the single "You" speaker.
-    ///    - If true, runs PyAnnote diarization on the mic channel too and threads
+    ///    - If true, runs diarization on the mic channel too and threads
     ///      per-speaker embeddings through the same classification/matching path
     ///      used for system audio. Surfaces multiple local speakers in the naming sheet.
     /// 5. Match speaker embeddings against persistent SpeakerDatabase
@@ -225,8 +225,13 @@ extension Transcription {
             }
 
             AppLogger.transcription.info("Running offline diarization on system audio")
+            // What diarized this meeting, read right before the first diarize
+            // call so a Nemotron load failure records pyannote. Stays nil when
+            // no diarizer runs.
+            var diarizationRun: DiarizationRunDescriptor?
             let rawSegments: [SpeakerSegment]
             if hasUsableSystemAudio {
+                diarizationRun = await Self.diarizationRunDescriptor(of: diarization)
                 do {
                     rawSegments = try await Self.diarizeSystemAudio(
                         samples: systemSamples,
@@ -682,6 +687,9 @@ extension Transcription {
                         // (`diarizationMicSamples` itself dies at the end of this
                         // branch scope.)
                         micSamples = []
+                        if diarizationRun == nil {
+                            diarizationRun = await Self.diarizationRunDescriptor(of: diarization)
+                        }
                         let micResult = try await Self.processMicChannelWithDiarization(
                             samples: diarizationMicSamples,
                             diarization: diarization,
@@ -927,7 +935,8 @@ extension Transcription {
                 droppedSegments: droppedSegments,
                 microphoneAudioOutcome: microphoneAudioOutcome,
                 systemAudioOutcome: systemAudioOutcome,
-                languageContext: languageContext
+                languageContext: languageContext,
+                diarization: diarizationRun
             )
 
         } catch {
@@ -996,6 +1005,7 @@ extension Transcription {
                 var droppedSegments = 0
                 let existingProfiles = speakerDB.allSpeakers()
                 let micResult: MicChannelResult
+                let diarizationRun = await Self.diarizationRunDescriptor(of: diarization)
                 do {
                     micResult = try await Self.processMicChannelWithDiarization(
                         samples: diarizationMicSamples,
@@ -1061,7 +1071,8 @@ extension Transcription {
                     droppedSegments: droppedSegments,
                     microphoneAudioOutcome: .usable,
                     systemAudioOutcome: .notProvided,
-                    languageContext: languageContext
+                    languageContext: languageContext,
+                    diarization: diarizationRun
                 )
             }
 
@@ -1175,6 +1186,11 @@ extension Transcription {
     nonisolated private static func audioDuration(at url: URL) throws -> TimeInterval {
         let file = try AVAudioFile(forReading: url)
         return Double(file.length) / file.processingFormat.sampleRate
+    }
+
+    /// The diarizer's backend and voiceprint model for the call about to run.
+    nonisolated static func diarizationRunDescriptor(of diarization: any DiarizationEngine) async -> DiarizationRunDescriptor {
+        await MainActor.run { diarization.activeRunDescriptor }
     }
 
     // MARK: - Mic Channel Diarization

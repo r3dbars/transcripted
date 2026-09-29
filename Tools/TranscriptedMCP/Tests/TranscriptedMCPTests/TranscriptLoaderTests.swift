@@ -25,6 +25,30 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(transcript?.speakers.count, 2)
     }
 
+    func testLoadReportsDiarizationEngineAndVoiceprintModel() throws {
+        let fixture = makeFixtureJSON().replacingOccurrences(
+            of: "diarization_engine: pyannote_offline",
+            with: "diarization_engine: nemotron_offline\nvoiceprint_model: \"redimnet2-b4\""
+        )
+        try writeFixture(fixture, filename: "Call_nemotron", to: tempDir)
+
+        let transcript = try XCTUnwrap(TranscriptLoader.load(tempDir.appendingPathComponent("Call_nemotron.md")))
+        XCTAssertEqual(transcript.recording.engines.diarization, "nemotron_offline")
+        XCTAssertEqual(transcript.recording.engines.voiceprintModel, "redimnet2-b4")
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript.recording.engines)) as? [String: String]
+        XCTAssertEqual(json?["voiceprint_model"], "redimnet2-b4")
+    }
+
+    func testLoadLegacyTranscriptWithoutVoiceprintModelOmitsIt() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_legacy_engine", to: tempDir)
+
+        let transcript = try XCTUnwrap(TranscriptLoader.load(tempDir.appendingPathComponent("Call_legacy_engine.md")))
+        XCTAssertEqual(transcript.recording.engines.diarization, "pyannote_offline")
+        XCTAssertNil(transcript.recording.engines.voiceprintModel)
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript.recording.engines)) as? [String: String]
+        XCTAssertEqual(json?.keys.sorted(), ["diarization", "stt"])
+    }
+
     func testLoadDuplicateSpeakerNamesDoesNotCrash() throws {
         let fixture = makeFixtureJSON(
             speakers: [

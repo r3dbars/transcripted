@@ -961,15 +961,29 @@ final class MetadataStubDiarizationEngine: DiarizationEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
     var isReady: Bool
     var initializeCallCount = 0
+    var activeRunDescriptor: DiarizationRunDescriptor
+    /// Swapped in by `initialize()`, the way a failed Nemotron load leaves
+    /// `DiarizationService` running pyannote.
+    private let runDescriptorAfterInitialize: DiarizationRunDescriptor?
     private let segments: [SpeakerSegment]
 
-    init(isReady: Bool = true, segments: [SpeakerSegment] = []) {
+    init(
+        isReady: Bool = true,
+        segments: [SpeakerSegment] = [],
+        runDescriptor: DiarizationRunDescriptor = DiarizationRunDescriptor(backend: .pyannote, voiceprintModel: nil),
+        runDescriptorAfterInitialize: DiarizationRunDescriptor? = nil
+    ) {
         self.isReady = isReady
         self.segments = segments
+        self.activeRunDescriptor = runDescriptor
+        self.runDescriptorAfterInitialize = runDescriptorAfterInitialize
     }
 
     func initialize() async {
         initializeCallCount += 1
+        if let runDescriptorAfterInitialize {
+            activeRunDescriptor = runDescriptorAfterInitialize
+        }
         isReady = true
     }
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] { segments }

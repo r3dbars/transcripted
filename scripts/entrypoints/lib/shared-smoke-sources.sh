@@ -61,6 +61,7 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
     "Sources/TranscriptedCore/Logging/PrivacyTextRedactor.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
+    "Sources/TranscriptedCore/Services/DiarizationBackend.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift"

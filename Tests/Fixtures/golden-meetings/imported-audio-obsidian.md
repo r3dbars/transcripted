@@ -16,6 +16,7 @@ system_utterances: 2
 mic_speakers: 0
 system_speakers: 2
 total_word_count: 13
+voiceprint_model: "wespeaker"
 imported_at: {{imported_at}}
 title: "Imported Episode"
 tags:

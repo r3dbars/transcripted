@@ -41,7 +41,8 @@ struct TestDataGenerator {
         duration: "\(durationFormatted)"
         processing_time: "0.2s"
         transcription_engine: parakeet_local
-        diarization_engine: pyannote_offline
+        diarization_engine: nemotron_offline
+        voiceprint_model: "redimnet2-b4"
         sources: [mic, system_audio]
         mic_utterances: \(micUtterances)
         system_utterances: \(systemUtterances)
