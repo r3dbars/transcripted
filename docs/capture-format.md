@@ -393,8 +393,10 @@ Details:
   known token formats. Each becomes `⟨redacted:<kind>⟩`, where kind is
   `password`, `code`, `card`, `secret`, `api-key`, `jwt`, `pem`, `iban` or
   `ssn`. Emails and phone numbers are kept. An entry that was nothing but a
-  secret isn't saved. `Words:` and `Characters:` count the scrubbed text, and
-  the heading title comes from it.
+  secret is saved as just its token (a sudo password becomes a
+  `⟨redacted:password⟩` section), so the command before it never runs into
+  the line after it on disk. `Words:` and `Characters:` count the scrubbed
+  text, and the heading title comes from it.
 - Day files written before the scrubber (or under older rules) are
   rescrubbed once when Writing starts: changed sections get their title and
   counts redone (`Accepted words:` never more than `Words:`), sections that

@@ -19,9 +19,9 @@ enum WritingDayFileRescrubber {
         var filesScanned = 0
         var filesChanged = 0
         /// Worth another try next launch: Writing stopped part way, or the
-        /// file changed or couldn't be written.
+        /// file changed, couldn't be opened or read, or couldn't be written.
         var failures = 0
-        /// Never readable as a day file (a symlink, not owner-only, not
+        /// Never readable as a day file (a symlink, another user's file, not
         /// UTF-8). Trying again next launch wouldn't help, so these don't
         /// hold the rules version back.
         var skipped = 0
@@ -64,7 +64,8 @@ enum WritingDayFileRescrubber {
             guard let contents = try WritingDayFileStore.contents(ofDayFile: name, in: directory) else { return .unchanged }
             data = contents
         } catch {
-            return .skipped
+            // A symlink or folder stays one; an open or read error may not.
+            return WritingDayFileStore.isNeverReadableDayFile(name, in: directory) ? .skipped : .failed
         }
         guard let text = String(data: data, encoding: .utf8) else { return .skipped }
         do {
