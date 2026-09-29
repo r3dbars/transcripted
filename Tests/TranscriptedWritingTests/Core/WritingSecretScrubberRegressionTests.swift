@@ -85,6 +85,8 @@ struct WritingSecretScrubberRegressionTests {
         Leak(text: "wifi password:\nSummer2024", secrets: ["Summer2024"], kept: "wifi password:"),
         // Third review round: the stricter rules still take these.
         Leak(text: "my pin 4821", secrets: ["4821"], kept: "my pin "),
+        Leak(text: "my pin 4821 for the gate", secrets: ["4821"], kept: " for the gate"),
+        Leak(text: "the garage pin 7731 if you get there first", secrets: ["7731"], kept: " if you get there first"),
         Leak(text: "CSC: 123", secrets: ["123"], kept: "CSC: "),
         Leak(text: "card ends 4242, csc 123", secrets: ["123"], kept: "card ends 4242, csc "),
         Leak(text: "Authorization: Basic dXNlcjpwYXNz", secrets: ["dXNlcjpwYXNz"], kept: "Authorization: Basic "),
@@ -147,7 +149,8 @@ struct WritingSecretScrubberRegressionTests {
         for kept in ["M2Ultra", "x86_64", "Wi-Fi6", "abc123def"] {
             #expect(WritingSecretScrubber.scrub(kept, appBundleIdentifier: Self.messages).kinds.isEmpty, "\(kept)")
         }
-        for secret in ["Tr0ub4dor&3", "P@ssw0rd", "8f3Kd9Lq", "S3cr3tv4lue"] {
+        // Common password words in leetspeak count too.
+        for secret in ["Tr0ub4dor&3", "P@ssw0rd", "8f3Kd9Lq", "S3cr3tv4lue", "Passw0rd", "l3tmein", "Sunsh1ne99"] {
             #expect(WritingSecretScrubber.scrub(secret, appBundleIdentifier: Self.messages).kinds == [.password], "\(secret)")
         }
     }

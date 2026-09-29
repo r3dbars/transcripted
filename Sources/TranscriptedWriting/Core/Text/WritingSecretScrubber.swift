@@ -218,7 +218,10 @@ public enum WritingSecretScrubber {
         static let usernameAndPassword = Prompt(answers: 2, looseAnswers: 2, passphrase: false)
         /// `sudo`: one password, then retries only when they look like one.
         static let elevation = Prompt(answers: 3, looseAnswers: 1, passphrase: false)
-        /// `ssh`, `psql`: one password. With keys and agents most never ask.
+        /// `ssh`: one password, then retries (sshd asks 3 times) only when
+        /// they look like one. With keys and agents most never ask.
+        static let remoteLogin = Prompt(answers: 3, looseAnswers: 1, passphrase: false)
+        /// `psql`, `kinit`: one password.
         static let single = Prompt(answers: 1, looseAnswers: 1, passphrase: false)
         /// `ssh-keygen`, `read -s`: a passphrase, then its confirmation.
         static let passphraseAndConfirm = Prompt(answers: 2, looseAnswers: 1, passphrase: true)
@@ -421,12 +424,34 @@ public enum WritingSecretScrubber {
         }
         if terminal == .editor, looksLikeCode(line) { return false }
         // Past the answers the prompt surely asks for (sudo's retry after a
-        // wrong password), the line has to look like a password by itself:
-        // `pytest` or `lazygit` after sudo had cached credentials stays.
+        // wrong password), the line has to look like a password by itself,
+        // or be a near miss of the first answer (`sunshien`, then
+        // `sunshine`): `pytest` or `lazygit` after sudo had cached
+        // credentials stays.
         if state.answered >= state.looseAnswers {
+            if let first = state.firstAnswer, isRetypeOf(first, line) { return true }
             return standalonePasswordKind(line, app: .terminal) != nil
         }
         return true
+    }
+
+    /// `retry` is `first` typed again with a slip: at most 2 edits apart.
+    private static func isRetypeOf(_ first: String, _ retry: String) -> Bool {
+        let a = Array(first), b = Array(retry)
+        guard a.count <= 64, b.count <= 64, abs(a.count - b.count) <= 2, !first.hasPrefix(tokenOpen) else {
+            return false
+        }
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        var previous = Array(0...b.count)
+        for i in 1...a.count {
+            var current = [i] + Array(repeating: 0, count: b.count)
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+            }
+            previous = current
+        }
+        return previous[b.count] <= 2
     }
 
     private static func isPathLike(_ word: String) -> Bool {
@@ -485,7 +510,8 @@ public enum WritingSecretScrubber {
         "sudo": .elevation, "su": .elevation, "doas": .elevation, "sudoedit": .elevation, "pkexec": .elevation,
         "login": .usernameAndPassword, "telnet": .usernameAndPassword, "ftp": .usernameAndPassword,
         "fdesetup": .usernameAndPassword,
-        "ssh": .single, "scp": .single, "sftp": .single, "mosh": .single, "kinit": .single, "psql": .single,
+        "ssh": .remoteLogin, "scp": .remoteLogin, "sftp": .remoteLogin, "mosh": .remoteLogin, "kinit": .single,
+        "psql": .single,
         "mysql_secure_installation": .single,
         "ssh-keygen": .passphraseAndConfirm, "ssh-add": .passphraseAndConfirm, "gpg": .passphraseAndConfirm,
         "gpg2": .passphraseAndConfirm, "openssl": .passphraseAndConfirm, "age": .passphraseAndConfirm,
@@ -569,8 +595,12 @@ public enum WritingSecretScrubber {
             && line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
     }
 
+    /// A redaction token never mentions a code: `⟨redacted:code⟩` has
+    /// `code` in it, and a second pass would read the number after it as one.
     private static func mentionsCode(_ line: String) -> Bool {
-        firstMatch(line, codeKeywordPattern) != nil
+        let range = NSRange(location: 0, length: (line as NSString).length)
+        let words = tokenPattern.stringByReplacingMatches(in: line, range: range, withTemplate: " ")
+        return firstMatch(words, codeKeywordPattern) != nil
     }
 
     private static func isCardDigits(_ line: String) -> Bool {
@@ -719,13 +749,28 @@ public enum WritingSecretScrubber {
             if knownShellWords.contains(stem) || versionedToolStems.contains(stem) { return nil }
             if app != .terminal, !commonPasswordStems.contains(stem) { return nil }
         } else if app == .other, !hasStrongSymbolInside,
-                  letterDigitSwitches(core) < otherAppLetterDigitSwitches {
+                  letterDigitSwitches(core) < otherAppLetterDigitSwitches, !isLeetCommonPassword(core) {
             return nil
         }
         if !hasLower, !hasStrongSymbolInside, core.count <= 12, core.allSatisfy({ $0.isLetter || $0.isNumber }) {
             return .code
         }
         return .password
+    }
+
+    /// A common password word spelled with digits for letters: `Passw0rd`,
+    /// `l3tmein`, `hunt3r1`. Trailing digits are dropped first.
+    private static func isLeetCommonPassword(_ token: String) -> Bool {
+        let body = String(token.reversed().drop(while: isDigit).reversed())
+        guard body.contains(where: isDigit) || body.contains(where: { "@$".contains($0) }) else { return false }
+        // `1` stands for `i` or `l`.
+        return ["i", "l"].contains { (one: Character) -> Bool in
+            let leet: [Character: Character] = ["0": "o", "1": one, "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"]
+            let decoded = String(body.map { leet[$0] ?? $0 }).lowercased()
+            guard decoded.allSatisfy(\.isLetter) else { return false }
+            return commonPasswordStems.contains(decoded)
+                || commonPasswordStems.contains { $0.count >= 5 && decoded.hasPrefix($0) }
+        }
     }
 
     /// How often `text` goes from a letter to a digit or back.
@@ -870,13 +915,17 @@ public enum WritingSecretScrubber {
         }
         add(pinPattern, group: 1, kind: .code) { _, match in !isCountedNumber(match, group: 1, in: text) }
         add(barePinPattern, group: 2, kind: .code) { _, match in
-            // `PIN 4821`, or a number that ends the line (`my pin 4821`), not
-            // pin the verb: "pin 2025 roadmap to the channel".
+            // `PIN 4821`, a number that ends the line (`pin 4821`), or a pin
+            // someone has (`my pin 4821 for the gate`); not pin the verb:
+            // "pin 2025 roadmap to the channel".
             let label = substring(match, group: 1, in: text) ?? ""
             let after = (text as NSString).substring(from: match.range.location + match.range.length)
             let restOfLine = after.prefix { $0 != "\n" }
             let endsLine = restOfLine.allSatisfy { !$0.isLetter && !$0.isNumber }
-            return (label == "PIN" || endsLine) && !isCountedNumber(match, group: 2, in: text)
+            let before = (text as NSString).substring(to: match.range.location)
+            let wordBefore = before.split(whereSeparator: \.isWhitespace).last.map { $0.lowercased() } ?? ""
+            let owned = pinOwnerWords.contains(wordBefore) && before.last?.isWhitespace == true
+            return (label == "PIN" || endsLine || owned) && !isCountedNumber(match, group: 2, in: text)
         }
         add(codeLabelPattern, group: 1, kind: .code) { value, _ in value.contains(where: isDigit) }
         add(otpLabelPattern, group: 1, kind: .code) { value, _ in value.contains(where: isDigit) }
@@ -1228,6 +1277,11 @@ public enum WritingSecretScrubber {
         #"\bpin(?:[^\S\n]*[:=][^\S\n]*|[^\S\n]+(?:is|was)[^\S\n]+|[^\S\n]+(?:code|number)(?:[^\S\n]*[:=][^\S\n]*|[^\S\n]+(?:is|was)[^\S\n]+|[^\S\n]+))(\d{4,8})\b"#,
         caseInsensitive: true
     )
+
+    /// Words before `pin` that make it a noun: `my pin`, `the gate pin`.
+    private static let pinOwnerWords: Set<String> = [
+        "my", "your", "our", "the", "door", "gate", "garage", "card", "debit", "atm", "sim", "phone", "new", "old",
+    ]
 
     /// `PIN 4821` with nothing between: group 1 is `pin` as typed.
     private static let barePinPattern = regex(#"\b(pin)[^\S\n]+(\d{4,8})\b"#, caseInsensitive: true)

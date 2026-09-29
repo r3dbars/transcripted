@@ -16,7 +16,7 @@ import Foundation
 /// no letters, like a card or OTP box) don't count toward the 3 words, so a
 /// card typed over four boxes stays one entry the scrubber can see whole. Every closed entry goes through
 /// `WritingSecretScrubber` before it's returned; an entry that was nothing
-/// but a secret isn't returned at all. Pure: the caller passes the clock.
+/// but a secret is returned as just its `⟨redacted:…⟩` token. Pure: the caller passes the clock.
 /// Not part of Tilde.
 struct WritingEntryComposer {
     static let idleGapMilliseconds: Int64 = 120_000
@@ -192,7 +192,10 @@ struct WritingEntryComposer {
             appBundleIdentifier: entry.appBundleIdentifier,
             precedingLines: context
         )
-        guard !scrubbed.isOnlyRedactions else { return nil }
+        // An entry that was only a secret is saved as its token, like the
+        // rescrub keeps it: dropping it would put the command before it next
+        // to the line after, and a later rescrub would read that line as the
+        // prompt's answer.
         let text = scrubbed.clean.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= Self.minimumCharacters else { return nil }
         let wordCount = Self.wordCount(text)

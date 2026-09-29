@@ -322,11 +322,31 @@ struct WritingSecretScrubberTests {
         #expect(lettersOnly.clean == "sudo apt update\n\(tok(.password))\nmoonbeam")
     }
 
-    @Test("ssh, scp and sftp take at most one answer", arguments: ["ssh deploy@example.com", "scp a.txt host:/tmp", "sftp host"])
+    @Test("ssh, scp and sftp take one answer, then only retries", arguments: ["ssh deploy@example.com", "scp a.txt host:/tmp", "sftp host"])
     func sshTakesOneAnswer(_ command: String) {
         let result = scrub(command + "\nsunshine\nmytool", app: Self.terminal)
         #expect(result.clean == command + "\n\(tok(.password))\nmytool")
         #expect(result.kinds == [.password])
+    }
+
+    static let retryCommands = ["sudo apt update", "ssh deploy@example.com", "su -"]
+
+    @Test("A mistyped password and its retry are both redacted", arguments: retryCommands)
+    func typoThenRetry(_ command: String) {
+        let result = scrub(command + "\nsunshien\nsunshine\nls", app: Self.terminal)
+        #expect(result.clean == command + "\n\(tok(.password))\n\(tok(.password))\nls")
+        #expect(result.kinds == [.password, .password])
+        // A tool run after is no near miss of the password.
+        let tools = scrub(command + "\nsunshine\nmytool\nlazygit", app: Self.terminal)
+        #expect(tools.clean == command + "\n\(tok(.password))\nmytool\nlazygit")
+    }
+
+    @Test("A number after a code token isn't read as a code on a second pass")
+    func codeTokenDoesNotMentionCode() {
+        #expect(scrub("\(tok(.code))\n2026").clean == "\(tok(.code))\n2026")
+        #expect(scrub("2026", preceding: [tok(.code)]).clean == "2026")
+        // A real code word still does.
+        #expect(scrub("here's the code\n4821").clean == "here's the code\n\(tok(.code))")
     }
 
     static let gitWithoutHTTPS = [
@@ -763,6 +783,10 @@ struct WritingSecretScrubberTests {
             Input("card with CVV and expiry", "4111\n1111\n1111\n1111\n123\n12/28", app: slack),
             Input("short code after code word", "what's the PIN?\n4821", app: slack),
             Input("already a token", tok(.password), app: slack),
+            // A code token has `code` in it; the number after it isn't one.
+            Input("code then a year", "482913\n2026", app: slack),
+            Input("confirmation code then a number", "B7X9QK\n1234", app: slack),
+            Input("sudo typo then retry", "sudo apt update\nsunshien\nsunshine\nls", app: terminal),
         ]
         return inputs
     }

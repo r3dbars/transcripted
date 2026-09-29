@@ -132,6 +132,50 @@ struct WritingDayFileRescrubberTests {
         #expect(WritingDayFileRescrubber.rescrubbed(once, timeZone: Self.timeZone, locale: Self.locale) == nil)
     }
 
+    @Test("Rescrubbing is idempotent when a code section is followed by a number section")
+    func codeThenNumberIdempotent() throws {
+        let dirty = Self.file([
+            Self.section("482913", app: Self.slack, at: Self.start),
+            Self.section("2026", app: Self.slack, at: Self.start + 30_000),
+            Self.section("B7X9QK\n1234", app: Self.slack, at: Self.start + 60_000),
+        ])
+        let once = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
+        #expect(once.contains("\n2026\n") || once.hasSuffix("2026\n") || once.contains("\n\n2026"))
+        #expect(once.contains("\n1234"))
+        #expect(!once.contains("482913"))
+        #expect(WritingDayFileRescrubber.rescrubbed(once, timeZone: Self.timeZone, locale: Self.locale) == nil)
+    }
+
+    @Test("Rescrubbing is idempotent after a mistyped sudo password and its retry")
+    func typoRetryIdempotent() throws {
+        let lines = ["sudo -v", "sunshien", "sunshine", "mytool"]
+        let dirty = Self.file(lines.enumerated().map { offset, line in
+            Self.section(line, app: Self.terminal, at: Self.start + Int64(offset) * 20_000)
+        })
+        let once = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
+        #expect(!once.contains("sunshien"))
+        #expect(!once.contains("sunshine"))
+        #expect(once.contains("mytool"))
+        #expect(WritingDayFileRescrubber.rescrubbed(once, timeZone: Self.timeZone, locale: Self.locale) == nil)
+    }
+
+    @Test("A day file that exists but can't be opened right now is a failure to retry, not a skip")
+    func transientReadFailureRetried() throws {
+        let sandbox = try Sandbox()
+        defer { sandbox.remove() }
+        try FileManager.default.createDirectory(at: sandbox.writing, withIntermediateDirectories: true)
+        let day = sandbox.writing.appendingPathComponent("Writing_2026-09-25.md")
+        try Data(Self.file([Self.section("the wifi password is sunshine", app: Self.slack, at: Self.start)]).utf8).write(to: day)
+        // Opening it fails (no read permission), but it's a regular file of
+        // ours: something that can change, so worth retrying.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: day.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: day.path) }
+        let result = WritingDayFileRescrubber.rescrub(
+            dayFile: day.lastPathComponent, in: sandbox.writing, timeZone: Self.timeZone, locale: Self.locale
+        )
+        #expect(result == .failed)
+    }
+
     @Test("A rewritten section's accepted-word count is never more than its word count")
     func acceptedWordsCapped() throws {
         let passphrase = "ssh-keygen -t ed25519\ncorrect horse battery staple"

@@ -43,6 +43,18 @@ enum WritingDayFileStore {
         return try existingContents(of: resolved(directory).appendingPathComponent(fileName, isDirectory: false))
     }
 
+    /// Whether `fileName` can never be read as a day file however often it's
+    /// tried: a bad name, or something other than a regular file this user
+    /// owns (a symlink, a folder). A read that failed for any other reason
+    /// (open, lock or I/O errors) may work next time.
+    static func isNeverReadableDayFile(_ fileName: String, in directory: URL) -> Bool {
+        guard isDayFileName(fileName) else { return true }
+        var info = stat()
+        let path = resolved(directory).appendingPathComponent(fileName, isDirectory: false).path
+        guard lstat(path, &info) == 0 else { return false }
+        return info.st_mode & S_IFMT != S_IFREG || info.st_uid != getuid()
+    }
+
     /// Replaces an existing day file's whole contents, atomically, the same
     /// way an append does, but only while it still holds `expected`: a file
     /// that changed or vanished since it was read (an append from another

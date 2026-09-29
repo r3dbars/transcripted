@@ -257,25 +257,27 @@ struct WritingEntryComposerTests {
         #expect(flushed.characterCount == card.count)
     }
 
-    @Test("An entry that is only redactions isn't saved")
-    func onlyRedactionsNotSaved() {
+    @Test("An entry that is only redactions is saved as just its token, with counts for the token")
+    func onlyRedactionsSavedAsToken() throws {
         var composer = Self.composer()
         let closed = composer.ingest([
             Self.typed("Tr0ub4dor&3", session: "chain-a", at: Self.start),
             Self.typed("A normal sentence after it", session: "chain-b", at: Self.start + 70_000),
         ], receivedAt: Self.date(Self.start + 70_500))
-        #expect(closed.isEmpty)
+        #expect(closed.map(\.text) == [Self.redactedPassword])
+        #expect(closed.first?.wordCount == 1)
+        #expect(closed.first?.characterCount == Self.redactedPassword.count)
         #expect(composer.closeAll().map(\.text) == ["A normal sentence after it"])
 
         _ = composer.ingest(
             [Self.typed("4111 1111 1111 1111", session: "chain-c", at: Self.start + 200_000)],
             receivedAt: Self.date(Self.start + 200_500)
         )
-        #expect(composer.closeAll().isEmpty)
+        #expect(composer.closeAll().map(\.text) == ["\u{27E8}redacted:card\u{27E9}"])
     }
 
-    @Test("Terminal: a password typed right after `sudo apt update` is dropped, and the command is saved")
-    func terminalPasswordAfterSudoDropped() throws {
+    @Test("Terminal: a password typed right after `sudo apt update` is saved as its token, and the command is saved")
+    func terminalPasswordAfterSudoSavedAsToken() throws {
         var composer = Self.composer()
         _ = composer.ingest(
             [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
@@ -286,7 +288,16 @@ struct WritingEntryComposerTests {
             receivedAt: Self.date(Self.start + 5_500)
         )
         #expect(closed.map(\.text) == ["sudo apt update"])
-        #expect(composer.closeAll().isEmpty)
+        #expect(composer.closeAll().map(\.text) == [Self.redactedPassword])
+    }
+
+    @Test("Terminal: the password's token keeps the next command from reading as sudo's answer on disk")
+    func tokenEntryKeepsCommandsApart() throws {
+        let saved = Self.savedTexts(
+            ["sudo -v", "sunshine", "mytool"].map { ($0, Self.terminal) },
+            gap: 70_000
+        )
+        #expect(saved == ["sudo -v", Self.redactedPassword, "mytool"])
     }
 
     @Test("Terminal: the same word ten minutes after `sudo apt update` is saved, the context expired")
@@ -407,23 +418,25 @@ struct WritingEntryComposerTests {
         return saved + composer.closeAll().map(\.text)
     }
 
-    @Test("A card typed over four boxes, then its expiry and CVC, never reaches a saved entry")
+    @Test("A card typed over four boxes, then its expiry and CVC, is saved only as tokens")
     func splitCardNeverSaved() {
         let safari = "com.apple.Safari"
         let saved = Self.savedTexts(["4111", "1111", "1111", "1111", "12/28", "123"].map { ($0, safari) })
-        #expect(saved.isEmpty)
+        #expect(!saved.isEmpty)
+        #expect(saved.allSatisfy(Self.isOnlyTokens))
         #expect(!saved.joined().contains { $0.isNumber })
     }
 
-    @Test("A one-time code typed one digit per box never reaches a saved entry")
+    @Test("A one-time code typed one digit per box is saved only as its token")
     func splitOTPNeverSaved() {
         let saved = Self.savedTexts(["4", "8", "2", "9", "1", "3"].map { ($0, "com.google.Chrome") })
-        #expect(saved.isEmpty)
+        #expect(saved == ["\u{27E8}redacted:code\u{27E9}"])
     }
 
-    @Test("A code typed into two boxes of three digits never reaches a saved entry")
+    @Test("A code typed into two boxes of three digits is saved only as its token")
     func multiDigitBoxesNeverSaved() {
-        #expect(Self.savedTexts([("482", "com.google.Chrome"), ("913", "com.google.Chrome")]).isEmpty)
+        let saved = Self.savedTexts([("482", "com.google.Chrome"), ("913", "com.google.Chrome")])
+        #expect(saved == ["\u{27E8}redacted:code\u{27E9}"])
     }
 
     @Test("A PIN shared as a scrap with the next line folded in is still removed")
@@ -449,7 +462,7 @@ struct WritingEntryComposerTests {
             Self.typed("sunshine", session: "t2", app: Self.terminal, at: Self.start + 70_000),
         ], receivedAt: Self.date(Self.start + 70_500)).map(\.text)
         saved += composer.closeAll().map(\.text)
-        #expect(saved == ["sudo apt update", "brb one sec"])
+        #expect(saved == ["sudo apt update", "brb one sec", Self.redactedPassword])
     }
 
     @Test("Terminal: the context lasts as long as sudo waits for a password")
@@ -460,10 +473,18 @@ struct WritingEntryComposerTests {
             Self.typed("sunshine", session: "t2", app: Self.terminal, at: Self.start + 240_000),
         ], receivedAt: Self.date(Self.start + 240_500)).map(\.text)
         saved += composer.closeAll().map(\.text)
-        #expect(saved == ["sudo apt update"])
+        #expect(saved == ["sudo apt update", Self.redactedPassword])
     }
 
     // MARK: - Helpers
+
+    /// Nothing but `⟨redacted:…⟩` tokens and whitespace.
+    private static func isOnlyTokens(_ text: String) -> Bool {
+        let stripped = text.replacingOccurrences(
+            of: "\u{27E8}redacted:[a-z-]+\u{27E9}", with: "", options: .regularExpression
+        )
+        return stripped.allSatisfy(\.isWhitespace)
+    }
 
     private static func composer() -> WritingEntryComposer {
         WritingEntryComposer { "entry-\($0)" }
