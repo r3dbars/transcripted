@@ -369,11 +369,18 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     func testRecoveryRescansFreshTimeoutJournalAfterLivenessWindow() async throws {
         let (manager, paths) = makeManager()
+        // Virtual time: a slow first scan on a loaded Mac can't spend the
+        // owner's budget before the rescan that finds the audio quiet.
+        let clock = VirtualRecoveryClock()
+        manager.orphanedRecordingRecoveryClock = clock.recoveryClock
+        let livenessWindow: TimeInterval = 0.02
         let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_fresh_mic.wav")
         let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_fresh_recovery.wav")
         let failedID = UUID()
         try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
         try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try stamp(primaryURL, modifiedAt: clock.startDate)
+        try stamp(recoveryURL, modifiedAt: clock.startDate)
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: primaryURL.lastPathComponent,
@@ -392,13 +399,22 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             archiveAudio: false,
             clearRecordingJournalAfterPersistence: false
         ))
+        var passCount = 0
+        manager.orphanedRecordingRecoveryPassObserver = { passCount += 1 }
 
         let recovered = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
-            livenessWindow: 0.02,
+            livenessWindow: livenessWindow,
             waitForRecentJournals: true
         )
+        manager.orphanedRecordingRecoveryPassObserver = nil
 
+        XCTAssertGreaterThanOrEqual(passCount, 2, "the first scan must find the audio live and come back")
+        XCTAssertGreaterThanOrEqual(
+            clock.advancedSeconds,
+            livenessWindow,
+            "the audio must be quiet for a whole liveness window before recovery takes it"
+        )
         XCTAssertEqual(recovered, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
@@ -409,16 +425,15 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     func testRecoveryWaitsThroughRepeatedFreshWrites() async throws {
         let (manager, paths) = makeManager()
+        // Virtual time, so the owner's budget can't run out while a loaded
+        // Mac is still finishing the first scan.
+        let clock = VirtualRecoveryClock()
+        manager.orphanedRecordingRecoveryClock = clock.recoveryClock
         let livenessWindow: TimeInterval = 0.08
+        let rewriteAt: TimeInterval = 0.05
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_repeated_write_mic.wav")
         try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            // Keep the first snapshot fresh even if the owner task is heavily
-            // delayed. The pass hook below supplies the repeated write at the
-            // exact recovery boundary under test.
-            [.modificationDate: Date().addingTimeInterval(60)],
-            ofItemAtPath: micURL.path
-        )
+        try stamp(micURL, modifiedAt: clock.startDate)
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: micURL.lastPathComponent,
@@ -428,14 +443,14 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         )
 
         var passCount = 0
-        manager.orphanedRecordingRecoveryPassObserver = {
+        manager.orphanedRecordingRecoveryPassObserver = { [self] in
             passCount += 1
             guard passCount == 1 else { return }
+            // The first scan already saw the file live. The recorder writes
+            // again partway through the wait that scan starts, so the rescan
+            // finds the audio live a second time.
             do {
-                try FileManager.default.setAttributes(
-                    [.modificationDate: Date()],
-                    ofItemAtPath: micURL.path
-                )
+                try stamp(micURL, modifiedAt: clock.startDate.addingTimeInterval(rewriteAt))
             } catch {
                 XCTFail("Could not refresh recovery fixture: \(type(of: error))")
             }
@@ -449,6 +464,11 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         manager.orphanedRecordingRecoveryPassObserver = nil
 
         XCTAssertGreaterThanOrEqual(passCount, 2)
+        XCTAssertGreaterThanOrEqual(
+            clock.advancedSeconds,
+            rewriteAt + livenessWindow,
+            "the audio must be quiet for a whole liveness window after the last write"
+        )
         XCTAssertEqual(recovered, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
@@ -496,10 +516,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let futureLead: TimeInterval = 1
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_future_mic.wav")
         try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: clock.startDate.addingTimeInterval(futureLead)],
-            ofItemAtPath: futureMicURL.path
-        )
+        try stamp(futureMicURL, modifiedAt: clock.startDate.addingTimeInterval(futureLead))
         let futureJournalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: futureMicURL.lastPathComponent,
@@ -555,15 +572,19 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     func testRecoveryUsesEarliestCandidateRetry() async throws {
         let (manager, paths) = makeManager()
+        let clock = VirtualRecoveryClock()
+        manager.orphanedRecordingRecoveryClock = clock.recoveryClock
         let livenessWindow: TimeInterval = 0.5
         let olderMicURL = paths.audioCaptures.appendingPathComponent("meeting_older_recent_mic.wav")
         let newerMicURL = paths.audioCaptures.appendingPathComponent("meeting_newer_recent_mic.wav")
         try writeMonoWAV(to: olderMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
         try writeMonoWAV(to: newerMicURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(-0.45)],
-            ofItemAtPath: olderMicURL.path
-        )
+        // The older file ages out 50 ms into recovery, the newer one only
+        // after a whole liveness window.
+        let olderAgesOutAt: TimeInterval = 0.05
+        let newerAgesOutAt = livenessWindow
+        try stamp(olderMicURL, modifiedAt: clock.startDate.addingTimeInterval(olderAgesOutAt - livenessWindow))
+        try stamp(newerMicURL, modifiedAt: clock.startDate)
         _ = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: olderMicURL.lastPathComponent,
@@ -579,9 +600,8 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             state: .stopping
         )
 
-        let startedAt = Date()
         var passCount = 0
-        var secondPassElapsed: TimeInterval?
+        var secondPassAt: TimeInterval?
         manager.orphanedRecordingRecoveryPassObserver = { [self] in
             passCount += 1
             if passCount == 1 {
@@ -591,7 +611,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
                     XCTFail("Could not age newer recovery fixture: \(type(of: error))")
                 }
             } else if passCount == 2 {
-                secondPassElapsed = Date().timeIntervalSince(startedAt)
+                secondPassAt = clock.advancedSeconds
             }
         }
 
@@ -604,18 +624,21 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
         XCTAssertEqual(recovered, 2)
         XCTAssertGreaterThanOrEqual(passCount, 2)
-        XCTAssertLessThan(try XCTUnwrap(secondPassElapsed), 0.3)
+        XCTAssertLessThan(
+            try XCTUnwrap(secondPassAt),
+            (olderAgesOutAt + newerAgesOutAt) / 2,
+            "the rescan must follow the earliest retry, not wait for the newer file"
+        )
     }
 
     func testJoinedRequestsCannotExtendRecoveryOwnerDeadline() async throws {
         let (manager, paths) = makeManager()
+        let clock = VirtualRecoveryClock()
+        manager.orphanedRecordingRecoveryClock = clock.recoveryClock
         let livenessWindow: TimeInterval = 0.05
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_joined_future_mic.wav")
         try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(5)],
-            ofItemAtPath: futureMicURL.path
-        )
+        try stamp(futureMicURL, modifiedAt: clock.startDate.addingTimeInterval(5))
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: futureMicURL.lastPathComponent,
@@ -624,29 +647,24 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             state: .stopping
         )
 
-        // Keep joins arriving for about a second. A broken owner that lets each
-        // join extend its deadline stays alive until the joins stop, so it
-        // returns only after all 40 were sent. The fixed 120 ms owner returns
-        // while joins are still arriving. Counting joins instead of timing the
-        // call keeps a loaded CI runner from turning this red.
+        // Joins arrive on the owner's own virtual timeline: one lands during
+        // every wait it takes, up to 40. A broken owner that lets a join
+        // extend its deadline keeps waiting as long as joins keep coming, so
+        // it returns only after all 40 were sent. The fixed owner returns on
+        // its own budget while joins are still arriving.
         let joinsToSend = 40
         var joinsSent = 0
-        let joinedRequestInjector = Task { @MainActor in
-            for _ in 0..<joinsToSend {
-                do {
-                    try await Task.sleep(for: .seconds(0.025))
-                } catch {
-                    return
-                }
-                joinsSent += 1
-                Task { @MainActor in
-                    _ = await manager.recoverOrphanedRecordings(
-                        in: paths.audioCaptures,
-                        livenessWindow: livenessWindow,
-                        waitForRecentJournals: true
-                    )
-                }
-            }
+        var joinedRequests: [Task<Int, Never>] = []
+        clock.afterSleep = {
+            guard joinsSent < joinsToSend else { return }
+            joinsSent += 1
+            joinedRequests.append(Task { @MainActor in
+                await manager.recoverOrphanedRecordings(
+                    in: paths.audioCaptures,
+                    livenessWindow: livenessWindow,
+                    waitForRecentJournals: true
+                )
+            })
         }
         let recovered = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
@@ -654,10 +672,17 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             waitForRecentJournals: true
         )
         let joinsSentWhenOwnerReturned = joinsSent
-        joinedRequestInjector.cancel()
-        await joinedRequestInjector.value
+        clock.afterSleep = nil
+        while !joinedRequests.isEmpty {
+            _ = await joinedRequests.removeFirst().value
+        }
 
         XCTAssertEqual(recovered, 0)
+        XCTAssertGreaterThan(
+            joinsSentWhenOwnerReturned,
+            0,
+            "joins must arrive while the owner is still waiting"
+        )
         XCTAssertLessThan(
             joinsSentWhenOwnerReturned,
             joinsToSend,
@@ -957,10 +982,11 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
     }
 
     private func backdate(_ url: URL) throws {
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date(timeIntervalSinceNow: -3_600)],
-            ofItemAtPath: url.path
-        )
+        try stamp(url, modifiedAt: Date(timeIntervalSinceNow: -3_600))
+    }
+
+    private func stamp(_ url: URL, modifiedAt date: Date) throws {
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
     }
 
     private func corruptHeaderSizes(at url: URL) throws {
@@ -1035,9 +1061,17 @@ private final class VirtualRecoveryClock: @unchecked Sendable {
     private let startInstant = ContinuousClock.now
     private let lock = NSLock()
     private var advanced: Duration = .zero
+    private var afterSleepAction: (@MainActor () -> Void)?
 
     var advancedSeconds: TimeInterval {
         lock.withLock { advanced } / .seconds(1)
+    }
+
+    /// Runs on the main actor after each recovery wait, once the clock has
+    /// moved, so a test can make something happen partway through recovery.
+    var afterSleep: (@MainActor () -> Void)? {
+        get { lock.withLock { afterSleepAction } }
+        set { lock.withLock { afterSleepAction = newValue } }
     }
 
     var recoveryClock: OrphanedRecordingRecoveryClock {
@@ -1047,6 +1081,9 @@ private final class VirtualRecoveryClock: @unchecked Sendable {
             sleep: { interval in
                 try Task.checkCancellation()
                 self.lock.withLock { self.advanced += interval }
+                if let afterSleep = self.afterSleep {
+                    await afterSleep()
+                }
                 await Task.yield()
             }
         )
