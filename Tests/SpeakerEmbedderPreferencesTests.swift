@@ -18,9 +18,10 @@ func testSpeakerEmbedderPreferences() {
 
     runSuite("effectiveChoice falls back on invalid or empty input") {
         let (d, s) = makeDefaults(); defer { d.removePersistentDomain(forName: s) }
-        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "garbage"]).rawValue, "wespeaker", "garbage env -> default")
-        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "wespeaker", "no env, no UD -> default")
-        assertEqual(SpeakerEmbedderPreferences.defaultChoice.rawValue, "wespeaker", "default stays WeSpeaker (unchanged behavior)")
+        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "garbage"]).rawValue, "redimnet2", "garbage env -> default")
+        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "redimnet2", "no env, no UD -> default")
+        assertEqual(SpeakerEmbedderPreferences.defaultChoice.rawValue, "redimnet2", "ReDimNet2 is the default voiceprint")
+        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "wespeaker"]).rawValue, "wespeaker", "env can still pick the previous model")
     }
 
     runSuite("UserDefaults persistence and env precedence") {
@@ -41,5 +42,6 @@ func testSpeakerEmbedderPreferences() {
         assertEqual(SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: nil), "speakers.sqlite", "nil id (incl. load-failed ERes2Net) -> default db")
         assertEqual(SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: ""), "speakers.sqlite", "empty id -> default db")
         assertEqual(SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: "eres2net"), "speakers_eres2net.sqlite", "eres2net id -> eres2net db")
+        assertEqual(SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: "redimnet2-b4"), "speakers_redimnet2-b4.sqlite", "ReDimNet2 gets its own db, never the WeSpeaker one")
     }
 }

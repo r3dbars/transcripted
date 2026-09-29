@@ -228,6 +228,10 @@ final class MeetingSessionController: ObservableObject {
     let diarization: DiarizationService
     let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
+    /// Closed while saved people move into a new voiceprint model's database
+    /// (MeetingVoiceprintMigrationLaunch). Transcription and speaker edits
+    /// wait on it, so none of them write that database mid-move.
+    let voiceprintMigrationGate = SpeakerVoiceprintMigrationGate()
     private let statsDatabase: StatsDatabase
     let downloader: MeetingModelDownloader
     var calendarSuggestedTitleProvider: (() -> String?)?
@@ -633,8 +637,12 @@ final class MeetingSessionController: ObservableObject {
         // with it (e.g. ERes2Net) before the speaker identity stack runs.
         self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder, backend: diarizationBackend)
 
-        // Speaker store: app-owned SQLite file under state/.
-        self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
+        // Speaker store: app-owned SQLite file under state/. It holds one voiceprint
+        // model's vectors, so it uses that model's cosine bars.
+        self.speakerDatabase = SpeakerDatabase(
+            path: storagePaths.speakerDB.path,
+            thresholds: diarization.activeSpeakerThresholds
+        )
         self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
@@ -707,9 +715,14 @@ final class MeetingSessionController: ObservableObject {
         taskManager.reservedAudioURLsProvider = { [weak self] in
             self?.transcriptionQueue.reservedAudioURLs ?? []
         }
-        // Tuned for the backend picked at launch (MeetingSpeakerSeparation).
+        // Tuned for the backend and voiceprint model picked at launch (MeetingSpeakerSeparation).
+        let speakerThresholds = diarization.activeSpeakerThresholds
         taskManager.speakerSeparationProvider = { recordingDate in
-            await MeetingSpeakerSeparation.resolve(backend: diarizationBackend, recordingStart: recordingDate)
+            await MeetingSpeakerSeparation.resolve(
+                backend: diarizationBackend,
+                thresholds: speakerThresholds,
+                recordingStart: recordingDate
+            )
         }
         // Expected people get named sooner (MeetingCalendarNaming).
         taskManager.lineupNamingProvider = { recordingDate in
@@ -739,6 +752,16 @@ final class MeetingSessionController: ObservableObject {
                 await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
             }
         }
+
+        // A new voiceprint model starts with an empty database: carry the
+        // people saved under WeSpeaker into it, off the main actor. Started
+        // before any queued job can run, since those wait on the gate.
+        MeetingVoiceprintMigrationLaunch.start(
+            voiceprintMigrationGate,
+            embedder: segmentEmbedder,
+            targetDatabase: speakerDatabase,
+            speakerClipsDirectory: storagePaths.speakerClips
+        )
 
         wireSubscriptions()
         transcriptionQueue.recoverImportedAudioJobs()
@@ -2794,6 +2817,18 @@ final class MeetingSessionController: ObservableObject {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
+        if !voiceprintMigrationGate.isOpen {
+            // Saved people are still moving to the new voiceprint model. Hold,
+            // then check everything again: other work may have started since.
+            await voiceprintMigrationGate.waitUntilOpen()
+            return await retranscribeSavedMeeting(
+                micAudioURL: micAudioURL,
+                systemAudioURL: systemAudioURL,
+                title: title,
+                transcriptURL: transcriptURL,
+                recordingDate: recordingDate
+            )
+        }
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_saved_audio_retranscription_requested",
@@ -4235,6 +4270,13 @@ final class MeetingSessionController: ObservableObject {
             },
             prepareModelsForRetry: { [weak self] in
                 guard let self else { return false }
+                // Hold while saved people move to the new voiceprint model. If
+                // a meeting started transcribing meanwhile, it goes first and
+                // the row stays retryable.
+                if await self.voiceprintMigrationGate.waitUntilOpen(),
+                   self.isCaptureSessionActive || self.hasBackgroundTranscriptionWork || self.isSpeakerReviewPending {
+                    return false
+                }
                 await self.prepareModels()
                 guard case .ready = self.state else { return false }
                 return true

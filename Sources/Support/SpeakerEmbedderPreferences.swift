@@ -1,15 +1,20 @@
 // SpeakerEmbedderPreferences.swift
 // Persisted choice of speaker-embedding ("voiceprint") model used by meeting
-// diarization. WeSpeaker is the diarizer's built-in 256-dim model; ERes2Net is a
-// 192-dim on-device model that is more robust to compressed (Zoom/phone) audio
-// and runs after diarization to drive same-voice consolidation + cross-call
-// speaker matching. Mirrors `TranscriptionModelPreferences`.
+// diarization. ReDimNet2 (192-dim, Palabra.ai) is the default since the voiceprint
+// bake-off (Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md): it recognizes more
+// people on call audio with zero wrong names. WeSpeaker is the diarizer's built-in
+// 256-dim model, used before and still the fallback when ReDimNet2 can't load.
+// ERes2Net is a 192-dim model the bake-off found weaker than WeSpeaker; kept only
+// for anyone who chose it. Each runs after diarization to drive same-voice
+// consolidation + cross-call speaker matching, and each has its own speaker
+// database. Mirrors `TranscriptionModelPreferences`.
 
 import Foundation
 
 enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
     case weSpeaker = "wespeaker"
     case eRes2Net = "eres2net"
+    case reDimNet2 = "redimnet2"
 
     var id: String { rawValue }
 
@@ -17,6 +22,7 @@ enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
         switch self {
         case .weSpeaker: return "WeSpeaker (built-in)"
         case .eRes2Net: return "ERes2Net (codec-robust)"
+        case .reDimNet2: return "ReDimNet2 (default)"
         }
     }
 
@@ -24,6 +30,7 @@ enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
         switch self {
         case .weSpeaker: return "WeSpeaker"
         case .eRes2Net: return "ERes2Net"
+        case .reDimNet2: return "ReDimNet2"
         }
     }
 
@@ -33,12 +40,14 @@ enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
             return "The diarizer's default 256-dim voiceprint."
         case .eRes2Net:
             return "On-device 192-dim voiceprint; better at keeping different people apart on compressed call audio. Uses a separate speaker memory."
+        case .reDimNet2:
+            return "On-device 192-dim voiceprint; recognizes more people on call audio. Uses a separate speaker memory, filled from your saved people on first use."
         }
     }
 }
 
 enum SpeakerEmbedderPreferences {
-    static let defaultChoice: SpeakerEmbedderChoice = .weSpeaker
+    static let defaultChoice: SpeakerEmbedderChoice = .reDimNet2
 
     private static let preferenceKey = "speaker-embedder-preference"
     /// Dev/test override, e.g. `TRANSCRIPTED_SPEAKER_EMBEDDER=eres2net`. Wins over

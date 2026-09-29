@@ -108,7 +108,8 @@ extension SpeakerDatabase {
             return exemplarEmbeddingsImpl(forProfileId: profileId)
         }
         let current = exemplarsImpl(forProfileId: profileId)
-        let updated = SpeakerExemplarPolicy.updated(current: current, newMean: newMean, average: average)
+        let updated = SpeakerExemplarPolicy.updated(
+            current: current, newMean: newMean, average: average, thresholds: thresholds)
         if updated == current { return current.map { $0.embedding } }
 
         persistExemplarsImpl(profileId: profileId, exemplars: updated)

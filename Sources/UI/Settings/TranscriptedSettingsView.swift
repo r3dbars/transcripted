@@ -2217,11 +2217,12 @@ struct TranscriptedSettingsView: View {
     }
 
     // Speaker matching: who's-who behavior for meetings. Outcome-framed (no
-    // model jargon); the call-optimized engine is off by default, gated on the
-    // model actually being available, and switching is non-destructive and
-    // reversible, with a one-time confirmation.
+    // model jargon). "Better matching on calls" is the ReDimNet2 voiceprint, on by
+    // default since the voiceprint bake-off; off is the previous WeSpeaker model.
+    // Gated on the model actually being available; switching is non-destructive
+    // (each model keeps its own speaker memory) with a one-time confirmation.
     private var generalSpeakerMatchingEditor: some View {
-        let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
+        let modelAvailable = SpeakerEmbedderFactory.reDimNet2ModelURL() != nil
         let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
         return VStack(alignment: .leading, spacing: 0) {
             GeneralToggleRow(
@@ -2242,33 +2243,29 @@ struct TranscriptedSettingsView: View {
             GeneralToggleRow(
                 title: "Better matching on calls",
                 isOn: Binding(
-                    get: { preferredSpeakerEmbedder == .eRes2Net },
+                    get: { modelAvailable && preferredSpeakerEmbedder == .reDimNet2 },
                     set: { wantOn in
-                        if wantOn {
-                            if namedCount > 0 {
-                                showSpeakerEmbedderSwitchConfirm = true
-                            } else {
-                                applySpeakerEmbedder(.eRes2Net)
-                            }
+                        if !wantOn && namedCount > 0 {
+                            showSpeakerEmbedderSwitchConfirm = true
                         } else {
-                            applySpeakerEmbedder(.weSpeaker)
+                            applySpeakerEmbedder(wantOn ? .reDimNet2 : .weSpeaker)
                         }
                     }
                 ),
-                help: modelAvailable ? "Call-optimized speaker matching. Takes effect after you restart Transcripted." : "Not available in this build.",
+                help: modelAvailable ? "Recognizes more people on Zoom, Meet, and phone audio. Changes take effect after you restart Transcripted." : "Not available in this build.",
                 info: GeneralInfo(
                     title: "Better matching on calls",
-                    message: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe, and switching back restores them. Takes effect after you restart Transcripted."
+                    message: "Uses a newer voice model that tells people apart more reliably on call audio. Your saved people carry over when it turns on. Turning it off goes back to the previous model with your people as they were. Changes take effect after you restart Transcripted."
                 ),
                 automationIdentifier: "transcripted.settings.general.call-matching",
                 showsDivider: false
             )
             .disabled(!modelAvailable)
-            .alert("Switch to call-optimized matching?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
-                Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
+            .alert("Turn off better matching on calls?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
+                Button("Turn Off") { applySpeakerEmbedder(.weSpeaker) }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your \(namedCount) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people. Takes effect after you restart Transcripted.")
+                Text("Transcripted goes back to the previous voice model and your people as they were before the switch. Anyone you named since stays saved with the new model and comes back if you turn this on again. Takes effect after you restart Transcripted.")
             }
         }
     }

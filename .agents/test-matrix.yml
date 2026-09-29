@@ -90,6 +90,7 @@ rules:
       - "scripts/entrypoints/build.sh"
       - "scripts/entrypoints/lib/swiftc-app-args.sh"
       - "scripts/entrypoints/lib/deps-staleness.sh"
+      - "scripts/entrypoints/lib/voiceprint-model.sh"
       - "Sources/TranscriptedKeyboard/**"
       - "config/entitlements/**"
       - "scripts/entrypoints/lib/bundle-input-method.sh"
@@ -546,6 +547,7 @@ rules:
   - paths:
       - "build-beta.sh"
       - "scripts/entrypoints/build-beta.sh"
+      - "scripts/entrypoints/lib/voiceprint-model.sh"
       - "scripts/release/**"
       - "docs/release-packaging.md"
       - "docs/sparkle-updates.md"
