@@ -429,15 +429,12 @@ struct TranscriptedSettingsView: View {
 
     private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
         ForEach(pages) { page in
-            Button {
+            SettingsSidebarButton(
+                page: page,
+                isSelected: navigation.selectedPage == page
+            ) {
                 navigation.selectedPage = page
-            } label: {
-                SettingsSidebarRow(
-                    page: page,
-                    isSelected: navigation.selectedPage == page
-                )
             }
-            .buttonStyle(.plain)
         }
     }
 
