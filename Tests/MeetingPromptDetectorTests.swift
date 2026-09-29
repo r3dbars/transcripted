@@ -63,8 +63,7 @@ func testMeetingPromptDetector() async {
     guard #available(macOS 14.0, *) else { return }
 
     runSuite("MeetingPromptDetector.remindSoon — calendar prompts use the short reminder backoff") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "calendar:design-review", source: .calendarEvent)
 
         let before = Date()
@@ -87,8 +86,7 @@ func testMeetingPromptDetector() async {
     }
 
     runSuite("MeetingPromptDetector.remindSoon — runtime prompts use the short reminder backoff") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "runtime:zoom", source: .runtimeApp)
 
         let before = Date()
@@ -111,8 +109,7 @@ func testMeetingPromptDetector() async {
     }
 
     runSuite("MeetingPromptDetector.dismiss — Not now keeps the longer calendar dismissal") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "calendar:not-now", source: .calendarEvent)
 
         let before = Date()
@@ -131,7 +128,7 @@ func testMeetingPromptDetector() async {
 
     runSuite("MeetingPromptDetector.dismiss — runtime resume ignores all-day calendar blocks") {
         let now = Date()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             calendarEventSnapshots: [
                 makeMeetingPromptCalendarSnapshot(
@@ -143,7 +140,6 @@ func testMeetingPromptDetector() async {
                 )
             ]
         )
-        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "runtime:webex", provider: .webex, source: .runtimeApp)
 
         let before = Date()
@@ -168,7 +164,7 @@ func testMeetingPromptDetector() async {
     runSuite("MeetingPromptDetector.dismiss — runtime resume still uses the next real calendar meeting") {
         let now = Date()
         let startsIn: TimeInterval = 10 * 60
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             calendarEventSnapshots: [
                 makeMeetingPromptCalendarSnapshot(
@@ -178,7 +174,6 @@ func testMeetingPromptDetector() async {
                 )
             ]
         )
-        detector.frontmostBundleIDProvider = { nil }
         let candidate = makeMeetingPromptCandidate(id: "runtime:webex", provider: .webex, source: .runtimeApp)
 
         let before = Date()
@@ -250,7 +245,7 @@ func testMeetingPromptDetector() async {
     await runSuite("MeetingPromptDetector calendar refresh — prompt evaluations reuse the warm snapshot") {
         let now = Date()
         let box = CandidateBox()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             fetchCalendarEventSnapshots: { _, _ in
                 box.calendarFetchCount += 1
@@ -263,7 +258,6 @@ func testMeetingPromptDetector() async {
                 ]
             }
         )
-        detector.frontmostBundleIDProvider = { nil }
         detector.browserWindowTitlesProvider = { _ in [] }
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -273,11 +267,11 @@ func testMeetingPromptDetector() async {
 
         detector.start()
         defer { detector.stop() }
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateAudioOutputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.calendarFetchCount, 1, "signal-driven evaluations should reuse the cached calendar window while it is fresh")
         assertNotNil(box.candidate, "the warm calendar snapshot should still be usable for prompting")
@@ -285,27 +279,25 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector calendar refresh — EventKit changes invalidate the warm snapshot") {
         let box = CandidateBox()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             fetchCalendarEventSnapshots: { _, _ in
                 box.calendarFetchCount += 1
                 return []
             }
         )
-        detector.frontmostBundleIDProvider = { nil }
 
         detector.start()
         defer { detector.stop() }
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         NotificationCenter.default.post(name: .EKEventStoreChanged, object: nil)
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.calendarFetchCount, 2, "calendar changes should force exactly one fresh EventKit read")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a Meet tab holding the mic prompts an ad-hoc call") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
@@ -315,7 +307,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNotNil(box.candidate, "a Meet tab holding the mic should surface a prompt with no calendar event")
         assertEqual(box.candidate?.id, "mic:googleMeet", "a Meet tab should attribute to Google Meet")
@@ -328,8 +320,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — never prompts while our own capture is active") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { true }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -338,14 +329,13 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNil(box.candidate, "we must never prompt to record a call while Transcripted itself holds the mic")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — busy presentation state suppresses mic prompts") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.shouldSkipPromptEvaluation = { true }
         detector.isOwnCaptureActive = { false }
         detector.browserWindowTitlesProvider = { _ in [] }
@@ -357,15 +347,14 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNil(box.candidate, "detector-level busy-state gating should block ad-hoc call prompts")
         assertEqual(box.promptCount, 0, "busy-state suppression should avoid asking the overlay to present")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — disabled mic prompt gate suppresses stale callbacks") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isMicInputPromptEnabled = { false }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
@@ -376,15 +365,14 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNil(box.candidate, "a stale monitor callback after disabling auto-detect calls should stay quiet")
         assertEqual(box.promptCount, 0, "the disabled preference gate should avoid asking the overlay to present")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — pending mic prompt avoids repeats during one call") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -399,9 +387,9 @@ func testMeetingPromptDetector() async {
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper", "com.apple.WebKit.GPU"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "a changed browser-helper set should not spam a second mic prompt for the same call")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the pending candidate id should stay stable across browser helpers")
@@ -411,8 +399,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves transient pending cooldown") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -423,18 +410,17 @@ func testMeetingPromptDetector() async {
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "mute/unmute should not bypass the short pending cooldown")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves explicit dismiss backoff") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -449,14 +435,14 @@ func testMeetingPromptDetector() async {
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         if let candidate = box.candidate {
             _ = detector.dismiss(candidate: candidate)
         }
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
         assertEqual(box.suppressionCount, 1, "dismissed mic prompts should emit a cooldown suppression signal when the call returns")
@@ -465,8 +451,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — already-recording suppression is reported coarsely") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.ownCaptureActivity = { .meetingRecording }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -480,7 +465,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNil(box.candidate, "we should not prompt while a meeting recording is already active")
         assertEqual(box.promptCount, 0, "already-recording suppression should not ask the overlay to present")
@@ -492,7 +477,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — native mic candidate keeps calendar title") {
         let now = Date()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             calendarEventSnapshots: [
                 makeMeetingPromptCalendarSnapshot(
@@ -504,7 +489,6 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
-        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -514,7 +498,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "one prompt should be presented")
         assertEqual(box.candidate?.source, .calendarEvent, "native mic evidence should keep matching calendar context")
@@ -522,12 +506,11 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — the prompt names the user's own meeting shortcut") {
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { false },
             refreshesCalendarEventSnapshots: false,
             meetingShortcutDisplay: { "⌃⇧R" }
         )
-        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -537,7 +520,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "a Zoom call should prompt")
         assertEqual(
@@ -549,7 +532,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — generic browser mic candidate does not steal calendar title") {
         let now = Date()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             calendarEventSnapshots: [
                 makeMeetingPromptCalendarSnapshot(
@@ -561,7 +544,6 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
-        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -572,7 +554,7 @@ func testMeetingPromptDetector() async {
 
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "one prompt should be presented")
         assertEqual(box.candidate?.source, .runtimeApp, "generic browser mic evidence should not borrow an unrelated Meet calendar event")
@@ -581,7 +563,7 @@ func testMeetingPromptDetector() async {
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — browser mic does not replace pending calendar prompt") {
         let now = Date()
-        let detector = MeetingPromptDetector(
+        let detector = makeIsolatedDetector(
             calendarAccessGranted: { true },
             calendarEventSnapshots: [
                 makeMeetingPromptCalendarSnapshot(
@@ -593,7 +575,6 @@ func testMeetingPromptDetector() async {
             ],
             refreshesCalendarEventSnapshots: false
         )
-        detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -604,9 +585,9 @@ func testMeetingPromptDetector() async {
 
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.start()
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.stop()
 
         assertEqual(box.promptCount, 1, "generic browser mic should not bypass an already-pending calendar prompt")
@@ -615,8 +596,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateCameraInUse — mic and camera on the same call prompt once") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -627,10 +607,10 @@ func testMeetingPromptDetector() async {
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         // The camera turning on for the same call must not raise a second prompt.
         detector.updateCameraInUse(true)
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "a mic call corroborated by the camera should still prompt exactly once")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the de-duped candidate keeps the stable browser-call id")
@@ -638,8 +618,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateCameraInUse — a camera-on with no call app frontmost stays quiet") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -648,18 +627,17 @@ func testMeetingPromptDetector() async {
             return true
         }
 
-        // The test runner is not a browser or conferencing app, so a bare
-        // camera-on signal cannot be attributed and must not prompt.
+        // Nothing is frontmost, so a bare camera-on signal cannot be
+        // attributed to a call app and must not prompt.
         detector.updateCameraInUse(true)
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertNil(box.candidate, "a camera-on we cannot attribute to a call app should not prompt")
         assertEqual(box.promptCount, 0, "an unattributable camera signal should never ask the overlay to present")
     }
 
     await runSuite("MeetingPromptDetector.updateAudioOutputUsers — a listen-only native call prompts without the mic") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -669,7 +647,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateAudioOutputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "sustained Zoom output with the mic idle is a live listen-only call")
         assertEqual(box.candidate?.id, "mic:zoom", "output attribution reuses the stable ad-hoc candidate id")
@@ -677,8 +655,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.updateAudioOutputUsers — mic and output on the same call prompt once") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -688,17 +665,16 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateAudioOutputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "output corroborating an active mic call must not raise a second prompt")
         assertEqual(box.candidate?.reason, .micInput, "the mic signal wins when both mic and output are active")
     }
 
     runSuite("MeetingPromptDetector.expire — an unattended countdown re-offers instead of long-dismissing") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         let before = Date()
@@ -717,8 +693,7 @@ func testMeetingPromptDetector() async {
     }
 
     runSuite("MeetingPromptDetector.expire — repeated unattended expiries fall back to the normal dismissal") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         var lastDecision: MeetingPromptBackoffDecision?
@@ -734,8 +709,7 @@ func testMeetingPromptDetector() async {
     }
 
     runSuite("MeetingPromptDetector.expire — past the re-offer cap does not mark the call declined") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         for _ in 0..<(MeetingPromptHeuristics.maxPromptExpiryReoffers + 1) {
@@ -757,8 +731,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector.expire — a re-offered candidate can prompt again after the interval") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
@@ -768,7 +741,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "the initial call should prompt")
 
         guard let shown = box.candidate else { return }
@@ -780,14 +753,13 @@ func testMeetingPromptDetector() async {
         // suppression shape instead: the candidate is snoozed (cooldown), not
         // provider-suppressed.
         detector.updateAudioOutputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "during the re-offer cooldown the same call must stay quiet, not re-prompt instantly")
     }
 
     await runSuite("MeetingPromptDetector.requestEvaluation — own-capture clear can prompt a live call") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         var ownCapture = true
         detector.isOwnCaptureActive = { ownCapture }
         let box = CandidateBox()
@@ -798,18 +770,17 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 0, "a live call must stay quiet while own-capture is active")
 
         ownCapture = false
         detector.requestEvaluation()
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "clearing own-capture should re-evaluate immediately instead of waiting for the poll")
     }
 
     await runSuite("MeetingPromptDetector.onUnrecordedCallEnded — a short call ending never nudges") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         detector.onPromptRequest = { _ in true }
         let box = CandidateBox()
@@ -820,16 +791,41 @@ func testMeetingPromptDetector() async {
         // Start and immediately end a detected call. The session ends, but a
         // seconds-long call is far below MissedCallNudgePolicy.minimumCallDuration.
         detector.updateMicInputUsers(["us.zoom.xos"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.unrecordedCallCount, 0, "a call shorter than the minimum duration must not raise the missed-call nudge")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("Hacker News", on: detector)
+        // An hour, so even a very slow evaluation pass lands inside the wait.
+        detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+            corroboratedDelay: 3_600,
+            uncorroboratedDelay: 3_600,
+            titleRecheckInterval: 3_600
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 0, "an unrecognized site holding the mic must not prompt right away")
+        assertEqual(box.suppression?.reason, .awaitingCallEvidence, "the held-back prompt should be reported as waiting for evidence")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — an unrecognized site prompts on its own once the wait runs out") {
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showBrowserTab("Hacker News", on: detector)
         detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
@@ -843,18 +839,11 @@ func testMeetingPromptDetector() async {
             box.promptCount += 1
             return true
         }
-        detector.onPromptSuppressed = { suppression in
-            box.suppression = suppression
-            box.suppressionCount += 1
-        }
 
+        // Nothing else happens after this push, so only the detector's own
+        // re-check can produce the prompt.
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation(extraMilliseconds: 0)
-
-        assertEqual(box.promptCount, 0, "an unrecognized site holding the mic must not prompt right away")
-        assertEqual(box.suppression?.reason, .awaitingCallEvidence, "the held-back prompt should be reported as waiting for evidence")
-
-        await waitForPromptEvaluation(extraMilliseconds: 1_500)
+        await waitForPromptEvaluation(detector, until: { box.promptCount > 0 })
 
         assertEqual(box.promptCount, 1, "once the wait runs out the detector should re-check on its own and prompt")
         assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "an unnamed browser call has its own candidate id")
@@ -863,8 +852,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a voice assistant never prompts") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showBrowserTab("ChatGPT", on: detector)
         detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
@@ -883,15 +871,14 @@ func testMeetingPromptDetector() async {
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         detector.updateCameraInUse(true)
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 0, "ChatGPT voice holding the mic is not a call, however long it runs")
         assertEqual(box.suppression?.reason, .notACall, "the skip should be reported as not a call")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a Teams tab is a Teams call") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showBrowserTab("Meeting with Ana | Microsoft Teams", on: detector)
         let box = CandidateBox()
@@ -902,7 +889,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.microsoft.edgemac.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "a Teams web tab holding the mic should prompt right away")
         assertEqual(box.candidate?.provider, .teams, "the tab title names the provider")
@@ -912,8 +899,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector browser evidence — audio playing back shortens the wait") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showBrowserTab("Hacker News", on: detector)
         detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
@@ -929,23 +915,22 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 0, "mic alone has to wait")
 
         // Output from another browser does not count.
         detector.updateBrowserOutputUsers(["com.apple.WebKit.GPU"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 0, "Safari playing audio says nothing about Chrome's mic")
 
         detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "the same browser playing audio back corroborates the call")
         assertEqual(box.candidate?.callEvidence, .micAndOutput, "the evidence should say mic and output")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — Not now to a generic prompt does not hide a Meet tab") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         let box = CandidateBox()
@@ -956,26 +941,26 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation(until: { box.candidate != nil })
+        await waitForPromptEvaluation(detector)
         assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "the first prompt is the generic browser call")
         if let candidate = box.candidate {
             _ = detector.dismiss(candidate: candidate)
         }
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         showBrowserTab("Meet - abc-defg-hij", on: detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation(until: { box.promptCount == 2 })
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 2, "a real Meet tab right after a Not now to ChatGPT-style mic use should still prompt")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the second prompt is the named Meet call")
 
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 2, "the generic prompt itself stays in its Not now quiet window")
     }
 
@@ -987,8 +972,7 @@ func testMeetingPromptDetector() async {
         }
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let first = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        first.frontmostBundleIDProvider = { nil }
+        let first = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         first.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: first)
         let firstBox = CandidateBox()
@@ -998,14 +982,13 @@ func testMeetingPromptDetector() async {
             return true
         }
         first.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(first)
         assertEqual(firstBox.promptCount, 1, "the first browser mic use prompts")
         if let candidate = firstBox.candidate {
             _ = first.dismiss(candidate: candidate)
         }
 
-        let relaunched = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        relaunched.frontmostBundleIDProvider = { nil }
+        let relaunched = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         relaunched.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: relaunched)
         let box = CandidateBox()
@@ -1017,15 +1000,14 @@ func testMeetingPromptDetector() async {
             box.suppression = suppression
         }
         relaunched.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(relaunched)
 
         assertEqual(box.promptCount, 0, "a relaunch must not reset the Not now")
         assertEqual(box.suppression?.reason, .learnedQuiet, "the skip should say it came from the learned quiet window")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — ChatGPT voice stays quiet after a tab switch") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         detector.browserEvidenceTiming = instantBrowserEvidenceTiming
         showBrowserTab("ChatGPT", on: detector)
@@ -1040,29 +1022,28 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.suppression?.reason, .notACall, "precondition: ChatGPT in front is not a call")
 
         // Voice mode keeps talking in a background tab while the user reads
         // something else, with its reply playing back.
         showBrowserTab("Hacker News", on: detector)
-        await waitForPromptEvaluation(extraMilliseconds: 300)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
         detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 0, "clicking away from ChatGPT must not turn its voice session into a call")
 
         // A real call can still win.
         showBrowserTab("Meet - abc-defg-hij", on: detector)
-        await waitForPromptEvaluation(extraMilliseconds: 300)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
         detector.updateBrowserOutputUsers([])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "a Meet tab showing up later in the same session still prompts")
         assertEqual(box.candidate?.id, "mic:googleMeet", "under its real name")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a non-call site seen later only holds while in front") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         var timing = instantBrowserEvidenceTiming
         timing.nonCallSiteStickyWindow = -1
@@ -1076,20 +1057,19 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 0, "no prompt while the non-call site is in front")
 
         // Notes in Claude during a call whose tab has no recognizable title.
         showBrowserTab("Hacker News", on: detector)
-        await waitForPromptEvaluation(extraMilliseconds: 300)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
         detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "a site that was not in front when the mic started does not silence the whole call")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a Not now survives a muted browser letting go of the mic") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         var timing = instantBrowserEvidenceTiming
         timing.micReleaseGrace = 5
@@ -1106,7 +1086,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.apple.WebKit.GPU"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.candidate?.id, MeetingPromptDetector.browserCallSiteCandidateID, "precondition: the call-site prompt")
         if let candidate = box.candidate {
             _ = detector.dismiss(candidate: candidate)
@@ -1116,17 +1096,16 @@ func testMeetingPromptDetector() async {
         // differently this time.
         showBrowserTab("Hacker News", on: detector)
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation(extraMilliseconds: 300)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
         detector.updateMicInputUsers(["com.apple.WebKit.GPU"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "unmuting must not re-ask the call the user just declined")
         assertEqual(box.suppression?.reason, .declinedThisCall, "the Not now still covers the call")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a Teams chat tab in the background is not a call") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         detector.browserEvidenceTiming = instantBrowserEvidenceTiming
         showBrowserWindows([
@@ -1144,7 +1123,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 0, "chat apps left open elsewhere must not make ChatGPT voice a call")
         assertEqual(box.suppression?.reason, .notACall, "the focused ChatGPT window decides")
@@ -1152,8 +1131,7 @@ func testMeetingPromptDetector() async {
     }
 
     await runSuite("MeetingPromptDetector browser evidence — a Not now covers the rest of the call, even by name") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         let box = CandidateBox()
@@ -1167,7 +1145,7 @@ func testMeetingPromptDetector() async {
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         assertEqual(box.candidate?.id, MeetingPromptDetector.unverifiedBrowserCandidateID, "precondition: the generic prompt")
         if let candidate = box.candidate {
             _ = detector.dismiss(candidate: candidate)
@@ -1175,9 +1153,9 @@ func testMeetingPromptDetector() async {
 
         // Same mic session: the user clicks over to the Meet tab.
         showBrowserTab("Meet - abc-defg-hij", on: detector)
-        await waitForPromptEvaluation(extraMilliseconds: 300)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
         detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(box.promptCount, 1, "the call the user just said Not now to must not be re-asked as Google Meet")
         assertEqual(box.suppression?.reason, .declinedThisCall, "the skip should say the call was already declined")
@@ -1192,8 +1170,7 @@ func testMeetingPromptDetector() async {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         seedLearnedOffBrowserMic(in: defaults)
 
-        let withTitles = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        withTitles.frontmostBundleIDProvider = { nil }
+        let withTitles = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         withTitles.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: withTitles)
         let titledBox = CandidateBox()
@@ -1205,12 +1182,11 @@ func testMeetingPromptDetector() async {
             titledBox.suppression = suppression
         }
         withTitles.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(withTitles)
         assertEqual(titledBox.promptCount, 0, "with titles, three Not nows to an unrecognized site turn it off")
         assertEqual(titledBox.suppression?.cooldownReason, "learned_off", "the skip should say it was learned off")
 
-        let noTitles = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        noTitles.frontmostBundleIDProvider = { nil }
+        let noTitles = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         noTitles.isOwnCaptureActive = { false }
         noTitles.browserEvidenceTiming = instantBrowserEvidenceTiming
         noTitles.browserWindowTitlesProvider = { _ in [] }
@@ -1220,11 +1196,10 @@ func testMeetingPromptDetector() async {
             return true
         }
         noTitles.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(noTitles)
         assertEqual(box.promptCount, 1, "without Accessibility a real Meet looks the same, so it must still prompt")
 
-        let reset = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        reset.frontmostBundleIDProvider = { nil }
+        let reset = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         reset.isOwnCaptureActive = { false }
         showUnrecognizedBrowserTabWithNoWait(on: reset)
         reset.resetLearnedBackoff()
@@ -1234,7 +1209,7 @@ func testMeetingPromptDetector() async {
             return true
         }
         reset.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(reset)
         assertEqual(resetBox.promptCount, 1, "turning detection off and on (the reset) brings the prompt back")
     }
 
@@ -1247,8 +1222,7 @@ func testMeetingPromptDetector() async {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         seedLearnedOffBrowserMic(in: defaults)
 
-        let detector = MeetingPromptDetector(learnedBackoffDefaults: defaults)
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector(learnedBackoffDefaults: defaults)
         detector.ownCaptureActivity = { .meetingRecording }
         showUnrecognizedBrowserTabWithNoWait(on: detector)
         detector.onPromptRequest = { _ in true }
@@ -1256,10 +1230,10 @@ func testMeetingPromptDetector() async {
         // Record first (menu or hotkey), then join: the prompt is never
         // considered, so this says nothing about unrecognized browser mics.
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
         // A second pass over the same call, while still recording.
         detector.updateBrowserOutputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation()
+        await waitForPromptEvaluation(detector)
 
         assertEqual(
             MeetingPromptLearnedBackoff(userDefaults: defaults).dismissStreak(
@@ -1272,8 +1246,7 @@ func testMeetingPromptDetector() async {
     }
 
     runSuite("MeetingPromptDetector.dismissStreak — counts consecutive 'not now's and resets on accept") {
-        let detector = MeetingPromptDetector()
-        detector.frontmostBundleIDProvider = { nil }
+        let detector = makeIsolatedDetector()
         let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
 
         assertEqual(detector.dismissStreak(for: .zoom), 0, "a fresh detector has no dismissal history")
@@ -1288,6 +1261,37 @@ func testMeetingPromptDetector() async {
         detector.markAccepted(candidate: candidate)
         assertEqual(detector.dismissStreak(for: .zoom), 0, "an accepted recording resets the provider's streak")
     }
+}
+
+/// A detector that reads nothing from the Mac running the suite: no Calendar
+/// permission or EventKit, no running or frontmost apps, no browser windows,
+/// and a fixed meeting shortcut. Each test sets what it needs on top.
+///
+/// The defaults read the real machine. On a Mac whose terminal has Calendar
+/// access, every fresh detector's first pass ran a live EventKit query and
+/// scored the owner's real meeting-link events alongside the test's own.
+@available(macOS 14.0, *)
+@MainActor
+private func makeIsolatedDetector(
+    calendarAccessGranted: @escaping () -> Bool = { false },
+    calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
+    refreshesCalendarEventSnapshots: Bool = true,
+    fetchCalendarEventSnapshots: @escaping (Date, Date) async -> [MeetingPromptCalendarEventSnapshot] = { _, _ in [] },
+    learnedBackoffDefaults: UserDefaults? = nil,
+    meetingShortcutDisplay: @escaping () -> String = { "⌥M" }
+) -> MeetingPromptDetector {
+    let detector = MeetingPromptDetector(
+        calendarAccessGranted: calendarAccessGranted,
+        calendarEventSnapshots: calendarEventSnapshots,
+        refreshesCalendarEventSnapshots: refreshesCalendarEventSnapshots,
+        fetchCalendarEventSnapshots: fetchCalendarEventSnapshots,
+        learnedBackoffDefaults: learnedBackoffDefaults,
+        meetingShortcutDisplay: meetingShortcutDisplay
+    )
+    detector.frontmostBundleIDProvider = { nil }
+    detector.runningBundleIDsProvider = { [] }
+    detector.browserWindowTitlesProvider = { _ in [] }
+    return detector
 }
 
 /// Makes the detector see one focused browser window with `title`, instead of
@@ -1349,26 +1353,33 @@ private final class CandidateBox {
     var calendarFetchCount = 0
 }
 
-// updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a
-// few times so it can run before we assert.
+/// Waits for every evaluation the detector has already started to finish,
+/// including the title reads and re-evaluations those start. Signal pushes
+/// evaluate on a separate task that reads running apps off the main thread,
+/// so on a loaded Mac a fixed wait can end before it does.
+@available(macOS 14.0, *)
 @MainActor
-/// Waits for the detector's async evaluation to reach `condition`, up to about
-/// five seconds. Use it where a prompt is expected: a fixed wait (below) is
-/// outrun by a loaded CI runner, and the suite then fails for no reason.
-private func waitForPromptEvaluation(until condition: () -> Bool) async {
-    for _ in 0..<1_000 {
-        if condition() { return }
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 5_000_000)
-    }
+private func waitForPromptEvaluation(_ detector: MeetingPromptDetector) async {
+    await detector.waitUntilEvaluationsSettle()
 }
 
-private func waitForPromptEvaluation(extraMilliseconds: UInt64 = 0) async {
-    if extraMilliseconds > 0 {
-        try? await Task.sleep(nanoseconds: extraMilliseconds * 1_000_000)
-    }
-    for _ in 0..<20 {
-        await Task.yield()
+/// Lets at least `extraMilliseconds` pass (so a title re-read is allowed
+/// again), then waits for the detector to settle.
+@available(macOS 14.0, *)
+@MainActor
+private func waitForPromptEvaluation(_ detector: MeetingPromptDetector, extraMilliseconds: UInt64) async {
+    try? await Task.sleep(nanoseconds: extraMilliseconds * 1_000_000)
+    await detector.waitUntilEvaluationsSettle()
+}
+
+/// For a timed re-check the detector schedules itself: waits for it to fire
+/// and reach `condition`, giving up after about five seconds.
+@available(macOS 14.0, *)
+@MainActor
+private func waitForPromptEvaluation(_ detector: MeetingPromptDetector, until condition: () -> Bool) async {
+    for _ in 0..<1_000 {
+        await detector.waitUntilEvaluationsSettle()
+        if condition() { return }
         try? await Task.sleep(nanoseconds: 5_000_000)
     }
 }

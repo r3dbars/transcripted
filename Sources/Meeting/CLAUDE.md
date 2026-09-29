@@ -183,3 +183,4 @@ Relevant direct coverage:
 
 - `MeetingSessionController` is the right place for app-level meeting behavior. If a change belongs to the reusable library, move down into `Sources/TranscriptedCore/`.
 - The menubar links recent meetings into Settings Home instead of rendering inline recent meetings. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift`, `Sources/UI/Settings/TranscriptedSettingsView.swift`, and `Sources/UI/Overlay/MeetingOverlayController.swift`.
+- `MeetingPromptDetector`'s defaults read the real Mac: Calendar permission and a live EventKit query, running and frontmost apps, browser window titles through Accessibility, and the saved meeting shortcut. Build test detectors with `makeIsolatedDetector` in `Tests/MeetingPromptDetectorTests.swift`, never the bare init. The bare init made that suite flaky only on Macs whose terminal has Calendar access, so CI never saw it.
