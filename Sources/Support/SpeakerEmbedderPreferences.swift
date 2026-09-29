@@ -1,6 +1,6 @@
 // SpeakerEmbedderPreferences.swift
 // Persisted choice of speaker-embedding ("voiceprint") model used by meeting
-// diarization. ReDimNet2 (192-dim, IDRnD) is the default since the voiceprint
+// diarization. ReDimNet2 (192-dim, Palabra.ai) is the default since the voiceprint
 // bake-off (Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md): it recognizes more
 // people on call audio with zero wrong names. WeSpeaker is the diarizer's built-in
 // 256-dim model, used before and still the fallback when ReDimNet2 can't load.

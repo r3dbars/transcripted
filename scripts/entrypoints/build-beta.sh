@@ -37,6 +37,8 @@ REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
 REQUIRE_BUNDLED_DIARIZER_MODELS="${REQUIRE_BUNDLED_DIARIZER_MODELS:-1}"
 BUNDLE_DIARIZER_MODELS="${BUNDLE_DIARIZER_MODELS:-1}"
+REQUIRE_BUNDLED_VOICEPRINT_MODEL="${REQUIRE_BUNDLED_VOICEPRINT_MODEL:-1}"
+BUNDLE_VOICEPRINT_MODEL="${BUNDLE_VOICEPRINT_MODEL:-1}"
 REGISTER_SENTRY_RELEASE="${REGISTER_SENTRY_RELEASE:-0}"
 GENERATE_DSYM="${GENERATE_DSYM:-1}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
@@ -67,6 +69,15 @@ if [ "$BUNDLE_DIARIZER_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" !
     echo "   do not depend on a runtime model download."
     echo "   If you intentionally want a thin local test build, rerun with:"
     echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+    exit 1
+fi
+
+if [ "$BUNDLE_VOICEPRINT_MODEL" = "0" ] && [ "$REQUIRE_BUNDLED_VOICEPRINT_MODEL" != "0" ]; then
+    echo "❌ BUNDLE_VOICEPRINT_MODEL=0 requires REQUIRE_BUNDLED_VOICEPRINT_MODEL=0"
+    echo "   Distribution builds bundle the ReDimNet2 voiceprint model by default so"
+    echo "   meetings name people with it instead of the fallback voiceprint model."
+    echo "   If you intentionally want a build without it, rerun with:"
+    echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>"
     exit 1
 fi
 
@@ -546,6 +557,39 @@ if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.m
     ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
 else
     echo "ℹ️  ERes2Net model not bundled (default; VoxCeleb2 research-only license)."
+fi
+
+# Bundle the ReDimNet2 b4 voiceprint model, the default speaker voiceprint.
+# Without it the app falls back to its previous voiceprint model, which names
+# people worse, so distribution builds require it. MIT weights (Palabra.ai)
+# trained on VoxCeleb2 (CC BY 4.0); the notice ships in THIRD_PARTY_LICENSES.md.
+# The .mlmodelc is plain resource data: the final app signature seals it with
+# the other bundled models.
+source "$ENTRYPOINT_DIR/lib/voiceprint-model.sh"
+VOICEPRINT_MODEL_DEST="$APP_BUNDLE/Contents/Resources/$VOICEPRINT_MODEL_BUNDLE_DIR"
+if [ "$BUNDLE_VOICEPRINT_MODEL" = "0" ]; then
+    echo "⚠️  Skipping bundled ReDimNet2 voiceprint model because BUNDLE_VOICEPRINT_MODEL=0"
+    echo "   Meetings use the fallback voiceprint model."
+elif voiceprint_problems="$(voiceprint_model_problems "$VOICEPRINT_MODEL_CACHE")"; then
+    echo "Bundling ReDimNet2 voiceprint model..."
+    rm -rf "$VOICEPRINT_MODEL_DEST"
+    mkdir -p "$VOICEPRINT_MODEL_DEST"
+    ditto "$VOICEPRINT_MODEL_CACHE" "$VOICEPRINT_MODEL_DEST/Model.mlmodelc"
+else
+    if [ "$REQUIRE_BUNDLED_VOICEPRINT_MODEL" = "0" ]; then
+        echo "⚠️  ReDimNet2 voiceprint model not usable — proceeding because REQUIRE_BUNDLED_VOICEPRINT_MODEL=0"
+        printf '%s\n' "$voiceprint_problems" | sed 's/^/   /'
+        echo "   Meetings use the fallback voiceprint model."
+    else
+        echo "❌ Missing or incomplete ReDimNet2 voiceprint model: $VOICEPRINT_MODEL_CACHE"
+        printf '%s\n' "$voiceprint_problems" | sed 's/^/   /'
+        echo "   build-beta.sh requires the bundled voiceprint model by default so"
+        echo "   distribution builds do not fall back to the previous voiceprint model."
+        echo "   Install it with: bash scripts/models/redimnet2/install.sh"
+        echo "   If you intentionally want a build without it, rerun with:"
+        echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>"
+        exit 1
+    fi
 fi
 
 # Copy Info.plist

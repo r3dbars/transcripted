@@ -3,8 +3,9 @@
 Transcripted bundles the third-party components listed below — dynamic frameworks copied
 into the app bundle (`Sentry.framework`, `Sparkle.framework`),
 libraries statically linked into the app binary (FluidAudio, swift-transformers,
-WhisperKit/ArgmaxCore), and a helper executable (llama.cpp's `llama-server`). Versions are pinned in
-`scripts/entrypoints/build-deps.sh`. The full license text for each component is
+WhisperKit/ArgmaxCore), a helper executable (llama.cpp's `llama-server`), and Core ML models
+copied into `Contents/Resources`. Library versions are pinned in
+`scripts/entrypoints/build-deps.sh`; each model's section names its version. The full license text for each component is
 reproduced verbatim from the pinned upstream revision.
 
 ## Contents
@@ -16,6 +17,7 @@ reproduced verbatim from the pinned upstream revision.
 - [WhisperKit / ArgmaxCore](#whisperkit--argmaxcore)
 - [llama.cpp (llama-server)](#llamacpp-llama-server)
 - [NVIDIA Nemotron 3 Diarization](#nvidia-nemotron-3-diarization)
+- [ReDimNet2 b4 voiceprint model](#redimnet2-b4-voiceprint-model)
 
 ---
 
@@ -745,4 +747,75 @@ THE MODEL MATERIALS ARE PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPR
 YOU ARE SOLELY RESPONSIBLE FOR (1) CLEARING RIGHTS OF OTHER PERSONS THAT MAY APPLY TO THE MODEL MATERIALS OR ANY USE THEREOF, INCLUDING WITHOUT LIMITATION ANY PERSON’S COPYRIGHTS OR OTHER RIGHTS INCLUDED OR EMBODIED IN THE MODEL MATERIALS; (2) OBTAINING ANY NECESSARY CONSENTS, PERMISSIONS OR OTHER RIGHTS REQUIRED FOR ANY USE OF THE MODEL MATERIALS; OR (3) PERFORMING ANY DUE DILIGENCE OR UNDERTAKING ANY OTHER INVESTIGATIONS INTO THE MODEL MATERIALS OR ANYTHING INCORPORATED OR EMBODIED THEREIN.
 
 IN NO EVENT SHALL THE PROVIDERS OF THE MODEL MATERIALS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE MODEL MATERIALS, THE USE THEREOF OR OTHER DEALINGS THEREIN.
+```
+
+---
+
+## ReDimNet2 b4 voiceprint model
+
+- **Component:** `Contents/Resources/redimnet2-voiceprint/Model.mlmodelc` (speaker voiceprints
+  used to recognize people across meetings)
+- **Version:** `b4-vox2-lm` weights from the v1.0.0 release (sha256
+  `4f0b1e8bc6bcc10406705996b41a8ed0c71bfcfb7af6fbccd751c2d6a226ef6a`), model code at commit
+  `c5bbe0b`. Transcripted converted the weights to a Core ML model (fp16, one fixed-length
+  function per 1, 2, 4 and 8 s input) with `scripts/voiceprint/convert/redimnet_slim.py`; the
+  network and weights are otherwise unchanged.
+- **Upstream:** https://github.com/PalabraAI/redimnet2 (ReDimNet2, by Palabra.ai), which builds on
+  ID R&D's ReDimNet (https://github.com/IDRnD/redimnet)
+- **License:** MIT. The repository's MIT license is the only grant and also covers the released
+  weights. Parts of the model code carry ID R&D, Inc.'s own MIT notice; both are reproduced below.
+- **Training data:** the weights were trained on the VoxCeleb2 dev set (J. S. Chung, A. Nagrani and
+  A. Zisserman, "VoxCeleb2: Deep Speaker Recognition", Interspeech 2018; Visual Geometry Group,
+  University of Oxford), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+  Transcripted ships no VoxCeleb audio or metadata, only the trained model converted to Core ML.
+  Copyright in the source videos stays with their owners.
+
+### License text
+
+```
+MIT License
+
+Copyright (c) 2026 Palabra.ai
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+```
+MIT License
+
+Copyright (c) 2024 ID R&D, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

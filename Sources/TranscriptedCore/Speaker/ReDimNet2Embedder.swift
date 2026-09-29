@@ -1,5 +1,6 @@
 // ReDimNet2Embedder.swift
-// The default voiceprint: IDRnD ReDimNet2 b4 (MIT code, VoxCeleb2-trained weights),
+// The default voiceprint: ReDimNet2 b4 by Palabra.ai (MIT; builds on ID R&D's ReDimNet),
+// weights trained on VoxCeleb2 (CC BY 4.0; credits in THIRD_PARTY_LICENSES.md),
 // converted to a fused Core ML model (raw 16 kHz audio -> 192-dim vector) by
 // scripts/voiceprint/convert/redimnet_slim.py.
 //

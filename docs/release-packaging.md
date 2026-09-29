@@ -108,6 +108,9 @@ also require the app binary to exist before signature validation runs.
 4. Make sure the local Parakeet models are installed. Distribution builds
    bundle them by default so first launch does not depend on a runtime model
    download.
+5. Make sure the ReDimNet2 voiceprint model is in the local model cache
+   (`bash scripts/models/redimnet2/install.sh`; see
+   `scripts/models/redimnet2/README.md`). Distribution builds require it.
 
 Useful checks:
 
@@ -123,23 +126,33 @@ SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh --no-open
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 
-`build-beta.sh` bundles Parakeet, the offline (pyannote/WeSpeaker) diarizer, and
+`build-beta.sh` bundles Parakeet, the offline (pyannote/WeSpeaker) diarizer,
 the Nemotron 3 diarizer (`fast128`, about 190 MB, from
-`~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization/`) by
-default for distribution builds. That keeps the first dictation/meeting path local
-after install. The build Mac needs Nemotron cached first: run one meeting there.
-The diarizer flags below cover both diarizers.
+`~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization/`), and
+the ReDimNet2 b4 voiceprint model (about 15 MB, from
+`~/Library/Application Support/FluidAudio/Models/redimnet2-b4-slim/Model.mlmodelc`,
+into `Contents/Resources/redimnet2-voiceprint/`) by default for distribution
+builds. That keeps the first dictation/meeting path local after install. The
+build Mac needs Nemotron cached first: run one meeting there. The diarizer flags
+below cover both diarizers. The voiceprint model isn't downloaded by anything;
+install it with `bash scripts/models/redimnet2/install.sh`. The build checks it
+has all four fixed-length functions (`len_16000` to `len_128000`) before copying
+it. Without it the app falls back to WeSpeaker voiceprints, so `build-beta.sh`
+stops unless you opt out with `REQUIRE_BUNDLED_VOICEPRINT_MODEL=0
+BUNDLE_VOICEPRINT_MODEL=0`. `build.sh` bundles it when the cache has it (even
+`--thin`; `BUNDLE_VOICEPRINT_MODEL=0` leaves it out) and says so when it
+doesn't.
 
-If you deliberately want a thin local test artifact, make both opt-outs explicit:
+If you deliberately want a thin local test artifact, make every opt-out explicit:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 For a thin packaging smoke that also skips notarization, keep every opt-out visible:
 
 ```bash
-SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 After `build-beta.sh` succeeds, run the packaged app smoke described below

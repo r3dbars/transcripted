@@ -85,7 +85,9 @@ transcript or failed-queue entry is left alone instead of guessing ownership.
 
 App-owned meeting state is stored separately under:
 
-- speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`
+- speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite` (WeSpeaker voiceprints);
+  the default ReDimNet2 voiceprint model keeps its own `state/speakers_redimnet2-b4.sqlite`, since
+  voiceprints from different models can't be compared
 - stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - queued import journals: `~/Library/Application Support/Transcripted/state/imported_transcription_queue/`
@@ -100,6 +102,12 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 Script-installed experimental models (never downloaded by the app) live under:
 
 - Parakeet Ultra: `~/Library/Application Support/Transcripted/models/parakeet-ultra/parakeet-tdt-0.6b-v3/`, installed by `scripts/models/parakeet-ultra/install.sh` and only used when its `transcripted-model.json` marker is present
+
+The ReDimNet2 voiceprint model ships inside the app
+(`Transcripted.app/Contents/Resources/redimnet2-voiceprint/Model.mlmodelc`). The build copies it
+from the shared FluidAudio model cache, where the app also looks when the bundle has none:
+`~/Library/Application Support/FluidAudio/Models/redimnet2-b4-slim/Model.mlmodelc`, put there by
+`scripts/models/redimnet2/install.sh`. The app never downloads it.
 
 Temporary audio scratch paths live under:
 

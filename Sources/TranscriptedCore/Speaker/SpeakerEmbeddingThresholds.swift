@@ -160,7 +160,7 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
         microAbsorb: 0.45,
         perSegmentSplit: 0.50, knownProfileConflict: 0.55)
 
-    /// ReDimNet2 b4 (192-d, IDRnD, VoxCeleb2-trained): the voiceprint bake-off winner
+    /// ReDimNet2 b4 (192-d, Palabra.ai, VoxCeleb2-trained): the voiceprint bake-off winner
     /// (Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md). Every bar is WeSpeaker's moved
     /// to ReDimNet2 at the same false-accept rate, measured on 334 human-labeled people
     /// over clean, Opus 12 kbps and noisy audio, holding in the worst of those
