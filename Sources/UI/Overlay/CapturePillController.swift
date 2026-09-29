@@ -2,14 +2,22 @@ import AppKit
 
 /// When an unanswered call prompt closes by itself. The clock stops while
 /// the pointer is over the island or while the prompt waits behind a
-/// dictation, and picks up where it left off. Plain values in and out so the
-/// fast tests can drive it with their own clock.
+/// dictation, and picks up where it left off. Waiting off screen is capped
+/// (`offScreenHoldLimit` per prompt): a dictation error that waits for a
+/// click, or a model download, must not keep a stale prompt around forever,
+/// so once the cap runs out the prompt expires unanswered as it always did.
+/// Plain values in and out so the fast tests can drive it with their own clock.
 struct CallPromptTimeoutClock: Equatable {
+    /// How long, in total, one prompt may wait behind a dictation.
+    static let offScreenHoldLimit: TimeInterval = 120
+
     enum Step: Equatable {
         /// Nothing to change.
         case keepGoing
-        /// Stop the running timeout and countdown.
-        case hold
+        /// Stop the running timeout and countdown. With `expiresIn`, the
+        /// prompt still expires unanswered after that long unless the clock
+        /// runs again first (it is waiting off screen); nil holds it open.
+        case hold(expiresIn: TimeInterval?)
         /// (Re)start the timeout and countdown for this long.
         case run(seconds: TimeInterval)
     }
@@ -19,16 +27,23 @@ struct CallPromptTimeoutClock: Equatable {
     private(set) var heldRemaining: TimeInterval?
     private var hovered = false
     private var offScreen = false
+    /// What is left of this prompt's off-screen allowance, and when its
+    /// current off-screen stretch began.
+    private var offScreenAllowance = CallPromptTimeoutClock.offScreenHoldLimit
+    private var offScreenSince: Date?
 
     var isHeld: Bool { heldRemaining != nil }
 
-    /// A new prompt gets the full timeout, unless it is already waiting
-    /// off screen (a newer prompt replacing one behind a dictation).
+    /// A new prompt gets the full timeout and a fresh off-screen allowance,
+    /// but stays held if it is already waiting off screen (a newer prompt
+    /// replacing one behind a dictation).
     mutating func start(timeout: TimeInterval, now: Date) -> Step {
         // Hover is reported only when it changes; a new prompt starts
         // unhovered, as the old pill did.
         hovered = false
         heldRemaining = nil
+        offScreenAllowance = Self.offScreenHoldLimit
+        offScreenSince = offScreen ? now : nil
         let seconds = max(1, timeout)
         deadline = now.addingTimeInterval(seconds)
         let step = settle(now: now)
@@ -36,14 +51,20 @@ struct CallPromptTimeoutClock: Equatable {
     }
 
     mutating func setHovered(_ hovered: Bool, now: Date) -> Step {
-        guard deadline != nil else { return .keepGoing }
+        guard deadline != nil, hovered != self.hovered else { return .keepGoing }
         self.hovered = hovered
         return settle(now: now)
     }
 
     mutating func setOnScreen(_ onScreen: Bool, now: Date) -> Step {
-        guard deadline != nil else { return .keepGoing }
+        guard deadline != nil, onScreen == offScreen else { return .keepGoing }
         offScreen = !onScreen
+        if offScreen {
+            offScreenSince = now
+        } else if let since = offScreenSince {
+            offScreenAllowance -= max(0, now.timeIntervalSince(since))
+            offScreenSince = nil
+        }
         return settle(now: now)
     }
 
@@ -54,9 +75,15 @@ struct CallPromptTimeoutClock: Equatable {
 
     private mutating func settle(now: Date) -> Step {
         if hovered || offScreen {
-            guard heldRemaining == nil, let deadline else { return .keepGoing }
-            heldRemaining = max(1, deadline.timeIntervalSince(now))
-            return .hold
+            if heldRemaining == nil, let deadline {
+                heldRemaining = max(1, deadline.timeIntervalSince(now))
+            }
+            guard heldRemaining != nil else { return .keepGoing }
+            // Hovering someone is reading it, so no cap; off screen, the
+            // allowance left (measured from when this stretch began).
+            guard offScreen else { return .hold(expiresIn: nil) }
+            let spent = offScreenSince.map { max(0, now.timeIntervalSince($0)) } ?? 0
+            return .hold(expiresIn: max(0, offScreenAllowance - spent))
         }
         guard let remaining = heldRemaining else { return .keepGoing }
         heldRemaining = nil
@@ -114,11 +141,16 @@ final class CapturePillController {
         switch step {
         case .keepGoing:
             break
-        case .hold:
+        case .hold(let expiresIn):
             dismissTask?.cancel()
             dismissTask = nil
             countdownTask?.cancel()
             countdownTask = nil
+            if let expiresIn {
+                // Waiting off screen: it still expires unanswered once the
+                // off-screen allowance runs out.
+                scheduleDismiss(timeout: expiresIn)
+            }
         case .run(let seconds):
             scheduleDismiss(timeout: seconds)
             scheduleCountdown(seconds: max(1, Int(ceil(seconds))))
