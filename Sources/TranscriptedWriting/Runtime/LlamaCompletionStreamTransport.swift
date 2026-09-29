@@ -32,7 +32,18 @@ struct URLSessionLlamaCompletionTransport: LlamaCompletionStreamingTransport, @u
     }
 }
 
-private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+/// The network side of one streamed request, kept behind closures so tests
+/// can drive the operation's delegate callbacks in any order without a socket.
+struct LlamaStreamNetwork: @unchecked Sendable {
+    /// Starts the request.
+    let resume: @Sendable () -> Void
+    /// Cancels the in-flight request.
+    let cancelTask: @Sendable () -> Void
+    /// Releases the session so its delegate reference and socket go away.
+    let invalidate: @Sendable () -> Void
+}
+
+final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let lines: AsyncThrowingStream<String, Error>
 
     private let lock = NSLock()
@@ -41,8 +52,7 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
     private var receivedStatusCode: Int?
     private var responseError: Error?
     private var buffer = Data()
-    private var session: URLSession?
-    private var task: URLSessionDataTask?
+    private var network: LlamaStreamNetwork?
     private var finished = false
 
     override init() {
@@ -64,11 +74,30 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
         configuration.connectionProxyDictionary = [:]
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         let task = session.dataTask(with: request)
+        start(network: LlamaStreamNetwork(
+            resume: { task.resume() },
+            cancelTask: { task.cancel() },
+            invalidate: { session.invalidateAndCancel() }
+        ))
+    }
+
+    func start(network: LlamaStreamNetwork) {
         lock.lock()
-        self.session = session
-        self.task = task
+        let alreadyFinished = finished
+        if !alreadyFinished { self.network = network }
         lock.unlock()
-        task.resume()
+        if alreadyFinished {
+            network.invalidate()
+            return
+        }
+        network.resume()
+    }
+
+    /// True while a caller is parked in `waitForResponse()`.
+    var isWaitingForResponse: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return responseContinuation != nil
     }
 
     func waitForResponse() async throws -> Int {
@@ -95,6 +124,8 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
         finish(throwing: CancellationError(), cancelTask: true)
     }
 
+    // MARK: - Delegate callbacks, forwarded to plain methods tests can call
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -111,17 +142,40 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
         didReceive response: URLResponse,
         completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
     ) {
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let accepted = receive(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        completionHandler(accepted ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        receive(data: data)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        complete(error: error)
+    }
+
+    /// Records the response status and wakes the waiter. Returns false when the
+    /// operation already finished, so a late response can't resurrect it.
+    @discardableResult
+    func receive(statusCode status: Int) -> Bool {
         lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return false
+        }
         receivedStatusCode = status
         let continuation = responseContinuation
         responseContinuation = nil
         lock.unlock()
         continuation?.resume(returning: status)
-        completionHandler(.allow)
+        return true
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    func receive(data: Data) {
         lock.lock()
         guard !finished else {
             lock.unlock()
@@ -138,11 +192,7 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
         for line in ready { lineContinuation.yield(line) }
     }
 
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didCompleteWithError error: Error?
-    ) {
+    func complete(error: Error?) {
         finish(throwing: error, cancelTask: false)
     }
 
@@ -153,22 +203,28 @@ private final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate,
             return
         }
         finished = true
-        let task = self.task
-        let session = self.session
-        self.task = nil
-        self.session = nil
+        let network = self.network
+        self.network = nil
+        // Decide the waiter's outcome while still holding the lock. A response
+        // callback can land the moment the lock drops; re-reading the status
+        // after that would skip the resume and leave the waiter parked forever.
         let responseContinuation = self.responseContinuation
         self.responseContinuation = nil
-        if receivedStatusCode == nil { responseError = error ?? URLError(.badServerResponse) }
+        let responseOutcome: Result<Int, Error>
+        if let status = receivedStatusCode {
+            responseOutcome = .success(status)
+        } else {
+            let failure = error ?? URLError(.badServerResponse)
+            responseError = failure
+            responseOutcome = .failure(failure)
+        }
         let tail = buffer
         buffer.removeAll(keepingCapacity: false)
         lock.unlock()
 
-        if cancelTask { task?.cancel() }
-        session?.invalidateAndCancel()
-        if receivedStatusCode == nil {
-            responseContinuation?.resume(throwing: error ?? URLError(.badServerResponse))
-        }
+        if cancelTask { network?.cancelTask() }
+        network?.invalidate()
+        responseContinuation?.resume(with: responseOutcome)
         if let error {
             // A truncated frame must not mask the transport error.
             lineContinuation.finish(throwing: error)

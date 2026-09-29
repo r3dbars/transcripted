@@ -11,6 +11,16 @@ public enum PersonalHistorySettingsContract {
     /// Bumped by Delete Personalization Data so the IME drops in-flight watches
     /// and will not recreate the count file or diary after a wipe.
     public static let outcomeLedgerGenerationKey = "OutcomeLedgerGeneration"
+    /// "Pause for 1 hour": seconds since 1970 until which the keyboard
+    /// neither suggests nor captures. The app writes it (`TildeSettings`);
+    /// the keyboard reads it on every key.
+    public static let pausedUntilKey = "GhostPausedUntil"
+
+    /// Whether a pause stamp read from `pausedUntilKey` still covers `now`.
+    /// Zero or a missing key means not paused.
+    public static func isPaused(pausedUntil stamp: Double, now: Date) -> Bool {
+        stamp > now.timeIntervalSince1970
+    }
 }
 
 public enum PersonalHistoryEventSource: String, Codable, Equatable, Sendable {

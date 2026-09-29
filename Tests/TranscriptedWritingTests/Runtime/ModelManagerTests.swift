@@ -352,15 +352,16 @@ struct ModelManagerTests {
         await manager.waitUntilSettled()
         let afterInstall = manager.fullVerificationCount
 
+        // The launch check already hashed these bytes.
         let first = manager.verifiedInstalledModelFile()
         #expect(first != nil)
-        #expect(manager.fullVerificationCount == afterInstall + 1)
+        #expect(manager.fullVerificationCount == afterInstall)
         try? first?.handle.close()
 
         // A helper restart: same bytes, same inode, no new hash.
         let second = manager.verifiedInstalledModelFile()
         #expect(second != nil)
-        #expect(manager.fullVerificationCount == afterInstall + 1)
+        #expect(manager.fullVerificationCount == afterInstall)
         try second?.handle.seek(toOffset: 0)
         #expect(try second?.handle.readToEnd() == fixture.data)
         try? second?.handle.close()
@@ -370,8 +371,67 @@ struct ModelManagerTests {
         try fixture.data.write(to: manager.modelURL)
         let third = manager.verifiedInstalledModelFile()
         #expect(third != nil)
-        #expect(manager.fullVerificationCount == afterInstall + 2)
+        #expect(manager.fullVerificationCount == afterInstall + 1)
         try? third?.handle.close()
+    }
+
+    @Test("A launch with an installed model hashes it once, not again at the first handoff")
+    func launchCheckCoversFirstHandoff() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanup() }
+        let manager = manager(fixture: fixture, transport: StubTransport([]))
+        try FileManager.default.createDirectory(at: manager.modelDirectory, withIntermediateDirectories: true)
+        try fixture.data.write(to: manager.modelURL)
+
+        _ = manager.start()
+        await manager.waitUntilSettled()
+        let handoff = manager.verifiedInstalledModelFile()
+
+        #expect(handoff != nil)
+        #expect(manager.fullVerificationCount == 1)
+        try handoff?.handle.seek(toOffset: 0)
+        #expect(try handoff?.handle.readToEnd() == fixture.data)
+        try? handoff?.handle.close()
+    }
+
+    @Test("A model edited between the launch check and the handoff is hashed again and refused")
+    func editAfterLaunchCheckIsCaught() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanup() }
+        let manager = manager(fixture: fixture, transport: StubTransport([]))
+        try FileManager.default.createDirectory(at: manager.modelDirectory, withIntermediateDirectories: true)
+        try fixture.data.write(to: manager.modelURL)
+        _ = manager.start()
+        await manager.waitUntilSettled()
+        #expect(manager.fullVerificationCount == 1)
+
+        let handle = try FileHandle(forWritingTo: manager.modelURL)
+        try handle.seek(toOffset: UInt64(fixture.data.count - 1))
+        try handle.write(contentsOf: Data([fixture.data.last! &+ 1]))
+        try handle.close()
+
+        #expect(manager.verifiedInstalledModelFile() == nil)
+        #expect(manager.fullVerificationCount == 2)
+    }
+
+    @Test("A freshly downloaded model is not hashed again at the first handoff")
+    func downloadVerificationCoversFirstHandoff() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanup() }
+        let transport = StubTransport([
+            response(headers: ["Content-Length": String(fixture.data.count)], chunks: [fixture.data])
+        ])
+        let manager = manager(fixture: fixture, transport: transport)
+
+        _ = manager.start()
+        await manager.waitUntilSettled()
+        #expect(manager.state == ModelState.ready(manager.modelURL))
+        let afterInstall = manager.fullVerificationCount
+
+        let handoff = manager.verifiedInstalledModelFile()
+        #expect(handoff != nil)
+        #expect(manager.fullVerificationCount == afterInstall)
+        try? handoff?.handle.close()
     }
 
     @Test("A same-size in-place edit after a cached verification is caught by the hash")

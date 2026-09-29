@@ -33,4 +33,32 @@ enum WritingActivation {
         if debugEnabled { return true }
         return setupCompleted && (saveMyWriting || autocomplete)
     }
+
+    /// A crash leaves the llama helper running, re-parented to launchd,
+    /// until something reaps it. Once setup is done, launch reaps it whatever
+    /// the feature switches say, so Autocomplete being off can't strand it.
+    static func reapsOrphanedHelperAtLaunch(setupCompleted: Bool) -> Bool {
+        setupCompleted
+    }
+}
+
+/// Which frontmost-window watchers run while Writing runs. Save-only users
+/// get neither: nothing of theirs uses the frontmost app or window.
+enum WritingFrontWindowWatch {
+    struct Plan: Equatable {
+        /// The `didActivateApplication` observer. It tells the scaffold
+        /// prewarmer which app is in front, and Screen Memory when it's on.
+        var observesAppActivation: Bool
+        /// The 1 Hz `CGWindowListCopyWindowInfo` poll, which only Screen
+        /// Memory's same-app window-change trigger needs.
+        var pollsFrontWindow: Bool
+    }
+
+    static func plan(running: Bool, autocompleteActive: Bool, screenMemoryEnabled: Bool) -> Plan {
+        let autocomplete = running && autocompleteActive
+        return Plan(
+            observesAppActivation: autocomplete,
+            pollsFrontWindow: autocomplete && screenMemoryEnabled
+        )
+    }
 }

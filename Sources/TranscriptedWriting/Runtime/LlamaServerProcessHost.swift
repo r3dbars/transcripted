@@ -142,11 +142,23 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     /// The executable remains nested inside the signed app. The model is
     /// supplied only after ModelManager has verified the external bytes.
     private static func resolveAssets(modelFileProvider: @Sendable () -> VerifiedModelFile?) -> Assets? {
-        let binary = Bundle.main.bundlePath + "/Contents/Helpers/llama-server"
+        let binary = bundledBinaryPath
         guard validCurrentBundleSeal(),
               FileManager.default.isExecutableFile(atPath: binary),
               let model = modelFileProvider() else { return nil }
         return Assets(binary: binary, model: "/dev/fd/0", modelInput: model.handle)
+    }
+
+    private static var bundledBinaryPath: String {
+        Bundle.main.bundlePath + "/Contents/Helpers/llama-server"
+    }
+
+    /// Reaps a helper that outlived a crashed app. Same rule as the reap
+    /// before every launch: only this app's own helper binary, only once
+    /// launchd has adopted it, and only when it's the port's sole listener.
+    /// Shells out to `lsof`/`ps`, so never call it on the main thread.
+    static func reapOrphanedHelper(port: Int) {
+        _ = preparePort(for: bundledBinaryPath, port: port)
     }
 
     private static func validCurrentBundleSeal() -> Bool {
@@ -444,17 +456,36 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         ) else { return false }
         let listeners = output.split(whereSeparator: \Character.isNewline).compactMap { Int32($0) }
         guard !listeners.isEmpty else { return true }
-        guard listeners.count == 1,
-              let pid = listeners.first,
-              processPath(pid: pid) == URL(fileURLWithPath: binary).standardizedFileURL.path,
-              command("/bin/ps", ["-o", "ppid=", "-p", String(pid)])?
-                .trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return false }
+        guard let pid = orphanToReap(
+            listeners: listeners,
+            binary: binary,
+            executablePath: { processPath(pid: $0) },
+            parentProcess: {
+                command("/bin/ps", ["-o", "ppid=", "-p", String($0)])?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        ) else { return false }
         kill(pid, SIGTERM)
         usleep(200_000)
         guard let remaining = command(
             "/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
         ) else { return false }
         return remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The listener that may be killed, if any: the port's only listener,
+    /// running this exact helper binary, re-parented to launchd (pid 1).
+    /// Anything else is someone else's process and is left alone.
+    static func orphanToReap(
+        listeners: [Int32],
+        binary: String,
+        executablePath: (Int32) -> String?,
+        parentProcess: (Int32) -> String?
+    ) -> Int32? {
+        guard listeners.count == 1, let pid = listeners.first,
+              executablePath(pid) == URL(fileURLWithPath: binary).standardizedFileURL.path,
+              parentProcess(pid) == "1" else { return nil }
+        return pid
     }
 
     private static func processPath(pid: Int32) -> String? {

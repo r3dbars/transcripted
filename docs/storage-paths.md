@@ -57,7 +57,8 @@ library moves:
   `Personal History/`
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup
-- diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`
+- diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`,
+  rolled to `writing-diagnostics.log.1` at 4 MB (one old generation kept)
 
 ## Meetings
 
