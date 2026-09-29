@@ -345,6 +345,26 @@ jobs:
             --artifact "build/Transcripted-$RELEASE_VERSION.dmg" \
             --skip-live
 
+      # A failed verification used to leave its reports on the runner, so the
+      # failing check couldn't be diagnosed. Keep them, plus the notarized
+      # package, under a name that says it failed; nothing here publishes.
+      - name: Upload failed verification evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-failed-verification
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+          path: |
+            build/packaged-app-smoke.json
+            build/packaged-app-ui-smoke.json
+            build/privacy-leak-sweep-report.json
+            build/Transcripted-${{ inputs.version }}.dmg
+            build/sparkle-deltas/*.delta
+            docs/appcast.xml
+            Casks/transcripted.rb
+
       - name: Bundle debug symbols
         shell: bash
         run: ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-$RELEASE_VERSION.dSYM.zip"
