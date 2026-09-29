@@ -15,13 +15,16 @@ Steps:
   1. build the fused torch module; gate it against the model's Python runtime
      (scripts/voiceprint/runtimes/<runtime>.py) on a few clips (cosine >= 0.9999)
   2. trace + convert (mlprogram). Input length, --shapes:
-       enum   one graph, EnumeratedShapes (--enum-sec). Default. Core ML runs it on
-              ANE / GPU only if the graph has no runtime-computed shapes: true for the
-              WeSpeaker ResNets, and for ReDimNet2 after builders' static-shape patch
+       enum   one graph, EnumeratedShapes (--enum-sec). Core ML runs it on ANE / GPU
+              only if the graph has no runtime-computed shapes (true for the WeSpeaker
+              ResNets, and for ReDimNet2 after builders' static-shape patch), and with
+              compute units ALL it re-plans on every change of input length (ReDimNet2:
+              0.3-0.8 s per clip when 2/4/8 s clips alternate)
        multi  one static-shape function per length in one multifunction package
-              (weights shared; Swift picks MLModelConfiguration.functionName
-              "len_<samples>"). For graphs full of mask / shape math (TitaNet, CAM++)
-              whose enum build Core ML keeps on the CPU
+              (weights shared; Swift sets MLModelConfiguration.functionName =
+              "len_<samples>" and keeps one MLModel per length). No re-planning, and
+              mask / shape math (TitaNet, CAM++) folds away. Default for ReDimNet,
+              TitaNet and CAM++; enum stays the default for the ResNets
        range  RangeDim (CPU only in practice)
   3. precision "auto": fp16 (front end kept fp32) if parity holds, else fp32
   4. parity on 60 clean clips (vox1o / ami / libri, 2/4/8 s) vs the Python runtime,
@@ -296,8 +299,9 @@ def main() -> int:
         i8 = next(i for i, r in enumerate(rows) if int(r["bucket"]) == 8)
         i2 = next(i for i, r in enumerate(rows) if int(r["bucket"]) == 2)
         wav10 = np.concatenate([wavs[i8], wavs[i2]])[:160000]
+        mixed = [wavs[i] for i in range(len(wavs)) if int(rows[i]["bucket"]) in (2, 4, 8)][:24]
         report["latency"] = pipeline.latency(final_mlc, wavs[i4], wav10, reps=args.reps,
-                                             multi=shapes == "multi", log=log)
+                                             multi=shapes == "multi", mixed=mixed, log=log)
         report["compute_plan_ALL"] = pipeline.compute_plan(
             final_mlc, pipeline.function_name(64000) if shapes == "multi" else "main")
         log(f"[plan] {report['compute_plan_ALL'].get('ops')} cost {report['compute_plan_ALL'].get('cost_frac')}")

@@ -13,10 +13,14 @@ sets and on call audio:
      (TRIAL TYPES below): a single clip or a session mean against a speaker profile, or two
      clusters of one meeting against each other.
   2. The reference model's (default app-wespeaker-coreml, the app's voiceprint) false-accept rate
-     at the WeSpeaker value, per condition scope.
-  3. The candidate's threshold with the same false-accept rate in that scope. The bar written is
-     the highest over scopes (clean, opus12, noisy, and clean profile vs degraded probe), so the
-     new model never false-accepts more than today's on any of them.
+     at the WeSpeaker value, per condition scope (clean, opus12, noisy, and clean profile vs
+     degraded probe). The target is the WORST of those: the safety today's app actually gives on
+     its weakest audio.
+  3. The candidate's bar is the lowest one that meets the target on every scope, so the new model
+     false-accepts no more on its worst audio than today's does on its worst. (`strict`, reported
+     next to it, keeps each scope's own FAR instead. That also charges the candidate for scopes
+     where today's model is extra safe by accident, e.g. WeSpeaker's opus12 probes drift away from
+     every clean profile, and at FARs of 1e-11 it mostly measures extrapolation.)
 
 Estimating the false-accept rate:
   * >= MIN_EMP impostor scores at or above the WeSpeaker value: empirical. The candidate's bar
@@ -361,11 +365,7 @@ class SetData:
 
 def load_segments(vp: Path, name: str) -> list[dict]:
     path = vp / "sets" / name / "segments.jsonl"
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    order_key = {}
-    for i, r in enumerate(rows):
-        order_key.setdefault(r["session"], (r.get("session_order", 0), r.get("date", ""), i))
-    return rows
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def build_set(name: str, rows: list[dict], keep: set[str]) -> SetData:
@@ -657,28 +657,40 @@ def isf_gpd(f: dict, far: float | None) -> float | None:
     return u - sg * math.log(q) if abs(xi) < 1e-9 else u + sg / xi * (q ** (-xi) - 1)
 
 
-def match_far(t_ref: float, ref: Side, cand: Side) -> dict:
-    """Candidate threshold with the reference's false-accept rate at t_ref, on one trial list."""
-    n, fr, fc = ref.n, ref.fit, cand.fit
+def ref_far(t_ref: float, ref: Side) -> dict:
+    """The reference's false-accept rate at its bar on one trial list: empirical when enough
+    impostors clear it, else off the Gaussian tail fit. The GPD reading is kept for the report."""
     k_ref = ref.count_ge(t_ref)
+    gfar = far_gpd(ref.fit, t_ref)
+    out = {"n": ref.n, "ref_count": k_ref, "far_gpd": gfar,
+           "gpd_note": ("reference past its GPD endpoint (FAR 0)" if gfar == 0.0 else None)}
+    if k_ref >= MIN_EMP:
+        out.update({"far": k_ref / ref.n, "far_method": "empirical"})
+    else:
+        out.update({"far": far_gauss(ref.fit, t_ref), "far_method": "gauss-tail"})
+    return out
+
+
+def cand_bar(rf: dict, far: float | None, cand: Side) -> dict:
+    """The candidate's bar on the same trial list that lets through `far` of the impostors.
+    rf: ref_far() of this list (its observed count feeds the guard)."""
+    n, k_ref, fc = cand.n, rf["ref_count"], cand.fit
     d = cand.asc[::-1]
+    expected = (far or 0.0) * n
     # Guard: the candidate may let through no more observed impostors than chance allows around the
-    # reference's count (99% Poisson quantile of its observed count, or of its fitted expected count
-    # when it saw none), so one mislabeled pair can't set a bar but a heavier tail can.
-    lam = float(k_ref) if k_ref > 0 else (far_gauss(fr, t_ref) or 0.0) * n
+    # reference's count or the expected count at `far` (99% Poisson quantile), so one mislabeled
+    # pair can't set a bar but a heavier tail can.
+    lam = max(float(k_ref), expected)
     allowed = max(k_ref, int(stats.poisson.ppf(GUARD_Q, lam)) if lam > 0 else 0)
     guard = float(d[allowed] + GUARD_EPS) if allowed < n else float(d[-1])
-    res = {"n": n, "ref_count": k_ref, "far_emp": k_ref / n if n else None, "guard_allows": allowed}
-    if k_ref >= MIN_EMP:
-        t = float(0.5 * (d[k_ref - 1] + d[k_ref])) if k_ref < n else float(d[-1])
-        res.update({"method": "empirical", "far": k_ref / n, "t_new": t, "t_fit": t, "t_guard": guard})
+    res = {**rf, "far_target": far, "guard_allows": allowed, "t_guard": guard}
+    if expected >= MIN_EMP:
+        k = int(round(expected))
+        t = float(d[k] + 1e-9) if k < n else float(d[-1])  # the lowest bar that lets k through
+        res.update({"method": "empirical", "t_new": t, "t_fit": t})
     else:
-        far = far_gauss(fr, t_ref)
         t_fit = isf_gauss(fc, far) if far else None
-        gfar = far_gpd(fr, t_ref)
-        res.update({"method": "gauss-tail", "far": far, "t_fit": t_fit, "t_guard": guard,
-                    "far_gpd": gfar, "t_gpd": isf_gpd(fc, gfar),
-                    "gpd_note": ("reference past its GPD endpoint (FAR 0)" if gfar == 0.0 else None)})
+        res.update({"method": "gauss-tail", "t_fit": t_fit, "t_gpd": isf_gpd(cand.fit, rf.get("far_gpd"))})
         if t_fit is None:
             res.update({"method": "guard-only", "t_new": guard})
         else:
@@ -688,6 +700,21 @@ def match_far(t_ref: float, ref: Side, cand: Side) -> dict:
     res["cand_count"] = cand.count_ge(res["t_new"])
     res["cand_far_gauss"] = far_gauss(fc, res["t_new"])
     return res
+
+
+def match_far(t_ref: float, ref: Side, cand: Side) -> dict:
+    """Candidate threshold with the reference's false-accept rate at t_ref, on one trial list."""
+    rf = ref_far(t_ref, ref)
+    return cand_bar(rf, rf["far"], cand)
+
+
+def match_minimax(t_ref: float, lists: dict[str, tuple[Side, Side]]) -> tuple[dict[str, dict], str]:
+    """Target = the reference's WORST false-accept rate over the scopes (the safety today's app
+    actually gives on its weakest audio); the candidate must meet it on every scope."""
+    rfs = {sc: ref_far(t_ref, r) for sc, (r, _) in lists.items()}
+    src = max(rfs, key=lambda sc: rfs[sc]["far"] or 0.0)
+    target = rfs[src]["far"]
+    return {sc: cand_bar(rfs[sc], target, c) for sc, (_, c) in lists.items()}, src
 
 
 def _sig(v):
@@ -716,20 +743,32 @@ def collect(vp: Path, models: list[str], sets: list[str], conds: list[str]):
     prof_scopes, w_scopes = scopes_for(conds)
     trials = {m: {t: defaultdict(Trials) for t in TRIAL_TYPES} for m in models}
     notes = {"sets": {}, "missing": []}
+    loaded = {}
     for s in sets:
         seg_path = vp / "sets" / s / "segments.jsonl"
         if not seg_path.exists():
             notes["missing"].append(f"{s}: no segments.jsonl")
             continue
-        rows = load_segments(vp, s)
         embs = {m: {c: load_emb(vp, m, s, c) for c in conds} for m in models}
         have = [c for c in conds if all(embs[m][c] is not None for m in models)]
         for c in conds:
             if c not in have:
                 who = [m for m in models if embs[m][c] is None]
                 notes["missing"].append(f"{s}/{c}: no embeddings for {', '.join(who)}")
+        if have:
+            loaded[s] = (embs, have)
+    # A condition is used only when every set has it for both models: a scope that holds some sets
+    # but not others would compare different people with the other scopes.
+    common = [c for c in conds if loaded and all(c in have for _, have in loaded.values())]
+    for s, (_, have) in loaded.items():
+        for c in have:
+            if c not in common:
+                notes["missing"].append(f"{s}/{c}: present, but left out until every set has it")
+    for s, (embs, _) in loaded.items():
+        have = common
         if not have:
             continue
+        rows = load_segments(vp, s)
         keep = set(r["seg_id"] for r in rows)
         for m in models:
             for c in have:
@@ -803,13 +842,25 @@ def calibrate(args) -> None:
             out[sc] = e
         return out
 
-    def sim_matches(t_ref: float, entries: dict[str, dict]) -> dict[str, dict]:
-        """Per-scope FAR matches; W bars must also hold against the other speaker's cluster from
-        ANOTHER session, which brings in every set (vox1o and libri have one person per session)."""
-        per = {sc: match_far(t_ref, e["r"], e["c"]) for sc, e in entries.items()}
-        for sc, e in entries.items():
-            if "alt" in e:
-                per[f"{sc} (cross-session)"] = match_far(t_ref, *e["alt"])
+    def sim_matches(t_ref: float, entries: dict[str, dict], strict: bool = False) -> dict[str, dict]:
+        """Candidate bar per scope. Default (minimax): the target is the reference's worst FAR over
+        the condition scopes and every scope must meet it. strict: every scope keeps its own
+        reference FAR. W bars must also hold against the other speaker's cluster from ANOTHER
+        session (every set; vox1o and libri have one person per session): that impostor list is
+        matched on its own and the higher bar wins."""
+        pops = [{sc: (e["r"], e["c"]) for sc, e in entries.items()},
+                {f"{sc} (cross-session)": e["alt"] for sc, e in entries.items() if "alt" in e}]
+        per: dict[str, dict] = {}
+        for lists in pops:
+            if not lists:
+                continue
+            if strict:
+                per.update({sc: match_far(t_ref, r, c) for sc, (r, c) in lists.items()})
+            else:
+                res, src = match_minimax(t_ref, lists)
+                for r in res.values():
+                    r["far_source"] = src
+                per.update(res)
         return per
 
     type_scopes: dict[str, dict[str, dict]] = {}
@@ -869,17 +920,22 @@ def calibrate(args) -> None:
         det.update({"trial_type": ttype, "trial_desc": TRIAL_TYPES[ttype], "impostors": pooled["source"]})
         if kind == "sim":
             per = sim_matches(ref_val, scopes)
+            strict = sim_matches(ref_val, scopes, strict=True)
             pl = match_far(ref_val, pooled["r"], pooled["c"])
             worst = max(per, key=lambda sc: per[sc]["t_new"])
             new = min(ceil3(per[worst]["t_new"]), 0.999)
             far_worst_sc = max(per, key=lambda sc: per[sc]["far"] or 0)
             if per[worst]["t_new"] > 0.999:
                 det["capped"] = True  # the matched bar is past any cosine: the check effectively never fires
+            strict_worst = max(strict, key=lambda sc: strict[sc]["t_new"])
             det.update({
                 "new": new, "binding_scope": worst, "method": per[worst]["method"],
-                "far_ref_pooled": pl["far"], "far_ref_pooled_method": pl["method"],
+                "far_target": per[worst]["far_target"], "far_target_scope": per[worst].get("far_source"),
+                "far_ref_pooled": pl["far"], "far_ref_pooled_method": pl["far_method"],
                 "far_ref_worst": per[far_worst_sc]["far"], "far_ref_worst_scope": far_worst_sc,
                 "new_pooled_only": ceil3(pl["t_new"]),
+                "new_strict": min(ceil3(strict[strict_worst]["t_new"]), 0.999), "strict_binding_scope": strict_worst,
+                "strict_per_scope": {sc: _sig(r["t_new"]) for sc, r in strict.items()},
                 "per_scope": {sc: {k: _sig(v) for k, v in r.items()} for sc, r in per.items()},
                 "tar_ref": float((pooled["tgt_r"] >= ref_val).mean()) if len(pooled["tgt_r"]) else None,
                 "tar_new": float((pooled["tgt_c"] >= new).mean()) if len(pooled["tgt_c"]) else None,
@@ -943,8 +999,8 @@ def calibrate(args) -> None:
             base = OFFSET_BASE.get(name)
             if base and base in ref_preset:
                 b0 = float(ref_preset[base])
-                t0 = max(match_far(b0, e["r"], e["c"])["t_new"] for e in scopes.values())
-                t1 = max(match_far(b0 + ref_val, e["r"], e["c"])["t_new"] for e in scopes.values())
+                t0 = max(r["t_new"] for r in sim_matches(b0, scopes).values())
+                t1 = max(r["t_new"] for r in sim_matches(b0 + ref_val, scopes).values())
                 det["equal_far_offset_check"] = {"base": base, "value": round(t1 - t0, 4)}
         thresholds[key] = det["new"]
         details[key] = det
@@ -971,8 +1027,10 @@ def calibrate(args) -> None:
         "reference_model": args.ref,
         "reference_preset": args.ref_preset,
         "reference_values": {json_key[k]: float(ref_preset[k]) for k in fields},
-        "method": ("equal false-accept rate per condition scope, highest over scopes; empirical when >= "
-                   f"{MIN_EMP} reference impostors clear the bar, else Gaussian fit to the top "
+        "method": ("equal false-accept rate: target = the reference's worst FAR over condition scopes at "
+                   "the WeSpeaker value, new bar = lowest that meets it on every scope (details.*.new_strict "
+                   f"keeps each scope's own FAR); empirical when >= {MIN_EMP} impostors clear the bar, "
+                   "else Gaussian fit to the top "
                    f"{TAIL_FRAC:.0%} (>= {TAIL_MIN}) impostor scores with an observed-count guard; margins "
                    "scaled by the impostor std ratio (highest over scopes)"),
         "trial_types": TRIAL_TYPES,
@@ -1028,18 +1086,21 @@ def render_report(doc: dict) -> str:
         f"Reference: `{doc['reference_model']}` with the app's `.{doc['reference_preset']}` preset. "
         f"Generated {doc['generated_at']} by `{doc['script']['name']}` v{doc['script']['version']}.",
         "",
-        "Each bar is moved by equal false-accept rate (FAR) on impostor trials of the matching type, "
-        "per condition scope, and the highest candidate value over scopes is kept, so the new model "
-        "false-accepts no more than today's on clean audio or call audio. Very low FARs come from a "
-        "Gaussian fit to the top 1% of impostor scores, so read them as a position in the impostor "
-        "tail, not a measured rate. Margins scale by the impostor score std ratio. TAR = share of "
-        "same-person trials of that type that clear the bar (pooled over sets and scopes). "
-        "Leave-one-set-out = the same calibration with each set dropped in turn (min-max): how much a "
-        "bar depends on which people are in the data.",
+        "Each bar is moved by equal false-accept rate (FAR) on impostor trials of the matching type. "
+        "The target is today's worst FAR at the WeSpeaker value over the condition scopes (clean, "
+        "call audio, clean profile vs call-audio probe), and the new bar is the lowest one that meets "
+        "that target on every scope, so the new model false-accepts no more on its worst audio than "
+        "the app does on its worst. `strict` instead keeps each scope's own FAR (never worse on any "
+        "scope, even where today's model is extra safe by accident); it is shown for comparison. "
+        "Very low FARs come from a Gaussian fit to the top 1% of impostor scores, so read them as a "
+        "position in the impostor tail, not a measured rate. Margins scale by the impostor score std "
+        "ratio. TAR = share of same-person trials of that type that clear the bar (pooled over sets "
+        "and scopes). Leave-one-set-out = the same calibration with each set dropped in turn "
+        "(min-max): how much a bar depends on which people are in the data.",
         "",
-        "| threshold | trial | WeSpeaker | ref FAR there (pooled / worst scope) | new value | leave-one-set-out | how | binding scope | TAR old | TAR new | TAR old/new, hardest scope |"
+        "| threshold | trial | WeSpeaker | ref FAR there (pooled / worst scope) | new value | strict | leave-one-set-out | how | binding scope | TAR old | TAR new | TAR old/new, hardest scope |"
         + (f" `.{cmp_name}` |" if cmp_name else ""),
-        "|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if cmp_name else ""),
+        "|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if cmp_name else ""),
     ]
     for key, x in d.items():
         if x["kind"] == "margin":
@@ -1058,7 +1119,8 @@ def render_report(doc: dict) -> str:
         lo = x.get("leave_one_set_out")
         loso = f"{min(lo.values()):.3f}-{max(lo.values()):.3f}" if lo else "-"
         cap = " (capped)" if x.get("capped") else ""
-        row = (f"| `{key}` | {x.get('trial_type', '-')} | {x['weSpeaker']:.3f} | {far} | **{x['new']:.3f}**{cap} | {loso} | "
+        strict = f"{x['new_strict']:.3f}" if "new_strict" in x else "-"
+        row = (f"| `{key}` | {x.get('trial_type', '-')} | {x['weSpeaker']:.3f} | {far} | **{x['new']:.3f}**{cap} | {strict} | {loso} | "
                f"{x['method']} | {x.get('binding_scope', '-')} | {tar_o} | {tar_n} | {hard} |")
         if cmp_name:
             cv = cmpv.get(key)
@@ -1074,12 +1136,21 @@ def render_report(doc: dict) -> str:
     if inferred:
         lines += [f"Trial type inferred from the field name (no explicit entry in the script): {', '.join('`'+k+'`' for k in inferred)}.", ""]
 
-    lines += ["## Per scope", "", "| threshold | scope | ref FAR | how | ref count / n | guard allows | new (fit / guard) | GPD new |", "|---|---|---|---|---|---|---|---|"]
+    lines += ["## Per scope", "",
+              "ref FAR = today's FAR at the WeSpeaker value in that scope; target = the worst of those "
+              "(its scope in brackets) that every scope's new bar must meet; strict = the bar at the "
+              "scope's own FAR; GPD = the strict match read off the GPD fits instead.", "",
+              "| threshold | scope | ref FAR | target FAR | how | ref count / n | guard allows | new (fit / guard) | strict | GPD |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
     for key, x in d.items():
+        strict_ps = x.get("strict_per_scope") or {}
         for sc, r in (x.get("per_scope") or {}).items():
             fit = r.get("t_fit")
-            lines.append(f"| `{key}` | {sc} | {_far(r.get('far'))} | {r['method']} | {r['ref_count']} / {r['n']} | {r.get('guard_allows', '-')} | "
+            st = strict_ps.get(sc)
+            lines.append(f"| `{key}` | {sc} | {_far(r.get('far'))} | {_far(r.get('far_target'))} ({r.get('far_source', '-')}) | "
+                         f"{r['method']} | {r['ref_count']} / {r['n']} | {r.get('guard_allows', '-')} | "
                          f"{r['t_new']:.3f} ({'-' if fit is None else f'{fit:.3f}'} / {r['t_guard']:.3f}) | "
+                         f"{'-' if st is None else format(st, '.3f')} | "
                          f"{'-' if r.get('t_gpd') is None else format(r['t_gpd'], '.3f')}"
                          f"{' (ref past GPD endpoint)' if r.get('gpd_note') else ''} |")
     checks = [(k, x["same_session_only"], x["cross_session_only"]) for k, x in d.items() if "cross_session_only" in x]

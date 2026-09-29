@@ -270,11 +270,20 @@ def per_bucket(rows, refs, embs) -> dict:
 
 
 def latency(mlmodelc: Path, wav4: np.ndarray, wav10: np.ndarray, reps: int = 10, multi: bool = False,
-            log=print) -> dict:
+            mixed: list | None = None, log=print) -> dict:
+    """Median ms at a fixed 4 s / 10 s length, plus (mixed) ms per clip when lengths
+    alternate 2/4/8 s: an enumerated-shape model can re-plan on every length change."""
     res = {"load_avg_start": [round(x, 1) for x in os.getloadavg()]}
-    for units in ("ALL", "CPU_ONLY"):
+    for units in ("ALL", "CPU_AND_GPU", "CPU_ONLY"):
         pr = Predictor(mlmodelc, units, multi)
         r = {}
+        if mixed:
+            for w in mixed:
+                pr(w)
+            t0 = time.perf_counter()
+            for w in mixed:
+                pr(w)
+            r["mixed_2_4_8s_ms_per_clip"] = round((time.perf_counter() - t0) * 1000 / len(mixed), 1)
         for name, w in (("4s", wav4), ("10s", wav10)):
             t0 = time.perf_counter()
             pr(w)
@@ -290,7 +299,8 @@ def latency(mlmodelc: Path, wav4: np.ndarray, wav10: np.ndarray, reps: int = 10,
                        "first_call_ms_incl_load": round(first, 1)}
         res[units] = r
         log(f"[latency] {units}: 4s median {r['4s']['median_ms']} ms (min {r['4s']['min_ms']}), "
-            f"10s median {r['10s']['median_ms']} ms (min {r['10s']['min_ms']})")
+            f"10s median {r['10s']['median_ms']} ms (min {r['10s']['min_ms']}), "
+            f"mixed 2/4/8 s {r.get('mixed_2_4_8s_ms_per_clip')} ms/clip")
         del pr
     res["load_avg_end"] = [round(x, 1) for x in os.getloadavg()]
     return res

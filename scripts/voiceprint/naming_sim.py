@@ -63,7 +63,10 @@ condition, talk time and lineup mode, because the app ships one set of bars per 
   * Auto-name bars (lineup bar A_L, global bar A_G). An "impostor top" is a voice whose best
     candidate profile is someone else: strangers, first-timers, and regulars whose own profile
     lost. Every calibration voice with a wrong top counts, whatever the profile's confirmations
-    (those depend on the run; the voice geometry doesn't).
+    (those depend on the run; the voice geometry doesn't). Each distinct (condition, person +
+    session, wrongly matched person) counts once at its highest similarity: reps, talk times and
+    lineup modes replay the same voices, and counting the copies let one look-alike pair (ICSI
+    me001 vs me026 in opus12) fill the fitted tail.
       - Lowest zero-wrong bar: the highest impostor top that beats the runner-up by the path's
         margin (0.10 lineup / 0.12 global). Clear-margin impostors are rare, so this max is noisy:
         a first version used only fully eligible impostors (0-2 per half) and a synthetic check
@@ -71,8 +74,16 @@ condition, talk time and lineup mode, because the app ships one set of bars per 
       - Safety margin, from the tail: fit an exponential tail to the top 2% (at least 25) of
         impostor-top similarities (threshold u, scale beta = mean excess over u, k points; with only
         10 points beta was +-30% and the two halves of one set disagreed by 0.3) and put the bar where
-        the fit expects ONE impostor above it across 100 calibration halves' worth of impostor
-        encounters: u + beta * ln(100 * k). Pooled over conditions and talk times, a std-based
+        the fit leaves a share p = 1e-4 of distinct impostor encounters above it (any margin, before
+        the margin, confirmation and lineup gates): u + beta * ln(k / (n * p)). One fit per audio
+        condition, strictest wins, so the bar holds if every meeting is in the worst condition.
+        Why p = 1e-4: a half has ~1,600 distinct impostor tops (~530 per condition), so rates much
+        below ~1/1,000 are pure extrapolation; at 1e-5 the halves disagreed by 0.06-0.10, at 1e-4
+        by ~0.05, and 1e-4 puts the baseline at 0.78/0.83, next to the app's lab-tuned 0.80, with
+        every bar above the other half's worst distinct impostor. `--impostor-rate` is the knob.
+        (Earlier versions: one impostor per 100 calibration pools, i.e. p = 1/(100 n), tightened the
+        bar whenever conditions or reps grew n, taking the baseline from 0.80 to 0.98; and the tail
+        counted replays of the same voice, which let one look-alike pair fill it.) Pooled over conditions and talk times, a std-based
         cushion measured how mixed the conditions were rather than the tail; beta only looks at
         the extreme, and the 99th percentile it starts from agreed to 0.005 between halves in the
         synthetic checks. Real impostor tails are Gaussian-like and fall off faster than
@@ -97,7 +108,10 @@ condition, talk time and lineup mode, because the app ships one set of bars per 
     false-accept rate on AMI, but on clean sets no WeSpeaker impostor pair reaches 0.70, so that
     remap collapses every constant above 0.70 onto one value; the linear map has no such tail.
     Scaling the margins keeps the rule and its meaning: un-centered x-vectors put every cosine in
-    0.95-1.0, where a 0.12 gap is impossible. `--fixed-margins` keeps 0.12/0.10 literally.
+    0.95-1.0, where a 0.12 gap is impossible. Scaled margins are the headline (coordinator-approved);
+    each model is also calibrated and scored with the literal 0.12/0.10 margins as a secondary
+    result (`fixed_margin_variant` in the JSON, last summary column). `--fixed-margins` makes the
+    literal margins the headline; `--no-fixed-variant` skips the second pass.
   * Fixed: confirmations (5 global / 2 lineup), EMA weights, K=3 exemplars, recent lineup of 12.
 
 The baseline (model.json "baseline": true) is also scored with the app's production bars
@@ -126,11 +140,17 @@ Meetings
     ignoring margin and meeting membership. It over-counts on purpose.
   * Conditions: every `<set>__<cond>.npz` present, plus `mixed` (each person-meeting drawn from
     clean/opus12/phone/noisy) when all four exist. clean vs call-audio (opus12, phone, noisy, mixed)
-    are reported separately.
+    are reported separately. One set of bars covers every condition a model has (the app can't tell
+    them apart), so a model's bars get stricter once its call audio lands: compare models on equal
+    coverage (`--conds clean --tag clean` gives a clean-only table in its own files).
+  * Answer-key audit drops: seg_ids in VP/results/audit/drop_<set>.txt are excluded before meetings
+    are built (a speaker left with one session becomes a stranger). `--no-drops` keeps them. The
+    drop files are part of each model's input fingerprint, so a regenerated list triggers a rerun.
 
 Run:
   VP/venv/bin/python scripts/voiceprint/naming_sim.py                 # every model with embeddings
   VP/venv/bin/python scripts/voiceprint/naming_sim.py --models wespeaker-resnet34-lm --force
+  VP/venv/bin/python scripts/voiceprint/naming_sim.py --conds clean --tag clean   # clean-only table
   VP/venv/bin/python scripts/voiceprint/naming_sim.py --summary-only
 Models whose inputs haven't changed since their JSON was written are skipped unless --force.
 """
@@ -171,7 +191,7 @@ FAR_GRID = (0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001)
 FAR_START = 0.01
 TAIL_FRAC = 0.02     # impostor tops used to fit the tail: the top 2% (at least TAIL_MIN)
 TAIL_MIN = 25
-TAIL_REPS = 100      # the bar must hold for this many calibration halves' worth of impostors
+IMPOSTOR_RATE = 1e-4  # tolerated share of distinct impostor encounters above the auto bar, worst condition
 
 # App constants (WeSpeaker units), from TranscriptedCore/Speaker/*.swift.
 APP = {
@@ -628,6 +648,7 @@ class Voice:
     vec: np.ndarray
     nseg: int
     seconds: float
+    key: str = ""        # person|session: the same voice sample across reps, talk times and modes
 
 
 @dataclass
@@ -714,7 +735,8 @@ def sim_meetings(world: World, si: SetInfo, store: EmbStore, cond: str, talk: st
                 dropped += 1
                 continue
             vec, used = got
-            voices.append(Voice(a.person, a.stranger, vec, len(used), sum(si.dur.get(s, 0.0) for s in used)))
+            voices.append(Voice(a.person, a.stranger, vec, len(used), sum(si.dur.get(s, 0.0) for s in used),
+                                f"{a.person}|{a.session}"))
         if voices:
             out.append(SimMeeting(voices, m.roster))
     return out, dropped
@@ -950,7 +972,7 @@ def simulate(meetings: list[SimMeeting], bars: Bars, mode: str, events: bool = F
             is_new = known_before[v.person] is None
             mt = matches[vi]
             if events and tops[vi] is not None and tops[vi][0].person != v.person:
-                res.wrong_top.append((tops[vi][1], tops[vi][2]))
+                res.wrong_top.append((tops[vi][1], tops[vi][2], v.key or v.person, tops[vi][0].person))
             if mt is not None:
                 p: Prof = mt["p"]
                 if p.pid in lineup:
@@ -1163,32 +1185,38 @@ def lookalike_pairs(si: SetInfo, store: EmbStore, cond: str, speakers: set[str],
 
 
 def run_pool(specs: list[Spec], bars: Bars, events: bool = False) -> RunResult:
+    """Simulate every spec; impostor-top events come back as (similarity, margin, condition)."""
     total = RunResult()
     for s in specs:
         t0 = time.perf_counter()
         r = simulate(s.meetings, bars, s.mode, events)
         r.seconds = time.perf_counter() - t0
+        r.wrong_top = [(x, m, s.cond, vk, pp) for x, m, vk, pp in r.wrong_top]
         total.add(r)
     return total
 
 
-def tail_fit(sims: np.ndarray, tail_reps: float) -> dict | None:
+def tail_fit(sims: np.ndarray, rate: float) -> dict | None:
     """Exponential tail above the top TAIL_FRAC of impostor-top similarities.
 
-    Returns the threshold u, the tail scale beta (mean excess over u), the tail size k and the bar
-    u + beta * ln(tail_reps * k): where the fit expects one impostor above it across tail_reps
-    calibration halves' worth of impostor tops. None when there are too few impostor tops.
+    Returns the threshold u, the tail scale beta (mean excess over u), the tail size k out of n and
+    the bar where the fit puts the share of impostor tops above it at `rate`:
+    P(X > u + y) = (k / n) * exp(-y / beta) = rate  ->  bar = u + beta * ln(k / (n * rate)).
+    The rate is per impostor encounter, so the bar doesn't tighten just because the pool is bigger.
+    None when there are too few impostor tops to fit.
     """
-    if len(sims) < 50:
+    n = len(sims)
+    if n < 50:
         return None
-    k = max(TAIL_MIN, int(math.ceil(TAIL_FRAC * len(sims))))
+    k = max(TAIL_MIN, int(math.ceil(TAIL_FRAC * n)))
     srt = np.sort(sims)
     u = float(srt[-(k + 1)])
     beta = max(float((srt[-k:] - u).mean()), 1e-4)
-    return {"u": u, "beta": beta, "k": k, "bar": u + beta * math.log(tail_reps * k), "max": float(srt[-1])}
+    return {"n": n, "u": u, "beta": beta, "k": k, "bar": u + beta * max(0.0, math.log(k / (n * rate))),
+            "max": float(srt[-1])}
 
 
-def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, tail_reps: float, fixed_margins: bool,
+def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, rate: float, fixed_margins: bool,
                    max_iter: int = 6) -> tuple[float, float, list[dict]]:
     """Lowest safe auto bars (see module doc). Returns (A_L, A_G, trace)."""
     AL = AG = math.inf
@@ -1196,9 +1224,23 @@ def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, tail_reps: fl
     for it in range(max_iter):
         bars = make_bars(floor, AL, AG, geo, fixed_margins)
         r = run_pool(specs, bars, events=True)
-        sims = np.array([x for x, _ in r.wrong_top]) if r.wrong_top else np.zeros(0)
-        margins = np.array([m for _, m in r.wrong_top]) if r.wrong_top else np.zeros(0)
-        tail = tail_fit(sims, tail_reps)
+        # Distinct impostor encounters: the same (condition, voice sample, wrongly matched person)
+        # recurs across reps, talk times and lineup modes; counting each copy let one look-alike
+        # pair fill the fitted tail. Keep its highest similarity (and that event's margin).
+        distinct: dict[tuple, tuple[float, float]] = {}
+        for x, m, c, vk, pp in r.wrong_top:
+            key = (c, vk, pp)
+            if key not in distinct or x > distinct[key][0]:
+                distinct[key] = (x, m)
+        keys = list(distinct)
+        sims = np.array([distinct[k][0] for k in keys]) if keys else np.zeros(0)
+        margins = np.array([distinct[k][1] for k in keys]) if keys else np.zeros(0)
+        conds = np.array([k[0] for k in keys]) if keys else np.zeros(0, dtype=str)
+        # One tail per audio condition; the strictest wins, so the bar holds even if every
+        # meeting is in the worst condition (the app uses one bar and can't tell them apart).
+        per_cond = {c: tail_fit(sims[conds == c], rate) for c in sorted(set(conds.tolist()))}
+        per_cond = {c: t for c, t in per_cond.items() if t is not None}
+        tail = max(per_cond.values(), key=lambda t: t["bar"]) if per_cond else None
         # Zero-wrong bar: the highest impostor that tops the lineup by the path's margin, whatever
         # its confirmations (those depend on the run; the voice geometry doesn't).
         clearL = sims[margins >= bars.margin_lineup]
@@ -1212,8 +1254,10 @@ def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, tail_reps: fl
             nAL = max(tail["bar"], (eL + b) if eL is not None else -math.inf)
             nAG = max(tail["bar"], (eG + b) if eG is not None else -math.inf, nAL)
         trace.append({"iter": it, "bars_in": [None if math.isinf(AL) else round(AL, 4), None if math.isinf(AG) else round(AG, 4)],
-                      "impostor_tops": int(len(sims)),
+                      "impostor_tops": int(len(sims)), "impostor_top_events": len(r.wrong_top),
                       "tail": tail and {k: round(v, 4) if isinstance(v, float) else v for k, v in tail.items()},
+                      "tail_by_cond": {c: round(t["bar"], 4) for c, t in per_cond.items()},
+                      "tail_cond": next((c for c, t in per_cond.items() if t is tail), None),
                       "impostor_top_std": round(float(np.std(sims)), 4) if len(sims) else None,
                       "clear_margin_impostors": {"lineup": int(len(clearL)), "global": int(len(clearG))},
                       "max_clear_margin_impostor": {"lineup": eL and round(eL, 4), "global": eG and round(eG, 4)},
@@ -1231,11 +1275,11 @@ def calibrate_auto(specs: list[Spec], floor: float, geo: Geometry, tail_reps: fl
     return AL, AG, trace
 
 
-def calibrate(specs: list[Spec], imp: np.ndarray, geo: Geometry, tail_reps: float,
+def calibrate(specs: list[Spec], imp: np.ndarray, geo: Geometry, rate: float,
               fixed_margins: bool = False) -> tuple[Bars, dict]:
     grid = [(far, float(np.quantile(imp, 1 - far))) for far in FAR_GRID] if len(imp) else [(FAR_START, geo.map(APP["floor_many"]))]
     F0 = next((f for far, f in grid if far == FAR_START), grid[len(grid) // 2][1])
-    AL, AG, trace0 = calibrate_auto(specs, F0, geo, tail_reps, fixed_margins)
+    AL, AG, trace0 = calibrate_auto(specs, F0, geo, rate, fixed_margins)
     sweep = []
     for far, F in grid:
         r = run_pool(specs, make_bars(F, AL, AG, geo, fixed_margins))
@@ -1246,11 +1290,12 @@ def calibrate(specs: list[Spec], imp: np.ndarray, geo: Geometry, tail_reps: floa
     best = min(s["_work"] for s in ok)
     chosen = max((s for s in ok if s["_work"] <= best * 1.02), key=lambda s: s["floor"])
     F = chosen["floor"]
-    AL, AG, trace1 = calibrate_auto(specs, F, geo, tail_reps, fixed_margins)
+    AL, AG, trace1 = calibrate_auto(specs, F, geo, rate, fixed_margins)
     bars = make_bars(F, AL, AG, geo, fixed_margins)
     for s in sweep:
         s.pop("_work")
-    info = {"tail_reps": tail_reps, "tail_final": trace1[-1]["tail"],
+    info = {"impostor_rate": rate, "tail_final": trace1[-1]["tail"], "tail_cond": trace1[-1]["tail_cond"],
+            "tail_by_cond": trace1[-1]["tail_by_cond"],
             "floor_grid": sweep, "floor_chosen_far": chosen["far"], "auto_trace_start": trace0, "auto_trace_final": trace1}
     return bars, info
 
@@ -1276,20 +1321,26 @@ def find_baseline() -> str | None:
     return cands[0] if cands else None
 
 
-def input_fingerprint(store: EmbStore, sets: list[str], drops: bool = True) -> dict:
+def input_fingerprint(store: EmbStore, sets: list[str], drops: bool = True,
+                      conds: list[str] | None = None, used: dict[str, list[str]] | None = None) -> dict:
+    """mtime/size of every input. `used` (set -> conds actually loaded) pins it to what a run read,
+    so files that land mid-run make the next run redo the model."""
     fp = {}
     for s in sets:
-        if drops and drop_path(s).exists():
-            st = drop_path(s).stat()
-            fp[f"{s}/drops"] = [int(st.st_mtime), st.st_size]
         seg = vp_root() / "sets" / s / "segments.jsonl"
         if not seg.exists():
             continue
-        for cnd in store.conds(s):
+        present = store.conds(s) if used is None else [c for c in used.get(s, []) if c != "mixed"]
+        present = [c for c in present if not conds or c in conds]
+        if not present:
+            continue  # nothing of this set was (or would be) read
+        for cnd in present:
             st = store.path(s, cnd).stat()
             fp[f"{s}__{cnd}"] = [int(st.st_mtime), st.st_size]
-        if any(k.startswith(f"{s}__") for k in fp):
-            fp[f"{s}/segments"] = [int(seg.stat().st_mtime), seg.stat().st_size]
+        fp[f"{s}/segments"] = [int(seg.stat().st_mtime), seg.stat().st_size]
+        if drops and drop_path(s).exists():
+            st = drop_path(s).stat()
+            fp[f"{s}/drops"] = [int(st.st_mtime), st.st_size]
     return fp
 
 
@@ -1299,12 +1350,13 @@ class Options:
     conds: list[str] | None = None
     talks: tuple[str, ...] = TALKS
     modes: tuple[str, ...] = MODES
-    reps: int = 4
+    reps: int = 2
     world_size: int = 40
-    tail_reps: float = TAIL_REPS
+    impostor_rate: float = IMPOSTOR_RATE
     fixed_margins: bool = False          # headline variant uses the app's literal 0.12/0.10 margins
     secondary_fixed: bool = True         # also score the fixed-margin variant as a secondary result
     drops: bool = True                   # exclude VP/results/audit/drop_<set>.txt
+    tag: str | None = None               # write to results/naming_<tag>/ and naming_summary_<tag>.md
     natural: tuple[str, ...] = NATURAL_PREFIXES
     mixed: bool = True
 
@@ -1401,7 +1453,7 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
         for fold, cal, test, imp, geo in fold_inputs:
             log(f"{model_id}: fold {fold} calibrating on {len(specs[cal])} runs"
                 f"{' (fixed margins)' if fixed_margins else ''}")
-            bars, info = calibrate(specs[cal], imp, geo, opts.tail_reps, fixed_margins)
+            bars, info = calibrate(specs[cal], imp, geo, opts.impostor_rate, fixed_margins)
             info["geometry"] = geo.public()
             info["impostor_pairs"] = int(len(imp))
             look = {}
@@ -1443,11 +1495,12 @@ def evaluate_model(model_id: str, opts: Options) -> dict | None:
     out = {
         "model_id": model_id, "baseline": is_baseline, "family": meta.get("family"), "dim": meta.get("dim") or store.dim,
         "params_m": meta.get("params_m"), "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "inputs": input_fingerprint(store, list(sets), opts.drops), "sets": {s: conds_of[s] for s in sets},
+        "inputs": input_fingerprint(store, list(sets), opts.drops, opts.conds, conds_of), "sets": {s: conds_of[s] for s in sets},
         "splits": split_info,
         "options": {"talks": list(opts.talks), "modes": list(opts.modes), "reps": opts.reps, "world_size": opts.world_size,
-                    "tail_reps": opts.tail_reps, "fixed_margins": opts.fixed_margins,
-                    "secondary_fixed": opts.secondary_fixed, "drops": opts.drops},
+                    "impostor_rate": opts.impostor_rate, "fixed_margins": opts.fixed_margins,
+                    "secondary_fixed": opts.secondary_fixed, "drops": opts.drops, "conds": opts.conds,
+                    "tag": opts.tag},
         "policy": {"app_constants": APP, "cost": COST, "far_grid": FAR_GRID, "app_bars": APP_BARS.public()},
         "voices_dropped_missing_embeddings": dropped,
         "audit_drops": ({s: {"clips_dropped": si.dropped, "file": str(drop_path(s).relative_to(vp_root()))}
@@ -1575,6 +1628,10 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
              "among models with zero wrong silent names (then models with look-alike pairs over their bar, then "
              "models with wrong names). **Wrong silent names must be 0.** Headline: every cosine constant, margins "
              "included, carried to each model's scale; last column: the app's literal 0.12/0.10 margins.", ""]
+    cond_filters = sorted({",".join(d.get("options", {}).get("conds") or ["all present"]) for d in docs})
+    lines += [f"Conditions used for calibration and scoring: {'; '.join(cond_filters)}. One set of bars per model covers "
+              "every condition it has, like the app; a model with call audio gets stricter bars than the same model "
+              "on clean alone, so compare models on the same coverage.", ""]
     drops: dict[str, int] = {}
     no_drops = []
     for d in docs:
@@ -1701,7 +1758,9 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
               "- Look-alike pairs over bar = held-out (A, B) pairs where one session of A clears the lineup bar against B's "
               "two-session profile (ignores the margin rule and who is in the meeting, so it over-counts; a nonzero value is "
               "a wrong-name risk the random meetings may not have hit).",
-              "- Bars: suggest floor (4+ segments) / lineup auto bar / global auto bar, in each model's own cosine units.",
+              "- Bars: suggest floor (4+ segments) / lineup auto bar / global auto bar, in each model's own cosine units. "
+              "Auto bar = exponential tail of distinct impostor tops, one fit per condition, strictest wins, leaving a "
+              "share of 1e-4 above it (`--impostor-rate`); never below the worst clear-margin impostor + beta.",
               "- Coverage differs while embeddings land; compare models on the same coverage before drawing conclusions."]
     if calib_wrong:
         lines.append(f"- Calibration split still had wrong silent names for: {', '.join(calib_wrong)} (should never happen; check).")
@@ -1714,6 +1773,13 @@ def write_summary(results_dir: Path, out_path: Path) -> str:
 # CLI
 # ---------------------------------------------------------------------------------------------
 
+def results_paths(tag: str | None) -> tuple[Path, Path]:
+    base = vp_root() / "results"
+    if not tag:
+        return base / "naming", base / "naming_summary.md"
+    return base / f"naming_{tag}", base / f"naming_summary_{tag}.md"
+
+
 def discover_models() -> list[str]:
     d = vp_root() / "emb"
     return sorted(p.name for p in d.iterdir() if p.is_dir() and any(p.glob("*__*.npz"))) if d.exists() else []
@@ -1721,17 +1787,17 @@ def discover_models() -> list[str]:
 
 def run_one(args: tuple[str, Options, bool]) -> tuple[str, str]:
     model_id, opts, force = args
-    out_dir = vp_root() / "results" / "naming"
+    out_dir = results_paths(opts.tag)[0]
     out_path = out_dir / f"{model_id}.json"
     store = EmbStore(model_id)
-    fp = input_fingerprint(store, opts.sets or discover_sets(), opts.drops)
+    fp = input_fingerprint(store, opts.sets or discover_sets(), opts.drops, opts.conds)
     if not fp:
         return model_id, "skipped: no embeddings"
     if out_path.exists() and not force:
         try:
             old = json.loads(out_path.read_text())
             o = old.get("options", {})
-            if (old.get("inputs") == fp and o.get("tail_reps") == opts.tail_reps
+            if (old.get("inputs") == fp and o.get("impostor_rate") == opts.impostor_rate
                     and o.get("fixed_margins", False) == opts.fixed_margins and o.get("drops", False) == opts.drops
                     and o.get("secondary_fixed", False) == opts.secondary_fixed and o.get("reps") == opts.reps):
                 return model_id, "up to date"
@@ -1757,10 +1823,10 @@ def main() -> int:
     ap.add_argument("--conds", help="comma-separated conditions (default: all present, plus mixed)")
     ap.add_argument("--talks", default=",".join(TALKS))
     ap.add_argument("--modes", default=",".join(MODES))
-    ap.add_argument("--reps", type=int, default=4, help="reseeded worlds per split")
+    ap.add_argument("--reps", type=int, default=2, help="reseeded worlds per split")
     ap.add_argument("--world-size", type=int, default=40)
-    ap.add_argument("--tail-reps", type=float, default=TAIL_REPS,
-                    help="auto bars must hold for this many calibration halves' worth of impostors (tail extrapolation)")
+    ap.add_argument("--impostor-rate", type=float, default=IMPOSTOR_RATE,
+                    help="tolerated share of impostor encounters above the auto bar, in the worst condition")
     ap.add_argument("--fixed-margins", action="store_true",
                     help="headline uses the app's margins at 0.12/0.10 in every model's units instead of scaling them")
     ap.add_argument("--no-fixed-variant", action="store_true",
@@ -1770,17 +1836,18 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=2, help="models in parallel (max 2 heavy processes per agent)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--summary-only", action="store_true")
+    ap.add_argument("--tag", help="write results to VP/results/naming_<tag>/ and naming_summary_<tag>.md "
+                                  "(e.g. --conds clean --tag clean for a table comparable while call audio lands)")
     args = ap.parse_args()
 
-    results_dir = vp_root() / "results" / "naming"
-    summary_path = vp_root() / "results" / "naming_summary.md"
+    results_dir, summary_path = results_paths(args.tag)
     if not args.summary_only:
         opts = Options(sets=args.sets.split(",") if args.sets else None,
                        conds=args.conds.split(",") if args.conds else None,
                        talks=tuple(args.talks.split(",")), modes=tuple(args.modes.split(",")),
-                       reps=args.reps, world_size=args.world_size, tail_reps=args.tail_reps,
+                       reps=args.reps, world_size=args.world_size, impostor_rate=args.impostor_rate,
                        fixed_margins=args.fixed_margins, secondary_fixed=not args.no_fixed_variant,
-                       drops=not args.no_drops)
+                       drops=not args.no_drops, tag=args.tag)
         models = args.models.split(",") if args.models else discover_models()
         if not models:
             log("no models with embeddings yet")

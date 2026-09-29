@@ -248,7 +248,7 @@ def build(model_id: str, meta: dict, model_dir: Path) -> Built:
             notes.append(f"level_norm_dbfs={meta['level_norm_dbfs']} rebuilt in-graph (LevelNorm)")
         built = Built(fused, int(meta["dim"]), fp32_scopes=["spec", "level"],
                       frontend={"kind": "redimnet_own", "level_norm_dbfs": meta.get("level_norm_dbfs")},
-                      notes=notes, default_enum="1:10:1")
+                      notes=notes, default_enum="1:10:1", default_shapes="multi")
         if type(wrap).__name__ == "ReDimNet2Wrap":
             built.prepare = lambda lengths: built.notes.extend(_redimnet_static(wrap, lengths))
         return built
@@ -296,7 +296,8 @@ def build(model_id: str, meta: dict, model_dir: Path) -> Built:
             net = OnnxModule(onnx_path)
             return Built(FbankOnnxFused(fe, net, False, None).eval(), int(meta["dim"]),
                          fp32_scopes=["frontend"], frontend={"kind": "sherpa_knf_general", **fe.cfg},
-                         notes=["front end = sherpa-onnx general path (knf povey, snip_edges=false, global-mean)"])
+                         notes=["front end = sherpa-onnx general path (knf povey, snip_edges=false, global-mean)"],
+                         default_shapes="multi", default_enum="1:10:1")
         raise NotImplementedError(f"sherpa framework {fw!r}")
 
     raise NotImplementedError(f"runtime {runtime!r}")
