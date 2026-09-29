@@ -142,11 +142,14 @@ final class ContextStoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
 
-        for (filename, duration) in [
+        let malformedDurations = [
             ("Bad text duration.md", "1:bad"),
             ("Negative duration.md", "-1:02"),
             ("Overflowing duration.md", "200000000000000000:00"),
-        ] {
+            ("Overflowing hours.md", "200000000000000000:0:0"),
+            ("Unrealistic duration.md", "9223372036854775807"),
+        ]
+        for (filename, duration) in malformedDurations {
             let meeting = """
             ---
             capture_type: meeting
@@ -167,24 +170,48 @@ final class ContextStoreTests: XCTestCase {
                 atomically: true,
                 encoding: .utf8
             )
+            XCTAssertEqual(
+                CLIContextStore.meetingTranscript(fromMarkdown: meeting)?.recording.durationSeconds,
+                0,
+                "\(filename) must fall back to zero"
+            )
         }
 
         let items = CLIContextStore.recent(
             in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
             kind: .meeting,
-            count: 5,
+            count: malformedDurations.count + 1,
             dateFrom: nil,
             dateTo: nil
         )
 
-        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(
+            items.count,
+            malformedDurations.count,
+            "malformed and overflowing durations must not crash or hide CLI results"
+        )
 
-        let parserSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("../TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift")
-        let source = try String(contentsOf: parserSourceURL, encoding: .utf8)
-        XCTAssertTrue(source.contains("split(separator: \":\", omittingEmptySubsequences: false)"))
-        XCTAssertTrue(source.contains("components.count == rawComponents.count"))
-        XCTAssertTrue(source.contains("$0 < 0 || $0 > maxDurationComponent"))
+        // Control: a well-formed duration still parses, so the zeros above
+        // come from the fallback and not from a parser that always says 0.
+        let wellFormed = """
+        ---
+        capture_type: meeting
+        title: Parser fixture
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "1:02:03"
+        ---
+
+        # Parser fixture
+
+        ## Full Transcript
+
+        [00:03] [Mic/You] Still works.
+        """
+        XCTAssertEqual(
+            CLIContextStore.meetingTranscript(fromMarkdown: wellFormed)?.recording.durationSeconds,
+            3_723
+        )
     }
 
     func testSearchSpeakerFilterUsesMatchingSpeakerUtterance() throws {
