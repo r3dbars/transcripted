@@ -832,6 +832,33 @@ func testMeetingPromptDetector() async {
         detector.frontmostBundleIDProvider = { nil }
         detector.isOwnCaptureActive = { false }
         showBrowserTab("Hacker News", on: detector)
+        // An hour, so even a very slow evaluation pass lands inside the wait.
+        detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
+            corroboratedDelay: 3_600,
+            uncorroboratedDelay: 3_600,
+            titleRecheckInterval: 3_600
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 0, "an unrecognized site holding the mic must not prompt right away")
+        assertEqual(box.suppression?.reason, .awaitingCallEvidence, "the held-back prompt should be reported as waiting for evidence")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — an unrecognized site prompts on its own once the wait runs out") {
+        let detector = MeetingPromptDetector()
+        detector.frontmostBundleIDProvider = { nil }
+        detector.isOwnCaptureActive = { false }
+        showBrowserTab("Hacker News", on: detector)
         detector.browserEvidenceTiming = BrowserCallEvidence.Timing(
             corroboratedDelay: 1,
             uncorroboratedDelay: 1,
@@ -843,17 +870,10 @@ func testMeetingPromptDetector() async {
             box.promptCount += 1
             return true
         }
-        detector.onPromptSuppressed = { suppression in
-            box.suppression = suppression
-            box.suppressionCount += 1
-        }
 
+        // Nothing else happens after this push, so only the detector's own
+        // re-check can produce the prompt.
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
-        await waitForPromptEvaluation(detector)
-
-        assertEqual(box.promptCount, 0, "an unrecognized site holding the mic must not prompt right away")
-        assertEqual(box.suppression?.reason, .awaitingCallEvidence, "the held-back prompt should be reported as waiting for evidence")
-
         await waitForPromptEvaluation(detector, until: { box.promptCount > 0 })
 
         assertEqual(box.promptCount, 1, "once the wait runs out the detector should re-check on its own and prompt")
