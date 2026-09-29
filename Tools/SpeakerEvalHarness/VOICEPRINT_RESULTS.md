@@ -1,16 +1,15 @@
 # Voiceprint bake-off: results
 
-_Generated 2026-09-28 20:22 by `scripts/voiceprint/build_report.py` from `data/eval/voiceprint/results`. Rerun it any time; numbers that haven't landed show as pending. The charts and raw tables live under `data/eval/voiceprint/results/report/` (gitignored with the rest of `data/`)._
-
-> **Not final.** The embedding daemon still had 158 jobs queued at 20:21:52, so some models are missing conditions. Rows say how many cells they have.
+_Generated 2026-09-29 00:18 by `scripts/voiceprint/build_report.py` from `data/eval/voiceprint/results`. Rerun it any time; numbers that haven't landed show as pending. The charts and raw tables live under `data/eval/voiceprint/results/report/` (gitignored with the rest of `data/`)._
 
 ## The short version
 
 - We scored **23 voiceprint networks** (25 builds, 21 networks we could legally ship) on 11,399 clips (after the audit drops) of 334 real people in four human-labeled sets, plus a fifth set with model-made labels that we keep out of the ranking.
 - Today's model (`app-wespeaker-coreml`) accepts 74.6% [72.3, 77.5] of same-person pairs on call audio at 1 false accept in 1,000.
-- **No winner yet.** `redimnet2-b4-vox2-lm` leads so far (+9.0 [+4.7, +11.5]* points vs today's model on the cells it has: 30 of 60) but isn't fully scored.
+- **Winner: `redimnet2-b6-vox2-lm`.** 84.6% [82.3, 86.6] on call audio, +10.0 [+8.0, +11.2]* points vs today's model. That's a clear win: the paired interval excludes zero.
+- Runner-up: `redimnet-b6-vox2-lm` at 83.8% [81.5, 86.0]. The intervals overlap, so this metric alone can't separate them.
 - Wrong silent names: **0 for all 23 models simulated.** That was the hard gate.
-- Still pending: latency benchmark (ms/clip uses rough embed-job timings until then); end-to-end pipeline results; call-audio verification for 18 networks (3dspeaker-campplus-en-voxceleb, 3dspeaker-campplus-zh-cn-common, 3dspeaker-eres2net-base-200k-zh-cn-common, redimnet-M-vb2-vox2-cnc-ft_mix, redimnet-b2-vox2-lm...); full cell coverage for 3 networks (3dspeaker-campplus-zh-en-common-advanced, redimnet2-b4-vox2-lm, wespeaker-resnet34-lm); naming with call audio for 18 models; 158 embedding jobs still queued.
+- Still pending: call-audio verification for 12 networks (3dspeaker-campplus-en-voxceleb, 3dspeaker-campplus-zh-cn-common, 3dspeaker-eres2net-base-200k-zh-cn-common, redimnet-M-vb2-vox2-cnc-ft_mix, redimnet-b2-vox2-lm...); naming with call audio for 15 models.
 
 ## What we tested and why
 
@@ -83,33 +82,33 @@ Headline metric: **true accepts at 1 in 1,000 false accepts on call audio**, poo
 
 | # | model | ship? | params (M) | clean | call [95% CI] | Δ vs baseline | EER call | lineup | auto from mtg 3+ | wrong names | ms/clip | cells |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `app-wespeaker-coreml` **(baseline)** | yes, credit | 6.6 | 88.7 | 74.6 [72.3, 77.5] | ref | 4.25 | 87% / 70% | 53% / 5.1% | 0 | ~16 | 60/60 |
-| 2 | `3dspeaker-eres2net-en-voxceleb` | yes, credit | 6.6 | 86.6 | 70.9 [68.5, 74.2] | -3.7 [-5.4, -1.7]* | 4.89 | 80% / 61% | 6.1% / 1.7% | 0 | ~151 | 60/60 |
-| 3 | `redimnet2-b4-vox2-lm` | yes, credit | 6.7 | 92.8 | 80.0 [74.8, 84.3] | +9.0 [+4.7, +11.5]* | 3.49 | 94% / 86% | 60% / 1.8% | 0 | ~79 | 30/60 partial |
-| 4 | `wespeaker-resnet34-lm` | yes, credit | 6.6 | 89.3 | 74.0 [71.2, 76.6] | +0.7 [-0.5, +1.0] | 4.69 | 84% / 65% | 53% / 7.4% | 0 | ~134 | 48/60 partial |
-| 5 | `3dspeaker-campplus-zh-en-common-advanced` | yes (medium risk) | 6.9 | 83.4 | 71.6 [67.6, 75.1] | -0.5 [-3.8, +2.0] | 4.85 | 82% / 70% | 34% / 0% | 0 | ~66 | 24/60 partial |
-| 6 | `redimnet2-b3-vb2-vox2-cnc2-lm` | no (reference only) | 4.5 | 93.9 | pending | – | pending | 93% / pending | 71% / pending | 0 | ~82 | 12/60 partial |
-| 7 | `redimnet2-b6-vox2-lm` | yes, credit | 12.4 | 93.6 | pending | – | pending | 92% / pending | 52% / pending | 0 | ~162 | 12/60 partial |
-| 8 | `redimnet2-b6-vox2-lm-coreml` _(Core ML)_ | yes, credit | 12.4 | 93.6 | pending | – | pending | 92% / pending | 52% / pending | 0 | ~623 | 12/60 partial |
-| 9 | `redimnet-b6-vox2-lm` | yes, credit | 15.0 | 92.9 | pending | – | pending | 96% / pending | 39% / pending | 0 | ~151 | 12/60 partial |
-| 10 | `redimnet2-b4-vox2-lm-coreml` _(Core ML)_ | yes, credit | 6.7 | 92.8 | pending | – | pending | 94% / pending | 60% / pending | 0 | ~598 | 12/60 partial |
-| 11 | `wespeaker-resnet293-lm-coreml` _(Core ML)_ | yes, credit | 28.6 | 92.2 | pending | – | pending | 91% / pending | 52% / pending | 0 | ~89 | 12/60 partial |
-| 12 | `redimnet-M-vb2-vox2-cnc-ft_mix` | no (reference only) | 4.8 | 92.0 | pending | – | pending | 87% / pending | 60% / pending | 0 | ~92 | 12/60 partial |
-| 13 | `wespeaker-resnet221-lm-coreml` _(Core ML)_ | yes, credit | 23.7 | 92.0 | pending | – | pending | 89% / 73% | 52% / pending | 0 | ~89 | 12/60 partial |
-| 14 | `redimnet2-b2-vox2-lm` | yes, credit | 3.7 | 90.2 | pending | – | pending | 87% / pending | 51% / pending | 0 | ~101 | 12/60 partial |
-| 15 | `wespeaker-campplus` | yes, credit | 7.2 | 89.6 | pending | – | pending | 85% / pending | 48% / pending | 0 | ~172 | 12/60 partial |
-| 16 | `wespeaker-resnet34` | yes, credit | 6.6 | 89.2 | pending | – | pending | 85% / pending | 58% / pending | 0 | ~183 | 12/60 partial |
-| 17 | `redimnet-b2-vox2-lm` | yes, credit | 5.1 | 89.0 | pending | – | pending | 89% / pending | 57% / pending | 0 | ~62 | 12/60 partial |
-| 18 | `wespeaker-campplus-lm` | yes, credit | 7.2 | 87.4 | pending | – | pending | 88% / 73% | 47% / pending | 0 | ~157 | 12/60 partial |
-| 19 | `3dspeaker-campplus-en-voxceleb` | yes, credit | 7.2 | 87.1 | pending | – | pending | 84% / pending | 10% / pending | 0 | ~208 | 12/60 partial |
-| 20 | `titanet-large` | yes, credit (medium risk) | 25.3 | 84.7 | pending | – | pending | 77% / pending | 25% / pending | 0 | ~194 | 12/60 partial |
-| 21 | `titanet-small` | yes, credit (medium risk) | 10.0 | 80.4 | pending | – | pending | 76% / pending | 23% / pending | 0 | ~75 | 12/60 partial |
-| 22 | `3dspeaker-eres2net-base-200k-zh-cn-common` | yes (medium risk) | 9.9 | 64.3 | pending | – | pending | pending | 18% / pending | 0 | ~329 | 9/60 partial |
-| 23 | `speakernet` | yes, credit | 5.8 | 61.8 | pending | – | pending | 65% / pending | 13% / pending | 0 | ~51 | 12/60 partial |
-| 24 | `3dspeaker-campplus-zh-cn-common` | yes (medium risk) | 6.9 | 47.4 | pending | – | pending | 52% / pending | 7.1% / pending | 0 | ~137 | 12/60 partial |
-| 25 | `speechbrain-xvector-vox` | yes, credit | 4.2 | 44.5 | pending | – | pending | 34% / pending | 0.2% / pending | 0 | ~9.6 | 12/60 partial |
+| 1 | `redimnet2-b6-vox2-lm` | yes, credit | 12.4 | 93.6 | 84.6 [82.3, 86.6] | +10.0 [+8.0, +11.2]* | 2.83 | 92% / 83% | 68% / 36% | 0 | ~160 | 60/60 |
+| 2 | `redimnet-b6-vox2-lm` | yes, credit | 15.0 | 92.9 | 83.8 [81.5, 86.0] | +9.2 [+7.4, +10.7]* | 3.08 | 96% / 88% | 68% / pending | 0 | ~151 | 60/60 |
+| 3 | `redimnet2-b4-vox2-lm` | yes, credit | 6.7 | 92.8 | 83.0 [80.1, 85.1] | +8.3 [+6.2, +9.6]* | 3.14 | 94% / 86% | 70% / 27% | 0 | ~79 | 60/60 |
+| 4 | `wespeaker-resnet293-lm-coreml` _(Core ML)_ | yes, credit | 28.6 | 92.2 | 80.7 [78.5, 83.2] | +6.0 [+4.6, +7.4]* | 3.42 | 91% / 70% | 52% / pending | 0 | 20 | 60/60 |
+| 5 | `wespeaker-resnet221-lm-coreml` _(Core ML)_ | yes, credit | 23.7 | 92.0 | 80.5 [78.1, 83.0] | +5.9 [+4.1, +7.3]* | 3.45 | 89% / 73% | 51% / 22% | 0 | 15 | 60/60 |
+| 6 | `wespeaker-resnet34-lm` | yes, credit | 6.6 | 89.3 | 75.1 [72.6, 77.6] | +0.5 [-0.5, +0.9] | 4.26 | 84% / 65% | 66% / 26% | 0 | ~141 | 60/60 |
+| 7 | `app-wespeaker-coreml` **(baseline)** | yes, credit | 6.6 | 88.7 | 74.6 [72.3, 77.5] | ref | 4.25 | 87% / 70% | 58% / 25% | 0 | 11 | 60/60 |
+| 8 | `wespeaker-campplus-lm` | yes, credit | 7.2 | 87.4 | 74.6 [71.8, 77.7] | -0.1 [-1.8, +1.3] | 4.25 | 88% / 73% | 58% / 20% | 0 | ~101 | 60/60 |
+| 9 | `3dspeaker-campplus-zh-en-common-advanced` | yes (medium risk) | 6.9 | 83.4 | 72.6 [69.3, 75.8] | -2.0 [-4.5, +0.2] | 4.24 | 82% / 70% | 63% / 19% | 0 | ~69 | 60/60 |
+| 10 | `3dspeaker-eres2net-en-voxceleb` | yes, credit | 6.6 | 86.6 | 70.9 [68.5, 74.2] | -3.7 [-5.4, -1.7]* | 4.89 | 80% / 61% | 61% / 37% | 0 | ~153 | 60/60 |
+| 11 | `titanet-large` | yes, credit (medium risk) | 25.3 | 84.7 | 67.7 [64.4, 71.5] | -6.9 [-9.4, -4.2]* | 5.50 | 77% / 64% | 37% / pending | 0 | ~203 | 60/60 |
+| 12 | `redimnet2-b3-vb2-vox2-cnc2-lm` | no (reference only) | 4.5 | 93.9 | pending | – | pending | 93% / pending | 80% / pending | 0 | ~82 | 12/60 partial |
+| 13 | `redimnet2-b6-vox2-lm-coreml` _(Core ML)_ | yes, credit | 12.4 | 93.6 | pending | – | pending | 92% / pending | 68% / pending | 0 | 23 | 12/60 partial |
+| 14 | `redimnet2-b4-vox2-lm-coreml` _(Core ML)_ | yes, credit | 6.7 | 92.8 | pending | – | pending | 94% / pending | 70% / pending | 0 | 15 | 12/60 partial |
+| 15 | `redimnet-M-vb2-vox2-cnc-ft_mix` | no (reference only) | 4.8 | 92.0 | pending | – | pending | 87% / pending | 60% / pending | 0 | ~95 | 12/60 partial |
+| 16 | `redimnet2-b2-vox2-lm` | yes, credit | 3.7 | 90.2 | pending | – | pending | 87% / pending | 63% / pending | 0 | ~102 | 12/60 partial |
+| 17 | `wespeaker-campplus` | yes, credit | 7.2 | 89.6 | pending | – | pending | 85% / pending | 59% / pending | 0 | ~172 | 12/60 partial |
+| 18 | `wespeaker-resnet34` | yes, credit | 6.6 | 89.2 | pending | – | pending | 85% / pending | 69% / pending | 0 | ~184 | 12/60 partial |
+| 19 | `redimnet-b2-vox2-lm` | yes, credit | 5.1 | 89.0 | pending | – | pending | 89% / pending | 60% / pending | 0 | ~62 | 12/60 partial |
+| 20 | `3dspeaker-campplus-en-voxceleb` | yes, credit | 7.2 | 87.1 | pending | – | pending | 84% / pending | 52% / pending | 0 | ~204 | 12/60 partial |
+| 21 | `titanet-small` | yes, credit (medium risk) | 10.0 | 80.4 | pending | – | pending | 76% / pending | 46% / pending | 0 | ~90 | 12/60 partial |
+| 22 | `3dspeaker-eres2net-base-200k-zh-cn-common` | yes (medium risk) | 9.9 | 64.3 | pending | – | pending | pending | 49% / pending | 0 | ~331 | 9/60 partial |
+| 23 | `speakernet` | yes, credit | 5.8 | 61.8 | pending | – | pending | 65% / pending | 32% / pending | 0 | ~51 | 12/60 partial |
+| 24 | `3dspeaker-campplus-zh-cn-common` | yes (medium risk) | 6.9 | 47.4 | pending | – | pending | 52% / pending | 9.1% / pending | 0 | ~142 | 12/60 partial |
+| 25 | `speechbrain-xvector-vox` | yes, credit | 4.2 | 44.5 | pending | – | pending | 34% / pending | 17% / pending | 0 | ~9.6 | 12/60 partial |
 
-**Set up but not scored yet** (no embeddings scored): `3dspeaker-campplus-zh-en-common-advanced-coreml` (yes (medium risk)), `3dspeaker-eres2net-zh-cn-common` (yes (medium risk)), `3dspeaker-eres2netv2-zh-cn-common` (yes (medium risk)), `ecapa2` (no (reference only)), `redimnet2-b6-vb2-vox2-cnc2-lm` (no (reference only)), `speechbrain-ecapa-vox` (yes, credit), `speechbrain-resnet-vox` (yes, credit), `titanet-large-coreml` (yes, credit (medium risk)), `unispeech-sat-base-plus-sv` (unclear), `wavlm-base-plus-sv` (unclear), `wespeaker-resnet152-lm` (yes, credit), `wespeaker-resnet221-lm` (yes, credit), `wespeaker-resnet293-lm` (yes, credit).
+**Set up but not scored yet** (no embeddings scored): `3dspeaker-campplus-zh-en-common-advanced-coreml` (yes (medium risk)), `3dspeaker-eres2net-zh-cn-common` (yes (medium risk)), `3dspeaker-eres2netv2-zh-cn-common` (yes (medium risk)), `ecapa2` (no (reference only)), `redimnet2-b4-eval-full10-turnlen` (yes, credit, eval), `redimnet2-b4-eval-s124-fp16-turnlen` (yes, credit, eval), `redimnet2-b4-eval-s1248-fp16-turnlen` (yes, credit, eval), `redimnet2-b4-eval-s24-fp16` (yes, credit, eval), `redimnet2-b4-eval-s24-fp16-turnlen` (yes, credit, eval), `redimnet2-b4-eval-s248-fp16` (yes, credit, eval), `redimnet2-b4-eval-s248-fp32-turnlen` (yes, credit, eval), `redimnet2-b4-eval-s2510-fp32` (yes, credit, eval), `redimnet2-b4-eval-s310-fp32` (yes, credit, eval), `redimnet2-b6-vb2-vox2-cnc2-lm` (no (reference only)), `speechbrain-ecapa-vox` (yes, credit), `speechbrain-resnet-vox` (yes, credit), `titanet-large-coreml` (yes, credit (medium risk)), `unispeech-sat-base-plus-sv` (unclear), `wavlm-base-plus-sv` (unclear), `wespeaker-resnet152-lm` (yes, credit), `wespeaker-resnet221-lm` (yes, credit), `wespeaker-resnet293-lm` (yes, credit).
 
 ### By condition and clip length
 
@@ -117,11 +116,17 @@ TAR at FAR 1e-3 / EER, both in %. The clean>x columns enroll clean and test on t
 
 | model | clean | clean>opus12 | clean>phone | clean>noisy | 2 s | 4 s | 8 s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `redimnet2-b6-vox2-lm` | 93.6 / 1.15 | 87.8 / 1.89 | pending | 81.5 / 3.77 | 66.8 / 5.21 | 89.3 / 2.33 | 97.7 / 0.96 |
+| `redimnet-b6-vox2-lm` | 92.9 / 1.37 | 87.6 / 2.04 | pending | 80.0 / 4.12 | 65.5 / 5.79 | 88.4 / 2.44 | 97.5 / 1.01 |
+| `redimnet2-b4-vox2-lm` | 92.8 / 1.31 | 86.3 / 2.10 | pending | 79.6 / 4.18 | 64.0 / 5.80 | 87.7 / 2.65 | 97.2 / 0.97 |
+| `wespeaker-resnet293-lm-coreml` _(Core ML)_ | 92.2 / 1.48 | 83.7 / 2.42 | pending | 77.7 / 4.43 | 61.1 / 6.11 | 85.1 / 2.94 | 95.8 / 1.22 |
+| `wespeaker-resnet221-lm-coreml` _(Core ML)_ | 92.0 / 1.45 | 84.0 / 2.36 | pending | 77.1 / 4.55 | 60.4 / 6.14 | 85.3 / 2.94 | 95.8 / 1.28 |
+| `wespeaker-resnet34-lm` | 89.3 / 1.78 | 79.6 / 2.91 | pending | 70.6 / 5.61 | 52.8 / 7.32 | 78.9 / 3.77 | 93.6 / 1.69 |
 | `app-wespeaker-coreml` **(baseline)** | 88.7 / 1.77 | 79.0 / 2.94 | pending | 70.2 / 5.56 | 52.8 / 7.27 | 78.2 / 3.81 | 92.8 / 1.67 |
+| `wespeaker-campplus-lm` | 87.4 / 1.96 | 78.4 / 2.92 | pending | 70.7 / 5.57 | 51.2 / 7.61 | 78.5 / 3.66 | 94.0 / 1.47 |
+| `3dspeaker-campplus-zh-en-common-advanced` | 83.4 / 2.45 | 75.7 / 3.43 | pending | 69.5 / 5.06 | 51.0 / 7.10 | 76.0 / 3.89 | 90.8 / 1.75 |
 | `3dspeaker-eres2net-en-voxceleb` | 86.6 / 2.05 | 77.6 / 3.05 | pending | 64.3 / 6.73 | 47.3 / 8.21 | 74.8 / 4.43 | 90.7 / 2.04 |
-| `redimnet2-b4-vox2-lm` | 92.8 / 1.31 | 82.2 / 2.83 | pending | 76.8 / 5.06 | 58.1 / 6.65 | 84.5 / 2.99 | 97.4 / 0.82 |
-| `wespeaker-resnet34-lm` | 89.3 / 1.78 | 79.5 / 3.04 | pending | 68.6 / 6.35 | 51.2 / 7.97 | 77.5 / 4.20 | 93.4 / 1.91 |
-| `3dspeaker-campplus-zh-en-common-advanced` | 83.4 / 2.45 | 76.5 / 3.78 | pending | 66.8 / 5.92 | 44.0 / 8.45 | 76.1 / 4.78 | 94.8 / 1.32 |
+| `titanet-large` | 84.7 / 2.35 | 77.4 / 3.21 | pending | 58.0 / 7.79 | 46.3 / 8.61 | 71.1 / 5.09 | 85.7 / 2.81 |
 
 ![Clean vs call-audio accuracy for the top models](../../data/eval/voiceprint/results/report/clean_vs_call.png)
 
@@ -129,26 +134,25 @@ TAR at FAR 1e-3 / EER, both in %. The clean>x columns enroll clean and test on t
 
 The rule: a shippable license, every cell scored, zero wrong silent names in the naming simulation. Then the highest call-audio accuracy. We don't crown anyone while a candidate that looks better on the cells it has is still being scored.
 
-**No winner yet.**
+### Winner: `redimnet2-b6-vox2-lm`
 
-### Leading so far (not final, cells missing): `redimnet2-b4-vox2-lm`
-
-- **Call audio:** 80.0% [74.8, 84.3] at 1 in 1,000 false accepts; EER 3.49%. Clean: 92.8% [90.8, 94.3]. Scored on 30 of 60 cells.
-- **Against today's model** (74.6% [72.3, 77.5]): +9.0 [+4.7, +11.5]* points, paired on 9 shared call-audio cells. That's clearly better.
-- **Naming:** names 60% of a regular's appearances from meeting 3 on (clean bars), median first automatic name at meeting 3; wrong silent names 0; 140 wrong suggestions (1.4%). With call audio in the calibration: 1.8%.
-- **Lineup (DIR at zero wrong names):** 94% clean, 86% on opus12 probes.
-- **Size and speed:** 6.7M parameters; about 79 ms per clip (rough embed-job timing on a busy machine).
-- **Core ML build** (`redimnet2-b4-vox2-lm-coreml`): fp32, worst parity 1.0, 31.4 MB, runs on gpu.
+- **Call audio:** 84.6% [82.3, 86.6] at 1 in 1,000 false accepts; EER 2.83%. Clean: 93.6% [91.7, 95.0].
+- **Against today's model** (74.6% [72.3, 77.5]): +10.0 [+8.0, +11.2]* points, paired on 24 shared call-audio cells. That's clearly better.
+- **Naming:** names 68% of a regular's appearances from meeting 3 on (clean bars), median first automatic name at meeting 3; wrong silent names 0; 64 wrong suggestions (1.4%). With call audio in the calibration: 36%.
+- **Lineup (DIR at zero wrong names):** 92% clean, 83% on opus12 probes.
+- **Size and speed:** 12.4M parameters; about 23 ms per clip (measured in latency.md).
+- **Core ML build** (`redimnet2-b6-vox2-lm-coreml`): fp32, worst parity 1.0, 54.6 MB, runs on gpu.
 - **License:** MIT weights (repo license, release assets); credit VoxCeleb. (eligible-attribution, low risk). Trained on: VoxCeleb2 dev (vox2), pretrain then large-margin finetune (lm).
 
-### Best fully scored shippable model so far: `3dspeaker-eres2net-en-voxceleb`
+### Runner-up: `redimnet-b6-vox2-lm`
 
-- **Call audio:** 70.9% [68.5, 74.2] at 1 in 1,000 false accepts; EER 4.89%. Clean: 86.6% [84.5, 89.0].
-- **Against today's model** (74.6% [72.3, 77.5]): -3.7 [-5.4, -1.7]* points, paired on 24 shared call-audio cells. That's not better.
-- **Naming:** names 6.1% of a regular's appearances from meeting 3 on (clean bars), median first automatic name at meeting never; wrong silent names 0; 522 wrong suggestions (2.6%). With call audio in the calibration: 1.7%.
-- **Lineup (DIR at zero wrong names):** 80% clean, 61% on opus12 probes.
-- **Size and speed:** 6.6M parameters; about 151 ms per clip (rough embed-job timing on a busy machine).
-- **License:** Apache 2.0 weights; credit VoxCeleb. The repo's June 2026 'research-only' note (scripts/entrypoints/build.sh, build-beta.sh) is not supported by the model card. (eligible-attribution, low risk). Trained on: VoxCeleb (English), 3D-Speaker recipe.
+- **Call audio:** 83.8% [81.5, 86.0] at 1 in 1,000 false accepts; EER 3.08%. Clean: 92.9% [91.6, 94.6].
+- **Against today's model** (74.6% [72.3, 77.5]): +9.2 [+7.4, +10.7]* points, paired on 24 shared call-audio cells. That's clearly better.
+- **Against the winner:** intervals overlap, no separation on this metric.
+- **Naming:** names 68% of a regular's appearances from meeting 3 on (clean bars), median first automatic name at meeting 3; wrong silent names 0; 72 wrong suggestions (1.6%).
+- **Lineup (DIR at zero wrong names):** 96% clean, 88% on opus12 probes.
+- **Size and speed:** 15.0M parameters; about 151 ms per clip (rough embed-job timing on a busy machine).
+- **License:** MIT (repo license covers release weights; none stated separately); credit VoxCeleb. (eligible-attribution, low risk). Trained on: VoxCeleb2 dev (vox2), pretrain then large-margin finetune (ft_lm).
 
 ## Naming simulation
 
@@ -158,31 +162,31 @@ Work per meeting: type a name 3, pick a known person 2, confirm a suggestion 1, 
 
 | model | ship? | wrong silent names (all runs) | look-alike pairs over bar | strangers wrongly named | wrong suggestions | auto from mtg 3+ (clean bars) | first auto: median / p90 meeting | work per meeting | with call audio: auto from mtg 3+ / wrong / work |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `redimnet2-b3-vb2-vox2-cnc2-lm` | no (reference only) | 0 | 0 / 14,647 | 0 | 60 (0.8%) | 71% | 3 / never | 3.98 | pending |
-| `redimnet2-b4-vox2-lm` | yes, credit | 0 | 0 / 24,621 | 0 | 140 (1.4%) | 60% | 3 / never | 4.14 | 1.8% / 0 / 5.46 |
-| `redimnet-M-vb2-vox2-cnc-ft_mix` | no (reference only) | 0 | 0 / 14,647 | 0 | 186 (1.8%) | 60% | 3 / never | 4.08 | pending |
-| `wespeaker-resnet34` | yes, credit | 0 | 0 / 14,647 | 0 | 220 (2.1%) | 58% | 3 / never | 4.15 | pending |
-| `redimnet-b2-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 224 (2.1%) | 57% | 3 / never | 4.15 | pending |
-| `app-wespeaker-coreml` **(baseline)** | yes, credit | 0 | 0 / 43,941 | 0 | 238 (2.1%) | 53% | 4 / never | 4.25 | 5.1% / 0 / 5.29 |
-| `wespeaker-resnet34-lm` | yes, credit | 0 | 0 / 43,941 | 0 | 224 (2.0%) | 53% | 4 / never | 4.25 | 7.4% / 0 / 5.18 |
-| `wespeaker-resnet293-lm-coreml` _(Core ML)_ | yes, credit | 0 | 0 / 14,647 | 0 | 144 (1.3%) | 52% | 4 / never | 4.25 | pending |
-| `redimnet2-b6-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 128 (1.1%) | 52% | 4 / never | 4.24 | pending |
-| `wespeaker-resnet221-lm-coreml` _(Core ML)_ | yes, credit | 0 | 0 / 14,647 | 0 | 162 (1.4%) | 52% | 4 / never | 4.27 | pending |
-| `redimnet2-b2-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 228 (1.9%) | 51% | 4 / never | 4.27 | pending |
-| `wespeaker-campplus` | yes, credit | 0 | 0 / 14,647 | 0 | 224 (1.8%) | 48% | 4 / never | 4.32 | pending |
-| `wespeaker-campplus-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 226 (1.9%) | 47% | 4 / never | 4.37 | pending |
-| `redimnet-b6-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 146 (1.1%) | 39% | never / never | 4.46 | pending |
-| `3dspeaker-campplus-zh-en-common-advanced` | yes (medium risk) | 0 | 0 / 43,941 | 0 | 456 (3.1%) | 34% | never / never | 4.54 | 0% / 0 / 5.25 |
-| `titanet-large` | yes, credit (medium risk) | 0 | 0 / 14,647 | 0 | 384 (2.4%) | 25% | never / never | 4.72 | pending |
-| `titanet-small` | yes, credit (medium risk) | 0 | 0 / 14,647 | 0 | 622 (3.7%) | 23% | never / never | 4.75 | pending |
-| `3dspeaker-eres2net-base-200k-zh-cn-common` | yes (medium risk) | 0 | 0 / 13,887 | 0 | 812 (5.6%) | 18% | never / never | 4.72 | pending |
-| `speakernet` | yes, credit | 0 | 0 / 14,647 | 0 | 1168 (6.8%) | 13% | never / never | 5.13 | pending |
-| `3dspeaker-campplus-en-voxceleb` | yes, credit | 0 | 0 / 14,647 | 0 | 532 (2.8%) | 10% | never / never | 4.94 | pending |
-| `3dspeaker-campplus-zh-cn-common` | yes (medium risk) | 0 | 0 / 14,647 | 0 | 1168 (6.6%) | 7.1% | never / never | 5.26 | pending |
-| `3dspeaker-eres2net-en-voxceleb` | yes, credit | 0 | 0 / 43,941 | 0 | 522 (2.6%) | 6.1% | never / never | 4.99 | 1.7% / 0 / 5.31 |
-| `speechbrain-xvector-vox` | yes, credit | 0 | 0 / 14,647 | 0 | 1186 (7.1%) | 0.2% | never / never | 5.62 | pending |
+| `redimnet2-b3-vb2-vox2-cnc2-lm` | no (reference only) | 0 | 0 / 14,647 | 0 | 76 (2.3%) | 80% | 3 / never | 3.75 | pending |
+| `redimnet2-b4-vox2-lm` | yes, credit | 0 | 0 / 43,941 | 0 | 68 (1.6%) | 70% | 3 / never | 3.94 | 27% / 0 / 4.80 |
+| `wespeaker-resnet34` | yes, credit | 0 | 0 / 14,647 | 0 | 70 (1.8%) | 69% | 3 / never | 4.00 | pending |
+| `redimnet-b6-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 72 (1.6%) | 68% | 3 / never | 3.94 | pending |
+| `redimnet2-b6-vox2-lm` | yes, credit | 0 | 0 / 42,421 | 0 | 64 (1.4%) | 68% | 3 / never | 3.94 | 36% / 0 / 4.43 |
+| `wespeaker-resnet34-lm` | yes, credit | 0 | 0 / 43,941 | 0 | 74 (1.7%) | 66% | 3 / never | 4.06 | 26% / 0 / 4.84 |
+| `redimnet2-b2-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 118 (2.4%) | 63% | 3 / never | 4.03 | pending |
+| `3dspeaker-campplus-zh-en-common-advanced` | yes (medium risk) | 0 | 0 / 43,941 | 0 | 88 (2.0%) | 63% | 3 / never | 4.14 | 19% / 0 / 5.03 |
+| `3dspeaker-eres2net-en-voxceleb` | yes, credit | 0 | 0 / 43,941 | 0 | 122 (2.5%) | 61% | 3 / never | 4.11 | 37% / 0 / 4.68 |
+| `redimnet-M-vb2-vox2-cnc-ft_mix` | no (reference only) | 0 | 0 / 14,647 | 0 | 98 (1.8%) | 60% | 3 / never | 4.04 | pending |
+| `redimnet-b2-vox2-lm` | yes, credit | 0 | 0 / 14,647 | 0 | 104 (2.0%) | 60% | 3 / never | 4.08 | pending |
+| `wespeaker-campplus` | yes, credit | 0 | 0 / 14,647 | 0 | 108 (2.0%) | 59% | 3 / never | 4.11 | pending |
+| `wespeaker-campplus-lm` | yes, credit | 0 | 0 / 43,941 | 0 | 108 (2.1%) | 58% | 3 / never | 4.14 | 20% / 0 / 4.97 |
+| `app-wespeaker-coreml` **(baseline)** | yes, credit | 0 | 0 / 43,941 | 0 | 116 (2.2%) | 58% | 3 / never | 4.14 | 25% / 0 / 4.91 |
+| `wespeaker-resnet293-lm-coreml` _(Core ML)_ | yes, credit | 0 | 0 / 14,647 | 0 | 74 (1.3%) | 52% | 4 / never | 4.22 | pending |
+| `3dspeaker-campplus-en-voxceleb` | yes, credit | 0 | 0 / 14,647 | 0 | 88 (1.6%) | 52% | 4 / never | 4.28 | pending |
+| `wespeaker-resnet221-lm-coreml` _(Core ML)_ | yes, credit | 0 | 0 / 43,941 | 0 | 84 (1.4%) | 51% | 4 / never | 4.26 | 22% / 0 / 4.94 |
+| `3dspeaker-eres2net-base-200k-zh-cn-common` | yes (medium risk) | 0 | 0 / 13,887 | 0 | 210 (4.6%) | 49% | 4 / never | 4.25 | pending |
+| `titanet-small` | yes, credit (medium risk) | 0 | 0 / 14,647 | 0 | 234 (3.8%) | 46% | 5 / never | 4.39 | pending |
+| `titanet-large` | yes, credit (medium risk) | 0 | 0 / 14,647 | 0 | 204 (2.9%) | 37% | never / never | 4.49 | pending |
+| `speakernet` | yes, credit | 0 | 0 / 14,647 | 0 | 578 (8.1%) | 32% | never / never | 4.79 | pending |
+| `speechbrain-xvector-vox` | yes, credit | 0 | 0 / 14,647 | 0 | 600 (8.5%) | 17% | never / never | 5.30 | pending |
+| `3dspeaker-campplus-zh-cn-common` | yes (medium risk) | 0 | 0 / 14,647 | 0 | 582 (6.6%) | 9.1% | never / never | 5.19 | pending |
 
-For scale, today's model with the app's shipped bars (0.70 / 0.80 / 0.92, no calibration) names 47% of regulars' appearances from meeting 3 on clean audio and 34% on call audio, with 0 wrong silent names. Our calibration (zero wrong names plus a safety margin, same recipe for every model) gives the same model 53% with clean-only bars, and 11% clean / 5.1% call once call audio is in the calibration. Absolute rates move a lot with how strict the bars are, so read the table as models against each other, not against the live app.
+For scale, today's model with the app's shipped bars (0.70 / 0.80 / 0.92, no calibration) names 47% of regulars' appearances from meeting 3 on clean audio and 35% on call audio, with 0 wrong silent names. Our calibration (zero wrong names plus a safety margin, same recipe for every model) gives the same model 58% with clean-only bars, and 43% clean / 25% call once call audio is in the calibration. Absolute rates move a lot with how strict the bars are, so read the table as models against each other, not against the live app.
 
 Notes on reading it:
 
@@ -194,7 +198,7 @@ Notes on reading it:
 
 Everyone at once: all labeled people share one database and each probe has to pick the right name, or none for a stranger. The number in the model table is **DIR at zero wrong names**: the share of known people shown with the right name at the lowest bar where nobody, known or stranger, gets a wrong name. Higher is better; the table shows clean / opus12 probes, one bar per model.
 
-Generated 2026-09-28 20:18 by `scripts/voiceprint/score_lineup.py`. All 334 people of vox1o, libri, ami and icsi (after the audit drop lists) share one database. Per seed, about 233 are enrolled (their earliest session, all clips) and about 101 are strangers who are never enrolled: every `stranger_only` person plus 20% of each set's multi-session people. Probes are every later session of an enrolled person and every session of a stranger. Numbers are means over 5 seeds (which people are strangers, which clips make the 1- and 3-clip probes).
+Generated 2026-09-28 21:42 by `scripts/voiceprint/score_lineup.py`. All 334 people of vox1o, libri, ami and icsi (after the audit drop lists) share one database. Per seed, about 233 are enrolled (their earliest session, all clips) and about 101 are strangers who are never enrolled: every `stranger_only` person plus 20% of each set's multi-session people. Probes are every later session of an enrolled person and every session of a stranger. Numbers are means over 5 seeds (which people are strangers, which clips make the 1- and 3-clip probes).
 
 How to read it. A name is shown when the top match's cosine clears the model's bar. **DIR** = known person, right name shown. **misID** = known person, wrong name shown. **stranger FA** = stranger given someone's name. **DIR @ 0 wrong** = DIR at the lowest bar where nobody (known or stranger) gets a wrong name. **One bar per model** (per talk time): set on clean + opus12 + noisy probes pooled, because the app can't tell a clean room from a weak call; the columns then show each condition at that one bar. `0.1% FA bar` = the bar letting through at most 0.1% of stranger probes; with 1,129 stranger probes per seed over 3 conditions that allows 1 stranger false alarm(s) in the pooled set.
 
@@ -206,13 +210,17 @@ Ranked by the headline: **DIR at zero wrong names on opus12 probes**, clean enro
 
 | # | model | score | rank-1 opus12 | **DIR @ 0 wrong, opus12** | DIR @ 0 wrong clean / noisy | misID @ 0.1% FA bar, opus12 (mean count per seed) | stranger FA @ 0.1% FA bar, clean / opus12 / noisy | misID @ 1% FA bar, opus12 | bar @ 0 wrong |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | redimnet2-b4-vox2-lm | centered | 99.5% | **85.8% ± 2.4** | 92.1% / 84.7% | 0.00% (0.0) | 0.00% / 0.00% / 0.27% | 0.00% (0.0) | 0.596 |
-| 2 | wespeaker-resnet221-lm-coreml | centered | 99.1% | **73.5% ± 1.4** | 88.8% / 76.0% | 0.00% (0.0) | 0.27% / 0.00% / 0.00% | 0.00% (0.0) | 0.626 |
-| 3 | wespeaker-campplus-lm | centered | 99.1% | **73.4% ± 7.2** | 87.4% / 75.8% | 0.00% (0.0) | 0.22% / 0.00% / 0.05% | 0.08% (1.0) | 0.658 |
-| 4 | 3dspeaker-campplus-zh-en-common-advanced | raw | 98.3% | **70.2% ± 1.7** | 81.2% / 72.8% | 0.02% (0.2) | 0.21% / 0.00% / 0.06% | 0.05% (0.6) | 0.679 |
-| 5 | **app-wespeaker-coreml** (baseline) | centered | 98.9% | **70.2% ± 2.5** | 86.7% / 74.5% | 0.00% (0.0) | 0.27% / 0.00% / 0.00% | 0.02% (0.2) | 0.622 |
-| 6 | wespeaker-resnet34-lm | raw | 98.9% | **64.7% ± 6.2** | 84.0% / 71.1% | 0.00% (0.0) | 0.22% / 0.00% / 0.05% | 0.00% (0.0) | 0.659 |
-| 7 | 3dspeaker-eres2net-en-voxceleb | raw | 98.9% | **60.6% ± 1.1** | 75.6% / 56.9% | 0.05% (0.6) | 0.11% / 0.16% / 0.00% | 0.05% (0.6) | 0.717 |
+| 1 | redimnet-b6-vox2-lm | centered | 99.6% | **88.4% ± 0.9** | 94.0% / 86.4% | 0.00% (0.0) | 0.00% / 0.00% / 0.27% | 0.00% (0.0) | 0.591 |
+| 2 | redimnet2-b4-vox2-lm | centered | 99.5% | **85.8% ± 2.4** | 92.1% / 84.7% | 0.00% (0.0) | 0.00% / 0.00% / 0.27% | 0.00% (0.0) | 0.596 |
+| 3 | redimnet2-b6-vox2-lm | raw | 99.6% | **82.8% ± 2.1** | 90.6% / 83.7% | 0.00% (0.0) | 0.00% / 0.00% / 0.27% | 0.00% (0.0) | 0.634 |
+| 4 | wespeaker-resnet221-lm-coreml | centered | 99.1% | **73.5% ± 1.4** | 88.8% / 76.0% | 0.00% (0.0) | 0.27% / 0.00% / 0.00% | 0.00% (0.0) | 0.626 |
+| 5 | wespeaker-campplus-lm | centered | 99.1% | **73.4% ± 7.2** | 87.4% / 75.8% | 0.00% (0.0) | 0.22% / 0.00% / 0.05% | 0.08% (1.0) | 0.658 |
+| 6 | wespeaker-resnet293-lm-coreml | centered | 99.1% | **70.2% ± 2.0** | 87.0% / 74.9% | 0.00% (0.0) | 0.00% / 0.00% / 0.27% | 0.00% (0.0) | 0.639 |
+| 7 | 3dspeaker-campplus-zh-en-common-advanced | raw | 98.3% | **70.2% ± 1.7** | 81.2% / 72.8% | 0.02% (0.2) | 0.21% / 0.00% / 0.06% | 0.05% (0.6) | 0.679 |
+| 8 | **app-wespeaker-coreml** (baseline) | centered | 98.9% | **70.2% ± 2.5** | 86.7% / 74.5% | 0.00% (0.0) | 0.27% / 0.00% / 0.00% | 0.02% (0.2) | 0.622 |
+| 9 | wespeaker-resnet34-lm | raw | 98.9% | **64.7% ± 6.2** | 84.0% / 71.1% | 0.00% (0.0) | 0.22% / 0.00% / 0.05% | 0.00% (0.0) | 0.659 |
+| 10 | titanet-large | centered | 98.8% | **64.4% ± 12.4** | 76.4% / 40.0% | 0.00% (0.0) | 0.16% / 0.05% / 0.06% | 0.07% (0.8) | 0.647 |
+| 11 | 3dspeaker-eres2net-en-voxceleb | raw | 98.9% | **60.6% ± 1.1** | 75.6% / 56.9% | 0.05% (0.6) | 0.11% / 0.16% / 0.00% | 0.05% (0.6) | 0.717 |
 
 **Clean audio, every model**
 
@@ -220,13 +228,13 @@ Clean enrollment and clean probes, bar tuned on clean probes alone (so clean-onl
 
 | # | model | coverage | score | rank-1 | **DIR @ 0 wrong** | misID @ 0.1% FA bar | misID @ 1% FA bar | within-dataset DIR @ 0 | 1 clip / 3 clips DIR @ 0 | 2-session enrollment | raw / centered DIR @ 0 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | redimnet-b6-vox2-lm | partial (clean) | centered | 99.7% | **95.7% ± 0.3** | 0.00% (0.0) | 0.00% (0.0) | 95.9% | 83.0% / 95.2% | 98.2% | 93.5% / 95.7% |
+| 1 | redimnet-b6-vox2-lm | full | centered | 99.7% | **95.7% ± 0.3** | 0.00% (0.0) | 0.00% (0.0) | 95.9% | 83.0% / 95.2% | 98.2% | 93.5% / 95.7% |
 | 2 | redimnet2-b4-vox2-lm-coreml | partial (clean) | centered | 99.7% | **94.0% ± 0.9** | 0.00% (0.0) | 0.00% (0.0) | 94.0% | 80.8% / 94.4% | 97.6% | 92.7% / 94.0% |
 | 3 | redimnet2-b4-vox2-lm | full | centered | 99.7% | **94.0% ± 0.9** | 0.00% (0.0) | 0.00% (0.0) | 94.0% | 80.8% / 94.4% | 97.6% | 92.7% / 94.0% |
 | 4 | redimnet2-b3-vb2-vox2-cnc2-lm | partial (clean) | centered | 99.6% | **93.1% ± 0.7** | 0.00% (0.0) | 0.00% (0.0) | 93.3% | 86.1% / 93.5% | 97.6% | 90.7% / 93.1% |
 | 5 | redimnet2-b6-vox2-lm-coreml | partial (clean) | centered | 99.7% | **92.3% ± 0.7** | 0.00% (0.0) | 0.00% (0.0) | 92.3% | 82.4% / 90.8% | 98.0% | 92.0% / 92.3% |
-| 6 | redimnet2-b6-vox2-lm | partial (clean) | centered | 99.7% | **92.3% ± 0.7** | 0.00% (0.0) | 0.00% (0.0) | 92.3% | 82.4% / 90.8% | 98.0% | 92.0% / 92.3% |
-| 7 | wespeaker-resnet293-lm-coreml | partial (clean) | centered | 99.6% | **91.4% ± 1.2** | 0.00% (0.0) | 0.00% (0.0) | 92.1% | 60.5% / 90.2% | 96.7% | 89.7% / 91.4% |
+| 6 | redimnet2-b6-vox2-lm | full | centered | 99.7% | **92.3% ± 0.7** | 0.00% (0.0) | 0.00% (0.0) | 92.3% | 82.4% / 90.8% | 98.0% | 92.0% / 92.3% |
+| 7 | wespeaker-resnet293-lm-coreml | full | centered | 99.6% | **91.4% ± 1.2** | 0.00% (0.0) | 0.00% (0.0) | 92.1% | 60.5% / 90.2% | 96.7% | 89.7% / 91.4% |
 | 8 | redimnet-b2-vox2-lm | partial (clean) | centered | 99.7% | **89.4% ± 1.5** | 0.00% (0.0) | 0.00% (0.0) | 89.4% | 77.9% / 89.3% | 96.0% | 88.1% / 89.4% |
 | 9 | wespeaker-resnet221-lm-coreml | full | centered | 99.7% | **88.8% ± 1.1** | 0.00% (0.0) | 0.00% (0.0) | 88.8% | 72.8% / 89.9% | 96.7% | 87.7% / 88.8% |
 | 10 | wespeaker-campplus-lm | full | centered | 99.4% | **87.6% ± 4.3** | 0.00% (0.0) | 0.00% (0.0) | 91.0% | 73.8% / 90.1% | 92.7% | 83.8% / 87.6% |
@@ -239,7 +247,7 @@ Clean enrollment and clean probes, bar tuned on clean probes alone (so clean-onl
 | 17 | 3dspeaker-campplus-en-voxceleb | partial (clean) | centered | 99.4% | **83.8% ± 2.6** | 0.00% (0.0) | 0.00% (0.0) | 85.1% | 67.8% / 84.5% | 91.8% | 81.0% / 83.8% |
 | 18 | 3dspeaker-eres2net-en-voxceleb | full | centered | 99.3% | **83.5% ± 2.8** | 0.02% (0.2) | 0.05% (0.6) | 88.6% | 40.6% / 83.9% | 91.8% | 79.7% / 83.5% |
 | 19 | 3dspeaker-campplus-zh-en-common-advanced | full | raw | 99.0% | **81.7% ± 1.7** | 0.00% (0.0) | 0.02% (0.2) | 83.6% | 69.1% / 82.1% | 88.8% | 81.7% / 78.5% |
-| 20 | titanet-large | partial (clean) | centered | 99.2% | **77.5% ± 8.5** | 0.00% (0.0) | 0.00% (0.0) | 77.5% | 63.0% / 74.3% | 91.0% | 75.4% / 77.5% |
+| 20 | titanet-large | full | centered | 99.2% | **77.5% ± 8.5** | 0.00% (0.0) | 0.00% (0.0) | 77.5% | 63.0% / 74.3% | 91.0% | 75.4% / 77.5% |
 | 21 | titanet-small | partial (clean) | centered | 98.9% | **76.3% ± 6.0** | 0.00% (0.0) | 0.08% (1.0) | 76.4% | 54.6% / 70.3% | 86.6% | 68.6% / 76.3% |
 | 22 | speakernet | partial (clean) | centered | 96.7% | **65.4% ± 4.3** | 0.00% (0.0) | 0.16% (2.0) | 66.5% | 35.3% / 60.7% | 70.5% | 61.4% / 65.4% |
 | 23 | 3dspeaker-campplus-zh-cn-common | partial (clean) | centered | 91.5% | **52.1% ± 3.1** | 0.03% (0.4) | 0.24% (3.0) | 55.2% | 30.0% / 45.9% | 56.1% | 42.9% / 52.1% |
@@ -249,24 +257,102 @@ The variants (yodas strangers, opus12 enrollment, 2-session enrollment, one clip
 
 ## Score fusion
 
-Generated 2026-09-28T20:06:59 by `scripts/voiceprint/score_fusion.py` v1.0 on top of `score_verify.py` v1.4 (same trial lists, drop lists, embeddings and metric code). Human-labeled sets: vox1o, libri, ami, icsi. TAR, EER and Δ are in % (Δ in percentage points).
+Generated 2026-09-28T21:18:36 by `scripts/voiceprint/score_fusion.py` v1.0 on top of `score_verify.py` v1.4 (same trial lists, drop lists, embeddings and metric code). Human-labeled sets: vox1o, libri, ami, icsi. TAR, EER and Δ are in % (Δ in percentage points).
 
 Complete pairs only (all four sets, every condition), cross-condition headline, fusion minus the better single model of the pair:
 
-| pair | method | Δ TAR@1e-3 cross | p | Δ EER cross | significant? |
-|---|---|---|---|---|---|
-| redimnet2-b4-vox2-lm + app-wespeaker-coreml | concat | +0.2 [-0.7, +2.0] | 0.358 | -0.10* [-0.21, -0.01] | no |
-| redimnet2-b4-vox2-lm + app-wespeaker-coreml | zavg | +0.1 [-0.9, +1.9] | 0.468 | -0.08 [-0.20, +0.01] | no |
-| redimnet2-b4-vox2-lm + app-wespeaker-coreml | ztuned | +1.0* [+0.4, +2.1] | 0.010 | -0.18* [-0.25, -0.13] | yes (TAR and EER) |
-| redimnet2-b4-vox2-lm + app-wespeaker-coreml | zavg-percond | +0.1 [-0.9, +1.9] | 0.478 | -0.08 [-0.20, +0.01] | no |
+| pair | method | Δ TAR@1e-3 cross | p | Δ EER cross | significant? | Δ TAR@1e-3 vs best single of all candidates |
+|---|---|---|---|---|---|---|
+| redimnet2-b6-vox2-lm + app-wespeaker-coreml | concat | -0.2 [-1.1, +1.6] | 0.782 | +0.03 [-0.07, +0.11] | no | -0.2 [-1.1, +1.6] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b6-vox2-lm + app-wespeaker-coreml | zavg | -0.3 [-1.3, +1.5] | 0.898 | +0.04 [-0.06, +0.13] | no | -0.3 [-1.3, +1.5] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b6-vox2-lm + app-wespeaker-coreml | ztuned | +1.0* [+0.3, +2.0] | 0.012 | -0.12* [-0.18, -0.07] | yes (TAR and EER) | +1.0* [+0.3, +2.0] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + app-wespeaker-coreml | concat | +0.2 [-0.7, +2.0] | 0.335 | -0.10* [-0.21, -0.02] | no | -1.5 [-2.8, +0.4] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + app-wespeaker-coreml | zavg | +0.1 [-0.8, +2.0] | 0.455 | -0.08* [-0.19, -0.01] | no | -1.6 [-2.9, +0.3] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + app-wespeaker-coreml | ztuned | +1.0* [+0.4, +2.1] | 0.004 | -0.18* [-0.25, -0.13] | yes (TAR and EER) | -0.7 [-2.4, +1.0] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml | concat | +1.0* [+0.3, +3.0] | 0.020 | -0.21* [-0.30, -0.12] | yes (TAR and EER) | +1.0* [+0.3, +3.0] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml | zavg | +0.8* [+0.2, +2.9] | 0.044 | -0.19* [-0.29, -0.10] | yes (TAR and EER) | +0.8* [+0.2, +2.9] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml | ztuned | +1.7* [+0.9, +2.8] | 0.004 | -0.23* [-0.29, -0.17] | yes (TAR and EER) | +1.7* [+0.9, +2.8] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + wespeaker-resnet221-lm-coreml | concat | +1.9* [+1.1, +4.0] | 0.004 | -0.36* [-0.47, -0.28] | yes (TAR and EER) | +0.2 [-1.0, +2.2] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + wespeaker-resnet221-lm-coreml | zavg | +1.8* [+1.0, +4.0] | 0.004 | -0.35* [-0.46, -0.26] | yes (TAR and EER) | +0.1 [-1.2, +2.0] vs `redimnet2-b6-vox2-lm` |
+| redimnet2-b4-vox2-lm + wespeaker-resnet221-lm-coreml | ztuned | +1.9* [+1.5, +3.8] | 0.004 | -0.36* [-0.46, -0.29] | yes (TAR and EER) | +0.2 [-1.1, +2.3] vs `redimnet2-b6-vox2-lm` |
 
-4 fusion-versus-single comparisons are listed; with that many, expect about 0.2 to clear a 95% CI by chance, so a lone marginal star is not evidence.
+- Significant gains over the better single model of the pair: 8 of 12 comparisons. Largest: redimnet2-b4-vox2-lm + wespeaker-resnet221-lm-coreml, concat, +1.9* [+1.1, +4.0] TAR@1e-3 and -0.36* [-0.47, -0.28] EER (pp).
+- Against the best single model on offer (the practical alternative), 4 of 12 clear a 95% CI: redimnet2-b6-vox2-lm + app-wespeaker-coreml (ztuned) +1.0* [+0.3, +2.0] vs `redimnet2-b6-vox2-lm`; redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml (concat) +1.0* [+0.3, +3.0] vs `redimnet2-b6-vox2-lm`; redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml (zavg) +0.8* [+0.2, +2.9] vs `redimnet2-b6-vox2-lm`; redimnet2-b6-vox2-lm + wespeaker-resnet221-lm-coreml (ztuned) +1.7* [+0.9, +2.8] vs `redimnet2-b6-vox2-lm`.
+- `concat` (no fitted numbers, one vector per person, the simplest app version) is significant in 2 of 4 pairs; `ztuned` in 4 of 4.
+
+12 fusion-versus-single comparisons are listed; with that many, expect about 0.6 to clear a 95% CI by chance, so a lone marginal star is not evidence.
 
 Full tables (by condition, per set, weight sweep, method notes) are in the fusion summary file under `results/`.
 
 ## Latency
 
-pending: `results/latency.md` hasn't been written yet. The `ms/clip` column above uses the embedding job's own timings (median per clip on a busy machine, mixed devices), which are only good for spotting order of magnitude.
+#### Voiceprint latency: what each finalist costs after a meeting
+
+Generated 2026-09-28 21:57 by `scripts/voiceprint/bench_latency.py` (8 interleaved rounds). Raw data: `latency_raw.jsonl`, `latency_cold.jsonl`, `latency_plans.json`, `latency_turns.json` in this folder.
+
+After a call, Nemotron splits the audio into speaker turns and every turn gets one voiceprint. A turn longer than 10 s is cut into windows (up to 10 s, a new window every 5 s), each window is embedded, and the vectors are averaged. So the cost is windows per hour times time per window. Everything below runs Core ML with compute units ALL on an M5 Max.
+
+**The Mac was heavily loaded the whole time** (load average 156 to 468 on 18 cores, because other agents were embedding datasets). Raw milliseconds are noisy and, for anything that touches the CPU, inflated. Each round times every model once, one at a time, with the baseline in the same round, and the ratio is taken inside the round; those ratios are the trustworthy part. The rounds are split into calm and contended by how the baseline behaved (see the answer below), and "fastest 10%" (p10) is what a call costs when nothing else is competing.
+
+#### Answer: extra seconds after a meeting, vs the app's current model
+
+8 rounds were run. 4 were calm (the baseline, which does identical work every call, ran at 12 to 14 ms per call) and 4 were contended (25 to 115 ms per call; the CPU-only FBank stage stalls). The headline uses the calm rounds; the busy-Mac column uses all of them.
+
+| model | extra, 30-min meeting | extra, 60-min meeting | range over calm rounds (60 min) | busy Mac, 60 min (all rounds, mean of raw calls) | its total voiceprint time, 60 min (calm) | cost vs baseline (calm) |
+|---|---|---|---|---|---|---|
+| **app-wespeaker-coreml** (baseline) | 0 | 0 | - | 0 | 12 s | 1.00x |
+| **wespeaker-resnet293-lm** | +2.0 s | +4.1 s | +2.7 to +5.3 s | -22 s | 16 s | 1.34x |
+| **wespeaker-resnet221-lm** | +0.7 s | +1.4 s | -0.1 to +2.4 s | -26 s | 14 s | 1.12x |
+| **redimnet2-b6-vox2-lm** | +1.9 s | +3.9 s | +2.1 to +5.4 s | -17 s | 16 s | 1.33x |
+| **redimnet2-b4-vox2-lm** | -0.9 s | -1.8 s | -3.1 to +1.1 s | -23 s | 11 s | 0.86x |
+
+How this is priced: every window of the real turn mix (942 turns and 970 windows per hour, hop 5 s) is charged the time its model takes for a window of that length (the fused models take the length rounded up to one they accept; the baseline embeds 960 fixed 10 s pieces per hour whatever the turn length), plus, for the wespeaker builds, the measured cost of the input length changing from call to call. "Extra" is the model's time minus the baseline's time **in the same round**, median over rounds. Negative means faster than today. The calm columns are median-call costs on the calm rounds; the busy-Mac column is the plain mean of 300 raw calls in arrival order, stalls included, over all rounds. Both leave out load time, which is larger than any of the per-window differences (section 4).
+
+Why two views: the baseline's FBank stage runs on the CPU only, and while the Mac is busy about one call in five stalls for 100 ms or more; the ANE and GPU models stay close to their median. On a quiet Mac the models are within a few seconds of each other per hour of meeting (the calm columns). On a Mac that is busy while the meeting is processed, the baseline's mean cost per window is 43 ms (mean of raw calls over all rounds) and the challengers' are 19 ms (wespeaker-resnet293-lm), 16 ms (wespeaker-resnet221-lm), 26 ms (redimnet2-b6-vox2-lm), 21 ms (redimnet2-b4-vox2-lm).
+
+#### At a glance
+
+Warm latency per window, calm rounds, ms at 2 / 4 / 8 / 10 s (the baseline is one fixed 10 s call for every length).
+
+| model | ms per window at 2 / 4 / 8 / 10 s | extra, 30 min | extra, 60 min | warm load | first-ever load | memory growth (peak) | size on disk | runs on |
+|---|---|---|---|---|---|---|---|---|
+| **app-wespeaker-coreml** | 14 / 11 / 13 / 13 | 0 | 0 | 0.7 s | 1 s | +172 MB | 15 MB | GPU for the embedding net (124 of 124 ops), CPU for FBank |
+| **wespeaker-resnet293-lm** | 10 / 20 / 41 / 53 | +2.0 s | +4.1 s | 24.8 s | 61 s | +154 MB | 59 MB | Neural Engine (493 of 522 ops, 29 on CPU) |
+| **wespeaker-resnet221-lm** | 8 / 15 / 31 / 41 | +0.7 s | +1.4 s | 21.9 s | 35 s | +163 MB | 49 MB | Neural Engine (373 of 402 ops, 29 on CPU) |
+| **redimnet2-b6-vox2-lm** | 10 / 23 / 40 / 44 | +1.9 s | +3.9 s | 4.2 s (39 s for all lengths) | 14 s (139 s all lengths) | +2347 MB | 55 MB | GPU (704 of 704 ops) |
+| **redimnet2-b4-vox2-lm** | 8 / 15 / 21 / 25 | -0.9 s | -1.8 s | 4.0 s (34 s for all lengths) | 15 s (131 s all lengths) | +1684 MB | 32 MB | GPU (677 of 677 ops) |
+
+#### Takeaways
+
+- **app-wespeaker-coreml** (today): 12 s of voiceprint time per 60-minute meeting, loads in under a second, +172 MB, GPU for the embedding net (124 of 124 ops), CPU for FBank. Under CPU load its FBank stage stalls, so it is the model most sensitive to a busy Mac.
+- **wespeaker-resnet293-lm**: +4.1 s per 60-minute meeting (+2.0 s per 30-minute) at the median call; 25 s warm load, 62 s first-ever; +154 MB; 53 ms for a full 10 s window; Neural Engine (493 of 522 ops, 29 on CPU).
+- **wespeaker-resnet221-lm**: +1.4 s per 60-minute meeting (+0.7 s per 30-minute) at the median call; 22 s warm load, 36 s first-ever; +163 MB; 41 ms for a full 10 s window; Neural Engine (373 of 402 ops, 29 on CPU).
+- **redimnet2-b6-vox2-lm**: +3.9 s per 60-minute meeting (+1.9 s per 30-minute) at the median call; 4 s warm load (39 s to have every length ready), 139 s first-ever with every length; +2347 MB; 44 ms for a full 10 s window; GPU (704 of 704 ops).
+- **redimnet2-b4-vox2-lm**: -1.8 s per 60-minute meeting (-0.9 s per 30-minute) at the median call; 4 s warm load (34 s to have every length ready), 131 s first-ever with every length; +1684 MB; 25 ms for a full 10 s window; GPU (677 of 677 ops).
+
+#### 1. Turns and windows per hour
+
+The primary source is the speaker lab's real Nemotron output (45 synthetic YODAS3 meetings, 12 to 44 min each, 21 hours), with the app's turn rules re-applied (same-speaker gaps under 0.29 s joined, turns under 0.25 s dropped). The app embeds every turn of 0.25 s or more, including the short ones. AMI and ICSI (human labels, real meetings) are a cross-check.
+
+| source | meetings | hours | turns / hour | windows / hour (hop 5 s) | fixed 10 s pieces / hour (app today) | median turn | p90 turn | turns > 10 s |
+|---|---|---|---|---|---|---|---|---|
+| nemotron-lab p3-A | 15 | 7.08 | 643 | 656 | 652 | 1.49 s | 4.6 s | 1.1% |
+| nemotron-lab p3-B | 12 | 4.67 | 955 | 995 | 980 | 1.61 s | 5.39 s | 2.5% |
+| nemotron-lab p3-C | 10 | 5.42 | 1168 | 1181 | 1178 | 1.58 s | 4.66 s | 0.8% |
+| nemotron-lab p3-E | 8 | 4.19 | 1143 | 1200 | 1177 | 1.49 s | 5.09 s | 2.2% |
+| nemotron-lab pooled | 45 | 21.35 | 942 | 970 | 960 | 1.54 s | 4.91 s | 1.6% |
+| ami (human labels) | 96 | 50.49 | 806 | 1008 | 926 | 1.67 s | 10.38 s | 10.5% |
+| icsi (human labels) | 75 | 71.69 | 1421 | 1528 | 1487 | 1.7 s | 6.46 s | 3.7% |
+
+Turns are short: 35% are under 1 s and only 1.6% run past 10 s, so almost every turn is one window and the 5 s hop adds only 3% more windows than turns. The lab pool (942 turns/h) sits between AMI (806) and ICSI (1421, seven-person research meetings, overlap not resolved so it is an upper bound); the family rows show how much the count moves with the number of speakers (A is 1 to 3 speakers, C is 5 to 8).
+
+For scale: the lab's whole post-call step (transcription, naming, everything) took a median 35.5 s for a median 29.3-minute call (1.18 s per meeting minute, 45 meetings).
+
+#### 2. Time per window
+
+Warm latency of one model call, median of 50 calls after 10 warm-ups at each length, per round; the cell is the median over the 4 calm rounds, with the fastest-10% value (p10) in brackets. The baseline always runs one fixed 10 s window (FBank on CPU, then the embedding net), so a 2 s turn costs what a 10 s turn does. The fused models take the audio at its own length, rounded up to a length they accept.
+
+_(cut here; the rest is in the file)_
 
 ![Accuracy against latency](../../data/eval/voiceprint/results/report/accuracy_vs_latency.png)
 
@@ -285,7 +371,72 @@ Those ms numbers were taken on a machine running other jobs. Use them for order 
 
 ## End to end
 
-pending: `results/e2e_summary.md` hasn't been written yet (the winner has to be wired into the app first).
+#### Voiceprint end to end: real pipeline, Nemotron diarization, shipped cleanup and naming
+
+#### Takeaways
+
+- **Wrong silent names: 0 for every voiceprint**, out of 175 to 190 names given silently per config (129 meetings per config: the six main sets, the no-invite run of p2-X, and the sound-alike company p1-Fhard-1). Wrong suggestions ("Was this X?" with the wrong X): also 0. Across all pairs of different people in the three companies, the highest session-voiceprint cosine any model saw is 0.42 to 0.68, against invitee bars of 0.80 to 0.82.
+- **Separation does not change.** Rows, fragments, blends, missed people and words right are identical to today's model in all 87 meetings of the six main sets for ReDimNet2 b4 and b6, and for ResNet293 in all but one (C-3308 of p3-C, words right 86.5% to 86.4%). The voiceprint only picks the fold target, and the fold rarely changes with the model.
+- **Every model names every regular silently at the same meeting as today, with three one-meeting slips for b4** (Elena Rossi in p2-X and in p2-X-noinv, 6th time vs 5th; Robert Chen in p2-X-noinv, 5th vs 4th). It happens at the 3rd to 4th time we hear a person (p2-X worst case 6th). The simulator caps at that point, so the differences below are second order: fewer typed names and confirmations, and more later meetings named silently.
+- **ReDimNet2 is a little better on naming work; ResNet293 is not.** Total naming work over the four company runs (F, X, X-noinv, Fhard): today 278, b4 263 (-5%), b6 253 (-9%), ResNet293 282 (+1%). Voices named silently: 178, 184, 190, 175. The clearest gap is the sound-alike company: work 82 today, 68 for b4 and b6 (-17%), 78 for ResNet293; silent names 48 today, 57 for b4 and b6.
+- **Why:** on call-quality voices the weak end of same-person scores is much higher for ReDimNet2 (5th percentile of same-person scores 0.57 to 0.71 across F, X and Fhard vs 0.47 to 0.56 today, while the bars moved up by only 0.015 to 0.03), and lower for ResNet293 (0.33 to 0.43). ResNet293's bars are still clean-audio-only calibrations.
+- **Speed:** on a quiet Mac, a 25-minute 7-speaker call takes 9.2 s of pipeline today, 9.2 s with b4 (1.00x), 10.7 s with b6 (1.17x), 11.7 s with ResNet293 (1.28x).
+- **Pick:** b6 is best on naming (-9%, most silent names); b4 costs no speed and gets most of the gain (-5% total, same -17% on sound-alikes). This is one deterministic run per config on simulated calls with no error bars, so treat +-10 rows as noise; the safe reading is "no worse than today on any measure, faster to name people with ReDimNet2, wrong names 0".
+
+Config for every row: `--backend nemotron --sep-fold 5 --sep-cap one --calendar-naming`. Only the voiceprint (embedder plus its calibrated thresholds) changes. Simulated meetings with answer keys (YODAS3), scored by `scripts/speaker_lab/score.py`.
+
+| voiceprint | wrong silent names | naming work F / X / X-noinv / Fhard | voices named silently F / X / X-noinv / Fhard | regulars named silently F / X / X-noinv / Fhard | first silent at appearance # (median, worst) F / X | rows vs people | exact | words right | missed | speed, quiet Mac (paired test) | done |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| today (WeSpeaker ResNet34-LM, FluidAudio) | 0 | 66 / 67 / 63 / 82 | 54 / 36 / 40 / 48 | 7/7 / 6/6 / 6/6 / 7/7 | 3, 4 / 3.5, 6 | 317 vs 329 | 80% | 85.5% | 15 | 9.2 s per 25-min call (1.00x) | all |
+| redimnet2-b4-vox2-lm | 0 | 60 / 69 / 66 / 68 | 56 / 34 / 37 / 57 | 7/7 / 6/6 / 6/6 / 7/7 | 3, 4 / 3.5, 6 | 317 vs 329 | 80% | 85.5% | 15 | 9.2 s per 25-min call (1.00x) | all |
+| redimnet2-b6-vox2-lm | 0 | 59 / 65 / 61 / 68 | 57 / 36 / 40 / 57 | 7/7 / 6/6 / 6/6 / 7/7 | 3, 4 / 3.5, 6 | 317 vs 329 | 80% | 85.5% | 15 | 10.7 s per 25-min call (1.17x) | all |
+| wespeaker-resnet293-lm | 0 | 74 / 67 / 63 / 78 | 50 / 35 / 39 / 51 | 7/7 / 6/6 / 6/6 / 7/7 | 3, 4 / 3.5, 6 | 317 vs 329 | 80% | 85.5% | 15 | 11.7 s per 25-min call (1.28x) | all |
+
+Naming work: typed name 3, pick existing 2, confirm 1, wrong silent name 10, summed over the whole series (F = company p0-F, 24 meetings; X = company p2-X, 18 meetings, cross-recording voices; X-noinv = X with no calendar invite, so the lineup falls back to recently heard people; Fhard = company p1-Fhard-1, 24 meetings, sound-alike voices, bonus set). Lower is better. Regulars = people who appear in at least 4 meetings of the series. Rows / exact / words right / missed / seconds cover the sets every row has finished (p3-A, p3-B, p3-C, p3-E, p0-F, p2-X), one entry per channel and meeting; wrong silent names count every finished run including the no-invite run.
+
+#### Separation, per set
+
+Rows shown vs true people, exact meetings, words under the right person, missed people. Fresh-DB sets (p3-*) only exercise the voiceprint through the fold; F and X also exercise it through cross-meeting matching.
+
+| voiceprint | p3-A | p3-B | p3-C | p3-E | p0-F | p2-X |
+|---|---|---|---|---|---|---|
+| today (WeSpeaker ResNet34-LM, FluidAudio) | 15/15 rows, 100% exact, 91.4% words, 0 missed | 42/42 rows, 100% exact, 85.0% words, 0 missed | 66/68 rows, 80% exact, 82.8% words, 2 missed | 39/38 rows, 62% exact, 83.7% words, 1 missed | 89/93 rows, 83% exact, 83.8% words, 4 missed | 66/73 rows, 56% exact, 85.6% words, 8 missed |
+| redimnet2-b4-vox2-lm | 15/15 rows, 100% exact, 91.4% words, 0 missed | 42/42 rows, 100% exact, 85.0% words, 0 missed | 66/68 rows, 80% exact, 82.8% words, 2 missed | 39/38 rows, 62% exact, 83.7% words, 1 missed | 89/93 rows, 83% exact, 83.8% words, 4 missed | 66/73 rows, 56% exact, 85.6% words, 8 missed |
+| redimnet2-b6-vox2-lm | 15/15 rows, 100% exact, 91.4% words, 0 missed | 42/42 rows, 100% exact, 85.0% words, 0 missed | 66/68 rows, 80% exact, 82.8% words, 2 missed | 39/38 rows, 62% exact, 83.7% words, 1 missed | 89/93 rows, 83% exact, 83.8% words, 4 missed | 66/73 rows, 56% exact, 85.6% words, 8 missed |
+| wespeaker-resnet293-lm | 15/15 rows, 100% exact, 91.4% words, 0 missed | 42/42 rows, 100% exact, 85.0% words, 0 missed | 66/68 rows, 80% exact, 82.8% words, 2 missed | 39/38 rows, 62% exact, 83.7% words, 1 missed | 89/93 rows, 83% exact, 83.8% words, 4 missed | 66/73 rows, 56% exact, 85.6% words, 8 missed |
+
+#### Regulars: appearance # of the first silent name (nth meeting with that person)
+
+**p0-F**
+
+| voiceprint | Priya Nair | Robert Chen | Sam Lee | Sam Patel | Kwame Mensah | Elena Rossi | Grace Kim | wrong suggestions |
+|---|---|---|---|---|---|---|---|---|
+| today (WeSpeaker ResNet34-LM, FluidAudio) | 3 | 4 | 3 | 3 | 3 | 4 | 3 | 0 |
+| redimnet2-b4-vox2-lm | 3 | 4 | 3 | 3 | 3 | 4 | 3 | 0 |
+| redimnet2-b6-vox2-lm | 3 | 4 | 3 | 3 | 3 | 4 | 3 | 0 |
+| wespeaker-resnet293-lm | 3 | 4 | 3 | 3 | 3 | 4 | 3 | 0 |
+
+**p2-X**
+
+| voiceprint | Priya Nair | Sam Lee | Kwame Mensah | Robert Chen | Elena Rossi | Sam Patel | wrong suggestions |
+|---|---|---|---|---|---|---|---|
+| today (WeSpeaker ResNet34-LM, FluidAudio) | 3 | 3 | 3 | 6 | 5 | 4 | 0 |
+| redimnet2-b4-vox2-lm | 3 | 3 | 3 | 6 | 6 | 4 | 0 |
+| redimnet2-b6-vox2-lm | 3 | 3 | 3 | 6 | 5 | 4 | 0 |
+| wespeaker-resnet293-lm | 3 | 3 | 3 | 6 | 5 | 4 | 0 |
+
+**p2-X no invite**
+
+| voiceprint | Priya Nair | Sam Lee | Kwame Mensah | Robert Chen | Elena Rossi | Sam Patel | wrong suggestions |
+|---|---|---|---|---|---|---|---|
+| today (WeSpeaker ResNet34-LM, FluidAudio) | 3 | 3 | 3 | 4 | 5 | 4 | 0 |
+| redimnet2-b4-vox2-lm | 3 | 3 | 3 | 5 | 6 | 4 | 0 |
+| redimnet2-b6-vox2-lm | 3 | 3 | 3 | 4 | 5 | 4 | 0 |
+| wespeaker-resnet293-lm | 3 | 3 | 3 | 4 | 5 | 4 | 0 |
+
+**p1-Fhard-1 (sound-alikes)**
+
+_(cut here; the rest is in the file)_
 
 ## What didn't work
 
@@ -318,7 +469,7 @@ Also blocked and not scored (yet): `ecapa2`, `redimnet2-b6-vb2-vox2-cnc2-lm`. EC
 
 ## Caveats
 
-- **Not every model is fully scored yet** (21 networks are missing some cells). Their pooled numbers average a different mix of sets and conditions than the complete rows, so compare with the paired Δ, which uses only shared cells.
+- **Not every model is fully scored yet** (12 networks are missing some cells). Their pooled numbers average a different mix of sets and conditions than the complete rows, so compare with the paired Δ, which uses only shared cells.
 - **Read speech and meetings, not your users.** The sets are VoxCeleb interviews, audiobooks, and two research-meeting corpora with headset mixes. AMI and ICSI are the closest to the product, and even they're English, scripted or research-group meetings.
 - **Call audio is simulated.** Opus, phone and noisy-room copies are deterministic degradations, not recordings of real Zoom calls. The end-to-end stage is where real pipeline audio finally shows up.
 - **Labels aren't perfect.** The audit found and dropped the obvious errors by model consensus, but the panel mostly shares VoxCeleb training, so it can share blind spots.
@@ -327,7 +478,6 @@ Also blocked and not scored (yet): `ecapa2`, `redimnet2-b6-vb2-vox2-cnc2-lm`. EC
 - **TAR at FAR 1e-4 is thin.** Even 30,000 different-person pairs allow only 3 false accepts per cell, so 1e-4 numbers are pooled under one threshold and noisy.
 - **The naming simulation is a Python mirror of the app, not the app.** It assumes the diarizer is perfect, uses point estimates without intervals, and calibrates each model's bars on half the speakers. Its calibrated bars differ from the bars the app ships (see the note under the naming table).
 - **License triage is engineering, not legal advice.** VoxCeleb-trained weights ship with credit; medium-risk items (TitaNet's telephone data, Alibaba's undisclosed 'common' data) need the owner's call.
-- **Latency numbers here are rough.** They come from the embedding job's timings on a machine running other jobs, across different devices (CPU, MPS, Core ML). Use them for order of magnitude. `latency.md` has the real benchmark once it exists.
 
 ## How to rerun
 
@@ -347,13 +497,9 @@ $VP/venv/bin/python scripts/voiceprint/build_report.py          # this file, the
 
 `build_report.py` reads the files listed in its docstring. It's safe to run at any point: a missing file becomes a pending row, and it never touches the app's real speaker database, prefs or capture library.
 
-Inputs found this run: 15. Missing: `latency.md`, `e2e_summary.md`.
+Inputs found this run: 17. Missing: none.
 
 ### Pending this run
 
-- latency benchmark (ms/clip uses rough embed-job timings until then)
-- end-to-end pipeline results
-- call-audio verification for 18 networks (3dspeaker-campplus-en-voxceleb, 3dspeaker-campplus-zh-cn-common, 3dspeaker-eres2net-base-200k-zh-cn-common, redimnet-M-vb2-vox2-cnc-ft_mix, redimnet-b2-vox2-lm...)
-- full cell coverage for 3 networks (3dspeaker-campplus-zh-en-common-advanced, redimnet2-b4-vox2-lm, wespeaker-resnet34-lm)
-- naming with call audio for 18 models
-- 158 embedding jobs still queued
+- call-audio verification for 12 networks (3dspeaker-campplus-en-voxceleb, 3dspeaker-campplus-zh-cn-common, 3dspeaker-eres2net-base-200k-zh-cn-common, redimnet-M-vb2-vox2-cnc-ft_mix, redimnet-b2-vox2-lm...)
+- naming with call audio for 15 models
