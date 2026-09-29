@@ -120,9 +120,10 @@ struct WritingEntryComposer {
 
     var hasOpenEntry: Bool { open != nil }
 
-    /// The Personal History events of every entry closed since the last
-    /// call, in keyboard order, and forgets them. Entries too short to save
-    /// still count; an entry that held a secret adds nothing.
+    /// The typed and accepted events of every entry closed since the last
+    /// call, in keyboard order, and forgets them. Never deletions. Entries
+    /// too short to save still count; an entry that held a secret adds
+    /// nothing.
     mutating func takeClearedHistory() -> [PersonalHistoryEvent] {
         defer { clearedHistory.removeAll() }
         return clearedHistory
