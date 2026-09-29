@@ -70,18 +70,22 @@ extension Transcription {
     /// matching loop can't see profiles created during the same recording) always score
     /// identically.
     ///
-    /// Includes three safeguards against false positives:
+    /// Includes three safeguards against false positives, with bars from `thresholds` (the active
+    /// voiceprint model's set; the WeSpeaker values are shown):
     /// - **Maturity bonus**: Immature profiles (callCount ≤ 2) require +0.08 higher similarity
-    /// - **Separation check**: Rejects match if two profiles are within 0.05 (ambiguous)
+    ///   (`immatureProfileMatchBonus`), callCount 3–4 +0.04 (`developingProfileMatchBonus`)
+    /// - **Separation check**: Rejects match if two profiles are within 0.05 (ambiguous,
+    ///   `ambiguousMatchMargin`)
     /// - **Negative-exemplar veto**: a profile is dropped from candidacy when the embedding too
-    ///   closely resembles a sample the user already rejected for it (`negativeExemplarsByProfile`).
-    ///   The map defaults empty, so callers that don't supply it — and profiles with no rejected
-    ///   samples — match exactly as before.
+    ///   closely resembles a sample the user already rejected for it (`negativeExemplarsByProfile`,
+    ///   floor `negativeVetoFloor`). The map defaults empty, so callers that don't supply it — and
+    ///   profiles with no rejected samples — match exactly as before.
     nonisolated public static func matchAgainstProfiles(
         _ embedding: [Float],
         profiles: [SpeakerProfile],
         threshold: Double,
-        negativeExemplarsByProfile: [UUID: [[Float]]] = [:]
+        negativeExemplarsByProfile: [UUID: [[Float]]] = [:],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> SnapshotMatchResult? {
         guard !profiles.isEmpty, !embedding.isEmpty else { return nil }
 
@@ -114,7 +118,8 @@ extension Transcription {
                    positiveSimilarity: similarity,
                    negativeExemplars: negatives,
                    profileAverage: profile.embedding,
-                   positiveExemplars: profile.exemplars
+                   positiveExemplars: profile.exemplars,
+                   thresholds: thresholds
                ) {
                 AppLogger.transcription.info("Match vetoed: negative exemplar", [
                     "profile": profile.displayName ?? profile.id.uuidString.prefix(8).description,
@@ -141,8 +146,8 @@ extension Transcription {
 
         // Maturity bonus: immature profiles need higher similarity to match.
         let maturityBonus: Double = switch matched.callCount {
-            case ...2: 0.08
-            case 3...4: 0.04
+            case ...2: thresholds.immatureProfileMatchBonus
+            case 3...4: thresholds.developingProfileMatchBonus
             default: 0.0
         }
         let effectiveThreshold = threshold + maturityBonus
@@ -158,7 +163,7 @@ extension Transcription {
         }
 
         // Separation check: reject if two profiles are too close (ambiguous).
-        if secondBestSimilarity >= threshold && (bestSimilarity - secondBestSimilarity) < 0.05 {
+        if secondBestSimilarity >= threshold && (bestSimilarity - secondBestSimilarity) < thresholds.ambiguousMatchMargin {
             AppLogger.transcription.info("Match rejected: ambiguous (two profiles too close)", [
                 "bestProfile": matched.displayName ?? matched.id.uuidString.prefix(8).description,
                 "bestSimilarity": String(format: "%.3f", bestSimilarity),
@@ -203,8 +208,8 @@ extension Transcription {
     ///
     /// Decouples the link/merge decision from the per-utterance attach floor (#8): a cluster
     /// attaches to a profile at the loose adaptive floor (0.70), but two clusters only FUSE when
-    /// they are directly similar *to each other* (cross-cluster cosine ≥
-    /// `SpeakerWritePathPolicy.crossClusterLinkFloor`).
+    /// they are directly similar *to each other* (cross-cluster cosine ≥ the active model's
+    /// `SpeakerEmbeddingThresholds.crossClusterLink`, 0.78 for WeSpeaker).
     ///
     /// Clusters on one profile are grouped by mutual cross-cluster similarity (union-find, so three
     /// fragments of one voice all collapse even if no single pair-with-the-largest holds). The group
@@ -219,7 +224,8 @@ extension Transcription {
         matchedProfileBySpeaker: [Int: UUID],
         matchSimilarityBySpeaker: [Int: Double],
         meanBySpeaker: [Int: [Float]],
-        segmentCountBySpeaker: [Int: Int]
+        segmentCountBySpeaker: [Int: Int],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> CrossClusterLinkPlan {
         var plan = CrossClusterLinkPlan()
         let byProfile = Dictionary(grouping: matchedProfileBySpeaker.keys) { matchedProfileBySpeaker[$0] }
@@ -251,7 +257,7 @@ extension Transcription {
                 for j in (i + 1)..<clusters.count {
                     guard let embA = meanBySpeaker[clusters[i]], let embB = meanBySpeaker[clusters[j]] else { continue }
                     let s = cosineSimilarityStatic(embA, embB)
-                    if SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: s) {
+                    if SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: s, thresholds: thresholds) {
                         union(clusters[i], clusters[j])
                     }
                 }

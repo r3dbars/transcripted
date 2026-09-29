@@ -28,6 +28,10 @@ import Foundation
 /// the auto-name bar. Raising the display bar must never silently change the write path, and a
 /// write-path change must never trade silent contamination for silent under-adaptation — both are
 /// observable only on the harness.
+///
+/// The cosine bars are per voiceprint model and live in `SpeakerEmbeddingThresholds`; the pipeline
+/// passes the active model's set. The static bars below are the WeSpeaker values, for callers that
+/// have no model in hand.
 public enum SpeakerWritePathPolicy {
 
     // MARK: - #6 Voiceprint write-back gate
@@ -47,15 +51,15 @@ public enum SpeakerWritePathPolicy {
     /// certified ladder's margin (`SpeakerNamingPolicy.autoAcceptMarginMin`) but applies it to the
     /// write decision the ladder does not cover. The read-side match guard only rejects runner-ups
     /// within 0.05 (ambiguous), so a match in [0.05, 0.12) is still NAMED but must not CONTAMINATE.
-    public static let writeBackMarginMin: Double = 0.12
+    public static let writeBackMarginMin: Double = SpeakerEmbeddingThresholds.weSpeaker.writeBackMarginMin
 
     /// At or above this cosine a match adapts the fingerprint at the full rate. Deliberately below
     /// the 0.92 *display* auto-name bar so legitimate drift keeps the profile current — using the
     /// display bar here would freeze adaptation and trade contamination for under-adaptation.
-    public static let confidentWriteBackSimilarity: Double = 0.80
+    public static let confidentWriteBackSimilarity: Double = SpeakerEmbeddingThresholds.weSpeaker.confidentWriteBack
 
     /// Between this and `confidentWriteBackSimilarity` a match adapts slowly. Below it, it freezes.
-    public static let cautiousWriteBackSimilarity: Double = 0.72
+    public static let cautiousWriteBackSimilarity: Double = SpeakerEmbeddingThresholds.weSpeaker.cautiousWriteBack
 
     /// EMA weight to blend a matched session embedding into the persisted voiceprint.
     ///
@@ -63,19 +67,22 @@ public enum SpeakerWritePathPolicy {
     ///   - similarity: cosine of the session mean to the matched profile.
     ///   - secondBestSimilarity: next-closest profile that cleared the match floor, or `nil`/negative
     ///     when there was no confusable runner-up (treated as unambiguous).
+    ///   - thresholds: the active voiceprint model's bars (`writeBackMarginMin`,
+    ///     `confidentWriteBack`, `cautiousWriteBack`).
     /// - Returns: `confidentBlendAlpha`, `cautiousBlendAlpha`, or `frozenBlendAlpha`.
     public static func voiceprintBlendAlpha(
         similarity: Double,
-        secondBestSimilarity: Double?
+        secondBestSimilarity: Double?,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> Float {
         // Ambiguity guard: a runner-up almost as close means we cannot be sure WHO this is, so
         // blending would risk contaminating the wrong profile. Freeze regardless of similarity.
         if let second = secondBestSimilarity, second >= 0,
-           (similarity - second) < writeBackMarginMin {
+           (similarity - second) < thresholds.writeBackMarginMin {
             return frozenBlendAlpha
         }
-        if similarity >= confidentWriteBackSimilarity { return confidentBlendAlpha }
-        if similarity >= cautiousWriteBackSimilarity { return cautiousBlendAlpha }
+        if similarity >= thresholds.confidentWriteBack { return confidentBlendAlpha }
+        if similarity >= thresholds.cautiousWriteBack { return cautiousBlendAlpha }
         return frozenBlendAlpha
     }
 
@@ -87,12 +94,15 @@ public enum SpeakerWritePathPolicy {
     /// are not silently merged, but below the within-meeting same-voice consolidation bar
     /// (`EmbeddingClusterer.sameVoiceConsolidationThreshold`, 0.88) so genuine over-segmented
     /// fragments of one voice that survived consolidation still fuse.
-    public static let crossClusterLinkFloor: Double = 0.78
+    public static let crossClusterLinkFloor: Double = SpeakerEmbeddingThresholds.weSpeaker.crossClusterLink
 
     /// Whether two clusters that matched the same profile are similar enough *to each other* to be
     /// the same person (genuine de-fragmentation) rather than two distinct people who both resemble
-    /// the profile.
-    public static func shouldFuseMatchedClusters(crossClusterSimilarity: Double) -> Bool {
-        crossClusterSimilarity >= crossClusterLinkFloor
+    /// the profile. The bar is the active model's `crossClusterLink`.
+    public static func shouldFuseMatchedClusters(
+        crossClusterSimilarity: Double,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> Bool {
+        crossClusterSimilarity >= thresholds.crossClusterLink
     }
 }

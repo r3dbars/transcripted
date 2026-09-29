@@ -118,6 +118,8 @@ data/
 # Speaker lab: separate harness build used while experiments run (scripts/speaker_lab/run_set.sh HARNESS=)
 Tools/SpeakerEvalHarness/.build-lab/
 Tools/SpeakerEvalHarness/.build-lab2/
+Tools/SpeakerEvalHarness/.build-vp/
+Tools/SpeakerEvalHarness/.build-vp2/
 
 # Speaker lab run outputs (local paths, own-call timelines; do not commit)
 reports/speaker-lab/

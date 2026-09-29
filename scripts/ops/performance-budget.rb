@@ -11,8 +11,11 @@ require "time"
 REPO_ROOT = Pathname.new(__dir__).join("../..").expand_path
 EXPECTED_PARAKEET_MODEL_DIR = "parakeet-tdt-0.6b-v3"
 EXPECTED_RESOURCE_ICONS = ["Transcripted.icns"].freeze
-MAX_APP_BYTES = 650 * 1024 * 1024
-MAX_RESOURCES_BYTES = 520 * 1024 * 1024
+# Raised 2026-09-29 from 650 / 520 MiB for two bundled models: the Nemotron 3
+# diarizer (~190 MB, so the first meeting after an update doesn't download it) and
+# the ReDimNet2 voiceprint (15 MB). A distribution build measured 808 / 702 MiB.
+MAX_APP_BYTES = 850 * 1024 * 1024
+MAX_RESOURCES_BYTES = 740 * 1024 * 1024
 MAX_TRANSCRIPTION_P95_SECONDS = 0.5
 MAX_TRANSCRIPTION_P95_RTF = 0.05
 MAX_MODEL_READY_P90_SECONDS = 30.0

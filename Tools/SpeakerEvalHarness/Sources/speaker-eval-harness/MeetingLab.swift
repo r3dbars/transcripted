@@ -21,6 +21,11 @@
 //
 // Nothing here touches real user state: every path is under --work (default
 // data/eval/yodas3/runs/<set>), stats go to a stub store, and the file logger is off.
+//
+// --embedder-model/--embedder-id/--embedder-dim [--embedder-thresholds ...] swap in any
+// fused Core ML voiceprint model (see LabVoiceprintEmbedder.swift). It is injected into
+// DiarizationService, so both backends embed every turn with it, and the run's speaker
+// DB becomes speakers_<id>.sqlite.
 
 import AVFoundation
 import FluidAudio
@@ -145,6 +150,10 @@ struct LabMeetingResult: Codable {
     var speakerHint: String = "none"
     var speakerBoundsMin: Int?
     var speakerBoundsMax: Int?
+    /// Voiceprint model id when --embedder-model swapped one in; nil for Core's default.
+    var embedder: String?
+    /// "file" (--embedder-thresholds) or "wespeaker-default"; nil for Core's default.
+    var embedderThresholds: String?
 }
 
 // MARK: - Plumbing
@@ -383,6 +392,9 @@ func runMeetingSeries(_ args: [String]) async {
     // --backend pyannote|nemotron: which diarizer DiarizationService runs (#1789).
     let backendRaw = (argValue("--backend", in: args) ?? DiarizationBackend.pyannote.rawValue).lowercased()
     guard let backend = DiarizationBackend(rawValue: backendRaw) else { die("unknown --backend \(backendRaw)") }
+    // --embedder-model ...: a fused Core ML voiceprint model instead of Core's default
+    // (loaded and probed here, before any meeting, so a bad model fails fast).
+    let voiceprint = LabVoiceprintEmbedder.load(from: args)
     // Fine-grained separation (overrides --separation when any is given):
     //   --sep-threshold <cosine|none>  --sep-fold <seconds|none>  --sep-merge <cosine|none>
     //   --sep-cap all|one|none   (all: invite size +1 on 3+; one: cap only one-person invites)
@@ -416,7 +428,7 @@ func runMeetingSeries(_ args: [String]) async {
         die("Parakeet load failed: \(error.localizedDescription)")
     }
     let engine = await MainActor.run { LabParakeetEngine(manager: asr) }
-    let diarization = await DiarizationService(backend: backend)
+    let diarization = await DiarizationService(segmentEmbedder: voiceprint?.embedder, backend: backend)
     await diarization.initialize()
     guard await MainActor.run(body: { diarization.isReady }) else { die("diarizer failed to initialize") }
 
@@ -439,7 +451,7 @@ func runMeetingSeries(_ args: [String]) async {
         let dbDir = freshDB ? runDir.appendingPathComponent("db", isDirectory: true) : sharedDBDir
         let paths = CoreStoragePaths(
             transcripts: runDir.appendingPathComponent("transcripts"),
-            speakerDB: dbDir.appendingPathComponent("speakers.sqlite"),
+            speakerDB: dbDir.appendingPathComponent(voiceprint?.speakerDBFileName ?? "speakers.sqlite"),
             statsDB: runDir.appendingPathComponent("stats.sqlite"),
             failedQueue: runDir.appendingPathComponent("failed_transcriptions.json"),
             speakerClips: dbDir.appendingPathComponent("speaker_clips"),
@@ -459,7 +471,10 @@ func runMeetingSeries(_ args: [String]) async {
             log("[lab] \(meeting.id): audio copy failed: \(error.localizedDescription)"); continue
         }
 
-        let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
+        // The voiceprint model's bars (a custom model's come from --embedder-thresholds)
+        // drive the store's own decisions and the separation merge bar too.
+        let speakerThresholds = diarization.activeSpeakerThresholds
+        let speakerDB = SpeakerDatabase(path: paths.speakerDB.path, thresholds: speakerThresholds)
         let box = LabResultBox()
         let manager = await MainActor.run { () -> TranscriptionTaskManager in
             let m = TranscriptionTaskManager(
@@ -491,7 +506,9 @@ func runMeetingSeries(_ args: [String]) async {
                 let cap = separation == "nocap" ? nil : labInvitedPeople(meetingDir: meetingDir).flatMap {
                     SpeakerSeparationOptions.speakerCap(invitedPeople: $0)
                 }
-                m.speakerSeparationProvider = { _ in SpeakerSeparationOptions.labTuned(maxSpeakers: cap) }
+                m.speakerSeparationProvider = { _ in
+                    SpeakerSeparationOptions.labTuned(maxSpeakers: cap, thresholds: speakerThresholds)
+                }
             }
             if calendarNaming {
                 let names = noInvite ? [] : labInviteeNames(meetingDir: meetingDir)
@@ -523,10 +540,13 @@ func runMeetingSeries(_ args: [String]) async {
         guard finished, let result else {
             let status = await MainActor.run { "\(manager.displayStatus)" }
             log("[lab] \(meeting.id): pipeline did not produce a result (\(status))")
-            write(LabMeetingResult(meeting: meeting.id, family: meeting.family, freshDB: freshDB,
-                                   splitLocalSpeakers: truth.split_local_speakers, outcome: "failed: \(status)",
-                                   processingSeconds: processing, systemSpeakerCount: 0, micSpeakerCount: 0,
-                                   rows: [], silentNames: [], utterances: [], profilesAfter: 0), to: outURL)
+            var failed = LabMeetingResult(meeting: meeting.id, family: meeting.family, freshDB: freshDB,
+                                          splitLocalSpeakers: truth.split_local_speakers, outcome: "failed: \(status)",
+                                          processingSeconds: processing, systemSpeakerCount: 0, micSpeakerCount: 0,
+                                          rows: [], silentNames: [], utterances: [], profilesAfter: 0)
+            failed.embedder = voiceprint?.embedder.identifier
+            failed.embedderThresholds = voiceprint?.thresholdsSource
+            write(failed, to: outURL)
             continue
         }
 
@@ -625,10 +645,13 @@ func runMeetingSeries(_ args: [String]) async {
         )
         out.speakerHint = ["backend-\(backend.rawValue)",
                            !sepFlags.isEmpty ? "sep-" + args.joined(separator: " ") : (separation == "none" ? speakerHint : "separation-\(separation)"),
-                           calendarNaming ? (noInvite ? "lineup-naming-no-invite" : "lineup-naming") : nil]
+                           calendarNaming ? (noInvite ? "lineup-naming-no-invite" : "lineup-naming") : nil,
+                           voiceprint.map { "embedder-\($0.embedder.identifier)" }]
             .compactMap { $0 }.joined(separator: "+")
         out.speakerBoundsMin = bounds?.min
         out.speakerBoundsMax = bounds?.max
+        out.embedder = voiceprint?.embedder.identifier
+        out.embedderThresholds = voiceprint?.thresholdsSource
         for (channel, contexts) in [("system", result.systemSpeakerContexts), ("mic", result.micSpeakerContexts)] {
             for (sid, ctx) in contexts.sorted(by: { $0.key < $1.key }) {
                 let share = attribution.share(channel: channel, diarizerSpeakerId: sid)

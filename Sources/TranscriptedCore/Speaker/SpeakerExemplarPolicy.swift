@@ -34,8 +34,9 @@ public enum SpeakerExemplarPolicy {
     /// nearest exemplar (denoise) instead of being stored as a near-duplicate. Below it, the mean is
     /// a distinct condition and earns its own exemplar slot. Mirrors
     /// `SpeakerWritePathPolicy.confidentWriteBackSimilarity` (0.80) — the point at which a match is
-    /// "clearly the same voice, same context."
-    public static let sameConditionSimilarity: Double = 0.80
+    /// "clearly the same voice, same context." Per model: `SpeakerEmbeddingThresholds.exemplarSameCondition`;
+    /// this is the WeSpeaker value.
+    public static let sameConditionSimilarity: Double = SpeakerEmbeddingThresholds.weSpeaker.exemplarSameCondition
 
     /// EMA weight for folding a same-condition mean into its exemplar. Higher than the profile
     /// average's 0.15 because each exemplar tracks ONE condition, so it should adapt to that
@@ -61,6 +62,7 @@ public enum SpeakerExemplarPolicy {
     /// - `average`: the profile's blended `embedding` — always an implicit representative, never
     ///   stored in `current`; passing it in lets a mean already covered by the average be dropped
     ///   rather than duplicated.
+    /// - `thresholds`: the voiceprint model's bars; `exemplarSameCondition` is the same-condition bar.
     ///
     /// Returns the new exemplar set (≤ `maxExemplars`). Diversity is non-decreasing: an eviction only
     /// happens when the incoming mean is strictly more distinct than the most-redundant existing
@@ -68,7 +70,8 @@ public enum SpeakerExemplarPolicy {
     public static func updated(
         current: [Exemplar],
         newMean: [Float],
-        average: [Float]
+        average: [Float],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> [Exemplar] {
         guard !newMean.isEmpty, newMean.count == average.count else { return current }
 
@@ -89,7 +92,7 @@ public enum SpeakerExemplarPolicy {
         }
 
         // Same condition as an existing representative → denoise, don't duplicate.
-        if bestRepSim >= sameConditionSimilarity {
+        if bestRepSim >= thresholds.exemplarSameCondition {
             guard let i = bestExemplarIndex else {
                 // Already covered by the average (which is EMA-updated separately). Nothing to add.
                 return usable

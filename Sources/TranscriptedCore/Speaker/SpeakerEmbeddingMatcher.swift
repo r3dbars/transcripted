@@ -9,6 +9,7 @@ extension SpeakerDatabase {
     /// Delegates to `Transcription.matchAgainstProfiles` — the same matcher the live
     /// transcription pipeline uses — so persistent-store callers (this) and in-memory-snapshot
     /// callers (the pipeline, the offline eval harness) never drift onto two different algorithms.
+    /// The matcher's guards use this database's `thresholds`.
     /// Returns the best match above threshold with similarity score, or nil for a new speaker.
     public func matchSpeaker(embedding: [Float], threshold: Double = 0.6) -> SpeakerMatchResult? {
         return queue.sync {
@@ -30,7 +31,8 @@ extension SpeakerDatabase {
             embedding,
             profiles: allSpeakers,
             threshold: threshold,
-            negativeExemplarsByProfile: negativeExemplarsByProfile
+            negativeExemplarsByProfile: negativeExemplarsByProfile,
+            thresholds: thresholds
         ) else { return nil }
 
         // matchAgainstProfiles returns a profile id against the snapshot passed in, so resolve it

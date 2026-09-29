@@ -16,6 +16,9 @@ LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+# The ReDimNet2 voiceprint model is 15 MB, so even --thin builds carry it.
+# BUNDLE_VOICEPRINT_MODEL=0 leaves it out to try the app's fallback model.
+BUNDLE_VOICEPRINT_MODEL="${BUNDLE_VOICEPRINT_MODEL:-1}"
 # Lab builds compile in the hill-climb lab control channel
 # (Sources/Support/LabControlChannel.swift). Local dev only: never distribute
 # one. build-beta.sh refuses this flag and rejects any binary that has it.
@@ -505,6 +508,25 @@ if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.m
     ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
 else
     echo "ERes2Net model not bundled (default; VoxCeleb2 license) — runtime uses the local cache. Set TRANSCRIPTED_BUNDLE_ERES2NET=1 to bundle for a local build."
+fi
+
+# Bundle the ReDimNet2 b4 voiceprint model, the default speaker voiceprint.
+# Best effort here: without it the app falls back to its previous voiceprint
+# model. build-beta.sh requires it. MIT weights trained on VoxCeleb2; the
+# notice ships in THIRD_PARTY_LICENSES.md.
+source "$ENTRYPOINT_DIR/lib/voiceprint-model.sh"
+VOICEPRINT_MODEL_DEST="$APP_BUNDLE/Contents/Resources/$VOICEPRINT_MODEL_BUNDLE_DIR"
+if [ "$BUNDLE_VOICEPRINT_MODEL" = "0" ]; then
+    echo "Skipping bundled ReDimNet2 voiceprint model (BUNDLE_VOICEPRINT_MODEL=0); the app uses its fallback voiceprint model."
+elif voiceprint_problems="$(voiceprint_model_problems "$VOICEPRINT_MODEL_CACHE")"; then
+    echo "Bundling ReDimNet2 voiceprint model from $VOICEPRINT_MODEL_CACHE..."
+    rm -rf "$VOICEPRINT_MODEL_DEST"
+    mkdir -p "$VOICEPRINT_MODEL_DEST"
+    ditto "$VOICEPRINT_MODEL_CACHE" "$VOICEPRINT_MODEL_DEST/Model.mlmodelc"
+else
+    echo "ReDimNet2 voiceprint model not bundled — the app falls back to its previous voiceprint model."
+    printf '%s\n' "$voiceprint_problems" | sed 's/^/  /'
+    echo "  Install it with: bash scripts/models/redimnet2/install.sh (see scripts/models/redimnet2/README.md)"
 fi
 
 # Copy Info.plist

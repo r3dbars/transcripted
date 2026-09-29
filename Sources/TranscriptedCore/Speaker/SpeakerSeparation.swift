@@ -44,12 +44,17 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
     }
 
     /// The settings the speaker lab picked: split at 0.70, fold voices under 5 s,
-    /// merge fingerprints at 0.6 and up, and cap at the invite size when there is one.
-    public static func labTuned(maxSpeakers: Int?) -> SpeakerSeparationOptions {
+    /// merge fingerprints at the voiceprint model's `separationMerge` and up (0.6 for
+    /// WeSpeaker), and cap at the invite size when there is one. The 0.70 is the
+    /// diarizer's own clustering setting, not a voiceprint bar.
+    public static func labTuned(
+        maxSpeakers: Int?,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> SpeakerSeparationOptions {
         SpeakerSeparationOptions(
             clusteringThreshold: 0.70,
             foldBelowSeconds: 5.0,
-            mergeSimilarity: 0.6,
+            mergeSimilarity: thresholds.separationMerge,
             maxSpeakers: maxSpeakers
         )
     }
@@ -64,12 +69,21 @@ public struct SpeakerSeparationOptions: Sendable, Equatable {
     }
 
     /// The tuned settings for `backend`, capped from the invite size when there is one.
-    public static func tuned(for backend: DiarizationBackend, invitedPeople: Int?) -> SpeakerSeparationOptions {
+    /// `thresholds` is the active voiceprint model's set (the diarizer's
+    /// `activeSpeakerThresholds`), which supplies the fingerprint merge bar.
+    public static func tuned(
+        for backend: DiarizationBackend,
+        invitedPeople: Int?,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> SpeakerSeparationOptions {
         switch backend {
         case .nemotron:
             return nemotronTuned(invitedPeople: invitedPeople)
         case .pyannote:
-            return labTuned(maxSpeakers: invitedPeople.flatMap { speakerCap(invitedPeople: $0) })
+            return labTuned(
+                maxSpeakers: invitedPeople.flatMap { speakerCap(invitedPeople: $0) },
+                thresholds: thresholds
+            )
         }
     }
 
