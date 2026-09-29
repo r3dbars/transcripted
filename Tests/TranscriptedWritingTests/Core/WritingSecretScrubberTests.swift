@@ -220,10 +220,10 @@ struct WritingSecretScrubberTests {
         "read -s answer",
         "read -rs answer",
         "read -sp \"Enter: \" answer",
-        "git push origin main",
-        "git pull",
+        "git push https://example.com/team/app.git main",
+        "git pull https://example.com/team/app.git",
         "git clone https://example.com/team/app.git",
-        "git fetch origin",
+        "git fetch https://example.com/team/app.git",
         "htpasswd -c .htpasswd admin",
         "keytool -list -keystore app.jks",
         "fdesetup enable",
@@ -303,11 +303,72 @@ struct WritingSecretScrubberTests {
         #expect(result.kinds.isEmpty)
     }
 
-    @Test("A retry after a wrong password is redacted too")
+    @Test("A retry after a wrong sudo password is redacted when it looks like a password")
     func retryRedacted() {
-        let result = scrub("sudo apt update\nsunshine\nmoonbeam", app: Self.terminal)
+        let result = scrub("sudo apt update\nsunshine\nhunter22", app: Self.terminal)
         #expect(result.clean == "sudo apt update\n\(tok(.password))\n\(tok(.password))")
         #expect(result.kinds == [.password, .password])
+    }
+
+    @Test("After sudo's one answer, a line that doesn't look like a password is the next command")
+    func sudoTakesOneLooseAnswer() {
+        // With cached credentials sudo doesn't ask, so `pytest` and `ruff`
+        // (or an alias) are commands. Only the first line can't be told apart.
+        let tools = scrub("sudo -v\nhunter2\npytest\nruff\nmytool", app: Self.terminal)
+        #expect(tools.clean == "sudo -v\n\(tok(.password))\npytest\nruff\nmytool")
+        #expect(tools.kinds == [.password])
+
+        let lettersOnly = scrub("sudo apt update\nsunshine\nmoonbeam", app: Self.terminal)
+        #expect(lettersOnly.clean == "sudo apt update\n\(tok(.password))\nmoonbeam")
+    }
+
+    @Test("ssh, scp and sftp take at most one answer", arguments: ["ssh deploy@example.com", "scp a.txt host:/tmp", "sftp host"])
+    func sshTakesOneAnswer(_ command: String) {
+        let result = scrub(command + "\nsunshine\nmytool", app: Self.terminal)
+        #expect(result.clean == command + "\n\(tok(.password))\nmytool")
+        #expect(result.kinds == [.password])
+    }
+
+    static let gitWithoutHTTPS = [
+        "git push", "git pull", "git fetch origin", "git push -u origin main", "git push origin main",
+        "git clone git@github.com:team/app.git", "git pull --rebase",
+    ]
+
+    @Test("git push, pull, fetch and clone don't prompt without an https URL on the line", arguments: gitWithoutHTTPS)
+    func gitWithoutHTTPSDoesNotPrompt(_ command: String) {
+        for next in ["gpull", "mytool", "sunshine"] {
+            let text = command + "\n" + next
+            #expect(scrub(text, app: Self.terminal).clean == text, "\(next)")
+            #expect(scrub(next, app: Self.terminal, preceding: [command]).clean == next, "\(next) as the next entry")
+        }
+    }
+
+    @Test("Login commands take a username and a password, and no third line")
+    func loginTakesTwoAnswers() {
+        let docker = scrub("docker login ghcr.io\njbetker\nsunshine\nmytool", app: Self.terminal)
+        #expect(docker.clean == "docker login ghcr.io\n\(tok(.password))\n\(tok(.password))\nmytool")
+        let git = scrub("jbetker\nsunshine\nmytool", app: Self.terminal, preceding: ["git clone https://example.com/team/app.git"])
+        #expect(git.clean == "\(tok(.password))\n\(tok(.password))\nmytool")
+    }
+
+    @Test("A passphrase typed again to confirm it is redacted too, spaces and all")
+    func passphraseConfirmationRedacted() {
+        let result = scrub(
+            "ssh-keygen -t ed25519\ncorrect horse battery staple\ncorrect horse battery staple\nls",
+            app: Self.terminal
+        )
+        #expect(result.clean == "ssh-keygen -t ed25519\n\(tok(.password))\n\(tok(.password))\nls")
+        #expect(result.kinds == [.password, .password])
+    }
+
+    @Test("A password token an earlier pass left counts as the prompt's answer")
+    func redactedAnswerUsesUpPrompt() {
+        let password = tok(.password)
+        // sudo's answer is spent, so the next command is a command.
+        #expect(scrub("mytool", app: Self.terminal, preceding: ["sudo -v", password]).clean == "mytool")
+        // passwd has a third answer left after two.
+        #expect(scrub("moonbeam", app: Self.terminal, preceding: ["passwd", password, password]).clean == password)
+        #expect(scrub("moonbeam", app: Self.terminal, preceding: ["passwd", password, password, password]).clean == "moonbeam")
     }
 
     @Test("passwd's old, new and confirm lines are all redacted, and a fourth line is kept")

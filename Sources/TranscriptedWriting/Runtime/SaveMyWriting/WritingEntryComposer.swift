@@ -158,9 +158,13 @@ struct WritingEntryComposer {
         return closeOpen().map { [$0] } ?? []
     }
 
-    /// Closes whatever is open, as at quit.
+    /// Closes whatever is open, as at quit, and forgets the context lines:
+    /// they're raw typed text (a sudo password among them), so they don't
+    /// stay in memory once Writing stops.
     mutating func closeAll() -> [Entry] {
-        closeOpen().map { [$0] } ?? []
+        let closed = closeOpen().map { [$0] } ?? []
+        recent.removeAll()
+        return closed
     }
 
     /// Drops the open entry unsaved: Save my writing went off, or delete all.

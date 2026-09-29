@@ -70,7 +70,9 @@ final class WritingDayFileWriter {
 
     /// Once per scrubber rules version: files written before the scrubber
     /// (or under older rules) get the current rules. Retried next launch if
-    /// any file couldn't be read or written.
+    /// Writing stopped part way or a file couldn't be written; a file that
+    /// can never be read as a day file (a symlink, not owner-only, not
+    /// UTF-8) is skipped and doesn't hold the version back.
     private func rescrubOlderDayFilesIfNeeded() {
         let version = WritingSecretScrubber.rulesVersion
         guard UserDefaults.standard.integer(forKey: Self.scrubbedRulesVersionKey) < version else { return }
@@ -85,6 +87,7 @@ final class WritingDayFileWriter {
                     "scanned": String(outcome.filesScanned),
                     "changed": String(outcome.filesChanged),
                     "failures": String(outcome.failures),
+                    "skipped": String(outcome.skipped),
                 ]
             )
             guard outcome.failures == 0 else { return }

@@ -159,6 +159,7 @@ struct DiagnosticsMetadataRedactorTests {
         #expect(field("scanned", "12") == "scanned=12")
         #expect(field("changed", "1") == "changed=1")
         #expect(field("failures", "0") == "failures=0")
+        #expect(field("skipped", "2") == "skipped=2")
         #expect(field("changed", "Writing_2026-09-25.md") != "changed=Writing_2026-09-25.md")
     }
 

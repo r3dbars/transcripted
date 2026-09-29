@@ -374,6 +374,22 @@ struct WritingEntryComposerTests {
         #expect(composer.closeAll().map(\.text) == ["sunshine"])
     }
 
+    @Test("Closing everything (Writing stopping) forgets the raw context lines too")
+    func closeAllForgetsContext() {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        #expect(composer.closeAll().map(\.text) == ["sudo apt update"])
+        // Nothing of the sudo line is left to read the next word as its password.
+        _ = composer.ingest(
+            [Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 3_000)],
+            receivedAt: Self.date(Self.start + 3_500)
+        )
+        #expect(composer.closeAll().map(\.text) == ["sunshine"])
+    }
+
     // MARK: - Secrets typed over several segments (review regressions)
 
     /// Types each string as its own segment, 1.5 s apart, and returns every
