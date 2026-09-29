@@ -9,6 +9,8 @@ extension Notification.Name {
 
 /// Save my writing's host side: builds the `WritingDayFileRecorder` against
 /// the capture library, closes idle entries on a timer, and flushes at quit.
+/// Entries that close with nothing to scrub go on to Personal History through
+/// `personalHistory`.
 /// The recorder, composer and formatter live in `TranscriptedWriting/Runtime`
 /// so they're tested under `swift test`; this owns only what needs AppKit or
 /// the app's paths.
@@ -25,6 +27,8 @@ final class WritingDayFileWriter {
     }
 
     let recorder: WritingDayFileRecorder
+    /// Where cleared entries go to Personal History.
+    let personalHistory: PersonalHistoryRelay
     private var idleTimer: Timer?
     /// Cleared at `stop()` so a rescrub still running stops between files.
     private let rescrubAllowed = RescrubFlag()
@@ -34,9 +38,12 @@ final class WritingDayFileWriter {
     init(
         directory: @escaping @Sendable () -> URL,
         preferences: @escaping @Sendable () -> WritingPreferences,
+        personalHistory: any PersonalHistoryIngesting,
         problemStarted: @escaping @MainActor @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in }
     ) {
         let names = WritingAppDisplayNames()
+        let relay = PersonalHistoryRelay(personalHistory: personalHistory)
+        self.personalHistory = relay
         recorder = WritingDayFileRecorder(
             directory: directory,
             gate: { WritingDayFileRecorder.Gate(preferences: preferences()) },
@@ -51,7 +58,8 @@ final class WritingDayFileWriter {
             },
             writeProblemStarted: { error in
                 Task { @MainActor in problemStarted(error) }
-            }
+            },
+            releaseToPersonalHistory: { relay.send($0) }
         )
     }
 
@@ -93,6 +101,8 @@ final class WritingDayFileWriter {
     }
 
     /// The final flush. Synchronous on purpose: it runs from the app's quit.
+    /// The open entry's day-file write finishes here; its Personal History
+    /// batch is handed off and lands only if the app lives long enough.
     func stop() {
         rescrubAllowed.set(false)
         idleTimer?.invalidate()

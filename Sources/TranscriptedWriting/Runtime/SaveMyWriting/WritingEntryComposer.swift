@@ -16,8 +16,13 @@ import Foundation
 /// no letters, like a card or OTP box) don't count toward the 3 words, so a
 /// card typed over four boxes stays one entry the scrubber can see whole. Every closed entry goes through
 /// `WritingSecretScrubber` before it's returned; an entry that was nothing
-/// but a secret isn't returned at all. Pure: the caller passes the clock.
-/// Not part of Tilde.
+/// but a secret isn't returned at all.
+///
+/// Personal History (the encrypted log and the next-word predictor) gets the
+/// keyboard's events only through here, once their entry has closed:
+/// `takeClearedHistory()`. An entry the scrubber redacts anything from, as
+/// saved or as typed before Backspace, gives Personal History nothing. Pure:
+/// the caller passes the clock. Not part of Tilde.
 struct WritingEntryComposer {
     static let idleGapMilliseconds: Int64 = 120_000
     static let minimumCharacters = 2
@@ -51,6 +56,9 @@ struct WritingEntryComposer {
         let firstTimestampMilliseconds: Int64
         var lastActivityMilliseconds: Int64
         var pieces: [Piece] = []
+        /// The typed and accepted events as the keyboard sent them, for
+        /// Personal History. Never deletions: Personal History doesn't take them.
+        var historyEvents: [PersonalHistoryEvent] = []
 
         var text: String { pieces.map(\.text).joined() }
 
@@ -103,6 +111,7 @@ struct WritingEntryComposer {
     private let makeEntryID: @Sendable (Int64) -> String
     private var open: OpenEntry?
     private var recent: [ContextKey: RecentLines] = [:]
+    private var clearedHistory: [PersonalHistoryEvent] = []
 
     /// `makeEntryID` gets the first keystroke's time in milliseconds.
     init(makeEntryID: @escaping @Sendable (Int64) -> String) {
@@ -110,6 +119,14 @@ struct WritingEntryComposer {
     }
 
     var hasOpenEntry: Bool { open != nil }
+
+    /// The Personal History events of every entry closed since the last
+    /// call, in keyboard order, and forgets them. Entries too short to save
+    /// still count; an entry that held a secret adds nothing.
+    mutating func takeClearedHistory() -> [PersonalHistoryEvent] {
+        defer { clearedHistory.removeAll() }
+        return clearedHistory
+    }
 
     /// Takes one batch in keyboard order. `receivedAt` counts as activity
     /// for the entry the batch ends in: the keyboard sends a batch shortly
@@ -164,9 +181,11 @@ struct WritingEntryComposer {
     }
 
     /// Drops the open entry unsaved: Save my writing went off, or delete all.
+    /// Personal History gets none of it either.
     mutating func discardOpenEntry() {
         open = nil
         recent.removeAll()
+        clearedHistory.removeAll()
     }
 
     private mutating func closeOpen() -> Entry? {
@@ -182,13 +201,15 @@ struct WritingEntryComposer {
             ),
             for: Self.contextKey(entry)
         )
-        guard typed.count >= Self.minimumCharacters else { return nil }
         let scrubbed = WritingSecretScrubber.scrub(
             typed,
             appBundleIdentifier: entry.appBundleIdentifier,
             precedingLines: context
         )
-        guard !scrubbed.isOnlyRedactions else { return nil }
+        if !Self.holdsSecret(entry, typed: typed, scrubbed: scrubbed, context: context) {
+            clearedHistory += entry.historyEvents
+        }
+        guard typed.count >= Self.minimumCharacters, !scrubbed.isOnlyRedactions else { return nil }
         let text = scrubbed.clean.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= Self.minimumCharacters else { return nil }
         let wordCount = Self.wordCount(text)
@@ -206,6 +227,40 @@ struct WritingEntryComposer {
                 entry.pieces.filter(\.accepted).reduce(0) { $0 + Self.wordCount($1.text) }
             )
         )
+    }
+
+    /// Whether the scrubber redacts anything from the entry as saved, or from
+    /// it as the keyboard sent it. The sent text matters when Backspace took
+    /// a secret back out: the saved entry no longer has it, but Personal
+    /// History would store every event, the deleted text included. The
+    /// scrubber changes text only to redact, so any change counts.
+    private static func holdsSecret(
+        _ entry: OpenEntry,
+        typed: String,
+        scrubbed: WritingSecretScrubber.Result,
+        context: [String]
+    ) -> Bool {
+        guard scrubbed.clean == typed else { return true }
+        let sent = sentText(entry.historyEvents)
+        guard sent != typed else { return false }
+        return WritingSecretScrubber.scrub(
+            sent,
+            appBundleIdentifier: entry.appBundleIdentifier,
+            precedingLines: context
+        ).clean != sent
+    }
+
+    /// The events' text the way Personal History keeps it: one line per
+    /// keyboard segment, and each Backspace there starts a new segment.
+    private static func sentText(_ events: [PersonalHistoryEvent]) -> String {
+        var text = ""
+        var session: String?
+        for event in events {
+            if let session, session != event.sessionIdentifier, !text.isEmpty { text += "\n" }
+            session = event.sessionIdentifier
+            text += event.text
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The previous entry's tail when it was the same app and history and
@@ -263,8 +318,12 @@ struct WritingEntryComposer {
 
     private static func apply(_ event: PersonalHistoryEvent, to entry: inout OpenEntry) {
         switch event.source {
-        case .typed: entry.append(event.text, accepted: false)
-        case .acceptedSuggestion: entry.append(event.text, accepted: true)
+        case .typed:
+            entry.append(event.text, accepted: false)
+            entry.historyEvents.append(event)
+        case .acceptedSuggestion:
+            entry.append(event.text, accepted: true)
+            entry.historyEvents.append(event)
         case .deletion: entry.deleteLast(event.deletedCharacters ?? 0)
         }
     }
