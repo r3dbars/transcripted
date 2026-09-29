@@ -12,8 +12,8 @@ enum KeyboardFocusProbe {
     /// The process Accessibility reports as having keyboard focus. This can
     /// differ from the frontmost app when a non-activating panel (a launcher,
     /// a floating search field) takes the keyboard. Nil when Accessibility
-    /// isn't granted or the system doesn't answer, which the policy treats
-    /// as unknown.
+    /// isn't granted or the system doesn't answer; the policy then refuses
+    /// the capture.
     ///
     /// Asks the system-wide element for the focused *application* only. It
     /// never sets a messaging timeout on the system-wide element: that call

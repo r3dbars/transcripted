@@ -45,7 +45,7 @@ struct FocusedWindowCapturePolicyTests {
         target: TypingTargetIdentity?,
         windows: [Policy.Window]? = nil,
         frontmostPID: Int32? = 400,
-        keyboardFocusPID: Int32? = nil,
+        keyboardFocusPID: Int32? = 400,
         excludedApps: Set<String> = [],
         inScope: @escaping (String) -> Bool = { _ in true }
     ) -> Policy.Choice {
@@ -64,8 +64,6 @@ struct FocusedWindowCapturePolicyTests {
     @Test("The focused window of the app being typed in, in scope, is the only capture target")
     func focusedWindowInScope() {
         #expect(choose(target: target()) == .capture(windowIdentifier: slackWindow))
-        // Accessibility agreeing on the focused process changes nothing.
-        #expect(choose(target: target(), keyboardFocusPID: slackPID) == .capture(windowIdentifier: slackWindow))
     }
 
     @Test("Other visible apps are never captured, even in front of the typing app")
@@ -89,6 +87,12 @@ struct FocusedWindowCapturePolicyTests {
     func keyboardFocusElsewhere() {
         // A launcher panel has keyboard focus while Slack stays frontmost.
         #expect(choose(target: target(), keyboardFocusPID: 999) == .refuse(.keyboardFocusElsewhere))
+    }
+
+    @Test("Unknown keyboard focus refuses: a launcher could be typing over the frontmost window")
+    func keyboardFocusUnknown() {
+        // No Accessibility answer means the typing app can't be confirmed.
+        #expect(choose(target: target(), keyboardFocusPID: nil) == .refuse(.keyboardFocusUnknown))
     }
 
     @Test("A window behind another window of the same app is not the focused window")

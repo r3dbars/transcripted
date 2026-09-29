@@ -623,18 +623,36 @@ struct ScreenCaptureServiceTests {
     // script/screen_capture_probe.swift are the real, live callers that
     // exercise the full instrumented path per docs/plans/screen-memory.md.
 
-    @Test("A focused-window refusal skips with a fixed reason: out of scope reads as excluded, anything unprovable as no target window")
-    func focusedWindowRefusalReasons() {
+    @Test("A focused-window refusal skips: out of scope reads as excluded, anything unprovable as no target window")
+    func focusedWindowRefusalOutcomes() {
         let app = "com.example.chat"
-        #expect(ScreenCaptureService.blockReason(for: .refuse(.excluded(bundleIdentifier: app)))
+        #expect(ScreenCaptureService.blockReason(for: .excluded(bundleIdentifier: app))
             == .excludedWindow(appBundleIdentifier: app))
-        #expect(ScreenCaptureService.blockReason(for: .refuse(.outOfScope(bundleIdentifier: app)))
+        #expect(ScreenCaptureService.blockReason(for: .outOfScope(bundleIdentifier: app))
             == .excludedWindow(appBundleIdentifier: app))
         for refusal: FocusedWindowCapturePolicy.Refusal in [
             .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
-            .notFrontmostApp, .keyboardFocusElsewhere, .notFocusedWindow,
+            .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
         ] {
-            #expect(ScreenCaptureService.blockReason(for: .refuse(refusal)) == .noTargetWindow)
+            #expect(ScreenCaptureService.blockReason(for: refusal) == .noTargetWindow)
+        }
+    }
+
+    @Test("Every focused-window refusal logs its own readable reason, never the app's bundle ID")
+    func focusedWindowRefusalLogReasons() {
+        let app = "com.example.chat"
+        let refusals: [FocusedWindowCapturePolicy.Refusal] = [
+            .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+            .excluded(bundleIdentifier: app), .outOfScope(bundleIdentifier: app),
+            .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
+        ]
+        let reasons = refusals.map(ScreenCaptureService.skipReason(for:))
+        // Distinct per refusal, so a skip in the log says which check closed the door.
+        #expect(Set(reasons).count == refusals.count)
+        for reason in reasons {
+            #expect(!reason.contains(app))
+            // The log writer keeps it literal instead of redacting it to a length.
+            #expect(DiagnosticsMetadataRedactor.logSafeField(forKey: "reason", value: reason) == "reason=\(reason)")
         }
     }
 

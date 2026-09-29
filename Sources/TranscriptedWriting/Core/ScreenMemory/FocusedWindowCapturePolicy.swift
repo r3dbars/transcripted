@@ -41,9 +41,12 @@ public enum FocusedWindowCapturePolicy {
     public struct FocusEvidence: Equatable, Sendable {
         /// The active app. `nil` when it can't be read, which refuses.
         public let frontmostApplicationProcessIdentifier: Int32?
-        /// The process that owns the focused UI element, from Accessibility.
-        /// `nil` means unknown (no Accessibility access, or the app didn't
-        /// answer), and then the frontmost app and z-order decide alone.
+        /// The app Accessibility says has keyboard focus. It can differ from
+        /// the frontmost app when a non-activating panel (a launcher, a
+        /// floating search field) takes the keyboard. `nil` means unknown
+        /// (no Accessibility access, or the system didn't answer), which
+        /// refuses: without it a launcher's typing could read the window
+        /// behind it.
         public let keyboardFocusProcessIdentifier: Int32?
 
         public init(
@@ -80,6 +83,8 @@ public enum FocusedWindowCapturePolicy {
         case notFrontmostApp
         /// Accessibility says keyboard focus is in another process.
         case keyboardFocusElsewhere
+        /// Accessibility couldn't say which process has keyboard focus.
+        case keyboardFocusUnknown
         /// Another window of the same app is in front of this one, or the
         /// window's z-order is unknown.
         case notFocusedWindow
@@ -120,9 +125,10 @@ public enum FocusedWindowCapturePolicy {
         guard focus.frontmostApplicationProcessIdentifier == processIdentifier else {
             return .refuse(.notFrontmostApp)
         }
-        if let keyboardFocus = focus.keyboardFocusProcessIdentifier, keyboardFocus != processIdentifier {
-            return .refuse(.keyboardFocusElsewhere)
+        guard let keyboardFocus = focus.keyboardFocusProcessIdentifier else {
+            return .refuse(.keyboardFocusUnknown)
         }
+        guard keyboardFocus == processIdentifier else { return .refuse(.keyboardFocusElsewhere) }
         // The app's focused window is its frontmost normal window.
         guard let rank = window.zOrderRank else { return .refuse(.notFocusedWindow) }
         let sameAppWindowInFront = windows.contains {

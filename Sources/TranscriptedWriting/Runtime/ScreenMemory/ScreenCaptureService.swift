@@ -614,9 +614,10 @@ actor ScreenCaptureService {
         )
         guard case let .capture(windowIdentifier) = choice,
               let targetWindow = content.windows.first(where: { $0.windowID == windowIdentifier }) else {
-            let reason = Self.blockReason(for: choice)
-            record(.skip(reason))
-            return .skipped(reason)
+            let refusal: FocusedWindowCapturePolicy.Refusal
+            if case let .refuse(reason) = choice { refusal = reason } else { refusal = .windowNotVisible }
+            diagnostics("screen-capture-skipped", ["reason": Self.skipReason(for: refusal)])
+            return .skipped(Self.blockReason(for: refusal))
         }
         guard let display = Self.display(containing: targetWindow, in: content.displays) else {
             diagnostics("screen-capture-skipped", ["reason": "no-display"])
@@ -666,15 +667,35 @@ actor ScreenCaptureService {
         )
     }
 
-    /// Logged reasons stay the fixed vocabulary: never a bundle ID, title
-    /// or path. An app outside the scope reads as excluded, since for
-    /// Screen Memory that's what it is.
-    static func blockReason(for choice: FocusedWindowCapturePolicy.Choice) -> CaptureTriggerPolicy.BlockReason {
-        switch choice {
-        case let .refuse(.excluded(bundleIdentifier)), let .refuse(.outOfScope(bundleIdentifier)):
+    /// The outcome a refusal returns. An app outside the scope reads as
+    /// excluded, since for Screen Memory that's what it is; anything else
+    /// means the focused window couldn't be proven.
+    static func blockReason(for refusal: FocusedWindowCapturePolicy.Refusal) -> CaptureTriggerPolicy.BlockReason {
+        switch refusal {
+        case let .excluded(bundleIdentifier), let .outOfScope(bundleIdentifier):
             return .excludedWindow(appBundleIdentifier: bundleIdentifier)
-        case .capture, .refuse:
+        case .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+             .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow:
             return .noTargetWindow
+        }
+    }
+
+    /// The logged `reason` for a refusal: a fixed string per case, all in
+    /// `DiagnosticsMetadataRedactor`'s allowlist. Never a bundle ID, title
+    /// or path.
+    static func skipReason(for refusal: FocusedWindowCapturePolicy.Refusal) -> String {
+        switch refusal {
+        case .noTarget: return "no-target-window"
+        case .windowNotVisible: return "window-not-visible"
+        case .ownerMismatch: return "owner-mismatch"
+        case .notNormalWindow: return "not-normal-window"
+        case .unknownApp: return "unknown-app"
+        case .excluded: return "excluded-app"
+        case .outOfScope: return "out-of-scope"
+        case .notFrontmostApp: return "not-frontmost-app"
+        case .keyboardFocusElsewhere: return "keyboard-focus-elsewhere"
+        case .keyboardFocusUnknown: return "keyboard-focus-unknown"
+        case .notFocusedWindow: return "not-focused-window"
         }
     }
 

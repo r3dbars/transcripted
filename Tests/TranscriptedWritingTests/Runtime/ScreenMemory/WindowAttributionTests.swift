@@ -46,7 +46,7 @@ struct WindowAttributionTests {
         #expect(mapped.width != localBox.width)
     }
 
-    @Test("Mapping through the identity (full-display) window frame is a no-op")
+    @Test("Mapping through a window that covers the whole display is a no-op")
     func identityWindowFrameIsNoOp() {
         let windowFrame = rect(0, 0, 1, 1)
         let box = rect(0.33, 0.44, 0.1, 0.2)

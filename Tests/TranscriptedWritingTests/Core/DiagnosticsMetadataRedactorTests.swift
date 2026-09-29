@@ -56,6 +56,18 @@ struct DiagnosticsMetadataRedactorTests {
         #expect(field("reason", "cadence") == "reason=cadence")
         #expect(field("reason", "enumeration-failed") == "reason=enumeration-failed")
         #expect(field("reason", "no-display") == "reason=no-display")
+        #expect(field("reason", "no-target-window") == "reason=no-target-window")
+        #expect(field("reason", "target-changed") == "reason=target-changed")
+        // Focused-window refusals.
+        #expect(field("reason", "window-not-visible") == "reason=window-not-visible")
+        #expect(field("reason", "owner-mismatch") == "reason=owner-mismatch")
+        #expect(field("reason", "not-normal-window") == "reason=not-normal-window")
+        #expect(field("reason", "unknown-app") == "reason=unknown-app")
+        #expect(field("reason", "out-of-scope") == "reason=out-of-scope")
+        #expect(field("reason", "not-frontmost-app") == "reason=not-frontmost-app")
+        #expect(field("reason", "keyboard-focus-elsewhere") == "reason=keyboard-focus-elsewhere")
+        #expect(field("reason", "keyboard-focus-unknown") == "reason=keyboard-focus-unknown")
+        #expect(field("reason", "not-focused-window") == "reason=not-focused-window")
     }
 
     @Test("The first-launch screen-permission-prompt outcome survives as its literal enum case")
@@ -104,8 +116,7 @@ struct DiagnosticsMetadataRedactorTests {
     func keepsStageTimingFields() {
         // Scene classification (`ScreenCaptureService.freshScene`).
         #expect(field("milliseconds", "4") == "milliseconds=4")
-        // Capture/OCR split (`ScreenCaptureService.performWindowCapture`/
-        // `performFullDisplayCapture`).
+        // Capture/OCR split (`ScreenCaptureService.performWindowCapture`).
         #expect(field("ocrMilliseconds", "112") == "ocrMilliseconds=112")
         // Personal-brain race (`GhostBrainServerHost.awaitPersonalPrediction`).
         #expect(field("waitedMilliseconds", "250") == "waitedMilliseconds=250")

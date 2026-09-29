@@ -122,7 +122,7 @@ public struct NormalizedDisplayRect: Equatable, Sendable {
     }
 }
 
-/// One on-device OCR pass over the full display, kept memory-only in Phase 1.
+/// One on-device read of the focused window (Accessibility or OCR), kept memory-only.
 /// The app builds this from ScreenCaptureKit + Vision; Core stays a pure,
 /// testable shape so Phase 2's scene classifier and Phase 3's redaction can
 /// consume it without ever importing AppKit/Vision.
@@ -187,8 +187,8 @@ public struct ScreenSnapshot: Equatable, Sendable {
 
     /// Every window bundle identifier this snapshot's text touched, deduped.
     /// This is what capture-time exclusion logic (and, later, redaction
-    /// scoping) checks against — not just the frontmost app, since capture
-    /// is full-display and can see windows behind the one in focus.
+    /// scoping) checks against. Capture reads only the focused window now,
+    /// so this is normally that one app.
     public var ownerBundleIdentifiers: Set<String> {
         Set(blocks.compactMap(\.windowOwnerBundleIdentifier))
     }
