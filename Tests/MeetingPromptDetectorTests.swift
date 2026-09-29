@@ -322,6 +322,9 @@ func testMeetingPromptDetector() async {
     await runSuite("MeetingPromptDetector.updateMicInputUsers — never prompts while our own capture is active") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { true }
+        // A Meet tab prompts at once, so this gate is the only thing keeping
+        // it quiet. With no titles the 60 s browser wait would hide a broken gate.
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -338,7 +341,9 @@ func testMeetingPromptDetector() async {
         let detector = makeIsolatedDetector()
         detector.shouldSkipPromptEvaluation = { true }
         detector.isOwnCaptureActive = { false }
-        detector.browserWindowTitlesProvider = { _ in [] }
+        // A Meet tab prompts at once, so this gate is the only thing keeping
+        // it quiet. With no titles the 60 s browser wait would hide a broken gate.
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -357,6 +362,9 @@ func testMeetingPromptDetector() async {
         let detector = makeIsolatedDetector()
         detector.isMicInputPromptEnabled = { false }
         detector.isOwnCaptureActive = { false }
+        // A Meet tab prompts at once, so this gate is the only thing keeping
+        // it quiet. With no titles the 60 s browser wait would hide a broken gate.
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -453,6 +461,9 @@ func testMeetingPromptDetector() async {
     await runSuite("MeetingPromptDetector.updateMicInputUsers — already-recording suppression is reported coarsely") {
         let detector = makeIsolatedDetector()
         detector.ownCaptureActivity = { .meetingRecording }
+        // A Meet tab prompts at once, so this gate is the only thing keeping
+        // it quiet. With no titles the 60 s browser wait would hide a broken gate.
+        showBrowserTab("Meet - abc-defg-hij", on: detector)
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
@@ -1074,7 +1085,9 @@ func testMeetingPromptDetector() async {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
         var timing = instantBrowserEvidenceTiming
-        timing.micReleaseGrace = 5
+        // Far longer than the gap below on any machine; the mic coming back
+        // cancels it.
+        timing.micReleaseGrace = 60
         detector.browserEvidenceTiming = timing
         showBrowserTab("Huddle with Sam - Slack", on: detector)
         let box = CandidateBox()

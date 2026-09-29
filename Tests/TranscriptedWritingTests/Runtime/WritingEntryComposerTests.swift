@@ -476,6 +476,100 @@ struct WritingEntryComposerTests {
         #expect(saved == ["sudo apt update", Self.redactedPassword])
     }
 
+    // MARK: - Personal History gets only closed, secret-free entries
+
+    @Test("Personal History gets nothing from an open entry, then its typed and accepted events in keyboard order once it closes")
+    func clearedHistoryWaitsForClose() throws {
+        var composer = Self.composer()
+        let first = Self.typed("Pushing teh", at: Self.start)
+        let backspace = try Self.deletion(2, session: "chain_1", at: Self.start + 1_000)
+        let accepted = Self.typed("he launch", source: .acceptedSuggestion, session: "chain_1", at: Self.start + 2_000)
+        let last = Self.typed(" to Thursday", session: "chain_1", at: Self.start + 2_500)
+        _ = composer.ingest([first, backspace, accepted, last], receivedAt: Self.date(Self.start + 3_000))
+        #expect(composer.takeClearedHistory().isEmpty)
+
+        _ = composer.closeAll()
+        // Deletions carry no text and Personal History doesn't take them.
+        #expect(composer.takeClearedHistory().map(\.id) == [first.id, accepted.id, last.id])
+        #expect(composer.takeClearedHistory().isEmpty)
+    }
+
+    @Test("An entry too short to save still goes to Personal History")
+    func clearedHistoryIncludesUnsavedShortEntry() {
+        var composer = Self.composer()
+        let event = Self.typed("k", session: "chain-a", at: Self.start)
+        _ = composer.ingest([event], receivedAt: Self.date(Self.start + 200))
+        #expect(composer.closeAll().isEmpty)
+        #expect(composer.takeClearedHistory().map(\.id) == [event.id])
+    }
+
+    @Test("Terminal: a sudo password's entry gives Personal History nothing, and the sudo line still goes")
+    func clearedHistoryDropsSudoPassword() {
+        var composer = Self.composer()
+        let command = Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)
+        _ = composer.ingest([command], receivedAt: Self.date(Self.start + 500))
+        _ = composer.ingest(
+            [Self.typed("Tr0ub4dor&3", session: "chain-b", app: Self.terminal, at: Self.start + 2_000)],
+            receivedAt: Self.date(Self.start + 2_200)
+        )
+        _ = composer.closeAll()
+        #expect(composer.takeClearedHistory().map(\.id) == [command.id])
+    }
+
+    @Test("Terminal: a sudo line folded into one entry with its password gives Personal History nothing")
+    func clearedHistoryDropsFoldedSudoEntry() {
+        var composer = Self.composer()
+        _ = composer.ingest([
+            Self.typed("sudo -v", session: "chain-a", app: Self.terminal, at: Self.start),
+            Self.typed("hunter2", session: "chain-b", app: Self.terminal, at: Self.start + 2_000),
+        ], receivedAt: Self.date(Self.start + 2_200))
+        _ = composer.closeAll()
+        #expect(composer.takeClearedHistory().isEmpty)
+    }
+
+    @Test("A secret removed with Backspace before the entry closed gives Personal History nothing, though the saved text is clean")
+    func clearedHistoryDropsBackspacedSecret() throws {
+        var composer = Self.composer()
+        _ = composer.ingest([
+            Self.typed("my card is ", at: Self.start),
+            Self.typed("4111 ", at: Self.start + 500),
+            Self.typed("1111 ", at: Self.start + 1_000),
+            Self.typed("1111 ", at: Self.start + 1_500),
+            Self.typed("1111", at: Self.start + 2_000),
+            try Self.deletion(19, session: "chain_1", at: Self.start + 3_000),
+            Self.typed("on file", session: "chain_1", at: Self.start + 4_000),
+        ], receivedAt: Self.date(Self.start + 4_500))
+        #expect(composer.closeAll().map(\.text) == ["my card is on file"])
+        #expect(composer.takeClearedHistory().isEmpty)
+    }
+
+    @Test("A card typed over four boxes gives Personal History none of the boxes")
+    func clearedHistoryDropsSplitCard() {
+        var composer = Self.composer()
+        let boxes = ["4111", "1111", "1111", "1111", "12/28", "123"]
+        var cleared: [PersonalHistoryEvent] = []
+        for (index, box) in boxes.enumerated() {
+            let at = Self.start + Int64(index) * 1_500
+            _ = composer.ingest(
+                [Self.typed(box, session: "box-\(index)", app: "com.apple.Safari", at: at)],
+                receivedAt: Self.date(at + 200)
+            )
+            cleared += composer.takeClearedHistory()
+        }
+        _ = composer.closeAll()
+        cleared += composer.takeClearedHistory()
+        #expect(!cleared.contains { $0.text.contains { $0.isNumber } })
+    }
+
+    @Test("A discarded open entry gives Personal History nothing")
+    func clearedHistoryDropsDiscardedEntry() {
+        var composer = Self.composer()
+        _ = composer.ingest([Self.typed("never saved", at: Self.start)], receivedAt: Self.date(Self.start))
+        composer.discardOpenEntry()
+        _ = composer.closeAll()
+        #expect(composer.takeClearedHistory().isEmpty)
+    }
+
     // MARK: - Helpers
 
     /// Nothing but `⟨redacted:…⟩` tokens and whitespace.

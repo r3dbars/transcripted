@@ -178,14 +178,15 @@ struct WritingAppScopeTests {
             .appendingPathComponent("transcripted-scope-\(UUID().uuidString)", isDirectory: true)
             .appendingPathComponent("writing", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory.deletingLastPathComponent()) }
+        let controller = Controller()
+        let relay = PersonalHistoryRelay(personalHistory: controller)
         let recorder = WritingDayFileRecorder(
             directory: { directory },
             gate: { .init(enabled: true, historyIdentifier: "history", consentIdentifier: "consent") },
-            appName: { _ in "App" }
+            appName: { _ in "App" },
+            releaseToPersonalHistory: { relay.send($0) }
         )
-        let controller = Controller()
         let ingest = WritingHistoryIngest(
-            personalHistory: controller,
             dayFiles: recorder,
             appScope: { .picked([Self.slack]) }
         )
@@ -200,8 +201,9 @@ struct WritingAppScopeTests {
             text: "outside the scope"
         )!
         #expect(await ingest.ingest([mailEvent]))
-        #expect(await controller.batches.isEmpty)
         recorder.flush()
+        await relay.drain()
+        #expect(await controller.batches.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 

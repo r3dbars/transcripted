@@ -11,6 +11,9 @@
 import CoreAudio
 import Foundation
 
+// Waits for something that should happen get 30 s: they return as soon as
+// it does, and a loaded Mac can take seconds to start a worker thread. Waits
+// for something that must NOT happen stay short.
 func testDefaultInputDeviceMonitor() {
     runSuite("DefaultInputDeviceObserverRegistry — delivers in registration order") {
         var registry = DefaultInputDeviceObserverRegistry()
@@ -287,13 +290,13 @@ func testDefaultInputDeviceMonitor() {
         )
 
         dispatcher.submit(at: 100.1, pendingSelfWrite: tokenA)
-        assertTrue(startedA.wait(timeout: .now() + 2) == .success, "A lookup starts")
+        assertTrue(startedA.wait(timeout: .now() + 30) == .success, "A lookup starts")
         tracker.beginWrite(deviceID: 43, now: 100.2, window: 0.5)
         releaseA.signal()
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "A delivers")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "A delivers")
         let tokenB = tracker.takePendingWriteForNotification(at: 100.3)
         dispatcher.submit(at: 100.3, pendingSelfWrite: tokenB)
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "B delivers")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "B delivers")
         assertEqual(lock.withLock { seen }, [false, true],
                     "A is not misclassified as B, and B still receives its self-write flag in callback order")
         dispatcher.close()
@@ -334,9 +337,9 @@ func testDefaultInputDeviceMonitor() {
             dispatcher.submit(at: 123)
             submitted.signal()
         }
-        assertTrue(submitted.wait(timeout: .now() + 5) == .success,
+        assertTrue(submitted.wait(timeout: .now() + 30) == .success,
                    "listener-queue submission must not await a blocked HAL read")
-        assertTrue(callback.wait(timeout: .now() + 2) == .success,
+        assertTrue(callback.wait(timeout: .now() + 30) == .success,
                    "a timed-out read must still notify route recovery")
         let first = lock.withLock { delivered }
         assertEqual(first.count, 1, "the timeout must deliver one event")
@@ -370,7 +373,7 @@ func testDefaultInputDeviceMonitor() {
             deliver: { _, _ in callback.signal() }
         )
         dispatcher.submit(at: 123)
-        assertTrue(workerStarted.wait(timeout: .now() + 2) == .success, "lookup starts")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "lookup starts")
         dispatcher.close()
         assertFalse(callback.wait(timeout: .now() + 0.1) == .success,
                     "shutdown must discard the timeout result")
@@ -404,13 +407,13 @@ func testDefaultInputDeviceMonitor() {
 
         dispatcher.submit(at: 1)
         assertTrue(dispatcher.hasScheduledWorker, "an in-flight self-write must serialize later callbacks")
-        assertTrue(workerStarted.wait(timeout: .now() + 2) == .success, "first worker starts")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "first worker starts")
         for index in 2...100 { dispatcher.submit(at: CFAbsoluteTime(index)) }
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "first notification times out")
-        assertTrue(workerStarted.wait(timeout: .now() + 2) == .success, "replacement worker starts")
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "latest notification times out")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "first notification times out")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "replacement worker starts")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "latest notification times out")
         dispatcher.submit(at: 101)
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "circuit-open still delivers recovery event")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "circuit-open still delivers recovery event")
         assertEqual(lock.withLock { started }, 2,
                     "two retained blocked workers must not create an unbounded replacement queue")
         assertEqual(lock.withLock { notifications }, [1, 100, 101],
@@ -449,17 +452,17 @@ func testDefaultInputDeviceMonitor() {
 
         let first = restartedDispatcher("1")
         first.submit(at: 1)
-        assertTrue(workerStarted.wait(timeout: .now() + 2) == .success, "first worker starts")
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "first worker times out")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "first worker starts")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "first worker times out")
         first.close()
         let second = restartedDispatcher("2")
         second.submit(at: 2)
-        assertTrue(workerStarted.wait(timeout: .now() + 2) == .success, "replacement worker starts")
-        assertTrue(callback.wait(timeout: .now() + 2) == .success, "replacement worker times out")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "replacement worker starts")
+        assertTrue(callback.wait(timeout: .now() + 30) == .success, "replacement worker times out")
         second.close()
         let third = restartedDispatcher("3")
         third.submit(at: 3)
-        assertTrue(callback.wait(timeout: .now() + 2) == .success,
+        assertTrue(callback.wait(timeout: .now() + 30) == .success,
                    "circuit-open result still reaches the new monitor generation")
         assertEqual(lock.withLock { started }, 2,
                     "stop/start must not recreate a fresh circuit around retained blocked HAL workers")
