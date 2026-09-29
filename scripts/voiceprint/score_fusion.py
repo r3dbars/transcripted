@@ -45,12 +45,20 @@ in-fold, on the calibration half only, and evaluated on the other half ("nested"
 with the best single model of the whole candidate list. A second table shows the pair that ranks
 first over all folds (which used every speaker for selection, so read it as optimistic).
 
+A second search runs the same way over the top models that already have every condition embedded, so the
+cross-condition trials can drive the choice while the main list is still waiting for degraded embeddings.
+Both reuse the same code; when every candidate is complete they coincide and only one is shown.
+
 Outputs (VP/results/):
   fusion_summary.md    the report
-  fusion_results.json  the numbers behind it
+  fusion_summary.json  the numbers behind it (--out changes the stem)
+  fusion_cache/        pickled per-pair and per-model results, keyed on the embedding files, so a rerun only
+                       recomputes what changed (--no-cache ignores it)
+Cost: bootstrap evaluation dominates (about 70 ms per cell per method at 1000 replicates); --workers splits
+pairs and searches over processes, each single-threaded.
 
 Usage:
-  score_fusion.py [--boot 1000] [--repeats 2] [--top-n 8] [--no-search] [--pairs a+b,c+d]
+  score_fusion.py [--boot 500] [--repeats 1] [--top-n 8] [--no-search] [--pairs a+b,c+d] [--workers 3]
 """
 from __future__ import annotations
 
@@ -64,6 +72,7 @@ import csv  # noqa: E402
 import hashlib  # noqa: E402
 import itertools  # noqa: E402
 import json  # noqa: E402
+import pickle  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
@@ -80,7 +89,7 @@ I_EER, I_TAR3 = METRICS.index("eer"), METRICS.index("tar@1e-3")
 HUMAN = sv.HUMAN_SETS
 DEFAULT_CONDS = ("clean", "opus12", "noisy")
 W_GRID = np.round(np.arange(0.0, 1.0001, 0.1), 2)
-N_BOOT = 1000
+N_BOOT = 500
 
 NAMED_PAIRS = [
     ("redimnet2-b6-vox2-lm", "wespeaker-resnet293-lm-coreml"),
@@ -88,6 +97,12 @@ NAMED_PAIRS = [
     ("redimnet2-b6-vox2-lm", "app-wespeaker-coreml"),
     ("redimnet2-b4-vox2-lm", "app-wespeaker-coreml"),
     ("titanet-large", "redimnet2-b6-vox2-lm"),
+]
+# not in the brief: same family and recipe as resnet293 (23.8M vs 28.6M params) but its degraded embeddings exist,
+# so it stands in while resnet293-lm-coreml's opus12 / noisy embeddings are still being made
+EXTRA_PAIRS = [
+    ("redimnet2-b6-vox2-lm", "wespeaker-resnet221-lm-coreml"),
+    ("redimnet2-b4-vox2-lm", "wespeaker-resnet221-lm-coreml"),
 ]
 FUSION_METHODS = ("concat", "zavg", "ztuned", "zavg-percond")
 METHOD_LABEL = {
@@ -476,7 +491,7 @@ def license_of(lic: dict, model: str):
     return lic.get(stem)
 
 
-def top_models(vp: Path, n: int, rank_group: str, have: set, lic: dict):
+def top_models(vp: Path, n: int, rank_group: str, have: set, lic: dict, not_have_reason="no embeddings in emb/"):
     """Top-n single models from verify_summary.csv (human, headline variant, TAR@1e-3), minus Core ML
     clones of a model already ranked and models the license gate rules out. Returns (chosen,
     raw_topn, dropped [(model, why)], ranked_on)."""
@@ -503,7 +518,7 @@ def top_models(vp: Path, n: int, rank_group: str, have: set, lic: dict):
             dropped.append((m, f"license gate: {v}"))
             continue
         if m not in have:
-            dropped.append((m, "no embeddings in emb/"))
+            dropped.append((m, not_have_reason))
             continue
         chosen.append(m)
         if len(chosen) == n:
@@ -639,13 +654,11 @@ def average_cell_results(per_fold: list) -> dict:
 def _pair_task(pair):
     data, eng, tc_groups, folds = _CTX["data"], _CTX["eng"], _CTX["tc_groups"], _CTX["folds"]
     grp = build_group(data, pair)
-    if not grp.cells:
-        return pair, None
     res = {"group": LiteGroup(grp), "methods": {}}
     for m in pair:
         res["methods"][f"single:{m}"] = eng.eval_avg(grp, f"single:{m}")
     for meth in FUSION_METHODS:
-        res["methods"][meth] = eng.eval_avg(grp, meth)
+        res["methods"][meth] = eng.eval_avg(grp, meth, with_reps=(meth != "zavg-percond"))  # sensitivity row: no CI
     res["calib"] = {f"{r}.{f}": eng.calibrate(grp, (r, f)) for (r, f) in folds}
     _, htcs = headline_tcs(grp, tc_groups)
     res["onethr"] = {k: eng.one_threshold(grp, k, htcs) for k in res["methods"]}
@@ -680,16 +693,45 @@ def _eval_folds_task(job):
     return out
 
 
+def cache_key(data: Data, args, grp: Group, kind: str) -> str:
+    """Key of a cached result: code version, settings, the cells and valid-trial masks, and every embedding file used."""
+    parts = [FUSION_VERSION, sv.SCORER_VERSION, kind, str(args.boot), str(args.repeats), ",".join(data.tcs), grp.sig]
+    for m in grp.models:
+        for sname in data.states:
+            for c in sv.CONDS:
+                parts.append(f"{m}|{sname}|{c}|{sv.file_sig(sv.emb_path(data.vp, m, sname, c))}")
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:20]
+
+
+def cache_load(vp: Path, key: str):
+    path = vp / "results" / "fusion_cache" / f"{key}.pkl"
+    try:
+        with open(path, "rb") as fh:
+            return pickle.load(fh)
+    except Exception:
+        return None
+
+
+def cache_save(vp: Path, key: str, obj) -> None:
+    path = vp / "results" / "fusion_cache" / f"{key}.pkl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--vp", default=str(sv.DEFAULT_VP))
     ap.add_argument("--boot", type=int, default=N_BOOT, help="bootstrap replicates")
-    ap.add_argument("--repeats", type=int, default=2, help="random speaker splits (each used in both directions)")
+    ap.add_argument("--repeats", type=int, default=1, help="random speaker splits (each used in both directions)")
     ap.add_argument("--conds", default=",".join(DEFAULT_CONDS), help="conditions; cross trials are clean>each degraded one")
     ap.add_argument("--top-n", type=int, default=8)
     ap.add_argument("--rank-group", choices=("auto", "clean", "cross"), default="auto")
     ap.add_argument("--no-search", action="store_true", help="skip the top-n pair search")
     ap.add_argument("--pairs", default="", help="override the named pairs: a+b,c+d ( - for none)")
+    ap.add_argument("--no-cache", action="store_true", help="ignore VP/results/fusion_cache")
     ap.add_argument("--workers", type=int, default=3, help="worker processes (each single-threaded)")
     ap.add_argument("--out", default="fusion_summary", help="output stem in VP/results/")
     args = ap.parse_args(argv)
@@ -706,7 +748,7 @@ def main(argv=None) -> int:
     eng = Engine(data, folds, tc_groups)
     log(f"sets: {', '.join(data.states)}; folds {len(folds)}; boot {args.boot}; conditions {', '.join(tcs)}")
 
-    named = [] if args.pairs == "-" else ([tuple(p.split("+")) for p in args.pairs.split(",") if p] or NAMED_PAIRS)
+    named = [] if args.pairs == "-" else ([tuple(p.split("+")) for p in args.pairs.split(",") if p] or NAMED_PAIRS + EXTRA_PAIRS)
     lic = read_licenses(vp)
     have = {p.name for p in (vp / "emb").iterdir() if p.is_dir()}
 
@@ -714,12 +756,21 @@ def main(argv=None) -> int:
 
     # every model that will be touched: embeddings and cosines are loaded once here, then shared with the
     # worker processes (fork) so none of them reloads anything
-    search = None
-    chosen: list = []
+    searches: list = []
     if not args.no_search:
         chosen, raw, dropped, ranked_on = top_models(vp, args.top_n, args.rank_group, have, lic)
-        search = {"chosen": chosen, "raw_top": raw, "dropped": dropped, "ranked_on": ranked_on}
-    all_models = sorted({m for p in named for m in p if m in have} | set(chosen))
+        searches.append({"title": f"Top {args.top_n} of verify_summary.csv", "chosen": chosen, "raw_top": raw,
+                         "dropped": dropped, "ranked_on": ranked_on})
+        # the same ranking, restricted to models that already have every condition on every set: this search
+        # can use the cross-condition trials while the top list is still waiting for degraded embeddings
+        full = {m for m in have if all(sv.emb_path(vp, m, s, c).exists() for s in data.states for c in conds)}
+        chosen2, raw2, dropped2, ranked2 = top_models(vp, args.top_n, args.rank_group, full, lic,
+                                                      "degraded embeddings not complete yet")
+        if len(chosen2) >= 3 and set(chosen2) != set(chosen):
+            searches.append({"title": f"Top {args.top_n} of verify_summary.csv among models with every condition already embedded",
+                             "chosen": chosen2, "raw_top": raw2, "dropped": dropped2, "ranked_on": ranked2})
+    all_chosen = list(dict.fromkeys(m for sr in searches for m in sr["chosen"]))
+    all_models = sorted({m for p in named for m in p if m in have} | set(all_chosen))
     for m in all_models:
         build_group(data, (m,), tcs)
     n_missing = sum(int(np.isnan(data.cos(m, s, b, tc)).sum()) for m in all_models for s in data.states
@@ -738,25 +789,45 @@ def main(argv=None) -> int:
 
     # ---- named pairs
     results: dict = {}
-    todo = []
+    todo, keys = [], {}
     for pair in named:
         if not all(m in have for m in pair):
             data.notes.append(f"pair {'+'.join(pair)}: a model has no embeddings yet, skipped")
             continue
-        todo.append(pair)
-    for (pair, res), _ in zip(run(_pair_task, todo), todo):
-        if res is None:
+        grp = build_group(data, pair)
+        if not grp.cells:
             data.notes.append(f"pair {'+'.join(pair)}: no common cells yet")
             continue
+        keys[pair] = cache_key(data, args, grp, "pair")
+        hit = None if args.no_cache else cache_load(vp, keys[pair])
+        if hit is not None:
+            results[pair] = hit
+            log(f"  {'+'.join(pair)}: {len(hit['group'].cells)} cells (cached)")
+        else:
+            todo.append(pair)
+    for pair, res in run(_pair_task, todo):
         results[pair] = res
+        cache_save(vp, keys[pair], res)
         log(f"  {'+'.join(pair)}: {len(res['group'].cells)} cells")
+    results = {p: results[p] for p in named if p in results}
 
     # ---- singles of every candidate over every cell they have (the practical alternative to a pair)
-    need_singles = list(dict.fromkeys(chosen + [m for pair in results for m in pair]))
-    singles_all = dict(run(_single_task, need_singles))
+    need_singles = list(dict.fromkeys(all_chosen + [m for pair in results for m in pair]))
+    singles_all, todo_s, skeys = {}, [], {}
+    for m in need_singles:
+        skeys[m] = cache_key(data, args, build_group(data, (m,), tcs), "single")
+        hit = None if args.no_cache else cache_load(vp, skeys[m])
+        if hit is not None:
+            singles_all[m] = hit
+        else:
+            todo_s.append(m)
+    for m, cells in run(_single_task, todo_s):
+        singles_all[m] = cells
+        cache_save(vp, skeys[m], cells)
 
     # ---- pair search over the top-n
-    if search is not None:
+    for search in searches:
+        chosen = search["chosen"]
         cand_cells = None
         for m in chosen:
             ks = {(s, b, tc) for s in data.states for b in data.trials[s] for tc in tcs
@@ -804,7 +875,7 @@ def main(argv=None) -> int:
         hname, htcs = headline_tcs(grp, tc_groups)
         need = {ck for ck in grp.cells if ck[2] in htcs}
         best = None
-        for m in dict.fromkeys(chosen + list(pair)):
+        for m in dict.fromkeys(all_chosen + list(pair)):
             if m not in singles_all or not need <= set(singles_all[m]):
                 continue
             sub = {k: v for k, v in singles_all[m].items() if k in need}
@@ -818,7 +889,7 @@ def main(argv=None) -> int:
     cover = {m: {tc: sum(1 for s in data.states for b in data.trials[s] if data.cos(m, s, b, tc) is not None)
                  for tc in tcs} for m in all_models}
     checks = self_checks(data, data.notes)
-    write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, cover, per_tc_expected, checks, t0, lic)
+    write_report(vp, args, data, eng, tc_groups, tcs, named, results, searches, cover, per_tc_expected, checks, t0, lic)
     log(f"done in {time.time() - t0:.0f}s")
     return 0
 
@@ -837,7 +908,7 @@ def complete(grp: Group, data: Data, tcs: tuple) -> bool:
     return len(grp.cells) >= sum(len(data.trials[s]) for s in data.states) * len(tcs)
 
 
-def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, cover, per_tc_expected, checks, t0, lic):
+def write_report(vp, args, data, eng, tc_groups, tcs, named, results, searches, cover, per_tc_expected, checks, t0, lic):
     L = []
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     sets_txt = ", ".join(data.states)
@@ -878,7 +949,9 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
         fam = " + ".join(str(mt.get("family", "?")) for mt in metas)
         prm = " + ".join(f"{mt['params_m']:g}M" for mt in metas if mt.get("params_m"))
         body.append(f"### {pname}\n")
-        body.append(f"Families: {fam}; parameters: {prm or 'n/a'}.\n")
+        body.append(f"Families: {fam}; parameters: {prm or 'n/a'}." + (
+            " **Extra pair, not in the brief** (stand-in for the resnet293 pairs while their degraded embeddings are missing)."
+            if pair in EXTRA_PAIRS else "") + "\n")
         cov = f"{len(grp.cells)}/{per_tc_expected * len(tcs)} cells"
         if not is_full:
             have_tc = sorted({tc for (_, _, tc) in grp.cells}, key=tcs.index)
@@ -894,9 +967,10 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
         bs_cross = pool(res["methods"][best_single], tc_groups["cross"]) if hname == "cross" else (None, None)
         lic_txt = ", ".join(f"`{m}`: {license_of(lic, m) or 'unknown'}" for m in pair)
         body.append(f"License gate: {lic_txt}.\n")
+        show_clean = hname != "clean"
         body.append(f"| method | TAR@1e-3 {hname} | Δ vs best single | p | EER {hname} | Δ EER | "
-                    f"TAR@1e-4 {hname}, one threshold | TAR@1e-3 clean | Δ clean | EER clean |")
-        body.append("|---|---|---|---|---|---|---|---|---|---|")
+                    f"TAR@1e-4 {hname}, one threshold |" + (" TAR@1e-3 clean | Δ clean | EER clean |" if show_clean else ""))
+        body.append("|---|---|---|---|---|---|---|" + ("---|---|---|" if show_clean else ""))
         for k in singles + list(FUSION_METHODS):
             pt, rp = pts[k]
             if pt is None:
@@ -912,15 +986,15 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
                 d2, _, _, _ = delta_txt(pt, rp, bs_pt, bs_rp, I_EER, 2)
                 d3 = "-" if cpt is None or bs_clean[0] is None else delta_txt(cpt, crp, bs_clean[0], bs_clean[1], I_TAR3)[0]
                 p = "-" if p_ is None else f"{p_:.3f}"
-                if k in FUSION_METHODS and is_full:
+                if k in ("concat", "zavg", "ztuned") and is_full:
                     cbx = res.get("cand_best")
                     cand_d = delta_txt(pt, rp, cbx[1], cbx[2], I_TAR3) + (cbx[0],) if cbx else None
                     summary_rows.append((pair, k, d1, c1, p_, delta_txt(pt, rp, bs_pt, bs_rp, I_EER, 2), pt, rp, cand_d))
             ot = res["onethr"][k]
             ot_txt = "-" if ot["tar@1e-4"] is None else f"{pct(ot['tar@1e-4'])} ({int(np.floor(1e-4 * ot['n_nontarget']))} FA of {ot['n_nontarget']})"
             body.append(f"| {name} | {cipct(pt[I_TAR3], rp, I_TAR3)} | {d1} | {p} | {cipct(pt[I_EER], rp, I_EER, 2)} | {d2} "
-                        f"| {ot_txt} | {'-' if cpt is None else cipct(cpt[I_TAR3], crp, I_TAR3)} | {d3} "
-                        f"| {'-' if cpt is None else cipct(cpt[I_EER], crp, I_EER, 2)} |")
+                        f"| {ot_txt} |" + (f" {'-' if cpt is None else cipct(cpt[I_TAR3], crp, I_TAR3)} | {d3} "
+                        f"| {'-' if cpt is None else cipct(cpt[I_EER], crp, I_EER, 2)} |" if show_clean else ""))
         body.append("")
         cb = res.get("cand_best")
         if cb and cb[0] not in pair:
@@ -975,10 +1049,12 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
                     + f". Objective on the calibration half: {hname} TAR@1e-3.\n")
         # weight sweep
         body.append(f"Weight sweep (not tuned; z-norm from the calibration half, weight w on `{pair[0]}`), evaluation halves, "
-                    f"TAR@1e-3 {hname} / clean / EER {hname}:\n")
+                    f"TAR@1e-3 {hname}{' / clean' if hname != 'clean' else ''} / EER {hname}:\n")
         body.append("| w | " + " | ".join(f"{w:.1f}" for w in W_GRID) + " |")
         body.append("|---|" + "---|" * len(W_GRID))
-        for label, tset, idx, dg in ((f"TAR {hname}", htcs, I_TAR3, 1), ("TAR clean", ("clean",), I_TAR3, 1), (f"EER {hname}", htcs, I_EER, 2)):
+        sweep_rows = [(f"TAR {hname}", htcs, I_TAR3, 1)] + ([("TAR clean", ("clean",), I_TAR3, 1)] if show_clean else []) \
+            + [(f"EER {hname}", htcs, I_EER, 2)]
+        for label, tset, idx, dg in sweep_rows:
             row = []
             for w in W_GRID:
                 pt, _ = pool(res["sweep"][float(w)], tset)
@@ -1004,14 +1080,29 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
                             f"| {'yes (TAR and EER)' if both else ('TAR only' if sig else 'no')} | {cand_txt} |")
         n_cmp = len(summary_rows)
         verdicts.append("")
+        sig_rows = [r for r in summary_rows if is_gain(r[3], I_TAR3)]
+        cand_sig = [r for r in summary_rows if r[8] and is_gain(r[8][1], I_TAR3)]
+        if sig_rows:
+            best_r = max(sig_rows, key=lambda r: r[2 + 0] and float(r[2].split()[0].rstrip("*")))
+            verdicts.append(f"- Significant gains over the better single model of the pair: {len(sig_rows)} of {n_cmp} comparisons. "
+                            f"Largest: {' + '.join(best_r[0])}, {best_r[1]}, {best_r[2]} TAR@1e-3 and {best_r[5][0]} EER (pp).")
+        else:
+            verdicts.append(f"- No comparison shows a significant TAR@1e-3 gain over the better single model of its pair.")
+        verdicts.append(f"- Against the best single model on offer (the practical alternative), {len(cand_sig)} of {n_cmp} clear a 95% CI"
+                        + (": " + "; ".join(f"{' + '.join(r[0])} ({r[1]}) {r[8][0]} vs `{r[8][4]}`" for r in cand_sig) if cand_sig else "") + ".")
+        n_concat = sum(1 for r in sig_rows if r[1] == "concat")
+        verdicts.append(f"- `concat` (no fitted numbers, one vector per person, the simplest app version) is significant in "
+                        f"{n_concat} of {sum(1 for r in summary_rows if r[1] == 'concat')} pairs; `ztuned` in "
+                        f"{sum(1 for r in sig_rows if r[1] == 'ztuned')} of {sum(1 for r in summary_rows if r[1] == 'ztuned')}.")
+        verdicts.append("")
         verdicts.append(f"{n_cmp} fusion-versus-single comparisons are listed; with that many, expect about {0.05 * n_cmp:.1f} "
                         "to clear a 95% CI by chance, so a lone marginal star is not evidence.\n")
     else:
         verdicts.append("No pair has every set and condition yet, so there is no verdict; the tables below are partial.\n")
 
     # ---- pair search
-    if search:
-        body.append("## Best pair among the top single models\n")
+    for search in searches:
+        body.append(f"## Best pair search: {search['title']}\n")
         body.append(f"Candidates: the top {args.top_n} of `verify_summary.csv` ranked on human TAR@1e-3 **{search['ranked_on']}** "
                     f"({'cross data is complete enough' if search['ranked_on'] == 'cross' else 'cross-condition data is still incomplete for most models'}), "
                     "minus the exclusions below.\n")
@@ -1053,6 +1144,8 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
             body.append(f"| {nm} | {cipct(pt[I_TAR3], rp, I_TAR3)} | {d1} | {'-' if p_ is None else f'{p_:.3f}'} "
                         f"| {cipct(pt[I_EER], rp, I_EER, 2)} | {d2} |")
         body.append("")
+        lic_bp = ", ".join(f"`{m}`: {license_of(lic, m) or 'unknown'}" for m in bp)
+        body.append(f"License gate of the top-ranked pair: {lic_bp}.\n")
         body.append("In-fold picks: " + "; ".join(f"fold {k}: `{v[0]}` + `{v[1]}`" for k, v in search["sel_by_fold"].items()) + ".\n")
         body.append("Single models of the candidate list on the same cells and folds (TAR@1e-3 / EER):\n")
         body.append("| model | TAR@1e-3 | EER |")
@@ -1061,7 +1154,7 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
             body.append(f"| `{m}` | {cipct(pt[I_TAR3], rp, I_TAR3)} | {cipct(pt[I_EER], rp, I_EER, 2)} |")
         body.append("")
         if search["search_tcs"] == ("clean",):
-            verdicts.append("The top-8 pair search ran on clean trials only for now; see its section.\n")
+            verdicts.append(f"Pair search \"{search['title']}\" ran on clean trials only for now; see its section.\n")
 
     # ---- notes
     body.append("## Method notes and checks\n")

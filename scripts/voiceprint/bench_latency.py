@@ -14,10 +14,13 @@ Subcommands (run with VP/venv/bin/python, from the repo root):
   run      timing rounds. Each round measures every model once, in a fresh process, one at a time
            (interleaved, start order rotated). The baseline is measured in every round, so each
            model has a same-round ratio to it. Appends to VP/results/latency_raw.jsonl.
+  cold     first-ever load: a content-changed copy of each model (Core ML has never planned it), load + first predict at
+           every length -> VP/results/latency_cold.jsonl. Run it while no timing round is running.
   plan     which device (ANE / GPU / CPU) Core ML plans for each model's ops -> latency_plans.json
-  report   VP/results/latency.md from the three files above.
-  worker   (internal) one model, one process: load, warm latency per length, mixed-length stream,
-           memory. Prints one JSON object.
+  report   VP/results/latency.md from the files above. Rounds are split into calm and contended by how the baseline
+           (identical work every call, CPU-bound FBank) behaved; the headline uses the calm ones.
+  worker   (internal) one model, one process: load, warm latency per length, a 300-window stream with real turn
+           lengths in arrival order and grouped by length, memory. Writes one JSON object.
 
 Models timed (compute units ALL, fused Core ML unless noted):
   app-wespeaker-coreml        the app today: FBank.mlmodelc (CPU) + Embedding.mlmodelc (ALL), one fixed
@@ -359,18 +362,25 @@ def cmd_worker(args) -> int:
 
     cold_dir = None
     if args.cold:
-        # A fresh copy at a new path: Core ML has never planned/compiled it for the ANE or GPU, which is
-        # what a user's first launch after install looks like.
+        # A fresh, content-changed copy: Core ML caches its ANE/GPU plans by model content, so a plain copy would hit the
+        # cache of the original. Appending a random number of trailing newlines to each model.mil (harmless to the parser)
+        # makes the bundle new to Core ML, which is what a user's first launch after install looks like.
         cold_dir = Path(tempfile.mkdtemp(prefix="benchlat_cold_"))
         import shutil
+
+        def fresh_copy(src: str, dst: Path):
+            shutil.copytree(src, dst, copy_function=shutil.copyfile)
+            for mil in dst.rglob("model.mil"):
+                with open(mil, "ab") as f:
+                    f.write(b"\n" * (1 + int.from_bytes(os.urandom(2), "big")))
+
         if spec["kind"] == "fluid":
             for name in ("FBank.mlmodelc", "Embedding.mlmodelc"):
-                shutil.copytree(Path(spec["dir"]) / name, cold_dir / name)
+                fresh_copy(str(Path(spec["dir"]) / name), cold_dir / name)
             spec = dict(spec, dir=str(cold_dir))
         else:
-            shutil.copytree(spec["mlmodelc"], cold_dir / "model.mlmodelc")
+            fresh_copy(spec["mlmodelc"], cold_dir / "model.mlmodelc")
             spec = dict(spec, mlmodelc=str(cold_dir / "model.mlmodelc"))
-
     audio = _speech()
     fp0 = _footprint_mb()
     res = {"id": spec["id"], "kind": spec["kind"], "load_avg_start": [round(x, 1) for x in os.getloadavg()],
@@ -505,14 +515,25 @@ def cmd_worker(args) -> int:
             res["lengths"][str(n / SR)] = {**_stats(ts), "call_samples": n, "full_protocol": full}
         # mixed-length stream: window lengths from the real turns, each rounded up to the next length
         # the model takes (what CoreMLSpeakerSegmentEmbedder does). Shows any re-plan cost per length change.
-        ts, used = [], collections.Counter()
-        for w in stream_windows:
-            n = next((L for L in lengths if L >= int(round(w * SR)) - 1), lengths[-1])
-            used[n / SR] += 1
+        call_ns = [next((L for L in lengths if L >= int(round(w * SR)) - 1), lengths[-1]) for w in stream_windows]
+        ts, calls = [], []
+        for n in call_ns:
             t0 = time.perf_counter()
             call(n)
             ts.append((time.perf_counter() - t0) * 1000)
+            calls.append([n / SR, round(ts[-1], 2)])
         res["stream"] = _stats(ts)
+        res["stream_calls"] = calls  # (call length s, ms) in arrival order
+        # Same windows, grouped by call length: an app can sort windows by length so each length is
+        # planned once. Shows how much of the stream cost is length-change overhead.
+        ts_g, calls_g = [], []
+        for n in sorted(call_ns):
+            t0 = time.perf_counter()
+            call(n)
+            ts_g.append((time.perf_counter() - t0) * 1000)
+            calls_g.append([n / SR, round(ts_g[-1], 2)])
+        res["stream_grouped"] = _stats(ts_g)
+        res["stream_grouped_calls"] = calls_g
         res["call_lengths_s"] = [n / SR for n in lengths]
         model_mb = dir_mb(Path(mlc))
     res["model_mb"] = round(model_mb, 1)
@@ -657,10 +678,32 @@ def _call_ms(row: dict, window_s: float, stat: str = "median") -> float:
     """ms for one window of `window_s` seconds. Baseline: its fixed 10 s call whatever the length.
     Fused: the next length the model accepts (CoreMLSpeakerSegmentEmbedder tiles up to it)."""
     if row["kind"] == "fluid":
-        return _len_stat(row, 10, stat)
+        # one fixed 10 s call whatever the turn length: the four measured "lengths" are identical work, so pool them
+        vals = [_len_stat(row, sec, stat) for sec in REQUIRED_S]
+        return min(vals) if stat == "p10" else statistics.median(vals)
     allowed = sorted(row["call_lengths_s"])
     L = next((a for a in allowed if a >= window_s - 1e-6), allowed[-1])
     return _len_stat(row, L, stat)
+
+
+def _is_multifunction(row: dict) -> bool:
+    return len(row.get("load_s_per_function") or {}) > 1
+
+
+def _stream_split(row: dict) -> dict | None:
+    """From the stream (arrival order) and the same windows grouped by length: mean ms per window when each
+    call is priced at its length's median in each run, and the difference (the length-change overhead)."""
+    if "stream_calls" not in row or "stream_grouped_calls" not in row:
+        return None
+    by, byg = collections.defaultdict(list), collections.defaultdict(list)
+    for length, ms in row["stream_calls"]:
+        by[length].append(ms)
+    for length, ms in row["stream_grouped_calls"]:
+        byg[length].append(ms)
+    calls = [length for length, _ in row["stream_calls"]]
+    arrive = statistics.fmean(statistics.median(by[c]) for c in calls)
+    grouped = statistics.fmean(statistics.median(byg[c]) for c in calls)
+    return {"as_arrive": arrive, "grouped": grouped, "overhead": arrive - grouped}
 
 
 def _fmt_range(lo: float, hi: float) -> str:
@@ -688,15 +731,81 @@ def cmd_report(_args) -> int:
     ids = [BASELINE_ID] + [i for i in FINALISTS if i in ids] + sorted(
         i for i in ids if i not in FINALISTS and i != BASELINE_ID)
     per_model = {mid: [r for r in rows if r["id"] == mid] for mid in ids}
-    paired_rounds = [rid for rid, d in rounds.items() if BASELINE_ID in d]
+    paired_rounds = sorted(rid for rid, d in rounds.items() if BASELINE_ID in d)
+    # A round is "calm" when the baseline, which runs identical work every call, took at most twice its best
+    # round's time: its FBank stage is CPU-only, so it is the canary for contention.
+    base_round_ms = {rid: statistics.median(_len_stat(rounds[rid][BASELINE_ID], sec) for sec in REQUIRED_S) for rid in paired_rounds}
+    calm_rounds = [rid for rid in paired_rounds if base_round_ms[rid] <= 2.0 * min(base_round_ms.values())]
+    heavy_rounds = [rid for rid in paired_rounds if rid not in calm_rounds]
 
-    def per_round(mid: str, fn):
-        return [(rid, fn(rounds[rid][mid], rounds[rid][BASELINE_ID])) for rid in paired_rounds if mid in rounds[rid]]
+    def per_round(mid: str, fn, only=None):
+        return [(rid, fn(rounds[rid][mid], rounds[rid][BASELINE_ID])) for rid in (only if only is not None else calm_rounds)
+                if mid in rounds[rid]]
 
-    def cost_per_hour(row: dict, source: str = "nemotron-lab pooled", hop: str = "windows_hop5", stat: str = "median"):
-        s = samples[source]
-        win = s["baseline_pieces"] if row["kind"] == "fluid" else s[hop]
-        return sum(_call_ms(row, w, stat) for w in win) / 1000.0 / src[source]["hours"]
+    def calm_rows(mid: str):
+        return [r for r in per_model[mid] if r["round_id"] in calm_rounds]
+
+    cold_rows = [json.loads(line) for line in open(COLD_JSONL)] if COLD_JSONL.exists() else []
+    cold_rows = [r for r in cold_rows if "error" not in r]
+
+    def plan_of(mid: str) -> dict:
+        r0 = max(per_model[mid], key=lambda r: r["artifact_mtime"])
+        return plans.get(f"{mid}@{r0['artifact_mtime']:.0f}") or {}
+
+    def device_of(mid: str) -> str:
+        plan = plan_of(mid)
+        if "Embedding" in plan:
+            e = plan["Embedding"]
+            return f"GPU for the embedding net ({e.get('gpu', 0)} of {sum(e.values())} ops), CPU for FBank"
+        if not plan or "error" in plan:
+            return "unknown"
+        n = {k: plan.get(k, 0) for k in ("ane", "gpu", "cpu")}
+        tot = sum(n.values())
+        main = max(n, key=n.get)
+        label = {"ane": "Neural Engine", "gpu": "GPU", "cpu": "CPU"}[main]
+        rest = [f"{n[k]} on {k.upper()}" for k in ("ane", "gpu", "cpu") if k != main and n[k]]
+        return f"{label} ({n[main]} of {tot} ops" + (", " + ", ".join(rest) if rest else "") + ")"
+
+    def warm_load(mid: str, key: str = "first_predict_s") -> tuple:
+        rows_c = calm_rows(mid) or per_model[mid]
+        vals = [r["load_s"] + r["first_predict_s"] if key == "first_predict_s" else r["all_ready_s"] for r in rows_c]
+        worst = max((r["load_s"] + r["first_predict_s"]) if key == "first_predict_s" else r["all_ready_s"] for r in per_model[mid])
+        return _med(vals), worst
+
+    def cold_load(mid: str, key: str = "first_predict_s"):
+        cr = [r for r in cold_rows if r["id"] == mid]
+        if not cr:
+            return None
+        return _med([r["load_s"] + r["first_predict_s"] if key == "first_predict_s" else r["all_ready_s"] for r in cr])
+
+    def peak_growth(mid: str, one: bool = False):
+        rs = per_model[mid]
+        if one:
+            return _med([r["footprint_after_first_predict_mb"]["phys_footprint"] - r["footprint_before_load_mb"]["phys_footprint"] for r in rs])
+        return _med([r["footprint_end_mb"]["phys_footprint_peak"] - r["footprint_before_load_mb"]["phys_footprint"] for r in rs])
+
+    overhead_cache: dict = {}
+
+    def switch_overhead_ms(mid: str) -> float:
+        """Extra ms per window when the input length changes call to call, for a model that is one enumerated-shape graph
+        (the wespeaker builds). Median over the rounds that recorded it. Multifunction builds hold one graph per length: 0."""
+        if mid not in overhead_cache:
+            rs = calm_rows(mid)
+            if not rs or rs[0]["kind"] == "fluid" or any(_is_multifunction(r) for r in rs):
+                overhead_cache[mid] = 0.0
+            else:
+                vals = [x["overhead"] for x in (_stream_split(r) for r in rs) if x]
+                overhead_cache[mid] = max(0.0, _med(vals) or 0.0)
+        return overhead_cache[mid]
+
+    def cost_per_hour(row: dict, source: str = "nemotron-lab pooled", hop: str = "windows_hop5", stat: str = "median",
+                      overhead: bool = True):
+        """Voiceprint seconds per hour of meeting: every window priced at its call length's per-length latency, plus the
+        measured length-change overhead for enumerated-shape models."""
+        smp = samples[source]
+        win = smp["baseline_pieces"] if row["kind"] == "fluid" else smp[hop]
+        ms = sum(_call_ms(row, w, stat) for w in win) + (switch_overhead_ms(row["id"]) * len(win) if overhead else 0.0)
+        return ms / 1000.0 / src[source]["hours"]
 
     def model_mean_ms(row: dict, stat: str = "median"):
         win = samples["nemotron-lab pooled"]["windows_hop5"]
@@ -714,39 +823,99 @@ def cmd_report(_args) -> int:
       "into windows (up to 10 s, a new window every 5 s), each window is embedded, and the vectors are averaged. So the cost is "
       "windows per hour times time per window. Everything below runs Core ML with compute units ALL on an M5 Max.")
     w("")
-    w(f"**The Mac was heavily loaded the whole time** (load average {min(loads):.0f} to {max(loads):.0f} on 18 cores). Raw milliseconds "
-      "are inflated and noisy, most of all for anything that touches the CPU. Each round times every model once, one at a time, "
+    w(f"**The Mac was heavily loaded the whole time** (load average {min(loads):.0f} to {max(loads):.0f} on 18 cores, because other agents were embedding datasets). "
+      "Raw milliseconds are noisy and, for anything that touches the CPU, inflated. Each round times every model once, one at a time, "
       "with the baseline in the same round, and the ratio is taken inside the round; those ratios are the trustworthy part. "
-      "\"Quiet\" numbers use the fastest decile of calls (p10), which is what a call costs when nothing else is competing.")
+      "The rounds are split into calm and contended by how the baseline behaved (see the answer below), and \"fastest 10%\" (p10) is what "
+      "a call costs when nothing else is competing.")
     w("")
 
     # ---------------- headline
     w("## Answer: extra seconds after a meeting, vs the app's current model")
     w("")
-    w("| model | extra, 30-min meeting | extra, 60-min meeting | quiet Mac, 60 min | its total voiceprint time, 60 min | vs baseline |")
-    w("|---|---|---|---|---|---|")
+    w(f"{len(paired_rounds)} rounds were run. {len(calm_rounds)} were calm (the baseline, which does identical work every call, ran at "
+      f"{min(base_round_ms[r] for r in calm_rounds):.0f} to {max(base_round_ms[r] for r in calm_rounds):.0f} ms per call) and {len(heavy_rounds)} were contended "
+      f"({min(base_round_ms[r] for r in heavy_rounds):.0f} to {max(base_round_ms[r] for r in heavy_rounds):.0f} ms per call; the CPU-only FBank stage stalls). "
+      "The headline uses the calm rounds; the busy-Mac column uses all of them." if heavy_rounds else
+      f"All {len(paired_rounds)} rounds were calm.")
+    w("")
+    w("| model | extra, 30-min meeting | extra, 60-min meeting | range over calm rounds (60 min) | busy Mac, 60 min (all rounds, mean of raw calls) | its total voiceprint time, 60 min (calm) | cost vs baseline (calm) |")
+    w("|---|---|---|---|---|---|---|")
     summary = {}
     for mid in ids:
-        pr = per_round(mid, lambda m, b: (cost_per_hour(m), cost_per_hour(b), cost_per_hour(m, stat="p10"), cost_per_hour(b, stat="p10")))
+        pr = per_round(mid, lambda m, b: (cost_per_hour(m), cost_per_hour(b)))
         if not pr:
             continue
         v = [x for _, x in pr]
-        d = [a - b for a, b, _, _ in v]
-        dq = [a - b for _, _, a, b in v]
-        summary[mid] = {"total": _med([a for a, _, _, _ in v]), "extra": _med(d), "range": (min(d), max(d)),
-                        "quiet_extra": _med(dq), "quiet_total": _med([a for _, _, a, _ in v]),
-                        "ratio": _med([a / b for a, b, _, _ in v]), "quiet_ratio": _med([a / b for _, _, a, b in v])}
-        s = summary[mid]
+        d = [a - b for a, b in v]
+        def busy(row):  # mean of the 300 raw arrival-order calls, priced over the hour's window count (stalls included)
+            n = pooled["baseline_pieces_per_hour"] if row["kind"] == "fluid" else pooled["windows_hop5_per_hour"]
+            return row["stream"]["mean"] * n / 1000.0
+
+        hv = per_round(mid, lambda m, b: busy(m) - busy(b), only=paired_rounds)
+        summary[mid] = {"total": _med([a for a, _ in v]), "extra": _med(d), "range": (min(d), max(d)),
+                        "ratio": _med([a / b for a, b in v]), "base_total": _med([b for _, b in v]),
+                        "heavy": _med([x for _, x in hv])}
+        s_ = summary[mid]
         if mid == BASELINE_ID:
-            w(f"| **{mid}** (baseline) | 0 | 0 | 0 | {s['total']:.0f} s ({s['quiet_total']:.0f} s quiet) | 1.00x |")
+            w(f"| **{mid}** (baseline) | 0 | 0 | - | 0 | {s_['total']:.0f} s | 1.00x |")
         else:
-            w(f"| **{mid}** | {s['extra']/2:+.1f} s | {s['extra']:+.1f} s (rounds: {_fmt_range(*s['range'])}) | "
-              f"{s['quiet_extra']:+.1f} s | {s['total']:.0f} s ({s['quiet_total']:.0f} s quiet) | "
-              f"{s['ratio']:.2f}x ({s['quiet_ratio']:.2f}x quiet) |")
+            hh = f"{s_['heavy']:+.0f} s" if s_["heavy"] is not None else "n/a"
+            w(f"| **{mid}** | {s_['extra']/2:+.1f} s | {s_['extra']:+.1f} s | {_fmt_range(*s_['range'])} s | {hh} | "
+              f"{s_['total']:.0f} s | {s_['ratio']:.2f}x |")
     w("")
-    w("Priced over the real window mix: " + f"{pooled['turns_per_hour']} turns and {pooled['windows_hop5_per_hour']} windows per hour "
-      f"(hop 5 s); the baseline embeds {pooled['baseline_pieces_per_hour']} fixed 10 s pieces per hour. "
-      "\"Extra\" is the model's time minus the baseline's time in the same round, median over rounds. Negative means faster than today.")
+    w(f"How this is priced: every window of the real turn mix ({pooled['turns_per_hour']} turns and {pooled['windows_hop5_per_hour']} windows per hour, hop 5 s) "
+      "is charged the time its model takes for a window of that length (the fused models take the length rounded up to one they accept; the baseline "
+      f"embeds {pooled['baseline_pieces_per_hour']} fixed 10 s pieces per hour whatever the turn length), plus, for the wespeaker builds, the measured "
+      "cost of the input length changing from call to call. \"Extra\" is the model's time minus the baseline's time **in the same round**, median over rounds. "
+      "Negative means faster than today. The calm columns are median-call costs on the calm rounds; the busy-Mac column is the plain mean of "
+      "300 raw calls in arrival order, stalls included, over all rounds. Both leave out load time, which is larger than any of the per-window "
+      "differences (section 4).")
+    w("")
+    w("Why two views: the baseline's FBank stage runs on the CPU only, and while the Mac is busy about one call in five stalls for 100 ms or more; the ANE and "
+      "GPU models stay close to their median. On a quiet Mac the models are within a few seconds of each other per hour of meeting (the calm columns). "
+      "On a Mac that is busy while the meeting is processed, the baseline's mean cost per window is "
+      f"{_med([r['stream']['mean'] for r in per_model[BASELINE_ID]]):.0f} ms (mean of raw calls over all rounds) and the challengers' are "
+      + ", ".join(f"{_med([r['stream']['mean'] for r in per_model[mid]]):.0f} ms ({mid})" for mid in ids if mid != BASELINE_ID) + ".")
+    w("")
+
+    w("### At a glance")
+    w("")
+    w("Warm latency per window, calm rounds, ms at 2 / 4 / 8 / 10 s (the baseline is one fixed 10 s call for every length).")
+    w("")
+    w("| model | ms per window at 2 / 4 / 8 / 10 s | extra, 30 min | extra, 60 min | warm load | first-ever load | memory growth (peak) | size on disk | runs on |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    for mid in ids:
+        rs = calm_rows(mid)
+        lat = " / ".join(f"{_med([_len_stat(r, sec) for r in rs]):.0f}" for sec in REQUIRED_S)
+        sm = summary.get(mid)
+        e30 = "0" if mid == BASELINE_ID else f"{sm['extra']/2:+.1f} s"
+        e60 = "0" if mid == BASELINE_ID else f"{sm['extra']:+.1f} s"
+        wl = warm_load(mid, "all")
+        wl1 = warm_load(mid)
+        cl = cold_load(mid, "all")
+        wtxt = f"{wl1[0]:.1f} s" + (f" ({wl[0]:.0f} s for all lengths)" if wl[0] > wl1[0] * 2 else "")
+        ctxt = "not run" if cl is None else (f"{cold_load(mid):.0f} s" + (f" ({cl:.0f} s all lengths)" if cl > cold_load(mid) * 2 else ""))
+        w(f"| **{mid}** | {lat} | {e30} | {e60} | {wtxt} | {ctxt} | +{peak_growth(mid):.0f} MB | "
+          f"{per_model[mid][0]['model_mb']:.0f} MB | {device_of(mid)} |")
+    w("")
+
+    w("### Takeaways")
+    w("")
+    for mid in ids:
+        sm = summary.get(mid)
+        wl1, wl_worst = warm_load(mid)
+        wl_all, _ = warm_load(mid, "all")
+        cl = cold_load(mid, "all")
+        lat10 = _med([_len_stat(r, 10) for r in calm_rows(mid)])
+        if mid == BASELINE_ID:
+            w(f"- **{mid}** (today): {sm['total']:.0f} s of voiceprint time per 60-minute meeting, loads in under a second, +{peak_growth(mid):.0f} MB, "
+              f"{device_of(mid)}. Under CPU load its FBank stage stalls, so it is the model most sensitive to a busy Mac.")
+            continue
+        extra = f"{sm['extra']:+.1f} s per 60-minute meeting ({sm['extra']/2:+.1f} s per 30-minute)"
+        load = f"{wl1:.0f} s warm load" + (f" ({wl_all:.0f} s to have every length ready)" if wl_all > wl1 * 2 else "")
+        cold = (f", {cl:.0f} s first-ever" + (" with every length" if wl_all > wl1 * 2 else "")) if cl else ""
+        w(f"- **{mid}**: {extra} at the median call; {load}{cold}; +{peak_growth(mid):.0f} MB; {lat10:.0f} ms for a full 10 s window; {device_of(mid)}.")
     w("")
 
     # ---------------- turns
@@ -778,13 +947,13 @@ def cmd_report(_args) -> int:
     w("## 2. Time per window")
     w("")
     w(f"Warm latency of one model call, median of {FULL_N} calls after {FULL_WARM} warm-ups at each length, per round; the cell is the median "
-      f"over {len(rounds)} round(s), with the quiet value (p10) in brackets. The baseline always runs one fixed 10 s window (FBank on CPU, then the "
+      f"over the {len(calm_rounds)} calm rounds, with the fastest-10% value (p10) in brackets. The baseline always runs one fixed 10 s window (FBank on CPU, then the "
       "embedding net), so a 2 s turn costs what a 10 s turn does. The fused models take the audio at its own length, rounded up to a length they accept.")
     w("")
-    w("| model | 2 s | 4 s | 8 s | 10 s | ratio to baseline, 2 / 4 / 8 / 10 s (median, quiet) |")
+    w("| model | 2 s | 4 s | 8 s | 10 s | ratio to baseline, 2 / 4 / 8 / 10 s (median, fastest 10%) |")
     w("|---|---|---|---|---|---|")
     for mid in ids:
-        rs = per_model[mid]
+        rs = calm_rows(mid)
         cells = [f"{_med([_len_stat(r, sec) for r in rs]):.1f} ms ({_med([_len_stat(r, sec, 'p10') for r in rs]):.1f})" for sec in REQUIRED_S]
         rat = []
         for sec in REQUIRED_S:
@@ -792,34 +961,50 @@ def cmd_report(_args) -> int:
             q = _med([x for _, x in per_round(mid, lambda m, b, sec=sec: _len_stat(m, sec, "p10") / _len_stat(b, 10, "p10"))])
             rat.append(f"{a:.2f}x ({q:.2f}x)")
         w(f"| {mid} | " + " | ".join(cells) + " | " + " / ".join(rat) + " |")
-    base_rows = per_model[BASELINE_ID]
+    base_rows = calm_rows(BASELINE_ID)
     w("")
-    w("Baseline split (median ms over rounds): " + "; ".join(
+    w("Baseline split (median ms over calm rounds): " + "; ".join(
         f"{sec} s turn: FBank {_med([r['lengths'][str(sec)]['fbank_median'] for r in base_rows]):.1f} + embedding "
         f"{_med([r['lengths'][str(sec)]['embedding_median'] for r in base_rows]):.1f}" for sec in (2, 10)) +
       ". FBank is CPU-only in the app, so it is what contention hits first.")
     w("")
-    w("Direct check with real turn lengths: 300 windows drawn from the Nemotron pool and timed one after another in random order "
-      "(this includes any Core ML re-plan when the input length changes). Compared with the same windows priced from the per-length medians above:")
+    w("Mean cost of one window over the real turn mix (calm rounds; each window of the Nemotron pool priced at its call length):")
     w("")
-    w("| model | stream mean ms / window | stream median | priced from per-length medians | stream / priced | stream ratio to baseline |")
+    w("| model | median call | fastest 10% of calls | ratio to baseline, same round (median / fastest 10%) |")
+    w("|---|---|---|---|")
+    for mid in ids:
+        rs = calm_rows(mid)
+        a = _med([model_mean_ms(r) for r in rs])
+        q = _med([model_mean_ms(r, "p10") for r in rs])
+        ra = _med([x for _, x in per_round(mid, lambda m, b: model_mean_ms(m) / model_mean_ms(b))])
+        rq = _med([x for _, x in per_round(mid, lambda m, b: model_mean_ms(m, "p10") / model_mean_ms(b, "p10"))])
+        w(f"| {mid} | {a:.1f} ms | {q:.1f} ms | {ra:.2f}x / {rq:.2f}x |")
+    w("")
+    w("Direct check with real turn lengths: 300 windows drawn from the Nemotron pool, timed one after another in arrival order "
+      "(so the input length changes from call to call), then the same 300 sorted by length so each length is planned once. Each call is "
+      "priced at its length's median within its run; the mean is over windows. The difference is what changing length costs.")
+    w("")
+    w("| model | as they arrive | grouped by length | length-change overhead | applied to the estimate | mean of raw calls (arrival order) |")
     w("|---|---|---|---|---|---|")
     for mid in ids:
-        rs = per_model[mid]
-        sm = _med([r["stream"]["mean"] for r in rs])
-        smed = _med([r["stream"]["median"] for r in rs])
-        priced = _med([model_mean_ms(r) for r in rs])
-        sr = _med([x for _, x in per_round(mid, lambda m, b: m["stream"]["mean"] / b["stream"]["mean"])])
-        w(f"| {mid} | {sm:.1f} | {smed:.1f} | {priced:.1f} | {sm/priced:.2f}x | {sr:.2f}x |")
+        rs = calm_rows(mid)
+        sp = [x for x in (_stream_split(r) for r in rs) if x]
+        raw_mean = _med([r["stream"]["mean"] for r in rs])
+        if not sp:
+            w(f"| {mid} | n/a (fixed 10 s window, length never changes) | | | 0 | {raw_mean:.1f} ms |")
+            continue
+        w(f"| {mid} | {_med([x['as_arrive'] for x in sp]):.1f} ms | {_med([x['grouped'] for x in sp]):.1f} ms | "
+          f"{_med([x['overhead'] for x in sp]):+.1f} ms | {switch_overhead_ms(mid):.1f} ms | {raw_mean:.1f} ms |")
     w("")
-    w("A stream/priced figure near 1.0 means changing the input length costs nothing extra. Note the baseline's stream mean is far above "
-      "its quiet latency because FBank shares the busy CPU cores.")
+    w("The enumerated wespeaker builds pay a few ms whenever the length differs from the previous call; the multifunction ReDimNet builds keep one graph per length "
+      "and show none beyond noise. An app that sorts windows by length before embedding avoids the overhead. The last column is the plain mean of the raw calls, "
+      "which contention tails inflate; it is shown so the loaded reality is visible.")
     w("")
 
     # ---------------- sensitivity
     w("## 3. How the estimate moves with the meeting mix")
     w("")
-    w("Extra seconds for a 60-minute meeting vs the baseline (median over rounds, loaded), pricing each family's own turns:")
+    w("Extra seconds for a 60-minute meeting vs the baseline (median over calm rounds), pricing each family's own turns:")
     w("")
     fnames = [s["source"] for s in turns["sources"] if s["source"].startswith("nemotron-lab") and "pooled" not in s["source"]]
     extra_srcs = [n for n in ("ami (human labels)", "icsi (human labels)") if n in src]
@@ -837,24 +1022,22 @@ def cmd_report(_args) -> int:
     w("")
 
     # ---------------- load / memory / size / device
-    cold_rows = [json.loads(line) for line in open(COLD_JSONL)] if COLD_JSONL.exists() else []
-    cold_rows = [r for r in cold_rows if "error" not in r]
     w("## 4. Load time, memory, size, compute device")
     w("")
-    w("`warm load` is a fresh process loading a model Core ML has already planned for this Mac (what every launch after the first costs): "
-      "the constructor, then the first prediction. `first-ever load` is a fresh copy at a new path, which Core ML has never compiled for the "
-      "ANE or GPU (what the first launch after install costs). `all lengths` adds the first call at every input length the model takes "
-      "(multifunction models load one function per length). Both were measured on the loaded machine, and compile runs on the CPU, so expect it "
-      "to be faster on a quiet Mac. Memory is macOS `phys_footprint` of the worker process, peak minus the same process before loading the model "
-      "(torch is blocked, so the empty process is Python + coremltools only).")
+    w("**Load time is the real cost here, not the per-window time.** Every model was loaded in a fresh process each round. `warm load` is the "
+      "constructor plus the first prediction for a model Core ML has already planned for this Mac (what every app launch after the first costs): "
+      "median over the calm rounds, with the slowest round in brackets. `first-ever` is a content-changed copy that Core ML has never planned "
+      "(the first launch after install), 2 runs each, measured while other jobs kept the Mac at load 140 to 180. `all lengths` also loads and runs the graph for "
+      "every input length the model takes. The wespeaker builds are one graph with 13 enumerated lengths on the Neural Engine; that whole load lands in "
+      "the constructor (it probably plans every enumerated length, which would make fewer lengths load faster; not tested). The ReDimNet builds are 10 "
+      "separate per-length functions on the GPU, about 4 s each, loaded as each length is first needed. Load and compile run on the CPU, so all of these "
+      "are slower when the Mac is busy.")
     w("")
-    w("| model | warm load + first predict | first-ever load + first predict | first-ever, all lengths | peak memory growth | model size on disk | ops planned on ANE / GPU / CPU |")
+    w("| model | warm load + first predict | warm, all lengths ready | first-ever load + first predict | first-ever, all lengths | model size on disk | ops planned on ANE / GPU / CPU |")
     w("|---|---|---|---|---|---|---|")
     for mid in ids:
         rs = per_model[mid]
-        r0 = max(rs, key=lambda r: r["round"] if "round" in r else 0)
-        growth = _med([r["footprint_end_mb"]["phys_footprint_peak"] - r["footprint_before_load_mb"]["phys_footprint"] for r in rs])
-        plan = plans.get(f"{mid}@{r0['artifact_mtime']:.0f}") or {}
+        plan = plan_of(mid)
         if "Embedding" in plan:
             e = plan["Embedding"]
             comp = f"embedding net {e.get('ane', 0)} / {e.get('gpu', 0)} / {e.get('cpu', 0)}; FBank pinned to CPU"
@@ -863,14 +1046,25 @@ def cmd_report(_args) -> int:
             comp = f"{plan.get('ane', 0)} / {plan.get('gpu', 0)} / {plan.get('cpu', 0)}" + (f" (+{nd} untagged)" if nd else "")
         else:
             comp = plan.get("error", "n/a")
-        cr = [r for r in cold_rows if r["id"] == mid]
-        cold = (f"{_med([r['load_s'] + r['first_predict_s'] for r in cr]):.1f} s" if cr else "not run")
-        cold_all = (f"{_med([r['all_ready_s'] for r in cr]):.1f} s" if cr else "not run")
-        w(f"| {mid} | {_med([r['load_s'] + r['first_predict_s'] for r in rs]):.1f} s (all lengths "
-          f"{_med([r['all_ready_s'] for r in rs]):.1f} s) | {cold} | {cold_all} | {growth:+.0f} MB | {r0['model_mb']:.1f} MB | {comp} |")
+        wa, wa_worst = warm_load(mid)
+        wb, wb_worst = warm_load(mid, "all")
+        c1, c2 = cold_load(mid), cold_load(mid, "all")
+        w(f"| {mid} | {wa:.1f} s ({wa_worst:.0f} s) | {wb:.1f} s ({wb_worst:.0f} s) | "
+          f"{'not run' if c1 is None else f'{c1:.1f} s'} | {'not run' if c2 is None else f'{c2:.1f} s'} | {rs[0]['model_mb']:.1f} MB | {comp} |")
     w("")
-    w("Memory caveat: Core ML does part of its ANE/GPU work in system services, so those allocations are outside the worker's footprint; "
-      "read the growth as a floor. Multifunction models are loaded one function per length, and the footprint counts all of them.")
+    w("Memory: macOS `phys_footprint` of the worker process, minus the same process before the model was loaded (Python + coremltools, torch blocked). "
+      "\"One graph\" is after loading the 4 s graph or function and running it; \"all lengths\" is the peak after every length was loaded and run.")
+    w("")
+    w("| model | growth, one graph loaded | growth, all lengths (peak) | note |")
+    w("|---|---|---|---|")
+    for mid in ids:
+        rs = per_model[mid]
+        note = ("FBank (CPU) + embedding net (GPU); one fixed 10 s shape" if mid == BASELINE_ID else
+                "one function per length, each holds its own GPU buffers" if _is_multifunction(rs[0]) else
+                "one graph, 13 enumerated lengths on the ANE (ANE memory is outside the process footprint, so read this as a floor)")
+        w(f"| {mid} | {peak_growth(mid, True):+.0f} MB | {peak_growth(mid):+.0f} MB | {note} |")
+    w("")
+    w("An app that loads only the ReDimNet lengths it needs, or unloads them after the meeting, sits near the \"one graph\" figure per length.")
     w("")
 
     # ---------------- raw rounds
@@ -879,8 +1073,8 @@ def cmd_report(_args) -> int:
     w("Per round: median ms at 4 s and 10 s and the stream mean, the load average when the worker started (1 / 5 minute), and the ratio to the "
       "baseline in that round. A model that is fast in a low-load round and slow in a high-load one is showing contention, not the model.")
     w("")
-    w("| round | model | load avg (1 / 5 min) | 4 s | 10 s | stream mean | ratio at 4 s | ratio at 10 s |")
-    w("|---|---|---|---|---|---|---|---|")
+    w("| round | calm? | model | load avg (1 / 5 min) | 4 s | 10 s | stream mean | ratio at 4 s | ratio at 10 s |")
+    w("|---|---|---|---|---|---|---|---|---|")
     for rid in sorted(rounds):
         d = rounds[rid]
         b = d.get(BASELINE_ID)
@@ -892,7 +1086,8 @@ def cmd_report(_args) -> int:
             rr4 = f"{l4/_len_stat(b, 10):.2f}x" if b else "-"
             rr10 = f"{l10/_len_stat(b, 10):.2f}x" if b else "-"
             la = r["load_avg_start"]
-            w(f"| {rid} | {mid} | {la[0]:.0f} / {la[1]:.0f} | {l4:.1f} | {l10:.1f} | {r['stream']['mean']:.1f} | {rr4} | {rr10} |")
+            w(f"| {rid} | {'calm' if rid in calm_rounds else 'contended'} | {mid} | {la[0]:.0f} / {la[1]:.0f} | {l4:.1f} | {l10:.1f} | "
+              f"{r['stream']['mean']:.1f} | {rr4} | {rr10} |")
     w("")
     if errors:
         w("Runs that failed: " + "; ".join(f"{e['id']}: {e['error'][:120]}" for e in errors))
