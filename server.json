@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.r3dbars/transcripted",
+  "title": "Transcripted",
+  "description": "Read-only search over the meetings, dictations and writing saved by the Transcripted Mac app.",
+  "websiteUrl": "https://transcripted.app",
+  "repository": {
+    "url": "https://github.com/r3dbars/transcripted",
+    "source": "github",
+    "subfolder": "Tools/TranscriptedMCP"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/r3dbars/transcripted/releases/download/v0.0.0/transcripted-mcp.mcpb",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
