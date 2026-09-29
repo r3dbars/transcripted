@@ -48,6 +48,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `TranscriptionLanguage.swift` — `TranscriptionLanguageSelection` / `TranscriptionLanguageContext`
 - `Pipeline/` — transcription orchestration, pipeline runner, task queue, and per-flow failure display copy keyed by `PipelineErrorKind`
   - `TranscriptionTaskManager.swift` — the host-facing single-flight queue/orchestrator
+  - `OrphanedRecordingRecoveryClock.swift` — time source for launch-time orphaned-recording recovery (owner deadline, rescan waits, "recently written" cutoff); real clocks in production, a virtual one in tests
   - `TranscriptionPipelineRunner.swift` — `extension TranscriptionTaskManager` that runs the pipeline off the main actor (multichannel, mic-only, imported audio) with speaker identification, plus the rollback registry
   - `Transcription.swift` — the `Transcription` service object
   - `TranscriptionPipeline.swift` — `extension Transcription` for local multichannel / mic-only transcription, mic-channel diarization, and speech-segment detection
