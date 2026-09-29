@@ -69,7 +69,6 @@ final class MeetingPromptDetector {
     /// Tests shrink these.
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
 
-    private let calendarReader = MeetingPromptCalendarReader()
     private let calendarAccessGranted: () -> Bool
     private let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
     private let refreshesCalendarEventSnapshots: Bool
@@ -228,8 +227,15 @@ final class MeetingPromptDetector {
         self.calendarAccessGranted = calendarAccessGranted
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
-        self.fetchCalendarEventSnapshots = fetchCalendarEventSnapshots ?? { [calendarReader] start, end in
-            await calendarReader.fetchMeetingEventSnapshots(start: start, end: end)
+        if let fetchCalendarEventSnapshots {
+            self.fetchCalendarEventSnapshots = fetchCalendarEventSnapshots
+        } else {
+            // Only the real reader opens an EKEventStore, so a detector given
+            // its own fetch (the unit tests) never touches EventKit.
+            let calendarReader = MeetingPromptCalendarReader()
+            self.fetchCalendarEventSnapshots = { start, end in
+                await calendarReader.fetchMeetingEventSnapshots(start: start, end: end)
+            }
         }
     }
 
