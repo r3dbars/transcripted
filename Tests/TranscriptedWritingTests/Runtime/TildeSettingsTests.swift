@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptedWritingCore
 import Testing
 @testable import TranscriptedWritingRuntime
 
@@ -125,4 +126,21 @@ struct TildeSettingsTests {
         #expect(settings.pausedUntil == nil)
     }
 
+    @Test("The app's pause lands under the key and suite the keyboard reads")
+    func pauseUsesTheKeyboardContract() {
+        let (settings, keyboard) = makeSettings()
+        let now = Date(timeIntervalSince1970: 1_786_485_600)
+        settings.pause(for: 3600, now: now)
+        let stamp = keyboard.double(forKey: PersonalHistorySettingsContract.pausedUntilKey)
+        #expect(PersonalHistorySettingsContract.isPaused(pausedUntil: stamp, now: now))
+        #expect(PersonalHistorySettingsContract.isPaused(pausedUntil: stamp, now: now.addingTimeInterval(3599)))
+        #expect(!PersonalHistorySettingsContract.isPaused(pausedUntil: stamp, now: now.addingTimeInterval(3600)))
+
+        settings.resume()
+        let cleared = keyboard.double(forKey: PersonalHistorySettingsContract.pausedUntilKey)
+        #expect(!PersonalHistorySettingsContract.isPaused(pausedUntil: cleared, now: now))
+        // The app writes the suite named for the keyboard's bundle; the
+        // keyboard, outside the sandbox, reads that same domain as .standard.
+        #expect(TildeSettings.keyboardSuiteName == PersonalHistorySettingsContract.keyboardSuiteName)
+    }
 }

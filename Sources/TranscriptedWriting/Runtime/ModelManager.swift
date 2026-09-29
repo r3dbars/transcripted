@@ -502,8 +502,12 @@ final class ModelManager: @unchecked Sendable {
             try Task.checkCancellation()
             try ensureModelDirectory()
 
-            if case .valid = try verifyModel(at: modelURL) {
-                publish(.ready(modelURL), generation: generation)
+            // Record the launch check's fingerprint so the first runtime
+            // handoff takes the shape-check path instead of hashing the
+            // multi-GB model a second time.
+            var installedFingerprint: SecureLocalStorage.FileContentFingerprint?
+            if case .valid = try verifyModel(at: modelURL, fingerprint: &installedFingerprint) {
+                publish(.ready(modelURL), generation: generation, verifiedFingerprint: installedFingerprint)
                 return
             }
             if FileManager.default.fileExists(atPath: modelURL.path) {
@@ -542,7 +546,8 @@ final class ModelManager: @unchecked Sendable {
                 throw ManagerError.invalidModel
             }
             try promotePartial()
-            switch try verifyModel(at: modelURL) {
+            var promotedFingerprint: SecureLocalStorage.FileContentFingerprint?
+            switch try verifyModel(at: modelURL, fingerprint: &promotedFingerprint) {
             case .valid:
                 break
             case .checksumMismatch:
@@ -552,7 +557,7 @@ final class ModelManager: @unchecked Sendable {
                 try? removeItem(at: modelURL)
                 throw ManagerError.invalidModel
             }
-            publish(.ready(modelURL), generation: generation)
+            publish(.ready(modelURL), generation: generation, verifiedFingerprint: promotedFingerprint)
         } catch is CancellationError {
             // A delete or a newer operation owns the next state.  Do not turn
             // an intentional cancellation into a user-visible failure.
@@ -690,6 +695,19 @@ final class ModelManager: @unchecked Sendable {
     private enum VerificationResult: Equatable { case valid, invalid, checksumMismatch }
 
     private func verifyModel(at url: URL) throws -> VerificationResult {
+        var unused: SecureLocalStorage.FileContentFingerprint?
+        return try verifyModel(at: url, fingerprint: &unused)
+    }
+
+    /// `verifyModel(at:)` that also reports the content fingerprint of the
+    /// exact bytes it hashed. The fingerprint is read from the same locked
+    /// descriptor before and after the hash, and is reported only when the
+    /// bytes hashed valid and nothing about the file moved in between.
+    private func verifyModel(
+        at url: URL,
+        fingerprint: inout SecureLocalStorage.FileContentFingerprint?
+    ) throws -> VerificationResult {
+        fingerprint = nil
         var info = stat()
         if lstat(url.path, &info) != 0 {
             if errno == ENOENT { return .invalid }
@@ -699,7 +717,15 @@ final class ModelManager: @unchecked Sendable {
             throw ManagerError.installationFailed
         }
         defer { try? handle.close() }
-        return try verifyModel(from: handle)
+        var before = stat()
+        guard fstat(handle.fileDescriptor, &before) == 0 else { throw ManagerError.installationFailed }
+        let result = try verifyModel(from: handle)
+        var after = stat()
+        if result == .valid, fstat(handle.fileDescriptor, &after) == 0 {
+            let hashed = SecureLocalStorage.FileContentFingerprint(before)
+            if SecureLocalStorage.FileContentFingerprint(after) == hashed { fingerprint = hashed }
+        }
+        return result
     }
 
     private func verifyModel(from handle: FileHandle) throws -> VerificationResult {
@@ -819,11 +845,19 @@ final class ModelManager: @unchecked Sendable {
         }
     }
 
-    private func publish(_ state: ModelState, generation: UInt64? = nil) {
+    private func publish(
+        _ state: ModelState,
+        generation: UInt64? = nil,
+        verifiedFingerprint newFingerprint: SecureLocalStorage.FileContentFingerprint? = nil
+    ) {
         let callbacks: (StateHandler?, ProgressHandler?) = stateQueue.sync {
             if let generation, generation != activeGeneration { return (nil, nil) }
             stateStorage = state
-            if !state.isReady { verifiedFingerprint = nil }
+            if !state.isReady {
+                verifiedFingerprint = nil
+            } else if let newFingerprint {
+                verifiedFingerprint = newFingerprint
+            }
             return (stateHandler, progressHandler)
         }
         guard callbacks.0 != nil || callbacks.1 != nil else { return }

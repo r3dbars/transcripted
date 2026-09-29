@@ -134,6 +134,61 @@ struct PersonalHistoryCaptureTests {
         #expect(events.map(\.sessionIdentifier).sorted() == ["kept-a", "kept-b"])
     }
 
+    /// What the keyboard does per key: ask for a permit, record only with one.
+    private func type(_ text: String, into fixture: Fixture) {
+        guard let permit = fixture.capture.permit(
+            appBundleIdentifier: "com.example.Editor",
+            secureInput: false
+        ) else { return }
+        fixture.capture.record(text: text, source: .typed, sessionIdentifier: "segment", permit: permit)
+    }
+
+    @Test("Text typed during a pause is never kept, even if the pause ends before delivery")
+    func pausedTypingIsNeverDelivered() async {
+        let fixture = Fixture()
+        fixture.enable()
+        fixture.defaults.set(false, forKey: "GhostSuggestionsEnabled")
+        // Paused for the next hour of the fixture's clock.
+        fixture.defaults.set(
+            1_786_485_600.0 + 3_600,
+            forKey: PersonalHistorySettingsContract.pausedUntilKey
+        )
+
+        type("PRIVATE_SENTINEL", into: fixture)
+        // Resume before the debounced batch goes out.
+        fixture.defaults.set(0.0, forKey: PersonalHistorySettingsContract.pausedUntilKey)
+        await fixture.capture.flushAndWait()
+
+        #expect(await fixture.sink.events.isEmpty)
+    }
+
+    @Test("With suggestions off and no pause, typing is still captured")
+    func saveOnlyTypingIsCaptured() async {
+        let fixture = Fixture()
+        fixture.enable()
+        fixture.defaults.set(false, forKey: "GhostSuggestionsEnabled")
+
+        type("kept", into: fixture)
+        await fixture.capture.flushAndWait()
+
+        #expect(await fixture.sink.events.map(\.text) == ["kept"])
+    }
+
+    @Test("An expired pause no longer blocks capture")
+    func expiredPauseCaptures() async {
+        let fixture = Fixture()
+        fixture.enable()
+        fixture.defaults.set(
+            1_786_485_600.0 - 1,
+            forKey: PersonalHistorySettingsContract.pausedUntilKey
+        )
+
+        type("kept", into: fixture)
+        await fixture.capture.flushAndWait()
+
+        #expect(await fixture.sink.events.map(\.text) == ["kept"])
+    }
+
     private actor Sink {
         private(set) var events: [PersonalHistoryEvent] = []
 

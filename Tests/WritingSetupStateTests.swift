@@ -24,6 +24,38 @@ func testWritingSetupState() {
         )
     }
 
+    runSuite("Launch reaps an orphaned Writing helper once setup is done, whatever the switches say") {
+        assertTrue(WritingActivation.reapsOrphanedHelperAtLaunch(setupCompleted: true))
+        assertFalse(
+            WritingActivation.reapsOrphanedHelperAtLaunch(setupCompleted: false),
+            "before \"Turn on writing\" no helper was ever launched"
+        )
+    }
+
+    runSuite("Save-only Writing watches no windows; the 1 Hz poll needs Autocomplete and Screen Memory") {
+        for screenMemory in [false, true] {
+            assertEqual(
+                WritingFrontWindowWatch.plan(running: true, autocompleteActive: false, screenMemoryEnabled: screenMemory),
+                .init(observesAppActivation: false, pollsFrontWindow: false),
+                "Save my writing alone (screen memory \(screenMemory))"
+            )
+            assertEqual(
+                WritingFrontWindowWatch.plan(running: false, autocompleteActive: true, screenMemoryEnabled: screenMemory),
+                .init(observesAppActivation: false, pollsFrontWindow: false),
+                "nothing while Writing is stopped (screen memory \(screenMemory))"
+            )
+        }
+        assertEqual(
+            WritingFrontWindowWatch.plan(running: true, autocompleteActive: true, screenMemoryEnabled: false),
+            .init(observesAppActivation: true, pollsFrontWindow: false),
+            "Autocomplete without Screen Memory keeps the prewarmer's app-switch observer, no poll"
+        )
+        assertEqual(
+            WritingFrontWindowWatch.plan(running: true, autocompleteActive: true, screenMemoryEnabled: true),
+            .init(observesAppActivation: true, pollsFrontWindow: true)
+        )
+    }
+
     runSuite("Writing setup completion is remembered in the given suite") {
         let suiteName = "WritingSetupStateTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
