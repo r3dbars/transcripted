@@ -323,6 +323,11 @@ final class WritingController {
             port: TildeProductProfile.current.llamaServerPort,
             modelFileProvider: { models.manager.verifiedInstalledModelFile() }
         )
+        let personalHistoryController = PersonalHistoryController(
+            store: EncryptedPersonalHistoryStore(),
+            settings: settings,
+            diagnostics: .shared
+        )
         let runtime = Runtime(
             models: models,
             llamaServerHost: llamaServerHost,
@@ -330,11 +335,7 @@ final class WritingController {
                 baseURL: llamaServerHost.baseURL,
                 accessKey: llamaServerHost.accessKey
             ),
-            personalHistoryController: PersonalHistoryController(
-                store: EncryptedPersonalHistoryStore(),
-                settings: settings,
-                diagnostics: .shared
-            ),
+            personalHistoryController: personalHistoryController,
             // Screen Memory serves Autocomplete only: with it off, nothing
             // on screen is read, even with Screen Recording granted.
             screenCaptureService: ScreenCaptureService(
@@ -346,9 +347,12 @@ final class WritingController {
                 },
                 excludedApps: { Self.settings().personalHistoryExcludedApps }
             ),
+            // Personal History takes only entries Save my writing cleared of
+            // secrets, so it's reached through the day files, not the socket.
             dayFiles: WritingDayFileWriter(
                 directory: writingDirectory,
                 preferences: { Self.preferences() },
+                personalHistory: personalHistoryController,
                 problemStarted: { [weak self] error in
                     self?.log("WRITING | save my writing: day file write failed (\(error))")
                 }
@@ -840,7 +844,6 @@ final class WritingController {
             runtime: runtime.llamaServerHost,
             personalHistory: WritingPausableIngest(
                 base: WritingHistoryIngest(
-                    personalHistory: runtime.personalHistoryController,
                     dayFiles: runtime.dayFiles.recorder,
                     appScope: { Self.preferences().appScope }
                 ),
