@@ -57,7 +57,7 @@ from __future__ import annotations
 import os
 
 for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
-    os.environ.setdefault(_var, "3")
+    os.environ.setdefault(_var, "1")  # the work is single-threaded; parallelism comes from --workers (max 3 threads total)
 
 import argparse  # noqa: E402
 import csv  # noqa: E402
@@ -614,6 +614,72 @@ def self_checks(data: Data, notes: list) -> dict:
 # Main
 
 
+_CTX: dict = {}
+
+
+class LiteGroup:
+    """What the report needs of a Group, without the trial arrays."""
+
+    def __init__(self, grp: Group):
+        self.models, self.cells, self.notes = grp.models, {ck: None for ck in grp.cells}, grp.notes
+
+
+def average_cell_results(per_fold: list) -> dict:
+    """[{cell: (point vec, reps)}, ...] -> {cell: (mean point, mean reps)}."""
+    acc: dict = {}
+    for cells in per_fold:
+        for ck, (pt, rp) in cells.items():
+            a = acc.setdefault(ck, [[], []])
+            a[0].append(pt)
+            if rp is not None:
+                a[1].append(rp)
+    return {ck: (np.mean(a[0], axis=0), np.mean(a[1], axis=0) if a[1] else None) for ck, a in acc.items()}
+
+
+def _pair_task(pair):
+    data, eng, tc_groups, folds = _CTX["data"], _CTX["eng"], _CTX["tc_groups"], _CTX["folds"]
+    grp = build_group(data, pair)
+    if not grp.cells:
+        return pair, None
+    res = {"group": LiteGroup(grp), "methods": {}}
+    for m in pair:
+        res["methods"][f"single:{m}"] = eng.eval_avg(grp, f"single:{m}")
+    for meth in FUSION_METHODS:
+        res["methods"][meth] = eng.eval_avg(grp, meth)
+    res["calib"] = {f"{r}.{f}": eng.calibrate(grp, (r, f)) for (r, f) in folds}
+    _, htcs = headline_tcs(grp, tc_groups)
+    res["onethr"] = {k: eng.one_threshold(grp, k, htcs) for k in res["methods"]}
+    # weight sweep (fixed w, z-norm from the calibration half), points only
+    res["sweep"] = {float(w): eng.eval_avg(grp, "zw", with_reps=False, w_fixed=float(w)) for w in W_GRID}
+    return pair, res
+
+
+def _single_task(m):
+    data, eng, tcs = _CTX["data"], _CTX["eng"], _CTX["tcs"]
+    return m, eng.eval_avg(build_group(data, (m,), tcs), f"single:{m}")
+
+
+def _search_calib_task(job):
+    pair, search_tcs = job
+    data, eng, folds = _CTX["data"], _CTX["eng"], _CTX["folds"]
+    grp = build_group(data, pair, search_tcs)
+    out = {}
+    for f in folds:
+        c = eng.calibrate(grp, f)
+        out[f] = (c["obj_at_w"], c["w"])
+    return pair, out
+
+
+def _eval_folds_task(job):
+    pair, search_tcs, method, fold_list = job
+    data, eng = _CTX["data"], _CTX["eng"]
+    grp = build_group(data, pair, search_tcs)
+    out = {}
+    for f in fold_list:
+        out[f] = {ck: (np.array([pt[m] for m in METRICS]), rp) for ck, (pt, rp) in eng.eval_method(grp, method, f).items()}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--vp", default=str(sv.DEFAULT_VP))
@@ -624,6 +690,7 @@ def main(argv=None) -> int:
     ap.add_argument("--rank-group", choices=("auto", "clean", "cross"), default="auto")
     ap.add_argument("--no-search", action="store_true", help="skip the top-n pair search")
     ap.add_argument("--pairs", default="", help="override the named pairs: a+b,c+d ( - for none)")
+    ap.add_argument("--workers", type=int, default=3, help="worker processes (each single-threaded)")
     ap.add_argument("--out", default="fusion_summary", help="output stem in VP/results/")
     args = ap.parse_args(argv)
 
@@ -645,98 +712,109 @@ def main(argv=None) -> int:
 
     per_tc_expected = sum(len(data.trials[s]) for s in data.states)
 
+    # every model that will be touched: embeddings and cosines are loaded once here, then shared with the
+    # worker processes (fork) so none of them reloads anything
+    search = None
+    chosen: list = []
+    if not args.no_search:
+        chosen, raw, dropped, ranked_on = top_models(vp, args.top_n, args.rank_group, have, lic)
+        search = {"chosen": chosen, "raw_top": raw, "dropped": dropped, "ranked_on": ranked_on}
+    all_models = sorted({m for p in named for m in p if m in have} | set(chosen))
+    for m in all_models:
+        build_group(data, (m,), tcs)
+    n_missing = sum(int(np.isnan(data.cos(m, s, b, tc)).sum()) for m in all_models for s in data.states
+                    for b in data.trials[s] for tc in tcs if data.cos(m, s, b, tc) is not None)
+    if n_missing:
+        data.notes.append(f"{n_missing} (trial, model) scores are missing because a clip has no embedding; a single model "
+                          "and a fusion are scored on the same trials inside a pair, but the candidate-list singles use their own")
+    _CTX.update(data=data, eng=eng, tc_groups=tc_groups, tcs=tcs, folds=folds)
+    pool_ = None
+    if args.workers > 1:
+        import multiprocessing as mp
+        pool_ = mp.get_context("fork").Pool(args.workers)
+
+    def run(fn, jobs):
+        return list(pool_.imap(fn, jobs)) if pool_ else [fn(j) for j in jobs]
+
     # ---- named pairs
     results: dict = {}
+    todo = []
     for pair in named:
         if not all(m in have for m in pair):
             data.notes.append(f"pair {'+'.join(pair)}: a model has no embeddings yet, skipped")
             continue
-        grp = build_group(data, pair)
-        if not grp.cells:
+        todo.append(pair)
+    for (pair, res), _ in zip(run(_pair_task, todo), todo):
+        if res is None:
             data.notes.append(f"pair {'+'.join(pair)}: no common cells yet")
             continue
-        t1 = time.time()
-        res = {"group": grp, "methods": {}}
-        for m in pair:
-            res["methods"][f"single:{m}"] = eng.eval_avg(grp, f"single:{m}")
-        for meth in FUSION_METHODS:
-            res["methods"][meth] = eng.eval_avg(grp, meth)
-        res["calib"] = {f"{r}.{f}": eng.calibrate(grp, (r, f)) for (r, f) in folds}
-        _, htcs_ = headline_tcs(grp, tc_groups)
-        res["onethr"] = {k: eng.one_threshold(grp, k, htcs_) for k in res["methods"]}
-        # weight sweep (fixed w, z-norm from the calibration half), points only
-        sweep = {}
-        for w in W_GRID:
-            sweep[float(w)] = eng.eval_avg(grp, "zw", with_reps=False, w_fixed=float(w))
-        res["sweep"] = sweep
         results[pair] = res
-        log(f"  {'+'.join(pair)}: {len(grp.cells)} cells in {time.time() - t1:.0f}s")
+        log(f"  {'+'.join(pair)}: {len(res['group'].cells)} cells")
+
+    # ---- singles of every candidate over every cell they have (the practical alternative to a pair)
+    need_singles = list(dict.fromkeys(chosen + [m for pair in results for m in pair]))
+    singles_all = dict(run(_single_task, need_singles))
 
     # ---- pair search over the top-n
-    search = None
-    if not args.no_search:
-        chosen, raw, dropped, ranked_on = top_models(vp, args.top_n, args.rank_group, have, lic)
-        search = {"chosen": chosen, "raw_top": raw, "dropped": dropped, "ranked_on": ranked_on}
-        # group of cells common to every candidate
+    if search is not None:
         cand_cells = None
         for m in chosen:
-            ks = set()
-            for s in data.states:
-                for b in data.trials[s]:
-                    for tc in tcs:
-                        if data.cos(m, s, b, tc) is not None:
-                            ks.add((s, b, tc))
+            ks = {(s, b, tc) for s in data.states for b in data.trials[s] for tc in tcs
+                  if data.cos(m, s, b, tc) is not None}
             cand_cells = ks if cand_cells is None else cand_cells & ks
         cand_cells = cand_cells or set()
-        have_cross = all(any(c[2] == tc for c in cand_cells) for tc in tc_groups["cross"]) if tc_groups["cross"] else False
-        full_cross = len([c for c in cand_cells if c[2] in tc_groups["cross"]]) == per_tc_expected * len(tc_groups["cross"])
-        search_tcs = tcs if (have_cross and full_cross) else ("clean",)
+        cross_cells = [c for c in cand_cells if c[2] in tc_groups["cross"]]
+        full_cross = bool(tc_groups["cross"]) and len(cross_cells) == per_tc_expected * len(tc_groups["cross"])
+        search_tcs = tcs if full_cross else ("clean",)
         search["search_tcs"] = search_tcs
         search["n_cells"] = len([c for c in cand_cells if c[2] in search_tcs])
         log(f"pair search over {len(chosen)} models on {', '.join(search_tcs)} ({search['n_cells']} cells)")
         pairs = list(itertools.combinations(chosen, 2))
-        sgroups = {p: build_group(data, p, search_tcs) for p in pairs}
-        rank = []
-        sel_by_fold = {}
-        for fold in folds:
-            objs = {}
-            for p in pairs:
-                cal = eng.calibrate(sgroups[p], fold)
-                objs[p] = cal["obj_at_w"]
-            sel_by_fold[fold] = max(objs, key=lambda p: objs[p])
-            search.setdefault("fold_obj", {})[fold] = objs
-        for p in pairs:
-            rank.append((p, float(np.mean([search["fold_obj"][f][p] for f in folds]))))
-        rank.sort(key=lambda x: -x[1])
-        search["rank"] = rank
+        calib = dict(run(_search_calib_task, [(p, search_tcs) for p in pairs]))
+        search["fold_obj"] = {f: {p: calib[p][f][0] for p in pairs} for f in folds}
+        search["rank_w"] = {p: [calib[p][f][1] for f in folds] for p in pairs}
+        sel_by_fold = {f: max(pairs, key=lambda p: search["fold_obj"][f][p]) for f in folds}
+        search["rank"] = sorted(((p, float(np.mean([search["fold_obj"][f][p] for f in folds]))) for p in pairs),
+                                key=lambda x: -x[1])
         search["sel_by_fold"] = {f"{r}.{f}": list(sel_by_fold[(r, f)]) for (r, f) in folds}
-        # nested: evaluate the in-fold selected pair with ztuned on its evaluation half
-        nested = {}
-        for fold in folds:
-            p = sel_by_fold[fold]
-            for ck, (pt, rp) in eng.eval_method(sgroups[p], "ztuned", fold).items():
-                nested.setdefault(ck, []).append((np.array([pt[m] for m in METRICS]), rp))
+        # nested: the pair picked in-fold, `ztuned`, on that fold's evaluation half
+        sel_pairs = sorted(set(sel_by_fold.values()))
+        jobs = [(p, search_tcs, "ztuned", [f for f in folds if sel_by_fold[f] == p]) for p in sel_pairs]
+        nested: dict = {}
+        for per_fold in run(_eval_folds_task, jobs):
+            for fold, cells in per_fold.items():
+                for ck, v in cells.items():
+                    nested.setdefault(ck, []).append(v)
         search["nested"] = {ck: (np.mean([v[0] for v in vs], axis=0),
                                  np.mean([v[1] for v in vs], axis=0) if all(v[1] is not None for v in vs) else None)
                             for ck, vs in nested.items()}
-        # singles of the candidate list on the same cells
-        search["singles"] = {}
-        for m in chosen:
-            g = build_group(data, (m,), search_tcs)
-            search["singles"][m] = eng.eval_avg(g, f"single:{m}")
-        # the pair that ranks first over all folds, evaluated on the evaluation halves
-        best_pair = rank[0][0]
+        search["singles"] = {m: {ck: v for ck, v in singles_all[m].items() if ck in cand_cells and ck[2] in search_tcs}
+                             for m in chosen}
+        # the pair that ranks first over all folds, on every evaluation half (its picking used every speaker)
+        best_pair = search["rank"][0][0]
         search["best_pair"] = best_pair
-        search["best_pair_res"] = {
-            "ztuned": eng.eval_avg(sgroups[best_pair], "ztuned"),
-            "concat": eng.eval_avg(sgroups[best_pair], "concat"),
-            "zavg": eng.eval_avg(sgroups[best_pair], "zavg"),
-            f"single:{best_pair[0]}": search["singles"][best_pair[0]],
-            f"single:{best_pair[1]}": search["singles"][best_pair[1]],
-        }
-        search["best_pair_group"] = sgroups[best_pair]
+        meths = ["ztuned", "concat", "zavg", f"single:{best_pair[0]}", f"single:{best_pair[1]}"]
+        search["best_pair_res"] = {}
+        for meth, per_fold in zip(meths, run(_eval_folds_task, [(best_pair, search_tcs, k, folds) for k in meths])):
+            search["best_pair_res"][meth] = average_cell_results(list(per_fold.values()))
 
-    all_models = sorted({m for p in named for m in p} | set((search or {}).get("chosen", [])))
+    # the practical alternative to a pair is the best single model on offer, not just the better of the two
+    for pair, res in results.items():
+        grp = res["group"]
+        hname, htcs = headline_tcs(grp, tc_groups)
+        need = {ck for ck in grp.cells if ck[2] in htcs}
+        best = None
+        for m in dict.fromkeys(chosen + list(pair)):
+            if m not in singles_all or not need <= set(singles_all[m]):
+                continue
+            sub = {k: v for k, v in singles_all[m].items() if k in need}
+            pt, rp = pool(sub, htcs)
+            if pt is not None and (best is None or pt[I_TAR3] > best[1][I_TAR3]):
+                best = (m, pt, rp)
+        res["cand_best"] = best
+    if pool_:
+        pool_.close()
+        pool_.join()
     cover = {m: {tc: sum(1 for s in data.states for b in data.trials[s] if data.cos(m, s, b, tc) is not None)
                  for tc in tcs} for m in all_models}
     checks = self_checks(data, data.notes)
@@ -796,7 +874,11 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
         hname, htcs = headline_tcs(grp, tc_groups)
         is_full = complete(grp, data, tcs)
         pname = " + ".join(f"`{m}`" for m in pair)
+        metas = [sv.model_meta(vp, m) for m in pair]
+        fam = " + ".join(str(mt.get("family", "?")) for mt in metas)
+        prm = " + ".join(f"{mt['params_m']:g}M" for mt in metas if mt.get("params_m"))
         body.append(f"### {pname}\n")
+        body.append(f"Families: {fam}; parameters: {prm or 'n/a'}.\n")
         cov = f"{len(grp.cells)}/{per_tc_expected * len(tcs)} cells"
         if not is_full:
             have_tc = sorted({tc for (_, _, tc) in grp.cells}, key=tcs.index)
@@ -831,13 +913,25 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
                 d3 = "-" if cpt is None or bs_clean[0] is None else delta_txt(cpt, crp, bs_clean[0], bs_clean[1], I_TAR3)[0]
                 p = "-" if p_ is None else f"{p_:.3f}"
                 if k in FUSION_METHODS and is_full:
-                    summary_rows.append((pair, k, d1, c1, p_, delta_txt(pt, rp, bs_pt, bs_rp, I_EER, 2), pt, rp))
+                    cbx = res.get("cand_best")
+                    cand_d = delta_txt(pt, rp, cbx[1], cbx[2], I_TAR3) + (cbx[0],) if cbx else None
+                    summary_rows.append((pair, k, d1, c1, p_, delta_txt(pt, rp, bs_pt, bs_rp, I_EER, 2), pt, rp, cand_d))
             ot = res["onethr"][k]
             ot_txt = "-" if ot["tar@1e-4"] is None else f"{pct(ot['tar@1e-4'])} ({int(np.floor(1e-4 * ot['n_nontarget']))} FA of {ot['n_nontarget']})"
             body.append(f"| {name} | {cipct(pt[I_TAR3], rp, I_TAR3)} | {d1} | {p} | {cipct(pt[I_EER], rp, I_EER, 2)} | {d2} "
                         f"| {ot_txt} | {'-' if cpt is None else cipct(cpt[I_TAR3], crp, I_TAR3)} | {d3} "
                         f"| {'-' if cpt is None else cipct(cpt[I_EER], crp, I_EER, 2)} |")
         body.append("")
+        cb = res.get("cand_best")
+        if cb and cb[0] not in pair:
+            lines = [f"Best single model among the candidates on these cells: `{cb[0]}`, TAR@1e-3 {hname} {cipct(cb[1][I_TAR3], cb[2], I_TAR3)}, "
+                     f"EER {cipct(cb[1][I_EER], cb[2], I_EER, 2)}. Fusion minus that model, TAR@1e-3 {hname}: "]
+            parts = []
+            for k in ("concat", "ztuned"):
+                fpt, frp = pts[k]
+                if fpt is not None:
+                    parts.append(f"{k} {delta_txt(fpt, frp, cb[1], cb[2], I_TAR3)[0]}")
+            body.append(lines[0] + "; ".join(parts) + ".\n")
         # by condition
         body.append("By condition, TAR@1e-3 / EER (headline methods):\n")
         body.append("| method | " + " | ".join(tcs) + " |")
@@ -897,16 +991,17 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
     if summary_rows:
         verdicts.append("Complete pairs only (all four sets, every condition), cross-condition headline, fusion minus the better "
                         "single model of the pair:\n")
-        verdicts.append("| pair | method | Δ TAR@1e-3 cross | p | Δ EER cross | significant? |")
-        verdicts.append("|---|---|---|---|---|---|")
+        verdicts.append("| pair | method | Δ TAR@1e-3 cross | p | Δ EER cross | significant? | Δ TAR@1e-3 vs best single of all candidates |")
+        verdicts.append("|---|---|---|---|---|---|---|")
         gains = []
-        for pair, k, d1, c1, p_, (d2, c2, _, _), pt, rp in summary_rows:
+        for pair, k, d1, c1, p_, (d2, c2, _, _), pt, rp, cand_d in summary_rows:
             sig = is_gain(c1, I_TAR3)
             both = sig and is_gain(c2, I_EER)
             if sig:
                 gains.append((pair, k, d1))
+            cand_txt = "-" if not cand_d else f"{cand_d[0]} vs `{cand_d[4]}`"
             verdicts.append(f"| {' + '.join(pair)} | {k} | {d1} | {'-' if p_ is None else f'{p_:.3f}'} | {d2} "
-                            f"| {'yes (TAR and EER)' if both else ('TAR only' if sig else 'no')} |")
+                            f"| {'yes (TAR and EER)' if both else ('TAR only' if sig else 'no')} | {cand_txt} |")
         n_cmp = len(summary_rows)
         verdicts.append("")
         verdicts.append(f"{n_cmp} fusion-versus-single comparisons are listed; with that many, expect about {0.05 * n_cmp:.1f} "
@@ -933,7 +1028,7 @@ def write_report(vp, args, data, eng, tc_groups, tcs, named, results, search, co
         body.append("| # | pair | calibration TAR@1e-3 (%) | weight on first, per fold |")
         body.append("|---|---|---|---|")
         for i, (p, v) in enumerate(search["rank"][:10], 1):
-            ws = [eng.calibrate(build_group(data, p, search["search_tcs"]), f)["w"] for f in eng.folds]
+            ws = search["rank_w"][p]
             body.append(f"| {i} | `{p[0]}` + `{p[1]}` | {pct(v)} | {', '.join(f'{w:.1f}' for w in ws)} |")
         body.append("")
         singles_rank = []

@@ -31,14 +31,19 @@ percentage points; min_dcf is the normalized 0-1 number the scorer prints; laten
 Usage:
   VP/venv/bin/python scripts/voiceprint/build_report.py [--vp DIR] [--out FILE] [--no-charts]
 
-How the parts that other agents write are read (their formats were not fixed when this was
-written, so these readers are tolerant and everything they find also lands in data.json):
-  latency.md, lineup_summary.md, fusion_summary.md, e2e_summary.md are parsed as Markdown tables.
-  The first column names a model id (backticks, bold and "(baseline)" are ignored). Latency uses
-  the first column whose header matches p50/median + 4 s, else any "ms" column; if a model has
-  several rows (devices) the fastest wins. Lineup uses a "top-1"/accuracy column, and
-  lineup/<model>.json is searched for keys like top1, top5, accuracy (clean and call variants).
-  Whatever the parser cannot place is shown as "see file", never guessed.
+How the parts that other agents write are read (their formats can move, so the readers are tolerant and
+say "see file" or "pending" instead of guessing):
+  lineup/<model>.json   headline.by_mode[headline.mode] keys like dir0_clean_cond and dir0_opus12 (DIR at zero
+                        wrong names, with *_sd). If that shape is gone, any top-1 / accuracy / DIR-style key is
+                        used and flagged as guessed in data.json. lineup_summary.md is embedded (intro plus the two
+                        headline tables) and is the fallback: a "DIR @ 0 wrong" column, table title says call or clean.
+  latency.md            Markdown tables with the model id in the first column (backticks, bold and "(baseline)"
+                        ignored; -ane / -gpu / -coreml suffixes fold into the network). Tables titled "time per window"
+                        win; the column "4 s" (else a p50/median 4 s, else any ms column) is used; the fastest row wins.
+                        Rows are Core ML builds, so they are applied to Core ML builds and to networks with no separate
+                        Core ML build. Until it exists, ms/clip is the embed daemon's median (marked ~, rough).
+  fusion_summary.md     embedded (intro + "Verdict" section); falls back to fusion_dev.md while the scorer is still writing it.
+  e2e_summary.md        embedded whole (first 70 lines).
 """
 from __future__ import annotations
 
@@ -541,14 +546,6 @@ def load_daemon_status(vp: Path) -> dict | None:
     return read_json(vp / "logs" / "daemon.status.json")
 
 
-def emb_coverage(vp: Path) -> dict[str, list[str]]:
-    out = {}
-    for d in sorted((vp / "emb").glob("*")):
-        if d.is_dir():
-            out[d.name] = sorted(p.stem for p in d.glob("*.npz"))
-    return out
-
-
 # ---- tolerant readers for the files other agents write -------------------------------------
 
 def parse_table_file(path: Path, known: set[str]) -> dict:
@@ -683,12 +680,8 @@ def lineup_numbers(lu: dict | None) -> dict:
     return {"clean": clean, "call": call, "clean_sd": js.get("clean_sd"), "call_sd": js.get("call_sd"), "mode": js.get("mode")}
 
 
-def net_of_latency_id(mid: str) -> str:
-    return re.sub(r"-(ane|gpu|cpu|coreml)$", "", mid)
-
-
-def load_latency(vp: Path, inp: Inputs, known: set[str]) -> dict:
-    """latency.md rows are Core ML builds named by their source model id. Returns per-network fastest 4 s ms."""
+def load_latency(vp: Path, inp: Inputs, known: set[str], meta_all: dict) -> dict:
+    """latency.md rows are Core ML builds named by their source model id (or the app baseline). Returns per-network fastest 4 s ms."""
     inp.note("latency.md", vp / "results" / "latency.md")
     tab = parse_table_file(vp / "results" / "latency.md", known)
     per: dict[str, dict] = {}
@@ -696,7 +689,7 @@ def load_latency(vp: Path, inp: Inputs, known: set[str]) -> dict:
         pl = pick_latency(rows)
         if not pl:
             continue
-        net = net_of_latency_id(mid)
+        net = network_of(mid, meta_all.get(mid, {}), set(meta_all))
         if net not in per or pl["ms"] < per[net]["ms"]:
             per[net] = {**pl, "row_id": mid}
     return {"text": tab["text"], "per_model": per}
@@ -845,7 +838,8 @@ def build_models(vp, verify, baseline, naming_docs, licenses, meta_all, coreml, 
         rec["lineup_n"] = lineup_numbers(lu)
         # latency: latency.md (a Core ML benchmark, keyed by network) wins; else the embed daemon's median for this build
         lat = latency["per_model"].get(net)
-        if lat and lat.get("ms") is not None:
+        # latency.md times Core ML builds: use it for those, and for a network that has no separate Core ML build
+        if lat and lat.get("ms") is not None and (meta.get("runtime") in ("coreml_fused", "fluid_coreml") or f"{net}-coreml" not in meta_all):
             rec["latency"] = {"ms": lat["ms"], "source": "latency.md", "device": lat.get("device"), "column": lat.get("column")}
         elif mid in daemon_ms:
             rec["latency"] = {"ms": daemon_ms[mid], "source": "embed daemon", "device": meta.get("device"), "column": "median ms per clip"}
@@ -883,17 +877,13 @@ def pick_representatives(models: dict) -> dict[str, dict]:
     return reps
 
 
-def head_value(m: dict):
-    v = m.get("verify") or {}
-    return (v.get("headline") or {}).get("v")
-
-
 def naming_ok(m: dict) -> bool | None:
-    """True: naming ran and zero wrong silent names. False: wrong names seen. None: pending."""
+    """True: naming ran and zero wrong silent names. False: wrong names seen. None: pending.
+    (Look-alike pairs are reported as a warning next to the winner, not used as a gate.)"""
     n = m.get("naming")
     if not n or not n.get("clean_only"):
         return None
-    return n["wrong_silent_total"] == 0 and n["lookalike_over"] == 0
+    return n["wrong_silent_total"] == 0
 
 
 def decide(reps: dict[str, dict], baseline_id: str | None) -> dict:
@@ -1167,7 +1157,7 @@ def chart_latency(plt, reps: dict, path: Path) -> dict:
     his = [100 * m["verify"]["tar_call"]["hi"] for m, _ in pts if m["verify"]["tar_call"].get("hi") is not None] or ys_
     ax.set_ylim(min(los) - 2, max(his) + 2)
     from matplotlib.ticker import MaxNLocator
-    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=7, steps=[1, 2, 5, 10], integer=True))
     xl = "Milliseconds to embed one clip (log scale). Lower is better."
     if have_fallback:
         xl += "  Hollow dot = rough timing from the embedding job on a busy machine."
@@ -1312,7 +1302,6 @@ def build_markdown(ctx: dict) -> str:
     L: list[str] = []
     A = L.append
     scored = [m for m in models.values() if m["scored"]]
-    scored_v = [m for m in scored if m["verify"]]
     nets_scored = {m["network"] for m in scored}
     ship_nets = {m["network"] for m in scored if m["license"]["ship"] == "yes"}
     base = models.get(baseline_id) if baseline_id else None
@@ -1333,11 +1322,14 @@ def build_markdown(ctx: dict) -> str:
     # ---- short version
     A("## The short version")
     A("")
-    human_n = sum(datasets[s]["clips"] for s in HUMAN_SETS if s in datasets)
+    human_n = sum(datasets[s]["clips_after_drops"] for s in HUMAN_SETS if s in datasets)
     people = sum(datasets[s]["speakers"] for s in HUMAN_SETS if s in datasets)
-    A(f"- We scored **{len(nets_scored)} voiceprint networks** ({len(scored)} builds, {len(ship_nets)} networks we could legally ship) "
-      f"on {human_n:,} clips of {people} real people in four human-labeled sets"
-      + (f", plus a fifth set with model-made labels that we keep out of the ranking." if "yodas" in datasets else "."))
+    if not scored:
+        A("- Nothing is scored yet. This file fills in as results land in `data/eval/voiceprint/results`.")
+    else:
+        A(f"- We scored **{len(nets_scored)} voiceprint networks** ({len(scored)} builds, {len(ship_nets)} networks we could legally ship) "
+          f"on {human_n:,} clips (after the audit drops) of {people} real people in four human-labeled sets"
+          + (f", plus a fifth set with model-made labels that we keep out of the ranking." if "yodas" in datasets else "."))
     w, r_up = find_rep(reps, dec["winner"]), find_rep(reps, dec["runner_up"])
     b_rep = find_rep(reps, baseline_id) or base
     if b_rep and b_rep["verify"] and b_rep["verify"]["tar_call"]:
@@ -1464,7 +1456,7 @@ def build_markdown(ctx: dict) -> str:
         if ov.get("n_other_voice_in_clip"):
             A(f"- AMI: {ov['n_other_voice_in_clip']} of {ov.get('clips', 3000):,} clips have another participant's laugh or cough inside. "
               "Models misplace those about 4 to 6 times as often. They're dropped.")
-        A("- None of the drops reorders the models on any set; they shift everyone together.")
+        A("- For the six models the audit checked, the drops don't change their order on any set; they shift everyone together.")
         A("")
 
     # ---- results
@@ -1485,7 +1477,8 @@ def build_markdown(ctx: dict) -> str:
       "`lineup` is clean / call in the 334-person lineup. `auto from mtg 3+` is the share of a regular's appearances named silently "
       "from their third meeting on, with bars calibrated on clean audio only (the same footing for every model) / with call audio in the calibration. "
       "`wrong names` is wrong silent names in the simulation (must be 0). `ms/clip` is embed time for one clip; `~` means a rough timing from the "
-      "embedding job on a busy machine, not a benchmark. `cells` is scored (set, clip length, condition) cells out of the most any model has.")
+      "embedding job on a busy machine, not a benchmark. `cells` is scored (set, clip length, condition) cells out of the most any model has. "
+      "Rows marked _(Core ML)_ are the same network converted to Core ML, so the accuracy should match; parity is in the latency section.")
     A("")
     hdr = ["#", "model", "ship?", "params (M)", "clean", "call [95% CI]", "Δ vs baseline", "EER call", "lineup", "auto from mtg 3+", "wrong names", "ms/clip", "cells"]
     A(mdrow(hdr))
@@ -1792,13 +1785,16 @@ def winner_block(m: dict, title: str, base: dict | None, models: dict, vs: dict 
         wc = n.get("with_call")
         if wc and wc.get("call"):
             s += f" With call audio in the calibration: {pct_s(wc['call'].get('auto_share_from_meeting3'))}."
+        if n.get("lookalike_over"):
+            s += (f" **Warning:** {n['lookalike_over']} held-out look-alike pairs clear the lineup bar against each other "
+                  f"(of {n['lookalike_checked']:,} checked). The random meetings didn't hit one, but a wrong name is possible.")
         bits.append(s)
     else:
         bits.append(f"- **Naming:** {PENDING}.")
     ln = m.get("lineup_n") or {}
     if ln.get("clean") is not None or ln.get("call") is not None:
         bits.append(f"- **Lineup (DIR at zero wrong names):** {pct_s(ln.get('clean'))} clean, {pct_s(ln.get('call'))} on opus12 probes.")
-    lat = m.get("latency")
+    lat = m.get("latency_best") or m.get("latency")
     size = f"{m['params_m']:.1f}M parameters" if m.get("params_m") else "size unknown"
     if lat and lat.get("ms"):
         src = "measured in latency.md" if lat["source"] == "latency.md" else "rough embed-job timing on a busy machine"
@@ -2011,7 +2007,10 @@ def model_json(m: dict, reps: dict) -> dict:
                          "app_bars_reference": None if not n["app_bars"] else {k: nn(n["app_bars"].get(k)) for k in ("clean", "call")}}
     else:
         out["naming"] = None
-    out["lineup"] = m.get("lineup")
+    ln = m.get("lineup_n") or {}
+    out["lineup"] = None if not ln or (ln.get("clean") is None and ln.get("call") is None) else {
+        "dir_at_zero_wrong_clean": pct_num(ln.get("clean")), "dir_at_zero_wrong_call_opus12": pct_num(ln.get("call")),
+        "sd_clean": pct_num(ln.get("clean_sd")), "sd_call": pct_num(ln.get("call_sd")), "scoring": ln.get("mode")}
     lat = m.get("latency") or (reps.get(m["network"]) or {}).get("latency_best")
     out["latency"] = None if not lat else {"ms": r3(lat["ms"], 2), "source": lat["source"], "device": lat.get("device"), "rough": lat["source"] != "latency.md"}
     out["coreml"] = m.get("coreml")
@@ -2078,15 +2077,15 @@ def main(argv=None) -> int:
     daemon_ms = load_daemon_ms(vp)
     known = set(meta_all) | set(headline_mode) | set(naming_docs["all"]) | set(naming_docs["clean"])
     lineup = load_lineup(vp, inp, known)
-    latency = load_latency(vp, inp, known)
+    latency = load_latency(vp, inp, known, meta_all)
     for name in ("fusion_summary.md", "e2e_summary.md"):
         inp.note(name, vp / "results" / name)
     fusion_text = read_text(vp / "results" / "fusion_summary.md")
     if fusion_text is None:  # the fusion scorer's working file, until it writes the summary
         fusion_text = read_text(vp / "results" / "fusion_dev.md")
         if fusion_text is not None:
-            inp.seen["fusion_summary.md"]["note"] = "not written yet; using fusion_dev.md"
-            inp.seen["fusion_summary.md"]["found"] = True
+            inp.seen["fusion_summary.md"].update({"note": "not written yet; using fusion_dev.md", "found": True,
+                                                  "modified": mtime_iso(vp / "results" / "fusion_dev.md")})
     e2e_text = read_text(vp / "results" / "e2e_summary.md")
     trials = load_trials_table(vp)
 
