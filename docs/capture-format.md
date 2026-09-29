@@ -397,9 +397,14 @@ Details:
   the heading title comes from it.
 - Day files written before the scrubber (or under older rules) are
   rescrubbed once when Writing starts: changed sections get their title and
-  counts redone, sections that were only a secret are removed, and files with
-  nothing to scrub aren't touched. A file that changes while it's being
-  rescrubbed is left for the next launch. The rules version it ran with is
+  counts redone (`Accepted words:` never more than `Words:`), sections that
+  were only a secret keep their heading with just the `⟨redacted:…⟩` token as
+  their text (so the command before them never runs into the line after, and
+  a second pass changes nothing), and files with nothing to scrub aren't
+  touched. A file that changes while it's being rescrubbed, or that Writing
+  stopped before reaching, is left for the next launch. One that can't be
+  read as a day file at all (a symlink, not UTF-8) is skipped and doesn't hold
+  the version back. The rules version it ran with is
   remembered per Mac (`WritingDayFilesScrubbedRulesVersion`), so day files
   that arrive later from another Mac aren't rescrubbed until the next rules
   bump, and nothing runs while Writing is off.

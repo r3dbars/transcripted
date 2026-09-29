@@ -47,8 +47,8 @@ struct WritingDayFileRescrubberTests {
         #expect(!result.contains("sunshine"))
     }
 
-    @Test("A section left with only redactions is removed and its neighbours are kept")
-    func onlyRedactionsSectionRemoved() throws {
+    @Test("A section left with only redactions keeps its heading with just the token, and its neighbours are kept")
+    func onlyRedactionsSectionKeptAsToken() throws {
         let first = Self.section("Pushing the launch to Thursday", app: Self.slack, at: Self.start)
         let last = Self.section("Thanks for the notes, see you at 10:30", app: Self.mail, at: Self.start + 300_000)
         let dirty = Self.file([
@@ -57,7 +57,11 @@ struct WritingDayFileRescrubberTests {
             last,
         ])
         let result = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
-        #expect(result == Self.file([first, last]))
+        #expect(result == Self.file([
+            first,
+            Self.section(Self.redactedPassword, app: Self.slack, at: Self.start + 60_000),
+            last,
+        ]))
         #expect(!result.contains("Tr0ub4dor"))
     }
 
@@ -75,7 +79,7 @@ struct WritingDayFileRescrubberTests {
         #expect(WritingDayFileRescrubber.rescrubbed(slackFile, timeZone: Self.timeZone, locale: Self.locale) == nil)
     }
 
-    @Test("A password section right after a same-app sudo section is removed")
+    @Test("A password section right after a same-app sudo section is redacted")
     func previousSectionIsContext() throws {
         let sudo = Self.section("sudo apt update", app: Self.terminal, at: Self.start)
         let later = Self.section("Back to the release notes now", app: Self.slack, at: Self.start + 60_000)
@@ -85,7 +89,57 @@ struct WritingDayFileRescrubberTests {
             later,
         ])
         let result = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
-        #expect(result == Self.file([sudo, later]))
+        #expect(result == Self.file([
+            sudo,
+            Self.section(Self.redactedPassword, app: Self.terminal, at: Self.start + 5_000),
+            later,
+        ]))
+    }
+
+    @Test("Rescrubbing is idempotent: tools run after a sudo password aren't eaten one pass at a time")
+    func sudoThenToolsIdempotent() throws {
+        let lines = ["sudo -v", "hunter2", "pytest", "ruff", "black", "mypy"]
+        let dirty = Self.file(lines.enumerated().map { offset, line in
+            Self.section(line, app: Self.terminal, at: Self.start + Int64(offset) * 20_000)
+        })
+        let once = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
+        #expect(once == Self.file(lines.enumerated().map { offset, line in
+            Self.section(
+                line == "hunter2" ? Self.redactedPassword : line,
+                app: Self.terminal,
+                at: Self.start + Int64(offset) * 20_000
+            )
+        }))
+        // Passes 2 and 3 find nothing: the same file as pass 1.
+        let twice = WritingDayFileRescrubber.rescrubbed(once, timeZone: Self.timeZone, locale: Self.locale) ?? once
+        let thrice = WritingDayFileRescrubber.rescrubbed(twice, timeZone: Self.timeZone, locale: Self.locale) ?? twice
+        #expect(twice == once)
+        #expect(thrice == once)
+    }
+
+    @Test("Rescrubbing is idempotent for a letters-only sudo password followed by commands the rules can't tell apart")
+    func lettersOnlyPasswordThenCommandsIdempotent() throws {
+        // `deploybox` and `buildall` look like a first answer to the prompt;
+        // only the first line after sudo may be one.
+        let lines = ["sudo -v", "sunshine", "deploybox", "buildall"]
+        let dirty = Self.file(lines.enumerated().map { offset, line in
+            Self.section(line, app: Self.terminal, at: Self.start + Int64(offset) * 20_000)
+        })
+        let once = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
+        #expect(!once.contains("sunshine"))
+        #expect(once.contains("deploybox"))
+        #expect(once.contains("buildall"))
+        #expect(WritingDayFileRescrubber.rescrubbed(once, timeZone: Self.timeZone, locale: Self.locale) == nil)
+    }
+
+    @Test("A rewritten section's accepted-word count is never more than its word count")
+    func acceptedWordsCapped() throws {
+        let passphrase = "ssh-keygen -t ed25519\ncorrect horse battery staple"
+        let dirty = Self.file([Self.section(passphrase, app: Self.terminal, at: Self.start, accepted: 6)])
+        let result = try #require(WritingDayFileRescrubber.rescrubbed(dirty, timeZone: Self.timeZone, locale: Self.locale))
+        let clean = "ssh-keygen -t ed25519\n\(Self.redactedPassword)"
+        #expect(result == Self.file([Self.section(clean, app: Self.terminal, at: Self.start, accepted: 4)]))
+        #expect(result.contains("Accepted words: 4"))
     }
 
     @Test("The previous section isn't context ten minutes later or from another app")
@@ -231,12 +285,39 @@ struct WritingDayFileRescrubberTests {
         #expect(result == Self.file([
             Self.section("sudo apt update", app: Self.terminal, at: Self.start),
             Self.section("brb one sec", app: Self.slack, at: Self.start + 3_000),
+            Self.section(Self.redactedPassword, app: Self.terminal, at: Self.start + 70_000),
         ]))
+    }
+
+    @Test("A day file that can never be read is skipped, not a failure, so it doesn't make every launch retry")
+    func unreadableFilesSkipped() throws {
+        let sandbox = try Sandbox()
+        defer { sandbox.remove() }
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: sandbox.writing, withIntermediateDirectories: true)
+        let dirty = Self.file([Self.section("the wifi password is sunshine", app: Self.slack, at: Self.start)])
+
+        let good = sandbox.writing.appendingPathComponent("Writing_2026-09-25.md")
+        try Data(dirty.utf8).write(to: good)
+        // A symlink named like a day file, pointing outside the folder.
+        let target = sandbox.root.appendingPathComponent("elsewhere.md")
+        try Data(dirty.utf8).write(to: target)
+        let link = sandbox.writing.appendingPathComponent("Writing_2026-09-24.md")
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
+        // Not UTF-8.
+        let binary = sandbox.writing.appendingPathComponent("Writing_2026-09-23.md")
+        try Data([0xFF, 0xFE, 0x00, 0xC3, 0x28]).write(to: binary)
+
+        let outcome = WritingDayFileRescrubber.rescrubAll(in: sandbox.writing, timeZone: Self.timeZone, locale: Self.locale)
+        #expect(outcome == WritingDayFileRescrubber.Outcome(filesScanned: 3, filesChanged: 1, failures: 0, skipped: 2))
+        // The symlink's target is never touched.
+        #expect(try String(contentsOf: target, encoding: .utf8) == dirty)
+        #expect(!(try String(contentsOf: good, encoding: .utf8)).contains("sunshine"))
     }
 
     // MARK: - Helpers
 
-    private static func section(_ text: String, app: String, at milliseconds: Int64) -> String {
+    private static func section(_ text: String, app: String, at milliseconds: Int64, accepted: Int = 0) -> String {
         let names = [slack: "Slack", mail: "Mail", terminal: "Terminal"]
         return WritingDayFileFormatter.section(
             .init(
@@ -248,7 +329,7 @@ struct WritingDayFileRescrubberTests {
                 bundleIdentifier: app,
                 wordCount: text.split(whereSeparator: \.isWhitespace).count,
                 characterCount: text.count,
-                acceptedWordCount: 0,
+                acceptedWordCount: accepted,
                 text: text
             ),
             timeZone: timeZone,
