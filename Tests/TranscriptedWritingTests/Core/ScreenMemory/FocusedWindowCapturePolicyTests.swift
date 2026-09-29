@@ -99,6 +99,14 @@ struct FocusedWindowCapturePolicyTests {
         ]
         #expect(choose(target: target(window: 42), windows: windows) == .refuse(.notFocusedWindow))
         #expect(choose(target: target(), windows: windows) == .capture(windowIdentifier: slackWindow))
+
+        // A same-app window the window server doesn't list as on screen
+        // (no rank) isn't in front of anything.
+        let offscreenSibling = desktop + [
+            Policy.Window(windowIdentifier: 43, processIdentifier: slackPID,
+                          bundleIdentifier: slack, layer: 0, zOrderRank: nil),
+        ]
+        #expect(choose(target: target(), windows: offscreenSibling) == .capture(windowIdentifier: slackWindow))
     }
 
     @Test("An excluded focused window is never captured")
