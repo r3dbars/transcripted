@@ -43,6 +43,14 @@ final class SpeakerNamingSheet {
     private var latestRequest: SpeakerNamingRequest?
     private var gate = SpeakerReviewPresentationGate()
 
+    /// With Settings › Dictation window set to Notch island, the review asks
+    /// "Who was on this call?" in the island instead of opening a window.
+    weak var island: NotchIslandController?
+    /// Open transcript on the island's "Everyone's named".
+    var onOpenTranscript: ((URL) -> Void)?
+    private var islandReviewView: NotchIslandSpeakerReviewView?
+    private var islandReviewContent: NotchIslandSpeakerReviewContent?
+
     /// Wire the presenter to a task manager and to whether a meeting is being
     /// captured. Idempotent — later calls replace the subscriptions.
     func observe(
@@ -78,6 +86,18 @@ final class SpeakerNamingSheet {
     }
 
     private func present(request: SpeakerNamingRequest) {
+        if let island, NotchIslandController.isSelected {
+            presentInIsland(request: request, island: island)
+            return
+        }
+        // Everyone was recognized: the window has nothing to ask, so it
+        // doesn't open and the meeting finishes saving as before. (The
+        // island lists who was on the call instead.)
+        if request.speakers.isEmpty {
+            gate.windowClosed(requestID: request.id)
+            request.onComplete([])
+            return
+        }
         // Avoid stacking — if a previous sheet is still open, close it first.
         currentWindowController?.close()
 
@@ -106,19 +126,8 @@ final class SpeakerNamingSheet {
     /// transcript id.
     private func resolveMeetingTitle(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
         let requestID = request.id
-        let url = request.transcriptURL
-        let transcriptID = request.transcriptId
         Task { [weak controller] in
-            let title = await Task.detached(priority: .utility) { () -> String? in
-                var transcriptURL: URL? = url
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    transcriptURL = TranscriptSaver.existingTranscriptURL(
-                        in: url.deletingLastPathComponent(),
-                        transcriptId: transcriptID
-                    )
-                }
-                return transcriptURL.flatMap { MeetingTranscriptStyler.displayTranscriptPreview(at: $0)?.title }
-            }.value
+            let title = await Self.meetingTitle(for: request)
             guard let controller, controller.requestID == requestID else { return }
             controller.showMeetingTitle(title)
         }
@@ -129,33 +138,120 @@ final class SpeakerNamingSheet {
     /// saved time is when the file was made, not a calendar slot.
     private func resolveInvitees(for request: SpeakerNamingRequest, in controller: NamingWindowController) {
         let requestID = request.id
+        Task { [weak controller] in
+            guard let invitees = await Self.invitees(for: request),
+                  let controller, controller.requestID == requestID else { return }
+            controller.showInvitees(invitees.names, remoteVoicesInMeeting: invitees.remoteVoices)
+        }
+    }
+
+    static func meetingTitle(for request: SpeakerNamingRequest) async -> String? {
         let url = request.transcriptURL
         let transcriptID = request.transcriptId
-        Task { [weak controller] in
-            let recording = await Task.detached(priority: .utility) { () -> (start: Date, remoteVoices: Int?)? in
-                var transcriptURL: URL? = url
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    transcriptURL = TranscriptSaver.existingTranscriptURL(
-                        in: url.deletingLastPathComponent(),
-                        transcriptId: transcriptID
-                    )
-                }
-                guard let transcriptURL,
-                      let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
-                      values["imported_at"] == nil,
-                      let start = TranscriptFrontmatter.recordedAt(values: values) else { return nil }
-                return (start, values["system_speakers"].flatMap { Int($0) })
-            }.value
-            guard let recording else { return }
-            let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recording.start)
-            guard !names.isEmpty, let controller, controller.requestID == requestID else { return }
-            controller.showInvitees(names, remoteVoicesInMeeting: recording.remoteVoices)
-        }
+        return await Task.detached(priority: .utility) { () -> String? in
+            var transcriptURL: URL? = url
+            if !FileManager.default.fileExists(atPath: url.path) {
+                transcriptURL = TranscriptSaver.existingTranscriptURL(
+                    in: url.deletingLastPathComponent(),
+                    transcriptId: transcriptID
+                )
+            }
+            return transcriptURL.flatMap { MeetingTranscriptStyler.displayTranscriptPreview(at: $0)?.title }
+        }.value
+    }
+
+    static func invitees(for request: SpeakerNamingRequest) async -> (names: [String], remoteVoices: Int?)? {
+        let url = request.transcriptURL
+        let transcriptID = request.transcriptId
+        let recording = await Task.detached(priority: .utility) { () -> (start: Date, remoteVoices: Int?)? in
+            var transcriptURL: URL? = url
+            if !FileManager.default.fileExists(atPath: url.path) {
+                transcriptURL = TranscriptSaver.existingTranscriptURL(
+                    in: url.deletingLastPathComponent(),
+                    transcriptId: transcriptID
+                )
+            }
+            guard let transcriptURL,
+                  let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+                  values["imported_at"] == nil,
+                  let start = TranscriptFrontmatter.recordedAt(values: values) else { return nil }
+            return (start, values["system_speakers"].flatMap { Int($0) })
+        }.value
+        guard let recording else { return nil }
+        let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recording.start)
+        guard !names.isEmpty else { return nil }
+        return (names, recording.remoteVoices)
     }
 
     private func dismissCurrentWindowBecauseRequestCleared() {
         currentWindowController?.closeWithoutCompleting()
         currentWindowController = nil
+        // Core clears the request once the island's answers are saved; the
+        // island keeps showing "Everyone's named" until it closes itself.
+        if let islandReviewView, !islandReviewView.isFinished {
+            finishIslandReview(requestID: islandReviewView.requestID)
+        }
+    }
+
+    // MARK: - In the notch island
+
+    private func presentInIsland(request: SpeakerNamingRequest, island: NotchIslandController) {
+        if let previous = islandReviewView {
+            // A newer review replaces one still on screen; its request is gone.
+            finishIslandReview(requestID: previous.requestID)
+        }
+        let requestID = request.id
+        let view = NotchIslandSpeakerReviewView(request: request)
+        let content = NotchIslandSpeakerReviewContent(reviewID: requestID, meetingTitle: nil, stage: .naming)
+        view.onLayoutChange = { [weak island] in island?.speakerReviewLayoutChanged() }
+        view.onWantsKeyboard = { [weak island] in island?.makeKeyForTyping() }
+        view.onLater = { [weak self] updates in
+            request.onComplete(updates)
+            self?.finishIslandReview(requestID: requestID)
+        }
+        view.onDone = { [weak self, weak island, weak view] updates, leftForLater in
+            request.onComplete(updates)
+            guard let self, var content = self.islandReviewContent, content.reviewID == requestID else { return }
+            self.gate.windowClosed(requestID: requestID)
+            content.stage = .done(leftForLater: leftForLater)
+            self.islandReviewContent = content
+            island?.showSpeakerReview(content, view: view)
+        }
+        view.onDoneLingerEnded = { [weak self] in self?.finishIslandReview(requestID: requestID) }
+        view.onOpenTranscript = { [weak self] in
+            self?.onOpenTranscript?(request.transcriptURL)
+            self?.finishIslandReview(requestID: requestID)
+        }
+        island.speakerReviewHoverHandler = { [weak view] hovered in view?.setHovered(hovered) }
+        island.speakerReviewVisibilityHandler = { [weak view] onScreen in view?.setOnScreen(onScreen) }
+        islandReviewView = view
+        islandReviewContent = content
+        island.showSpeakerReview(content, view: view)
+
+        Task { @MainActor [weak self, weak island, weak view] in
+            let title = await Self.meetingTitle(for: request)
+            guard let self, let view, self.islandReviewView === view,
+                  var content = self.islandReviewContent else { return }
+            view.setMeetingTitle(title)
+            content.meetingTitle = title
+            self.islandReviewContent = content
+            island?.showSpeakerReview(content, view: view)
+        }
+        Task { @MainActor [weak self, weak view] in
+            guard let invitees = await Self.invitees(for: request),
+                  let self, let view, self.islandReviewView === view else { return }
+            view.setInvitees(invitees.names)
+        }
+    }
+
+    private func finishIslandReview(requestID: UUID) {
+        gate.windowClosed(requestID: requestID)
+        guard islandReviewView?.requestID == requestID else { return }
+        islandReviewView = nil
+        islandReviewContent = nil
+        island?.speakerReviewHoverHandler = nil
+        island?.speakerReviewVisibilityHandler = nil
+        island?.showSpeakerReview(nil, view: nil)
     }
 }
 

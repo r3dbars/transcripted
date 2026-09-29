@@ -57,6 +57,10 @@ final class MeetingOverlayController: NSObject {
     private var currentParticipants: [String] = []
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
+    /// Mirrors `MeetingSessionController.asksAboutCallAudioWhileRecording`.
+    /// The session owns the ask and ties it to the start that raised it, so a
+    /// start that fails before recording never leaves one for the next meeting.
+    private var islandCallAudioAskPending = false
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
@@ -346,6 +350,14 @@ final class MeetingOverlayController: NSObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notice in
                 self?.applyMicOnlyNotice(notice)
+            }
+            .store(in: &subscriptions)
+
+        session.$asksAboutCallAudioWhileRecording
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] asks in
+                self?.applyCallAudioAsk(asks)
             }
             .store(in: &subscriptions)
 
@@ -1423,12 +1435,26 @@ final class MeetingOverlayController: NSObject {
             prompt: state == .prompt ? prompt : nil,
             duration: currentDuration,
             callAudioNote: callAudioNote,
-            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified
+            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
+            asksAboutCallAudio: islandCallAudioAskPending
         )
+    }
+
+    /// The session raised or dropped the "can't hear the other side" ask.
+    /// It asks while the recording that started mic only runs; every meeting
+    /// asks again.
+    private func applyCallAudioAsk(_ asks: Bool) {
+        guard asks != islandCallAudioAskPending else { return }
+        islandCallAudioAskPending = asks
+        pushToView()
     }
 
     private func handleIslandAction(_ action: NotchIslandAction) {
         switch action {
+        case .meetingCallAudioDismiss:
+            islandCallAudioAskPending = false
+            meetingSession?.dismissCallAudioAsk()
+            pushToView()
         case .meetingStop, .meetingDismissError:
             handleCloseTapped()
         case .meetingPrimary, .meetingOpen:
@@ -1439,7 +1465,12 @@ final class MeetingOverlayController: NSObject {
             handleCallAudioActionTapped()
         case .meetingCallAudio:
             // The "Mic only" chip, which can show under a warning prompt too.
-            guard micOnlyNotice == .callAudioOff else { return }
+            islandCallAudioAskPending = false
+            meetingSession?.dismissCallAudioAsk()
+            guard micOnlyNotice == .callAudioOff else {
+                pushToView()
+                return
+            }
             Task { @MainActor [weak self] in
                 await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
             }

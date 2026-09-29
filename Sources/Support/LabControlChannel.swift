@@ -389,7 +389,7 @@ final class LabControlChannel {
             guard appDelegate.sessionController.isDictating else {
                 return .failure("dictation_not_active")
             }
-            // Same call the status-item quick menu's Stop Dictation makes.
+            // Same call the menu bar popover's Stop Dictation makes.
             // `paste` is false unless the command explicitly asked for it.
             appDelegate.sessionController.stopDictationAndPaste(trigger: .menu, autoPaste: paste)
             return .success(nil)

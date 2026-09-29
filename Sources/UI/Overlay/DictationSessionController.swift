@@ -7,17 +7,6 @@ import Combine
 
 @MainActor
 class DictationSessionController: ObservableObject {
-    enum DictationTrigger: String {
-        case rightOptionTap = "right_option_tap"
-        case physicalKey = "physical_key"
-        case keyboardShortcut = "keyboard_shortcut"
-        case overlayButton = "overlay_button"
-        case menu = "menu"
-        case onboarding = "onboarding"
-        case sessionCap = "session_cap"
-        case unknown = "unknown"
-    }
-
     /// Issue #1743: the App Nap suppression assertion is balanced on this
     /// property's transitions rather than on individual start/stop paths.
     /// A dictation session ends in a dozen different places (success, cancel,
@@ -291,8 +280,17 @@ class DictationSessionController: ObservableObject {
 
     /// The "Not pasted" notice, whose Paste button pastes into whatever app
     /// is in front now (the user clicks where the words go first).
-    private func showNotPasted(_ text: String, message: String, overlayController: FloatingOverlayController) {
-        overlayController.showNotPastedNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+    private func showNotPasted(
+        _ text: String,
+        message: String,
+        unconfirmed: Bool = false,
+        overlayController: FloatingOverlayController
+    ) {
+        overlayController.showNotPastedNotice(
+            text,
+            fallbackMessage: message,
+            unconfirmed: unconfirmed
+        ) { [weak self, weak overlayController] in
             guard let self, let overlayController else { return }
             let frontmost = NSWorkspace.shared.frontmostApplication
             guard frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
@@ -1704,14 +1702,19 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: "Pasted")
                 }
-            case .copied(let message, reason: _):
+            case .copied(let message, reason: let reason):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
                 } else {
                     // The text is safe on the clipboard — present it as a calm
                     // "press ⌘V" notice, not a warning-triangle error. The
                     // island also shows the words and a Paste button.
-                    self.showNotPasted(text, message: message, overlayController: overlayController)
+                    self.showNotPasted(
+                        text,
+                        message: message,
+                        unconfirmed: reason == .pasteNotConfirmed,
+                        overlayController: overlayController
+                    )
                 }
             case .failed(let message, reason: _):
                 let combinedMessage: String
@@ -2319,29 +2322,24 @@ class DictationSessionController: ObservableObject {
         var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
         timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            var didAnnounceSessionCap = false
-            while !Task.isCancelled {
-                let now = ProcessInfo.processInfo.systemUptime
-                if timeout.isExpired(at: now) { break }
-                let remainingSeconds = timeout.remaining(at: now) ?? 0
-                let inWarningWindow = DictationSessionCapWarningPolicy.shouldWarn(remainingSeconds: remainingSeconds)
-                if inWarningWindow,
-                   self?.showSessionCapCountdown(
-                       remainingSeconds: remainingSeconds,
-                       announce: !didAnnounceSessionCap
-                   ) == true {
-                    didAnnounceSessionCap = true
-                }
-                // Inside the warning window, tick every second so the pill
-                // counts down live. Before it, sleep until the window opens.
-                let secondsUntilNextCheck = inWarningWindow
-                    ? min(remainingSeconds, 1)
-                    : remainingSeconds - DictationSessionCapWarningPolicy.warningWindowSeconds
-                let checkNanos = UInt64((secondsUntilNextCheck * 1_000_000_000).rounded(.up))
-                let sleepNanos = min(checkNanos, Self.sessionTimeoutPollIntervalNanos)
-                if sleepNanos == 0 { break }
-                try? await Task.sleep(nanoseconds: sleepNanos)
-            }
+            // DictationSessionCapTimer sleeps until the last 30 seconds, then
+            // ticks every second so the pill counts down live, and returns at
+            // the cap (or on cancel).
+            await DictationSessionCapTimer.run(
+                DictationSessionCapTimer.Steps(
+                    timeout: timeout,
+                    pollIntervalNanos: Self.sessionTimeoutPollIntervalNanos,
+                    uptime: { ProcessInfo.processInfo.systemUptime },
+                    sleep: { nanoseconds in try? await Task.sleep(nanoseconds: nanoseconds) },
+                    isCancelled: { Task.isCancelled },
+                    showCountdown: { remainingSeconds, announce in
+                        self?.showSessionCapCountdown(
+                            remainingSeconds: remainingSeconds,
+                            announce: announce
+                        ) == true
+                    }
+                )
+            )
             guard !Task.isCancelled, let self = self else { return }
             if self.isDictating {
                 let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false

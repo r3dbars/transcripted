@@ -89,7 +89,9 @@ public enum DiagnosticsMetadataRedactor {
              // first complete-word partial, whole milliseconds, no text.
              "firstTokenMilliseconds", "firstPartialMilliseconds",
              // `personal-stream-hold`: how long the first prefix was held.
-             "heldMilliseconds":
+             "heldMilliseconds",
+             // Transcripted: `writing-day-files-rescrubbed`, file counts only.
+             "scanned", "changed", "failures", "skipped":
             safe = matches(value, #"^(?:[0-9]+(?:\.[0-9]+)?|none|unknown)$"#)
         case "willRestart", "firstInstall",
              // `llama-completion-timing`: whether the stream was cut once the

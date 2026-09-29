@@ -99,6 +99,26 @@ enum SpeakerNameSelectionPolicy {
         return displayMatches[0]
     }
 
+    /// The one saved person already called `name`, so naming a voice after
+    /// them adds the voice to that person instead of making a second one.
+    /// Nil when nobody or more than one person has that name (then the
+    /// caller can't tell which one was meant and names the voice as typed).
+    static func uniqueSavedPerson<Person>(
+        named name: String,
+        among people: [Person],
+        excluding excludedID: UUID,
+        id: (Person) -> UUID,
+        displayName: (Person) -> String?
+    ) -> Person? {
+        let key = normalizedSearchText(name)
+        guard !key.isEmpty else { return nil }
+        let matches = people.filter { person in
+            id(person) != excludedID
+                && displayName(person).map(normalizedSearchText) == key
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     static func isOwnerLabel(_ value: String) -> Bool {
         normalizedSearchText(value) == normalizedSearchText(ownerLabel)
     }

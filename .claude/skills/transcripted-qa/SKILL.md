@@ -151,7 +151,7 @@ Read `~/Library/Application Support/Transcripted/logs/app.jsonl` directly. Check
 | `ui/hotkey-responsive` | Cmd+Shift+R triggers log activity |
 | `ui/hotkey-stop` | Second Cmd+Shift+R stops recording |
 | `ui/settings-window` | Settings opens from menu and closes with Cmd+W |
-| `ui/context-menu` | Right-click menu is readable |
+| `ui/context-menu` | Right-click on the status item opens the popover |
 | `ui/menu-item-Start-Recording` | "Start Recording" menu item present |
 | `ui/menu-item-Settings` | "Settings" menu item present |
 | `ui/menu-item-Quit` | "Quit" menu item present |

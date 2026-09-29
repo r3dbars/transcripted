@@ -33,6 +33,48 @@ final class CalendarNamingPolicyTests: XCTestCase {
         )
     }
 
+    private func autoAcceptOnRecentLineup(_ profile: SpeakerProfile, similarity: Double, runnerUp: Double) -> Bool {
+        SpeakerNamingPolicy.shouldAutoAccept(
+            profile: profile,
+            similarity: similarity,
+            secondBestSimilarity: runnerUp,
+            recentOutcomes: [],
+            inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                for: profile,
+                invitedNameKeys: [SpeakerNamingPolicy.nameKey(profile.displayName ?? "")],
+                lineupIsFromInvite: false
+            )
+        )
+    }
+
+    func testWithNoInviteALoneMatchBelowTheStandardBarGoesToReview() {
+        // A stranger who sounds a bit like one recent colleague, and nobody
+        // else came close: not enough to put a name on them silently.
+        let taylor = person("Taylor Wolf", confirmedMeetings: 2)
+        XCTAssertFalse(autoAcceptOnRecentLineup(taylor, similarity: 0.84, runnerUp: -1))
+    }
+
+    func testWithNoInviteALoneMatchAtTheStandardBarIsStillNamedSilently() {
+        let taylor = person("Taylor Wolf", confirmedMeetings: 2)
+        XCTAssertTrue(autoAcceptOnRecentLineup(taylor, similarity: 0.95, runnerUp: -1))
+    }
+
+    func testWithNoInviteAClearWinnerOverAnotherSavedPersonIsNamedSilently() {
+        let taylor = person("Taylor Wolf", confirmedMeetings: 2)
+        XCTAssertTrue(autoAcceptOnRecentLineup(taylor, similarity: 0.86, runnerUp: 0.70))
+    }
+
+    func testWithAnInviteALoneMatchKeepsTheLabTunedBar() {
+        let taylor = person("Taylor Wolf", confirmedMeetings: 2)
+        XCTAssertTrue(autoAccept(taylor, similarity: 0.84, runnerUp: -1, invited: ["Taylor Wolf"]))
+    }
+
+    func testOnlyARealInviteCountsAsAnInviteLineup() {
+        XCTAssertTrue(SpeakerNamingPolicy.lineupIsFromInvite(.init(invitedNames: ["Sam Lee"])))
+        XCTAssertFalse(SpeakerNamingPolicy.lineupIsFromInvite(.init(invitedNames: [])))
+        XCTAssertFalse(SpeakerNamingPolicy.lineupIsFromInvite(.init(invitedNames: ["  "])))
+    }
+
     func testAnInvitedPersonConfirmedTwiceIsNamedSilentlyOnAClearMatch() {
         let sam = person("Sam Lee", confirmedMeetings: 2)
         XCTAssertTrue(autoAccept(sam, similarity: 0.84, runnerUp: 0.40, invited: ["Sam Lee", "Grace Kim"]))

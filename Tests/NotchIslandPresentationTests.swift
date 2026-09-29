@@ -107,6 +107,18 @@ func testNotchIslandPresentation() {
         }
     }
 
+    runSuite("NotchIslandPresentation names an unconfirmed paste as maybe pasted, not missing") {
+        let message = NotchIslandDictationContent.Message(
+            tone: .notice,
+            text: "Maybe pasted",
+            actionTitle: "Paste",
+            preview: "send me the notes",
+            dismissSeconds: 15
+        )
+        assertEqual(NotchIslandPresentation.messageLabel(message), "Maybe pasted",
+                    "a paste that likely landed shouldn't claim it didn't, or the Paste button doubles it")
+    }
+
     runSuite("NotchIslandPresentation shows the words of a dictation that didn't paste") {
         let message = NotchIslandDictationContent.Message(
             tone: .notice,

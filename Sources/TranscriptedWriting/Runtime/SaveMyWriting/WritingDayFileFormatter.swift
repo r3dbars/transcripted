@@ -103,7 +103,7 @@ enum WritingDayFileFormatter {
 
     /// The body runs to the next `## ` heading, so a line of writing that
     /// starts with one (Markdown typed in a notes app) is escaped to stay text.
-    private static func body(_ text: String) -> String {
+    static func body(_ text: String) -> String {
         text.split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.hasPrefix("## ") ? "\\" + $0 : String($0) }
             .joined(separator: "\n")

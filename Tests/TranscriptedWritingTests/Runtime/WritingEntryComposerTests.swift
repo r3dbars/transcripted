@@ -224,6 +224,245 @@ struct WritingEntryComposerTests {
         #expect(composer.closeAll().isEmpty)
     }
 
+    // MARK: - Secrets never reach a saved entry
+
+    private static let terminal = "com.apple.Terminal"
+    private static let redactedPassword = "\u{27E8}redacted:password\u{27E9}"
+    private static let redactedCard = "\u{27E8}redacted:card\u{27E9}"
+
+    @Test("A closed entry's text is scrubbed, and its word and character counts describe the scrubbed text")
+    func closedEntryIsScrubbed() throws {
+        var composer = Self.composer()
+        let closed = composer.ingest([
+            Self.typed("the wifi password is sunshine", session: "chain-a", at: Self.start),
+            Self.typed("Next message about lunch", session: "chain-b", at: Self.start + 2_000),
+        ], receivedAt: Self.date(Self.start + 2_500))
+        let entry = try #require(closed.first)
+        let expected = "the wifi password is \(Self.redactedPassword)"
+        #expect(entry.text == expected)
+        #expect(!entry.text.contains("sunshine"))
+        #expect(entry.wordCount == 5)
+        #expect(entry.characterCount == expected.count)
+
+        let card = "my card is \(Self.redactedCard) thanks"
+        _ = composer.closeAll()
+        _ = composer.ingest(
+            [Self.typed("my card is 4111 1111 1111 1111 thanks", session: "chain-c", at: Self.start + 10_000)],
+            receivedAt: Self.date(Self.start + 10_500)
+        )
+        let flushed = try #require(composer.closeAll().first)
+        #expect(flushed.text == card)
+        // The token counts as one word, as in the first entry above.
+        #expect(flushed.wordCount == 5)
+        #expect(flushed.characterCount == card.count)
+    }
+
+    @Test("An entry that is only redactions isn't saved")
+    func onlyRedactionsNotSaved() {
+        var composer = Self.composer()
+        let closed = composer.ingest([
+            Self.typed("Tr0ub4dor&3", session: "chain-a", at: Self.start),
+            Self.typed("A normal sentence after it", session: "chain-b", at: Self.start + 70_000),
+        ], receivedAt: Self.date(Self.start + 70_500))
+        #expect(closed.isEmpty)
+        #expect(composer.closeAll().map(\.text) == ["A normal sentence after it"])
+
+        _ = composer.ingest(
+            [Self.typed("4111 1111 1111 1111", session: "chain-c", at: Self.start + 200_000)],
+            receivedAt: Self.date(Self.start + 200_500)
+        )
+        #expect(composer.closeAll().isEmpty)
+    }
+
+    @Test("Terminal: a password typed right after `sudo apt update` is dropped, and the command is saved")
+    func terminalPasswordAfterSudoDropped() throws {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        let closed = composer.ingest(
+            [Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 5_000)],
+            receivedAt: Self.date(Self.start + 5_500)
+        )
+        #expect(closed.map(\.text) == ["sudo apt update"])
+        #expect(composer.closeAll().isEmpty)
+    }
+
+    @Test("Terminal: the same word ten minutes after `sudo apt update` is saved, the context expired")
+    func terminalContextExpires() {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        let later = Self.start + 600_000
+        let closed = composer.ingest(
+            [Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: later)],
+            receivedAt: Self.date(later + 500)
+        )
+        #expect(closed.map(\.text) == ["sudo apt update"])
+        #expect(composer.closeAll().map(\.text) == ["sunshine"])
+    }
+
+    @Test("Terminal: a word after `sudo apt update` typed in Slack is saved, context is per app")
+    func terminalContextIsPerApp() {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.slack, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        let closed = composer.ingest(
+            [Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 5_000)],
+            receivedAt: Self.date(Self.start + 5_500)
+        )
+        #expect(closed.map(\.text) == ["sudo apt update"])
+        #expect(composer.closeAll().map(\.text) == ["sunshine"])
+    }
+
+    @Test("The previous entry's text never leaks into the next entry")
+    func previousEntryDoesNotLeak() throws {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        // "sunshine" is a scrap, so the next segment folds in on its own line.
+        _ = composer.ingest([
+            Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 5_000),
+            Self.typed("ls -la", session: "chain-c", app: Self.terminal, at: Self.start + 8_000),
+        ], receivedAt: Self.date(Self.start + 8_500))
+        let entry = try #require(composer.closeAll().first)
+        #expect(entry.text == "\(Self.redactedPassword)\nls -la")
+        #expect(!entry.text.contains("sudo"))
+        #expect(!entry.text.contains("sunshine"))
+        #expect(entry.capturedAtMilliseconds == Self.start + 5_000)
+    }
+
+    @Test("Terminal: a password folded into the same entry as its sudo line is redacted in place")
+    func passwordFoldedIntoSameEntry() throws {
+        var composer = Self.composer()
+        // "sudo -v" is a scrap, so the password segment folds into it.
+        _ = composer.ingest([
+            Self.typed("sudo -v", session: "chain-a", app: Self.terminal, at: Self.start),
+            Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 3_000),
+        ], receivedAt: Self.date(Self.start + 3_500))
+        let entry = try #require(composer.closeAll().first)
+        #expect(entry.text == "sudo -v\n\(Self.redactedPassword)")
+        #expect(entry.wordCount == 3)
+        #expect(entry.characterCount == "sudo -v\n\(Self.redactedPassword)".count)
+    }
+
+    @Test("Discarding the open entry also forgets the previous entry's context")
+    func discardForgetsContext() {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        let closed = composer.ingest(
+            [Self.typed("sunsh", session: "chain-b", app: Self.terminal, at: Self.start + 1_000)],
+            receivedAt: Self.date(Self.start + 1_500)
+        )
+        #expect(closed.map(\.text) == ["sudo apt update"])
+        // Save my writing turned off, or delete all.
+        composer.discardOpenEntry()
+        _ = composer.ingest(
+            [Self.typed("sunshine", session: "chain-c", app: Self.terminal, at: Self.start + 3_000)],
+            receivedAt: Self.date(Self.start + 3_500)
+        )
+        #expect(composer.closeAll().map(\.text) == ["sunshine"])
+    }
+
+    @Test("Closing everything (Writing stopping) forgets the raw context lines too")
+    func closeAllForgetsContext() {
+        var composer = Self.composer()
+        _ = composer.ingest(
+            [Self.typed("sudo apt update", session: "chain-a", app: Self.terminal, at: Self.start)],
+            receivedAt: Self.date(Self.start + 500)
+        )
+        #expect(composer.closeAll().map(\.text) == ["sudo apt update"])
+        // Nothing of the sudo line is left to read the next word as its password.
+        _ = composer.ingest(
+            [Self.typed("sunshine", session: "chain-b", app: Self.terminal, at: Self.start + 3_000)],
+            receivedAt: Self.date(Self.start + 3_500)
+        )
+        #expect(composer.closeAll().map(\.text) == ["sunshine"])
+    }
+
+    // MARK: - Secrets typed over several segments (review regressions)
+
+    /// Types each string as its own segment, 1.5 s apart, and returns every
+    /// entry that would be saved.
+    private static func savedTexts(_ segments: [(text: String, app: String)], gap: Int64 = 1_500) -> [String] {
+        var composer = composer()
+        var saved: [String] = []
+        for (index, segment) in segments.enumerated() {
+            let at = start + Int64(index) * gap
+            saved += composer.ingest(
+                [typed(segment.text, session: "segment-\(index)", app: segment.app, at: at)],
+                receivedAt: date(at + 200)
+            ).map(\.text)
+        }
+        return saved + composer.closeAll().map(\.text)
+    }
+
+    @Test("A card typed over four boxes, then its expiry and CVC, never reaches a saved entry")
+    func splitCardNeverSaved() {
+        let safari = "com.apple.Safari"
+        let saved = Self.savedTexts(["4111", "1111", "1111", "1111", "12/28", "123"].map { ($0, safari) })
+        #expect(saved.isEmpty)
+        #expect(!saved.joined().contains { $0.isNumber })
+    }
+
+    @Test("A one-time code typed one digit per box never reaches a saved entry")
+    func splitOTPNeverSaved() {
+        let saved = Self.savedTexts(["4", "8", "2", "9", "1", "3"].map { ($0, "com.google.Chrome") })
+        #expect(saved.isEmpty)
+    }
+
+    @Test("A code typed into two boxes of three digits never reaches a saved entry")
+    func multiDigitBoxesNeverSaved() {
+        #expect(Self.savedTexts([("482", "com.google.Chrome"), ("913", "com.google.Chrome")]).isEmpty)
+    }
+
+    @Test("A PIN shared as a scrap with the next line folded in is still removed")
+    func pinScrapWithNextLine() {
+        let messages = "com.apple.MobileSMS"
+        let saved = Self.savedTexts([("PIN 4821", messages), ("see you tonight", messages)])
+        #expect(!saved.joined().contains("4821"))
+        #expect(saved.joined().contains("see you tonight"))
+    }
+
+    @Test("Terminal: a password that arrives one character per segment after sudo is one redaction")
+    func perCharacterTerminalPassword() {
+        let saved = Self.savedTexts([("sudo -v", Self.terminal)] + "hunter2".map { (String($0), Self.terminal) })
+        #expect(saved == ["sudo -v\n\(Self.redactedPassword)"])
+    }
+
+    @Test("Terminal: a message in another app between sudo and the password doesn't lose the context")
+    func terminalContextSurvivesOtherApp() {
+        var composer = Self.composer()
+        var saved = composer.ingest([
+            Self.typed("sudo apt update", session: "t1", app: Self.terminal, at: Self.start),
+            Self.typed("brb one sec", session: "s1", app: Self.slack, at: Self.start + 3_000),
+            Self.typed("sunshine", session: "t2", app: Self.terminal, at: Self.start + 70_000),
+        ], receivedAt: Self.date(Self.start + 70_500)).map(\.text)
+        saved += composer.closeAll().map(\.text)
+        #expect(saved == ["sudo apt update", "brb one sec"])
+    }
+
+    @Test("Terminal: the context lasts as long as sudo waits for a password")
+    func terminalContextLastsWhileSudoWaits() {
+        var composer = Self.composer()
+        var saved = composer.ingest([
+            Self.typed("sudo apt update", session: "t1", app: Self.terminal, at: Self.start),
+            Self.typed("sunshine", session: "t2", app: Self.terminal, at: Self.start + 240_000),
+        ], receivedAt: Self.date(Self.start + 240_500)).map(\.text)
+        saved += composer.closeAll().map(\.text)
+        #expect(saved == ["sudo apt update"])
+    }
+
     // MARK: - Helpers
 
     private static func composer() -> WritingEntryComposer {

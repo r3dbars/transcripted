@@ -882,7 +882,7 @@ class ContextCaptureEngine: ObservableObject {
 
     private func routeDictationToggle(
         sourceApp: NSRunningApplication?,
-        trigger: DictationSessionController.DictationTrigger,
+        trigger: DictationTrigger,
         shortcutMode: DictationShortcutMode
     ) {
         guard isHotkeyRoutingActive, let session = sessionController else { return }

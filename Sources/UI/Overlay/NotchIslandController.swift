@@ -14,6 +14,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var dictationActionHandler: ((NotchIslandAction) -> Void)?
     var meetingActionHandler: ((NotchIslandAction) -> Void)?
     var callActionHandler: ((NotchIslandAction) -> Void)?
+    var callHoverHandler: ((Bool) -> Void)?
     /// The meeting pill's own hover rules (the saved dwell) still apply.
     var meetingHoverHandler: ((Bool) -> Void)?
     /// Right-click menu while a meeting records (Keep Controls Visible,
@@ -23,6 +24,15 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var onPasteLastDictation: (() -> Void)?
     /// The text of the dictation that just landed, for Copy and the preview.
     var lastDictationTextProvider: (() -> String?)?
+    /// The pointer entered or left the island while "Who was on this call?"
+    /// is up, so its Later ring and "Everyone's named" linger can pause.
+    var speakerReviewHoverHandler: ((Bool) -> Void)?
+    /// "Who was on this call?" went on or off screen (a dictation, a call
+    /// prompt, or the next meeting hides it), so its Later ring only runs
+    /// while someone can see it.
+    var speakerReviewVisibilityHandler: ((Bool) -> Void)? {
+        didSet { reportedSpeakerReviewVisible = nil }
+    }
 
     private static let hoverOpenDelay: UInt64 = 120_000_000
     private static let hoverCloseDelay: UInt64 = 380_000_000
@@ -32,6 +42,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private var dictation: NotchIslandDictationContent?
     private var meeting: NotchIslandMeetingContent?
     private var callPrompt: NotchIslandCallPromptContent?
+    private var speakerReview: NotchIslandSpeakerReviewContent?
+    private var reportedSpeakerReviewVisible: Bool?
     private var recentInsert: NotchIslandRecentInsert?
     private var targetApp: NSRunningApplication?
     private var listeningSince: Date?
@@ -212,10 +224,45 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         refreshLive()
     }
 
+    // MARK: - Speaker review
+
+    /// Shows (or with nil, takes down) "Who was on this call?". The view is
+    /// owned by the review's presenter and kept alive across drop-down
+    /// rebuilds so typing and playback carry on.
+    func showSpeakerReview(_ content: NotchIslandSpeakerReviewContent?, view: NSView?) {
+        let (panel, islandView) = ensurePanel()
+        speakerReview = content
+        islandView.speakerReviewView = content == nil ? nil : view
+        let isNaming = content?.stage == .naming
+        panel.acceptsKeyForTyping = isNaming
+        if !isNaming, panel.isKeyWindow {
+            panel.makeFirstResponder(nil)
+        }
+        render()
+    }
+
+    private func reportSpeakerReviewVisibility(_ visible: Bool) {
+        guard reportedSpeakerReviewVisible != visible else { return }
+        reportedSpeakerReviewVisible = visible
+        speakerReviewVisibilityHandler?(visible)
+    }
+
+    /// The review's rows grew or shrank.
+    func speakerReviewLayoutChanged() {
+        guard isShown, speakerReview != nil else { return }
+        render()
+    }
+
+    /// A name box was clicked: take the keyboard, only while the review asks.
+    func makeKeyForTyping() {
+        guard let panel, panel.acceptsKeyForTyping else { return }
+        panel.makeKey()
+    }
+
     // MARK: - Rendering
 
     private func render(animated: Bool = true) {
-        if NotchIslandPresentation.stickyKey(dictation: dictation, meeting: meeting, callPrompt: callPrompt) == nil {
+        if NotchIslandPresentation.stickyKey(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview) == nil {
             collapsedStickyKey = nil
         }
         let layout = NotchIslandPresentation.layout(
@@ -224,9 +271,11 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             callPrompt: callPrompt,
             recentInsert: recentInsert,
             expanded: expanded,
-            collapsedStickyKey: collapsedStickyKey
+            collapsedStickyKey: collapsedStickyKey,
+            speakerReview: speakerReview
         )
         lastLayout = layout
+        reportSpeakerReviewVisibility(layout.showsSpeakerReview)
         guard !layout.isEmpty else {
             hide(animated: animated)
             return
@@ -531,6 +580,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard hovered != isHovered else { return }
         isHovered = hovered
         meetingHoverHandler?(hovered)
+        if callPrompt != nil { callHoverHandler?(hovered) }
+        if speakerReview != nil { speakerReviewHoverHandler?(hovered) }
         islandView?.setCountdownPaused(hovered)
         hoverTask?.cancel()
         hoverTask = Task { @MainActor [weak self] in
@@ -555,7 +606,10 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             dictationActionHandler?(.dictationDismissMessage)
             return
         }
-        let stickyKey = NotchIslandPresentation.stickyKey(dictation: dictation, meeting: meeting, callPrompt: callPrompt)
+        // Clicks between the review's rows mean nothing; Later and Done
+        // are the ways out.
+        if case .speakerReview? = lastLayout?.drop { return }
+        let stickyKey = NotchIslandPresentation.stickyKey(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview)
         if let stickyKey, lastLayout?.dropIsSticky == true {
             // Close the drop-down that opened by itself. It stays closed
             // until something new needs saying; a hover or click reopens it.

@@ -123,9 +123,12 @@ SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh --no-open
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 
-`build-beta.sh` bundles Parakeet and offline diarizer models by default for
-distribution builds. That keeps the first dictation/meeting path local after
-install.
+`build-beta.sh` bundles Parakeet, the offline (pyannote/WeSpeaker) diarizer, and
+the Nemotron 3 diarizer (`fast128`, about 190 MB, from
+`~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization/`) by
+default for distribution builds. That keeps the first dictation/meeting path local
+after install. The build Mac needs Nemotron cached first: run one meeting there.
+The diarizer flags below cover both diarizers.
 
 If you deliberately want a thin local test artifact, make both opt-outs explicit:
 

@@ -357,10 +357,10 @@ func testClipboardRestoringTextPaster() async {
                 "a likely paste should read as pasted, and tell Auto Enter users to press Return themselves"
             )
             assertTrue(
-                source.contains("case .copied(let message, reason: _):")
-                    && source.contains("self.showNotPasted(text, message: message, overlayController: overlayController)")
-                    && source.contains("overlayController.showNotPastedNotice(text, fallbackMessage: message)"),
-                "copied fallbacks should use a calm clipboard notice instead of a warning"
+                source.contains("case .copied(let message, reason: let reason):")
+                    && source.contains("unconfirmed: reason == .pasteNotConfirmed,")
+                    && source.contains("overlayController.showNotPastedNotice("),
+                "copied fallbacks should use a calm clipboard notice instead of a warning, and an unconfirmed paste says so"
             )
             // The island's Paste is offered only next to the words themselves,
             // so a user can see whether an ambiguous paste already landed.

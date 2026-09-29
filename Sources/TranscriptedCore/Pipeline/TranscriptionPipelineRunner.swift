@@ -345,18 +345,25 @@ extension TranscriptionTaskManager {
             "transcription_engine": speechEngine.identifier
         ])
 
+        // An imported file's date says when the file was made or copied, not
+        // which meeting it was, so imports never pick up a calendar invite:
+        // no invite cap on its speakers and no lowered lineup bars.
+        let isImport = importedAt != nil
         let separationProvider = await MainActor.run { self.speakerSeparationProvider }
-        let speakerSeparation = await separationProvider?(recordingDate)
+        let speakerSeparation = await separationProvider?(isImport ? nil : recordingDate)
         // Lineup naming: people on the lineup get lower silent-naming bars
         // (SpeakerNamingPolicy.InviteeBars). Resolved before Phase 1 matches voices,
         // so a voice heard in this meeting can't put itself on its own lineup.
         let lineupProvider = await MainActor.run { self.lineupNamingProvider }
         let invitedNameKeys: Set<String>
-        if let request = await lineupProvider?(recordingDate) {
+        let lineupIsFromInvite: Bool
+        if !isImport, let request = await lineupProvider?(recordingDate) {
             let profilesBefore = await MainActor.run { transcription.speakerDB.allSpeakers() }
             invitedNameKeys = SpeakerNamingPolicy.lineupNameKeys(request, profilesBeforeMeeting: profilesBefore)
+            lineupIsFromInvite = SpeakerNamingPolicy.lineupIsFromInvite(request)
         } else {
             invitedNameKeys = []
+            lineupIsFromInvite = false
         }
 
         // Phase 1: Transcribe with local models
@@ -426,7 +433,8 @@ extension TranscriptionTaskManager {
                     recentOutcomes: cachedRecentOutcomes(entry.profile),
                     marginSimilarities: entry.marginSimilarities,
                     inviteeBars: SpeakerNamingPolicy.inviteeBars(
-                        for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite,
+                        thresholds: speakerThresholds),
                     thresholds: speakerThresholds
                 )
                 if canAutoAccept {
@@ -457,7 +465,8 @@ extension TranscriptionTaskManager {
                 recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                 marginSimilarities: entry.marginSimilarities,
                 inviteeBars: SpeakerNamingPolicy.inviteeBars(
-                    for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite,
+                        thresholds: speakerThresholds),
                 thresholds: speakerThresholds
             )
             speakerMappings[key] = mapping
@@ -492,7 +501,8 @@ extension TranscriptionTaskManager {
                         recentOutcomes: cachedRecentOutcomes(entry.profile),
                         marginSimilarities: entry.marginSimilarities,
                         inviteeBars: SpeakerNamingPolicy.inviteeBars(
-                            for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite,
+                        thresholds: speakerThresholds),
                         thresholds: speakerThresholds
                     )
                     if canAutoAccept {
@@ -528,7 +538,8 @@ extension TranscriptionTaskManager {
                     recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
                     marginSimilarities: entry.marginSimilarities,
                     inviteeBars: SpeakerNamingPolicy.inviteeBars(
-                        for: entry.profile, invitedNameKeys: invitedNameKeys, thresholds: speakerThresholds),
+                        for: entry.profile, invitedNameKeys: invitedNameKeys, lineupIsFromInvite: lineupIsFromInvite,
+                        thresholds: speakerThresholds),
                     thresholds: speakerThresholds
                 )
                 speakerMappings[key] = mapping
@@ -775,7 +786,64 @@ extension TranscriptionTaskManager {
             try await rollback.checkCancellation()
         }
 
-        if !namingEntries.isEmpty {
+        // Remote voices named silently in this meeting. They aren't asked
+        // about, but the review lists them with a clip each so a wrong
+        // auto-name can be corrected ("Not Taylor?") and land as a correction
+        // on the lifeline. A meeting where everyone was recognized still gets
+        // this list. Only the Notch island shows it; the review window never
+        // does, so without the island no clips are cut and a meeting with
+        // nobody to ask finishes saving at once.
+        let reviewListsRecognizedVoices = await MainActor.run {
+            self.reviewListsRecognizedVoicesProvider?() ?? false
+        }
+        var recognizedEntries: [SpeakerNamingEntry] = []
+        if reviewListsRecognizedVoices && !autoAcceptedIds.isEmpty {
+            do {
+                let recognizedUtterances = result.systemUtterances.filter {
+                    autoAcceptedIds.contains(String($0.speakerId))
+                }
+                let clips = try SpeakerClipExtractor.extractClips(
+                    sourceAudioURL: systemURL,
+                    utterances: recognizedUtterances,
+                    channel: .system,
+                    speakerDB: speakerDB,
+                    clipsDirectory: transcription.speakerClipsDirectory
+                )
+                for clip in clips {
+                    guard let name = clip.currentName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !name.isEmpty else {
+                        _ = removeManagedCleanupFile(clip.clipURL, label: "unnamed recognized speaker clip")
+                        continue
+                    }
+                    let context = result.systemSpeakerContexts[clip.diarizerSpeakerId]
+                    recognizedEntries.append(SpeakerNamingEntry(
+                        id: clip.persistentSpeakerId,
+                        diarizerSpeakerId: clip.diarizerSpeakerId,
+                        channel: .system,
+                        clipURL: clip.clipURL,
+                        sampleText: clip.sampleText,
+                        currentName: name,
+                        matchSimilarity: clip.matchSimilarity,
+                        matchSecondSimilarity: context?.matchSecondSimilarity,
+                        callCount: context?.matchedProfileSnapshot?.callCount ?? 0,
+                        needsNaming: false,
+                        needsConfirmation: false,
+                        sessionEmbedding: context?.sessionEmbedding,
+                        matchedProfileSnapshot: context?.matchedProfileSnapshot
+                    ))
+                }
+                Self.registerSpeakerClipsRollback(clips.map(\.clipURL), channel: "recognized", into: rollback)
+            } catch {
+                AppLogger.pipeline.warning("Recognized clip extraction failed, recognized voices can't be corrected from the review", ["error": error.localizedDescription])
+            }
+            try await rollback.checkCancellation()
+        }
+
+        if SpeakerNamingPolicy.shouldQueueSpeakerReview(
+            askedVoices: namingEntries.count,
+            recognizedVoices: recognizedEntries.count,
+            reviewListsRecognizedVoices: reviewListsRecognizedVoices
+        ) {
             // Seed knownPeople with existing named DB profiles so the sheet's combobox has
             // suggestions. Previously this was always empty — users typed blind.
             let allProfiles = speakerDB.allSpeakers()
@@ -800,6 +868,16 @@ extension TranscriptionTaskManager {
             }.count
 
             let capturedEntries = namingEntries
+            let capturedRecognizedEntries = recognizedEntries
+            // Voices auto-named in this meeting, once each, in the order heard.
+            var seenRecognizedNames: Set<String> = []
+            let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in
+                guard let name = pending.knowledge.profile.displayName?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !name.isEmpty,
+                    seenRecognizedNames.insert(name).inserted else { return nil }
+                return name
+            }
             let speakerNamingRequestId = UUID()
             try await rollback.checkCancellation()
             await MainActor.run {
@@ -811,6 +889,8 @@ extension TranscriptionTaskManager {
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
                     recognizedPeopleCount: recognizedPeopleCount,
+                    recognizedSpeakerNames: recognizedSpeakerNames,
+                    recognizedSpeakers: capturedRecognizedEntries,
                     transcriptURL: savedURL,
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,
@@ -821,6 +901,16 @@ extension TranscriptionTaskManager {
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                     importedRecoverySession: importedRecoverySession,
                     onComplete: { [weak self] updates in
+                        // A recognized voice joins the save only when it was
+                        // corrected; otherwise its auto-name stands.
+                        let reviewed = SpeakerNamingPolicy.reviewEntriesToFinalize(
+                            asked: capturedEntries,
+                            recognized: capturedRecognizedEntries,
+                            updates: updates
+                        )
+                        for entry in reviewed.discardClips {
+                            _ = self?.removeManagedCleanupFile(entry.clipURL, label: "recognized speaker clip")
+                        }
                         self?.handleNamingComplete(
                             updates: updates,
                             transcriptURL: savedURL,
@@ -833,7 +923,7 @@ extension TranscriptionTaskManager {
                             shouldRemoveMicAudio: shouldRemoveMicScratchAudio,
                             shouldRemoveSystemAudio: shouldRemoveSystemScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-                            clips: capturedEntries,
+                            clips: reviewed.finalize,
                             importedRecoverySession: importedRecoverySession,
                             requestId: speakerNamingRequestId
                         )
@@ -871,6 +961,7 @@ extension TranscriptionTaskManager {
 
             AppLogger.pipeline.info("Speaker naming requested", [
                 "total": "\(namingEntries.count)",
+                "recognized": "\(recognizedEntries.count)",
                 "mic": "\(namingEntries.filter { $0.channel == .mic }.count)",
                 "system": "\(namingEntries.filter { $0.channel == .system }.count)"
             ])

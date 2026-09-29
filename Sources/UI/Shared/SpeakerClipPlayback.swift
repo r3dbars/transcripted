@@ -47,6 +47,7 @@ final class SpeakerClipPlayback: ObservableObject {
 
     static func play(_ url: URL) { shared.play(url) }
     static func isPlaying(_ url: URL) -> Bool { shared.isPlaying(url) }
+    static func progress(of url: URL) -> Double? { shared.progress(of: url) }
     static func stop() { shared.stop() }
 
     // MARK: - Instance API
@@ -70,6 +71,13 @@ final class SpeakerClipPlayback: ObservableObject {
 
     func isPlaying(_ url: URL) -> Bool {
         activeURL == url
+    }
+
+    /// How far the clip at `url` has played, 0...1, or nil when it isn't the
+    /// clip playing. Drives the island's ring around a playing sample.
+    func progress(of url: URL) -> Double? {
+        guard activeURL == url, let activeSound, activeSound.duration > 0 else { return nil }
+        return min(1, max(0, activeSound.currentTime / activeSound.duration))
     }
 
     /// Stream a short range from retained audio instead of loading a long

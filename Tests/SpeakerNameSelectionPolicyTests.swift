@@ -1,6 +1,25 @@
 import Foundation
 
 func testSpeakerNameSelectionPolicy() {
+    runSuite("SpeakerNameSelectionPolicy finds the one saved person a queued voice is named after") {
+        struct Person { let id: UUID; let name: String? }
+        let voice = Person(id: UUID(), name: nil)
+        let alice = Person(id: UUID(), name: "Alice Park")
+        let sam = Person(id: UUID(), name: "Sam")
+        let otherSam = Person(id: UUID(), name: "sam")
+        let people = [voice, alice, sam, otherSam]
+        func find(_ name: String, excluding: UUID = voice.id) -> UUID? {
+            SpeakerNameSelectionPolicy.uniqueSavedPerson(
+                named: name, among: people, excluding: excluding, id: { $0.id }, displayName: { $0.name }
+            )?.id
+        }
+        assertEqual(find("  alice PARK "), alice.id, "an invitee chip or typed name joins the saved Alice")
+        assertNil(find("Alice"), "a first name alone is a different name, so it stays a new person")
+        assertNil(find("Sam"), "two saved Sams: can't tell which, so the voice is named as typed")
+        assertNil(find("Alice Park", excluding: alice.id), "a voice is never merged into itself")
+        assertNil(find("   "), "an empty name matches nobody")
+    }
+
     runSuite("SpeakerNameSelectionPolicy suggests the only prefix match") {
         let people = [
             makeSpeakerIdentityOption(name: "Taylor Wolfe", calls: 9),

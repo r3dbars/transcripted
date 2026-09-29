@@ -241,7 +241,11 @@ extension TranscriptSaver {
         }
     }
 
-    private static func applyDeferredSpeakerName(
+    /// Names one queued voice's row in a transcript: the row must still match
+    /// (same diarizer id, channel, and profile), gets the new name with a
+    /// `user_manual` source, and its body labels follow. Shared with
+    /// `SpeakerIdentityMutationService`'s reviewed-voice merge.
+    static func applyDeferredSpeakerName(
         in content: inout String,
         update: DeferredSpeakerNameUpdate,
         newName: String

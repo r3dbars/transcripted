@@ -1,0 +1,161 @@
+name: Publish MCP Bundle
+
+# Packages the signed transcripted-mcp helper from a published release DMG as
+# an MCP Bundle (.mcpb), attaches it to that release, and publishes
+# server.json to the official MCP Registry (registry.modelcontextprotocol.io)
+# as io.github.r3dbars/transcripted.
+#
+# It never builds or signs anything. The helper is copied byte-for-byte out of
+# the notarized app, so the bundle carries the same Developer ID signature.
+# Registry login uses GitHub OIDC, so no secret is needed.
+#
+# Re-running for the same tag reuses the .mcpb already on the release, so its
+# SHA-256 stays stable for clients that already saw it. A version that is
+# already in the registry is left alone, since the registry rejects repeats.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to package (for example v1.1.66). Empty means the latest release.
+        required: false
+        default: ""
+      publish:
+        description: Publish server.json to the MCP Registry after uploading the bundle
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-mcp-bundle
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUNDLE_NAME: transcripted-mcp.mcpb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve release
+        id: release
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a release tag like v1.2.3, got '$tag'."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Reuse or build the bundle
+        id: bundle
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mcpb"
+          mkdir -p "$work"
+          out="$work/$BUNDLE_NAME"
+
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          if grep -qx "$BUNDLE_NAME" <<< "$assets"; then
+            echo "Release $TAG already has $BUNDLE_NAME; reusing it."
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$BUNDLE_NAME" --dir "$work"
+            echo "uploaded=true" >> "$GITHUB_OUTPUT"
+          else
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Transcripted-$VERSION.dmg" --dir "$work"
+            mount="$work/mount"
+            mkdir -p "$mount"
+            hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$work/Transcripted-$VERSION.dmg"
+            trap 'hdiutil detach "$mount" -quiet || true' EXIT
+
+            app="$mount/Transcripted.app"
+            helper="$app/Contents/Helpers/transcripted-mcp"
+            if [ ! -x "$helper" ]; then
+              echo "::error::No transcripted-mcp helper in the $TAG app bundle."
+              exit 1
+            fi
+            codesign --verify --strict --verbose=2 "$helper"
+            lipo -archs "$helper"
+
+            stage="$work/stage"
+            mkdir -p "$stage/server"
+            cp "$helper" "$stage/server/transcripted-mcp"
+            jq --arg v "$VERSION" '.version = $v' Tools/TranscriptedMCP/mcpb/manifest.json > "$stage/manifest.json"
+
+            # Best-effort icon from the app bundle.
+            icns="$(find "$app/Contents/Resources" -maxdepth 1 -name '*.icns' -print -quit || true)"
+            if [ -n "$icns" ] && sips -s format png --resampleWidth 512 "$icns" --out "$stage/icon.png" >/dev/null 2>&1; then
+              jq '.icon = "icon.png"' "$stage/manifest.json" > "$stage/manifest.tmp" && mv "$stage/manifest.tmp" "$stage/manifest.json"
+            fi
+
+            hdiutil detach "$mount" -quiet
+            trap - EXIT
+
+            npx --yes @anthropic-ai/mcpb validate "$stage/manifest.json"
+            (cd "$stage" && zip -r -X -q "$out" .)
+            echo "uploaded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          sha="$(shasum -a 256 "$out" | awk '{print $1}')"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "$BUNDLE_NAME sha256: $sha"
+
+      - name: Attach bundle to release
+        if: steps.bundle.outputs.uploaded != 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          BUNDLE_PATH: ${{ steps.bundle.outputs.path }}
+        run: gh release upload "$TAG" "$BUNDLE_PATH" --repo "$GITHUB_REPOSITORY"
+
+      - name: Fill server.json
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA256: ${{ steps.bundle.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$BUNDLE_NAME"
+          jq --arg v "$VERSION" --arg url "$url" --arg sha "$SHA256" \
+            '.version = $v | .packages[0].identifier = $url | .packages[0].fileSha256 = $sha' \
+            server.json > server.tmp && mv server.tmp server.json
+          cat server.json
+
+      - name: Publish to MCP Registry
+        if: github.event_name == 'release' || inputs.publish
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.modelcontextprotocol.io/v0/servers/io.github.r3dbars%2Ftranscripted/versions/$VERSION")"
+          if [ "$status" = "200" ]; then
+            echo "io.github.r3dbars/transcripted $VERSION is already in the MCP Registry; nothing to publish."
+            exit 0
+          fi
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

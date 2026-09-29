@@ -1,0 +1,55 @@
+{
+  "manifest_version": "0.3",
+  "name": "transcripted",
+  "display_name": "Transcripted",
+  "version": "0.0.0",
+  "description": "Read-only search over the meetings, dictations and writing saved by the Transcripted Mac app.",
+  "long_description": "Transcripted is a free, open source Mac app that records meetings and dictation and saves them as local Markdown files. This extension lets Claude search and read those files: find what was said, who said it, decisions and action items. It is read-only and runs on your Mac. Audio and transcripts never leave your Mac. Install the Transcripted app first from https://transcripted.app so there is something to search.",
+  "author": {
+    "name": "r3dbars",
+    "url": "https://github.com/r3dbars"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r3dbars/transcripted.git"
+  },
+  "homepage": "https://transcripted.app",
+  "documentation": "https://github.com/r3dbars/transcripted/blob/main/docs/agent-connect.md",
+  "support": "https://github.com/r3dbars/transcripted/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/transcripted-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/transcripted-mcp",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "recent_context", "description": "Latest meetings, dictations and writing in one feed." },
+    { "name": "search_context", "description": "Search meetings, dictations and writing, with on-device semantic matching." },
+    { "name": "list_meetings", "description": "List meetings with participants, duration and word count." },
+    { "name": "read_meeting", "description": "Read a meeting transcript, paged for long meetings." },
+    { "name": "search", "description": "Search meeting transcripts by keyword or meaning, filtered by speaker or date." },
+    { "name": "search_meetings", "description": "Keyword search over meeting utterances with quote receipts." },
+    { "name": "list_dictations", "description": "List saved dictation days." },
+    { "name": "read_dictation", "description": "Read a dictation day or a single entry." },
+    { "name": "list_writing", "description": "List saved writing days." },
+    { "name": "read_writing", "description": "Read a writing day or a single entry." },
+    { "name": "who_is", "description": "Everything known about a person across your meetings." },
+    { "name": "recap", "description": "Digest of all meetings in a date range." },
+    { "name": "digest", "description": "Decisions, action items and open questions across meetings in a time window." },
+    { "name": "list_action_items", "description": "Roll up action items across meetings by owner or status." },
+    { "name": "list_decisions", "description": "Roll up decisions across meetings." },
+    { "name": "decisions", "description": "Find decisions with meeting quote receipts." },
+    { "name": "commitments", "description": "Find commitments by person with meeting quote receipts." },
+    { "name": "open_questions", "description": "Find open questions for a topic with meeting quote receipts." },
+    { "name": "show_recent_meetings", "description": "Interactive recent-meetings card with inline audio playback." },
+    { "name": "status", "description": "Server status, capture folders and index counts." }
+  ],
+  "keywords": ["meetings", "transcripts", "dictation", "notes", "local", "privacy", "macos"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin"]
+  }
+}

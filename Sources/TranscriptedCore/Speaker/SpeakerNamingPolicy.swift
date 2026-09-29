@@ -41,11 +41,23 @@ public enum SpeakerNamingPolicy {
         public var requiredConfirmedMeetings: Int
         public var similarity: Double
         public var marginMin: Double
+        /// When no other saved person came close (no runner-up), the lower
+        /// similarity bar alone isn't enough: the match must also clear
+        /// `autoAcceptSimilarityThreshold`. Without an invite the lineup is
+        /// just whoever you heard lately, so a stranger who sounds a bit like
+        /// one of them has nobody to lose a margin to.
+        public var needsRunnerUpBelowStandardBar: Bool
 
-        public init(requiredConfirmedMeetings: Int, similarity: Double, marginMin: Double) {
+        public init(
+            requiredConfirmedMeetings: Int,
+            similarity: Double,
+            marginMin: Double,
+            needsRunnerUpBelowStandardBar: Bool = false
+        ) {
             self.requiredConfirmedMeetings = requiredConfirmedMeetings
             self.similarity = similarity
             self.marginMin = marginMin
+            self.needsRunnerUpBelowStandardBar = needsRunnerUpBelowStandardBar
         }
 
         /// The lab-tuned lineup bars for a voiceprint model: its `inviteeSimilarity` and
@@ -60,6 +72,21 @@ public enum SpeakerNamingPolicy {
 
         /// The lab-tuned lineup bars at WeSpeaker scale.
         public static let labTuned = labTuned(for: .weSpeaker)
+
+        /// Bars for the no-invite lineup (people heard most recently): the invite
+        /// bars, but a lone match below the model's standard auto-accept bar goes to
+        /// review.
+        public static func recentLineup(for thresholds: SpeakerEmbeddingThresholds) -> InviteeBars {
+            InviteeBars(
+                requiredConfirmedMeetings: 2,
+                similarity: thresholds.inviteeSimilarity,
+                marginMin: thresholds.inviteeMarginMin,
+                needsRunnerUpBelowStandardBar: true
+            )
+        }
+
+        /// The no-invite lineup bars at WeSpeaker scale.
+        public static let recentLineup = recentLineup(for: .weSpeaker)
     }
 
     /// Who counts as "expected" in a meeting for lineup naming: the calendar invite,
@@ -93,16 +120,24 @@ public enum SpeakerNamingPolicy {
         name.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
-    /// Invitee bars for `profile` when its name is on the invite, else nil (today's bars).
+    /// Lineup bars for `profile` when its name is on the lineup, else nil (today's bars).
+    /// `lineupIsFromInvite` false means the lineup is the recent-people fallback.
     /// `thresholds` is the active voiceprint model's set, which supplies the cosine bars.
     public static func inviteeBars(
         for profile: SpeakerProfile,
         invitedNameKeys: Set<String>,
+        lineupIsFromInvite: Bool = true,
         thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> InviteeBars? {
         guard !invitedNameKeys.isEmpty, let name = profile.displayName, !name.isEmpty,
               invitedNameKeys.contains(nameKey(name)) else { return nil }
-        return .labTuned(for: thresholds)
+        return lineupIsFromInvite ? .labTuned(for: thresholds) : .recentLineup(for: thresholds)
+    }
+
+    /// True when `request` builds its lineup from a real invite rather than
+    /// from the people heard most recently.
+    public static func lineupIsFromInvite(_ request: LineupRequest) -> Bool {
+        request.invitedNames.contains { !nameKey($0).isEmpty }
     }
 
     /// Profile-level eligibility for silent recognition, shared by the
@@ -160,7 +195,10 @@ public enum SpeakerNamingPolicy {
             // and route to confirm rather than silently auto-name.
             marginOK = false
         case .some(let second) where second < 0:
-            marginOK = true   // no confusable runner-up cleared the match floor
+            // No confusable runner-up cleared the match floor. On the no-invite
+            // lineup that only counts at the standard bar.
+            marginOK = !(inviteeBars?.needsRunnerUpBelowStandardBar ?? false)
+                || similarity > thresholds.autoAcceptSimilarity
         case .some(let second):
             marginOK = (marginTop - second) >= (inviteeBars?.marginMin ?? thresholds.autoAcceptMarginMin)
         }
@@ -243,6 +281,44 @@ public enum SpeakerNamingPolicy {
             confidence: confidence(similarity: similarity, callCount: profile.callCount, thresholds: thresholds),
             isConfirmedIdentity: true
         )
+    }
+
+    /// A meeting gets a review when a voice needs an answer. When the review
+    /// lists recognized voices (the Notch island's "who was on the call"), a
+    /// meeting where everyone was recognized gets one too, so the person sees
+    /// who was on the call and can correct a wrong name. The review window
+    /// has nothing to show for such a meeting, so without the island the
+    /// meeting finishes saving at once instead of holding a review nobody sees.
+    public static func shouldQueueSpeakerReview(
+        askedVoices: Int,
+        recognizedVoices: Int,
+        reviewListsRecognizedVoices: Bool
+    ) -> Bool {
+        askedVoices > 0 || (reviewListsRecognizedVoices && recognizedVoices > 0)
+    }
+
+    /// Which review rows go to the naming coordinator when a review closes.
+    /// Asked voices always go (an unanswered one is marked for Speakers).
+    /// A recognized voice goes only when the review corrected it; otherwise
+    /// its silent auto-name stands, and its clip is only thrown away.
+    public static func reviewEntriesToFinalize(
+        asked: [SpeakerNamingEntry],
+        recognized: [SpeakerNamingEntry],
+        updates: [SpeakerNameUpdate]
+    ) -> (finalize: [SpeakerNamingEntry], discardClips: [SpeakerNamingEntry]) {
+        let askedKeys = Set(asked.map { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) })
+        let updatedKeys = Set(updates.map { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) })
+        var finalize = asked
+        var discard: [SpeakerNamingEntry] = []
+        for entry in recognized {
+            let key = entry.channel.speakerKey(diarizerSpeakerId: entry.diarizerSpeakerId)
+            if updatedKeys.contains(key), !askedKeys.contains(key) {
+                finalize.append(entry)
+            } else {
+                discard.append(entry)
+            }
+        }
+        return (finalize, discard)
     }
 
     /// Row-level manual names should stay row-level edits, even when a mic row

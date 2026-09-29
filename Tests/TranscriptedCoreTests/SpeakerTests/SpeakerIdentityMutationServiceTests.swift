@@ -206,6 +206,122 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertTrue(updated.contains("[System/Sarah]"))
     }
 
+    // MARK: - Merge a queued voice into a saved person
+
+    private func writeQueuedVoiceTranscript(named fileName: String, speakerId: UUID) throws -> URL {
+        let url = try writeTranscript(named: fileName, speakerId: speakerId, speakerName: "Speaker 0")
+        let queued = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: "source: db\n", with: "source: db_pending\n")
+        try queued.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    func testNamingAQueuedVoiceAfterASavedPersonMergesNamesTheRowAndConfirmsThePerson() throws {
+        let voice = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
+        let sarah = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: sarah.id, name: "Sarah", source: NameSource.userManual)
+        let confirmationsBefore = speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount ?? 0
+        let firstURL = try writeQueuedVoiceTranscript(named: "first.md", speakerId: voice.id)
+        let secondURL = try writeQueuedVoiceTranscript(named: "second.md", speakerId: voice.id)
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .mergeReviewedVoice(
+                sourceId: voice.id,
+                targetId: sarah.id,
+                reviewedRows: [firstURL, secondURL].map {
+                    TranscriptSaver.DeferredSpeakerNameUpdate(
+                        transcriptURL: $0,
+                        dbId: voice.id,
+                        diarizerSpeakerId: "0",
+                        channel: .system
+                    )
+                },
+                confirmedTranscriptIds: [UUID(), UUID()]
+            ),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertTrue(outcome.succeeded)
+        XCTAssertNil(speakerDatabase.getSpeaker(id: voice.id), "the voice joined Sarah")
+        XCTAssertEqual(
+            speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount,
+            confirmationsBefore + 2,
+            "each reviewed meeting confirms Sarah, like a merged answer in the island"
+        )
+        for url in [firstURL, secondURL] {
+            let updated = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertTrue(updated.contains(#"db_id: "\#(sarah.id.uuidString)""#))
+            XCTAssertTrue(updated.contains(#"name: "Sarah""#))
+            XCTAssertTrue(updated.contains("source: \(NameSource.userManual)"), "a named row is no longer pending review")
+            XCTAssertFalse(updated.contains("db_pending"))
+            XCTAssertTrue(updated.contains("[System/Sarah]"))
+        }
+    }
+
+    func testAQueuedVoiceMergeWithAStaleRowChangesNothing() throws {
+        let voice = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
+        let sarah = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: sarah.id, name: "Sarah", source: NameSource.userManual)
+        let confirmationsBefore = speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount ?? 0
+        let url = try writeQueuedVoiceTranscript(named: "stale.md", speakerId: voice.id)
+        let original = try String(contentsOf: url, encoding: .utf8)
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .mergeReviewedVoice(
+                sourceId: voice.id,
+                targetId: sarah.id,
+                reviewedRows: [
+                    TranscriptSaver.DeferredSpeakerNameUpdate(
+                        transcriptURL: url,
+                        dbId: voice.id,
+                        diarizerSpeakerId: "7",
+                        channel: .system
+                    )
+                ],
+                confirmedTranscriptIds: [UUID()]
+            ),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertNotNil(speakerDatabase.getSpeaker(id: voice.id), "the voice is still its own")
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount, confirmationsBefore)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
+    }
+
+    func testAQueuedVoiceMergeRollsBackTheRowNamingWhenTheDatabaseFails() throws {
+        let voice = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
+        let url = try writeQueuedVoiceTranscript(named: "rollback.md", speakerId: voice.id)
+        let original = try String(contentsOf: url, encoding: .utf8)
+        // The kept person has vanished, so the database merge throws; the voice
+        // itself carries the name so the row naming runs first.
+        speakerDatabase.setDisplayName(id: voice.id, name: "Sarah", source: NameSource.userManual)
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .mergeReviewedVoice(
+                sourceId: voice.id,
+                targetId: UUID(),
+                reviewedRows: [
+                    TranscriptSaver.DeferredSpeakerNameUpdate(
+                        transcriptURL: url,
+                        dbId: voice.id,
+                        diarizerSpeakerId: "0",
+                        channel: .system
+                    )
+                ],
+                confirmedTranscriptIds: [UUID()]
+            ),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertNotNil(speakerDatabase.getSpeaker(id: voice.id))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original, "the named row is restored")
+    }
+
     func testMergeRestoresTranscriptsWhenDatabaseMergeFails() throws {
         let source = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
         // targetId does not exist — mergeProfiles throws profileNotFound, exercising the
