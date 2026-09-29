@@ -10,7 +10,8 @@ name: Publish MCP Bundle
 # Registry login uses GitHub OIDC, so no secret is needed.
 #
 # Re-running for the same tag reuses the .mcpb already on the release, so its
-# SHA-256 stays stable for clients that already saw it.
+# SHA-256 stays stable for clients that already saw it. A version that is
+# already in the registry is left alone, since the registry rejects repeats.
 
 on:
   release:
@@ -76,7 +77,8 @@ jobs:
           mkdir -p "$work"
           out="$work/$BUNDLE_NAME"
 
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$BUNDLE_NAME"; then
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          if grep -qx "$BUNDLE_NAME" <<< "$assets"; then
             echo "Release $TAG already has $BUNDLE_NAME; reusing it."
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$BUNDLE_NAME" --dir "$work"
             echo "uploaded=true" >> "$GITHUB_OUTPUT"
@@ -145,8 +147,15 @@ jobs:
       - name: Publish to MCP Registry
         if: github.event_name == 'release' || inputs.publish
         shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.modelcontextprotocol.io/v0/servers/io.github.r3dbars%2Ftranscripted/versions/$VERSION")"
+          if [ "$status" = "200" ]; then
+            echo "io.github.r3dbars/transcripted $VERSION is already in the MCP Registry; nothing to publish."
+            exit 0
+          fi
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
