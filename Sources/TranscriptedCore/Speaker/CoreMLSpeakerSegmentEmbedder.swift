@@ -73,6 +73,11 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
     /// samples. Used when the model's own function list can't be read or has fewer
     /// than two functions; nil for a single-function model.
     public var functionsByLength: [Int: String]?
+    /// Multifunction model only: release every loaded function after this many
+    /// seconds without a call (they reload on the next call). A multifunction model
+    /// holds GPU memory per loaded function (ReDimNet2: about 125 MB each), and the
+    /// app only embeds in the minute after a meeting. nil keeps them loaded.
+    public var idleReleaseSeconds: TimeInterval?
 
     public init(
         modelURL: URL,
@@ -87,7 +92,8 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
         hopSamples: Int? = nil,
         pooling: SpeakerEmbeddingPooling = .talkTimeWeighted,
         computeUnits: MLComputeUnits = .all,
-        functionsByLength: [Int: String]? = nil
+        functionsByLength: [Int: String]? = nil,
+        idleReleaseSeconds: TimeInterval? = nil
     ) {
         self.modelURL = modelURL
         self.identifier = identifier
@@ -102,6 +108,7 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
         self.pooling = pooling
         self.computeUnits = computeUnits
         self.functionsByLength = functionsByLength
+        self.idleReleaseSeconds = idleReleaseSeconds
     }
 }
 
@@ -265,7 +272,9 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
             configured: configuration.functionsByLength)
         if let functions {
             let lengthByName = Dictionary(functions.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
-            let router = CoreMLVoiceprintFunctionRouter(functionsByLength: functions) { name in
+            let router = CoreMLVoiceprintFunctionRouter(
+                functionsByLength: functions, idleReleaseSeconds: configuration.idleReleaseSeconds
+            ) { name in
                 let runner = try CoreMLSpeakerSegmentEmbedder.loadModel(configuration, functionName: name)
                 if let length = lengthByName[name], !(runner.inputLengths?.accepts(length) ?? true) {
                     throw CoreMLSpeakerEmbedderError("function \(name) does not take \(length) samples")
@@ -681,27 +690,71 @@ final class CoreMLVoiceprintFunctionRouter: @unchecked Sendable {
 
     private let functionsByLength: [Int: String]
     private let load: (_ functionName: String) throws -> Predictor
+    private let idleReleaseSeconds: TimeInterval?
     private let lock = NSLock()
     private var loaded: [Int: Result<Predictor, Error>] = [:]
+    /// Bumped by every call; an idle release only fires if no call came since.
+    private var callGeneration = 0
+    private static let releaseQueue = DispatchQueue(label: "com.transcripted.voiceprint.idle-release", qos: .utility)
 
     init(
         functionsByLength: [Int: String],
+        idleReleaseSeconds: TimeInterval? = nil,
         load: @escaping (_ functionName: String) throws -> Predictor
     ) {
         self.functionsByLength = functionsByLength
         self.lengths = functionsByLength.keys.sorted()
+        self.idleReleaseSeconds = idleReleaseSeconds
         self.load = load
+    }
+
+    /// How many functions are loaded (or failed to load) right now.
+    var loadedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loaded.count
+    }
+
+    /// Drops every loaded function; the next call for a length loads it again. A
+    /// call already running keeps its model alive until it returns.
+    func releaseLoadedFunctions() {
+        lock.lock()
+        let count = loaded.count
+        loaded.removeAll()
+        lock.unlock()
+        if count > 0 {
+            AppLogger.speakers.info("Core ML speaker embedder released idle model functions", ["functions": "\(count)"])
+        }
+    }
+
+    /// After a call, schedule a release that fires only if no other call follows
+    /// within `idleReleaseSeconds`.
+    private func scheduleIdleRelease() {
+        guard let seconds = idleReleaseSeconds else { return }
+        lock.lock()
+        callGeneration &+= 1
+        let generation = callGeneration
+        lock.unlock()
+        Self.releaseQueue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let idle = self.callGeneration == generation
+            self.lock.unlock()
+            if idle { self.releaseLoadedFunctions() }
+        }
     }
 
     /// Loads the function for `length` now; throws if there is none or it fails.
     func preload(length: Int) throws {
         _ = try predictor(forLength: length).get()
+        scheduleIdleRelease()
     }
 
     /// Runs `window` on the function for its length; nil if there is none or it
     /// failed to load.
     func predict(_ window: [Float]) -> [Float]? {
         guard case .success(let run) = predictor(forLength: window.count) else { return nil }
+        defer { scheduleIdleRelease() }
         return run(window)
     }
 

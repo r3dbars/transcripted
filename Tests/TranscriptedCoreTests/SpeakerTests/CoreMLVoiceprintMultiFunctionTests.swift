@@ -111,6 +111,43 @@ final class CoreMLVoiceprintMultiFunctionTests: XCTestCase {
 
     // MARK: - Where function names come from
 
+    /// Releasing drops every loaded function (their GPU memory with them); the next
+    /// call for a length loads its function again, and nothing else reloads.
+    func testReleasingDropsLoadedFunctionsAndTheNextCallReloadsOnlyItsOwn() {
+        let recorder = Recorder()
+        let r = router(recorder)
+        _ = r.predict([Float](repeating: 0.1, count: 2 * second))
+        _ = r.predict([Float](repeating: 0.1, count: 4 * second))
+        XCTAssertEqual(r.loadedCount, 2)
+
+        r.releaseLoadedFunctions()
+        XCTAssertEqual(r.loadedCount, 0)
+
+        XCTAssertNotNil(r.predict([Float](repeating: 0.1, count: 2 * second)))
+        XCTAssertEqual(r.loadedCount, 1)
+        XCTAssertEqual(recorder.loads, ["len_32000", "len_64000", "len_32000"])
+    }
+
+    /// A function that failed to load is tried again after a release, so a
+    /// transient failure doesn't disable a length for the rest of the session.
+    func testAFailedFunctionIsRetriedAfterARelease() {
+        let recorder = Recorder()
+        let r = router(recorder, failing: ["len_16000"])
+        XCTAssertNil(r.predict([Float](repeating: 0.1, count: second)))
+        r.releaseLoadedFunctions()
+        XCTAssertNil(r.predict([Float](repeating: 0.1, count: second)))
+        XCTAssertEqual(recorder.loads, ["len_16000", "len_16000"])
+    }
+
+    /// Without an idle-release setting, loaded functions stay loaded.
+    func testWithoutIdleReleaseFunctionsStayLoaded() {
+        let recorder = Recorder()
+        let r = router(recorder)
+        _ = r.predict([Float](repeating: 0.1, count: 8 * second))
+        XCTAssertEqual(r.loadedCount, 1)
+        XCTAssertEqual(recorder.loads, ["len_128000"])
+    }
+
     func testFunctionNameCarriesItsLength() {
         XCTAssertEqual(CoreMLVoiceprintFunctions.length(fromFunctionName: "len_64000"), 64_000)
         for bad in ["main", "len_", "len_0", "len_-5", "len_4s", "64000", "xlen_64000"] {

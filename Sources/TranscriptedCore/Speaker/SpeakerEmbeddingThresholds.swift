@@ -159,6 +159,34 @@ public struct SpeakerEmbeddingThresholds: Sendable, Equatable {
         absorb: LabKnobOverrides.float("speaker.cluster.small_cluster_absorb.eres2net", default: 0.55),
         microAbsorb: 0.45,
         perSegmentSplit: 0.50, knownProfileConflict: 0.55)
+
+    /// ReDimNet2 b4 (192-d, IDRnD, VoxCeleb2-trained): the voiceprint bake-off winner
+    /// (Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md). Every bar is WeSpeaker's moved
+    /// to ReDimNet2 at the same false-accept rate, measured on 334 human-labeled people
+    /// over clean, Opus 12 kbps and noisy audio, holding in the worst of those
+    /// (`scripts/voiceprint/calibrate_thresholds.py`). These exact values ran end to end
+    /// through the real pipeline with 0 wrong silent names.
+    public static let reDimNet2B4 = SpeakerEmbeddingThresholds(
+        matchOneSegment: 0.860, matchFewSegments: 0.787, matchManySegments: 0.707,
+        ghostMergeFloor: 0.723,
+        consolidation: 0.902, absorb: 0.726, microAbsorb: 0.626,
+        perSegmentSplit: 0.635, knownProfileConflict: 0.707,
+        immatureProfileMatchBonus: 0.085,
+        developingProfileMatchBonus: 0.043,
+        ambiguousMatchMargin: 0.053,
+        negativeVetoFloor: 0.817,
+        writeBackMarginMin: 0.128,
+        confidentWriteBack: 0.815,
+        cautiousWriteBack: 0.728,
+        crossClusterLink: 0.795,
+        exemplarSameCondition: 0.828,
+        autoAcceptSimilarity: 0.946,
+        autoAcceptMarginMin: 0.128,
+        inviteeSimilarity: 0.815,
+        inviteeMarginMin: 0.106,
+        highConfidenceSimilarity: 0.869,
+        duplicateProfileMerge: 0.598,
+        separationMerge: 0.598)
 }
 
 // MARK: - Calibration files

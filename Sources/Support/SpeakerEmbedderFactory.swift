@@ -13,12 +13,32 @@ enum SpeakerEmbedderFactory {
     private static let bundleDirName = "eres2net-embedding"
     private static let modelFileName = "Model.mlmodelc"
 
+    /// ReDimNet2 model directory in the app Resources (see build.sh) and in the
+    /// shared FluidAudio Models cache, where dev builds and build.sh source it
+    /// (scripts/models/redimnet2/install.sh puts it there).
+    private static let reDimNet2BundleDirName = "redimnet2-voiceprint"
+    private static let reDimNet2CacheDirName = "redimnet2-b4-slim"
+
+    /// One ReDimNet2 instance per process: the meeting controller and the Settings
+    /// DB-path lookup share it, so the model loads once. Its idle release frees the
+    /// GPU memory between meetings.
+    private static let reDimNet2Lock = NSLock()
+    nonisolated(unsafe) private static var reDimNet2Resolved = false
+    nonisolated(unsafe) private static var reDimNet2Embedder: (any SpeakerSegmentEmbedder)?
+
     /// Build the segment embedder for `choice`, or nil to use the diarizer's
-    /// native WeSpeaker embedding. Returns nil (falling back to WeSpeaker) if the
-    /// ERes2Net model can't be located or loaded.
+    /// native WeSpeaker embedding. Returns nil (falling back to WeSpeaker, and the
+    /// default `speakers.sqlite`) if the chosen model can't be located or loaded.
     static func makeEmbedder(for choice: SpeakerEmbedderChoice) -> (any SpeakerSegmentEmbedder)? {
-        guard choice == .eRes2Net else { return nil }
         guard #available(macOS 14.0, *) else { return nil }
+        switch choice {
+        case .weSpeaker:
+            return nil
+        case .reDimNet2:
+            return sharedReDimNet2()
+        case .eRes2Net:
+            break
+        }
         guard let url = resolveModelURL() else {
             AppLog.speakerEmbedder("ERes2Net model not found in bundle or cache; using WeSpeaker")
             return nil
@@ -80,9 +100,40 @@ enum SpeakerEmbedderFactory {
         }
     }
 
+    /// The ReDimNet2 model's location, without loading it (Settings uses this to
+    /// tell whether the build has the model).
+    static func reDimNet2ModelURL() -> URL? {
+        resolveModelURL(bundleDirName: reDimNet2BundleDirName, cacheDirName: reDimNet2CacheDirName)
+    }
+
+    @available(macOS 14.0, *)
+    private static func sharedReDimNet2() -> (any SpeakerSegmentEmbedder)? {
+        reDimNet2Lock.lock()
+        defer { reDimNet2Lock.unlock() }
+        if reDimNet2Resolved { return reDimNet2Embedder }
+        reDimNet2Resolved = true
+        guard let url = reDimNet2ModelURL() else {
+            AppLog.speakerEmbedder("ReDimNet2 model not found in bundle or cache; using WeSpeaker")
+            return nil
+        }
+        guard let embedder = ReDimNet2Embedder.load(modelURL: url) else {
+            AppLog.speakerEmbedder("ReDimNet2 model failed to load; using WeSpeaker")
+            return nil
+        }
+        AppLog.speakerEmbedder("ReDimNet2 speaker embedder active (dim \(embedder.dimension))")
+        reDimNet2Embedder = embedder
+        return embedder
+    }
+
     /// First match wins: app bundle Resources, then the shared FluidAudio Models
     /// cache (where build.sh sources it from and where dev builds stage it).
     static func resolveModelURL() -> URL? {
+        resolveModelURL(bundleDirName: bundleDirName, cacheDirName: bundleDirName)
+    }
+
+    /// First match wins: `Resources/<bundleDirName>/Model.mlmodelc`, then
+    /// `FluidAudio/Models/<cacheDirName>/Model.mlmodelc` in Application Support.
+    static func resolveModelURL(bundleDirName: String, cacheDirName: String) -> URL? {
         var candidates: [URL] = []
         if let resourcePath = Bundle.main.resourcePath {
             candidates.append(URL(fileURLWithPath: resourcePath)
@@ -92,7 +143,7 @@ enum SpeakerEmbedderFactory {
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             candidates.append(appSupport
                 .appendingPathComponent("FluidAudio/Models")
-                .appendingPathComponent(bundleDirName)
+                .appendingPathComponent(cacheDirName)
                 .appendingPathComponent(modelFileName))
         }
         return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
