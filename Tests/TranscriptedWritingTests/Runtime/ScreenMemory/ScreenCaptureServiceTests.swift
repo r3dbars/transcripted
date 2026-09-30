@@ -631,7 +631,7 @@ struct ScreenCaptureServiceTests {
         #expect(ScreenCaptureService.blockReason(for: .outOfScope(bundleIdentifier: app))
             == .excludedWindow(appBundleIdentifier: app))
         for refusal: FocusedWindowCapturePolicy.Refusal in [
-            .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+            .noTarget, .ownApp, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
             .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
         ] {
             #expect(ScreenCaptureService.blockReason(for: refusal) == .noTargetWindow)
@@ -642,7 +642,7 @@ struct ScreenCaptureServiceTests {
     func focusedWindowRefusalLogReasons() {
         let app = "com.example.chat"
         let refusals: [FocusedWindowCapturePolicy.Refusal] = [
-            .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+            .noTarget, .ownApp, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
             .excluded(bundleIdentifier: app), .outOfScope(bundleIdentifier: app),
             .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow,
         ]

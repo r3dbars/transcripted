@@ -73,6 +73,11 @@ enum AXWindowTextReader {
     /// the tree yields too little to trust.
     static func read(for window: SCWindow, display: SCDisplay) -> Result? {
         guard isAvailable(), let pid = window.owningApplication?.processID else { return nil }
+        // Never our own process: an Accessibility read of Transcripted's own
+        // SwiftUI windows is answered in-process on this task's thread and
+        // waits on the main thread, which deadlocked against a dictation
+        // paste's Accessibility call on main (1.1.67 hang, 2026-09-29).
+        guard pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
         // A wedged target app must cost at most one bounded call, never the
         // system default multi-second IPC timeout.

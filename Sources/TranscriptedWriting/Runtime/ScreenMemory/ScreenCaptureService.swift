@@ -610,7 +610,8 @@ actor ScreenCaptureService {
                 keyboardFocusProcessIdentifier: keyboardFocusProcessIdentifier()
             ),
             excludedApps: excludedApps(),
-            appInScope: appInScope
+            appInScope: appInScope,
+            ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier
         )
         guard case let .capture(windowIdentifier) = choice,
               let targetWindow = content.windows.first(where: { $0.windowID == windowIdentifier }) else {
@@ -674,7 +675,7 @@ actor ScreenCaptureService {
         switch refusal {
         case let .excluded(bundleIdentifier), let .outOfScope(bundleIdentifier):
             return .excludedWindow(appBundleIdentifier: bundleIdentifier)
-        case .noTarget, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
+        case .noTarget, .ownApp, .windowNotVisible, .ownerMismatch, .notNormalWindow, .unknownApp,
              .notFrontmostApp, .keyboardFocusElsewhere, .keyboardFocusUnknown, .notFocusedWindow:
             return .noTargetWindow
         }
@@ -686,6 +687,7 @@ actor ScreenCaptureService {
     static func skipReason(for refusal: FocusedWindowCapturePolicy.Refusal) -> String {
         switch refusal {
         case .noTarget: return "no-target-window"
+        case .ownApp: return "own-app"
         case .windowNotVisible: return "window-not-visible"
         case .ownerMismatch: return "owner-mismatch"
         case .notNormalWindow: return "not-normal-window"

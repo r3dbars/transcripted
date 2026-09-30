@@ -23,7 +23,7 @@ public enum DiagnosticsMetadataRedactor {
         // the one being typed in. Never the app, title or window itself.
         "window-not-visible", "owner-mismatch", "not-normal-window", "unknown-app",
         "out-of-scope", "not-frontmost-app", "keyboard-focus-elsewhere",
-        "keyboard-focus-unknown", "not-focused-window",
+        "keyboard-focus-unknown", "not-focused-window", "own-app",
         // The 2026-08-16 first-launch Screen Recording permission prompt's
         // outcome vocabulary from the setup permission flow.
         "requested", "settings-opened", "dismissed",
