@@ -587,11 +587,15 @@ final class AudioInitializationTests: XCTestCase {
         let oldStartEntered = expectation(description: "blocked start entered")
         let oldAttemptFinished = expectation(description: "blocked start finished")
         let oldStopFinished = expectation(description: "blocked start cancelled")
+        let cancelReturned = expectation(description: "cancel returned while start remains held")
         oldStopFinished.assertForOverFulfill = false
         let releaseOldStart = DispatchSemaphore(value: 0)
+        defer { releaseOldStart.signal() }
         oldCapture.onStart = {
             oldStartEntered.fulfill()
-            _ = releaseOldStart.wait(timeout: .now() + 2)
+            // Only the test releases start. A timed self-release could make
+            // a cancellation blocked behind start look successful.
+            releaseOldStart.wait()
         }
         oldCapture.onStopSync = {
             oldStopFinished.fulfill()
@@ -602,22 +606,22 @@ final class AudioInitializationTests: XCTestCase {
             XCTAssertFalse(didStart, "cancel during start must not report success")
             oldAttemptFinished.fulfill()
         }
-        wait(for: [oldStartEntered], timeout: 1)
+        wait(for: [oldStartEntered], timeout: 5)
 
-        let cancelStartedAt = Date()
-        oldAttempt.cancel()
-        XCTAssertLessThan(
-            Date().timeIntervalSince(cancelStartedAt),
-            0.25,
-            "cancel() must not wait behind capture.start()"
-        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            oldAttempt.cancel()
+            cancelReturned.fulfill()
+        }
+        // This deadline bounds the harness. The contract is completion
+        // before the held start is released, independent of runner speed.
+        wait(for: [cancelReturned], timeout: 5)
         XCTAssertTrue(
             try newAttempt.startIfNotCancelled { _ in },
             "a fresh attempt must start while the cancelled start is still inside start()"
         )
 
         releaseOldStart.signal()
-        wait(for: [oldAttemptFinished, oldStopFinished], timeout: 1)
+        wait(for: [oldAttemptFinished, oldStopFinished], timeout: 5)
         oldCapture.onStopSync = nil
         XCTAssertGreaterThanOrEqual(oldCapture.stopSyncCallCount, 1)
         XCTAssertEqual(newCapture.startCallCount, 1)
