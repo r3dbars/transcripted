@@ -66,6 +66,12 @@ public enum FocusedWindowCapturePolicy {
     public enum Refusal: Equatable, Sendable {
         /// No typing target, or one without a window or process.
         case noTarget
+        /// The target is one of Transcripted's own windows (Settings, the
+        /// island). Reading our own SwiftUI tree through Accessibility from
+        /// the capture task answers in-process and waits on the main thread,
+        /// which deadlocked against a dictation paste (1.1.67 hang report,
+        /// 2026-09-29). Our own windows carry nothing worth suggesting from.
+        case ownApp
         /// The target window isn't among the on-screen windows.
         case windowNotVisible
         /// The window belongs to a different process or app than the target.
@@ -95,13 +101,15 @@ public enum FocusedWindowCapturePolicy {
         windows: [Window],
         focus: FocusEvidence,
         excludedApps: Set<String>,
-        appInScope: (String) -> Bool
+        appInScope: (String) -> Bool,
+        ownProcessIdentifier: Int32? = nil
     ) -> Choice {
         guard let target,
               let windowIdentifier = target.windowIdentifier,
               let processIdentifier = target.processIdentifier else {
             return .refuse(.noTarget)
         }
+        guard processIdentifier != ownProcessIdentifier else { return .refuse(.ownApp) }
         guard let window = windows.first(where: { $0.windowIdentifier == windowIdentifier }) else {
             return .refuse(.windowNotVisible)
         }

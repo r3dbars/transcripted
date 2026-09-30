@@ -47,7 +47,8 @@ struct FocusedWindowCapturePolicyTests {
         frontmostPID: Int32? = 400,
         keyboardFocusPID: Int32? = 400,
         excludedApps: Set<String> = [],
-        inScope: @escaping (String) -> Bool = { _ in true }
+        inScope: @escaping (String) -> Bool = { _ in true },
+        ownPID: Int32? = 777
     ) -> Policy.Choice {
         Policy.choose(
             target: target,
@@ -57,7 +58,8 @@ struct FocusedWindowCapturePolicyTests {
                 keyboardFocusProcessIdentifier: keyboardFocusPID
             ),
             excludedApps: excludedApps,
-            appInScope: inScope
+            appInScope: inScope,
+            ownProcessIdentifier: ownPID
         )
     }
 
@@ -87,6 +89,14 @@ struct FocusedWindowCapturePolicyTests {
     func keyboardFocusElsewhere() {
         // A launcher panel has keyboard focus while Slack stays frontmost.
         #expect(choose(target: target(), keyboardFocusPID: 999) == .refuse(.keyboardFocusElsewhere))
+    }
+
+    @Test("Transcripted's own window is never read, even when it's the focused, in-scope window")
+    func ownAppWindowRefused() {
+        // Typing into Settings or the island: reading our own UI from the
+        // capture task deadlocked against a dictation paste (1.1.67).
+        #expect(choose(target: target(), ownPID: slackPID) == .refuse(.ownApp))
+        #expect(choose(target: target(), ownPID: 777) == .capture(windowIdentifier: slackWindow))
     }
 
     @Test("Unknown keyboard focus refuses: a launcher could be typing over the frontmost window")
