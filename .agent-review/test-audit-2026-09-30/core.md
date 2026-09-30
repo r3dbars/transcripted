@@ -114,7 +114,7 @@ Integration inventory:
 | Tests/E2E/SlowPastebackSmoke.swift | Production ClipboardRestoringTextPaster with named synthetic pasteboards and delayed fake target | `run-slow-pasteback-smoke.sh`; not native Accessibility insertion into real apps |
 | AudioTests/LiveCaptureSmokeTests.swift | Synthetic signal evidence test plus opt-in production mic/system recording and external tone | Default package skips live case; `run-live-capture-smoke.sh` explicitly enables it. Not run in this lane per user constraint |
 
-Concurrency verification is spread across gate/ring/ownership/state tests above, staged executor smokes, compiler checks and runtime stall diagnostics. `scripts/dev/concurrency-census.sh` typechecks app sources with `-strict-concurrency=complete` against `.agents/concurrency-baseline.json`; `concurrency-census.py --self-test` verifies its counting/ratchet. It is compiler-warning proof, not race-free capture proof or a benchmark. No separate `Tests/Concurrency` directory exists at this head.
+Concurrency verification is spread across gate/ring/ownership/state tests above, staged executor smokes, compiler checks and runtime stall diagnostics. `scripts/dev/concurrency-census.sh` typechecks app sources with `-strict-concurrency=complete` against `.agents/concurrency-baseline.json`; `concurrency-census.py --self-test` verifies its counting/ratchet. It is compiler-warning proof, not race-free capture proof or a benchmark. No separate a separate concurrency-test directory directory exists at this head.
 
 ## Coverage and execution limits
 
