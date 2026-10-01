@@ -311,7 +311,8 @@ export function register(on: On) {
     const { Box, Text } = await $.ui.resolve(e)
     const live = isLive(s, now)
     const context = s.isAutoContext ? 'Claude has the call' : 'Claude has no live context (/meeting auto on)'
-    const asked = s.isHelperOn && s.notes?.meetingId === session.meetingId ? s.notes.questions.length : 0
+    const helperNotes = s.isHelperOn && s.notes?.meetingId === session.meetingId ? s.notes : null
+    const asked = helperNotes?.questions.length ?? 0
     const notes = asked > 0 ? `  ·  ${asked} asked of you` : ''
     return (
       <Box flexDirection="row" paddingX={1}>
