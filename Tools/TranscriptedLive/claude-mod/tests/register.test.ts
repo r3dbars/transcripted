@@ -335,4 +335,38 @@ describe('register', () => {
     expect(await ui.find({ key: 'email' } as never)).toBeDefined()
     await ui.unmount()
   })
+
+  test('pressing a wrap-up button again before Claude answers sends it once', async ($, on) => {
+    const lines = [...UTTERANCES, { t: 420, speaker: 'you', text: 'ok i will send the numbers thursday' }]
+    world(on, 'ended', { meetingId: 'meeting_2026-10-01_14-23-27-933', lines })
+    const submitted: string[] = []
+    on('model.complete', () => ({
+      value: {
+        isAnswered: true as const,
+        text: '{"title":"Review rules","summary":["skip review"],"decisions":[],"actions":["You: numbers"],"openQuestions":[]}',
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    }))
+    on('ui.toast', () => ({ value: undefined }))
+    on('prompt.submit', ($, e) => {
+      submitted.push(e.text)
+      return { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+    } as never)
+    for (let i = 0; i < 5; i++) await ui.press({ key: 'todos' } as never)
+    await ui.press({ key: 'email' } as never)
+    expect(submitted.filter(text => text.includes('checklist')).length).toBe(1)
+    expect(submitted.filter(text => text.includes('follow-up email')).length).toBe(1)
+    await ui.unmount()
+  })
 })

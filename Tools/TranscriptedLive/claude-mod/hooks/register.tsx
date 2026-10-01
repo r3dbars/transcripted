@@ -95,6 +95,8 @@ type LiveState = {
   nextHelperStartMs: number
   /** Where the helper binary is; '' when it could not be found. */
   helperBinary: string
+  /** Prompts this mod submitted that have not had their turn yet, so a repeat press waits. */
+  pendingAsks: Map<string, number>
 }
 
 const PANE_ID = 'live-meeting'
@@ -219,6 +221,7 @@ export function register(on: On) {
     isHelperProcessUp: false,
     nextHelperStartMs: -Infinity,
     helperBinary: '',
+    pendingAsks: new Map(),
   }
 
   on('session.start', async ($, e, next) => {
@@ -337,7 +340,7 @@ export function register(on: On) {
     if (ask) {
       if (s.lines.length === 0) return { text: 'Nothing has been said in the live meeting yet.' }
       // Claude answers in a turn of its own; the prompt hook attaches the call.
-      void $.prompt.submit({ text: ask }).catch(() => undefined)
+      submitOnce($, s, ask)
       return {}
     }
 
@@ -373,6 +376,15 @@ export function register(on: On) {
       }
       return result
     })
+  })
+
+  // A finished turn frees the buttons again.
+  on('turn.complete', async ($, e, next) => {
+    if (!e.agentId && s.pendingAsks.size > 0) {
+      s.pendingAsks.clear()
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   on('ui.close', { id: PANE_ID }, ($, e, next) => {
@@ -467,7 +479,13 @@ export function register(on: On) {
       </Box>
     )
     const ask = (key: string, label: string, hotkey: string, prompt: string) => (
-      <Button key={key} label={label} hotkey={hotkey} onPress={() => void $.prompt.submit({ text: prompt }).catch(() => undefined)} />
+      <Button
+        key={key}
+        label={s.pendingAsks.has(prompt) ? `${label} ✓ sent` : label}
+        hotkey={hotkey}
+        dimColor={s.pendingAsks.has(prompt)}
+        onPress={() => submitOnce($, s, prompt)}
+      />
     )
 
     // After the call: the wrap-up card.
@@ -591,6 +609,25 @@ export function register(on: On) {
         ))}
       </Box>
     )
+  })
+}
+
+/** How long a submitted prompt blocks the same prompt, at most, if no turn completes. */
+const PENDING_ASK_MS = 120_000
+
+/**
+ * Submits a prompt for Claude unless the same one is already waiting: presses
+ * made while Claude is busy queue up, and five of the same prompt is noise.
+ */
+function submitOnce($: EngineInterface, s: LiveState, text: string) {
+  const now = Date.now()
+  const since = s.pendingAsks.get(text)
+  if (since !== undefined && now - since < PENDING_ASK_MS) return
+  s.pendingAsks.set(text, now)
+  $.ui.invalidate('ui.render')
+  void $.prompt.submit({ text }).catch(() => {
+    s.pendingAsks.delete(text)
+    $.ui.invalidate('ui.render')
   })
 }
 
