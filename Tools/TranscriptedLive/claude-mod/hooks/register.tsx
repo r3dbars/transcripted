@@ -301,6 +301,32 @@ export function register(on: On) {
     return { result: forModel(s, pick(s, minutes), minutes) + notes }
   })
 
+  // One line above the prompt while a call is live: that it is recording, and
+  // whether Claude is getting it. The quickest "is this on?" check on any surface.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || e.surface === 'mobile') return next(e)
+    const now = Date.now()
+    const session = s.session
+    if (!session || !(isLive(s, now) || isStalled(s, now))) return next(e)
+    const { Box, Text } = await $.ui.resolve(e)
+    const live = isLive(s, now)
+    const context = s.isAutoContext ? 'Claude has the call' : 'Claude has no live context (/meeting auto on)'
+    const asked = s.isHelperOn && s.notes?.meetingId === session.meetingId ? s.notes.questions.length : 0
+    const notes = asked > 0 ? `  ·  ${asked} asked of you` : ''
+    return (
+      <Box flexDirection="row" paddingX={1}>
+        <Text color={live ? 'red' : 'yellow'} bold>
+          {live ? '● Recording' : '◌ Stalled'}
+        </Text>
+        <Text dimColor>{`  ${clock(session.audioSeconds)}  ·  `}</Text>
+        <Text color={s.isAutoContext ? 'green' : undefined} dimColor={!s.isAutoContext}>
+          {context}
+        </Text>
+        <Text dimColor>{notes}</Text>
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
 

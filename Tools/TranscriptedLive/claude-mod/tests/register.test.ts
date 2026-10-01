@@ -205,4 +205,21 @@ describe('register', () => {
     const search = await $.tool.call({ tool: 'mcp__plugin_transcripted-live_transcripted__search_meetings', query: 'pricing' } as never)
     expect(JSON.stringify(search)).toContain('ran')
   })
+
+  test('a live call shows a recording band above the prompt on terminal and desktop', async ($, on) => {
+    world(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({
+        plugin: 'transcripted-live',
+        surface,
+        component: 'AbovePrompt',
+        props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+      } as never)
+      expect(await ui.find({ type: 'Text', text: /Recording/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Claude has the call/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
 })
