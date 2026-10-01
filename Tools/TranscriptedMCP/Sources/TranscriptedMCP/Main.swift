@@ -97,7 +97,7 @@ struct TranscriptedMCP {
         )
 
         // Start stdio transport
-        let transport = StdioTransport()
+        let transport = CompanionTransport()
         try await server.start(transport: transport)
         log(MCPStartupDiagnostics.message(
             phase: .transportReady,
