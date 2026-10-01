@@ -440,7 +440,7 @@ export function register(on: On) {
     if (e.props.hasSurvey || e.surface === 'mobile') return next(e)
     const model = viewModel(s, Date.now(), await isPaneOpen($))
     if (!['live', 'stalled', 'wrapped', 'ending'].includes(model.phase)) return next(e)
-    const drawn = ui.band(await elements($, e), model, paneActions($, s))
+    const drawn = ui.band(await elements($, e), model, paneActions($, s), { answer: answerPrompt })
     return drawn ?? next(e)
   })
 

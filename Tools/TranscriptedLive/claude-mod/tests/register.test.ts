@@ -494,4 +494,33 @@ describe('register', () => {
     expect(toasts).toContain('Stopping · Transcripted is saving the meeting')
     await armed.unmount()
   })
+
+  test('a question aimed at you shows in the band with Draft answer', async ($, on) => {
+    world(on)
+    const submitted: string[] = []
+    on('model.complete', () => ({
+      value: {
+        isAnswered: true as const,
+        text: '{"title":"t","gist":"g","questions":["can you send the numbers by Friday?"],"actions":[],"say":""}',
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    }))
+    on('prompt.suggest', () => ({ isShown: true }))
+    on('prompt.submit', ($, e) => {
+      submitted.push(e.text)
+      return { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+    } as never)
+    expect(await ui.find({ type: 'Text', text: /Asked: “can you send the numbers by Friday\?”/ })).toBeDefined()
+    await ui.press({ key: 'band-draft' } as never)
+    expect(submitted.at(-1)).toContain('can you send the numbers by Friday?')
+    await ui.unmount()
+  })
 })

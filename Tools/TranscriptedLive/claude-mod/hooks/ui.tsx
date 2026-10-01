@@ -76,9 +76,11 @@ const AMBER = '#E5A93B'
  * Notes (show or hide the sidebar) and Stop (two presses). After the call it
  * says the wrap-up is ready.
  */
-export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null {
-  const { Box, Text } = el
+export function band(el: Els, m: ViewModel, act: Actions, prompts: Prompts): RenderElement | null {
+  const { Box, Text, Button } = el
   const isLive = m.phase === 'live' || m.phase === 'stalled'
+  // The newest question aimed at the person, with a one-click draft.
+  const question = m.questions.at(-1)
   if (isLive) {
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
@@ -86,7 +88,21 @@ export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null 
         <Box flexShrink={0}>
           <Text dimColor>{m.phase === 'live' ? m.clock : `${m.clock} · reconnecting`}</Text>
         </Box>
-        <Box flexGrow={1} />
+        {question ? (
+          <Box flexGrow={1} flexShrink={1} flexDirection="row" alignItems="center" gap={1}>
+            <Box flexShrink={1}>
+              <Text wrap="truncate-end">{`Asked: “${question}”`}</Text>
+            </Box>
+            <Button
+              key="band-draft"
+              variant="primary"
+              label={m.pending.has(prompts.answer(question)) ? 'Drafting…' : 'Draft answer'}
+              onPress={() => act.ask(prompts.answer(question))}
+            />
+          </Box>
+        ) : (
+          <Box flexGrow={1} />
+        )}
         {notesButton(el, m, act)}
         {stopButton(el, m, act)}
       </Box>
