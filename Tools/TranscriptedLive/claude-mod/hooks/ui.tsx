@@ -20,6 +20,8 @@ export type TranscriptLine = { time: string; who: string; text: string; isNewTur
 export type ViewModel = {
   phase: Phase
   clock: string
+  /** When the call started, "Oct 1 · 2:23 PM"; '' when unknown. */
+  when: string
   isReplay: boolean
   isContextOn: boolean
   isHelperOn: boolean
@@ -332,13 +334,10 @@ function endingState(el: Els, m: ViewModel): RenderElement {
 function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: Prompts): RenderElement {
   const { Box, Button, Markdown, Text } = el
   const people = wrap.speakers.length > 0 ? wrap.speakers.join(', ') : ''
-  const meta = [
-    m.clock,
-    wrap.source === 'saved' ? 'from your saved transcript' : 'speaker names coming…',
-    people,
-  ]
+  const meta = [m.when, durationLabel(m.clock), people || (wrap.source === 'saved' ? '' : 'names coming…')]
     .filter(Boolean)
     .join('  ·  ')
+  const next = wrap.nextActions ?? []
   const markdown = wrapupMarkdown(wrap, false)
   const button = (key: string, label: string, prompt: string, hotkey: string, isPrimary: boolean) => (
     <Button
@@ -354,9 +353,47 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: 
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       <Text color="green">✓ Wrap-up</Text>
       {header(el, m, wrap.title || 'Call wrap-up', meta, false)}
+      {wrap.overview ? (
+        <Box marginTop={1}>
+          <Text wrap="wrap">{wrap.overview}</Text>
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <Markdown key="wrap-md" text={markdown} />
       </Box>
+      {next.length > 0 ? (
+        <Box flexDirection="column" marginTop={1} gap={1}>
+          <Text bold>Claude can do next</Text>
+          {next.map((action, index) => {
+            const isSent = m.pending.has(action.prompt)
+            return (
+              <Box
+                key={`next-${index}`}
+                flexDirection="row"
+                alignItems="center"
+                gap={1}
+                borderStyle="round"
+                borderDimColor
+                paddingX={1}
+              >
+                <Box flexGrow={1} flexShrink={1}>
+                  <Text wrap="wrap" dimColor={isSent}>
+                    {action.label}
+                  </Text>
+                </Box>
+                <Button
+                  key={`next-btn-${index}`}
+                  label={isSent ? 'Working…' : 'Do it'}
+                  hotkey={String(index + 4)}
+                  variant="primary"
+                  dimColor={isSent}
+                  onPress={() => act.ask(action.prompt)}
+                />
+              </Box>
+            )
+          })}
+        </Box>
+      ) : null}
       <Box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
         {button('email', 'Follow-up email', prompts.email, '1', true)}
         {button('todos', 'Todo list', prompts.todos, '2', false)}
@@ -367,15 +404,48 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: 
   )
 }
 
+/**
+ * Action items grouped by who owns them ("Sarah: send the deck" under **Sarah**)
+ * when there is more than one owner; a plain checklist otherwise.
+ */
+function actionsByOwner(actions: string[]): string {
+  if (actions.length === 0) return ''
+  const groups = new Map<string, string[]>()
+  for (const item of actions) {
+    const match = /^([^:]{1,40}):\s+(.+)$/.exec(item)
+    const owner = match?.[1]?.trim() ?? ''
+    const task = match?.[2]?.trim() ?? item
+    groups.set(owner, [...(groups.get(owner) ?? []), task])
+  }
+  const owners = [...groups.keys()]
+  if (owners.length < 2 || owners.includes('')) return `#### Action items\n${actions.map(item => `- [ ] ${item}`).join('\n')}`
+  // You first, then named people, then whatever nobody took.
+  const rank = (owner: string) => (/^you$/i.test(owner) ? 0 : /^unassigned$/i.test(owner) ? 2 : 1)
+  owners.sort((a, b) => rank(a) - rank(b))
+  return [
+    '#### Who owes what',
+    ...owners.map(owner => `**${owner}**\n${(groups.get(owner) ?? []).map(task => `- [ ] ${task}`).join('\n')}`),
+  ].join('\n\n')
+}
+
+/** "06:05" as "6 min"; under a minute, "under a minute". */
+function durationLabel(clock: string): string {
+  const parts = clock.split(':').map(Number)
+  const minutes = parts.length === 3 ? (parts[0] ?? 0) * 60 + (parts[1] ?? 0) : (parts[0] ?? 0)
+  if (!Number.isFinite(minutes)) return clock
+  return minutes < 1 ? 'under a minute' : `${minutes} min`
+}
+
 /** The wrap-up as Markdown: for the card, and with its title for the clipboard. */
 export function wrapupMarkdown(wrap: LiveWrapup, withTitle: boolean): string {
   const section = (title: string, items: string[], prefix: string) =>
     items.length > 0 ? `#### ${title}\n${items.map(item => `${prefix}${item}`).join('\n')}` : ''
   return [
     withTitle ? `## ${wrap.title || 'Call wrap-up'}` : '',
+    withTitle && wrap.overview ? wrap.overview : '',
     section('Summary', wrap.summary, '- '),
     section('Decisions', wrap.decisions, '- '),
-    section('Action items', wrap.actions, '- [ ] '),
+    actionsByOwner(wrap.actions),
     section('Still open', wrap.openQuestions, '- '),
   ]
     .filter(Boolean)

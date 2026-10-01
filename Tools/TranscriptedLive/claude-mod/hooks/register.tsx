@@ -101,6 +101,8 @@ type LiveState = {
   pendingAsks: Map<string, number>
   /** The pane's tab while a call is live. */
   tab: Tab
+  /** The title the pane was last opened or retitled with. */
+  shownTitle: string
 }
 
 const PANE_ID = 'live-meeting'
@@ -127,6 +129,9 @@ const WRAP_MIN_LINES = 4
 const WRAP_MAX_FAILURES = 2
 /** How often to look for the meeting Transcripted saved, after a call. */
 const SAVED_SCAN_MS = 5_000
+/** After the named wrap-up, keep looking for speaker renames this long, this often. */
+const RENAME_WATCH_MS = 3 * 60 * 60_000
+const RENAME_SCAN_MS = 15_000
 /** A saved meeting starts within this many seconds of the live one. */
 const SAVED_MATCH_SECONDS = 20
 /** The saved transcript the wrap-up reads, at most (head and tail kept). */
@@ -223,6 +228,7 @@ export function register(on: On) {
     helperBinary: '',
     pendingAsks: new Map(),
     tab: 'notes',
+    shownTitle: PANE_TITLE,
   }
 
   on('session.start', async ($, e, next) => {
@@ -320,7 +326,7 @@ export function register(on: On) {
       if (isOpen) {
         await $.ui.close({ id: PANE_ID }).catch(() => undefined)
       } else {
-        await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+        await $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
       }
       return { text: session ? statusCard(s) : HELPER_MISSING_TEXT }
     }
@@ -454,7 +460,7 @@ function paneActions($: EngineInterface, s: LiveState): Actions {
     },
     openPane: () => {
       s.isHidden = false
-      void $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+      void $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
     },
     copy: text => {
       void $.ui.copy({ text }).then(
@@ -463,6 +469,26 @@ function paneActions($: EngineInterface, s: LiveState): Actions {
       )
     },
   }
+}
+
+/** The pane's tab label: the call's name once the notes or the wrap-up know it. */
+function paneTitle(s: LiveState): string {
+  const meetingId = s.session?.meetingId ?? ''
+  const wrap = meetingId ? s.wrapups[meetingId] : undefined
+  const notes = s.notes && s.notes.meetingId === meetingId ? s.notes : null
+  const name = (wrap?.title || notes?.title || '').trim()
+  return name ? (name.length > 40 ? `${name.slice(0, 39)}…` : name) : PANE_TITLE
+}
+
+/** "meeting_2026-10-01_14-23-27-933" as "Oct 1 · 2:23 PM". */
+function meetingWhen(meetingId: string): string {
+  const match = /(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})/.exec(meetingId)
+  if (!match) return ''
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const hour = Number(match[4])
+  const minute = match[5] ?? '00'
+  const h12 = hour % 12 === 0 ? 12 : hour % 12
+  return `${months[Number(match[2]) - 1] ?? ''} ${Number(match[3])} · ${h12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
 /** Transcript lines the pane keeps, newest last. */
@@ -505,6 +531,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
   return {
     phase,
     clock: clock(session?.audioSeconds ?? 0),
+    when: meetingWhen(meetingId),
     isReplay: session?.source === 'replay',
     isContextOn: s.isAutoContext,
     isHelperOn: s.isHelperOn,
@@ -593,7 +620,15 @@ async function pollOnce($: EngineInterface, s: LiveState) {
     maybeWrapUp($, s, now, tick)
     if (isLive(s, now) && meetingId && s.autoOpenedFor !== meetingId && !s.isHidden) {
       s.autoOpenedFor = meetingId
-      await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+      await $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
+    }
+
+    // The pane's tab carries the call's name once there is one.
+    const title = paneTitle(s)
+    if (title !== s.shownTitle) {
+      const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID)
+      if (isOpen) await $.ui.open({ id: PANE_ID, title }).catch(() => undefined)
+      s.shownTitle = title
     }
 
     const renderKey = JSON.stringify([
@@ -655,7 +690,9 @@ function newContext(s: LiveState, now: number): { text: string; commit: () => vo
   const session = s.session
   const meetingId = session?.meetingId
   if (!session || !meetingId) return null
-  if (!isLive(s, now) && !endedRecently(s, now)) return null
+  const wrapNow = s.wrapups[meetingId]
+  const isRenamedLater = !!wrapNow && withinRenameWatch(s, now) && wrapContextKey(meetingId, wrapNow) !== s.sentWrapKey
+  if (!isLive(s, now) && !endedRecently(s, now) && !isRenamedLater) return null
 
   const sentUpTo = s.sentUpTo[meetingId]
   const isFirst = sentUpTo === undefined
@@ -667,7 +704,7 @@ function newContext(s: LiveState, now: number): { text: string; commit: () => vo
   const notesKey = notes ? JSON.stringify(notes) : ''
   const hasNewNotes = notesKey !== '' && notesKey !== s.sentNotesKey
   const wrap = s.wrapups[meetingId]
-  const wrapKey = wrap ? `${meetingId}:${wrap.source}` : ''
+  const wrapKey = wrap ? wrapContextKey(meetingId, wrap) : ''
   const hasNewWrap = wrapKey !== '' && wrapKey !== s.sentWrapKey
   if (fresh.length === 0 && !hasNewNotes && !hasNewWrap) return null
 
@@ -693,6 +730,11 @@ function newContext(s: LiveState, now: number): { text: string; commit: () => vo
       if (hasNewWrap) s.sentWrapKey = wrapKey
     },
   }
+}
+
+/** Changes when the wrap-up Claude should see changes: new source or renamed speakers. */
+function wrapContextKey(meetingId: string, wrap: Wrapup): string {
+  return `${meetingId}:${wrap.source}:${wrap.speakerKey ?? ''}`
 }
 
 /** Starts a helper pass when the call is live and enough new lines landed. */
@@ -810,12 +852,18 @@ async function findHelperBinary($: EngineInterface): Promise<string> {
 function maybeWrapUp($: EngineInterface, s: LiveState, now: number, tick: number) {
   const session = s.session
   const meetingId = session?.meetingId
-  if (!session || !meetingId || s.wrapBusy || session.state !== 'ended' || !endedRecently(s, now)) return
+  if (!session || !meetingId || s.wrapBusy || session.state !== 'ended') return
   if (s.lines.length < WRAP_MIN_LINES || (s.wrapFailures[meetingId] ?? 0) >= WRAP_MAX_FAILURES) return
 
   const current = s.wrapups[meetingId]
-  if (current?.source === 'saved') return
-  if (current && tick - s.lastSavedScanMs < SAVED_SCAN_MS) return
+  const isRenameWatch = current?.source === 'saved'
+  if (isRenameWatch) {
+    // Names often come later, when the person reviews speakers in Transcripted.
+    if (!withinRenameWatch(s, now) || tick - s.lastSavedScanMs < RENAME_SCAN_MS) return
+  } else {
+    if (!endedRecently(s, now)) return
+    if (current && tick - s.lastSavedScanMs < SAVED_SCAN_MS) return
+  }
 
   s.wrapBusy = true
   void (async () => {
@@ -824,6 +872,7 @@ function maybeWrapUp($: EngineInterface, s: LiveState, now: number, tick: number
       s.lastSavedScanMs = tick
       saved = await findSavedMeeting($, s, meetingId)
       if (!saved) return
+      if (isRenameWatch && speakerKey(saved.speakers) === (current.speakerKey ?? '')) return
     }
     const wrap = await runWrapUp($, s, meetingId, saved)
     if (!wrap) {
@@ -835,9 +884,9 @@ function maybeWrapUp($: EngineInterface, s: LiveState, now: number, tick: number
     $.ui.invalidate('ui.render')
     if (!current) {
       $.ui.toast('Call wrap-up ready · /meeting')
-      if (!s.isHidden) await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+      if (!s.isHidden) await $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
     } else {
-      $.ui.toast('Wrap-up updated with speaker names')
+      $.ui.toast(wrap.speakers.length > 0 ? `Wrap-up updated: ${wrap.speakers.join(', ')}` : 'Wrap-up updated from the saved transcript')
     }
   })()
     .catch(() => undefined)
@@ -847,6 +896,17 @@ function maybeWrapUp($: EngineInterface, s: LiveState, now: number, tick: number
 }
 
 type SavedMeeting = { path: string; speakers: string[]; transcript: string }
+
+/** Every speaker label in the saved transcript, generic ones included: a rename changes it. */
+function speakerKey(speakers: string[]): string {
+  return [...speakers].sort().join('|')
+}
+
+/** After a call, how long to keep watching the saved meeting for speaker renames. */
+function withinRenameWatch(s: LiveState, now: number): boolean {
+  const endedAt = s.session?.endedAt
+  return s.session?.state === 'ended' && endedAt !== undefined && now - Date.parse(endedAt) < RENAME_WATCH_MS
+}
 
 /** The meeting file Transcripted saved for this call: same day, start within seconds. */
 async function findSavedMeeting($: EngineInterface, s: LiveState, meetingId: string): Promise<SavedMeeting | null> {
@@ -924,8 +984,11 @@ async function runWrapUp(
     '{"title": "3 to 6 words naming what the call was about",',
     ' "summary": ["2 to 4 bullets, each one line of at most 14 words"],',
     ' "decisions": ["what was decided"],',
-    ' "actions": ["Owner: what, by when (when said). Use real names when known, \"You\" for the user"],',
-    ' "openQuestions": ["what is still unresolved, especially anything the user owes an answer on"]}',
+    ' "actions": ["Owner: what, by when (when said). Always start with the owner: a real name when known, \"You\" for the user, \"Unassigned\" when nobody took it"],',
+    ' "openQuestions": ["what is still unresolved, especially anything the user owes an answer on"],',
+    ' "overview": "one sentence: what this call was and its outcome",',
+    ' "nextActions": [{"label": "2 to 5 word imperative", "prompt": "the full instruction for Claude Code"}]}',
+    'nextActions: 3 to 5 concrete things Claude Code could do right now for the user because of this call: drafts (email, Slack, doc), a GitHub issue, a code change or investigation in the current project, a reminder list, research. Each prompt stands alone and names the specifics from the call. No vague items like "follow up".',
     'Every bullet one short line, plain facts only: no commentary on accuracy, no hedging. Empty lists when nothing fits. Never invent names, dates or decisions that were not said.',
   ].join('\n')
   const reply = await $.model
@@ -947,7 +1010,20 @@ function parseWrapup(text: string, meetingId: string, saved: SavedMeeting | null
     actions: list(value.actions, 10),
     openQuestions: list(value.openQuestions, 6),
     speakers: saved ? saved.speakers.filter(name => !/^speaker \d+$/i.test(name)).slice(0, 8) : [],
+    speakerKey: saved ? speakerKey(saved.speakers) : '',
+    overview: str(value.overview),
+    nextActions: nextActions(value.nextActions),
   }
+}
+
+/** The wrap-up's suggested tasks: labelled, bounded, at most five. */
+function nextActions(value: unknown): { label: string; prompt: string }[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}))
+    .map(item => ({ label: str(item.label).slice(0, 40), prompt: str(item.prompt).slice(0, 600) }))
+    .filter(item => item.label !== '' && item.prompt !== '')
+    .slice(0, 5)
 }
 
 function wrapupText(wrap: Wrapup): string {

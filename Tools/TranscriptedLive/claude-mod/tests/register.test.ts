@@ -31,13 +31,19 @@ function sessionJson(state: 'recording' | 'ended', meetingId = 'meeting_test'): 
   })
 }
 
-type World = { statuses: (string | undefined)[]; opened: string[]; closed: string[]; clock: ReturnType<typeof mock.clock> }
+type World = {
+  statuses: (string | undefined)[]
+  opened: string[]
+  titles: string[]
+  closed: string[]
+  clock: ReturnType<typeof mock.clock>
+}
 
 type WorldOptions = { meetingId?: string; lines?: typeof UTTERANCES; files?: Record<string, string> }
 
 /** The helper's files and the engine calls the mod makes, answered from memory. */
 function world(on: On, state: 'recording' | 'ended' = 'recording', options: WorldOptions = {}): World {
-  const seen = { statuses: [], opened: [], closed: [] } as unknown as World
+  const seen = { statuses: [], opened: [], titles: [], closed: [] } as unknown as World
   const open = new Set<string>()
   // Shared with the test, so it can add a file (the saved meeting) mid-test.
   const files: Record<string, string> = options.files ?? {}
@@ -73,6 +79,7 @@ function world(on: On, state: 'recording' | 'ended' = 'recording', options: Worl
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.open', ($, e) => {
     seen.opened.push(e.id)
+    seen.titles.push(e.title ?? '')
     open.add(e.id)
     return { value: { isPlaced: true as const } }
   })
@@ -368,6 +375,75 @@ describe('register', () => {
     await ui.press({ key: 'email' } as never)
     expect(submitted.filter(text => text.includes('checklist')).length).toBe(1)
     expect(submitted.filter(text => text.includes('follow-up email')).length).toBe(1)
+    await ui.unmount()
+  })
+
+  test('renaming a speaker in Transcripted redoes the wrap-up: owners by name, next actions, pane titled', async ($, on) => {
+    const meetingsDir = '/Users/test/Library/Application Support/Transcripted/captures/meetings'
+    const file = `${meetingsDir}/2026-10-01 Meeting at 2 23 PM.md`
+    const saved = (who: string) =>
+      ['---', 'date: 2026-10-01', 'time: 14:23:28', '---', '## Transcript', '', `**00:12**  [System/${who}]`, 'I will send the deck.', '', '**00:20**  [Mic/You]', "I'll send the numbers Thursday."].join('\n')
+    const files: Record<string, string> = { [file]: saved('Speaker 1') }
+    const lines = [...UTTERANCES, { t: 420, speaker: 'you', text: 'ok i will send the numbers thursday' }]
+    const { clock, titles } = world(on, 'ended', { meetingId: 'meeting_2026-10-01_14-23-27-933', lines, files })
+    const toasts: string[] = []
+    const submitted: string[] = []
+    on('model.complete', ($, e) => {
+      const who = e.prompt.includes('Sarah') ? 'Sarah' : 'Unassigned'
+      return {
+        value: {
+          isAnswered: true as const,
+          text: JSON.stringify({
+            title: 'Deck and numbers',
+            summary: ['agreed on next steps'],
+            decisions: [],
+            actions: ['You: send the numbers by Thursday', `${who}: send the deck`],
+            openQuestions: [],
+            overview: 'A short sync on the deck and the numbers.',
+            nextActions: [{ label: 'Draft the numbers email', prompt: 'Draft an email with the churn numbers for Thursday.' }],
+          }),
+          usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }
+    })
+    on('ui.toast', ($, e) => {
+      toasts.push((e as unknown as { text: string }).text)
+      return { value: undefined }
+    })
+    on('prompt.submit', ($, e) => {
+      submitted.push(e.text)
+      return { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    // Live wrap-up, then the saved one (still "Speaker 1").
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    const before = await $.command.run({ command: 'meeting', args: 'wrapup', ...COMPOSER })
+    expect(before.text).toContain('Unassigned: send the deck')
+
+    // The person names Speaker 1 in Transcripted.
+    files[file] = saved('Sarah')
+    await clock.advance(16_000)
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    const after = await $.command.run({ command: 'meeting', args: 'wrapup', ...COMPOSER })
+    expect(after.text).toContain('Sarah: send the deck')
+    expect(toasts).toContain('Wrap-up updated: Sarah, You')
+    expect(titles).toContain('Deck and numbers')
+
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Deck and numbers', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+    } as never)
+    expect(await ui.find({ type: 'Markdown', text: /Who owes what[\s\S]*\*\*You\*\*[\s\S]*\*\*Sarah\*\*\n- \[ \] send the deck/ } as never)).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /A short sync on the deck and the numbers\./ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Claude can do next/ })).toBeDefined()
+    await ui.press({ key: 'next-btn-0' } as never)
+    expect(submitted.at(-1)).toBe('Draft an email with the churn numbers for Thursday.')
     await ui.unmount()
   })
 })

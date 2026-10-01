@@ -22,7 +22,16 @@ export type LiveWrapup = {
   openQuestions: string[]
   /** Named speakers in the saved transcript; empty for the live wrap-up. */
   speakers: string[]
+  /** Every speaker label the saved transcript had; a rename in Transcripted changes it. */
+  speakerKey?: string
+  /** One sentence on what the call was. */
+  overview?: string
+  /** Things Claude could do next for the person, each a button. */
+  nextActions?: LiveNextAction[]
 }
+
+/** A task the wrap-up offers to hand Claude: a short label and the prompt it sends. */
+export type LiveNextAction = { label: string; prompt: string }
 
 declare module 'claude-code' {
   interface PluginState {
