@@ -1088,6 +1088,18 @@ final class MeetingSessionController: ObservableObject {
                 promptProperties: activeDetectedPromptRecordingTelemetryProperties
             )
         }
+        if let identity = activeRecordingIdentity {
+            LiveMeetingTranscriptService.shared.beginCapture(
+                sessionID: identity, router: sttRouter, model: recordingSTTModel,
+                languageSelection: recordingLanguageSelection,
+                deliveryEnabled: { [weak capture = capture] enabled, epoch in capture?.setLivePCMDeliveryEnabled(enabled, previewEpoch: epoch) },
+                deliveryDrops: { [weak capture = capture] in capture?.livePCMDroppedBufferCount ?? 0 },
+                mayInfer: { [weak self] in
+                    guard let self else { return false }
+                    return !self.taskManager.hasActiveTranscriptionWorkRequiringQuitConfirmation
+                }
+            )
+        }
         transition(to: .recording, reason: "capture_start_confirmed")
         refreshSystemAudioSignalVerification(shouldWarn: startDecision.systemAudioPermissionCheckWasInconclusive)
         if startDecision.mayRaiseSystemAudioPermissionPrompt {
@@ -1965,6 +1977,9 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func clearActiveRecordingIdentity() {
+        if let identity = activeRecordingIdentity {
+            LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
+        }
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil

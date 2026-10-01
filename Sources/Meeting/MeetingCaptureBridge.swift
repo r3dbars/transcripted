@@ -109,6 +109,10 @@ final class MeetingCaptureBridge: ObservableObject {
         self.audio.onMicPCMBuffer = { [weak micPCMRelay] buffer in
             micPCMRelay?.enqueue(buffer)
         }
+        let liveTranscript = LiveMeetingTranscriptService.shared
+        self.audio.onLivePCMBuffer = { [weak liveTranscript] buffer, source, capturedAt, previewEpoch in
+            liveTranscript?.receive(buffer, source: source, capturedAt: capturedAt, previewEpoch: previewEpoch)
+        }
         wireCallbacks()
         wireSubscriptions()
         CallAppMicrophoneSharingMonitor.shared.$runningCallAppBundleIDs

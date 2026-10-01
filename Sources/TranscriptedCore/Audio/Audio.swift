@@ -1708,6 +1708,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // on. The callback receives that owned processed copy.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
 
+    /// Optional provisional transcription consumer. Install once before capture;
+    /// buffers arrive on a bounded worker, never on an audio or file-write thread.
+    /// Its overflow drops live-preview buffers only; saved recording is unaffected.
+    public var onLivePCMBuffer: ((AVAudioPCMBuffer, LiveMeetingAudioSource, TimeInterval, UInt64) -> Void)?
+    let livePCMDelivery = LiveMeetingPCMDelivery()
+
+    public func setLivePCMDeliveryEnabled(_ enabled: Bool, previewEpoch: UInt64) {
+        livePCMDelivery.setEnabled(enabled, captureGeneration: recordingSessionGeneration, previewEpoch: previewEpoch)
+    }
+
+    public var livePCMDroppedBufferCount: Int { livePCMDelivery.dropCount }
+
     /// Wait until every host callback already admitted from the meeting mic has
     /// run. The app uses this before finalizing borrowed-mic dictation, including
     /// when file finalization itself hit its outer timeout.
@@ -2512,6 +2524,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
 
     func prepareForNewRecordingStart() {
+        livePCMDelivery.setEnabled(false)
         // A fast retry can begin before stop()'s deferred main-thread cleanup.
         // Reset the old timer here so every recording gets a fresh watchdog
         // and buffer timestamp.
@@ -2840,6 +2853,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
+        livePCMDelivery.setEnabled(false)
         let finishingCapture = systemAudioCaptureAttemptOwnership.captureOwned(by: captureGeneration)
         signalDiagnosticsLock.lock()
         finishingSystemSignalAttempt = finishingCapture

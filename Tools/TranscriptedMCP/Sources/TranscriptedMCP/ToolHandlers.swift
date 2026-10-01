@@ -773,7 +773,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "show_recent_meetings",
-                description: "Render an interactive card list of the most recent meetings — each with audio playback and a raw-transcript view — as an MCP Apps (SEP-1865) UI widget that draws inline in rendering-capable clients. Clients that don't paint inline UI get a plain-text meeting list as a fallback. All audio and transcripts are local; nothing leaves this Mac.",
+                description: "Render recent meetings with raw transcript text and size-capped recorded audio as an MCP Apps widget. Transcript and audio bytes are returned to the connected host. Clients without inline UI receive a text list. Unavailable in companion mode, which exports text only.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -786,10 +786,16 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true),
                 _meta: TranscriptedUIResources.toolMeta
             ),
-        ])
+        ].filter { !CompanionTools.companionMode || $0.name != "show_recent_meetings" } + CompanionTools.tools)
     }
 
     await server.withMethodHandler(CallTool.self) { params in
+        if CompanionTools.companionMode && params.name == "show_recent_meetings" {
+            return textResult("Audio export is unavailable in the ChatGPT companion. Use show_companion for selected text context.", isError: true)
+        }
+        if CompanionTools.names.contains(params.name) {
+            return await CompanionTools.call(params: params, index: index, directories: directories)
+        }
         do {
             return try withAgentCaptureQueryTelemetry(params: params) {
                 switch params.name {

@@ -723,6 +723,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await writeFirstRunReliabilityReportIfRequested()
         }
 
+        CompanionConnectionService.shared.configure(meetingSession: appState.meetingSession)
+
         #if TRANSCRIPTED_LAB_CONTROL
         // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
         LabControlChannel.startIfRequested(appDelegate: self)
@@ -782,6 +784,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
+        CompanionConnectionService.shared.shutdown()
         persistentDictationInputController.stopMonitoring()
         // A paste may still be waiting to put the user's clipboard back.
         ClipboardRestoringTextPaster.restorePendingClipboardsBeforeQuit()

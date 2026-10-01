@@ -1,0 +1,19 @@
+{
+  "name": "transcripted",
+  "version": "0.1.2",
+  "description": "Connect ChatGPT to saved context and live meeting controls in Transcripted on this Mac.",
+  "author": { "name": "Justin Betker" },
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Transcripted",
+    "shortDescription": "Your meetings, in context",
+    "logo": "./assets/icon.png",
+    "composerIcon": "./assets/icon.png",
+    "brandColor": "#EE7B35",
+    "defaultPrompt": [
+      "Open Transcripted and show my recent context.",
+      "Use Transcripted to find what I committed to this week, with sources.",
+      "Open the Transcripted companion so I can record a meeting and share live text."
+    ]
+  }
+}
