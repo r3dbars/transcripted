@@ -455,7 +455,7 @@ export function register(on: On) {
       </Box>
     )
     const bullet = (mark: string, text: string, color?: string) => (
-      <Box flexDirection="row">
+      <Box flexDirection="row" alignItems="flex-start">
         <Box width={3} flexShrink={0}>
           <Text color={color} dimColor={!color}>
             {mark}
@@ -551,7 +551,7 @@ export function register(on: On) {
 
         {notes && notes.questions.length > 0 ? heading('ASKED OF YOU', 'press a number for a draft answer') : null}
         {(notes?.questions ?? []).map((question, index) => (
-          <Box flexDirection="row">
+          <Box flexDirection="row" alignItems="flex-start">
             {ask(`q${index}`, `${index + 1}`, String(index + 1), answerPrompt(question))}
             <Box marginLeft={1} flexGrow={1} flexShrink={1}>
               <Text wrap="wrap">{question}</Text>
@@ -681,14 +681,14 @@ function statusText(s: LiveState, now: number): string | undefined {
   if (!session) return undefined
   if (isLive(s, now)) {
     const asked = s.notes && s.notes.meetingId === session.meetingId ? s.notes.questions.length : 0
-    return `● ${clock(session.audioSeconds)}${asked > 0 ? ` · ${asked} asked of you` : ''} · /meeting`
+    return `● ${clock(session.audioSeconds)}${asked > 0 ? ` · ${asked} asked` : ''}`
   }
   if (isStalled(s, now)) return 'stalled · is transcripted-live running?'
   if (endedRecently(s, now) && s.lines.length > 0) {
     const wrap = session.meetingId ? s.wrapups[session.meetingId] : undefined
-    if (wrap) return `✓ wrap-up ready${wrap.source === 'saved' ? ' with names' : ''} · /meeting`
-    if (s.lines.length < WRAP_MIN_LINES) return '○ ended · too short for a wrap-up'
-    return '○ ended · writing wrap-up…'
+    if (wrap) return '✓ wrap-up ready'
+    if (s.lines.length < WRAP_MIN_LINES) return '○ ended'
+    return '○ writing wrap-up…'
   }
 
   return undefined
@@ -971,11 +971,11 @@ async function runWrapUp(
     '',
     'Write the after-call wrap-up for the user. Reply with JSON only, no prose:',
     '{"title": "3 to 6 words naming what the call was about",',
-    ' "summary": ["2 to 4 short bullets"],',
+    ' "summary": ["2 to 4 bullets, each one line of at most 14 words"],',
     ' "decisions": ["what was decided"],',
     ' "actions": ["Owner: what, by when (when said). Use real names when known, \"You\" for the user"],',
     ' "openQuestions": ["what is still unresolved, especially anything the user owes an answer on"]}',
-    'Short bullets. Empty lists when nothing fits. Never invent names, dates or decisions that were not said.',
+    'Every bullet one short line, plain facts only: no commentary on accuracy, no hedging. Empty lists when nothing fits. Never invent names, dates or decisions that were not said.',
   ].join('\n')
   const reply = await $.model
     .complete({ model: WRAP_MODEL, prompt, maxTokens: 1500, effort: 'low', timeoutMs: 90_000 })
