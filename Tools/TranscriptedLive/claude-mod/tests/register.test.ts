@@ -93,7 +93,7 @@ describe('register', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
 
-    expect(seen.statuses.at(-1)).toBe('● 06:50 · /meeting attach')
+    expect(seen.statuses.at(-1)).toBe('● 06:50 · /meeting')
     expect(seen.opened).toEqual(['live-meeting'])
   })
 
@@ -128,7 +128,7 @@ describe('register', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
 
-    expect(seen.statuses.at(-1)).toBe('○ ended · /meeting attach')
+    expect(seen.statuses.at(-1)).toBe('○ ended · too short for a wrap-up')
     expect(seen.opened).toEqual([])
   })
 

@@ -17,6 +17,11 @@ import type { LiveNotes as Notes, LiveWrapup as Wrapup } from '../types'
  * say (`/meeting helper off` stops it). Both send transcript text to Claude, the
  * same as typing it; nothing else leaves the machine.
  *
+ * Nothing to start by hand: while a session is open the mod keeps the helper
+ * running (it starts it when no helper has written lately; the helper itself
+ * refuses a second copy, so several sessions share one). The helper only reads
+ * what Transcripted is already recording. `/meeting autostart off` stops this.
+ *
  * The pane is a dashboard: what is being discussed, what was asked of the
  * person (each with a button that has Claude draft an answer), action items and
  * the last few lines. A new question also becomes the prompt box's suggestion.
@@ -82,6 +87,14 @@ type LiveState = {
   wrapFailures: Record<string, number>
   /** `$.clock` time of the last look for the saved meeting. */
   lastSavedScanMs: number
+  /** Start the helper when none is running (on by default). */
+  isAutostart: boolean
+  /** A helper this session started is running. */
+  isHelperProcessUp: boolean
+  /** `$.clock` time before which no new helper is started. */
+  nextHelperStartMs: number
+  /** Where the helper binary is; '' when it could not be found. */
+  helperBinary: string
 }
 
 const PANE_ID = 'live-meeting'
@@ -123,6 +136,13 @@ const MCP_TOOL_PREFIX = 'mcp__plugin_transcripted-live_transcripted__'
 const PERSON_ONLY_TOOLS = new Set(['start_meeting', 'stop_meeting', 'set_live_context_sharing'])
 const STORE_AUTO = 'autoContext'
 const STORE_HELPER = 'helper'
+const STORE_AUTOSTART = 'autostart'
+/** A helper that has not written its session file for this long is not running. */
+const HELPER_ALIVE_MS = 10_000
+/** After a helper exits, wait this long before starting another. */
+const HELPER_RESTART_MS = 5_000
+/** After another copy refused to start (one is already running), wait longer. */
+const HELPER_YIELD_MS = 30_000
 /** Prompt origins that are the person talking to Claude (or this mod on their behalf). */
 const CONTEXT_ORIGINS = new Set(['composer', 'sdk', 'bridge', 'unclassified', 'plugin'])
 /** "04:09 them " — the label column the text hangs beside. */
@@ -139,6 +159,7 @@ const HELP_TEXT = [
   '/meeting wrapup       the after-call wrap-up (names once Transcripted saves the meeting)',
   '/meeting attach [N]   hand Claude the last N minutes now (default 5, or "all")',
   '/meeting auto on|off  send new lines with each prompt (on by default)',
+  '/meeting autostart on|off  keep the transcripted-live helper running (on by default)',
   '/meeting helper on|off  Haiku keeps notes while the call is live (on by default)',
 ].join('\n')
 
@@ -162,9 +183,8 @@ function answerPrompt(question: string): string {
 }
 
 const HELPER_MISSING_TEXT = [
-  'No live transcript yet. Start the helper in another terminal:',
-  '  Tools/TranscriptedLive/.build/release/transcripted-live watch',
-  'then record a meeting in Transcripted (or try `transcripted-live replay <audio>`).',
+  'No live transcript yet. The helper starts by itself a few seconds after a session opens',
+  '(build it once with `swift build -c release` in Tools/TranscriptedLive), then record a meeting in Transcripted.',
 ].join('\n')
 
 export function register(on: On) {
@@ -195,6 +215,10 @@ export function register(on: On) {
     wrapBusy: false,
     wrapFailures: {},
     lastSavedScanMs: -Infinity,
+    isAutostart: true,
+    isHelperProcessUp: false,
+    nextHelperStartMs: -Infinity,
+    helperBinary: '',
   }
 
   on('session.start', async ($, e, next) => {
@@ -204,6 +228,8 @@ export function register(on: On) {
     s.isAutoContext = (await $.store.get(STORE_AUTO).catch(() => undefined)) !== false
     s.isHelperOn = (await $.store.get(STORE_HELPER).catch(() => undefined)) !== false
     s.meetingsDir = await meetingsDirectory($, home)
+    s.isAutostart = (await $.store.get(STORE_AUTOSTART).catch(() => undefined)) !== false
+    s.helperBinary = await findHelperBinary($)
     // A hot reload starts this module over; what was already sent, the notes and
     // the wrap-ups live in session state so the reload neither re-sends nor redoes them.
     s.sentUpTo = (await $.state.get(SENT_REF).catch(() => null))?.value ?? {}
@@ -253,6 +279,20 @@ export function register(on: On) {
     const session = s.session
 
     if (verb === 'help') return { text: HELP_TEXT }
+
+    if (verb === 'autostart') {
+      const isOn = amount === 'on' ? true : amount === 'off' ? false : undefined
+      if (isOn === undefined) return { text: HELP_TEXT }
+      s.isAutostart = isOn
+      await $.store.set(STORE_AUTOSTART, isOn).catch(() => undefined)
+      return {
+        text: isOn
+          ? s.helperBinary
+            ? 'The live helper starts by itself while Claude Code is open.'
+            : 'Autostart is on, but the helper binary is missing: run `swift build -c release` in Tools/TranscriptedLive.'
+          : 'The live helper no longer starts by itself; run `transcripted-live watch` when you want it.',
+      }
+    }
 
     if (verb === 'auto' || verb === 'helper') {
       const isOn = amount === 'on' ? true : amount === 'off' ? false : undefined
@@ -597,8 +637,10 @@ async function pollOnce($: EngineInterface, s: LiveState) {
     }
 
     const meetingId = s.session?.meetingId ?? ''
+    const tick = await $.clock.now().catch(() => now)
+    superviseHelper($, s, now, tick)
     maybeRunHelper($, s, now)
-    maybeWrapUp($, s, now, await $.clock.now().catch(() => now))
+    maybeWrapUp($, s, now, tick)
     if (isLive(s, now) && meetingId && s.autoOpenedFor !== meetingId && !s.isHidden) {
       s.autoOpenedFor = meetingId
       await $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
@@ -638,10 +680,16 @@ function statusText(s: LiveState, now: number): string | undefined {
   const session = s.session
   if (!session) return undefined
   if (isLive(s, now)) {
-    return `● ${clock(session.audioSeconds)} · /meeting attach`
+    const asked = s.notes && s.notes.meetingId === session.meetingId ? s.notes.questions.length : 0
+    return `● ${clock(session.audioSeconds)}${asked > 0 ? ` · ${asked} asked of you` : ''} · /meeting`
   }
   if (isStalled(s, now)) return 'stalled · is transcripted-live running?'
-  if (endedRecently(s, now) && s.lines.length > 0) return '○ ended · /meeting attach'
+  if (endedRecently(s, now) && s.lines.length > 0) {
+    const wrap = session.meetingId ? s.wrapups[session.meetingId] : undefined
+    if (wrap) return `✓ wrap-up ready${wrap.source === 'saved' ? ' with names' : ''} · /meeting`
+    if (s.lines.length < WRAP_MIN_LINES) return '○ ended · too short for a wrap-up'
+    return '○ ended · writing wrap-up…'
+  }
 
   return undefined
 }
@@ -752,6 +800,53 @@ async function runHelper($: EngineInterface, s: LiveState, meetingId: string) {
     s.suggested = [...s.suggested, ...notes.questions].slice(-50)
     void $.prompt.suggest({ text: `what should I say to: ${fresh}` }).catch(() => undefined)
   }
+}
+
+// MARK: keeping the helper running
+
+/**
+ * Starts `transcripted-live watch` when autostart is on, this session is not
+ * already running one, and no helper has written its session file lately.
+ * The child lives as long as this module: a reload or the session ending stops
+ * it, and another open session starts the next one within seconds.
+ */
+function superviseHelper($: EngineInterface, s: LiveState, now: number, tick: number) {
+  if (!s.isAutostart || !s.helperBinary || s.isHelperProcessUp || tick < s.nextHelperStartMs) return
+  const updatedAt = s.session ? Date.parse(s.session.updatedAt) : NaN
+  if (Number.isFinite(updatedAt) && now - updatedAt < HELPER_ALIVE_MS) return
+
+  s.isHelperProcessUp = true
+  s.nextHelperStartMs = tick + HELPER_RESTART_MS
+  void (async () => {
+    let refused = false
+    try {
+      const child = $.process.spawn({
+        argv: [s.helperBinary, 'watch'],
+        env: { TRANSCRIPTED_DISABLE_FILE_LOGGER: '1' },
+      })
+      for await (const { text } of child) {
+        if (text.includes('already running')) refused = true
+        $.ui.log(`transcripted-live: ${text.trim()}`, { to: 'debug' })
+      }
+    } catch {
+      // Could not start it; try again after the back-off.
+    } finally {
+      s.isHelperProcessUp = false
+      const later = await $.clock.now().catch(() => tick)
+      s.nextHelperStartMs = later + (refused ? HELPER_YIELD_MS : HELPER_RESTART_MS)
+    }
+  })()
+}
+
+/** The helper built beside this mod (Tools/TranscriptedLive/.build/release), or TRANSCRIPTED_LIVE_BIN. */
+async function findHelperBinary($: EngineInterface): Promise<string> {
+  const override = await $.env.get('TRANSCRIPTED_LIVE_BIN').catch(() => undefined)
+  const root = $.plugin.root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '')
+  const candidates = [override, `${root}/../.build/release/transcripted-live`].filter((path): path is string => !!path)
+  for (const path of candidates) {
+    if (await $.fs.exists(path).catch(() => false)) return path
+  }
+  return ''
 }
 
 // MARK: the after-call wrap-up
@@ -985,7 +1080,7 @@ function statusCard(s: LiveState): string {
   const notes = s.notes && s.notes.meetingId === session.meetingId ? ['', notesText(s.notes)] : []
   return [
     `${state} · ${clock(session.audioSeconds)} · ${countLabel(s.lines.length)}`,
-    `Context with each prompt: ${s.isAutoContext ? 'on' : 'off'} · helper: ${s.isHelperOn ? 'on' : 'off'}`,
+    `Context with each prompt: ${s.isAutoContext ? 'on' : 'off'} · notes: ${s.isHelperOn ? 'on' : 'off'} · autostart: ${s.isAutostart ? (s.helperBinary ? 'on' : 'on, helper not built') : 'off'}`,
     ...(last.length > 0 ? ['', 'Latest:', ...last] : []),
     ...notes,
     '',
