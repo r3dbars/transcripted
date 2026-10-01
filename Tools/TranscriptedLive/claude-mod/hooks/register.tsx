@@ -47,6 +47,8 @@ type Session = {
   lineCount: number
   audioSeconds: number
   partial: Partial<Record<Speaker, string>>
+  /** Per speaker, recent loudness 0...1 (0.1 s steps, newest last). */
+  levels?: Partial<Record<Speaker, number[]>>
   pid: number
 }
 
@@ -120,7 +122,7 @@ const PANE_ID = 'live-meeting'
 const PANE_TITLE = 'Live meeting'
 const COMMAND_NAME = 'meeting'
 const TOOL_SHORT_NAME = 'read_live'
-const POLL_MS = 400
+const POLL_MS = 250
 /** A recording session whose helper stopped writing this long ago is stale. */
 const STALE_MS = 15_000
 /** How long "meeting ended" stays in the status line. */
@@ -589,6 +591,20 @@ function meetingWhen(meetingId: string): string {
   return `${months[Number(match[2]) - 1] ?? ''} ${Number(match[3])} · ${h12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
+/** Mic and call loudness as one meter: the louder of the two at each step, aligned at the newest. */
+function mixedLevels(levels: Partial<Record<Speaker, number[]>> | undefined): number[] {
+  const you = Array.isArray(levels?.you) ? levels.you : []
+  const them = Array.isArray(levels?.them) ? levels.them : []
+  const length = Math.max(you.length, them.length)
+  const out: number[] = []
+  for (let i = 0; i < length; i++) {
+    const a = you[you.length - length + i] ?? 0
+    const b = them[them.length - length + i] ?? 0
+    out.push(Math.max(typeof a === 'number' ? a : 0, typeof b === 'number' ? b : 0))
+  }
+  return out
+}
+
 /** Transcript lines the pane keeps, newest last. */
 const PANE_TRANSCRIPT_LINES = 40
 
@@ -635,6 +651,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     isHelperOn: s.isHelperOn,
     isTalking: partials.length > 0,
     frame: s.frame,
+    levels: mixedLevels(session?.levels),
     title: (wrap?.title || notes?.title || '').trim(),
     gist: notes?.gist ?? '',
     questions: s.isHelperOn ? (notes?.questions ?? []) : [],
@@ -739,6 +756,7 @@ async function pollOnce($: EngineInterface, s: LiveState) {
 
     const renderKey = JSON.stringify([
       isTalking && isLive(s, now) ? s.frame : -1,
+      s.session?.levels,
       s.session?.state,
       meetingId,
       Math.floor(s.session?.audioSeconds ?? 0),

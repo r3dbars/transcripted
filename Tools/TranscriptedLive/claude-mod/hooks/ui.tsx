@@ -27,8 +27,10 @@ export type ViewModel = {
   isHelperOn: boolean
   /** Someone is mid-sentence right now (drives the waveform). */
   isTalking: boolean
-  /** Advances while someone talks; the waveform's animation step. */
+  /** Advances while someone talks; the terminal waveform's animation step. */
   frame: number
+  /** Recent loudness of the call, 0...1, newest last (mic and call audio together). */
+  levels: number[]
   title: string
   gist: string
   questions: string[]
@@ -110,7 +112,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
   if (m.phase !== 'live' && m.phase !== 'stalled') return null
 
   const isLive = m.phase === 'live'
-  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.isTalking, 7, m.frame)}</Box>
+  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.levels, 10)}</Box>
   const dot = (
     <Box flexShrink={0}>
       <Text color={isLive ? RED : AMBER}>{isLive ? '●' : '◌'}</Text>
@@ -130,7 +132,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
   const askedChip =
     asked > 0 ? <Button key="band-asked" plain label={`${asked} asked`} onPress={act.openPane} /> : null
   const row = (children: (RenderElement | null)[]) => (
-    <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
+    <Box flexDirection="row" alignItems="center" gap={1}>
       {children}
     </Box>
   )
@@ -142,7 +144,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
       return row([
         mark,
         <Box flexShrink={0}>
-          <Text bold>{isLive ? 'Recording' : 'Reconnecting'}</Text>
+          <Text dimColor>{isLive ? 'Recording' : 'Reconnecting'}</Text>
         </Box>,
         time,
         grow(m.isContextOn ? null : <Text color="yellow">context off</Text>),
@@ -222,7 +224,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
     case 7:
       return row([
         <Box flexGrow={1} flexShrink={1}>
-          {recordingMark(el, 'band-wave-wide', isLive, m.isTalking, 32, m.frame)}
+          {recordingMark(el, 'band-wave-wide', isLive, m.levels, 40)}
         </Box>,
         time,
         toggle(el, m, act, true),
@@ -233,8 +235,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
         mark,
         <Box flexShrink={0}>
           <Text>
-            <Text bold>{isLive ? 'Recording' : 'Reconnecting'}</Text>
-            <Text dimColor>{`  ${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
+            <Text dimColor>{`${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
           </Text>
         </Box>,
         <Box flexGrow={1} flexShrink={1} marginLeft={1}>
@@ -276,85 +277,60 @@ function stopButton(el: Els, m: ViewModel, act: Actions, isIcon: boolean): Rende
 }
 
 /**
- * A dot and a waveform that moves while someone is talking, flat when quiet.
- * Desktop: a small vector image that animates itself (no frame, so no white
- * box). Terminal: block-character bars the band redraws each poll.
+ * A dot and a level meter drawn from the real loudness of the call: bars scroll
+ * in from the right as people talk and sink when it is quiet. Desktop draws it
+ * as a small vector image; the terminal as block characters.
  */
-function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean, width = 7, frame = 0): RenderElement {
+function recordingMark(el: Els, key: string, isLive: boolean, levels: number[], width = 7): RenderElement {
   const { Text, Svg } = el
   const color = isLive ? RED : AMBER
   const showDot = width <= 12
+  const recent = fit(levels, width)
   if (Svg) {
-    const px = Math.max(36, Math.round(width * 7.5)) + (showDot ? 14 : 0)
-    return (
-      <Svg
-        key={key}
-        source={waveSvg(width, isLive, isTalking, showDot, px)}
-        alt={isLive ? (isTalking ? 'Recording, someone is talking' : 'Recording') : 'Reconnecting'}
-        width={px}
-        height={16}
-      />
-    )
+    const px = Math.max(28, Math.round(width * 5)) + (showDot ? 10 : 0)
+    return <Svg key={key} source={meterSvg(recent, isLive, showDot, px)} alt={isLive ? 'Recording' : 'Reconnecting'} width={px} height={12} />
   }
-  const dot = isLive ? '●' : '◌'
   return (
     <Text key={key}>
-      {showDot ? <Text color={color}>{`${dot} `}</Text> : null}
-      <Text color={color} dimColor={!isTalking}>
-        {waveform(width, isTalking ? frame : -1)}
+      {showDot ? <Text color={color}>{isLive ? '● ' : '◌ '}</Text> : null}
+      <Text color={color} dimColor>
+        {recent.map(level => BARS[Math.max(0, Math.min(BARS.length - 1, Math.round(level * (BARS.length - 1))))]).join('')}
       </Text>
     </Text>
   )
 }
 
-/** The waveform as SVG: rounded bars that breathe while someone talks (SMIL plays in an image). */
-function waveSvg(bars: number, isLive: boolean, isTalking: boolean, showDot: boolean, px: number): string {
+/** The newest `width` levels, padded with silence on the left. */
+function fit(levels: number[], width: number): number[] {
+  const recent = levels.slice(-width)
+  return [...Array<number>(Math.max(0, width - recent.length)).fill(0), ...recent]
+}
+
+/** Thin rounded bars, centred, height from each level; a soft dot that pulses while live. */
+function meterSvg(levels: number[], isLive: boolean, showDot: boolean, px: number): string {
   const color = isLive ? RED : AMBER
-  const h = 16
+  const h = 12
   const mid = h / 2
-  const start = showDot ? 14 : 1
-  const step = (px - start) / bars
-  const barW = Math.max(2, Math.min(3, step * 0.55))
-  let out = ''
-  for (let i = 0; i < bars; i++) {
-    const x = (start + i * step).toFixed(1)
-    const rest = 2
-    if (!isTalking) {
-      out += `<rect x="${x}" y="${mid - rest / 2}" width="${barW}" height="${rest}" rx="${barW / 2}" fill="${color}" opacity="0.35"/>`
-      continue
-    }
-    const peak = 4 + Math.round(10 * (0.5 + 0.5 * Math.sin(i * 1.7)))
-    const dur = (0.7 + ((i * 37) % 9) * 0.07).toFixed(2)
-    const heights = [rest, peak, rest + 3, Math.round(peak * 0.6), rest].join(';')
-    const ys = [rest, peak, rest + 3, Math.round(peak * 0.6), rest].map(v => (mid - v / 2).toFixed(1)).join(';')
-    out +=
-      `<rect x="${x}" y="${mid - rest / 2}" width="${barW}" height="${rest}" rx="${barW / 2}" fill="${color}" opacity="0.9">` +
-      `<animate attributeName="height" values="${heights}" dur="${dur}s" repeatCount="indefinite"/>` +
-      `<animate attributeName="y" values="${ys}" dur="${dur}s" repeatCount="indefinite"/></rect>`
-  }
+  const start = showDot ? 10 : 0
+  const step = (px - start) / Math.max(1, levels.length)
+  const barW = Math.max(1.6, Math.min(2.4, step * 0.5))
+  const bars = levels
+    .map((level, i) => {
+      const height = Math.max(1.6, Math.pow(level, 1.4) * (h - 1))
+      const opacity = (0.35 + 0.55 * level).toFixed(2)
+      return `<rect x="${(start + i * step + (step - barW) / 2).toFixed(1)}" y="${(mid - height / 2).toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" rx="${(barW / 2).toFixed(1)}" fill="${color}" opacity="${opacity}"/>`
+    })
+    .join('')
   const dot = showDot
     ? isLive
-      ? `<circle cx="6" cy="${mid}" r="6" fill="${color}" opacity="0.25"><animate attributeName="r" values="3.5;6.5;3.5" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.35;0;0.35" dur="1.8s" repeatCount="indefinite"/></circle><circle cx="6" cy="${mid}" r="3.5" fill="${color}"/>`
-      : `<circle cx="6" cy="${mid}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`
+      ? `<circle cx="4" cy="${mid}" r="2.6" fill="${color}"><animate attributeName="opacity" values="1;0.35;1" dur="2s" repeatCount="indefinite"/></circle>`
+      : `<circle cx="4" cy="${mid}" r="2.4" fill="none" stroke="${color}" stroke-width="1.2"/>`
     : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${h}" viewBox="0 0 ${px} ${h}">${dot}${out}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${h}" viewBox="0 0 ${px} ${h}">${dot}${bars}</svg>`
 }
 
 const BARS = '▁▂▃▄▅▆▇█'
 
-/** Block-character bars; two sines per bar so it never looks like a loop. Flat when `frame` is -1. */
-export function waveform(width: number, frame: number): string {
-  let out = ''
-  for (let i = 0; i < width; i++) {
-    if (frame < 0) {
-      out += BARS[0]
-      continue
-    }
-    const level = 0.5 + 0.3 * Math.sin(frame * 1.1 + i * 1.3) + 0.2 * Math.sin(frame * 0.47 + i * 2.1)
-    out += BARS[Math.max(0, Math.min(BARS.length - 1, Math.round(level * (BARS.length - 1))))]
-  }
-  return out
-}
 
 // MARK: pane
 
@@ -386,7 +362,7 @@ function header(el: Els, m: ViewModel, title: string, meta: string, isLive: bool
         {title}
       </Text>
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.isTalking, 7, m.frame)}</Box> : null}
+        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.levels, 10)}</Box> : null}
         <Text dimColor wrap="truncate-end">
           {meta}
         </Text>
@@ -460,9 +436,9 @@ function notesBody(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Rende
   }
 
   const markdown = [
-    m.gist ? `#### Now\n${m.gist}` : '',
-    m.actions.length > 0 ? `#### Action items\n${m.actions.map(item => `- [ ] ${item}`).join('\n')}` : '',
-    m.say ? `#### You could say\n> ${m.say}` : '',
+    m.gist ? `**Now**\n${m.gist}` : '',
+    m.actions.length > 0 ? `**Action items**\n${m.actions.map(item => `- [ ] ${item}`).join('\n')}` : '',
+    m.say ? `**You could say**\n> ${m.say}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -493,7 +469,7 @@ function questionCard(
   const isSent = m.pending.has(prompt)
   // No border around the button: a bordered box swallowed clicks on the desktop.
   return (
-    <Box key={`q-card-${index}`} flexDirection="column">
+    <Box flexDirection="column">
       <Text wrap="wrap">{`“${question}”`}</Text>
       <Box flexDirection="row" marginTop={1}>
         <Button
@@ -570,7 +546,6 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions): RenderEl
   const markdown = wrapupMarkdown(wrap, false)
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
-      <Text color="green">✓ Wrap-up</Text>
       {header(el, m, wrap.title || 'Call wrap-up', meta, false)}
       <Box marginTop={1}>
         <Markdown key="wrap-md" text={markdown} />
@@ -581,7 +556,7 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions): RenderEl
           {next.map((action, index) => {
             const isSent = m.pending.has(action.prompt)
             return (
-              <Box key={`next-${index}`} flexDirection="row">
+              <Box flexDirection="row">
                 <Button
                   key={`next-btn-${index}`}
                   label={isSent ? `${action.label}  ·  working…` : `${action.label}  →`}
@@ -613,12 +588,12 @@ function actionsByOwner(actions: string[]): string {
     groups.set(owner, [...(groups.get(owner) ?? []), task])
   }
   const owners = [...groups.keys()]
-  if (owners.length < 2 || owners.includes('')) return `#### Action items\n${actions.map(item => `- [ ] ${item}`).join('\n')}`
+  if (owners.length < 2 || owners.includes('')) return `**Action items**\n${actions.map(item => `- [ ] ${item}`).join('\n')}`
   // You first, then named people, then whatever nobody took.
   const rank = (owner: string) => (/^you$/i.test(owner) ? 0 : /^unassigned$/i.test(owner) ? 2 : 1)
   owners.sort((a, b) => rank(a) - rank(b))
   return [
-    '#### Who owes what',
+    '**Who owes what**',
     ...owners.map(owner => `**${owner}**\n${(groups.get(owner) ?? []).map(task => `- [ ] ${task}`).join('\n')}`),
   ].join('\n\n')
 }
@@ -634,7 +609,7 @@ function durationLabel(clock: string): string {
 /** The wrap-up as Markdown: for the card, and with its title for the clipboard. */
 export function wrapupMarkdown(wrap: LiveWrapup, withTitle: boolean): string {
   const section = (title: string, items: string[], prefix: string) =>
-    items.length > 0 ? `#### ${title}\n${items.map(item => `${prefix}${item}`).join('\n')}` : ''
+    items.length > 0 ? `**${title}**\n${items.map(item => `${prefix}${item}`).join('\n')}` : ''
   return [
     withTitle ? `## ${wrap.title || 'Call wrap-up'}` : '',
     section('Summary', wrap.summary, '- '),

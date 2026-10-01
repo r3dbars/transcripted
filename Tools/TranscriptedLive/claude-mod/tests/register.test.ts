@@ -233,8 +233,7 @@ describe('register', () => {
         component: 'AbovePrompt',
         props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
       } as never)
-      expect(await ui.find({ type: 'Text', text: /Recording/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /in context/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /06:50  ·  in context/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /people stop/ })).toBeDefined()
       await ui.unmount()
     }
