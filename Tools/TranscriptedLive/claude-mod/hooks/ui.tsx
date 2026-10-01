@@ -56,11 +56,19 @@ export type Prompts = {
   notes: string
 }
 
-// Loose element constructors: the surface tables differ, and only desktop has Svg.
+// Loose element constructors: the surface tables differ.
 type El = (props: Record<string, unknown>) => RenderElement
-export type Els = { Box: El; Text: El; Button: El; Markdown: El; Svg?: El }
+/** `wave` draws the animated recording mark where the surface runs client modules. */
+export type Els = {
+  Box: El
+  Text: El
+  Button: El
+  Markdown: El
+  wave?: (key: string, isLive: boolean, isTalking: boolean, color: string) => RenderElement
+}
 
 const RED = '#FF5A4E'
+const AMBER = '#E5A93B'
 
 // MARK: band
 
@@ -71,10 +79,13 @@ export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null 
     const asked = m.questions.length
     return (
       <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
-        {recordingMark(el, m.phase === 'live', m.isTalking)}
-        <Text bold>{m.phase === 'live' ? 'Recording' : 'Reconnecting'}</Text>
-        <Text dimColor>{m.clock}</Text>
-        <Text dimColor>{m.isContextOn ? '· in context' : '· context off'}</Text>
+        <Box flexShrink={0}>{recordingMark(el, 'band-wave', m.phase === 'live', m.isTalking)}</Box>
+        <Box flexShrink={0}>
+          <Text>
+            <Text bold>{m.phase === 'live' ? 'Recording' : 'Reconnecting'}</Text>
+            <Text dimColor>{`  ${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
+          </Text>
+        </Box>
         <Box flexGrow={1} flexShrink={1} marginLeft={1}>
           <Text dimColor italic wrap="truncate-end">
             {m.latest ? `“${m.latest}”` : ''}
@@ -104,39 +115,12 @@ export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null 
   return null
 }
 
-/** A pulsing dot with a small waveform that moves while someone is talking. */
-function recordingMark(el: Els, isLive: boolean, isTalking: boolean): RenderElement {
-  const { Svg, Text } = el
-  if (!Svg) return <Text color={isLive ? RED : 'yellow'}>{isLive ? (isTalking ? '●' : '○') : '◌'}</Text>
-  return (
-    <Svg
-      source={waveSvg(isLive, isTalking)}
-      alt={isLive ? (isTalking ? 'Recording, someone is talking' : 'Recording') : 'Reconnecting'}
-      width={38}
-      height={14}
-      isInteractive
-    />
-  )
-}
-
-function waveSvg(isLive: boolean, isTalking: boolean): string {
-  const color = isLive ? RED : '#E5A93B'
-  const bars = [0.45, 0.9, 0.6, 1, 0.5]
-    .map((peak, i) => {
-      const x = 14 + i * 5
-      const rest = 2
-      const tall = Math.round(peak * 12)
-      const anim = isTalking
-        ? `<animate attributeName="height" values="${rest};${tall};${rest + 2};${Math.round(tall * 0.7)};${rest}" dur="${(0.9 + i * 0.13).toFixed(2)}s" repeatCount="indefinite"/>` +
-          `<animate attributeName="y" values="${7 - rest / 2};${7 - tall / 2};${7 - (rest + 2) / 2};${7 - (tall * 0.7) / 2};${7 - rest / 2}" dur="${(0.9 + i * 0.13).toFixed(2)}s" repeatCount="indefinite"/>`
-        : ''
-      return `<rect x="${x}" y="${7 - rest / 2}" width="2.4" height="${rest}" rx="1.2" fill="${color}" opacity="${isTalking ? 0.9 : 0.35}">${anim}</rect>`
-    })
-    .join('')
-  const pulse = isLive
-    ? `<circle cx="5" cy="7" r="5" fill="${color}" opacity="0.25"><animate attributeName="r" values="3.5;6;3.5" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.35;0;0.35" dur="1.8s" repeatCount="indefinite"/></circle>`
-    : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="38" height="14" viewBox="0 0 38 14">${pulse}<circle cx="5" cy="7" r="3.5" fill="${color}"/>${bars}</svg>`
+/** A dot and a text waveform that moves while someone is talking; a plain dot where it can't animate. */
+function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean): RenderElement {
+  const color = isLive ? RED : AMBER
+  if (el.wave) return el.wave(key, isLive, isTalking, color)
+  const { Text } = el
+  return <Text color={color}>{isLive ? (isTalking ? '● ▃▅▇▅▃' : '● ▁▁▁▁▁') : '◌'}</Text>
 }
 
 // MARK: pane
@@ -169,7 +153,7 @@ function header(el: Els, m: ViewModel, title: string, meta: string, isLive: bool
         {title}
       </Text>
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {isLive ? recordingMark(el, m.phase === 'live', m.isTalking) : null}
+        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.isTalking)}</Box> : null}
         <Text dimColor wrap="truncate-end">
           {meta}
         </Text>

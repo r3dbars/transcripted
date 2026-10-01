@@ -1,4 +1,4 @@
-import type { EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On, RenderElement } from 'claude-code'
 
 import type { LiveNotes as Notes, LiveWrapup as Wrapup } from '../types'
 import * as ui from './ui'
@@ -413,7 +413,7 @@ export function register(on: On) {
     if (e.props.hasSurvey || e.surface === 'mobile') return next(e)
     const model = viewModel(s, Date.now(), await isPaneOpen($))
     if (model.phase !== 'live' && model.phase !== 'stalled' && model.phase !== 'wrapped') return next(e)
-    const drawn = ui.band(await $.ui.resolve(e) as unknown as Els, model, paneActions($, s))
+    const drawn = ui.band(await elements($, e), model, paneActions($, s))
     return drawn ?? next(e)
   })
 
@@ -421,11 +421,27 @@ export function register(on: On) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
     const model = viewModel(s, Date.now(), true)
-    return ui.pane(await $.ui.resolve(e) as unknown as Els, model, paneActions($, s), {
+    return ui.pane(await elements($, e), model, paneActions($, s), {
       answer: answerPrompt,
       ...FOLLOW_UP_PROMPTS,
     })
   })
+}
+
+/**
+ * The surface's elements for ui.tsx, plus the animated recording mark where the
+ * surface runs client modules (terminal and desktop). The `Client` is built here
+ * because the engine reads a client module's path off the hooks module itself.
+ */
+async function elements($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]): Promise<Els> {
+  const table = (await $.ui.resolve(e)) as unknown as Record<string, ((props: Record<string, unknown>) => RenderElement) | undefined>
+  const Client = table.Client
+  const els = table as unknown as Els
+  if (!Client) return els
+  return {
+    ...els,
+    wave: (key, isLive, isTalking, color) => <Client key={key} module="./wave.tsx" props={{ isLive, isTalking, color }} />,
+  }
 }
 
 /** What the band's and the pane's buttons do. */
