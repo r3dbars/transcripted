@@ -108,6 +108,8 @@ type LiveState = {
   stopArmedUntil: number
   /** Transcripted said it takes meeting control over its companion socket. */
   canStop: boolean
+  /** The meeting whose "wrap-up ready" line the person closed. */
+  dismissedWrapFor: string
   /** The session the person just confirmed stopping; lets exactly that one stop_meeting call through. */
   personStopFor: string
 }
@@ -237,6 +239,7 @@ export function register(on: On) {
     stopArmedUntil: 0,
     canStop: false,
     personStopFor: '',
+    dismissedWrapFor: '',
   }
 
   on('session.start', async ($, e, next) => {
@@ -535,6 +538,10 @@ function paneActions($: EngineInterface, s: LiveState): Actions {
       $.ui.invalidate('ui.render')
       void stopRecording($, s)
     },
+    dismiss: () => {
+      s.dismissedWrapFor = s.session?.meetingId ?? ''
+      $.ui.invalidate('ui.render')
+    },
     togglePane: () => {
       void (async () => {
         const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID)
@@ -625,6 +632,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     tab: s.isHelperOn ? s.tab : 'transcript',
     isPaneOpen: isOpen,
     pending: new Set(s.pendingAsks.keys()),
+    isWrapDismissed: (!!meetingId && s.dismissedWrapFor === meetingId) || !endedRecently(s, now),
     isStopArmed: s.stopState === 'armed' && now <= s.stopArmedUntil,
     isStopping: s.stopState === 'stopping',
   }

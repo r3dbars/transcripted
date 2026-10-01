@@ -42,6 +42,8 @@ export type ViewModel = {
   isPaneOpen: boolean
   /** Prompts sent from a button that Claude has not answered yet. */
   pending: ReadonlySet<string>
+  /** The person closed the "wrap-up ready" line, or it has been up 30 minutes. */
+  isWrapDismissed: boolean
   /** Stop is pressed once and waits for the second press. */
   isStopArmed: boolean
   /** A stop was sent and the call is winding down. */
@@ -55,6 +57,8 @@ export type Actions = {
   togglePane: () => void
   /** First press arms it, a second within a few seconds stops the recording. */
   stop: () => void
+  /** Hides the "wrap-up ready" line for this call. */
+  dismiss: () => void
 }
 
 export type Prompts = {
@@ -108,7 +112,7 @@ export function band(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Ren
       </Box>
     )
   }
-  if (m.phase === 'wrapped' && m.wrap) {
+  if (m.phase === 'wrapped' && m.wrap && !m.isWrapDismissed) {
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
         <Box flexShrink={0}>
@@ -121,6 +125,7 @@ export function band(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Ren
           <Text wrap="truncate-end">{m.wrap.title}</Text>
         </Box>
         {notesButton(el, m, act)}
+        <Button key="band-dismiss" plain label="×" onPress={act.dismiss} />
       </Box>
     )
   }

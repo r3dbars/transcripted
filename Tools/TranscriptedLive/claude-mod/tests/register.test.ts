@@ -376,6 +376,31 @@ describe('register', () => {
     expect(submitted.filter(text => text.includes('checklist')).length).toBe(1)
     expect(submitted.filter(text => text.includes('follow-up email')).length).toBe(1)
     await ui.unmount()
+
+    const band = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+    } as never)
+    expect(await band.find({ type: 'Text', text: /Wrap-up ready/ })).toBeDefined()
+    await band.press({ key: 'band-dismiss' } as never)
+    await band.unmount()
+    // Dismissed, the mod draws no band at all (it hands the slot back to Claude Code).
+    let drewBand = true
+    try {
+      const after = await $.ui.mount({
+        plugin: 'transcripted-live',
+        surface: 'desktop',
+        component: 'AbovePrompt',
+        props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+      } as never)
+      drewBand = (await after.find({ type: 'Text', text: /Wrap-up ready/ })) !== undefined
+      await after.unmount()
+    } catch {
+      drewBand = false
+    }
+    expect(drewBand).toBe(false)
   })
 
   test('renaming a speaker in Transcripted redoes the wrap-up: owners by name, next actions, pane titled', async ($, on) => {
