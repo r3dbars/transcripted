@@ -67,7 +67,8 @@ export type Prompts = {
 
 // Loose element constructors: the surface tables differ.
 type El = (props: Record<string, unknown>) => RenderElement
-export type Els = { Box: El; Text: El; Button: El; Markdown: El }
+/** `Svg` is there on the desktop (and other remote surfaces), not the terminal. */
+export type Els = { Box: El; Text: El; Button: El; Markdown: El; Svg?: El }
 
 const RED = '#FF5A4E'
 const AMBER = '#E5A93B'
@@ -274,11 +275,27 @@ function stopButton(el: Els, m: ViewModel, act: Actions, isIcon: boolean): Rende
   )
 }
 
-/** A dot and a text waveform that moves while someone is talking, flat when quiet. */
+/**
+ * A dot and a waveform that moves while someone is talking, flat when quiet.
+ * Desktop: a small vector image that animates itself (no frame, so no white
+ * box). Terminal: block-character bars the band redraws each poll.
+ */
 function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean, width = 7, frame = 0): RenderElement {
-  const { Text } = el
+  const { Text, Svg } = el
   const color = isLive ? RED : AMBER
   const showDot = width <= 12
+  if (Svg) {
+    const px = Math.max(36, Math.round(width * 7.5)) + (showDot ? 14 : 0)
+    return (
+      <Svg
+        key={key}
+        source={waveSvg(width, isLive, isTalking, showDot, px)}
+        alt={isLive ? (isTalking ? 'Recording, someone is talking' : 'Recording') : 'Reconnecting'}
+        width={px}
+        height={16}
+      />
+    )
+  }
   const dot = isLive ? '●' : '◌'
   return (
     <Text key={key}>
@@ -288,6 +305,39 @@ function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean
       </Text>
     </Text>
   )
+}
+
+/** The waveform as SVG: rounded bars that breathe while someone talks (SMIL plays in an image). */
+function waveSvg(bars: number, isLive: boolean, isTalking: boolean, showDot: boolean, px: number): string {
+  const color = isLive ? RED : AMBER
+  const h = 16
+  const mid = h / 2
+  const start = showDot ? 14 : 1
+  const step = (px - start) / bars
+  const barW = Math.max(2, Math.min(3, step * 0.55))
+  let out = ''
+  for (let i = 0; i < bars; i++) {
+    const x = (start + i * step).toFixed(1)
+    const rest = 2
+    if (!isTalking) {
+      out += `<rect x="${x}" y="${mid - rest / 2}" width="${barW}" height="${rest}" rx="${barW / 2}" fill="${color}" opacity="0.35"/>`
+      continue
+    }
+    const peak = 4 + Math.round(10 * (0.5 + 0.5 * Math.sin(i * 1.7)))
+    const dur = (0.7 + ((i * 37) % 9) * 0.07).toFixed(2)
+    const heights = [rest, peak, rest + 3, Math.round(peak * 0.6), rest].join(';')
+    const ys = [rest, peak, rest + 3, Math.round(peak * 0.6), rest].map(v => (mid - v / 2).toFixed(1)).join(';')
+    out +=
+      `<rect x="${x}" y="${mid - rest / 2}" width="${barW}" height="${rest}" rx="${barW / 2}" fill="${color}" opacity="0.9">` +
+      `<animate attributeName="height" values="${heights}" dur="${dur}s" repeatCount="indefinite"/>` +
+      `<animate attributeName="y" values="${ys}" dur="${dur}s" repeatCount="indefinite"/></rect>`
+  }
+  const dot = showDot
+    ? isLive
+      ? `<circle cx="6" cy="${mid}" r="6" fill="${color}" opacity="0.25"><animate attributeName="r" values="3.5;6.5;3.5" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.35;0;0.35" dur="1.8s" repeatCount="indefinite"/></circle><circle cx="6" cy="${mid}" r="3.5" fill="${color}"/>`
+      : `<circle cx="6" cy="${mid}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`
+    : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${h}" viewBox="0 0 ${px} ${h}">${dot}${out}</svg>`
 }
 
 const BARS = '▁▂▃▄▅▆▇█'
