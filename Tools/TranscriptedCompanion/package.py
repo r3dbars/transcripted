@@ -88,7 +88,22 @@ def main():
         assert "transcripted/.codex-plugin/plugin.json" in names
         assert "transcripted/server/transcripted-mcp" in names
         assert set(names) == {"transcripted/" + relative for relative in PACKAGE_FILES}
-    print(json.dumps({"archive": str(archive.resolve()), "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "helper_sha256": digest, "files": len(names)}, indent=2))
+    # Codex 0.154.0 and desktop 0.159.2 recognize the portable manifest but fail to discover its
+    # mcp.json servers. Keep the canonical portable archive, and generate a
+    # compatibility-only local install instead of editing installed caches.
+    local_plugin = args.output / "local" / "transcripted"
+    local_files = PACKAGE_FILES - {"plugin.json", "mcp.json"}
+    local_plugin.mkdir(parents=True, exist_ok=True)
+    for path in local_plugin.rglob("*"):
+        assert not path.is_symlink(), f"Symlink in local export: {path}"
+        if path.is_file():
+            assert path.relative_to(local_plugin).as_posix() in local_files, f"Unexpected local export file: {path.name}"
+    for relative in local_files:
+        target = local_plugin / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SOURCE / relative, target)
+    assert not (local_plugin / "plugin.json").exists(), "Local compatibility export must not contain a portable root manifest"
+    print(json.dumps({"archive": str(archive.resolve()), "local_plugin": str(local_plugin.resolve()), "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "helper_sha256": digest, "files": len(names)}, indent=2))
 
 
 if __name__ == "__main__":

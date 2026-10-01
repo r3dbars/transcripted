@@ -1,6 +1,8 @@
 # Test the Transcripted companion
 
-The private plugin (version 0.1.2) and companion-enabled Mac app are built. The plugin is installed in the local Codex plugin cache. The existing installed Transcripted app remains running; the new build has not replaced it.
+The private account plugin is version 0.1.2. The local marketplace copy is now version 0.1.3, with a compatibility packaging fix: Both Codex 0.154.0 and the desktop-bundled 0.159.2 discover its MCP server, where the portable package returned zero servers. Use the **Transcripted Local** entry for this Mac test. The account package has not received a fix for this runtime.
+
+The companion-enabled Mac app is built. Direct MCP calls verified its connection with recording and live sharing off. The actual Codex visual panel remains unverified; neither a successful native connection nor the installed skill alone proves that UI is available.
 
 [Open the private plugin](https://chatgpt.com/plugins/plugins_6abdbb6de6088191bd1ebfe05a9a7450).
 

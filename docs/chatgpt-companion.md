@@ -38,7 +38,9 @@ python3 Tools/TranscriptedCompanion/package.py --no-build
 python3 Tools/TranscriptedCompanion/test-launcher.py
 ```
 
-The source plugin is `Tools/TranscriptedCompanion/plugin/transcripted`; the archive is generated under `build/companion/Transcripted-plugin.zip`. Its launcher verifies the packaged helper's SHA-256 before starting and enables the text-only companion mode. The older MCP audio widget remains available to ordinary MCP clients but is excluded from this plugin. No connection tokens, capture files, SQLite indexes, logs, model caches, or app credentials are packaged.
+The portable source plugin is `Tools/TranscriptedCompanion/plugin/transcripted`; the archive is generated under `build/companion/Transcripted-plugin.zip`. Packaging also generates `build/companion/local/transcripted`, a compatibility-only install used by the local marketplace. Codex 0.154.0 and the desktop-bundled 0.159.2 returned no MCP servers for the portable format; the compatibility export is verified through its actual `plugin/read` API. Do not point that runtime directly at the portable source or edit its installed cache.
+
+The launcher verifies the packaged helper's SHA-256 before starting and enables the text-only companion mode. The older MCP audio widget remains available to ordinary MCP clients but is excluded from this plugin. No connection tokens, capture files, SQLite indexes, logs, model caches, or app credentials are packaged.
 
 The repository's local marketplace exposes `transcripted@transcripted-local`. Register and install it using the supported local plugin commands:
 
@@ -48,3 +50,5 @@ codex plugin add transcripted@transcripted-local
 ```
 
 After updating source, regenerate the package and reinstall the plugin to refresh its cached helper. A new conversation or desktop restart may be needed before newly added tools are discovered.
+
+Run `python3 Tools/TranscriptedCompanion/test-discovery.py` to check discovery with the installed Codex runtime. Server discovery and valid UI metadata do not prove that a particular host renders MCP Apps. The sidebar/panel integration still requires a compatible host and visual verification.

@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "transcripted",
-      "source": { "source": "local", "path": "./Tools/TranscriptedCompanion/plugin/transcripted" },
+      "source": { "source": "local", "path": "./build/companion/local/transcripted" },
       "interface": { "displayName": "Transcripted" }
     }
   ]
