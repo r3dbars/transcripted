@@ -1,4 +1,4 @@
-import type { EngineInterface, On, RenderElement } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 
 import type { LiveNotes as Notes, LiveWrapup as Wrapup } from '../types'
 import * as ui from './ui'
@@ -105,6 +105,8 @@ type LiveState = {
   shownTitle: string
   /** Which band look is in use (`/meeting style`). */
   bandStyle: BandStyle
+  /** The waveform's animation step: advances each poll while someone is talking. */
+  frame: number
   /** The Stop button: idle, pressed once (until `stopArmedUntil`), or a stop sent. */
   stopState: 'idle' | 'armed' | 'stopping'
   stopArmedUntil: number
@@ -238,6 +240,7 @@ export function register(on: On) {
     tab: 'notes',
     shownTitle: PANE_TITLE,
     bandStyle: 3,
+    frame: 0,
     stopState: 'idle',
     stopArmedUntil: 0,
     canStop: false,
@@ -471,22 +474,9 @@ export function register(on: On) {
   })
 }
 
-/**
- * The surface's elements for ui.tsx, plus the animated recording mark where the
- * surface runs client modules (terminal and desktop). The `Client` is built here
- * because the engine reads a client module's path off the hooks module itself.
- */
+/** The surface's elements, typed loosely for ui.tsx. */
 async function elements($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]): Promise<Els> {
-  const table = (await $.ui.resolve(e)) as unknown as Record<string, ((props: Record<string, unknown>) => RenderElement) | undefined>
-  const Client = table.Client
-  const els = table as unknown as Els
-  if (!Client) return els
-  return {
-    ...els,
-    wave: (key, isLive, isTalking, color, width) => (
-      <Client key={key} module="./wave.tsx" props={{ isLive, isTalking, color, width: width ?? 7, isDotHidden: (width ?? 7) > 12 }} />
-    ),
-  }
+  return (await $.ui.resolve(e)) as unknown as Els
 }
 
 /**
@@ -644,6 +634,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     isContextOn: s.isAutoContext,
     isHelperOn: s.isHelperOn,
     isTalking: partials.length > 0,
+    frame: s.frame,
     title: (wrap?.title || notes?.title || '').trim(),
     gist: notes?.gist ?? '',
     questions: s.isHelperOn ? (notes?.questions ?? []) : [],
@@ -742,7 +733,12 @@ async function pollOnce($: EngineInterface, s: LiveState) {
       s.shownTitle = title
     }
 
+    // The waveform moves only while someone is mid-sentence: a new frame each poll.
+    const isTalking = !!(s.session?.partial?.you?.trim() || s.session?.partial?.them?.trim())
+    if (isTalking && isLive(s, now)) s.frame += 1
+
     const renderKey = JSON.stringify([
+      isTalking && isLive(s, now) ? s.frame : -1,
       s.session?.state,
       meetingId,
       Math.floor(s.session?.audioSeconds ?? 0),

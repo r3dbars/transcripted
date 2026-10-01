@@ -27,6 +27,8 @@ export type ViewModel = {
   isHelperOn: boolean
   /** Someone is mid-sentence right now (drives the waveform). */
   isTalking: boolean
+  /** Advances while someone talks; the waveform's animation step. */
+  frame: number
   title: string
   gist: string
   questions: string[]
@@ -65,14 +67,7 @@ export type Prompts = {
 
 // Loose element constructors: the surface tables differ.
 type El = (props: Record<string, unknown>) => RenderElement
-/** `wave` draws the animated recording mark where the surface runs client modules. */
-export type Els = {
-  Box: El
-  Text: El
-  Button: El
-  Markdown: El
-  wave?: (key: string, isLive: boolean, isTalking: boolean, color: string, width?: number) => RenderElement
-}
+export type Els = { Box: El; Text: El; Button: El; Markdown: El }
 
 const RED = '#FF5A4E'
 const AMBER = '#E5A93B'
@@ -114,7 +109,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
   if (m.phase !== 'live' && m.phase !== 'stalled') return null
 
   const isLive = m.phase === 'live'
-  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.isTalking)}</Box>
+  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.isTalking, 7, m.frame)}</Box>
   const dot = (
     <Box flexShrink={0}>
       <Text color={isLive ? RED : AMBER}>{isLive ? '●' : '◌'}</Text>
@@ -226,7 +221,7 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
     case 7:
       return row([
         <Box flexGrow={1} flexShrink={1}>
-          {recordingMark(el, 'band-wave-wide', isLive, m.isTalking, 32)}
+          {recordingMark(el, 'band-wave-wide', isLive, m.isTalking, 32, m.frame)}
         </Box>,
         time,
         toggle(el, m, act, true),
@@ -279,12 +274,36 @@ function stopButton(el: Els, m: ViewModel, act: Actions, isIcon: boolean): Rende
   )
 }
 
-/** A dot and a text waveform that moves while someone is talking; a plain dot where it can't animate. */
-function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean, width?: number): RenderElement {
-  const color = isLive ? RED : AMBER
-  if (el.wave) return el.wave(key, isLive, isTalking, color, width)
+/** A dot and a text waveform that moves while someone is talking, flat when quiet. */
+function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean, width = 7, frame = 0): RenderElement {
   const { Text } = el
-  return <Text color={color}>{isLive ? (isTalking ? '● ▃▅▇▅▃' : '● ▁▁▁▁▁') : '◌'}</Text>
+  const color = isLive ? RED : AMBER
+  const showDot = width <= 12
+  const dot = isLive ? '●' : '◌'
+  return (
+    <Text key={key}>
+      {showDot ? <Text color={color}>{`${dot} `}</Text> : null}
+      <Text color={color} dimColor={!isTalking}>
+        {waveform(width, isTalking ? frame : -1)}
+      </Text>
+    </Text>
+  )
+}
+
+const BARS = '▁▂▃▄▅▆▇█'
+
+/** Block-character bars; two sines per bar so it never looks like a loop. Flat when `frame` is -1. */
+export function waveform(width: number, frame: number): string {
+  let out = ''
+  for (let i = 0; i < width; i++) {
+    if (frame < 0) {
+      out += BARS[0]
+      continue
+    }
+    const level = 0.5 + 0.3 * Math.sin(frame * 1.1 + i * 1.3) + 0.2 * Math.sin(frame * 0.47 + i * 2.1)
+    out += BARS[Math.max(0, Math.min(BARS.length - 1, Math.round(level * (BARS.length - 1))))]
+  }
+  return out
 }
 
 // MARK: pane
@@ -317,7 +336,7 @@ function header(el: Els, m: ViewModel, title: string, meta: string, isLive: bool
         {title}
       </Text>
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.isTalking)}</Box> : null}
+        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.isTalking, 7, m.frame)}</Box> : null}
         <Text dimColor wrap="truncate-end">
           {meta}
         </Text>
