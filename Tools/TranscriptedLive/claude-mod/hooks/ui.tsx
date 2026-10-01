@@ -48,6 +48,7 @@ export type Actions = {
   ask: (prompt: string) => void
   setTab: (tab: Tab) => void
   openPane: () => void
+  togglePane: () => void
 }
 
 export type Prompts = {
@@ -70,47 +71,175 @@ const AMBER = '#E5A93B'
 
 // MARK: band
 
-/** One quiet line above the prompt while a call is live, or just wrapped up. */
-export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null {
+/** The band's looks, picked with `/meeting style 1-6`. */
+export const BAND_STYLES = [
+  { id: 1, name: 'Dot', about: 'just a recording dot, the time and the notes toggle' },
+  { id: 2, name: 'Pill', about: 'waveform, "Recording", the time and the toggle' },
+  { id: 3, name: 'Ticker', about: 'waveform and time, then the last thing said scrolling by' },
+  { id: 4, name: 'Captions', about: 'a small status line over live captions of what is being said' },
+  { id: 5, name: 'Coach', about: 'whatever was just asked of you, with a Draft answer button' },
+  { id: 6, name: 'Topic', about: 'the call\'s name and what is being discussed right now' },
+] as const
+export type BandStyle = (typeof BAND_STYLES)[number]['id']
+
+/** The band above the prompt while a call is live, or just wrapped up. */
+export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prompts: Prompts): RenderElement | null {
   const { Box, Text, Button } = el
-  if (m.phase === 'live' || m.phase === 'stalled') {
-    const asked = m.questions.length
-    return (
-      <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
-        <Box flexShrink={0}>{recordingMark(el, 'band-wave', m.phase === 'live', m.isTalking)}</Box>
-        <Box flexShrink={0}>
-          <Text>
-            <Text bold>{m.phase === 'live' ? 'Recording' : 'Reconnecting'}</Text>
-            <Text dimColor>{`  ${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
-          </Text>
-        </Box>
-        <Box flexGrow={1} flexShrink={1} marginLeft={1}>
-          <Text dimColor italic wrap="truncate-end">
-            {m.latest ? `“${m.latest}”` : ''}
-          </Text>
-        </Box>
-        {asked > 0 ? (
-          <Button key="band-asked" plain label={`${asked} asked of you`} onPress={act.openPane} />
-        ) : null}
-        {!m.isPaneOpen ? <Button key="band-notes" plain label="Notes ›" onPress={act.openPane} /> : null}
-      </Box>
-    )
-  }
-  if (m.phase === 'wrapped' && m.wrap && !m.isPaneOpen) {
+  if (m.phase === 'wrapped' && m.wrap) {
+    if (m.isPaneOpen) return null
     return (
       <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
         <Text color="green">✓</Text>
-        <Text bold>Wrap-up ready</Text>
+        <Box flexShrink={0}>
+          <Text bold>Wrap-up ready</Text>
+        </Box>
         <Box flexGrow={1} flexShrink={1}>
           <Text dimColor wrap="truncate-end">
             {m.wrap.title}
           </Text>
         </Box>
-        <Button key="band-open" plain label="Open ›" onPress={act.openPane} />
+        {toggle(el, m, act, style === 1)}
       </Box>
     )
   }
-  return null
+  if (m.phase !== 'live' && m.phase !== 'stalled') return null
+
+  const isLive = m.phase === 'live'
+  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.isTalking)}</Box>
+  const dot = (
+    <Box flexShrink={0}>
+      <Text color={isLive ? RED : AMBER}>{isLive ? '●' : '◌'}</Text>
+    </Box>
+  )
+  const time = (
+    <Box flexShrink={0}>
+      <Text dimColor>{m.clock}</Text>
+    </Box>
+  )
+  const grow = (child: RenderElement | null) => (
+    <Box flexGrow={1} flexShrink={1}>
+      {child}
+    </Box>
+  )
+  const asked = m.questions.length
+  const askedChip =
+    asked > 0 ? <Button key="band-asked" plain label={`${asked} asked`} onPress={act.openPane} /> : null
+  const row = (children: (RenderElement | null)[]) => (
+    <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
+      {children}
+    </Box>
+  )
+
+  switch (style) {
+    case 1:
+      return row([dot, time, grow(null), askedChip, toggle(el, m, act, true)])
+    case 2:
+      return row([
+        mark,
+        <Box flexShrink={0}>
+          <Text bold>{isLive ? 'Recording' : 'Reconnecting'}</Text>
+        </Box>,
+        time,
+        grow(m.isContextOn ? null : <Text color="yellow">context off</Text>),
+        askedChip,
+        toggle(el, m, act, false),
+      ])
+    case 4: {
+      const caption = m.partials[0] ?? (m.lines.at(-1) ? { who: m.lines.at(-1)?.who ?? '', text: m.lines.at(-1)?.text ?? '' } : null)
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            {mark}
+            {time}
+            <Box flexShrink={0}>
+              <Text dimColor>{m.isContextOn ? '· Claude is listening' : '· context off'}</Text>
+            </Box>
+            {grow(null)}
+            {askedChip}
+            {toggle(el, m, act, false)}
+          </Box>
+          <Text wrap="truncate-start" italic={!!m.partials[0]} dimColor={!caption}>
+            {caption ? `${caption.who}: ${caption.text}${m.partials[0] ? '…' : ''}` : 'Listening…'}
+          </Text>
+        </Box>
+      )
+    }
+    case 5: {
+      const question = m.questions.at(-1)
+      if (!question) {
+        return row([
+          mark,
+          time,
+          grow(
+            <Text dimColor wrap="truncate-end">
+              {m.gist ? `Now: ${m.gist}` : 'Nothing asked of you yet'}
+            </Text>,
+          ),
+          toggle(el, m, act, false),
+        ])
+      }
+      const prompt = prompts.answer(question)
+      return row([
+        mark,
+        <Box flexShrink={0}>
+          <Text bold color={RED}>
+            Asked
+          </Text>
+        </Box>,
+        grow(<Text wrap="truncate-end">{`“${question}”`}</Text>),
+        <Button
+          key="band-draft"
+          label={m.pending.has(prompt) ? 'Drafting…' : 'Draft answer'}
+          variant="primary"
+          dimColor={m.pending.has(prompt)}
+          onPress={() => act.ask(prompt)}
+        />,
+        toggle(el, m, act, true),
+      ])
+    }
+    case 6:
+      return row([
+        mark,
+        time,
+        <Box flexShrink={1}>
+          <Text bold wrap="truncate-end">
+            {m.title || 'Live call'}
+          </Text>
+        </Box>,
+        grow(
+          <Text dimColor wrap="truncate-end">
+            {m.gist ? `— ${m.gist}` : ''}
+          </Text>,
+        ),
+        askedChip,
+        toggle(el, m, act, false),
+      ])
+    case 3:
+    default:
+      return row([
+        mark,
+        <Box flexShrink={0}>
+          <Text>
+            <Text bold>{isLive ? 'Recording' : 'Reconnecting'}</Text>
+            <Text dimColor>{`  ${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
+          </Text>
+        </Box>,
+        <Box flexGrow={1} flexShrink={1} marginLeft={1}>
+          <Text dimColor italic wrap="truncate-end">
+            {m.latest ? `“${m.latest}”` : ''}
+          </Text>
+        </Box>,
+        askedChip,
+        toggle(el, m, act, false),
+      ])
+  }
+}
+
+/** Shows or hides the notes sidebar; an icon in the minimal styles, words elsewhere. */
+function toggle(el: Els, m: ViewModel, act: Actions, isIcon: boolean): RenderElement {
+  const { Button } = el
+  const label = isIcon ? (m.isPaneOpen ? '◨' : '◧') : m.isPaneOpen ? 'Hide notes' : 'Show notes'
+  return <Button key="band-toggle" plain label={label} onPress={act.togglePane} />
 }
 
 /** A dot and a text waveform that moves while someone is talking; a plain dot where it can't animate. */
@@ -332,11 +461,6 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions): RenderEl
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       <Text color="green">✓ Wrap-up</Text>
       {header(el, m, wrap.title || 'Call wrap-up', meta, false)}
-      {wrap.overview ? (
-        <Box marginTop={1}>
-          <Text wrap="wrap">{wrap.overview}</Text>
-        </Box>
-      ) : null}
       <Box marginTop={1}>
         <Markdown key="wrap-md" text={markdown} />
       </Box>
@@ -402,7 +526,6 @@ export function wrapupMarkdown(wrap: LiveWrapup, withTitle: boolean): string {
     items.length > 0 ? `#### ${title}\n${items.map(item => `${prefix}${item}`).join('\n')}` : ''
   return [
     withTitle ? `## ${wrap.title || 'Call wrap-up'}` : '',
-    withTitle && wrap.overview ? wrap.overview : '',
     section('Summary', wrap.summary, '- '),
     section('Decisions', wrap.decisions, '- '),
     section('Still open', wrap.openQuestions, '- '),

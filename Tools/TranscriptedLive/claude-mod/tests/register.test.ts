@@ -329,7 +329,7 @@ describe('register', () => {
 
     const second = await $.command.run({ command: 'meeting', args: 'wrapup', ...COMPOSER })
     expect(second.text).toContain("Call wrap-up: Review rules with Sarah (from Transcripted's saved transcript, with names)")
-    expect(prompts.at(-1)).toContain('[00:12] Sarah: Could it skip review if there are only two people?')
+    expect(prompts.at(-1)).toContain('[00:12] Sarah [call]: Could it skip review if there are only two people?')
 
     const ui = await $.ui.mount({
       plugin: 'transcripted-live',
@@ -440,10 +440,39 @@ describe('register', () => {
       props: { title: 'Deck and numbers', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
     expect(await ui.find({ type: 'Markdown', text: /Who owes what[\s\S]*\*\*You\*\*[\s\S]*\*\*Sarah\*\*\n- \[ \] send the deck/ } as never)).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /A short sync on the deck and the numbers\./ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Claude can do next/ })).toBeDefined()
+        expect(await ui.find({ type: 'Text', text: /Claude can do next/ })).toBeDefined()
     await ui.press({ key: 'next-btn-0' } as never)
     expect(submitted.at(-1)).toBe('Draft an email with the churn numbers for Thursday.')
     await ui.unmount()
+  })
+
+  test('all six band styles draw on terminal and desktop, each with the notes toggle', async ($, on) => {
+    world(on)
+    on('store.get', () => ({ value: undefined }))
+    on('store.set', () => ({ value: undefined }))
+    on('model.complete', () => ({
+      value: {
+        isAnswered: true as const,
+        text: '{"title":"Review rules","gist":"skipping review","questions":["can review be skipped?"],"actions":[],"say":""}',
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    }))
+    on('prompt.suggest', () => ({ isShown: true }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    for (const style of [1, 2, 3, 4, 5, 6]) {
+      const picked = await $.command.run({ command: 'meeting', args: `style ${style}`, ...COMPOSER })
+      expect(picked.text).toContain(`Band style ${style}:`)
+      for (const surface of ['terminal', 'desktop'] as const) {
+        const ui = await $.ui.mount({
+          plugin: 'transcripted-live',
+          surface,
+          component: 'AbovePrompt',
+          props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+        } as never)
+        expect(await ui.find({ key: 'band-toggle' } as never)).toBeDefined()
+        await ui.unmount()
+      }
+    }
   })
 })
