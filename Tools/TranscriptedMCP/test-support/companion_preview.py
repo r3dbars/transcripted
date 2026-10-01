@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", required=True)
 parser.add_argument("--port", type=int, default=8767)
+parser.add_argument("--long-transcript", action="store_true", help="Invented overflow text for reader-scroll checks")
 options = parser.parse_args()
 binary = Path(options.binary).resolve(strict=True)
 root = Path(tempfile.mkdtemp(prefix="tc-preview-", dir="/private/tmp"))
@@ -104,6 +105,10 @@ def native_call(request):
                     return failed("permission_denied")
                 native["live_read_count"] += 1
                 texts = ["This is synthetic live text, not a real recording.", "We decided to keep the sample pilot small.", "The sample owner will invite three volunteers."]
+                if options.long_transcript:
+                    texts = [f"Sample passage {number + 1}. " + texts[number % len(texts)] * 4 for number in range(20)]
+                    if not native["segments"]:
+                        native["segments"] = [{"sequence": index + 1, "start_seconds": index * 12, "end_seconds": index * 12 + 7, "source": "microphone" if index % 2 == 0 else "system", "text": text, "provisional": True} for index, text in enumerate(texts)]
                 if len(native["segments"]) < len(texts):
                     index = len(native["segments"])
                     native["segments"].append({"sequence": index + 1, "start_seconds": index * 12, "end_seconds": index * 12 + 7,
