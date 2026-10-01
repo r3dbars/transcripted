@@ -227,7 +227,8 @@ describe('register', () => {
         props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
       } as never)
       expect(await ui.find({ type: 'Text', text: /Recording/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /Claude has the call/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /in context/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /people stop/ })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -262,9 +263,9 @@ describe('register', () => {
       requestId: 'live-meeting',
       props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
-    expect(await ui.find({ type: 'Text', text: /ASKED OF YOU/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Asked of you/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /can review be skipped for two people\?/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /review rules/ })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: /review rules/ } as never)).toBeDefined()
     await ui.press({ key: 'q0' } as never)
     expect(submitted.at(-1)).toContain('I was just asked: "can review be skipped for two people?"')
     await ui.unmount()
@@ -331,7 +332,7 @@ describe('register', () => {
       props: { title: 'Live meeting', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
     expect(await ui.find({ type: 'Text', text: /Sarah, You/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /ACTION ITEMS/ })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: /- \[ \] You: send the numbers by Thursday/ } as never)).toBeDefined()
     expect(await ui.find({ key: 'email' } as never)).toBeDefined()
     await ui.unmount()
   })

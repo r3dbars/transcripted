@@ -1,6 +1,8 @@
 import type { EngineInterface, On } from 'claude-code'
 
 import type { LiveNotes as Notes, LiveWrapup as Wrapup } from '../types'
+import * as ui from './ui'
+import type { Actions, Els, Phase, Tab, TranscriptLine, ViewModel } from './ui'
 
 /**
  * transcripted-live: the meeting Transcripted is recording, live in Claude Code.
@@ -97,6 +99,8 @@ type LiveState = {
   helperBinary: string
   /** Prompts this mod submitted that have not had their turn yet, so a repeat press waits. */
   pendingAsks: Map<string, number>
+  /** The pane's tab while a call is live. */
+  tab: Tab
 }
 
 const PANE_ID = 'live-meeting'
@@ -127,8 +131,6 @@ const SAVED_SCAN_MS = 5_000
 const SAVED_MATCH_SECONDS = 20
 /** The saved transcript the wrap-up reads, at most (head and tail kept). */
 const WRAP_MAX_CHARS = 60_000
-/** Transcript lines the dashboard keeps under its sections. */
-const TRANSCRIPT_TAIL = 12
 /** Session values that survive a hot reload of this module. */
 const SENT_REF = { plugin: 'transcripted-live', key: 'sentUpTo' } as const
 const NOTES_REF = { plugin: 'transcripted-live', key: 'notes' } as const
@@ -147,8 +149,6 @@ const HELPER_RESTART_MS = 5_000
 const HELPER_YIELD_MS = 30_000
 /** Prompt origins that are the person talking to Claude (or this mod on their behalf). */
 const CONTEXT_ORIGINS = new Set(['composer', 'sdk', 'bridge', 'unclassified', 'plugin'])
-/** "04:09 them " — the label column the text hangs beside. */
-const LABEL_WIDTH = 11
 /** A pause this long repeats the speaker label even when the speaker did not change. */
 const TURN_GAP_SECONDS = 60
 
@@ -222,6 +222,7 @@ export function register(on: On) {
     nextHelperStartMs: -Infinity,
     helperBinary: '',
     pendingAsks: new Map(),
+    tab: 'notes',
   }
 
   on('session.start', async ($, e, next) => {
@@ -407,209 +408,105 @@ export function register(on: On) {
     return { result: forModel(s, pick(s, minutes), minutes) + notes }
   })
 
-  // One line above the prompt while a call is live: that it is recording, and
-  // whether Claude is getting it. The quickest "is this on?" check on any surface.
+  // The band above the prompt: recording, the last thing said, what is asked of you.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.surface === 'mobile') return next(e)
-    const now = Date.now()
-    const session = s.session
-    if (!session || !(isLive(s, now) || isStalled(s, now))) return next(e)
-    const { Box, Text } = await $.ui.resolve(e)
-    const live = isLive(s, now)
-    const context = s.isAutoContext ? 'Claude has the call' : 'Claude has no live context (/meeting auto on)'
-    const helperNotes = s.isHelperOn && s.notes?.meetingId === session.meetingId ? s.notes : null
-    const asked = helperNotes?.questions.length ?? 0
-    const notes = asked > 0 ? `  ·  ${asked} asked of you` : ''
-    return (
-      <Box flexDirection="row" paddingX={1}>
-        <Text color={live ? 'red' : 'yellow'} bold>
-          {live ? '● Recording' : '◌ Stalled'}
-        </Text>
-        <Text dimColor>{`  ${clock(session.audioSeconds)}  ·  `}</Text>
-        <Text color={s.isAutoContext ? 'green' : undefined} dimColor={!s.isAutoContext}>
-          {context}
-        </Text>
-        <Text dimColor>{notes}</Text>
-      </Box>
-    )
+    const model = viewModel(s, Date.now(), await isPaneOpen($))
+    if (model.phase !== 'live' && model.phase !== 'stalled' && model.phase !== 'wrapped') return next(e)
+    const drawn = ui.band(await $.ui.resolve(e) as unknown as Els, model, paneActions($, s))
+    return drawn ?? next(e)
   })
 
-  // The pane: a live dashboard while the call runs, a wrap-up card after it.
+  // The pane: live notes and transcript while the call runs, the wrap-up after it.
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
-
-    const { Box, Text, Button } = await $.ui.resolve(e)
-    const now = Date.now()
-    const session = s.session
-
-    if (!session) {
-      return (
-        <Box flexDirection="column">
-          <Text dimColor>No live transcript yet.</Text>
-          <Text dimColor wrap="wrap">
-            Run transcripted-live watch, then record a meeting in Transcripted.
-          </Text>
-        </Box>
-      )
-    }
-
-    const meetingId = session.meetingId ?? ''
-    const live = isLive(s, now)
-    const wrap = s.wrapups[meetingId]
-    const notes = s.notes && s.notes.meetingId === meetingId ? s.notes : null
-
-    const heading = (title: string, extra?: string) => (
-      <Box marginTop={1}>
-        <Text bold color="gray">
-          {title}
-        </Text>
-        {extra ? <Text dimColor>{`  ${extra}`}</Text> : null}
-      </Box>
-    )
-    const bullet = (mark: string, text: string, color?: string) => (
-      <Box flexDirection="row" alignItems="flex-start">
-        <Box width={3} flexShrink={0}>
-          <Text color={color} dimColor={!color}>
-            {mark}
-          </Text>
-        </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text wrap="wrap">{text}</Text>
-        </Box>
-      </Box>
-    )
-    const ask = (key: string, label: string, hotkey: string, prompt: string) => (
-      <Button
-        key={key}
-        label={s.pendingAsks.has(prompt) ? `${label} ✓ sent` : label}
-        hotkey={hotkey}
-        dimColor={s.pendingAsks.has(prompt)}
-        onPress={() => submitOnce($, s, prompt)}
-      />
-    )
-
-    // After the call: the wrap-up card.
-    if (!live && session.state === 'ended') {
-      if (!wrap) {
-        return (
-          <Box flexDirection="column">
-            <Text>
-              <Text dimColor>{'○ '}</Text>
-              <Text bold>Call ended</Text>
-              <Text dimColor>{`  ${clock(session.audioSeconds)} · ${countLabel(s.lines.length)}`}</Text>
-            </Text>
-            <Box marginTop={1}>
-              <Text dimColor>{s.lines.length < WRAP_MIN_LINES ? 'Too short for a wrap-up.' : 'Writing the wrap-up…'}</Text>
-            </Box>
-          </Box>
-        )
-      }
-      return (
-        <Box flexDirection="column">
-          <Text>
-            <Text color="green">{'✓ '}</Text>
-            <Text bold>{wrap.title || 'Call wrap-up'}</Text>
-            <Text dimColor>{`  ${clock(session.audioSeconds)}`}</Text>
-          </Text>
-          <Text dimColor>
-            {wrap.source === 'saved'
-              ? `From Transcripted's saved transcript${wrap.speakers.length > 0 ? ` · ${wrap.speakers.join(', ')}` : ''}`
-              : 'From the live text · names come when Transcripted saves the meeting'}
-          </Text>
-          {wrap.summary.length > 0 ? heading('SUMMARY') : null}
-          {wrap.summary.map(item => bullet('•', item))}
-          {wrap.decisions.length > 0 ? heading('DECISIONS') : null}
-          {wrap.decisions.map(item => bullet('◆', item, 'magenta'))}
-          {wrap.actions.length > 0 ? heading('ACTION ITEMS') : null}
-          {wrap.actions.map(item => bullet('☐', item, 'yellow'))}
-          {wrap.openQuestions.length > 0 ? heading('STILL OPEN') : null}
-          {wrap.openQuestions.map(item => bullet('?', item, 'cyan'))}
-          <Box marginTop={1} flexDirection="row" flexWrap="wrap" gap={1}>
-            {ask('email', 'Draft follow-up email', '1', FOLLOW_UP_PROMPTS.email)}
-            {ask('todos', 'Make my todo list', '2', FOLLOW_UP_PROMPTS.todos)}
-            {ask('notes', 'Write meeting notes', '3', FOLLOW_UP_PROMPTS.notes)}
-          </Box>
-        </Box>
-      )
-    }
-
-    // During the call: the dashboard.
-    const headline = live ? 'Live' : isStalled(s, now) ? 'Stalled' : 'Waiting'
-    const detail = [clock(session.audioSeconds), session.source === 'replay' ? 'replay' : '', s.isAutoContext ? 'Claude has the call' : 'context off']
-      .filter(Boolean)
-      .join(' · ')
-    const partials = (['them', 'you'] as const)
-      .map(speaker => [speaker, (session.partial?.[speaker] ?? '').trim()] as const)
-      .filter(([, text]) => text !== '')
-    const tail = s.lines.slice(-TRANSCRIPT_TAIL)
-    const shown = tail.map((line, index) => ({ line, hasLabel: startsTurn(line, tail[index - 1]) }))
-    const label = (line: Utterance) => (
-      <Text>
-        <Text dimColor>{`${clock(line.t)} `}</Text>
-        <Text color={line.speaker === 'you' ? 'cyan' : undefined} dimColor={line.speaker === 'them'}>
-          {line.speaker}
-        </Text>
-      </Text>
-    )
-
-    return (
-      <Box flexDirection="column">
-        <Text>
-          <Text color={live ? 'red' : undefined} dimColor={!live}>
-            {live ? '● ' : '○ '}
-          </Text>
-          <Text bold>{headline}</Text>
-          <Text dimColor>{`  ${detail}`}</Text>
-        </Text>
-
-        {heading('NOW')}
-        <Text wrap="wrap" dimColor={!notes?.gist}>
-          {notes?.gist || (s.isHelperOn ? 'Notes start after a little talk.' : 'Live helper is off (/meeting helper on).')}
-        </Text>
-
-        {notes && notes.questions.length > 0 ? heading('ASKED OF YOU', 'press a number for a draft answer') : null}
-        {(notes?.questions ?? []).map((question, index) => (
-          <Box flexDirection="row" alignItems="flex-start">
-            {ask(`q${index}`, `${index + 1}`, String(index + 1), answerPrompt(question))}
-            <Box marginLeft={1} flexGrow={1} flexShrink={1}>
-              <Text wrap="wrap">{question}</Text>
-            </Box>
-          </Box>
-        ))}
-
-        {notes && notes.actions.length > 0 ? heading('ACTION ITEMS') : null}
-        {(notes?.actions ?? []).map(item => bullet('☐', item, 'yellow'))}
-
-        {notes?.say ? heading('YOU COULD SAY') : null}
-        {notes?.say ? <Text wrap="wrap" color="green">{`“${notes.say}”`}</Text> : null}
-
-        {heading('TRANSCRIPT', s.lines.length > tail.length ? `last ${tail.length} of ${s.lines.length}` : undefined)}
-        {shown.length === 0 && partials.length === 0 ? <Text dimColor>Listening…</Text> : null}
-        {shown.map(({ line, hasLabel }, index) => (
-          <Box flexDirection="row" marginTop={hasLabel && index > 0 ? 1 : 0}>
-            <Box width={LABEL_WIDTH} flexShrink={0}>
-              {hasLabel ? label(line) : <Text> </Text>}
-            </Box>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text wrap="wrap">{readable(line.text)}</Text>
-            </Box>
-          </Box>
-        ))}
-        {partials.map(([speaker, text], index) => (
-          <Box flexDirection="row" marginTop={index === 0 && shown.length > 0 ? 1 : 0}>
-            <Box width={LABEL_WIDTH} flexShrink={0}>
-              <Text dimColor>{`   … ${speaker}`}</Text>
-            </Box>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text dimColor italic wrap="truncate-start">
-                {`${readable(text)}▍`}
-              </Text>
-            </Box>
-          </Box>
-        ))}
-      </Box>
-    )
+    const model = viewModel(s, Date.now(), true)
+    return ui.pane(await $.ui.resolve(e) as unknown as Els, model, paneActions($, s), {
+      answer: answerPrompt,
+      ...FOLLOW_UP_PROMPTS,
+    })
   })
+}
+
+/** What the band's and the pane's buttons do. */
+function paneActions($: EngineInterface, s: LiveState): Actions {
+  return {
+    ask: prompt => submitOnce($, s, prompt),
+    setTab: tab => {
+      s.tab = tab
+      $.ui.invalidate('ui.render')
+    },
+    openPane: () => {
+      s.isHidden = false
+      void $.ui.open({ id: PANE_ID, title: PANE_TITLE }).catch(() => undefined)
+    },
+    copy: text => {
+      void $.ui.copy({ text }).then(
+        result => $.ui.toast(result.isCopied ? 'Wrap-up copied' : 'Could not copy here'),
+        () => undefined,
+      )
+    },
+  }
+}
+
+/** Transcript lines the pane keeps, newest last. */
+const PANE_TRANSCRIPT_LINES = 40
+
+async function isPaneOpen($: EngineInterface): Promise<boolean> {
+  return (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE_ID && pane.isPlaced)
+}
+
+/** Everything the band and the pane draw, from the live state. */
+function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
+  const session = s.session
+  const meetingId = session?.meetingId ?? ''
+  const notes = s.notes && s.notes.meetingId === meetingId ? s.notes : null
+  const wrap = meetingId ? (s.wrapups[meetingId] ?? null) : null
+  const phase: Phase = !session
+    ? 'none'
+    : isLive(s, now)
+      ? 'live'
+      : isStalled(s, now)
+        ? 'stalled'
+        : session.state === 'ended'
+          ? wrap
+            ? 'wrapped'
+            : s.lines.length >= WRAP_MIN_LINES && endedRecently(s, now)
+              ? 'ending'
+              : 'ended'
+          : 'waiting'
+  const partials = (['them', 'you'] as const)
+    .map(speaker => ({ who: speaker === 'you' ? 'You' : 'Them', text: readable((session?.partial?.[speaker] ?? '').trim()) }))
+    .filter(partial => partial.text !== '')
+  const tail = s.lines.slice(-PANE_TRANSCRIPT_LINES)
+  const lines: TranscriptLine[] = tail.map((line, index) => ({
+    time: clock(line.t),
+    who: line.speaker === 'you' ? 'You' : 'Them',
+    text: readable(line.text),
+    isNewTurn: startsTurn(line, tail[index - 1]),
+  }))
+  const newest = partials[0]?.text || (s.lines.at(-1) ? readable(s.lines.at(-1)?.text ?? '') : '')
+  return {
+    phase,
+    clock: clock(session?.audioSeconds ?? 0),
+    isReplay: session?.source === 'replay',
+    isContextOn: s.isAutoContext,
+    isHelperOn: s.isHelperOn,
+    isTalking: partials.length > 0,
+    title: (wrap?.title || notes?.title || '').trim(),
+    gist: notes?.gist ?? '',
+    questions: s.isHelperOn ? (notes?.questions ?? []) : [],
+    actions: notes?.actions ?? [],
+    say: notes?.say ?? '',
+    lines,
+    lineCount: s.lines.length,
+    partials,
+    latest: newest,
+    wrap,
+    tab: s.isHelperOn ? s.tab : 'transcript',
+    isPaneOpen: isOpen,
+    pending: new Set(s.pendingAsks.keys()),
+  }
 }
 
 /** How long a submitted prompt blocks the same prompt, at most, if no turn completes. */
@@ -813,7 +710,8 @@ async function runHelper($: EngineInterface, s: LiveState, meetingId: string) {
     `Your previous notes: ${previous}`,
     '',
     'Update the notes. Reply with JSON only, no prose:',
-    '{"gist": "one line on what is being discussed right now",',
+    '{"title": "3 to 6 words naming what the call is about",',
+    ' "gist": "one line on what is being discussed right now",',
     ' "questions": ["questions or requests aimed at the user that they have not answered yet"],',
     ' "actions": ["decisions and action items so far, short, with who when known"],',
     ' "say": "one short thing the user could say next, or empty"}',
@@ -1083,6 +981,7 @@ function parseNotes(text: string, meetingId: string, upTo: number): Notes | null
   return {
     meetingId,
     upTo,
+    title: str(value.title),
     gist: str(value.gist),
     questions: list(value.questions, 5),
     actions: list(value.actions, 5),

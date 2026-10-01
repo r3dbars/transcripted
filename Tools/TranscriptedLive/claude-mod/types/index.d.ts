@@ -3,6 +3,8 @@ export type LiveNotes = {
   meetingId: string
   /** Audio clock of the newest line the notes cover. */
   upTo: number
+  /** A short name for the call, so the pane has a real title. */
+  title?: string
   gist: string
   questions: string[]
   actions: string[]
