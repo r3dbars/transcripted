@@ -2,7 +2,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { LiveNotes as Notes, LiveWrapup as Wrapup } from '../types'
 import * as ui from './ui'
-import type { Actions, BandStyle, Els, Phase, Tab, TranscriptLine, ViewModel } from './ui'
+import type { Actions, Els, Phase, Tab, TranscriptLine, ViewModel } from './ui'
 
 /**
  * transcripted-live: the meeting Transcripted is recording, live in Claude Code.
@@ -47,8 +47,6 @@ type Session = {
   lineCount: number
   audioSeconds: number
   partial: Partial<Record<Speaker, string>>
-  /** Per speaker, recent loudness 0...1 (0.1 s steps, newest last). */
-  levels?: Partial<Record<Speaker, number[]>>
   pid: number
 }
 
@@ -105,10 +103,6 @@ type LiveState = {
   tab: Tab
   /** The title the pane was last opened or retitled with. */
   shownTitle: string
-  /** Which band look is in use (`/meeting style`). */
-  bandStyle: BandStyle
-  /** The waveform's animation step: advances each poll while someone is talking. */
-  frame: number
   /** The Stop button: idle, pressed once (until `stopArmedUntil`), or a stop sent. */
   stopState: 'idle' | 'armed' | 'stopping'
   stopArmedUntil: number
@@ -122,7 +116,7 @@ const PANE_ID = 'live-meeting'
 const PANE_TITLE = 'Live meeting'
 const COMMAND_NAME = 'meeting'
 const TOOL_SHORT_NAME = 'read_live'
-const POLL_MS = 250
+const POLL_MS = 400
 /** A recording session whose helper stopped writing this long ago is stale. */
 const STALE_MS = 15_000
 /** How long "meeting ended" stays in the status line. */
@@ -159,8 +153,6 @@ const PERSON_ONLY_TOOLS = new Set(['start_meeting', 'stop_meeting', 'set_live_co
 const STORE_AUTO = 'autoContext'
 const STORE_HELPER = 'helper'
 const STORE_AUTOSTART = 'autostart'
-/** Versioned so the Quiet default reaches people who tried the earlier styles. */
-const STORE_BAND_STYLE = 'bandStyle.v2'
 /** The bundled transcripted MCP server, as the engine names a plugin's server. */
 const MCP_SERVER = 'plugin_transcripted-live_transcripted'
 /** How long a first press of Stop waits for the second. */
@@ -186,7 +178,6 @@ const HELP_TEXT = [
   '/meeting attach [N]   hand Claude the last N minutes now (default 5, or "all")',
   '/meeting auto on|off  send new lines with each prompt (on by default)',
   '/meeting autostart on|off  keep the transcripted-live helper running (on by default)',
-  '/meeting style [1-8|next]  pick how the band above the prompt looks (8, Quiet, is the default)',
   '/meeting helper on|off  Haiku keeps notes while the call is live (on by default)',
 ].join('\n')
 
@@ -242,8 +233,6 @@ export function register(on: On) {
     pendingAsks: new Map(),
     tab: 'notes',
     shownTitle: PANE_TITLE,
-    bandStyle: 8,
-    frame: 0,
     stopState: 'idle',
     stopArmedUntil: 0,
     canStop: false,
@@ -258,8 +247,6 @@ export function register(on: On) {
     s.isHelperOn = (await $.store.get(STORE_HELPER).catch(() => undefined)) !== false
     s.meetingsDir = await meetingsDirectory($, home)
     s.isAutostart = (await $.store.get(STORE_AUTOSTART).catch(() => undefined)) !== false
-    const style = await $.store.get(STORE_BAND_STYLE).catch(() => undefined)
-    if (typeof style === 'number' && ui.BAND_STYLES.some(one => one.id === style)) s.bandStyle = style as BandStyle
     s.helperBinary = await findHelperBinary($)
     void probeMeetingControl($).then(canStop => {
       s.canStop = canStop
@@ -297,7 +284,7 @@ export function register(on: On) {
       .register({
         name: COMMAND_NAME,
         description: 'Live meeting from Transcripted: status, catch up, action items, what to say, notes',
-        argumentHint: '[style 1-8 | catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
+        argumentHint: '[catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
       })
       .catch(() => undefined)
 
@@ -314,18 +301,6 @@ export function register(on: On) {
     const session = s.session
 
     if (verb === 'help') return { text: HELP_TEXT }
-
-    if (verb === 'style') {
-      const list = ui.BAND_STYLES.map(one => `${one.id === s.bandStyle ? '▸' : ' '} ${one.id}  ${one.name.padEnd(9)} ${one.about}`).join('\n')
-      const count = ui.BAND_STYLES.length
-      const next = amount === 'next' ? (s.bandStyle % ui.BAND_STYLES.length) + 1 : Number(amount)
-      if (!ui.BAND_STYLES.some(one => one.id === next)) return { text: `Band styles (/meeting style 1-${count}, or next):\n${list}` }
-      s.bandStyle = next as BandStyle
-      await $.store.set(STORE_BAND_STYLE, next).catch(() => undefined)
-      $.ui.invalidate('ui.render')
-      const picked = ui.BAND_STYLES.find(one => one.id === next)
-      return { text: `Band style ${next}: ${picked?.name} — ${picked?.about}.` }
-    }
 
     if (verb === 'autostart') {
       const isOn = amount === 'on' ? true : amount === 'off' ? false : undefined
@@ -464,8 +439,8 @@ export function register(on: On) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.surface === 'mobile') return next(e)
     const model = viewModel(s, Date.now(), await isPaneOpen($))
-    if (model.phase !== 'live' && model.phase !== 'stalled' && model.phase !== 'wrapped') return next(e)
-    const drawn = ui.band(await elements($, e), model, paneActions($, s), s.bandStyle, { answer: answerPrompt })
+    if (!['live', 'stalled', 'wrapped', 'ending'].includes(model.phase)) return next(e)
+    const drawn = ui.band(await elements($, e), model, paneActions($, s))
     return drawn ?? next(e)
   })
 
@@ -592,20 +567,6 @@ function meetingWhen(meetingId: string): string {
   return `${months[Number(match[2]) - 1] ?? ''} ${Number(match[3])} · ${h12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
-/** Mic and call loudness as one meter: the louder of the two at each step, aligned at the newest. */
-function mixedLevels(levels: Partial<Record<Speaker, number[]>> | undefined): number[] {
-  const you = Array.isArray(levels?.you) ? levels.you : []
-  const them = Array.isArray(levels?.them) ? levels.them : []
-  const length = Math.max(you.length, them.length)
-  const out: number[] = []
-  for (let i = 0; i < length; i++) {
-    const a = you[you.length - length + i] ?? 0
-    const b = them[them.length - length + i] ?? 0
-    out.push(Math.max(typeof a === 'number' ? a : 0, typeof b === 'number' ? b : 0))
-  }
-  return out
-}
-
 /** Transcript lines the pane keeps, newest last. */
 const PANE_TRANSCRIPT_LINES = 40
 
@@ -651,8 +612,6 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     isContextOn: s.isAutoContext,
     isHelperOn: s.isHelperOn,
     isTalking: partials.length > 0,
-    frame: s.frame,
-    levels: mixedLevels(session?.levels),
     title: (wrap?.title || notes?.title || '').trim(),
     gist: notes?.gist ?? '',
     questions: s.isHelperOn ? (notes?.questions ?? []) : [],
@@ -667,7 +626,6 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     isPaneOpen: isOpen,
     pending: new Set(s.pendingAsks.keys()),
     isStopArmed: s.stopState === 'armed' && now <= s.stopArmedUntil,
-    canStop: s.canStop,
     isStopping: s.stopState === 'stopping',
   }
 }
@@ -751,13 +709,7 @@ async function pollOnce($: EngineInterface, s: LiveState) {
       s.shownTitle = title
     }
 
-    // The waveform moves only while someone is mid-sentence: a new frame each poll.
-    const isTalking = !!(s.session?.partial?.you?.trim() || s.session?.partial?.them?.trim())
-    if (isTalking && isLive(s, now)) s.frame += 1
-
     const renderKey = JSON.stringify([
-      isTalking && isLive(s, now) ? s.frame : -1,
-      s.session?.levels,
       s.session?.state,
       meetingId,
       Math.floor(s.session?.audioSeconds ?? 0),

@@ -222,10 +222,8 @@ describe('register', () => {
     expect(JSON.stringify(search)).toContain('ran')
   })
 
-  test('a live call shows a recording band above the prompt on terminal and desktop', async ($, on) => {
+  test('a live call shows one band above the prompt: dot, time, Notes and Stop, on terminal and desktop', async ($, on) => {
     world(on)
-    on('store.get', ($, e) => ({ value: e.key === 'bandStyle.v2' ? 3 : undefined }))
-    on('store.set', () => ({ value: undefined }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
     for (const surface of ['terminal', 'desktop'] as const) {
@@ -235,8 +233,9 @@ describe('register', () => {
         component: 'AbovePrompt',
         props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
       } as never)
-      expect(await ui.find({ type: 'Text', text: /06:50  ·  in context/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /people stop/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /06:50/ })).toBeDefined()
+      expect(JSON.stringify(await ui.find({ key: 'band-notes' } as never))).toContain('Hide notes')
+      expect(JSON.stringify(await ui.find({ key: 'band-stop' } as never))).toContain('Stop')
       await ui.unmount()
     }
   })
@@ -447,36 +446,6 @@ describe('register', () => {
     await ui.unmount()
   })
 
-  test('every band style draws on terminal and desktop, each with the notes toggle', async ($, on) => {
-    world(on)
-    on('store.get', () => ({ value: undefined }))
-    on('store.set', () => ({ value: undefined }))
-    on('model.complete', () => ({
-      value: {
-        isAnswered: true as const,
-        text: '{"title":"Review rules","gist":"skipping review","questions":["can review be skipped?"],"actions":[],"say":""}',
-        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-      },
-    }))
-    on('prompt.suggest', () => ({ isShown: true }))
-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
-    for (const style of [1, 2, 3, 4, 5, 6, 7, 8]) {
-      const picked = await $.command.run({ command: 'meeting', args: `style ${style}`, ...COMPOSER })
-      expect(picked.text).toContain(`Band style ${style}:`)
-      for (const surface of ['terminal', 'desktop'] as const) {
-        const ui = await $.ui.mount({
-          plugin: 'transcripted-live',
-          surface,
-          component: 'AbovePrompt',
-          props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
-        } as never)
-        expect(await ui.find({ key: 'band-toggle' } as never)).toBeDefined()
-        await ui.unmount()
-      }
-    }
-  })
-
   test('Stop takes two presses and stops only the current session; Claude still cannot', async ($, on) => {
     world(on)
     const calls: { tool: string; session?: unknown }[] = []
@@ -505,9 +474,8 @@ describe('register', () => {
     const ui = await $.ui.mount({
       plugin: 'transcripted-live',
       surface: 'desktop',
-      component: 'Pane',
-      requestId: 'live-meeting',
-      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
     } as never)
     await ui.press({ key: 'band-stop' } as never)
     expect(calls.some(call => call.tool.endsWith('stop_meeting') && call.session === 'S-1')).toBe(false)
@@ -516,9 +484,8 @@ describe('register', () => {
     const armed = await $.ui.mount({
       plugin: 'transcripted-live',
       surface: 'desktop',
-      component: 'Pane',
-      requestId: 'live-meeting',
-      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
     } as never)
     expect(JSON.stringify(await armed.find({ key: 'band-stop' } as never))).toContain('click again')
     await armed.press({ key: 'band-stop' } as never)

@@ -27,10 +27,6 @@ export type ViewModel = {
   isHelperOn: boolean
   /** Someone is mid-sentence right now (drives the waveform). */
   isTalking: boolean
-  /** Advances while someone talks; the terminal waveform's animation step. */
-  frame: number
-  /** Recent loudness of the call, 0...1, newest last (mic and call audio together). */
-  levels: number[]
   title: string
   gist: string
   questions: string[]
@@ -48,8 +44,6 @@ export type ViewModel = {
   pending: ReadonlySet<string>
   /** Stop is pressed once and waits for the second press. */
   isStopArmed: boolean
-  /** Transcripted takes stop requests (the companion socket is there). */
-  canStop: boolean
   /** A stop was sent and the call is winding down. */
   isStopping: boolean
 }
@@ -77,284 +71,82 @@ const AMBER = '#E5A93B'
 
 // MARK: band
 
-/** The band's looks, picked with `/meeting style 1-6`. */
-export const BAND_STYLES = [
-  { id: 1, name: 'Dot', about: 'just a recording dot, the time and the notes toggle' },
-  { id: 2, name: 'Pill', about: 'waveform, "Recording", the time and the toggle' },
-  { id: 3, name: 'Ticker', about: 'waveform and time, then the last thing said scrolling by' },
-  { id: 4, name: 'Captions', about: 'a small status line over live captions of what is being said' },
-  { id: 5, name: 'Coach', about: 'whatever was just asked of you, with a Draft answer button' },
-  { id: 6, name: 'Topic', about: 'the call\'s name and what is being discussed right now' },
-  { id: 7, name: 'Wave', about: 'only a wide waveform, the time and two icons' },
-  { id: 8, name: 'Quiet', about: 'no band while recording; it appears only when something is asked of you or the wrap-up is ready' },
-] as const
-export type BandStyle = (typeof BAND_STYLES)[number]['id']
-
-/** The band above the prompt while a call is live, or just wrapped up. */
-export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prompts: Prompts): RenderElement | null {
-  const { Box, Text, Button } = el
-  if (m.phase === 'wrapped' && m.wrap) {
-    if (m.isPaneOpen) return null
+/**
+ * The one line above the prompt: a red dot and the time while recording, with
+ * Notes (show or hide the sidebar) and Stop (two presses). After the call it
+ * says the wrap-up is ready.
+ */
+export function band(el: Els, m: ViewModel, act: Actions): RenderElement | null {
+  const { Box, Text } = el
+  const isLive = m.phase === 'live' || m.phase === 'stalled'
+  if (isLive) {
     return (
-      <Box flexDirection="row" alignItems="center" gap={1} paddingX={1}>
-        <Text color="green">✓</Text>
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        <Box flexShrink={0}>{dot(el, m.phase === 'live')}</Box>
         <Box flexShrink={0}>
-          <Text bold>Wrap-up ready</Text>
+          <Text dimColor>{m.phase === 'live' ? m.clock : `${m.clock} · reconnecting`}</Text>
         </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text dimColor wrap="truncate-end">
-            {m.wrap.title}
-          </Text>
-        </Box>
-        {toggle(el, m, act, style === 1)}
+        <Box flexGrow={1} />
+        {notesButton(el, m, act)}
+        {stopButton(el, m, act)}
       </Box>
     )
   }
-  if (m.phase !== 'live' && m.phase !== 'stalled') return null
-
-  const isLive = m.phase === 'live'
-  if (style === 8) {
-    // Quiet: the status line says it is recording; the band speaks only when asked of you.
-    const question = m.questions.at(-1)
-    if (!question) return null
-    const prompt = prompts.answer(question)
+  if (m.phase === 'wrapped' && m.wrap) {
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
         <Box flexShrink={0}>
-          <Text dimColor>Asked</Text>
+          <Text color="green">✓</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text dimColor>Wrap-up ready</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
-          <Text wrap="truncate-end">{`“${question}”`}</Text>
+          <Text wrap="truncate-end">{m.wrap.title}</Text>
         </Box>
-        <Button
-          key="band-draft"
-          plain
-          label={m.pending.has(prompt) ? 'Drafting…' : 'Draft answer'}
-          onPress={() => act.ask(prompt)}
-        />
-        {toggle(el, m, act, true)}
+        {notesButton(el, m, act)}
       </Box>
     )
   }
-  const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.levels, 10)}</Box>
-  const dot = (
-    <Box flexShrink={0}>
-      <Text color={isLive ? RED : AMBER}>{isLive ? '●' : '◌'}</Text>
-    </Box>
-  )
-  const time = (
-    <Box flexShrink={0}>
-      <Text dimColor>{m.clock}</Text>
-    </Box>
-  )
-  const grow = (child: RenderElement | null) => (
-    <Box flexGrow={1} flexShrink={1}>
-      {child}
-    </Box>
-  )
-  const asked = m.questions.length
-  const askedChip =
-    asked > 0 ? <Button key="band-asked" plain label={`${asked} asked`} onPress={act.openPane} /> : null
-  const row = (children: (RenderElement | null)[]) => (
-    <Box flexDirection="row" alignItems="center" gap={1}>
-      {children}
-    </Box>
-  )
-
-  switch (style) {
-    case 1:
-      return row([dot, time, grow(null), askedChip, toggle(el, m, act, true)])
-    case 2:
-      return row([
-        mark,
-        <Box flexShrink={0}>
-          <Text dimColor>{isLive ? 'Recording' : 'Reconnecting'}</Text>
-        </Box>,
-        time,
-        grow(m.isContextOn ? null : <Text color="yellow">context off</Text>),
-        askedChip,
-        toggle(el, m, act, false),
-      ])
-    case 4: {
-      const caption = m.partials[0] ?? (m.lines.at(-1) ? { who: m.lines.at(-1)?.who ?? '', text: m.lines.at(-1)?.text ?? '' } : null)
-      return (
-        <Box flexDirection="column" paddingX={1}>
-          <Box flexDirection="row" alignItems="center" gap={1}>
-            {mark}
-            {time}
-            <Box flexShrink={0}>
-              <Text dimColor>{m.isContextOn ? '· Claude is listening' : '· context off'}</Text>
-            </Box>
-            {grow(null)}
-            {askedChip}
-            {toggle(el, m, act, false)}
-          </Box>
-          <Text wrap="truncate-start" italic={!!m.partials[0]} dimColor={!caption}>
-            {caption ? `${caption.who}: ${caption.text}${m.partials[0] ? '…' : ''}` : 'Listening…'}
-          </Text>
+  if (m.phase === 'ending') {
+    return (
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        <Box flexGrow={1}>
+          <Text dimColor>Writing the wrap-up…</Text>
         </Box>
-      )
-    }
-    case 5: {
-      const question = m.questions.at(-1)
-      if (!question) {
-        return row([
-          mark,
-          time,
-          grow(
-            <Text dimColor wrap="truncate-end">
-              {m.gist ? `Now: ${m.gist}` : 'Nothing asked of you yet'}
-            </Text>,
-          ),
-          toggle(el, m, act, false),
-        ])
-      }
-      const prompt = prompts.answer(question)
-      return row([
-        mark,
-        <Box flexShrink={0}>
-          <Text bold color={RED}>
-            Asked
-          </Text>
-        </Box>,
-        grow(<Text wrap="truncate-end">{`“${question}”`}</Text>),
-        <Button
-          key="band-draft"
-          label={m.pending.has(prompt) ? 'Drafting…' : 'Draft answer'}
-          variant="primary"
-          dimColor={m.pending.has(prompt)}
-          onPress={() => act.ask(prompt)}
-        />,
-        toggle(el, m, act, true),
-      ])
-    }
-    case 6:
-      return row([
-        mark,
-        time,
-        <Box flexShrink={1}>
-          <Text bold wrap="truncate-end">
-            {m.title || 'Live call'}
-          </Text>
-        </Box>,
-        grow(
-          <Text dimColor wrap="truncate-end">
-            {m.gist ? `— ${m.gist}` : ''}
-          </Text>,
-        ),
-        askedChip,
-        toggle(el, m, act, false),
-      ])
-    case 7:
-      return row([
-        <Box flexGrow={1} flexShrink={1}>
-          {recordingMark(el, 'band-wave-wide', isLive, m.levels, 40)}
-        </Box>,
-        time,
-        toggle(el, m, act, true),
-      ])
-    case 3:
-    default:
-      return row([
-        mark,
-        <Box flexShrink={0}>
-          <Text>
-            <Text dimColor>{`${m.clock}  ·  ${m.isContextOn ? 'in context' : 'context off'}`}</Text>
-          </Text>
-        </Box>,
-        <Box flexGrow={1} flexShrink={1} marginLeft={1}>
-          <Text dimColor italic wrap="truncate-end">
-            {m.latest ? `“${m.latest}”` : ''}
-          </Text>
-        </Box>,
-        askedChip,
-        toggle(el, m, act, false),
-      ])
+        {notesButton(el, m, act)}
+      </Box>
+    )
   }
+  return null
 }
 
-/**
- * The band's controls: show or hide the notes sidebar, and stop the recording
- * (while live, where Transcripted takes it). Icons in the minimal styles.
- */
-function toggle(el: Els, m: ViewModel, act: Actions, isIcon: boolean): RenderElement {
-  const { Box, Button } = el
-  const label = isIcon ? (m.isPaneOpen ? '◨' : '◧') : m.isPaneOpen ? 'Hide notes' : 'Show notes'
-  const isLive = m.phase === 'live' || m.phase === 'stalled'
-  return (
-    <Box flexDirection="row" flexShrink={0} gap={1}>
-      <Button key="band-toggle" plain label={label} onPress={act.togglePane} />
-      {isLive && m.canStop ? stopButton(el, m, act, isIcon) : null}
-    </Box>
-  )
+/** The recording dot: softly pulsing on the desktop, a plain dot in the terminal. */
+function dot(el: Els, isLive: boolean): RenderElement {
+  const { Svg, Text } = el
+  const color = isLive ? RED : AMBER
+  if (!Svg) return <Text color={color}>{isLive ? '●' : '◌'}</Text>
+  const source = isLive
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.5" fill="${color}" opacity="0.2"><animate attributeName="r" values="3;5.5;3" dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.35;0;0.35" dur="2s" repeatCount="indefinite"/></circle><circle cx="6" cy="6" r="3.2" fill="${color}"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="3" fill="none" stroke="${color}" stroke-width="1.3"/></svg>`
+  return <Svg key="band-dot" source={source} alt={isLive ? 'Recording' : 'Reconnecting'} width={12} height={12} />
 }
 
-function stopButton(el: Els, m: ViewModel, act: Actions, isIcon: boolean): RenderElement {
+function notesButton(el: Els, m: ViewModel, act: Actions): RenderElement {
   const { Button } = el
-  const label = m.isStopping ? (isIcon ? '…' : 'Stopping…') : m.isStopArmed ? 'Stop? click again' : isIcon ? '■' : '■ Stop'
+  return <Button key="band-notes" plain label={m.isPaneOpen ? 'Hide notes' : 'Notes'} onPress={act.togglePane} />
+}
+
+function stopButton(el: Els, m: ViewModel, act: Actions): RenderElement {
+  const { Button } = el
+  if (m.isStopping) return <Button key="band-stop" plain label="Stopping…" onPress={() => undefined} />
   // `plain` is true or absent, never false: the armed state drops it for the primary look.
   return m.isStopArmed ? (
-    <Button key="band-stop" variant="primary" label={label} onPress={act.stop} />
+    <Button key="band-stop" variant="primary" label="Stop? click again" onPress={act.stop} />
   ) : (
-    <Button key="band-stop" plain label={label} onPress={act.stop} />
+    <Button key="band-stop" plain label="Stop" onPress={act.stop} />
   )
 }
-
-/**
- * A dot and a level meter drawn from the real loudness of the call: bars scroll
- * in from the right as people talk and sink when it is quiet. Desktop draws it
- * as a small vector image; the terminal as block characters.
- */
-function recordingMark(el: Els, key: string, isLive: boolean, levels: number[], width = 7): RenderElement {
-  const { Text, Svg } = el
-  const color = isLive ? RED : AMBER
-  const showDot = width <= 12
-  const recent = fit(levels, width)
-  if (Svg) {
-    const px = Math.max(28, Math.round(width * 5)) + (showDot ? 10 : 0)
-    return <Svg key={key} source={meterSvg(recent, isLive, showDot, px)} alt={isLive ? 'Recording' : 'Reconnecting'} width={px} height={12} />
-  }
-  return (
-    <Text key={key}>
-      {showDot ? <Text color={color}>{isLive ? '● ' : '◌ '}</Text> : null}
-      <Text color={color} dimColor>
-        {recent.map(level => BARS[Math.max(0, Math.min(BARS.length - 1, Math.round(level * (BARS.length - 1))))]).join('')}
-      </Text>
-    </Text>
-  )
-}
-
-/** The newest `width` levels, padded with silence on the left. */
-function fit(levels: number[], width: number): number[] {
-  const recent = levels.slice(-width)
-  return [...Array<number>(Math.max(0, width - recent.length)).fill(0), ...recent]
-}
-
-/** Thin rounded bars, centred, height from each level; a soft dot that pulses while live. */
-function meterSvg(levels: number[], isLive: boolean, showDot: boolean, px: number): string {
-  const color = isLive ? RED : AMBER
-  const h = 12
-  const mid = h / 2
-  const start = showDot ? 10 : 0
-  const step = (px - start) / Math.max(1, levels.length)
-  const barW = Math.max(1.6, Math.min(2.4, step * 0.5))
-  const bars = levels
-    .map((level, i) => {
-      const height = Math.max(1.6, Math.pow(level, 1.4) * (h - 1))
-      const opacity = (0.35 + 0.55 * level).toFixed(2)
-      return `<rect x="${(start + i * step + (step - barW) / 2).toFixed(1)}" y="${(mid - height / 2).toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" rx="${(barW / 2).toFixed(1)}" fill="${color}" opacity="${opacity}"/>`
-    })
-    .join('')
-  const dot = showDot
-    ? isLive
-      ? `<circle cx="4" cy="${mid}" r="2.6" fill="${color}"><animate attributeName="opacity" values="1;0.35;1" dur="2s" repeatCount="indefinite"/></circle>`
-      : `<circle cx="4" cy="${mid}" r="2.4" fill="none" stroke="${color}" stroke-width="1.2"/>`
-    : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${h}" viewBox="0 0 ${px} ${h}">${dot}${bars}</svg>`
-}
-
-const BARS = '▁▂▃▄▅▆▇█'
-
 
 // MARK: pane
 
@@ -430,9 +222,6 @@ function liveNotes(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Rende
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       {header(el, m, title, meta, true)}
-      {m.canStop && (m.phase === 'live' || m.phase === 'stalled') ? (
-        <Box flexDirection="row">{stopButton(el, m, act, false)}</Box>
-      ) : null}
       {tabs(el, m, act)}
       <Box flexDirection="column" marginTop={1}>
         {m.tab === 'notes' ? notesBody(el, m, act, prompts) : transcriptBody(el, m)}
