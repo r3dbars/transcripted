@@ -28,7 +28,6 @@ struct GeneralSettingsPage<
     @Binding var showTranscriptedInDock: Bool
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
-    @Binding var dictationOverlayMode: DictationOverlayPresentationMode
     @Binding var autoDetectCallsEnabled: Bool
 
     let correctionsStatusLine: String
@@ -69,11 +68,7 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
-                DictationOverlayModeRow(selection: $dictationOverlayMode)
-
-                if dictationOverlayMode == .notchIsland {
-                    NotchIslandScreenSharingRow()
-                }
+                NotchIslandScreenSharingRow()
 
                 GeneralToggleRow(
                     title: "Clean up pasted text",

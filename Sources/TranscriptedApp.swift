@@ -206,8 +206,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     let appState = TranscriptedAppState()
     let overlayController = FloatingOverlayController()
-    /// Carries dictation, meetings and the call prompt when Settings ›
-    /// Dictation window is Notch island; idle and hidden otherwise.
+    /// Carries dictation, meetings and the call prompt.
     let notchIsland = NotchIslandController()
     let sessionController = DictationSessionController()
     /// Second non-activating panel for meeting mode (Lane C). Distinct from
@@ -306,9 +305,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] in
             self?.pasteLastDictationFromSettings()
         }
-        if NotchIslandController.isSelected {
-            notchIsland.prewarm()
-        }
+        notchIsland.prewarm()
         sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
