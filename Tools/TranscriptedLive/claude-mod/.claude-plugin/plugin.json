@@ -1,8 +1,9 @@
 {
   "name": "transcripted-live",
-  "version": "0.1.0",
-  "description": "Experiment: the meeting Transcripted is recording, live beside the transcript. A pane of what was just said (you = mic, them = call audio), a status line while recording, /meeting attach to hand Claude the last few minutes, and a read_live tool Claude can call. Needs the transcripted-live helper running.",
+  "version": "0.2.0",
+  "description": "The meeting Transcripted is recording, inside Claude Code: Claude gets the call as context, a live dashboard (now, asked of you, action items), prompt suggestions for questions aimed at you, and an after-call wrap-up that gains speaker names once Transcripted saves the meeting. Needs the transcripted-live helper running.",
   "author": {
     "name": "Transcripted"
-  }
+  },
+  "types": "./types/index.d.ts"
 }

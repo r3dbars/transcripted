@@ -37,7 +37,15 @@ final class TailedStream {
 
             let maxFrames = Int((tail.format?.sampleRate ?? 48_000) * maxSeconds)
             let start = finishedSeconds + tail.secondsRead
-            guard let samples = try tail.readNewMonoSamples(maxFrames: maxFrames), let format = tail.format else {
+            // Transcripted deletes its temp WAVs once the meeting is saved; a file
+            // that vanished, even mid-read, has nothing more to give.
+            let read: [Float]?
+            do {
+                read = try tail.readNewMonoSamples(maxFrames: maxFrames)
+            } catch where !FileManager.default.fileExists(atPath: url.path) {
+                return ([], false)
+            }
+            guard let samples = read, let format = tail.format else {
                 return ([], false)
             }
             if samples.isEmpty {
@@ -90,7 +98,15 @@ public final class LiveRunner {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
                 continue
             }
-            try await follow(recording, pollSeconds: pollSeconds)
+            do {
+                try await follow(recording, pollSeconds: pollSeconds)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // One meeting going wrong must not stop the watch for the next one.
+                log("meeting stopped early: \(error)")
+                try? output.end()
+            }
             finished.insert(recording.meetingId)
         }
     }

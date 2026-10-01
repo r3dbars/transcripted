@@ -13,11 +13,11 @@ const UTTERANCES = [
   { t: 400, speaker: 'them', text: 'could it skip review if there are only two people' },
 ]
 
-function sessionJson(state: 'recording' | 'ended'): string {
+function sessionJson(state: 'recording' | 'ended', meetingId = 'meeting_test'): string {
   const now = new Date().toISOString()
   return JSON.stringify({
     state,
-    meetingId: 'meeting_test',
+    meetingId,
     source: 'live',
     model: 'parakeet-eou 320ms',
     startedAt: now,
@@ -31,19 +31,28 @@ function sessionJson(state: 'recording' | 'ended'): string {
   })
 }
 
-type World = { statuses: (string | undefined)[]; opened: string[]; closed: string[] }
+type World = { statuses: (string | undefined)[]; opened: string[]; closed: string[]; clock: ReturnType<typeof mock.clock> }
+
+type WorldOptions = { meetingId?: string; lines?: typeof UTTERANCES; files?: Record<string, string> }
 
 /** The helper's files and the engine calls the mod makes, answered from memory. */
-function world(on: On, state: 'recording' | 'ended' = 'recording'): World {
-  const seen: World = { statuses: [], opened: [], closed: [] }
+function world(on: On, state: 'recording' | 'ended' = 'recording', options: WorldOptions = {}): World {
+  const seen = { statuses: [], opened: [], closed: [] } as unknown as World
   const open = new Set<string>()
-  const files: Record<string, string> = {
-    [`${ROOT}/session.json`]: sessionJson(state),
-    [JSONL_PATH]: UTTERANCES.map(line => JSON.stringify(line)).join('\n') + '\n',
-  }
+  // Shared with the test, so it can add a file (the saved meeting) mid-test.
+  const files: Record<string, string> = options.files ?? {}
+  files[`${ROOT}/session.json`] = sessionJson(state, options.meetingId)
+  files[JSONL_PATH] = (options.lines ?? UTTERANCES).map(line => JSON.stringify(line)).join('\n') + '\n'
+  on('fs.list', ($, e) => {
+    const dir = `${e.path ?? ''}/`
+    const names = Object.keys(files)
+      .filter(path => path.startsWith(dir) && !path.slice(dir.length).includes('/'))
+      .map(path => ({ name: path.slice(dir.length), kind: 'file' as const }))
+    return { value: names as never }
+  })
 
   mock.env(on, { HOME: '/Users/test', TRANSCRIPTED_LIVE_DIR: ROOT })
-  mock.clock(on)
+  seen.clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__transcripted-live__${e.name}` } }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -221,5 +230,109 @@ describe('register', () => {
       expect(await ui.find({ type: 'Text', text: /Claude has the call/ })).toBeDefined()
       await ui.unmount()
     }
+  })
+
+  test('the dashboard lists what was asked of you, and a number drafts the answer', async ($, on) => {
+    world(on)
+    const submitted: string[] = []
+    const suggested: string[] = []
+    on('model.complete', () => ({
+      value: {
+        isAnswered: true as const,
+        text: '{"gist":"review rules","questions":["can review be skipped for two people?"],"actions":["You: try it"],"say":""}',
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    }))
+    on('prompt.suggest', ($, e) => {
+      suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('prompt.submit', ($, e) => {
+      submitted.push(e.text)
+      return { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+
+    expect(suggested).toEqual(['what should I say to: can review be skipped for two people?'])
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+    } as never)
+    expect(await ui.find({ type: 'Text', text: /ASKED OF YOU/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /can review be skipped for two people\?/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /review rules/ })).toBeDefined()
+    await ui.press({ key: 'q0' } as never)
+    expect(submitted.at(-1)).toContain('I was just asked: "can review be skipped for two people?"')
+    await ui.unmount()
+  })
+
+  test('after the call a wrap-up card appears, then redoes itself with names from the saved meeting', async ($, on) => {
+    const meetingsDir = '/Users/test/Library/Application Support/Transcripted/captures/meetings'
+    const files: Record<string, string> = {}
+    const lines = [...UTTERANCES, { t: 420, speaker: 'you', text: 'ok i will send the numbers thursday' }]
+    const { clock } = world(on, 'ended', { meetingId: 'meeting_2026-10-01_14-23-27-933', lines, files })
+    const prompts: string[] = []
+    on('model.complete', ($, e) => {
+      prompts.push(e.prompt)
+      const named = e.prompt.includes('Sarah')
+      return {
+        value: {
+          isAnswered: true as const,
+          text: JSON.stringify({
+            title: named ? 'Review rules with Sarah' : 'Review rules',
+            summary: ['talked about skipping review'],
+            decisions: [],
+            actions: [named ? 'You: send the numbers by Thursday' : 'you: send numbers'],
+            openQuestions: [],
+          }),
+          usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }
+    })
+    on('ui.toast', () => ({ value: undefined }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+
+    const first = await $.command.run({ command: 'meeting', args: 'wrapup', ...COMPOSER })
+    expect(first.text).toContain('Call wrap-up: Review rules (from the live text')
+    expect(first.text).toContain('- you: send numbers')
+
+    files[`${meetingsDir}/2026-10-01 Meeting at 2 23 PM.md`] = [
+      '---',
+      'date: 2026-10-01',
+      'time: 14:23:28',
+      '---',
+      '## Transcript',
+      '',
+      '**00:12**  [System/Sarah]',
+      'Could it skip review if there are only two people?',
+      '',
+      '**00:20**  [Mic/You]',
+      "I'll send the numbers Thursday.",
+    ].join('\n')
+    // The next look for the saved meeting comes a few seconds later.
+    await clock.advance(6_000)
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+
+    const second = await $.command.run({ command: 'meeting', args: 'wrapup', ...COMPOSER })
+    expect(second.text).toContain("Call wrap-up: Review rules with Sarah (from Transcripted's saved transcript, with names)")
+    expect(prompts.at(-1)).toContain('[00:12] Sarah: Could it skip review if there are only two people?')
+
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Live meeting', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
+    } as never)
+    expect(await ui.find({ type: 'Text', text: /Sarah, You/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ACTION ITEMS/ })).toBeDefined()
+    expect(await ui.find({ key: 'email' } as never)).toBeDefined()
+    await ui.unmount()
   })
 })
