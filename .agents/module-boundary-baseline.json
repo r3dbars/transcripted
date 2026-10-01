@@ -116,10 +116,6 @@
     },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
-        "SpeakerIdentityOption",
-        "SpeakerMatchOutcomeKind",
-        "SpeakerNameUpdate",
-        "SpeakerReviewPrioritizer",
         "TranscriptSaver",
         "TranscriptionTaskManager"
       ]

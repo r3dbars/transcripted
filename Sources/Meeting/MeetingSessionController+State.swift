@@ -217,10 +217,11 @@ final class MeetingSessionController: ObservableObject {
     /// Whether the speech and speaker models were already loaded when the
     /// last start began capture (the launch warmup's job).
     var meetingModelsWarmAtStart = false
-    /// Asks before a meeting starts when macOS says system audio is off.
-    /// Swappable so tests and harnesses can answer without a modal alert.
+    /// Answers the start's question when macOS says system audio is off:
+    /// the macOS allow box the first time, otherwise record and let the
+    /// Notch island ask while recording. Swappable for tests and harnesses.
     var systemAudioAccessPrompter: @MainActor (MeetingSystemAudioAccessPromptCopy) async -> MeetingSystemAudioAccessChoice = {
-        await MeetingSystemAudioAccessAlert.ask($0)
+        $0 == .notYetAllowed ? .turnOn : .askWhileRecording
     }
     /// True when the prompter asks while the meeting records (the Notch
     /// island) instead of blocking the start. Then a mic-only start is never

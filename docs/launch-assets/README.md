@@ -22,9 +22,9 @@ Motion assets:
   `docs/marketing/hero-video-storyboard.md`
 - `docs/assets/launch/transcripted-dictation-recording.mov` - dictation recording control
 - `docs/assets/launch/transcripted-dictation-recording.mp4` - lightweight social/video upload
-- `docs/assets/launch/transcripted-dictation-recording.gif` - the "Near text box"
-  Listening window (the Notch island is the default from 1.1.67); no longer in
-  the README
+- `docs/assets/launch/transcripted-dictation-recording.gif` - shows the old
+  "Near text box" Listening window, which is gone (the Notch island is the only
+  dictation window now); out of date, no longer in the README
 - `docs/assets/launch/transcripted-demo.mov` / `.mp4` / `.gif` - 4-frame fast
   tour; too fast for the README (superseded by the hero GIF), still usable as
   raw material

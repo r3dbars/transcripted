@@ -176,7 +176,7 @@ python3 scripts/dev/check-file-size.py --hotspots
 
 Over 1,500 lines as of 2026-10-02, largest first:
 
-- `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
+- None. `MeetingOverlayController.swift` was the last one; it dropped under 1,500 when the old meeting pill code went.
 
 Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
 
