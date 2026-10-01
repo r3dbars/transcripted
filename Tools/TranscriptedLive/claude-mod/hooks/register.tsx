@@ -105,6 +105,13 @@ type LiveState = {
   shownTitle: string
   /** Which band look is in use (`/meeting style`). */
   bandStyle: BandStyle
+  /** The Stop button: idle, pressed once (until `stopArmedUntil`), or a stop sent. */
+  stopState: 'idle' | 'armed' | 'stopping'
+  stopArmedUntil: number
+  /** Transcripted said it takes meeting control over its companion socket. */
+  canStop: boolean
+  /** The session the person just confirmed stopping; lets exactly that one stop_meeting call through. */
+  personStopFor: string
 }
 
 const PANE_ID = 'live-meeting'
@@ -149,6 +156,10 @@ const STORE_AUTO = 'autoContext'
 const STORE_HELPER = 'helper'
 const STORE_AUTOSTART = 'autostart'
 const STORE_BAND_STYLE = 'bandStyle'
+/** The bundled transcripted MCP server, as the engine names a plugin's server. */
+const MCP_SERVER = 'plugin_transcripted-live_transcripted'
+/** How long a first press of Stop waits for the second. */
+const STOP_CONFIRM_MS = 4_000
 /** A helper that has not written its session file for this long is not running. */
 const HELPER_ALIVE_MS = 10_000
 /** After a helper exits, wait this long before starting another. */
@@ -170,7 +181,7 @@ const HELP_TEXT = [
   '/meeting attach [N]   hand Claude the last N minutes now (default 5, or "all")',
   '/meeting auto on|off  send new lines with each prompt (on by default)',
   '/meeting autostart on|off  keep the transcripted-live helper running (on by default)',
-  '/meeting style [1-6|next]  pick how the band above the prompt looks',
+  '/meeting style [1-7|next]  pick how the band above the prompt looks',
   '/meeting helper on|off  Haiku keeps notes while the call is live (on by default)',
 ].join('\n')
 
@@ -227,6 +238,10 @@ export function register(on: On) {
     tab: 'notes',
     shownTitle: PANE_TITLE,
     bandStyle: 3,
+    stopState: 'idle',
+    stopArmedUntil: 0,
+    canStop: false,
+    personStopFor: '',
   }
 
   on('session.start', async ($, e, next) => {
@@ -240,6 +255,10 @@ export function register(on: On) {
     const style = await $.store.get(STORE_BAND_STYLE).catch(() => undefined)
     if (typeof style === 'number' && ui.BAND_STYLES.some(one => one.id === style)) s.bandStyle = style as BandStyle
     s.helperBinary = await findHelperBinary($)
+    void probeMeetingControl($).then(canStop => {
+      s.canStop = canStop
+      $.ui.invalidate('ui.render')
+    })
     // A hot reload starts this module over; what was already sent, the notes and
     // the wrap-ups live in session state so the reload neither re-sends nor redoes them.
     s.sentUpTo = (await $.state.get(SENT_REF).catch(() => null))?.value ?? {}
@@ -272,7 +291,7 @@ export function register(on: On) {
       .register({
         name: COMMAND_NAME,
         description: 'Live meeting from Transcripted: status, catch up, action items, what to say, notes',
-        argumentHint: '[style 1-6 | catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
+        argumentHint: '[style 1-7 | catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
       })
       .catch(() => undefined)
 
@@ -292,8 +311,9 @@ export function register(on: On) {
 
     if (verb === 'style') {
       const list = ui.BAND_STYLES.map(one => `${one.id === s.bandStyle ? '▸' : ' '} ${one.id}  ${one.name.padEnd(9)} ${one.about}`).join('\n')
+      const count = ui.BAND_STYLES.length
       const next = amount === 'next' ? (s.bandStyle % ui.BAND_STYLES.length) + 1 : Number(amount)
-      if (!ui.BAND_STYLES.some(one => one.id === next)) return { text: `Band styles (/meeting style 1-6, or next):\n${list}` }
+      if (!ui.BAND_STYLES.some(one => one.id === next)) return { text: `Band styles (/meeting style 1-${count}, or next):\n${list}` }
       s.bandStyle = next as BandStyle
       await $.store.set(STORE_BAND_STYLE, next).catch(() => undefined)
       $.ui.invalidate('ui.render')
@@ -376,7 +396,10 @@ export function register(on: On) {
       }
     }
 
-    if (verb === 'status') return { text: statusCard(s) }
+    if (verb === 'status') {
+      s.canStop = await probeMeetingControl($)
+      return { text: statusCard(s) }
+    }
 
     return { text: HELP_TEXT }
   })
@@ -414,6 +437,12 @@ export function register(on: On) {
     // The bundled transcripted MCP server can also start and stop recordings and
     // turn live sharing on; those stay the person's to do in Transcripted.
     if (e.tool.startsWith(MCP_TOOL_PREFIX) && PERSON_ONLY_TOOLS.has(e.tool.slice(MCP_TOOL_PREFIX.length))) {
+      // The one exception: the person pressed Stop twice and this mod is making that call.
+      const sessionId = (e as unknown as { session_id?: unknown }).session_id
+      if (e.tool === `${MCP_TOOL_PREFIX}stop_meeting` && typeof sessionId === 'string' && s.personStopFor === sessionId) {
+        s.personStopFor = ''
+        return next(e)
+      }
       return { deny: 'Starting, stopping and sharing recordings is done in Transcripted itself, not from Claude Code.' }
     }
     if (e.tool !== s.toolName) return next(e)
@@ -454,8 +483,57 @@ async function elements($: EngineInterface, e: Parameters<EngineInterface['ui'][
   if (!Client) return els
   return {
     ...els,
-    wave: (key, isLive, isTalking, color) => <Client key={key} module="./wave.tsx" props={{ isLive, isTalking, color }} />,
+    wave: (key, isLive, isTalking, color, width) => (
+      <Client key={key} module="./wave.tsx" props={{ isLive, isTalking, color, width: width ?? 7, isDotHidden: (width ?? 7) > 12 }} />
+    ),
   }
+}
+
+/**
+ * Asks Transcripted, over its companion socket (the bundled MCP server), to stop
+ * the meeting it is recording now: the person pressed Stop twice. Only the
+ * current session, by the id Transcripted reports this moment. Claude itself
+ * can never reach this; the model's calls to stop_meeting are denied.
+ */
+async function stopRecording($: EngineInterface, s: LiveState) {
+  try {
+    const status = mcpJson(await $.mcp.call(MCP_SERVER, 'get_recording_status'))
+    const sessionId = typeof status?.session_id === 'string' ? status.session_id : ''
+    if (!sessionId || status?.capture_active !== true) {
+      $.ui.toast('Transcripted is not recording right now')
+      return
+    }
+    s.personStopFor = sessionId
+    const result = await $.mcp.call(MCP_SERVER, 'stop_meeting', { session_id: sessionId })
+    $.ui.toast(result.isError ? 'Transcripted did not stop; stop it from the menu bar' : 'Stopping · Transcripted is saving the meeting')
+  } catch {
+    $.ui.toast('Could not reach Transcripted; stop it from the menu bar')
+  } finally {
+    s.personStopFor = ''
+    $.clock.after(5_000, () => {
+      s.stopState = 'idle'
+      $.ui.invalidate('ui.render')
+    })
+  }
+}
+
+/** Whether Transcripted takes stop requests: its companion socket answers and allows meeting control. */
+async function probeMeetingControl($: EngineInterface): Promise<boolean> {
+  try {
+    const status = mcpJson(await $.mcp.call(MCP_SERVER, 'get_recording_status'))
+    return status?.allow_meeting_control === true
+  } catch {
+    return false
+  }
+}
+
+/** The JSON object an MCP tool returned in its first text block, if any. */
+function mcpJson(result: { content?: readonly unknown[] }): Record<string, unknown> | null {
+  for (const block of result.content ?? []) {
+    const text = typeof block === 'object' && block !== null ? (block as { text?: unknown }).text : undefined
+    if (typeof text === 'string') return parseJsonObject(text)
+  }
+  return null
 }
 
 /** What the band's and the pane's buttons do. */
@@ -469,6 +547,25 @@ function paneActions($: EngineInterface, s: LiveState): Actions {
     openPane: () => {
       s.isHidden = false
       void $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
+    },
+    stop: () => {
+      const now = Date.now()
+      if (s.stopState === 'stopping') return
+      if (s.stopState !== 'armed' || now > s.stopArmedUntil) {
+        s.stopState = 'armed'
+        s.stopArmedUntil = now + STOP_CONFIRM_MS
+        $.ui.invalidate('ui.render')
+        $.clock.after(STOP_CONFIRM_MS + 50, () => {
+          if (s.stopState === 'armed' && Date.now() > s.stopArmedUntil) {
+            s.stopState = 'idle'
+            $.ui.invalidate('ui.render')
+          }
+        })
+        return
+      }
+      s.stopState = 'stopping'
+      $.ui.invalidate('ui.render')
+      void stopRecording($, s)
     },
     togglePane: () => {
       void (async () => {
@@ -560,6 +657,9 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     tab: s.isHelperOn ? s.tab : 'transcript',
     isPaneOpen: isOpen,
     pending: new Set(s.pendingAsks.keys()),
+    isStopArmed: s.stopState === 'armed' && now <= s.stopArmedUntil,
+    canStop: s.canStop,
+    isStopping: s.stopState === 'stopping',
   }
 }
 
@@ -1120,7 +1220,7 @@ function statusCard(s: LiveState): string {
   const notes = s.notes && s.notes.meetingId === session.meetingId ? ['', notesText(s.notes)] : []
   return [
     `${state} · ${clock(session.audioSeconds)} · ${countLabel(s.lines.length)}`,
-    `Context with each prompt: ${s.isAutoContext ? 'on' : 'off'} · notes: ${s.isHelperOn ? 'on' : 'off'} · autostart: ${s.isAutostart ? (s.helperBinary ? 'on' : 'on, helper not built') : 'off'}`,
+    `Context with each prompt: ${s.isAutoContext ? 'on' : 'off'} · notes: ${s.isHelperOn ? 'on' : 'off'} · autostart: ${s.isAutostart ? (s.helperBinary ? 'on' : 'on, helper not built') : 'off'} · stop button: ${s.canStop ? 'on' : 'off'}`,
     ...(last.length > 0 ? ['', 'Latest:', ...last] : []),
     ...notes,
     '',

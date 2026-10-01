@@ -6,11 +6,11 @@ import type { ClientModule } from 'claude-code'
  * The bars move only while someone is mid-sentence; quiet, they lie flat.
  */
 
-type Props = { isLive: boolean; isTalking: boolean; color: string }
+type Props = { isLive: boolean; isTalking: boolean; color: string; width?: number; isDotHidden?: boolean }
 type State = { frame: number }
 
 const BARS = '▁▂▃▄▅▆▇█'
-const WIDTH = 7
+const DEFAULT_WIDTH = 7
 const FRAME_MS = 110
 
 const Wave: ClientModule<Props, State> = (props, surface) => {
@@ -24,7 +24,8 @@ const Wave: ClientModule<Props, State> = (props, surface) => {
   const live = props.isLive
   const dot = live ? (props.isTalking || frame % 14 < 9 ? '●' : '○') : '◌'
   let wave = ''
-  for (let i = 0; i < WIDTH; i++) {
+  const width = Math.max(3, Math.min(48, props.width ?? DEFAULT_WIDTH))
+  for (let i = 0; i < width; i++) {
     if (!props.isTalking) {
       wave += BARS[0]
       continue
@@ -35,8 +36,8 @@ const Wave: ClientModule<Props, State> = (props, surface) => {
   }
   return (
     <Text>
-      <Text color={props.color}>{dot}</Text>
-      <Text color={props.color} dimColor={!props.isTalking}>{` ${wave}`}</Text>
+      {props.isDotHidden ? null : <Text color={props.color}>{`${dot} `}</Text>}
+      <Text color={props.color} dimColor={!props.isTalking}>{wave}</Text>
     </Text>
   )
 }

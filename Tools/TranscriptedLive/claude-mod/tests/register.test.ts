@@ -475,4 +475,53 @@ describe('register', () => {
       }
     }
   })
+
+  test('Stop takes two presses and stops only the current session; Claude still cannot', async ($, on) => {
+    world(on)
+    const calls: { tool: string; session?: unknown }[] = []
+    const toasts: string[] = []
+    // A plugin's $.mcp.call reaches the server through the tool-call chain (so the
+    // mod's own deny hook sees it); the server itself is answered here.
+    on('mcp.call', ($, e) => {
+      calls.push({ tool: `mcp__plugin_transcripted-live_transcripted__${e.tool}`, session: e.args?.session_id })
+      const status = { allow_meeting_control: true, capture_active: true, session_id: 'S-1' }
+      const text = e.tool === 'get_recording_status' ? JSON.stringify(status) : '{"stopped":true}'
+      return { value: { content: [{ type: 'text', text }], isError: false } as never }
+    })
+    on('tool.call', () => ({ result: 'ran' }))
+    on('ui.toast', ($, e) => {
+      toasts.push((e as unknown as { text: string }).text)
+      return { value: undefined }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    const status = await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+    expect(status.text).toContain('stop button: on')
+
+    // Claude asking on its own is refused.
+    const byModel = await $.tool.call({ tool: 'mcp__plugin_transcripted-live_transcripted__stop_meeting', session_id: 'S-1' } as never)
+    expect(JSON.stringify(byModel)).toContain('done in Transcripted itself')
+
+    const ui = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+    } as never)
+    await ui.press({ key: 'band-stop' } as never)
+    expect(calls.some(call => call.tool.endsWith('stop_meeting') && call.session === 'S-1')).toBe(false)
+    await $.command.run({ command: 'meeting', args: 'help', ...COMPOSER })
+    const armed = await $.ui.mount({
+      plugin: 'transcripted-live',
+      surface: 'desktop',
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+    } as never)
+    expect(JSON.stringify(await armed.find({ key: 'band-stop' } as never))).toContain('click again')
+    await armed.unmount()
+    await ui.press({ key: 'band-stop' } as never)
+    await $.command.run({ command: 'meeting', args: 'help', ...COMPOSER })
+    expect(calls.filter(call => call.tool.endsWith('stop_meeting') && call.session === 'S-1').length).toBe(1)
+    expect(toasts).toContain('Stopping · Transcripted is saving the meeting')
+    await ui.unmount()
+  })
 })

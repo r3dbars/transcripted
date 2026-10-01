@@ -42,6 +42,12 @@ export type ViewModel = {
   isPaneOpen: boolean
   /** Prompts sent from a button that Claude has not answered yet. */
   pending: ReadonlySet<string>
+  /** Stop is pressed once and waits for the second press. */
+  isStopArmed: boolean
+  /** Transcripted takes stop requests (the companion socket is there). */
+  canStop: boolean
+  /** A stop was sent and the call is winding down. */
+  isStopping: boolean
 }
 
 export type Actions = {
@@ -49,6 +55,8 @@ export type Actions = {
   setTab: (tab: Tab) => void
   openPane: () => void
   togglePane: () => void
+  /** First press arms it, a second within a few seconds stops the recording. */
+  stop: () => void
 }
 
 export type Prompts = {
@@ -63,7 +71,7 @@ export type Els = {
   Text: El
   Button: El
   Markdown: El
-  wave?: (key: string, isLive: boolean, isTalking: boolean, color: string) => RenderElement
+  wave?: (key: string, isLive: boolean, isTalking: boolean, color: string, width?: number) => RenderElement
 }
 
 const RED = '#FF5A4E'
@@ -79,6 +87,7 @@ export const BAND_STYLES = [
   { id: 4, name: 'Captions', about: 'a small status line over live captions of what is being said' },
   { id: 5, name: 'Coach', about: 'whatever was just asked of you, with a Draft answer button' },
   { id: 6, name: 'Topic', about: 'the call\'s name and what is being discussed right now' },
+  { id: 7, name: 'Wave', about: 'only a wide waveform, the time and two icons' },
 ] as const
 export type BandStyle = (typeof BAND_STYLES)[number]['id']
 
@@ -214,6 +223,14 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
         askedChip,
         toggle(el, m, act, false),
       ])
+    case 7:
+      return row([
+        <Box flexGrow={1} flexShrink={1}>
+          {recordingMark(el, 'band-wave-wide', isLive, m.isTalking, 32)}
+        </Box>,
+        time,
+        toggle(el, m, act, true),
+      ])
     case 3:
     default:
       return row([
@@ -235,17 +252,37 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
   }
 }
 
-/** Shows or hides the notes sidebar; an icon in the minimal styles, words elsewhere. */
+/**
+ * The band's controls: show or hide the notes sidebar, and stop the recording
+ * (while live, where Transcripted takes it). Icons in the minimal styles.
+ */
 function toggle(el: Els, m: ViewModel, act: Actions, isIcon: boolean): RenderElement {
-  const { Button } = el
+  const { Box, Button } = el
   const label = isIcon ? (m.isPaneOpen ? '◨' : '◧') : m.isPaneOpen ? 'Hide notes' : 'Show notes'
-  return <Button key="band-toggle" plain label={label} onPress={act.togglePane} />
+  const isLive = m.phase === 'live' || m.phase === 'stalled'
+  return (
+    <Box flexDirection="row" flexShrink={0} gap={1}>
+      <Button key="band-toggle" plain label={label} onPress={act.togglePane} />
+      {isLive && m.canStop ? stopButton(el, m, act, isIcon) : null}
+    </Box>
+  )
+}
+
+function stopButton(el: Els, m: ViewModel, act: Actions, isIcon: boolean): RenderElement {
+  const { Button } = el
+  const label = m.isStopping ? (isIcon ? '…' : 'Stopping…') : m.isStopArmed ? 'Stop? click again' : isIcon ? '■' : '■ Stop'
+  // `plain` is true or absent, never false: the armed state drops it for the primary look.
+  return m.isStopArmed ? (
+    <Button key="band-stop" variant="primary" label={label} onPress={act.stop} />
+  ) : (
+    <Button key="band-stop" plain label={label} onPress={act.stop} />
+  )
 }
 
 /** A dot and a text waveform that moves while someone is talking; a plain dot where it can't animate. */
-function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean): RenderElement {
+function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean, width?: number): RenderElement {
   const color = isLive ? RED : AMBER
-  if (el.wave) return el.wave(key, isLive, isTalking, color)
+  if (el.wave) return el.wave(key, isLive, isTalking, color, width)
   const { Text } = el
   return <Text color={color}>{isLive ? (isTalking ? '● ▃▅▇▅▃' : '● ▁▁▁▁▁') : '◌'}</Text>
 }
@@ -320,6 +357,11 @@ function liveNotes(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Rende
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       {header(el, m, title, meta, true)}
+      {m.canStop && (m.phase === 'live' || m.phase === 'stalled') ? (
+        <Box flexDirection="row" marginTop={1}>
+          {stopButton(el, m, act, false)}
+        </Box>
+      ) : null}
       {tabs(el, m, act)}
       <Box flexDirection="column" marginTop={1}>
         {m.tab === 'notes' ? notesBody(el, m, act, prompts) : transcriptBody(el, m)}
