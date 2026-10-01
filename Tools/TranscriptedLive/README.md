@@ -1,5 +1,28 @@
 # TranscriptedLive (experiment)
 
+## Install (for Transcripted users)
+
+You need Transcripted (a build that includes the live helper) and Claude Code 2.1.287 or newer
+(desktop Code tab or terminal). In Claude Code:
+
+```
+/plugin marketplace add r3dbars/transcripted
+/plugin install transcripted-live@transcripted
+/reload-plugins
+```
+
+That's it. Record a meeting in Transcripted and, while Claude Code is open:
+
+- a quiet line above the prompt shows a red dot and the time, with **Notes** and **Stop**
+- Claude gets the call as context with every message
+- a question aimed at you shows up with **Draft answer**
+- after the call, a wrap-up (summary, decisions, still open, who owes what, three things
+  Claude can do next) that redoes itself with speaker names once Transcripted saves the meeting
+
+The plugin starts the helper bundled in Transcripted (`Contents/Helpers/transcripted-live`) by
+itself; it only reads what Transcripted is already recording. Stop shows only when the running
+Transcripted takes meeting control.
+
 The meeting Transcripted is recording, live inside Claude Code.
 
 Two pieces, and neither changes the app:

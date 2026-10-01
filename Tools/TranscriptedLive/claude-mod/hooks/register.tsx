@@ -196,8 +196,8 @@ function answerPrompt(question: string): string {
 }
 
 const HELPER_MISSING_TEXT = [
-  'No live transcript yet. The helper starts by itself a few seconds after a session opens',
-  '(build it once with `swift build -c release` in Tools/TranscriptedLive), then record a meeting in Transcripted.',
+  'No live transcript yet. Record a meeting in Transcripted and it shows up here within a few seconds.',
+  'This needs a Transcripted build that includes the live helper (Contents/Helpers/transcripted-live).',
 ].join('\n')
 
 export function register(on: On) {
@@ -314,7 +314,7 @@ export function register(on: On) {
         text: isOn
           ? s.helperBinary
             ? 'The live helper starts by itself while Claude Code is open.'
-            : 'Autostart is on, but the helper binary is missing: run `swift build -c release` in Tools/TranscriptedLive.'
+            : 'Autostart is on, but no Transcripted app with the live helper was found. Update Transcripted.'
           : 'The live helper no longer starts by itself; run `transcripted-live watch` when you want it.',
       }
     }
@@ -632,6 +632,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
     tab: s.isHelperOn ? s.tab : 'transcript',
     isPaneOpen: isOpen,
     pending: new Set(s.pendingAsks.keys()),
+    canStop: s.canStop,
     isWrapDismissed: (!!meetingId && s.dismissedWrapFor === meetingId) || !endedRecently(s, now),
     isStopArmed: s.stopState === 'armed' && now <= s.stopArmedUntil,
     isStopping: s.stopState === 'stopping',
@@ -917,11 +918,27 @@ function superviseHelper($: EngineInterface, s: LiveState, now: number, tick: nu
   })()
 }
 
-/** The helper built beside this mod (Tools/TranscriptedLive/.build/release), or TRANSCRIPTED_LIVE_BIN. */
+/**
+ * Where the helper is: TRANSCRIPTED_LIVE_BIN, else bundled in an installed
+ * Transcripted app (Contents/Helpers, signed with it), else built beside this
+ * mod in a checkout (Tools/TranscriptedLive/.build/release).
+ */
 async function findHelperBinary($: EngineInterface): Promise<string> {
   const override = await $.env.get('TRANSCRIPTED_LIVE_BIN').catch(() => undefined)
+  const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
   const root = $.plugin.root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '')
-  const candidates = [override, `${root}/../.build/release/transcripted-live`].filter((path): path is string => !!path)
+  const apps: string[] = []
+  for (const dir of ['/Applications', `${home}/Applications`]) {
+    const entries = await $.fs.list(dir).catch(() => [])
+    for (const entry of entries) {
+      if (entry.kind === 'dir' && /^Transcripted.*\.app$/.test(entry.name)) {
+        apps.push(`${dir}/${entry.name}/Contents/Helpers/transcripted-live`)
+      }
+    }
+  }
+  // The plain "Transcripted.app" first: the released build wins over side builds.
+  apps.sort((a, b) => Number(!a.includes('/Transcripted.app/')) - Number(!b.includes('/Transcripted.app/')))
+  const candidates = [override, ...apps, `${root}/../.build/release/transcripted-live`].filter((path): path is string => !!path)
   for (const path of candidates) {
     if (await $.fs.exists(path).catch(() => false)) return path
   }

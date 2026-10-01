@@ -44,6 +44,8 @@ export type ViewModel = {
   pending: ReadonlySet<string>
   /** The person closed the "wrap-up ready" line, or it has been up 30 minutes. */
   isWrapDismissed: boolean
+  /** Transcripted takes stop requests (its companion socket answers). */
+  canStop: boolean
   /** Stop is pressed once and waits for the second press. */
   isStopArmed: boolean
   /** A stop was sent and the call is winding down. */
@@ -108,7 +110,7 @@ export function band(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Ren
           <Box flexGrow={1} />
         )}
         {notesButton(el, m, act)}
-        {stopButton(el, m, act)}
+        {m.canStop ? stopButton(el, m, act) : null}
       </Box>
     )
   }

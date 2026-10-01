@@ -222,7 +222,7 @@ describe('register', () => {
     expect(JSON.stringify(search)).toContain('ran')
   })
 
-  test('a live call shows one band above the prompt: dot, time, Notes and Stop, on terminal and desktop', async ($, on) => {
+  test('a live call shows one band above the prompt: dot, time and Notes (Stop only where Transcripted takes it), on terminal and desktop', async ($, on) => {
     world(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
@@ -235,7 +235,8 @@ describe('register', () => {
       } as never)
       expect(await ui.find({ type: 'Text', text: /06:50/ })).toBeDefined()
       expect(JSON.stringify(await ui.find({ key: 'band-notes' } as never))).toContain('Hide notes')
-      expect(JSON.stringify(await ui.find({ key: 'band-stop' } as never))).toContain('Stop')
+      // No companion socket in this world, so Transcripted can't take a stop: no Stop button.
+      expect(await ui.find({ key: 'band-stop' } as never)).toBeUndefined()
       await ui.unmount()
     }
   })
