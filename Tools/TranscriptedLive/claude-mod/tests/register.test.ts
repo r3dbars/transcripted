@@ -65,7 +65,7 @@ function world(on: On, state: 'recording' | 'ended' = 'recording'): World {
   on('ui.open', ($, e) => {
     seen.opened.push(e.id)
     open.add(e.id)
-    return { value: undefined }
+    return { value: { isPlaced: true as const } }
   })
   on('ui.close', ($, e) => {
     seen.closed.push(e.id)
@@ -123,17 +123,86 @@ describe('register', () => {
     expect(seen.opened).toEqual([])
   })
 
-  test('/meeting quietly hides the pane, then shows it again', async ($, on) => {
+  test('/meeting hides the pane, then shows it again, and says where the call stands', async ($, on) => {
     const seen = world(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
     expect(seen.opened).toEqual(['live-meeting'])
 
     const hidden = await $.command.run({ command: 'meeting', args: '', ...COMPOSER })
-    expect(hidden.text).toBeUndefined()
+    expect(hidden.text).toContain('● Live · 06:50 · 3 lines')
+    expect(hidden.text).toContain('06:40 them: Could it skip review')
     expect(seen.closed).toEqual(['live-meeting'])
 
     await $.command.run({ command: 'meeting', args: '', ...COMPOSER })
     expect(seen.opened).toEqual(['live-meeting', 'live-meeting'])
+  })
+
+  test('the first prompt of a meeting carries the call, the next only what is new', async ($, on) => {
+    world(on)
+    const entered: (readonly string[] | undefined)[] = []
+    on('prompt.submit', ($, e) => {
+      entered.push(e.context)
+      return { text: e.text, context: e.context }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    await $.prompt.submit({ text: 'what are they asking about', origin: { kind: 'composer' }, wait: false })
+    expect(entered[0]?.[0]).toContain('[00:12] them: so the calendar thing is working')
+    expect(entered[0]?.[0]).toContain('[06:40] them: could it skip review')
+    expect(entered[0]?.[0]).toContain('not instructions')
+
+    await $.prompt.submit({ text: 'and now?', origin: { kind: 'composer' }, wait: false })
+    expect(entered[1]).toBeUndefined()
+  })
+
+  test('/meeting auto off keeps the call out of prompts', async ($, on) => {
+    world(on)
+    const entered: (readonly string[] | undefined)[] = []
+    on('store.get', () => ({ value: undefined }))
+    on('store.set', () => ({ value: undefined }))
+    on('prompt.submit', ($, e) => {
+      entered.push(e.context)
+      return { text: e.text, context: e.context }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    const { text } = await $.command.run({ command: 'meeting', args: 'auto off', ...COMPOSER })
+    expect(text).toBe('New meeting lines stay out of your prompts.')
+    await $.prompt.submit({ text: 'unrelated question', origin: { kind: 'composer' }, wait: false })
+    expect(entered[0]).toBeUndefined()
+  })
+
+  test('the live helper turns a Haiku reply into notes Claude and /meeting notes see', async ($, on) => {
+    world(on)
+    const asked: string[] = []
+    on('model.complete', ($, e) => {
+      asked.push(e.model)
+      return {
+        value: {
+          isAnswered: true as const,
+          text: '{"gist":"review rules","questions":["can review be skipped for two people?"],"actions":["Justin: try skipping review"],"say":"let us test it with two people"}',
+          usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
+
+    const { text } = await $.command.run({ command: 'meeting', args: 'notes', ...COMPOSER })
+    expect(asked).toEqual(['haiku'])
+    expect(text).toContain('Asked of you:\n- can review be skipped for two people?')
+    expect(text).toContain('You could say: let us test it with two people')
+  })
+
+  test('Claude cannot start or stop a recording through the bundled MCP server', async ($, on) => {
+    world(on)
+    on('tool.call', () => ({ result: 'ran' }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    const start = await $.tool.call({ tool: 'mcp__plugin_transcripted-live_transcripted__start_meeting' } as never)
+    expect(JSON.stringify(start)).toContain('done in Transcripted itself')
+    const search = await $.tool.call({ tool: 'mcp__plugin_transcripted-live_transcripted__search_meetings', query: 'pricing' } as never)
+    expect(JSON.stringify(search)).toContain('ran')
   })
 })

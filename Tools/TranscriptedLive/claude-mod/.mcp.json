@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "transcripted": {
+      "command": "${HOME}/Library/Application Support/Transcripted/mcp/transcripted-mcp",
+      "args": []
+    }
+  }
+}

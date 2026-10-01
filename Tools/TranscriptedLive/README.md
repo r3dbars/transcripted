@@ -10,10 +10,20 @@ Two pieces, and neither changes the app:
   Parakeet EOU model on each. The mic is "you", system audio is "them". A mic line that
   mostly repeats what the call just said is dropped as speaker echo. Output goes to
   `~/Library/Application Support/TranscriptedLive/`: `session.json` plus one JSONL per meeting.
-- `claude-mod/`, a Claude Code mod (plugin with a function-hooks module). It draws a
-  live meeting pane, pins a status line while recording, and adds `/meeting` plus a
-  `read_live` tool. Nothing goes to the model until you run `/meeting attach` or Claude
-  calls `read_live`.
+- `claude-mod/`, a Claude Code mod (plugin with a function-hooks module):
+  - while a meeting is live (or ended in the last 30 minutes), each prompt you send carries
+    the lines said since your last prompt as hidden context, so Claude just knows the call
+    (`/meeting auto off` stops it)
+  - a live helper asks Haiku every 45 s or so (only while recording, only after new lines) for
+    questions aimed at you, decisions and action items, and a line you could say
+    (`/meeting helper off` stops it)
+  - `/meeting` status card, `/meeting catchup | actions | say | notes | attach [N|all]`
+  - a `read_live` tool, and the app's `transcripted-mcp` server bundled (`.mcp.json`) for past
+    meetings; its `start_meeting`, `stop_meeting` and `set_live_context_sharing` are denied
+  - a live pane and status line on surfaces that draw mod UI. The terminal does; the desktop
+    Code tab (Claude Code 2.1.284) runs the hooks but draws no mod UI yet.
+
+  The hidden context and the helper send transcript text to Claude, the same as pasting it.
 
 ## Try it
 
@@ -36,6 +46,20 @@ In the session:
 - `/meeting` shows or hides the pane
 - `/meeting attach [N|all]` hands Claude the last N minutes (default 5)
 - ask "what did they just say about X?" and Claude can call `read_live` itself
+
+## In the Claude desktop app
+
+The Code tab can't take `--plugin-dir`, so point it at the mod from `~/.claude/settings.json`:
+
+```json
+"env": {
+  "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
+  "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/Tools/TranscriptedLive/claude-mod",
+  "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
+}
+```
+
+New sessions load it. Run the helper yourself: `.build/release/transcripted-live watch`.
 
 ## Notes
 
