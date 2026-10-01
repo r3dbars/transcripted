@@ -36,6 +36,8 @@ SKIP_DOCS = {
     "THIRD_PARTY_LICENSES.md": "license texts",
     "docs/writing-port-ledger.md": "names files in the Tilde repo being ported",
     "docs/writing-plan.md": "names files in the Tilde repo being ported",
+    "Tools/SpeakerEvalHarness/VOICEPRINT_BAKEOFF.md": "finished bake-off record; its scripts were removed",
+    "Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md": "finished bake-off record; its scripts were removed",
 }
 
 # Always-loaded entry files and their line budgets. Every agent session reads

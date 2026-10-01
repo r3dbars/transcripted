@@ -134,7 +134,6 @@ Use these docs for these jobs:
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
-- `docs/qa-parakeet-start-failure-smoke.md` — manual Parakeet start-failure regression checklist
 - `docs/capture-format.md` — authoritative spec for the saved Markdown capture format
 - `docs/observability.md` — the five diagnostic sinks and which one owns what
 - `docs/privacy-first-observability.md` — the three observability lanes and their privacy contract
