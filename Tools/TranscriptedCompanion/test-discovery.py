@@ -2,7 +2,8 @@
 """Check a packaged plugin through Codex's supported plugin/read protocol.
 
 Uses an unregistered temporary marketplace. It never installs a plugin, changes
-Codex configuration, launches its MCP process, or invokes a Transcripted tool.
+Codex configuration, or invokes a Transcripted tool. With the explicit
+--check-installed-startup option it also starts the configured MCP servers.
 """
 import argparse
 import json
@@ -94,6 +95,7 @@ def main():
     parser.add_argument("--plugin-root", type=Path, default=DEFAULT_PLUGIN)
     parser.add_argument("--codex", "--codex-path", default=str(DESKTOP_CODEX) if DESKTOP_CODEX.is_file() else "codex")
     parser.add_argument("--probe-portable", type=Path, help="Also report portable discovery; this diagnostic is not an assertion")
+    parser.add_argument("--check-installed-startup", action="store_true", help="Start configured MCP servers and assert the installed Transcripted tools load; never calls a tool")
     args = parser.parse_args()
     version = subprocess.run([args.codex, "--version"], check=True, capture_output=True, text=True).stdout.strip()
     server = AppServer(args.codex)
@@ -108,6 +110,18 @@ def main():
             with tempfile.TemporaryDirectory(prefix="transcripted-portable-probe-", dir="/private/tmp") as directory:
                 portable = read_package(server, args.probe_portable, Path(directory))
                 report["portable_mcp_servers"] = portable["mcpServers"]
+        if args.check_installed_startup:
+            status = server.request("mcpServerStatus/list", {"limit": 100, "detail": "full"})
+            candidates = list(status["data"])
+            while status.get("nextCursor"):
+                status = server.request("mcpServerStatus/list", {"limit": 100, "detail": "full", "cursor": status["nextCursor"]})
+                candidates.extend(status["data"])
+            installed = next(item for item in candidates if item.get("pluginId") == "transcripted@transcripted-local")
+            assert not installed.get("toolsError"), installed.get("toolsError")
+            assert "show_companion" in installed["tools"], "Companion tool missing from installed server"
+            assert "get_recording_status" in installed["tools"], "Native status tool missing"
+            report["installed_startup_verified"] = True
+            report["installed_tool_count"] = len(installed["tools"])
         print(json.dumps(report, indent=2))
     finally:
         server.close()

@@ -1,6 +1,6 @@
 {
   "name": "transcripted",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Connect ChatGPT to saved context and live meeting controls in Transcripted on this Mac.",
   "author": { "name": "Justin Betker" },
   "mcpServers": "./.mcp.json",

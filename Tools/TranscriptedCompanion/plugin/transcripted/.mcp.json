@@ -2,8 +2,10 @@
   "mcpServers": {
     "transcripted": {
       "command": "/bin/bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/launch.sh"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+      "args": [
+        "./scripts/launch.sh"
+      ],
+      "cwd": "."
     }
   }
 }

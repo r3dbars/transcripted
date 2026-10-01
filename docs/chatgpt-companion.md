@@ -51,4 +51,4 @@ codex plugin add transcripted@transcripted-local
 
 After updating source, regenerate the package and reinstall the plugin to refresh its cached helper. A new conversation or desktop restart may be needed before newly added tools are discovered.
 
-Run `python3 Tools/TranscriptedCompanion/test-discovery.py` to check discovery with the installed Codex runtime. Server discovery and valid UI metadata do not prove that a particular host renders MCP Apps. The sidebar/panel integration still requires a compatible host and visual verification.
+Run `python3 Tools/TranscriptedCompanion/test-discovery.py` to check discovery with the installed Codex runtime. Add `--check-installed-startup` to start configured MCP servers and verify the installed Transcripted tools load without calling them. The legacy config uses `cwd: "."` and `./scripts/launch.sh`; the desktop runtime did not expand the prior `${CLAUDE_PLUGIN_ROOT}` placeholder. Server discovery and valid UI metadata do not prove that a particular host renders MCP Apps. The sidebar/panel integration still requires a compatible host and visual verification.
