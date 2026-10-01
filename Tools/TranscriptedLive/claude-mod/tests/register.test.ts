@@ -340,18 +340,18 @@ describe('register', () => {
     } as never)
     expect(await ui.find({ type: 'Text', text: /Sarah, You/ })).toBeDefined()
     expect(await ui.find({ type: 'Markdown', text: /- \[ \] You: send the numbers by Thursday/ } as never)).toBeDefined()
-    expect(await ui.find({ key: 'email' } as never)).toBeDefined()
+    expect(await ui.find({ key: 'email' } as never)).toBeUndefined()
     await ui.unmount()
   })
 
-  test('pressing a wrap-up button again before Claude answers sends it once', async ($, on) => {
+  test('pressing a next-action button again before Claude answers sends it once', async ($, on) => {
     const lines = [...UTTERANCES, { t: 420, speaker: 'you', text: 'ok i will send the numbers thursday' }]
     world(on, 'ended', { meetingId: 'meeting_2026-10-01_14-23-27-933', lines })
     const submitted: string[] = []
     on('model.complete', () => ({
       value: {
         isAnswered: true as const,
-        text: '{"title":"Review rules","summary":["skip review"],"decisions":[],"actions":["You: numbers"],"openQuestions":[]}',
+        text: '{"title":"Review rules","summary":["skip review"],"decisions":[],"actions":["You: numbers"],"openQuestions":[],"nextActions":[{"label":"Make my checklist","prompt":"Make a checklist from the call."},{"label":"Draft the email","prompt":"Draft the follow-up email."}]}',
         usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
       },
     }))
@@ -371,8 +371,8 @@ describe('register', () => {
       requestId: 'live-meeting',
       props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
-    for (let i = 0; i < 5; i++) await ui.press({ key: 'todos' } as never)
-    await ui.press({ key: 'email' } as never)
+    for (let i = 0; i < 5; i++) await ui.press({ key: 'next-btn-0' } as never)
+    await ui.press({ key: 'next-btn-1' } as never)
     expect(submitted.filter(text => text.includes('checklist')).length).toBe(1)
     expect(submitted.filter(text => text.includes('follow-up email')).length).toBe(1)
     await ui.unmount()

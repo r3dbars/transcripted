@@ -48,14 +48,10 @@ export type Actions = {
   ask: (prompt: string) => void
   setTab: (tab: Tab) => void
   openPane: () => void
-  copy: (text: string) => void
 }
 
 export type Prompts = {
   answer: (question: string) => string
-  email: string
-  todos: string
-  notes: string
 }
 
 // Loose element constructors: the surface tables differ.
@@ -129,7 +125,7 @@ function recordingMark(el: Els, key: string, isLive: boolean, isTalking: boolean
 
 export function pane(el: Els, m: ViewModel, act: Actions, prompts: Prompts): RenderElement {
   if (m.phase === 'none') return emptyState(el)
-  if (m.phase === 'wrapped' && m.wrap) return wrapUp(el, m, m.wrap, act, prompts)
+  if (m.phase === 'wrapped' && m.wrap) return wrapUp(el, m, m.wrap, act)
   if (m.phase === 'ending' || m.phase === 'ended') return endingState(el, m)
   return liveNotes(el, m, act, prompts)
 }
@@ -255,18 +251,11 @@ function questionCard(
   const { Box, Text, Button } = el
   const prompt = prompts.answer(question)
   const isSent = m.pending.has(prompt)
+  // No border around the button: a bordered box swallowed clicks on the desktop.
   return (
-    <Box
-      key={`q-card-${index}`}
-      flexDirection="column"
-      borderStyle="round"
-      borderDimColor
-      paddingX={1}
-      gap={1}
-      hover={{ borderStyle: 'round' }}
-    >
-      <Text wrap="wrap">{question}</Text>
-      <Box flexDirection="row">
+    <Box key={`q-card-${index}`} flexDirection="column">
+      <Text wrap="wrap">{`“${question}”`}</Text>
+      <Box flexDirection="row" marginTop={1}>
         <Button
           key={`q${index}`}
           label={isSent ? 'Drafting…' : 'Draft answer'}
@@ -331,24 +320,14 @@ function endingState(el: Els, m: ViewModel): RenderElement {
   )
 }
 
-function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: Prompts): RenderElement {
+function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions): RenderElement {
   const { Box, Button, Markdown, Text } = el
   const people = wrap.speakers.length > 0 ? wrap.speakers.join(', ') : ''
   const meta = [m.when, durationLabel(m.clock), people || (wrap.source === 'saved' ? '' : 'names coming…')]
     .filter(Boolean)
     .join('  ·  ')
-  const next = wrap.nextActions ?? []
+  const next = (wrap.nextActions ?? []).slice(0, 3)
   const markdown = wrapupMarkdown(wrap, false)
-  const button = (key: string, label: string, prompt: string, hotkey: string, isPrimary: boolean) => (
-    <Button
-      key={key}
-      label={m.pending.has(prompt) ? `${label} ✓` : label}
-      hotkey={hotkey}
-      variant={isPrimary ? 'primary' : 'secondary'}
-      dimColor={m.pending.has(prompt)}
-      onPress={() => act.ask(prompt)}
-    />
-  )
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       <Text color="green">✓ Wrap-up</Text>
@@ -367,25 +346,12 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: 
           {next.map((action, index) => {
             const isSent = m.pending.has(action.prompt)
             return (
-              <Box
-                key={`next-${index}`}
-                flexDirection="row"
-                alignItems="center"
-                gap={1}
-                borderStyle="round"
-                borderDimColor
-                paddingX={1}
-              >
-                <Box flexGrow={1} flexShrink={1}>
-                  <Text wrap="wrap" dimColor={isSent}>
-                    {action.label}
-                  </Text>
-                </Box>
+              <Box key={`next-${index}`} flexDirection="row">
                 <Button
                   key={`next-btn-${index}`}
-                  label={isSent ? 'Working…' : 'Do it'}
-                  hotkey={String(index + 4)}
-                  variant="primary"
+                  label={isSent ? `${action.label}  ·  working…` : `${action.label}  →`}
+                  hotkey={String(index + 1)}
+                  variant={index === 0 ? 'primary' : 'secondary'}
                   dimColor={isSent}
                   onPress={() => act.ask(action.prompt)}
                 />
@@ -394,12 +360,6 @@ function wrapUp(el: Els, m: ViewModel, wrap: LiveWrapup, act: Actions, prompts: 
           })}
         </Box>
       ) : null}
-      <Box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
-        {button('email', 'Follow-up email', prompts.email, '1', true)}
-        {button('todos', 'Todo list', prompts.todos, '2', false)}
-        {button('notes', 'Meeting notes', prompts.notes, '3', false)}
-        <Button key="copy" label="Copy" hotkey="c" onPress={() => act.copy(wrapupMarkdown(wrap, true))} />
-      </Box>
     </Box>
   )
 }
@@ -445,8 +405,8 @@ export function wrapupMarkdown(wrap: LiveWrapup, withTitle: boolean): string {
     withTitle && wrap.overview ? wrap.overview : '',
     section('Summary', wrap.summary, '- '),
     section('Decisions', wrap.decisions, '- '),
-    actionsByOwner(wrap.actions),
     section('Still open', wrap.openQuestions, '- '),
+    actionsByOwner(wrap.actions),
   ]
     .filter(Boolean)
     .join('\n\n')

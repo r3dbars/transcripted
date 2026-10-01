@@ -177,13 +177,6 @@ const PROMPTS: Record<string, string> = {
   say: 'Based on where my live meeting is right now, suggest 2 or 3 short things I could say next, each one line.',
 }
 
-const FOLLOW_UP_PROMPTS = {
-  email:
-    'Draft a short follow-up email for the call I just finished: thanks, what we decided, who owes what by when, and anything still open. Plain text, ready to paste.',
-  todos: 'Turn my action items from the call I just finished into a checklist for me, most urgent first, with dates where they were said.',
-  notes: 'Write clean meeting notes for the call I just finished: summary, decisions, action items with owners, open questions. Markdown.',
-}
-
 /** What Claude is asked when the person presses a question's number. */
 function answerPrompt(question: string): string {
   return `On my live call I was just asked: "${question}". Draft what I could say back, 1 to 3 short sentences I can read out loud. Use what we know from the call and this project.`
@@ -427,10 +420,7 @@ export function register(on: On) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
     const model = viewModel(s, Date.now(), true)
-    return ui.pane(await elements($, e), model, paneActions($, s), {
-      answer: answerPrompt,
-      ...FOLLOW_UP_PROMPTS,
-    })
+    return ui.pane(await elements($, e), model, paneActions($, s), { answer: answerPrompt })
   })
 }
 
@@ -461,12 +451,6 @@ function paneActions($: EngineInterface, s: LiveState): Actions {
     openPane: () => {
       s.isHidden = false
       void $.ui.open({ id: PANE_ID, title: paneTitle(s) }).catch(() => undefined)
-    },
-    copy: text => {
-      void $.ui.copy({ text }).then(
-        result => $.ui.toast(result.isCopied ? 'Wrap-up copied' : 'Could not copy here'),
-        () => undefined,
-      )
     },
   }
 }
@@ -988,7 +972,7 @@ async function runWrapUp(
     ' "openQuestions": ["what is still unresolved, especially anything the user owes an answer on"],',
     ' "overview": "one sentence: what this call was and its outcome",',
     ' "nextActions": [{"label": "2 to 5 word imperative", "prompt": "the full instruction for Claude Code"}]}',
-    'nextActions: 3 to 5 concrete things Claude Code could do right now for the user because of this call: drafts (email, Slack, doc), a GitHub issue, a code change or investigation in the current project, a reminder list, research. Each prompt stands alone and names the specifics from the call. No vague items like "follow up".',
+    'nextActions: exactly 3 concrete things Claude Code could do right now for the user because of this call: drafts (email, Slack, doc), a GitHub issue, a code change or investigation in the current project, a reminder list, research. Each prompt stands alone and names the specifics from the call. No vague items like "follow up".',
     'Every bullet one short line, plain facts only: no commentary on accuracy, no hedging. Empty lists when nothing fits. Never invent names, dates or decisions that were not said.',
   ].join('\n')
   const reply = await $.model
@@ -1016,14 +1000,14 @@ function parseWrapup(text: string, meetingId: string, saved: SavedMeeting | null
   }
 }
 
-/** The wrap-up's suggested tasks: labelled, bounded, at most five. */
+/** The wrap-up's suggested tasks: labelled, bounded, at most three. */
 function nextActions(value: unknown): { label: string; prompt: string }[] {
   if (!Array.isArray(value)) return []
   return value
     .map(item => (typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}))
     .map(item => ({ label: str(item.label).slice(0, 40), prompt: str(item.prompt).slice(0, 600) }))
     .filter(item => item.label !== '' && item.prompt !== '')
-    .slice(0, 5)
+    .slice(0, 3)
 }
 
 function wrapupText(wrap: Wrapup): string {
