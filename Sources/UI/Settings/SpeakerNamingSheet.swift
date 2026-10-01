@@ -240,7 +240,7 @@ final class SpeakerNamingSheet {
         Task { @MainActor [weak self, weak view] in
             guard let invitees = await Self.invitees(for: request),
                   let self, let view, self.islandReviewView === view else { return }
-            view.setInvitees(invitees.names)
+            view.setInvitees(invitees.names, remoteVoicesInMeeting: invitees.remoteVoices)
         }
     }
 
