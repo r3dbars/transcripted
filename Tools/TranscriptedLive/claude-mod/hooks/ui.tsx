@@ -86,6 +86,7 @@ export const BAND_STYLES = [
   { id: 5, name: 'Coach', about: 'whatever was just asked of you, with a Draft answer button' },
   { id: 6, name: 'Topic', about: 'the call\'s name and what is being discussed right now' },
   { id: 7, name: 'Wave', about: 'only a wide waveform, the time and two icons' },
+  { id: 8, name: 'Quiet', about: 'no band while recording; it appears only when something is asked of you or the wrap-up is ready' },
 ] as const
 export type BandStyle = (typeof BAND_STYLES)[number]['id']
 
@@ -112,6 +113,29 @@ export function band(el: Els, m: ViewModel, act: Actions, style: BandStyle, prom
   if (m.phase !== 'live' && m.phase !== 'stalled') return null
 
   const isLive = m.phase === 'live'
+  if (style === 8) {
+    // Quiet: the status line says it is recording; the band speaks only when asked of you.
+    const question = m.questions.at(-1)
+    if (!question) return null
+    const prompt = prompts.answer(question)
+    return (
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        <Box flexShrink={0}>
+          <Text dimColor>Asked</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate-end">{`“${question}”`}</Text>
+        </Box>
+        <Button
+          key="band-draft"
+          plain
+          label={m.pending.has(prompt) ? 'Drafting…' : 'Draft answer'}
+          onPress={() => act.ask(prompt)}
+        />
+        {toggle(el, m, act, true)}
+      </Box>
+    )
+  }
   const mark = <Box flexShrink={0}>{recordingMark(el, 'band-wave', isLive, m.levels, 10)}</Box>
   const dot = (
     <Box flexShrink={0}>
@@ -362,7 +386,11 @@ function header(el: Els, m: ViewModel, title: string, meta: string, isLive: bool
         {title}
       </Text>
       <Box flexDirection="row" alignItems="center" gap={1}>
-        {isLive ? <Box flexShrink={0}>{recordingMark(el, 'pane-wave', m.phase === 'live', m.levels, 10)}</Box> : null}
+        {isLive ? (
+          <Box flexShrink={0}>
+            <Text color={m.phase === 'live' ? RED : AMBER}>{m.phase === 'live' ? '●' : '◌'}</Text>
+          </Box>
+        ) : null}
         <Text dimColor wrap="truncate-end">
           {meta}
         </Text>
@@ -403,9 +431,7 @@ function liveNotes(el: Els, m: ViewModel, act: Actions, prompts: Prompts): Rende
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
       {header(el, m, title, meta, true)}
       {m.canStop && (m.phase === 'live' || m.phase === 'stalled') ? (
-        <Box flexDirection="row" marginTop={1}>
-          {stopButton(el, m, act, false)}
-        </Box>
+        <Box flexDirection="row">{stopButton(el, m, act, false)}</Box>
       ) : null}
       {tabs(el, m, act)}
       <Box flexDirection="column" marginTop={1}>

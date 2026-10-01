@@ -224,6 +224,8 @@ describe('register', () => {
 
   test('a live call shows a recording band above the prompt on terminal and desktop', async ($, on) => {
     world(on)
+    on('store.get', ($, e) => ({ value: e.key === 'bandStyle.v2' ? 3 : undefined }))
+    on('store.set', () => ({ value: undefined }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
     for (const surface of ['terminal', 'desktop'] as const) {
@@ -445,7 +447,7 @@ describe('register', () => {
     await ui.unmount()
   })
 
-  test('all six band styles draw on terminal and desktop, each with the notes toggle', async ($, on) => {
+  test('every band style draws on terminal and desktop, each with the notes toggle', async ($, on) => {
     world(on)
     on('store.get', () => ({ value: undefined }))
     on('store.set', () => ({ value: undefined }))
@@ -459,7 +461,7 @@ describe('register', () => {
     on('prompt.suggest', () => ({ isShown: true }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
     await $.command.run({ command: 'meeting', args: 'status', ...COMPOSER })
-    for (const style of [1, 2, 3, 4, 5, 6]) {
+    for (const style of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const picked = await $.command.run({ command: 'meeting', args: `style ${style}`, ...COMPOSER })
       expect(picked.text).toContain(`Band style ${style}:`)
       for (const surface of ['terminal', 'desktop'] as const) {
@@ -503,24 +505,26 @@ describe('register', () => {
     const ui = await $.ui.mount({
       plugin: 'transcripted-live',
       surface: 'desktop',
-      component: 'AbovePrompt',
-      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
     await ui.press({ key: 'band-stop' } as never)
     expect(calls.some(call => call.tool.endsWith('stop_meeting') && call.session === 'S-1')).toBe(false)
     await $.command.run({ command: 'meeting', args: 'help', ...COMPOSER })
+    await ui.unmount()
     const armed = await $.ui.mount({
       plugin: 'transcripted-live',
       surface: 'desktop',
-      component: 'AbovePrompt',
-      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+      component: 'Pane',
+      requestId: 'live-meeting',
+      props: { title: 'Live meeting', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0 }, view: {} },
     } as never)
     expect(JSON.stringify(await armed.find({ key: 'band-stop' } as never))).toContain('click again')
-    await armed.unmount()
-    await ui.press({ key: 'band-stop' } as never)
+    await armed.press({ key: 'band-stop' } as never)
     await $.command.run({ command: 'meeting', args: 'help', ...COMPOSER })
     expect(calls.filter(call => call.tool.endsWith('stop_meeting') && call.session === 'S-1').length).toBe(1)
     expect(toasts).toContain('Stopping · Transcripted is saving the meeting')
-    await ui.unmount()
+    await armed.unmount()
   })
 })

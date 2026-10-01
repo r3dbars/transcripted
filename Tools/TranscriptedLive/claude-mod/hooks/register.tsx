@@ -159,7 +159,8 @@ const PERSON_ONLY_TOOLS = new Set(['start_meeting', 'stop_meeting', 'set_live_co
 const STORE_AUTO = 'autoContext'
 const STORE_HELPER = 'helper'
 const STORE_AUTOSTART = 'autostart'
-const STORE_BAND_STYLE = 'bandStyle'
+/** Versioned so the Quiet default reaches people who tried the earlier styles. */
+const STORE_BAND_STYLE = 'bandStyle.v2'
 /** The bundled transcripted MCP server, as the engine names a plugin's server. */
 const MCP_SERVER = 'plugin_transcripted-live_transcripted'
 /** How long a first press of Stop waits for the second. */
@@ -185,7 +186,7 @@ const HELP_TEXT = [
   '/meeting attach [N]   hand Claude the last N minutes now (default 5, or "all")',
   '/meeting auto on|off  send new lines with each prompt (on by default)',
   '/meeting autostart on|off  keep the transcripted-live helper running (on by default)',
-  '/meeting style [1-7|next]  pick how the band above the prompt looks',
+  '/meeting style [1-8|next]  pick how the band above the prompt looks (8, Quiet, is the default)',
   '/meeting helper on|off  Haiku keeps notes while the call is live (on by default)',
 ].join('\n')
 
@@ -241,7 +242,7 @@ export function register(on: On) {
     pendingAsks: new Map(),
     tab: 'notes',
     shownTitle: PANE_TITLE,
-    bandStyle: 3,
+    bandStyle: 8,
     frame: 0,
     stopState: 'idle',
     stopArmedUntil: 0,
@@ -296,7 +297,7 @@ export function register(on: On) {
       .register({
         name: COMMAND_NAME,
         description: 'Live meeting from Transcripted: status, catch up, action items, what to say, notes',
-        argumentHint: '[style 1-7 | catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
+        argumentHint: '[style 1-8 | catchup | actions | say | notes | wrapup | attach [N|all] | auto on|off | helper on|off]',
       })
       .catch(() => undefined)
 
