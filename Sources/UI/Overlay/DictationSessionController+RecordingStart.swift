@@ -179,10 +179,6 @@ extension DictationSessionController {
         case .showLoadingWhileWaiting:
             // Slow path — engine is settling after a device change. Wait for it.
             enterPendingStartStage(.waitingForAudioRoute)
-            overlayController.showMiniCursorStartingStateIfNeeded(
-                near: sourceApp,
-                anchorRect: sessionAnchorRect
-            )
             overlayController.showLoadingState(
                 near: sourceApp,
                 presentation: microphoneRecoveryPresentation(
@@ -410,10 +406,6 @@ extension DictationSessionController {
 
         startupTask?.cancel()
         enterPendingStartStage(.awaitingModelWarmup)
-        overlayController.showMiniCursorStartingStateIfNeeded(
-            near: sourceApp,
-            anchorRect: sessionAnchorRect
-        )
         updateLoadingOverlay(sourceApp: sourceApp)
 
         startupTask = Task { @MainActor [weak self] in

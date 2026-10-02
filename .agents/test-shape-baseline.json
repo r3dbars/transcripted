@@ -20,7 +20,7 @@
     "Tests/MeetingSessionUIPolicyTests.swift": 6,
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 8,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 19,
+    "Tests/OverlayScreenSharePrivacyTests.swift": 18,
     "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 1,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 4,
@@ -33,7 +33,7 @@
     "Tests/TestHelpers.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 174
+    "Tests/UIAutomationSurfaceContractTests.swift": 160
   },
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2,
