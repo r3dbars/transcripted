@@ -49,7 +49,7 @@ extension TranscriptionTaskManager {
     /// background task to avoid blocking the main thread with cascading queue.sync
     /// calls — each DB method synchronously locks a utility queue, and with 7+
     /// speakers this totals 15-20 blocking calls that freeze the UI.
-    public func handleNamingComplete(
+    func handleNamingComplete(
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
         transcriptId: UUID,

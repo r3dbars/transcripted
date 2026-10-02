@@ -17,7 +17,7 @@ final class SpeakerReviewProfileProtection: @unchecked Sendable {
     private let lock = NSLock()
     private var entriesByRequestId: [UUID: Entry] = [:]
 
-    static func profileIds(for request: SpeakerNamingRequest) -> Set<UUID> {
+    private static func profileIds(for request: SpeakerNamingRequest) -> Set<UUID> {
         var ids = Set<UUID>()
         for entry in request.speakers {
             ids.insert(entry.id)
