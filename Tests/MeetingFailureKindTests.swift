@@ -297,7 +297,7 @@ func testMeetingFailureKind() {
             isRetryable: true
         )
 
-        assertEqual(copy.title, "Recording didn't close cleanly", "stop-timeout users should see specific copy, not generic retry phrasing")
+        assertEqual(copy.title, "Recording may be cut off", "stop-timeout users should see specific copy, not generic retry phrasing")
     }
 
     runSuite("MeetingFailureCopy surfaces saved-before-quit recovery guidance") {
@@ -307,8 +307,8 @@ func testMeetingFailureKind() {
             isRetryable: true
         )
 
-        assertEqual(copy.title, "Meeting saved before quit", "quit recovery should not look like a failure")
-        assertTrue(copy.detail.contains("Audio is safe"), "quit recovery should reassure users that audio was kept")
+        assertEqual(copy.title, "Saved when you quit", "quit recovery should not look like a failure")
+        assertTrue(copy.detail.contains("The audio is safe"), "quit recovery should reassure users that audio was kept")
     }
 
     runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {

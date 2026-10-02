@@ -592,7 +592,7 @@ enum MeetingPromptHeuristics {
     static func micInputPresentation(title: String, meetingShortcut: String) -> RuntimeMeetingPromptPresentation {
         RuntimeMeetingPromptPresentation(
             title: title,
-            detail: "Start recording now or press \(meetingShortcut) anytime.",
+            detail: "Or press \(meetingShortcut) anytime.",
             score: micInputPromptScore
         )
     }

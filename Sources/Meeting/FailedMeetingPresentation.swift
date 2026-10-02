@@ -38,7 +38,7 @@ enum FailedMeetingPresentation {
            !title.isEmpty {
             return title
         }
-        return fallback == "Transcript needs another pass" ? "Meeting transcript failed" : fallback
+        return fallback == "Transcript needs another pass" ? "Transcript failed" : fallback
     }
 
     private static func audioURLs(for failed: FailedTranscription) -> [URL] {

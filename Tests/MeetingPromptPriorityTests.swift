@@ -86,7 +86,7 @@ func testMeetingPromptPriority() {
         assertEqual(reconnected.phase, .recovered)
         assertFalse(MeetingSystemAudioPromptPolicy.offersActions(for: reconnected), "good news has nothing to decide")
         assertEqual(MeetingSystemAudioPromptPolicy.autoHideSeconds(for: reconnected), 4, "it goes away on its own")
-        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: reconnected), "A few seconds of call audio may be missing.")
+        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: reconnected), "A few seconds may be missing.")
 
         let hidden = reconnected.dismissingPrompt()
         assertFalse(hidden.shouldPresentPrompt, "hiding it is an acknowledgement")
@@ -97,7 +97,7 @@ func testMeetingPromptPriority() {
         let back = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
             current: unheard, notHearingPlayback: false, playbackLossConfirmed: true, isRecording: true)!
         assertEqual(MeetingSystemAudioPromptPolicy.autoHideSeconds(for: back), 4)
-        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: back), "Some call audio may be missing.")
+        assertEqual(MeetingSystemAudioDegradationCopy.detail(for: back), "A few seconds may be missing.")
 
         let failed = MeetingSystemAudioDegradationPolicy.next(current: nil, status: .failed, isRecording: true)!
         let interruptedDegraded = MeetingSystemAudioDegradationWarning(

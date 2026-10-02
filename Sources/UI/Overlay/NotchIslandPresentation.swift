@@ -553,19 +553,19 @@ enum NotchIslandPresentation {
     ) -> ([NotchIslandItem], [NotchIslandItem]) {
         switch meeting.phase {
         case .none:
-            return ([.symbol(.video, .accent), .text("Meeting", .title)], [])
+            return ([.symbol(.video, .accent), .text("Missed call", .title)], [])
         case .preparing(let title, _):
             return ([.spinner, .text(title, .title)], [])
         case .recording:
             var right: [NotchIslandItem]
             if meeting.systemAudioUnverified {
-                right = [.text("Audio unverified", .warning)]
+                right = [.text("Can't confirm call", .warning)]
             } else {
                 switch meeting.callAudioNote {
                 case .off?:
                     right = [.chip("Mic only", .warning, .meetingCallAudio)]
                 case .onForNextMeeting?:
-                    right = [.text("Call audio on", .secondary)]
+                    right = [.text("Call audio next time", .secondary)]
                 case nil:
                     right = [.meetingMeters]
                 }
@@ -580,7 +580,7 @@ enum NotchIslandPresentation {
         case .saved:
             return ([.symbol(.check, .accent), .text("Saved", .title)], [.chip("Open", .plain, .meetingOpen)])
         case .error:
-            return ([.symbol(.warning, .warning), .text("Meeting not saved", .title)], [])
+            return ([.symbol(.warning, .warning), .text("Meeting failed", .title)], [])
         }
     }
 

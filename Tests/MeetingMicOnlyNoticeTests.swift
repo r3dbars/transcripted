@@ -217,6 +217,6 @@ func testMeetingMicOnlyNotice() {
         let detail = MeetingSystemAudioDegradationCopy.detail(
             for: MeetingSystemAudioDegradationWarning(cause: .unverified, phase: .degraded, isPromptDismissed: false)
         )
-        assertEqual(detail, "Mic is recording. Check System Audio access.", "short enough for the one-line prompt detail")
+        assertEqual(detail, "Your mic is recording. Check call audio access.", "short enough for the one-line prompt detail")
     }
 }

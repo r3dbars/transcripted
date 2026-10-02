@@ -536,7 +536,7 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 1, "a Zoom call should prompt")
         assertEqual(
             box.candidate?.detail,
-            "Start recording now or press ⌃⇧R anytime.",
+            "Or press ⌃⇧R anytime.",
             "a rebound meeting shortcut should show in the prompt, not the default"
         )
     }

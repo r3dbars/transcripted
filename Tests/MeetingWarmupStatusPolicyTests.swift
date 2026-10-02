@@ -35,7 +35,7 @@ func testMeetingWarmupStatusPolicy() {
             shouldSurfaceMeetingWarmupFailure: false
         )
 
-        assertEqual(status.subtitle, "Loading meeting transcription", "visible warmup should still show loading copy")
+        assertEqual(status.subtitle, "Loading transcription", "visible warmup should still show loading copy")
         assertEqual(status.meetingsStatus, "Loading", "meeting status should track visible loading")
     }
 
@@ -58,7 +58,7 @@ func testMeetingWarmupStatusPolicy() {
             shouldSurfaceMeetingWarmupFailure: false
         )
 
-        assertEqual(status.subtitle, "Preparing meeting transcription", "user-started meeting setup should show startup copy immediately")
+        assertEqual(status.subtitle, "Loading transcription", "user-started meeting setup should show startup copy immediately")
         assertEqual(status.meetingsStatus, "Starting", "not-loaded but in-flight meeting warmup should not look idle")
         assertFalse(status.isReadyForMenuHeader, "active meeting warmup should not claim full readiness")
     }

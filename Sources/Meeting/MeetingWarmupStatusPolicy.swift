@@ -77,7 +77,7 @@ enum MeetingWarmupStatusPolicy {
         case .downloading(let progress):
             let percentage = clampedDownloadPercentage(progress)
             return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
+                title: "Getting ready",
                 subtitle: "Downloading local dictation model",
                 detail: "One-time local model download. Keep Transcripted open; future app updates should reuse the cached model.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
@@ -86,7 +86,7 @@ enum MeetingWarmupStatusPolicy {
             )
         case .loading:
             return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
+                title: "Getting ready",
                 subtitle: "Loading local dictation model",
                 detail: "Transcripted has the model files and is loading dictation into memory.",
                 progress: 0.68,
@@ -153,8 +153,8 @@ enum MeetingWarmupStatusPolicy {
                 return .ready
             }
             return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Loading meeting transcription",
+                title: "Getting ready",
+                subtitle: "Loading transcription",
                 detail: "Dictation is ready. Transcripted is still warming up meeting transcription in the background.",
                 progress: 0.86,
                 dictationStatus: "Ready",
@@ -165,8 +165,8 @@ enum MeetingWarmupStatusPolicy {
                 return .dictationReadyMeetingsOnDemand
             }
             return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Preparing meeting transcription",
+                title: "Getting ready",
+                subtitle: "Loading transcription",
                 detail: "Dictation is ready. Meeting transcription is still starting up.",
                 progress: 0.76,
                 dictationStatus: "Ready",

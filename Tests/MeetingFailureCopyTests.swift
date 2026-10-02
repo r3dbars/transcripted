@@ -10,15 +10,15 @@ func testMeetingFailureCopy() {
 
         assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
         assertTrue(
-            copy.detail.contains("kept the audio"),
+            copy.detail.contains("audio is saved"),
             "no-speech copy should say the audio was kept"
         )
         assertTrue(
-            copy.detail.contains("Meetings page") && copy.detail.contains("Try again"),
+            copy.detail.contains("Meetings") && copy.detail.contains("try again"),
             "saved no-speech rows now offer Try again, so the copy should say where to find it"
         )
         assertTrue(
-            copy.detail.contains("If people were talking"),
+            copy.detail.contains("If people talked"),
             "the retry pointer is conditional, because a silent recording hides the action"
         )
         assertFalse(copy.detail.contains("\u{2014}"), "user copy avoids em dashes")
@@ -63,7 +63,7 @@ func testMeetingFailureCopy() {
             shortErrorMessage: "Recording too short",
             isRetryable: false
         )
-        assertTrue(plain.detail.contains("Nothing broke"), "a plain too-short recording keeps its old copy")
+        assertEqual(plain.detail, "Record at least 2 seconds before you stop.", "a plain too-short recording just says how long to record")
     }
 
     runSuite("MeetingFailureCopy gives classified engine failures plain copy") {
@@ -71,13 +71,13 @@ func testMeetingFailureCopy() {
         // pass" with the raw engine error as the detail.
         let cases: [(message: String, title: String)] = [
             ("Parakeet inference failed: MLMultiArray shape mismatch", "Transcription didn't finish"),
-            ("Parakeet model not loaded", "Speech model wasn't ready"),
-            ("Model download failed: offline", "Speech model didn't download"),
+            ("Parakeet model not loaded", "Voice model still loading"),
+            ("Model download failed: offline", "Voice model didn't download"),
             ("Invalid audio format: unsupported sample rate", "Couldn't read the recording"),
-            ("PyAnnote diarization crashed", "Couldn't sort out the speakers"),
+            ("PyAnnote diarization crashed", "Couldn't tell speakers apart"),
             ("Transcription already in progress", "Transcription didn't start"),
             ("Transcription pipeline error", "Transcription didn't finish"),
-            ("No microphone found", "No microphone found"),
+            ("No microphone found", "No mic found"),
         ]
         for (message, title) in cases {
             let copy = MeetingFailureCopy.make(
@@ -102,7 +102,7 @@ func testMeetingFailureCopy() {
         )
         assertEqual(copy.title, "Transcription didn't finish", "the catch-all still gets a plain title")
         assertFalse(copy.detail.contains("speech model"), "the cause is unknown here, so the copy must not name one")
-        assertTrue(copy.detail.contains("Meetings page"), "the failed row on the Meetings page says the real reason")
+        assertTrue(copy.detail.contains("Meetings"), "the failed row on the Meetings page says the real reason")
     }
 
     runSuite("MeetingFailureCopy says when nothing was recorded") {
@@ -138,7 +138,7 @@ func testMeetingFailureCopy() {
             shortErrorMessage: "Recording didn't close cleanly. Open the Meetings page to retry.",
             isRetryable: true
         )
-        assertEqual(unclean.title, "Recording didn't close cleanly", "the stop-timeout pill should match the failed row")
+        assertEqual(unclean.title, "Recording may be cut off", "the stop-timeout pill should match the failed row")
     }
 
     runSuite("MeetingFailureCopy never points at a Home page") {

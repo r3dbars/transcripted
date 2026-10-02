@@ -15,15 +15,14 @@
 //     and a ring fills around it until the clip ends
 //   - a calendar 1:1 with one unnamed remote voice fills that voice's name
 //     box with the other invitee; it saves on Done like a typed name
-//   - local mic voices sit under a "Keep Local Mic as You" switch, and an
-//     open name box offers "Discard Voice" for a voice that isn't a person
+//   - local mic voices sit under an "All me" toggle; an open name box
+//     offers "Not a person" for a voice that isn't one
 //
 // Done saves the answers through the same `SpeakerNameUpdate`s the review
-// window builds, then shows "Everyone's named" with Open transcript. Later
-// (or its 20 s ring running out) saves whatever was answered and leaves
-// the rest for Speakers. A name typed but not submitted counts on both. The
-// ring only runs while the review is on screen. The rules live in
-// NotchIslandSpeakerReviewPolicy.
+// window builds, then shows "Everyone's named" with Open. Later (or its 20 s
+// ring running out) saves whatever was answered and leaves the rest for
+// Speakers. A name typed but not submitted counts on both. The ring only runs
+// while the review is on screen. The rules live in NotchIslandSpeakerReviewPolicy.
 
 import AppKit
 import TranscriptedCore
@@ -60,7 +59,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     private var invitees: [String] = []
     /// The calendar 1:1 name has been offered (it is offered once).
     private var didOfferOneOnOnePrefill = false
-    /// "Keep Local Mic as You" is on: every asked local mic voice saves as You.
+    /// "All me" is on: every asked local mic voice saves as You.
     private var keepMicAsYou = false
     /// The button carrying the countdown ring: Later, or Done when nothing is asked.
     private var countdownButton: NotchIslandButton?
@@ -288,7 +287,8 @@ final class NotchIslandSpeakerReviewView: NSView {
             fontSize: 12
         )
         keep.onPress = { [weak self] in self?.toggleKeepMicAsYou() }
-        keep.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.keepAsYouHelp)
+        keep.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.keepAsYouAccessibilityLabel(keepMicAsYou: keepMicAsYou))
+        keep.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.keepAsYouHelp(keepMicAsYou: keepMicAsYou))
         keep.setContentHuggingPriority(.required, for: .horizontal)
         keep.setContentCompressionResistancePriority(.required, for: .horizontal)
         let line = NSStackView(views: [label, NSView(), keep])
@@ -301,9 +301,8 @@ final class NotchIslandSpeakerReviewView: NSView {
         return line
     }
 
-    /// "Keep Local Mic as You": every asked local mic voice saves as You
-    /// (`.collapsedToMe`), whatever was typed for it. Pressing it again
-    /// ("Review Local Mic Voices") lifts that.
+    /// "All me": every asked local mic voice saves as You (`.collapsedToMe`),
+    /// whatever was typed for it. Pressing it again ("Undo") lifts that.
     private func toggleKeepMicAsYou() {
         stopLaterCountdown()
         keepMicAsYou.toggle()
@@ -480,7 +479,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         titleRow.orientation = .horizontal
         titleRow.spacing = 7
         let detail = NotchIslandPalette.label(copy.detail, font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
-        let open = NotchIslandButton(title: "Open transcript", style: .accent, height: 30)
+        let open = NotchIslandButton(title: "Open", style: .accent, height: 30)
         open.onPress = { [weak self] in self?.onOpenTranscript?() }
         let footer = NSStackView(views: [NSView(), open])
         footer.orientation = .horizontal
@@ -614,9 +613,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     private var highlightedRow: Int?
     private var isPointerInside = false
     private var hoverArea: NSTrackingArea?
-    /// "Discard Voice": not saved to People.
+    /// "Not a person": not saved to People.
     private var isDiscarded = false
-    /// "Keep Local Mic as You" is on for this local mic voice.
+    /// "All me" is on for this local mic voice.
     private var isKeptAsYou = false
     /// The name box holds the calendar 1:1 name and nobody has touched it.
     private var prefilledUntouched = false
@@ -761,7 +760,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return true
     }
 
-    /// "Keep Local Mic as You" was switched on or off for the local mic voices.
+    /// "All me" was switched on or off for the local mic voices.
     func setKeptAsYou(_ kept: Bool) {
         guard isMic, kept != isKeptAsYou else { return }
         isKeptAsYou = kept
@@ -771,7 +770,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         rebuild()
     }
 
-    /// "Discard Voice" / "Undo Discard".
+    /// "Not a person" / "Undo".
     private func toggleDiscard() {
         onInteract?()
         guard !isKeptAsYou else { return }
@@ -880,6 +879,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             let undo = pill(NotchIslandSpeakerReviewPolicy.discardTitle(discarded: true), style: .subtle) { [weak self] in
                 self?.toggleDiscard()
             }
+            undo.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.undoDiscardAccessibilityLabel)
             undo.setAccessibilityHelp("Save this voice to People after all.")
             views.append(undo)
         case (.none, _) where isRecognized:
@@ -1186,7 +1186,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// row, or nil when the voice was left unnamed (or, for a recognized
     /// voice, left as it was). A name still sitting in an open box counts,
     /// read the way Return would read it, except an untouched calendar name
-    /// on Later. Keep as You and Discard Voice win over any name, and build
+    /// on Later. All me and Not a person win over any name, and build
     /// the window's `.collapsedToMe` and `.discardedFromDatabase` updates.
     func buildUpdate(finish: NotchIslandSpeakerReviewPolicy.Finish) -> SpeakerNameUpdate? {
         if let lock {

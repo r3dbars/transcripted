@@ -189,8 +189,8 @@ final class MeetingOverlayController: NSObject {
         currentPrompt = nil
         promptKind = nil
         currentWarmupStatus = .init(
-            title: "Starting meeting…",
-            subtitle: "Checking permissions and audio",
+            title: "Starting…",
+            subtitle: "Checking your mic and call audio",
             detail: "",
             progress: 0.12,
             dictationStatus: "Ready",
@@ -872,7 +872,7 @@ final class MeetingOverlayController: NSObject {
         pushToView()
     }
 
-    /// The "Audio unverified" title owns the strip's middle when both apply.
+    /// The "Can't confirm call audio" title owns the strip's middle when both apply.
     private var showsMicOnlyNote: Bool {
         micOnlyNotice != nil && systemAudioDegradationWarning?.cause != .unverified
     }
@@ -1013,10 +1013,10 @@ final class MeetingOverlayController: NSObject {
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
             countdownText: "",
-            secondaryTitle: "Keep Recording",
+            secondaryTitle: "Continue",
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
-            primaryTitle: "End & Transcribe",
-            primaryAccessibilityLabel: "End and transcribe the meeting",
+            primaryTitle: "Stop",
+            primaryAccessibilityLabel: "Stop and transcribe the meeting",
             tertiaryTitle: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessTitle : nil,
             tertiaryAccessibilityLabel: offersCheckAccess ? MeetingMicOnlyNoticeCopy.checkAccessAccessibilityLabel : nil
         )
@@ -1027,24 +1027,24 @@ final class MeetingOverlayController: NSObject {
     ) -> PromptDisplay {
         if warning.kind == .degradedRoute {
             return PromptDisplay(
-                title: "Audio route changed",
-                detail: "Mic or system audio looks muted. Transcripted is still recording.",
+                title: "Audio changed",
+                detail: "Mic or call audio sounds muted. Still recording.",
                 countdownText: "",
-                secondaryTitle: "Keep Recording",
+                secondaryTitle: "Continue",
                 secondaryAccessibilityLabel: "Keep recording",
-                primaryTitle: "End & Transcribe",
-                primaryAccessibilityLabel: "End and transcribe meeting"
+                primaryTitle: "Stop",
+                primaryAccessibilityLabel: "Stop and transcribe the meeting"
             )
         }
 
         return PromptDisplay(
-            title: "No audio detected",
-            detail: "No mic or system audio for \(formatInactiveDuration(warning.inactiveDuration)).",
-            countdownText: "Ends in \(max(0, countdownSeconds))s",
-            secondaryTitle: "Keep Recording",
+            title: "No sound",
+            detail: "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",
+            countdownText: "Stops in \(max(0, countdownSeconds))s",
+            secondaryTitle: "Continue",
             secondaryAccessibilityLabel: "Keep recording",
-            primaryTitle: "End & Transcribe",
-            primaryAccessibilityLabel: "End and transcribe meeting"
+            primaryTitle: "Stop",
+            primaryAccessibilityLabel: "Stop and transcribe the meeting"
         )
     }
 
@@ -1054,21 +1054,21 @@ final class MeetingOverlayController: NSObject {
         let detail: String
         switch outcome {
         case .switchedToBuiltIn:
-            detail = "Using the built-in mic while keeping Bluetooth output."
+            detail = "Switched to the Mac's mic. Sound still plays in your headphones."
         case .builtInUnavailable, .switchFailed:
-            detail = "Choose a built-in mic in System Settings, or keep recording."
+            detail = "Pick the Mac's mic in System Settings."
         case .notNeeded:
-            detail = "Transcripted is still recording."
+            detail = "Still recording."
         }
 
         return PromptDisplay(
-            title: "Bluetooth mic is unstable",
+            title: "Bluetooth mic is dropping out",
             detail: detail,
             countdownText: "",
-            secondaryTitle: "Keep Recording",
+            secondaryTitle: "Continue",
             secondaryAccessibilityLabel: "Keep recording with the current audio input",
-            primaryTitle: "End & Transcribe",
-            primaryAccessibilityLabel: "End and transcribe meeting"
+            primaryTitle: "Stop",
+            primaryAccessibilityLabel: "Stop and transcribe the meeting"
         )
     }
 
@@ -1078,12 +1078,12 @@ final class MeetingOverlayController: NSObject {
     // cause lives in the title instead. Accepting never saves the mode.
     private func micBoostPromptDisplay() -> PromptDisplay {
         PromptDisplay(
-            title: "Mic is very quiet — another app's call",
-            detail: "Just this meeting. Other audio may get a little quieter.",
+            title: "Another call app made your mic quiet",
+            detail: "Just this meeting. Other sounds may get quieter.",
             countdownText: "",
-            secondaryTitle: "Not now",
+            secondaryTitle: "Skip",
             secondaryAccessibilityLabel: "Keep software mic boost",
-            primaryTitle: "Boost Mic",
+            primaryTitle: "Boost",
             primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
         )
     }
@@ -1093,19 +1093,19 @@ final class MeetingOverlayController: NSObject {
     // truncating line, so the copy stays short.
     private func missedCallPromptDisplay(call: MeetingPromptUnrecordedCall) -> PromptDisplay {
         let surface = call.provider == .googleMeet
-            ? "That browser call"
-            : "That \(call.provider.displayName) call"
+            ? "Browser call"
+            : "\(call.provider.displayName) call"
         let length = formatInactiveDuration(call.duration)
         let shortcut = PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.meetingBinding()
         )
         return PromptDisplay(
-            title: "\(surface) wasn't recorded",
-            detail: "About \(length). Click Record on the prompt or press \(shortcut) next time.",
+            title: "\(surface) not recorded",
+            detail: "\(length). Next time, click Record or press \(shortcut).",
             countdownText: "",
             secondaryTitle: "Don't show again",
             secondaryAccessibilityLabel: "Disable missed-call reminders",
-            primaryTitle: "Got It",
+            primaryTitle: "OK",
             primaryAccessibilityLabel: "Dismiss missed-call reminder"
         )
     }
@@ -1133,7 +1133,7 @@ final class MeetingOverlayController: NSObject {
             }
         case .preparing where currentWarmupStatus.progress >= 1:
             // Models are ready; the mic and call audio are what's starting.
-            phase = .preparing(title: "Starting meeting…", detail: "Checking permissions and audio")
+            phase = .preparing(title: "Starting…", detail: "Checking your mic and call audio")
         case .preparing:
             phase = .preparing(
                 title: currentWarmupStatus.title,

@@ -2,8 +2,8 @@
 // Foundation-pure rules for the island's "Who was on this call?" review:
 // which question each voice gets, which calendar invitees show as one-tap
 // names, what the name box suggests as you type, and what the island says
-// once names are saved; plus the 1:1 calendar name, Keep Local Mic as You,
-// and Discard Voice carried over from the review window.
+// once names are saved; plus the 1:1 calendar name, "All me" (keep local mic as You),
+// and "Not a person" (discard) carried over from the review window.
 // NotchIslandSpeakerReviewView draws them.
 
 import Foundation
@@ -221,9 +221,9 @@ enum NotchIslandSpeakerReviewPolicy {
 
     /// A voice set aside from naming: kept as you, or thrown away.
     enum Lock: Equatable {
-        /// "Keep Local Mic as You" is on: every local mic voice saves as You.
+        /// "All me" is on: every local mic voice saves as You.
         case keptAsYou
-        /// "Discard Voice": not saved to People. The transcript stays saved.
+        /// "Not a person": not saved to People. The transcript stays saved.
         case discarded
     }
 
@@ -234,16 +234,27 @@ enum NotchIslandSpeakerReviewPolicy {
         return discarded ? .discarded : nil
     }
 
-    /// The local mic section's switch, shown only when local mic voices are asked about.
+    /// The local mic section's toggle, shown only when local mic voices are asked about.
     static func keepAsYouTitle(keepMicAsYou: Bool) -> String {
-        keepMicAsYou ? "Review Local Mic Voices" : "Keep Local Mic as You"
+        keepMicAsYou ? "Undo" : "All me"
     }
 
-    static let keepAsYouHelp = "Use one \u{201C}You\u{201D} label for everyone picked up by the local microphone."
+    static func keepAsYouHelp(keepMicAsYou: Bool) -> String {
+        keepMicAsYou
+            ? "Name each local mic voice again."
+            : "Use one \u{201C}You\u{201D} label for everyone picked up by the local microphone."
+    }
+
+    /// VoiceOver names for the two Undo buttons, which look the same.
+    static func keepAsYouAccessibilityLabel(keepMicAsYou: Bool) -> String {
+        keepMicAsYou ? "Undo All me" : "All me"
+    }
+
+    static let undoDiscardAccessibilityLabel = "Undo Not a person"
 
     /// The per-voice discard button.
     static func discardTitle(discarded: Bool) -> String {
-        discarded ? "Undo Discard" : "Discard Voice"
+        discarded ? "Undo" : "Not a person"
     }
 
     static let discardHelp = "Do not save this voice to People. The transcript stays saved."
@@ -251,8 +262,8 @@ enum NotchIslandSpeakerReviewPolicy {
     /// The line a locked voice shows in place of its question.
     static func lockNote(_ lock: Lock) -> String {
         switch lock {
-        case .keptAsYou: return "Will be saved as \u{201C}You\u{201D}"
-        case .discarded: return "Will not be saved to People"
+        case .keptAsYou: return "Saved as You"
+        case .discarded: return "Not saved to People"
         }
     }
 
@@ -323,10 +334,9 @@ enum NotchIslandSpeakerReviewPolicy {
     /// The title and line the island shows after Done.
     static func doneCopy(leftForLater: Int) -> (title: String, detail: String) {
         if leftForLater <= 0 {
-            return ("Everyone’s named", "Next time they’re recognized on their own.")
+            return ("Everyone’s named", "Transcripted will know them next time.")
         }
-        let voices = leftForLater == 1 ? "1 voice" : "\(leftForLater) voices"
-        return ("Names saved", "\(voices) left to name in Speakers.")
+        return ("Names saved", "\(leftForLater) left to name in Speakers.")
     }
 
     /// The header question, with the meeting's name when it is known.

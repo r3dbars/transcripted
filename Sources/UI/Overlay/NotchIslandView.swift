@@ -767,10 +767,10 @@ final class NotchIslandDropView: NSView {
     var fittingHeight: CGFloat { ceil(stack.fittingSize.height) }
 
     /// Nothing in the drop-down reads a live value today: the call prompt's
-    /// countdown is the ring around Not now, which runs by itself.
+    /// countdown is the ring around Skip, which runs by itself.
     func updateLive(_ live: NotchIslandLiveValues) {}
 
-    /// A meeting prompt that only changed its "Ends in 12s" line is updated
+    /// A meeting prompt that only changed its "Stops in 12s" line is updated
     /// in place, so its buttons are not rebuilt under the pointer each second.
     func adoptIfOnlyCountdownChanged(_ newDrop: NotchIslandDrop) -> Bool {
         guard case .meetingPrompt(let old) = drop,
@@ -844,11 +844,11 @@ final class NotchIslandDropView: NSView {
         case .meetingControls(let note, let unverified):
             let subtitle: String
             if unverified {
-                subtitle = "Call audio is unverified"
+                subtitle = "Can't confirm call audio yet"
             } else {
                 switch note {
-                case .off?: subtitle = "Only your mic is recording"
-                case .onForNextMeeting?: subtitle = "Call audio is on for your next meeting"
+                case .off?: subtitle = "Call audio is off"
+                case .onForNextMeeting?: subtitle = "Call audio starts next meeting"
                 case nil: subtitle = "You and the call"
                 }
             }
@@ -861,7 +861,7 @@ final class NotchIslandDropView: NSView {
             add(lane("Call", call))
             var leading: [NSView] = []
             if note == .off {
-                leading.append(button("Turn on call audio", .warning, .meetingCallAudio))
+                leading.append(button("Turn on", .warning, .meetingCallAudio))
             }
             add(buttonRow(leading: leading, trailing: [
                 button("Stop", .destructive, .meetingStop, symbol: "stop.fill"),
@@ -886,47 +886,47 @@ final class NotchIslandDropView: NSView {
                 trailing.append(button(prompt.secondaryTitle, .plain, .meetingSecondary))
             }
             if !prompt.primaryTitle.isEmpty {
-                let style: NotchIslandButton.Style = prompt.primaryTitle.hasPrefix("End") ? .destructive : .accent
+                let style: NotchIslandButton.Style = prompt.primaryTitle == "Stop" ? .destructive : .accent
                 trailing.append(button(prompt.primaryTitle, style, .meetingPrimary))
             }
             add(buttonRow(leading: leading, trailing: trailing))
         case .meetingSaved(let title):
-            add(titleBlock(title ?? "Meeting saved", "Saved to your meetings"))
-            add(buttonRow(leading: [], trailing: [button("Open transcript", .accent, .meetingOpen)]))
+            add(titleBlock(title ?? "Meeting saved", "Saved to Meetings"))
+            add(buttonRow(leading: [], trailing: [button("Open", .accent, .meetingOpen)]))
         case .meetingError(let title, let message, let canOpen, let grantsSystemAudio):
             add(titleBlock(title, message, wrapsDetail: true))
-            var trailing = [button("Dismiss", .plain, .meetingDismissError)]
+            var trailing = [button("OK", .plain, .meetingDismissError)]
             if grantsSystemAudio {
                 // The meeting overlay's primary action opens the audio-only
                 // Settings pane while the start's denial is on screen.
-                trailing.append(button("Grant Access", .accent, .meetingPrimary))
+                trailing.append(button("Open Settings", .accent, .meetingPrimary))
             } else if canOpen {
                 trailing.append(button("Open", .accent, .meetingOpen))
             }
             add(buttonRow(leading: [], trailing: trailing))
         case .callPrompt(let title, let detail):
             add(titleBlock(title, detail))
-            // The countdown is a ring around Not now, like the dictation
+            // The countdown is a ring around Skip, like the dictation
             // Dismiss ring; it pauses while the pointer is over the island.
-            let notNow = NotchIslandButton(title: "Not now", style: .plain)
+            let notNow = NotchIslandButton(title: "Skip", style: .plain)
             notNow.onPress = { [weak self] in self?.onAction?(.callDismiss) }
             notNow.setContentHuggingPriority(.required, for: .horizontal)
             notNow.startCountdown(seconds: Double(max(1, live.callSecondsLeft)))
             countdownButton = notNow
             add(buttonRow(leading: [], trailing: [
                 notNow,
-                button("Later", .plain, .callRemind),
+                button("Remind me", .plain, .callRemind),
                 button("Record", .destructive, .callRecord, symbol: "record.circle.fill"),
             ]))
         case .meetingCallAudioAsk:
             add(titleBlock(
-                "Only your mic is recording",
-                "Turn on call audio to hear everyone else. It starts with your next meeting; this one keeps recording.",
+                "Call audio is off",
+                "Turn it on to record the other people. Starts next meeting.",
                 wrapsDetail: true
             ))
             add(buttonRow(leading: [], trailing: [
-                button("Mic only is fine", .plain, .meetingCallAudioDismiss),
-                button("Turn on call audio", .accent, .meetingCallAudio),
+                button("Skip", .plain, .meetingCallAudioDismiss),
+                button("Turn on", .accent, .meetingCallAudio),
             ]))
         case .speakerReview:
             if let speakerReviewView {

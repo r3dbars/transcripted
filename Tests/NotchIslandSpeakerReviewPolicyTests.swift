@@ -69,9 +69,9 @@ func testNotchIslandSpeakerReviewPolicy() {
 
     runSuite("NotchIslandSpeakerReviewPolicy says what happened after Done") {
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).title, "Everyone’s named")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "Next time they’re recognized on their own.")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 voice left to name in Speakers.")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 voices left to name in Speakers.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "Transcripted will know them next time.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left to name in Speakers.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: "Design sync"), "Who was on Design sync?")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: nil), "Who was on this call?")
     }
@@ -302,9 +302,9 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.lock(isMic: false, keepMicAsYou: true, discarded: true), .discarded)
         assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: true), .discarded)
         assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: false), nil, "a voice left alone is asked as usual")
-        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: false), "Keep Local Mic as You")
-        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: true), "Review Local Mic Voices", "pressing it again lifts it")
-        assertEqual(Policy.lockNote(.keptAsYou), "Will be saved as \u{201C}You\u{201D}")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: false), "All me")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: true), "Undo", "pressing it again lifts it")
+        assertEqual(Policy.lockNote(.keptAsYou), "Saved as You")
     }
 
     runSuite("Discard Voice is offered on an asked voice with its name box open") {
@@ -313,8 +313,8 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertFalse(Policy.offersDiscard(isRecognized: false, nameBoxOpen: false, keptAsYou: false), "Is this Maya? asks Yes/No first; No opens the box")
         assertFalse(Policy.offersDiscard(isRecognized: true, nameBoxOpen: true, keptAsYou: false), "a recognized voice is corrected, not discarded")
         assertFalse(Policy.offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: true), "not while kept as You")
-        assertEqual(Policy.discardTitle(discarded: false), "Discard Voice")
-        assertEqual(Policy.discardTitle(discarded: true), "Undo Discard")
-        assertEqual(Policy.lockNote(.discarded), "Will not be saved to People")
+        assertEqual(Policy.discardTitle(discarded: false), "Not a person")
+        assertEqual(Policy.discardTitle(discarded: true), "Undo")
+        assertEqual(Policy.lockNote(.discarded), "Not saved to People")
     }
 }
