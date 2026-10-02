@@ -805,14 +805,14 @@ fi
 if [ "$cache_enabled" = true ] && [ "$cache_status" = "miss" ]; then
     touch "$cache_complete"
 fi
+# A copy, not a link: an overlapping run may relink build/tests while this one
+# runs. Copy before releasing the lock so that relink can't start mid-copy.
+RUN_BINARY="$TRANSCRIPTED_CONTAINER_DIR/$TEST_DEFAULTS_DOMAIN"
+cp "$TEST_BINARY" "$RUN_BINARY"
 release_cache_lock
 
 echo "Running tests..."
 echo ""
-
-# A copy, not a link: an overlapping run may relink build/tests while this one runs.
-RUN_BINARY="$TRANSCRIPTED_CONTAINER_DIR/$TEST_DEFAULTS_DOMAIN"
-cp "$TEST_BINARY" "$RUN_BINARY"
 
 print_failure_rerun_hint() {
     echo ""
@@ -846,11 +846,11 @@ if [ "$coverage_requested" = true ]; then
     echo ""
     echo "Writing coverage artifacts..."
     "$llvm_profdata" merge -sparse "${profraw_files[@]}" -o "$COVERAGE_PROFDATA"
-    "$llvm_cov" report "$TEST_BINARY" \
+    "$llvm_cov" report "$RUN_BINARY" \
         -instr-profile="$COVERAGE_PROFDATA" \
         -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \
         > "$COVERAGE_SUMMARY"
-    "$llvm_cov" export "$TEST_BINARY" \
+    "$llvm_cov" export "$RUN_BINARY" \
         -instr-profile="$COVERAGE_PROFDATA" \
         -format=lcov \
         -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \

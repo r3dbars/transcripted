@@ -1726,7 +1726,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:284",
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline+SystemSpeakerIdentity.swift:48",
       "risk": "Too low lets noisy turns pull voiceprints off; too high leaves quiet speakers with no voiceprint (unnamed).",
       "notes": "Affects cross-call naming in real use, but autoeval replays fingerprints already computed, so only meeting-import sees it."
     },
@@ -1744,7 +1744,7 @@
       "affects": [
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift:289",
+      "source": "Sources/TranscriptedCore/Pipeline/TranscriptionPipeline+SystemSpeakerIdentity.swift:53",
       "risk": "Too low builds voiceprints from fragments; too high leaves people who speak in short bursts without a voiceprint.",
       "notes": ""
     },

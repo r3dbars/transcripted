@@ -348,8 +348,9 @@ func testRecentCaptureScanners() async {
         }
 
         // Speed is CI's job (scripts/ops/performance-budget.rb
-        // --check-home-recent-captures), not this test's: a wall-clock limit
-        // fails on a busy machine. This checks the load stays bounded.
+        // --check-home-recent-captures, whose benchmark uses this same
+        // 64-named-speaker meeting shape), not this test's: a wall-clock limit
+        // fails on a busy machine. This checks what the load returns.
         let snapshot = await RecentCaptureLoader.load(
             dictationLimit: 5,
             meetingLimit: 5,

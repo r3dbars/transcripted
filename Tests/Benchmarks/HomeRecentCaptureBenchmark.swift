@@ -179,6 +179,9 @@ struct HomeRecentCaptureBenchmark {
         guard snapshot.dictationCounts.totalWords == fixture.totalDictationWords else {
             throw BenchmarkError.validation("expected \(fixture.totalDictationWords) counted words, got \(snapshot.dictationCounts.totalWords)")
         }
+        guard snapshot.meetings.allSatisfy({ $0.speakerStatus == .ready }) else {
+            throw BenchmarkError.validation("meetings with only real named speakers were marked as needing review")
+        }
         guard isNewestFirst(snapshot.meetings.map(\.date)) else {
             throw BenchmarkError.validation("meetings were not sorted newest-first")
         }
@@ -265,10 +268,25 @@ private struct FixtureBuilder {
         )
     }
 
+    /// Every meeting carries a crowd of real named speakers, so a loader that
+    /// starts paying per speaker (or per meeting's speaker block) shows up here.
+    static let namedSpeakersPerMeeting = 64
+
     private func writeMeeting(index: Int) throws {
         let date = date(offsetMinutes: -index)
         let filename = String(format: "Meeting_%05d.md", index)
         let url = meetingsRoot.appendingPathComponent(filename, isDirectory: false)
+        let speakerCount = Self.namedSpeakersPerMeeting
+        let speakerLines = (0..<speakerCount)
+            .map { speakerIndex in
+                let timestamp = String(format: "00:%02d", speakerIndex % 60)
+                let channel = speakerIndex.isMultiple(of: 2) ? "System" : "Mic"
+                return """
+                **\(timestamp)** [\(channel)/Person \(index)-\(speakerIndex)]
+                Synthetic meeting line \(index) from a named speaker.
+                """
+            }
+            .joined(separator: "\n\n")
         let markdown = """
         ---
         title: "Synthetic Meeting \(index)"
@@ -276,20 +294,16 @@ private struct FixtureBuilder {
         date: "\(dayString(from: date))"
         time: "\(timeString(from: date))"
         duration: "10:00"
-        total_word_count: 8
+        total_word_count: \(speakerCount * 8)
         mic_utterances: 1
-        system_utterances: 1
+        system_utterances: \(speakerCount)
         ---
 
         # Synthetic Meeting \(index)
 
         ## Transcript
 
-        **00:01** [Mic/You]
-        Synthetic meeting line \(index).
-
-        **00:04** [System/Alex]
-        Another synthetic line \(index).
+        \(speakerLines)
         """
         try markdown.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
