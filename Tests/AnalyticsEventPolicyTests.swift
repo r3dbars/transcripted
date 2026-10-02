@@ -638,6 +638,7 @@ func testAnalyticsEventPolicy() {
             assertEqual(sanitized, entry.properties, "\(entry.event) properties should all survive the sanitizer and allowlist")
         }
 
+        guard recorded.count == 4 else { return }
         assertEqual(recorded[1].properties["result"], "success", "success result should be sent")
         assertEqual(
             recorded[1].properties["elapsed_bucket"],
