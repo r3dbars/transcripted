@@ -763,3 +763,8 @@ final class MeetingCaptureBridge: ObservableObject {
             .store(in: &cancellables)
     }
 }
+
+/// The stop paths read the bridge through `MeetingCaptureControlling` so
+/// `MeetingStopSequence` can be tested against a fake capture.
+@available(macOS 14.0, *)
+extension MeetingCaptureBridge: MeetingCaptureControlling {}

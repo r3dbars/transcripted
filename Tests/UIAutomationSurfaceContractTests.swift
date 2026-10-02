@@ -1,15 +1,8 @@
-// Repo-structure / contract suite, not behavioral coverage.
-// What's left here reads Swift files as text, for one of three reasons:
-//   - the code lives in TranscriptedApp.swift, the TranscriptedSettingsView
-//     split, the SpeakerPeople split, or HomeView.swift, which need seams of
-//     their own next;
-//   - the code is the meeting overlay controller, whose island path still
-//     needs a seam;
-//   - it's a contract with a script or another package (the QA CLI and bench,
-//     and the identifiers the QA smokes press).
-// The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
-// identifiers, and failure copy are behavior tests in
-// AutomationSurfaceBehaviorTests.swift now.
+// Contract suite for the surfaces external UI automation and users rely on.
+// The menubar suites build the real compiled pieces (MenuBarAutomationID, the
+// AppKit menubar rows) and check them directly; the app command table is
+// covered in AutomationSurfaceBehaviorTests.swift. The rest is grandfathered source text that greps Settings and Home
+// files for stable AX identifiers and copy.
 //
 // Adding a new contract guard is purely additive: call `contractSource("Sources/.../X.swift")`
 // inline inside an assertion. Do NOT reintroduce a top-of-suite block of
@@ -19,6 +12,7 @@
 // memoizes each file on demand, so repeated reads of the same path are free and two
 // PRs can add guards for the same file without redeclaring anything.
 
+import AppKit
 import Foundation
 
 // On-demand, memoized source reader. Each path is read at most once per run.
@@ -86,7 +80,20 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
     ].contains { contractSource($0).contains(needle) }
 }
 
-func testUIAutomationSurfaceContract() {
+// The Writing tab: its page plus the views under Sources/UI/Settings/Writing/.
+private func writingSurfaceContractContains(_ needle: String) -> Bool {
+    [
+        "Sources/UI/Settings/Pages/WritingSettingsPage.swift",
+        "Sources/UI/Settings/Writing/WritingIntroView.swift",
+        "Sources/UI/Settings/Writing/WritingDemoView.swift",
+        "Sources/UI/Settings/Writing/WritingSetupFlowView.swift",
+        "Sources/UI/Settings/Writing/WritingEverydayView.swift",
+        "Sources/UI/Settings/Writing/WritingSettingsSection.swift",
+    ].contains { contractSource($0).contains(needle) }
+}
+
+@MainActor
+func testUIAutomationSurfaceContract() async {
     // Guards that read TranscriptedSettingsView.swift alone before the shell was
     // split into TranscriptedSettingsView+*.swift extensions. They now read the
     // whole split, so they hold wherever the code lives.
@@ -154,56 +161,154 @@ func testUIAutomationSurfaceContract() {
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
-            "The warning must resolve from this capture's PCM evidence, not a cached permission")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
-            "Saved health must include failures discovered while draining the tail")
+        // The PCM-evidence and tail-failure halves are behavior tests now:
+        // "Capture health evidence comes from this capture, not a cached
+        // permission" in MeetingSessionUIPolicyTests.
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
-        assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
-            "the recovery action should come from typed permission evidence")
+        // Typed permission evidence behind the action: MeetingSessionUIPolicyTests,
+        // "Capture health evidence comes from this capture, not a cached permission".
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
     }
-    runSuite("UI automation surface contract - every identifier the QA smokes press exists in the app") {
-        // A cross-package contract: the QA CLI and the launch smoke press
-        // these identifiers, so the app must declare each one somewhere. It
-        // checks existence, not which file, so splits and moves don't break
-        // it. The ones compiled into this runner are behavior-tested in
-        // AutomationSurfaceBehaviorTests.swift.
-        let pressed = qaSmokePressedIdentifiers()
-        assertTrue(pressed.count >= 20, "the QA smokes should still drive the menu bar, sidebar, onboarding and import controls")
-        var declared = Set<String>()
-        let root = repoFixtureURL("Sources/")
-        if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
-            for case let url as URL in enumerator where url.pathExtension == "swift" {
-                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                declared.formUnion(automationIdentifierLiterals(in: text))
+    runSuite("Meetings header exposes existing capture actions") {
+        for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
+            assertTrue(contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier), "New menu should expose \(identifier)")
+        }
+        assertTrue(
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Image(systemName: \"plus\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".accessibilityLabel(\"New recording or transcription\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".menuIndicator(.hidden)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(".fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Record a meeting\", systemImage: \"mic\")")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("Label(\"Transcribe a file…\", systemImage: \"doc.badge.plus\")"),
+            "New menu should use the approved plain-language labels"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/Pages/HomeSettingsPage.swift").contains("onStartMeeting: onStartMeeting,\n                onImportAudioFile: onImportAudioFile"),
+            "Header should reuse the injected capture actions"
+        )
+    }
+    runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
+        // These raw values are the strings external automation looks up. The
+        // QA AX smoke (Tools/TranscriptedQA UISmoke) and the build.sh launch
+        // smoke keep their own copies, so the cross-package lists stay pinned
+        // here against the compiled enum.
+        let expected: [MenuBarAutomationID: String] = [
+            .statusItemButton: "transcripted.status-item.button",
+            .startMeeting: "transcripted.menubar.primary.start-meeting",
+            .startDictation: "transcripted.menubar.primary.start-dictation",
+            .openTranscripted: "transcripted.menubar.utility.open-transcripted",
+            .checkUpdates: "transcripted.menubar.utility.check-updates",
+            .quit: "transcripted.menubar.utility.quit",
+        ]
+        assertEqual(MenuBarAutomationID.allCases.count, expected.count, "every menubar automation id should be listed here")
+        for id in MenuBarAutomationID.allCases {
+            assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
+            assertTrue(
+                contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(id.rawValue),
+                "\(id.rawValue) should stay in the QA AX smoke's expected list"
+            )
+        }
+        for id in MenuBarAutomationID.allCases where id != .statusItemButton {
+            assertTrue(
+                contractSource("scripts/entrypoints/build.sh").contains(id.rawValue),
+                "\(id.rawValue) should stay enforced by the build.sh launch smoke"
+            )
+        }
+
+        _ = NSApplication.shared
+        let primary = MenuBarPrimaryActionsView(frame: .zero)
+        let utility = MenuBarUtilityActionsView(frame: .zero)
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true
+        )
+        assertEqual(
+            Set((primary.keyboardFocusableRows + utility.keyboardFocusableRows).map { $0.accessibilityIdentifier() }),
+            Set(MenuBarAutomationID.allCases.filter { $0 != .statusItemButton }.map(\.rawValue)),
+            "the real popover rows should carry every row identifier as their AX identifier"
+        )
+        assertEqual(
+            utility.smokeSnapshot.mapValues(\.automationIdentifier),
+            [
+                "checkUpdates": MenuBarAutomationID.checkUpdates.rawValue,
+                "openTranscripted": MenuBarAutomationID.openTranscripted.rawValue,
+                "quit": MenuBarAutomationID.quit.rawValue,
+            ],
+            "the utility smoke snapshot should report the identifiers AppKit automation sees"
+        )
+    }
+
+    await runSuite("UI automation surface contract - menubar action rows are AX buttons with a real press path") {
+        _ = NSApplication.shared
+        let row = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        row.setAutomationIdentifier(.openTranscripted)
+        row.update(symbolName: "mic.fill", title: "Record Meeting", displayTitle: "Record", detail: "Mic and system audio", size: .button)
+        var presses = 0
+        row.onPress = { presses += 1 }
+
+        assertEqual(row.accessibilityIdentifier(), MenuBarAutomationID.openTranscripted.rawValue, "the row should expose its automation id to AX")
+        assertEqual(row.identifier?.rawValue, MenuBarAutomationID.openTranscripted.rawValue, "the row's NSView identifier should match its AX identifier")
+        assertEqual(row.smokeSnapshot.automationIdentifier, MenuBarAutomationID.openTranscripted.rawValue, "the smoke snapshot should report the AX identifier")
+        assertEqual(row.accessibilityRole(), .button, "a menubar row should be an AX button")
+        assertTrue(row.isAccessibilityElement(), "a menubar row should be an AX element")
+        assertEqual(row.accessibilityLabel(), "Record", "the AX label should be the title on screen, so Voice Control can match it")
+
+        assertTrue(row.accessibilityPerformPress(), "AXPress on an enabled row should succeed")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on an enabled row should run its action")
+
+        row.update(symbolName: "mic.fill", title: "Record Meeting", detail: "", size: .button, isEnabled: false)
+        assertFalse(row.accessibilityPerformPress(), "AXPress on a disabled row should fail")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on a disabled row should not run its action")
+    }
+
+    runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
+        assertEqual(MenuTokens.minimumHitTargetSize, 40, "the menubar hit-target floor is 40pt")
+        assertEqual(MenuTokens.panelHeight, 480, "the popover height keeps the default rows visible")
+
+        _ = NSApplication.shared
+        for size in [MenuBarActionRowView.Size.primary, .utility, .button] {
+            for detail in ["", "Detail line"] {
+                let row = MenuBarActionRowView(frame: .zero)
+                row.update(symbolName: "power", title: "Quit", detail: detail, size: size)
+                assertTrue(
+                    row.intrinsicContentSize.height >= MenuTokens.minimumHitTargetSize,
+                    "a \(size) row (detail: \(!detail.isEmpty)) should be at least the 40pt hit target"
+                )
             }
         }
-        declared.formUnion(TranscriptedSettingsPage.allCases.map(\.automationIdentifier))
-        for identifier in pressed.sorted() {
-            assertTrue(declared.contains(identifier), "\(identifier) is pressed by the QA smokes but the app never declares it")
+
+        let utility = MenuBarUtilityActionsView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: 200))
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "You're up to date",
+            updateVersion: "1.1.68",
+            updateTone: .standard,
+            updateEnabled: true
+        )
+        utility.layout()
+        for row in utility.keyboardFocusableRows {
+            assertTrue(
+                row.frame.height >= MenuTokens.minimumHitTargetSize,
+                "\(row.accessibilityIdentifier()) should be laid out at least 40pt tall"
+            )
         }
     }
 
-    runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
-        assertTrue(
-            contractSource("Sources/App/TranscriptedApp.swift").contains("transcripted.status-item.button")
-                && contractSource("Sources/App/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
-            "the real menu bar status item should expose a stable AX identifier for external UI automation"
-        )
-    }
-
+    // Kept as source text: the SwiftUI Settings scene and its fallback view live
+    // in the @main App, which the fast runner can't build. They guard the old
+    // bug where Command-, left a blank Settings scene on screen.
     runSuite("UI automation surface contract - native Settings routes to the real window") {
         let appSource = contractSource("Sources/App/TranscriptedApp.swift")
-        assertTrue(
-            appSource.contains("func menuOpenSettings()")
-                && appSource.contains("showSettingsWindow(page: .general, source: \"app_menu\")"),
-            "the declarative app Settings command should open the owned General settings page"
-        )
         assertTrue(
             appSource.contains("TranscriptedSettingsFallbackView")
                 && appSource.contains("transcripted.settings.fallback.open")
@@ -219,32 +324,53 @@ func testUIAutomationSurfaceContract() {
         )
     }
 
-    runSuite("UI automation surface contract - app commands route through existing delegate entry points") {
-        for requiredAppHook in [
-            "TranscriptedMenuCommands(appDelegate: appDelegate)",
-            "func menuStartDictation()",
-            "startDictationFromSettings()",
-            "func menuToggleMeetingRecording()",
-            "meetingOverlayController.toggleFromHotkey()",
-            "func menuImportAudio()",
-            "importAudioFileFromSettings()",
-            "func menuOpenPage(_ page: TranscriptedSettingsPage)",
-            "showSettingsWindow(page: page, source: \"menu_command\")",
-            "func menuFindSpeaker()",
-            "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
-        ] {
-            assertTrue(contractSource("Sources/App/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
-        }
-    }
-
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
+        for pageCase in [
+            "case today",
+            "case home",
+            "case dictations",
+            "case writing",
+            "case general",
+            "case people",
+            "case connectAgent",
+        ] {
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
+        }
+
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
-            "settings sidebar rows should expose each page's automation identifier"
+            contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains("var automationIdentifier: String")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
+            "settings sidebar pages should expose stable automation identifiers"
+        )
+
+        for (typeName, path) in [
+            ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
+            ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
+            ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
+            ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            ("WritingSettingsPage", "Sources/UI/Settings/Pages/WritingSettingsPage.swift"),
+        ] {
+            assertTrue(
+                contractSource(path).contains("struct \(typeName)"),
+                "\(typeName) should stay extracted while the Settings shell owns its bindings"
+            )
+        }
+
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains(".frame(width: 40, height: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
+            "General settings info buttons should keep compact visuals with a 40pt hit target and stable AX identifiers"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".frame(width: 40, height: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".accessibilityLabel(Text(\"Remove correction\"))"),
+            "custom dictionary remove controls should keep a 40pt destructive hit target with a clear AX label"
         )
 
         for requiredSourceHook in [
+            "title: \"Transcribe a file\"",
             "actions.importAudioFile()",
+            "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
             "trackSettingsAction(\"empty_import_audio\", page: .home)",
         ] {
             assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
@@ -280,6 +406,20 @@ func testUIAutomationSurfaceContract() {
                 && homeSurfaceContractContains("HomeHitTarget.minimum"),
             "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
         )
+        for requiredFailedMeetingPolicyHook in [
+            "return \"This meeting does not have enough saved audio to retry.\"",
+        ] {
+            assertTrue(contractSource("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift").contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
+        }
+        assertFalse(
+            contractSource("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift").contains("hasRetainedAudioFiles"),
+            "failed-meeting policy should not retain an unreachable dismiss state"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
+        )
         // Quiet-library redesign: the retained-audio player is
         // HomeMeetingPodcastPlayer (HomeMeetingAudioPlayer.swift), whose
         // transport buttons size their hit target off HomeHitTarget.minimum.
@@ -287,6 +427,11 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("max(size, HomeHitTarget.minimum)")
                 && contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("hitTargetSize"),
             "Home retained-audio play controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains("struct MeetingAudioSourceMenu"),
+            "retained-audio source menus should keep a 40pt hit floor"
         )
         assertFalse(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
@@ -322,6 +467,21 @@ func testUIAutomationSurfaceContract() {
         // The shared binding must dismiss only the active alert via
         // HomeRootAlertPolicy, never clear both. HomeRootAlertPolicyTests
         // covers the priority/dismissal behavior directly.
+
+        // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
+        // Every Home/meeting control that touches an app-owned file (transcript or
+        // audio) must route through OwnFileResolver so a path that drifted
+        // after scanning (restyle/rename, WAV→M4A recompression, deletion) surfaces
+        // an error instead of a silent dead click. Behavior is covered by
+        // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
+        // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
+        assertTrue(
+            contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveForReveal(")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveExistingFile(")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case reveal([URL])")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case unavailable"),
+            "OwnFileResolver must keep both reveal (with enclosing-folder fallback) and open/play (regular-file-only) resolution modes"
+        )
 
         let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
         // Quiet-library redesign: the meeting preview sheet's separate
@@ -394,6 +554,13 @@ func testUIAutomationSurfaceContract() {
             "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
         )
 
+        // Retained-audio playback follows recompressed/moved files instead of going
+        // silently Unavailable on a stale path.
+        assertTrue(
+            contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
+        )
+
         // Row-interaction affordances, which have no behavioral coverage in the
         // fast suite (it greps source, never runs the UI). The overflow actions
         // only reveal on hover, so every capture row needs a full-width hit
@@ -409,6 +576,15 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
+        // Quiet-library onboarding redesign: the 14-step use-case-branching flow
+        // collapsed into three steps (welcome, permissions, done). Microphone is
+        // the only blocking permission; System Audio and Calendar are optional
+        // rows on the single permissions screen.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)"),
+            "onboarding should stay a single three-step flow gated only on microphone"
+        )
         assertTrue(
             contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("NSApplication.didBecomeActiveNotification")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcriptedPermissionsDidChange"),
@@ -424,6 +600,23 @@ func testUIAutomationSurfaceContract() {
         assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
         assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
 
+        for identifier in [
+            "transcripted.home.expansion.name-speakers",
+            "transcripted.home.expansion.speaker.\\(identity.stableID)",
+            "transcripted.home.speaker-picker",
+            "transcripted.home.speaker-picker.name",
+            "transcripted.home.speaker-picker.cancel",
+            "transcripted.home.speaker-picker.save",
+            "transcripted.home.speaker-sheet",
+            "transcripted.home.speaker-sheet.row.\\(draft.id).name",
+            "transcripted.home.speaker-sheet.cancel",
+            "transcripted.home.speaker-sheet.save",
+        ] {
+            assertTrue(
+                contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains(identifier),
+                "\(identifier) should keep meeting speaker correction scriptable without matching visible names"
+            )
+        }
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = selectedOption?.id")
                 && contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = nil"),
@@ -437,14 +630,76 @@ func testUIAutomationSurfaceContract() {
         // remapped to surviving profiles) is covered by
         // HomeMeetingPreviewFormatterTests through HomeMeetingSpeakerNamingPolicy.
 
+        for requiredAgentHook in [
+            "transcripted.settings.agent.connect.\\(agent.rawValue)",
+            "transcripted.settings.agent.copy-prompt",
+            "transcripted.settings.agent.copy-folder-paths",
+            "transcripted.settings.agent.codex-inbox",
+            "Copy Paths",
+        ] {
+            assertTrue(contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift").contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
+        }
+
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
             "the island's meeting right-click menu should keep a stable Discard title for automation"
         )
 
+        assertTrue(
+            contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete this meeting?")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete Meeting")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete this failed meeting?")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete Failed Meeting"),
+            "delete confirmation copy should stay pinned for destructive-flow automation"
+        )
+
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("settingsAutomationIdentifier")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("transcripted.settings.permissions.\\(kind.rawValue).action"),
+            "settings shared controls should support stable automation IDs"
+        )
+
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("generalAutomationIdentifier")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.island-screen-sharing")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.info.\\(automationSlug(info.title))"),
+            "general settings controls should keep scriptable row and choice IDs"
+        )
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
+        // Quiet-library redesign: the stats sheet, the dictation-file-per-row
+        // list, the meeting preview sheet, and the failed-meetings card all
+        // dissolved into QuietHomeHeader's attention link/find toggle,
+        // per-entry dictation rows (QuietDictationLibrary), the meeting row's
+        // inline expansion (QuietHomeLibrary/HomeMeetingAudioPlayer), and
+        // inline failed-meeting rows (HomeView's failed-meeting actions).
+        for identifier in [
+            "transcripted.home.row.copy",
+            "transcripted.home.row.more",
+            "transcripted.home.attention.link",
+            "transcripted.home.find.toggle",
+            "transcripted.dictations.row",
+            "transcripted.dictations.row.copy",
+            "transcripted.dictations.expansion.copy",
+            "transcripted.dictations.expansion.open",
+            "transcripted.home.meeting.preview",
+            "transcripted.home.meeting-preview.audio.skip-back",
+            "transcripted.home.meeting-preview.audio.toggle",
+            "transcripted.home.meeting-preview.audio.skip-forward",
+            "transcripted.home.failed-meeting.play-audio",
+            "transcripted.home.failed-meeting.show-audio",
+            "transcripted.home.failed-meeting.retry",
+            "transcripted.home.failed-meeting.more",
+            "transcripted.home.load-more",
+        ] {
+            assertTrue(homeSurfaceContractContains(identifier), "\(identifier) should stay attached to Home click-flow controls")
+        }
+        assertFalse(
+            homeSurfaceContractContains("transcripted.home.failed-meeting.dismiss"),
+            "failed meetings should not expose an unreachable non-destructive click flow"
+        )
+
         for identifier in [
             "transcripted.settings.footer.check-updates",
             "transcripted.settings.general.launch-at-login",
@@ -476,6 +731,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.storage.support-files",
             "transcripted.settings.about.automatic-updates",
             "transcripted.settings.about.support",
+            "transcripted.settings.general.transcribe-audio-file",
             "transcripted.settings.general.corrections.clear-all",
         ] {
             assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
@@ -529,6 +785,16 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
+        // Quiet-library redesign: the attention pills row dissolved into
+        // QuietHomeHeader's single attention-clause link in the header
+        // sentence (see the click-flow identifier loop above for
+        // transcripted.home.attention.link's own coverage).
+        assertTrue(
+            contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("struct QuietHomeHeader: View")
+                && contractSource("Sources/UI/Settings/QuietHomeLibrary.swift").contains("let attentionTitle: String?"),
+            "the Home header's attention clause should stay labeled and scriptable"
+        )
+
         assertTrue(
             settingsShellSource().contains("HomeRowMenuItem(title: \"Review speakers\"")
                 && settingsShellSource().contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
@@ -537,6 +803,102 @@ func testUIAutomationSurfaceContract() {
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 
+        for identifier in [
+            "transcripted.onboarding.nav.back",
+            "transcripted.onboarding.nav.primary",
+            "transcripted.onboarding.permissions.microphone",
+            "transcripted.onboarding.permissions.system-audio",
+            "transcripted.onboarding.permissions.accessibility",
+            "transcripted.onboarding.permissions.calendar",
+        ] {
+            assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
+        }
+
+        // Quiet-library onboarding redesign: the use-case choice cards are gone
+        // (single path, no branching). Keep the nav controls scriptable and the
+        // microphone-required gate legible in source.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.back")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .permissions:\n            return !hasRequiredPermissions")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("case .done:\n            return !canFinishSetup")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("hasRequiredPermissions || skippedMicrophone")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("LibraryTokens.minimumHitTarget"),
+            "onboarding nav controls should stay scriptable and gate progress on the microphone-required check"
+        )
+        // After a Don't Allow, macOS won't ask for the mic again, so setup
+        // offers a skip instead of a dead end; it never shows before that.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("guard currentStep == .permissions, micBlocked, !micGranted else { return nil }")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.secondary"),
+            "onboarding should offer Skip for now only once the microphone is blocked"
+        )
+
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".monospacedDigit()")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("modelProgressLabelMinimumWidth")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityLabel(Text(status))"),
+            "onboarding/local-model progress labels should stay stable, tabular, and accessible"
+        )
+    }
+
+    runSuite("UI automation surface contract - Writing tab controls stay mapped") {
+        for identifier in [
+            "transcripted.settings.page.writing",
+            "transcripted.settings.writing.intro.next",
+            "transcripted.settings.writing.intro.back",
+            "transcripted.settings.writing.intro.set-up",
+            "transcripted.settings.writing.intro.demo",
+            "transcripted.settings.writing.setup.save-my-writing",
+            "transcripted.settings.writing.setup.autocomplete",
+            "transcripted.settings.writing.setup.continue",
+            "transcripted.settings.writing.setup.back",
+            "transcripted.settings.writing.setup.cancel",
+            "transcripted.settings.writing.setup.scope.all",
+            "transcripted.settings.writing.setup.scope.picked",
+            "transcripted.settings.writing.setup.more-apps",
+            "transcripted.settings.writing.setup.turn-on",
+            "transcripted.settings.writing.status",
+            "transcripted.settings.writing.edit-setup",
+            "transcripted.settings.writing.pause",
+            "transcripted.settings.writing.resume",
+            "transcripted.settings.writing.keyboard.turn-on",
+            "transcripted.settings.writing.screen-recording.allow",
+            "transcripted.settings.writing.entry",
+            "transcripted.settings.writing.settings.save-my-writing",
+            "transcripted.settings.writing.settings.autocomplete",
+            "transcripted.settings.writing.settings.personalized",
+            "transcripted.settings.writing.settings.model",
+            "transcripted.settings.writing.settings.storage",
+            "transcripted.settings.writing.delete-all",
+            "transcripted.settings.writing.delete-all.confirm",
+        ] {
+            assertTrue(writingSurfaceContractContains(identifier), "\(identifier) should stay attached to a Writing tab control")
+        }
+
+        // The page routes intro -> setup -> everyday from the model's screen,
+        // and the shell only hands it the controller and the recording check.
+        let page = contractSource("Sources/UI/Settings/Pages/WritingSettingsPage.swift")
+        assertTrue(
+            page.contains("case let .intro(page):")
+                && page.contains("case let .setup(step):")
+                && page.contains("case .everyday:"),
+            "the Writing page should route the intro pages, setup steps and everyday view"
+        )
+
+        // Screen Recording can make macOS ask Transcripted to quit and reopen,
+        // so the ask never happens while anything records.
+        let model = contractSource("Sources/Writing/WritingSettingsModel.swift")
+        assertTrue(
+            model.contains("if choices.autocomplete, !controller.screenRecordingGranted, !isCaptureBusy() {")
+                && model.contains("guard !isCaptureBusy() else {"),
+            "every Screen Recording request should wait while a meeting or dictation records"
+        )
+        assertTrue(
+            writingSurfaceContractContains("WritingPrimaryButton(")
+                && contractSource("Sources/UI/Settings/Writing/WritingComponents.swift").contains("LibraryTokens.minimumHitTarget"),
+            "Writing tab actions should keep the 40pt hit target"
+        )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
@@ -594,10 +956,10 @@ func testUIAutomationSurfaceContract() {
         )
     }
 
-    // WS4 "Premium minimalism" polish guards: teaching empty states (not gray
-    // filler) and error states routed through shared plain-words copy (no raw
-    // `error.localizedDescription` on a user-facing surface). The copy itself
-    // is checked by value in AutomationSurfaceBehaviorTests.swift.
+    // WS4 "Premium minimalism" polish guards. These pin the visual/UX polish so
+    // it can't silently regress: teaching empty states (not gray filler),
+    // plain-words error states routed through shared copy (no raw
+    // `error.localizedDescription` on a user-facing surface), and design tokens.
     runSuite("UI automation surface contract - WS4 empty states teach") {
         let speakers = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
 
@@ -618,6 +980,23 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - WS4 error states act, not dump") {
         let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
+        let agentCopy = contractSource("Sources/UI/Settings/AgentSetupFailureCopy.swift")
+        let settingsCopy = contractSource("Sources/UI/Settings/SettingsActionFailureCopy.swift")
+
+        // Shared plain-words primitives exist and are the single source of copy.
+        assertTrue(
+            agentCopy.contains("enum AgentSetupFailureCopy")
+                && agentCopy.contains("static let detailsTitle = \"Copy Details\"")
+                && agentCopy.contains("Transcripted couldn't connect \\(agentName)")
+                && agentCopy.contains("static let codexInbox"),
+            "AgentSetupFailureCopy should hold plain-words connect/setup failure copy behind a Copy Details reveal"
+        )
+        assertTrue(
+            settingsCopy.contains("enum SettingsActionFailureCopy")
+                && settingsCopy.contains("static let modelCacheRemoval")
+                && settingsCopy.contains("static func captureLibraryMigration("),
+            "SettingsActionFailureCopy should hold plain-words settings-action failure copy"
+        )
 
         // Agent page: routes through the shared copy + a Copy Details reveal, and
         // no longer dumps a raw NSError into a user-visible label.
@@ -658,6 +1037,46 @@ func testUIAutomationSurfaceContract() {
         )
     }
 
+    runSuite("UI automation surface contract - WS4 design tokens are the single source") {
+        _ = NSApplication.shared
+        @MainActor func label(in view: NSView, showing text: String) -> NSTextField? {
+            view.layout()
+            return view.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == text }
+        }
+
+        let primaryRow = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 42))
+        primaryRow.update(symbolName: "mic.fill", title: "Record Meeting", detail: "", size: .primary)
+        assertTrue(
+            label(in: primaryRow, showing: "Record Meeting")?.font == MenuTokens.Font.rowTitlePrimary,
+            "a primary row title should use MenuTokens.Font.rowTitlePrimary"
+        )
+        let utilityRow = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        utilityRow.update(symbolName: "power", title: "Quit", detail: "", size: .utility)
+        assertTrue(
+            label(in: utilityRow, showing: "Quit")?.font == MenuTokens.Font.rowTitleUtility,
+            "a utility row title should use MenuTokens.Font.rowTitleUtility"
+        )
+        // MenuBarHeaderView needs MeetingSessionController, which the fast
+        // runner doesn't compile, so its font stays a source-text check.
+        let header = contractSource("Sources/UI/MenuBar/MenuBarHeaderView.swift")
+        assertTrue(
+            header.contains("MenuTokens.Font.headerStatus"),
+            "the header status line should read its font from MenuTokens.Font"
+        )
+        assertFalse(
+            header.contains("NSFont.systemFont(ofSize: 11.5"),
+            "the header should not re-inline a raw NSFont size now that MenuTokens.Font owns it"
+        )
+
+        let doc = contractSource("docs/DESIGN_TOKENS.md")
+        assertTrue(
+            doc.contains("Type scale")
+                && doc.contains("Spacing grid")
+                && doc.contains("Corner radii")
+                && doc.contains("MenuTokens.Font"),
+            "docs/DESIGN_TOKENS.md should exist as the single source documenting the type, spacing, and radius scales"
+        )
+    }
 }
 
 private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {
@@ -671,4 +1090,15 @@ private func sourceBlock(named startMarker: String, endingBefore endMarker: Stri
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
     guard !needle.isEmpty else { return 0 }
     return haystack.components(separatedBy: needle).count - 1
+}
+
+}
+
+/// The row answers AXPress first and runs its action on the next main-queue
+/// turn; anything queued after the press runs after the action.
+@MainActor
+private func drainMainQueue() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { continuation.resume() }
+    }
 }

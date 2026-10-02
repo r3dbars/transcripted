@@ -34,16 +34,15 @@ extension ParakeetEngine {
             // window before the timestamp is taken.
             queue: nil
         ) { [weak self] _ in
-            let observedAt = CFAbsoluteTimeGetCurrent()
-            let token = bindingIntent.tokenForNotification(
+            let arrival = ParakeetConfigChangeArrival.stamp(
                 engineID: observedEngineID,
-                at: observedAt,
+                bindingIntent: bindingIntent,
                 window: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
             )
             self?.scheduleInputDeviceNameRefresh(
                 configChangeSource: .audioEngine,
-                observedAt: observedAt,
-                bindingToken: token
+                observedAt: arrival.observedAt,
+                bindingToken: arrival.bindingToken
             )
         }
     }
@@ -204,30 +203,29 @@ extension ParakeetEngine {
         let observedRouteIdentity = currentSelection.map {
             ParakeetAudioRouteIdentity(selection: $0)
         }
-        if let bindingToken, source == .audioEngine,
-           bindingToken.engineID == ObjectIdentifier(audioEngine) {
-            await bindingToken.waitForResolution(
-                nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
-            )
-            guard !Task.isCancelled, !isShuttingDown,
-                  !isSharedMeetingMicClaimCurrent,
-                  pinnedDictationRecording == nil,
-                  !audioStartInProgress, !audioStopInProgress,
-                  generationAtAdmission == audioConfigObservationGeneration else { return }
-        }
-        if ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
-               source: source,
-               observedAt: configChangeObservedAt,
-               ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
-               windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
-               stableRoute: stableAudioRouteIdentity,
-               observedRoute: observedRouteIdentity,
-               bindingToken: bindingToken,
-               currentEngine: audioEngine,
-               forceForMicrophoneSharing: forceForMicrophoneSharing
-           ) {
-            return
-        }
+        let admission = await ParakeetConfigChangeAdmission.decide(
+            ParakeetConfigChangeAdmissionRequest(
+                source: source, observedAt: configChangeObservedAt, bindingToken: bindingToken,
+                forceForMicrophoneSharing: forceForMicrophoneSharing,
+                ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil),
+            observedRoute: observedRouteIdentity,
+            stableRoute: stableAudioRouteIdentity,
+            windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
+            currentEngine: { audioEngine },
+            waitForResolution: { token in
+                await token.waitForResolution(
+                    nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
+                )
+            },
+            stillAdmitted: {
+                !Task.isCancelled && !isShuttingDown
+                    && !isSharedMeetingMicClaimCurrent
+                    && pinnedDictationRecording == nil
+                    && !audioStartInProgress && !audioStopInProgress
+                    && generationAtAdmission == audioConfigObservationGeneration
+            }
+        )
+        guard admission == .recover else { return }
         audioConfigObservationGeneration &+= 1
         let observationGeneration = audioConfigObservationGeneration
 
@@ -427,8 +425,9 @@ extension ParakeetEngine {
     // `ParakeetDeviceRecoveryReadinessPolicy.action(for:)` and
     // `ParakeetDeviceRecoveryFailurePolicy.action(wasRecording:)` /
     // `.rebuildStrategy(audioEngineQueueBlocked:)` in
-    // ParakeetStartRecordingFailurePolicy.swift. This method is the executor
-    // that drives CoreAudio/AVAudioEngine off those decisions.
+    // ParakeetStartRecordingFailurePolicy.swift. The ordering that consults
+    // them lives in ParakeetDeviceRecoverySequence.swift; the methods below
+    // hand it the real CoreAudio/AVAudioEngine steps.
 
     private func attemptDeviceRecovery() {
         // Keep the intent latched while the graph is temporarily stopped. A
@@ -442,11 +441,36 @@ extension ParakeetEngine {
             // Wait for CoreAudio to finish settling the new device graph.
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self = self else { return }
-            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-            var workflowRecoveryFinished = false
-            func finishWorkflowRecovery(result: String, artifactRetained: Bool) {
-                guard !workflowRecoveryFinished else { return }
-                workflowRecoveryFinished = true
+            await ParakeetDeviceRecoverySequence.run(
+                generation: myGeneration,
+                shouldRestartRecording: shouldRestartRecording,
+                steps: self.deviceRecoverySteps(
+                    generation: myGeneration,
+                    shouldRestartRecording: shouldRestartRecording,
+                    startedAt: recoveryStartedAt
+                )
+            )
+        }
+    }
+
+    private func deviceRecoverySteps(
+        generation myGeneration: UInt64,
+        shouldRestartRecording: Bool,
+        startedAt recoveryStartedAt: CFAbsoluteTime
+    ) -> ParakeetDeviceRecoverySteps<ParakeetAudioInputSnapshot> {
+        ParakeetDeviceRecoverySteps(
+            isStale: { self.recoveryState.isStale(generation: $0) },
+            releaseRecordingIntent: { self.configChangeWasRecording = false },
+            reportAttempted: { artifactRetained in
+                WorkflowRecoveryTelemetry.attempted(
+                    workflowKind: "dictation",
+                    failureKind: "route_changed",
+                    retrySource: "audio_route_recovery",
+                    surface: "runtime",
+                    artifactRetained: artifactRetained
+                )
+            },
+            reportFinished: { result, artifactRetained in
                 WorkflowRecoveryTelemetry.finished(
                     workflowKind: "dictation",
                     failureKind: "route_changed",
@@ -456,102 +480,56 @@ extension ParakeetEngine {
                     surface: "runtime",
                     artifactRetained: artifactRetained
                 )
-            }
-            defer {
-                // An older task must never clear a newer route change's intent.
-                if !self.recoveryState.isStale(generation: myGeneration) {
-                    self.configChangeWasRecording = false
-                }
-                finishWorkflowRecovery(
-                    result: Task.isCancelled ? "cancelled" : "superseded",
-                    artifactRetained: shouldRestartRecording
-                )
-            }
-            WorkflowRecoveryTelemetry.attempted(
-                workflowKind: "dictation",
-                failureKind: "route_changed",
-                retrySource: "audio_route_recovery",
-                surface: "runtime",
-                artifactRetained: shouldRestartRecording
-            )
-
-            guard !Task.isCancelled else { return }
-            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-
-            var lastSnapshotOwner: ParakeetAudioEngineQueueOwnerToken?
-            do {
-                var recoveryAttempt = 0
-                var readySnapshot: ParakeetAudioInputSnapshot?
-                while readySnapshot == nil {
-                    recoveryAttempt += 1
-                    let snapshotOwner = self.currentAudioEngineQueueOwnerToken()
-                    lastSnapshotOwner = snapshotOwner
-                    let snapshot: ParakeetAudioInputSnapshot
-                    do {
-                        // One exact lease a user stop can claim; a snapshot
-                        // that returns after the claim is a cancellation.
-                        snapshot = try await self.audioEngineWorkOwnership.runLeased(
-                            owner: snapshotOwner,
-                            phase: .deviceRecoverySnapshot
-                        ) { isLeaseCurrent in
-                            try await self.audioInputSnapshot(
-                                operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
-                                recoveryGeneration: myGeneration,
-                                isEngineWorkCurrent: isLeaseCurrent
-                            )
-                        }
-                    } catch {
-                        if error is DictationInputDeviceBindingError {
-                            // A reconnect can expose the selected device before
-                            // AUHAL accepts it. The recovery timeout bounds this
-                            // wait; repeatedly replacing graphs cannot fix it.
-                            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                            guard !Task.isCancelled else { return }
-                            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                            continue
-                        }
-                        throw error
-                    }
-                    let readiness = self.audioFormatReadiness(
-                        outputFormat: snapshot.outputFormat,
-                        hwFormat: snapshot.hwFormat,
-                        selection: snapshot.selection
+            },
+            readSnapshot: { snapshotOwner, recoveryAttempt in
+                // One exact lease a user stop can claim; a snapshot that
+                // returns after the claim is a cancellation.
+                try await self.audioEngineWorkOwnership.runLeased(
+                    owner: snapshotOwner,
+                    phase: .deviceRecoverySnapshot
+                ) { isLeaseCurrent in
+                    try await self.audioInputSnapshot(
+                        operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
+                        recoveryGeneration: myGeneration,
+                        isEngineWorkCurrent: isLeaseCurrent
                     )
-                    switch ParakeetDeviceRecoveryReadinessPolicy.action(for: readiness) {
-                    case .finishRecovery:
-                        readySnapshot = snapshot
-                    case .keepWaiting:
-                        var context = self.audioFormatContext(
-                            outputFormat: snapshot.outputFormat,
-                            hwFormat: snapshot.hwFormat,
-                            selection: snapshot.selection,
-                            readiness: readiness
-                        )
-                        context["recovery_attempt"] = "\(recoveryAttempt)"
-                        EventReporter.shared.capture(
-                            level: .warning,
-                            engine: "parakeet",
-                            event: "device_change_rewarm_deferred",
-                            message: "Audio route still settling after device change",
-                            context: context
-                        )
-                        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                        guard !Task.isCancelled else { return }
-                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                        continue
-                    }
                 }
-                guard let snapshot = readySnapshot,
-                      !Task.isCancelled,
-                      !self.recoveryState.isStale(generation: myGeneration) else { return }
+            },
+            readiness: { snapshot in
+                self.audioFormatReadiness(
+                    outputFormat: snapshot.outputFormat,
+                    hwFormat: snapshot.hwFormat,
+                    selection: snapshot.selection
+                )
+            },
+            reportStillSettling: { snapshot, readiness, recoveryAttempt in
+                var context = self.audioFormatContext(
+                    outputFormat: snapshot.outputFormat,
+                    hwFormat: snapshot.hwFormat,
+                    selection: snapshot.selection,
+                    readiness: readiness
+                )
+                context["recovery_attempt"] = "\(recoveryAttempt)"
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: "device_change_rewarm_deferred",
+                    message: "Audio route still settling after device change",
+                    context: context
+                )
+            },
+            sleep: { nanoseconds in try? await Task.sleep(nanoseconds: nanoseconds) },
+            commitSnapshot: { snapshot in
                 self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
                 self.prewarmRetryCount = 0
                 AppLogger.transcription.info("PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
-
-                guard !Task.isCancelled else { return }
-                guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
-                self.cancelConfigRecoveryTimeout()
-                self.publishRecoveryState()
+            },
+            finishRecovery: { success, generation in
+                self.recoveryState.finishRecovery(success: success, generation: generation)
+            },
+            cancelTimeout: { self.cancelConfigRecoveryTimeout() },
+            publishRecoveryState: { self.publishRecoveryState() },
+            reportSucceeded: { snapshot in
                 AnalyticsReporter.track(
                     "dictation_audio_route_recovery_finished",
                     properties: self.dictationRouteAnalyticsContext(
@@ -565,83 +543,58 @@ extension ParakeetEngine {
                         ]
                     )
                 )
-
-                // If we were recording, try to restart on the new device.
-                // The watchdog (via isRecoveryAttempt=false) catches silent
-                // failures where the device looks functional but produces no
-                // samples. The watchdog gets one retry before giving up.
-                if shouldRestartRecording {
-                    // The ordinary start path keeps the preserved segments on
-                    // the same recording. A measured split Bluetooth route
-                    // needed one more probe after the old two-second window,
-                    // so failures that can still clear retry inside a budget.
-                    let restart = await ParakeetRouteRecoveryRestart.run(
-                        startedAtUptime: ProcessInfo.processInfo.systemUptime,
-                        nowUptime: { ProcessInfo.processInfo.systemUptime },
-                        isCurrent: {
-                            !Task.isCancelled && !self.recoveryState.isStale(generation: myGeneration)
-                        },
-                        startRecording: { await self.startRecording() },
-                        shouldRetry: {
-                            ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
-                                after: self.lastRecordingStartFailureReason,
-                                inputCanStartRecording: self.recoveryState.canStartRecording
-                            )
-                        },
-                        sleep: { delay in try? await Task.sleep(nanoseconds: delay) }
-                    )
-                    switch restart {
-                    case .superseded:
-                        return
-                    case .restarted(let attempt):
-                        AppLogger.transcription.info("PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
-                        EventReporter.shared.capture(level: .info, engine: "parakeet",
-                            event: "recording_recovered_device_change",
-                            message: "Recording recovered after device change",
-                            context: [
-                                "audio_device": self.inputDeviceName,
-                                "sample_rate": "\(self.safeNativeSampleRate())",
-                                "attempts": "\(attempt)"
-                            ])
-                        finishWorkflowRecovery(result: "success", artifactRetained: true)
-                    case .exhausted:
-                        self.interruptRecordingPreservingRecoveredTimeline()
-                        EventReporter.shared.capture(level: .error, engine: "parakeet",
-                            event: "recording_interrupted",
-                            message: "Recording could not restart after device change within retry budget",
-                            context: self.dictationRouteDiagnosticsContext(
-                                outputFormat: snapshot.outputFormat,
-                                hwFormat: snapshot.hwFormat,
-                                selection: snapshot.selection,
-                                extra: [
-                                    "audio_device": self.inputDeviceName,
-                                    "reason": "recording_restart_budget_exhausted"
-                                ]
-                            ))
-                        finishWorkflowRecovery(
-                            result: "failed",
-                            artifactRetained: !self.recoveredRecordingTimeline.isEmpty
+            },
+            restartRecording: {
+                // The ordinary start path keeps the preserved segments on the
+                // same recording. A measured split Bluetooth route needed one
+                // more probe after the old two-second window, so failures that
+                // can still clear retry inside a budget. The watchdog (via
+                // isRecoveryAttempt=false) catches silent failures where the
+                // device looks functional but produces no samples.
+                await ParakeetRouteRecoveryRestart.run(
+                    startedAtUptime: ProcessInfo.processInfo.systemUptime,
+                    nowUptime: { ProcessInfo.processInfo.systemUptime },
+                    isCurrent: {
+                        !Task.isCancelled && !self.recoveryState.isStale(generation: myGeneration)
+                    },
+                    startRecording: { await self.startRecording() },
+                    shouldRetry: {
+                        ParakeetDeviceRecoveryStartRetryPolicy.shouldRetry(
+                            after: self.lastRecordingStartFailureReason,
+                            inputCanStartRecording: self.recoveryState.canStartRecording
                         )
-                    }
-                } else {
-                    finishWorkflowRecovery(result: "success", artifactRetained: false)
-                }
-            } catch {
-                guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                // A timed-out audio-engine operation means the serial engine queue
-                // is wedged behind a CoreAudio call that never returned (the AirPods
-                // / Bluetooth route-switch hang). Rebuilding on that same queue would
-                // never run, so fail safe by abandoning the blocked graph instead.
-                let graphRepair = ParakeetDeviceRecoveryFailurePolicy.graphRepair(after: error)
-                if graphRepair == .abandonBlockedAudioGraph {
-                    guard let lastSnapshotOwner,
-                          self.ownsAudioEngineQueue(lastSnapshotOwner) else { return }
-                }
-                let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: shouldRestartRecording)
-                if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
-                    self.cancelConfigRecoveryTimeout()
-                    self.publishRecoveryState()
-                }
+                    },
+                    sleep: { delay in try? await Task.sleep(nanoseconds: delay) }
+                )
+            },
+            reportRecordingRecovered: { attempt in
+                AppLogger.transcription.info("PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
+                EventReporter.shared.capture(level: .info, engine: "parakeet",
+                    event: "recording_recovered_device_change",
+                    message: "Recording recovered after device change",
+                    context: [
+                        "audio_device": self.inputDeviceName,
+                        "sample_rate": "\(self.safeNativeSampleRate())",
+                        "attempts": "\(attempt)"
+                    ])
+            },
+            interruptPreservingTimeline: { self.interruptRecordingPreservingRecoveredTimeline() },
+            reportRestartExhausted: { snapshot in
+                EventReporter.shared.capture(level: .error, engine: "parakeet",
+                    event: "recording_interrupted",
+                    message: "Recording could not restart after device change within retry budget",
+                    context: self.dictationRouteDiagnosticsContext(
+                        outputFormat: snapshot.outputFormat,
+                        hwFormat: snapshot.hwFormat,
+                        selection: snapshot.selection,
+                        extra: [
+                            "audio_device": self.inputDeviceName,
+                            "reason": "recording_restart_budget_exhausted"
+                        ]
+                    ))
+            },
+            hasRecoveredTimeline: { !self.recoveredRecordingTimeline.isEmpty },
+            reportFailed: { _ in
                 AnalyticsReporter.track(
                     "dictation_audio_route_recovery_finished",
                     properties: self.dictationRouteAnalyticsContext(
@@ -653,24 +606,21 @@ extension ParakeetEngine {
                         ]
                     )
                 )
-                finishWorkflowRecovery(
-                    result: "failed",
-                    artifactRetained: !self.recoveredRecordingTimeline.isEmpty
-                )
-                if failureAction.markRecordingInterrupted {
-                    self.interruptRecordingPreservingRecoveredTimeline()
-                    EventReporter.shared.capture(level: .error, engine: "parakeet",
-                        event: "recording_interrupted",
-                        message: "Recording interrupted — engine rewarm failed after device change",
-                        context: self.dictationRouteDiagnosticsContext(
-                            selection: self.cachedInputDeviceSelection,
-                            extra: [
-                                "audio_device": self.inputDeviceName,
-                                "error": error.localizedDescription
-                            ]
-                        ))
-                }
-                if failureAction.reportSentryFailure {
+            },
+            reportRecordingInterrupted: { error in
+                EventReporter.shared.capture(level: .error, engine: "parakeet",
+                    event: "recording_interrupted",
+                    message: "Recording interrupted — engine rewarm failed after device change",
+                    context: self.dictationRouteDiagnosticsContext(
+                        selection: self.cachedInputDeviceSelection,
+                        extra: [
+                            "audio_device": self.inputDeviceName,
+                            "error": error.localizedDescription
+                        ]
+                    ))
+            },
+            reportRewarmFailed: { error, reportSentryFailure in
+                if reportSentryFailure {
                     EventReporter.shared.capture(level: .error, engine: "parakeet",
                         event: "device_change_rewarm_failed",
                         message: error.localizedDescription,
@@ -695,34 +645,24 @@ extension ParakeetEngine {
                             ]
                         ))
                 }
-                // Publishing interruption can synchronously cancel the session
-                // through Combine. Do not rebuild that cancellation's graph.
-                guard !Task.isCancelled,
-                      !self.recoveryState.isStale(generation: myGeneration) else { return }
-                // Circuit-open means this attempt never entered the current
-                // queue. The already-counted blocked workers keep their leases;
-                // fail closed without retiring another healthy graph.
-                if graphRepair == .keepCurrentGraph {
-                    return
-                }
-                switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
-                    audioEngineQueueBlocked: graphRepair == .abandonBlockedAudioGraph
-                ) {
-                case .queuedOnAudioEngineQueue:
-                    guard await self.rebuildAudioEngine(reason: "device_change_rewarm_failed") != nil else { return }
-                case .abandonBlockedAudioGraph:
-                    guard let lastSnapshotOwner,
-                          self.abandonBlockedAudioEngine(
-                            reason: "device_change_rewarm_failed",
-                            expectedOwner: lastSnapshotOwner
-                          ) else { return }
-                }
-                if failureAction.schedulePrewarmRetry {
-                    self.prewarmRetryCount = 0
-                    self.schedulePrewarmRetry()
-                }
+            },
+            graph: deviceRecoveryGraphSteps()
+        )
+    }
+
+    private func deviceRecoveryGraphSteps() -> ParakeetDeviceRecoveryGraphSteps {
+        ParakeetDeviceRecoveryGraphSteps(
+            currentOwner: { self.currentAudioEngineQueueOwnerToken() },
+            ownsQueue: { self.ownsAudioEngineQueue($0) },
+            rebuildOnQueue: { reason in await self.rebuildAudioEngine(reason: reason) != nil },
+            abandonBlockedGraph: { reason, owner in
+                self.abandonBlockedAudioEngine(reason: reason, expectedOwner: owner)
+            },
+            scheduleFreshPrewarmRetry: {
+                self.prewarmRetryCount = 0
+                self.schedulePrewarmRetry()
             }
-        }
+        )
     }
 
     private func scheduleConfigRecoveryTimeout(generation: UInt64, wasRecording: Bool) {
@@ -730,61 +670,69 @@ extension ParakeetEngine {
         configRecoveryTimeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioDeviceRecoveryTimeout)
             guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
-            guard self.recoveryState.timeoutRecovery(generation: generation) else { return }
+            await ParakeetDeviceRecoverySequence.runTimeout(
+                generation: generation,
+                wasRecording: wasRecording,
+                steps: self.deviceRecoveryTimeoutSteps(generation: generation, wasRecording: wasRecording)
+            )
+        }
+    }
 
-            // Capture ownership before publishing interruption: its subscriber
-            // can synchronously cancel the old session and supersede this graph.
-            let timeoutOwner = self.currentAudioEngineQueueOwnerToken()
-            self.configRecoveryTimeoutTask = nil
-            self.configChangeWasRecording = false
-            self.publishRecoveryState()
-            let timeoutAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: wasRecording)
-            let failureAction = timeoutAction.failureAction
-            AnalyticsReporter.track(
-                "dictation_audio_route_recovery_timeout",
-                properties: self.dictationRouteAnalyticsContext(
-                    selection: self.cachedInputDeviceSelection,
-                    extra: [
-                        "recovery_latency_bucket": AnalyticsReporter.durationBucket(
-                            seconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000
-                        ),
-                        "was_recording": "\(wasRecording)"
-                    ]
+    private func deviceRecoveryTimeoutSteps(
+        generation: UInt64,
+        wasRecording: Bool
+    ) -> ParakeetDeviceRecoveryTimeoutSteps {
+        let timeoutSeconds = Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000
+        return ParakeetDeviceRecoveryTimeoutSteps(
+            timeoutRecovery: { self.recoveryState.timeoutRecovery(generation: $0) },
+            clearTimeoutTask: { self.configRecoveryTimeoutTask = nil },
+            releaseRecordingIntent: { self.configChangeWasRecording = false },
+            publishRecoveryState: { self.publishRecoveryState() },
+            reportTimedOut: { failureAction in
+                AnalyticsReporter.track(
+                    "dictation_audio_route_recovery_timeout",
+                    properties: self.dictationRouteAnalyticsContext(
+                        selection: self.cachedInputDeviceSelection,
+                        extra: [
+                            "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: timeoutSeconds),
+                            "was_recording": "\(wasRecording)"
+                        ]
+                    )
                 )
-            )
-            WorkflowRecoveryTelemetry.finished(
-                workflowKind: "dictation",
-                failureKind: "route_changed",
-                retrySource: "audio_route_recovery",
-                result: "failed",
-                elapsedSeconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000,
-                surface: "runtime",
-                artifactRetained: !self.recoveredRecordingTimeline.isEmpty
-            )
-            let diagnosticsEvent = failureAction.reportSentryFailure
-                ? "device_change_recovery_timeout"
-                : "device_change_recovery_deferred"
-            let diagnosticsLevel: EventLevel = failureAction.reportSentryFailure ? .error : .warning
-            let diagnosticsMessage = failureAction.reportSentryFailure
-                ? "Audio device recovery timed out"
-                : "Idle audio route still settling after device change"
-            EventReporter.shared.capture(
-                level: diagnosticsLevel,
-                engine: "parakeet",
-                event: diagnosticsEvent,
-                message: diagnosticsMessage,
-                context: self.dictationRouteDiagnosticsContext(
-                    selection: self.cachedInputDeviceSelection,
-                    extra: [
-                        "recovery_generation": "\(generation)",
-                        "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
-                        "was_recording": "\(wasRecording)",
-                        "audio_device": self.inputDeviceName
-                    ]
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "dictation",
+                    failureKind: "route_changed",
+                    retrySource: "audio_route_recovery",
+                    result: "failed",
+                    elapsedSeconds: timeoutSeconds,
+                    surface: "runtime",
+                    artifactRetained: !self.recoveredRecordingTimeline.isEmpty
                 )
-            )
-            if failureAction.markRecordingInterrupted {
-                self.interruptRecordingPreservingRecoveredTimeline()
+                let diagnosticsEvent = failureAction.reportSentryFailure
+                    ? "device_change_recovery_timeout"
+                    : "device_change_recovery_deferred"
+                let diagnosticsLevel: EventLevel = failureAction.reportSentryFailure ? .error : .warning
+                let diagnosticsMessage = failureAction.reportSentryFailure
+                    ? "Audio device recovery timed out"
+                    : "Idle audio route still settling after device change"
+                EventReporter.shared.capture(
+                    level: diagnosticsLevel,
+                    engine: "parakeet",
+                    event: diagnosticsEvent,
+                    message: diagnosticsMessage,
+                    context: self.dictationRouteDiagnosticsContext(
+                        selection: self.cachedInputDeviceSelection,
+                        extra: [
+                            "recovery_generation": "\(generation)",
+                            "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
+                            "was_recording": "\(wasRecording)",
+                            "audio_device": self.inputDeviceName
+                        ]
+                    )
+                )
+            },
+            interruptPreservingTimeline: { self.interruptRecordingPreservingRecoveredTimeline() },
+            reportRecordingInterrupted: {
                 EventReporter.shared.capture(
                     level: .error,
                     engine: "parakeet",
@@ -798,22 +746,9 @@ extension ParakeetEngine {
                         ]
                     )
                 )
-            }
-            guard self.ownsAudioEngineQueue(timeoutOwner) else { return }
-            switch timeoutAction.rebuildStrategy {
-            case .queuedOnAudioEngineQueue:
-                guard await self.rebuildAudioEngine(reason: "device_change_recovery_timeout") != nil else { return }
-            case .abandonBlockedAudioGraph:
-                guard self.abandonBlockedAudioEngine(
-                    reason: "device_change_recovery_timeout",
-                    expectedOwner: timeoutOwner
-                ) else { return }
-            }
-            if failureAction.schedulePrewarmRetry {
-                self.prewarmRetryCount = 0
-                self.schedulePrewarmRetry()
-            }
-        }
+            },
+            graph: deviceRecoveryGraphSteps()
+        )
     }
 
     func cancelConfigRecoveryTimeout() {

@@ -30,17 +30,32 @@ func testSingleInstanceGuard() {
         assertEqual(guardInstance.acquire(), .acquired, "same guard should not reject its own repeated acquire")
     }
 
-    runSuite("SingleInstanceGuard reopen presents controls without a modal alert") {
-        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/App/TranscriptedApp.swift")
-        let source = (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
-        let body = source.components(separatedBy: "private func handleSingleInstanceReopenRequest() {")
-            .dropFirst().first?.components(separatedBy: "@objc func togglePopover()").first ?? ""
-        assertFalse(body.isEmpty, "the production reopen handler must be present")
-        assertFalse(body.contains("NSAlert("), "reopen must not hide recording controls behind an alert")
-        assertFalse(body.contains("runModal("), "reopen must not block capture commands in a modal loop")
-        assertTrue(body.contains("onboardingWindowController.present"), "unfinished onboarding must remain reachable")
-        assertTrue(body.contains("showMainPopover("), "reopen must surface the existing recording controls")
-        assertTrue(body.contains("showSettingsWindow("), "reopen must retain the no-status-item fallback")
+    runSuite("SingleInstanceReopenPolicy sends a second launch to real controls, never an alert") {
+        // Every surface is a live control: there is no alert case for a reopen to block on.
+        assertEqual(
+            SingleInstanceReopenSurface.allCases,
+            [.onboarding, .popover, .settingsFallback],
+            "reopen should only ever land on onboarding, the popover, or Settings"
+        )
+        assertEqual(
+            SingleInstanceReopenPolicy.surface(onboardingComplete: false, hasStatusItem: true),
+            .onboarding,
+            "unfinished onboarding must remain reachable even with a status item"
+        )
+        assertEqual(
+            SingleInstanceReopenPolicy.surface(onboardingComplete: false, hasStatusItem: false),
+            .onboarding,
+            "unfinished onboarding must remain reachable without a status item"
+        )
+        assertEqual(
+            SingleInstanceReopenPolicy.surface(onboardingComplete: true, hasStatusItem: true),
+            .popover,
+            "reopen must surface the existing recording controls"
+        )
+        assertEqual(
+            SingleInstanceReopenPolicy.surface(onboardingComplete: true, hasStatusItem: false),
+            .settingsFallback,
+            "reopen must retain the no-status-item fallback"
+        )
     }
 }

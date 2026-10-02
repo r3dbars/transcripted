@@ -41,6 +41,33 @@ protocol ParakeetAudioGraphDriver: Sendable {
     func retire(_ engine: Engine, reason: String) -> Bool
 }
 
+/// The native calls a dictation start makes, on the graph's serial queue.
+/// `prepareTap` is the first call that reads the engine's input node: on a
+/// fresh engine that binds the macOS default input, so it runs only after
+/// the start's lease was checked.
+protocol ParakeetAudioGraphStartDriver: ParakeetAudioGraphDriver {
+    associatedtype TapFormat
+    associatedtype TapBuffer
+
+    /// Clears an old tap, applies the voice-processing choice, then reads the
+    /// tap format the node now has. Checks `isCurrent` between the steps.
+    func prepareTap(
+        on engine: Engine,
+        voiceProcessingEnabled: Bool,
+        isCurrent: () -> Bool,
+        stageTimings: inout [String: Int]
+    ) throws -> TapFormat
+    /// Installs `onBuffer` as the input tap. Throws when a route change made
+    /// the format stale.
+    func installTap(
+        on engine: Engine,
+        format: TapFormat,
+        onBuffer: @escaping (TapBuffer) -> Void
+    ) throws
+    func isRunning(_ engine: Engine) -> Bool
+    func start(_ engine: Engine) throws
+}
+
 extension ParakeetAudioGraphDriver {
     /// Cleanup for a start that was cancelled or came back too late.
     func cleanUpLateStart(_ engine: Engine) {

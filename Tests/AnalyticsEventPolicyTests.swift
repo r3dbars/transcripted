@@ -574,19 +574,81 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("WorkflowRecoveryTelemetry emits the allowlisted recovery attempt bucket") {
-        let source = readSourceFixture("Sources/Observability/WorkflowRecoveryTelemetry.swift")
-        assertTrue(
-            source.contains("\"recovery_attempt_bucket\": AnalyticsReporter.countBucket(attempt)"),
-            "workflow recovery helper should emit the allowlisted recovery attempt bucket key"
+        var recorded: [(event: String, properties: [String: String])] = []
+        let record: (String, [String: String]) -> Void = { recorded.append(($0, $1)) }
+
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            surface: "home",
+            artifactRetained: true,
+            track: record
         )
-        assertFalse(
-            source.contains("\"attempt_bucket\""),
-            "workflow recovery helper should not emit the legacy attempt bucket key"
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            result: "success",
+            elapsedSeconds: 45,
+            surface: "home",
+            artifactRetained: true,
+            track: record
         )
-        assertTrue(
-            source.contains("\"workflow_recovery_failed\""),
-            "workflow recovery helper should emit a dedicated failed terminal event for failure drill-down"
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            result: "failed",
+            surface: "home",
+            artifactRetained: false,
+            track: record
         )
+
+        assertEqual(
+            recorded.map(\.event),
+            [
+                "workflow_recovery_attempted",
+                "workflow_recovery_finished",
+                "workflow_recovery_finished",
+                "workflow_recovery_failed",
+            ],
+            "a success finishes once; a failure also sends the dedicated failed terminal event"
+        )
+
+        for entry in recorded {
+            assertEqual(
+                entry.properties["recovery_attempt_bucket"],
+                AnalyticsReporter.countBucket(2),
+                "\(entry.event) should carry the allowlisted recovery attempt bucket"
+            )
+            assertNil(entry.properties["attempt_bucket"], "\(entry.event) should not send the legacy attempt bucket key")
+
+            guard let policy = AnalyticsEventPolicy.policy(forEvent: entry.event) else {
+                assertTrue(false, "\(entry.event) must be registered or AnalyticsReporter drops it")
+                continue
+            }
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                entry.properties,
+                allowedKeys: policy.allowedProperties
+            )
+            assertEqual(sanitized, entry.properties, "\(entry.event) properties should all survive the sanitizer and allowlist")
+        }
+
+        guard recorded.count == 4 else { return }
+        assertEqual(recorded[1].properties["result"], "success", "success result should be sent")
+        assertEqual(
+            recorded[1].properties["elapsed_bucket"],
+            AnalyticsReporter.durationBucket(seconds: 45),
+            "elapsed time should be sent only as a bucket"
+        )
+        assertEqual(recorded[1].properties["artifact_retained"], "true", "artifact retention should be a boolean string")
+        assertEqual(recorded[3].properties["result"], "failed", "failed event should carry the failed result")
+        assertEqual(recorded[3].properties["artifact_retained"], "false", "artifact retention should be a boolean string")
+        assertNil(recorded[3].properties["elapsed_bucket"], "no elapsed time means no elapsed bucket")
     }
 
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
@@ -1455,7 +1517,7 @@ func testAnalyticsEventPolicy() {
                 "result": "updates_submitted",
                 "review_item_bucket": "4_9",
                 "review_reason": "mixed",
-                "surface": "speaker_review_island",
+                "surface": "speaker_review_sheet",
                 "updates_submitted_bucket": "2_3",
                 "audio_path": "/Users/jane/Private/customer.wav",
                 "meeting_title": "Customer Roadmap",
@@ -1474,7 +1536,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["result"], "updates_submitted", "coarse result should survive")
         assertEqual(sanitized["review_item_bucket"], "4_9", "review item bucket should survive")
         assertEqual(sanitized["review_reason"], "mixed", "review reason should survive")
-        assertEqual(sanitized["surface"], "speaker_review_island", "surface should survive")
+        assertEqual(sanitized["surface"], "speaker_review_sheet", "surface should survive")
         assertEqual(sanitized["updates_submitted_bucket"], "2_3", "submitted update bucket should survive")
         assertNil(sanitized["audio_path"], "audio paths must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
@@ -1749,41 +1811,6 @@ func testAnalyticsEventPolicy() {
         assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
-    runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
-        let appSource = readSourceFixture("Sources/App/TranscriptedApp.swift")
-
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
-            1,
-            "shown telemetry should fire once, only after the detected prompt is actually presented"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_record_selected\"", in: appSource),
-            1,
-            "selected telemetry should fire once on the explicit record choice"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_suppressed\"", in: appSource),
-            1,
-            "suppression telemetry should fire once from the detector suppression hook"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_choice_made\"", in: appSource),
-            3,
-            "choice telemetry should cover record, dismiss, and remind-later actions; automatic expiry is an outcome, not a user choice"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            3,
-            "app-level outcomes should cover dismiss, expiry, and remind-later exactly once; suppressions send only meeting_prompt_suppressed"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),
-            1,
-            "only an explicit user dismissal should be classified as prompt abandonment"
-        )
-    }
-
     runSuite("Meeting prompt outcomes belong only to meetings a detected prompt started") {
         assertNil(
             MeetingPromptTelemetry.sessionOutcomeProperties(
@@ -1846,17 +1873,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
-}
-
-private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: String) -> Int {
-    guard !needle.isEmpty else { return 0 }
-    var count = 0
-    var searchRange = haystack.startIndex..<haystack.endIndex
-    while let range = haystack.range(of: needle, range: searchRange) {
-        count += 1
-        searchRange = range.upperBound..<haystack.endIndex
-    }
-    return count
 }
 
 /// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because

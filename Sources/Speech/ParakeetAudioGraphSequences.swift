@@ -1,15 +1,313 @@
 // ParakeetAudioGraphSequences.swift
-// The orderings ParakeetEngine's stop, route-change recovery, route restart
-// and input snapshot must keep, written against `ParakeetAudioGraph` and small
-// host protocols so the fast tests can run them with a fake driver and record
-// what happens in which order. ParakeetEngine supplies the real steps.
+// The orderings ParakeetEngine's start, stop, route-change recovery, route
+// restart and input snapshot must keep, written against `ParakeetAudioGraph`
+// and small host protocols so the fast tests can run them with a fake driver
+// and record what happens in which order. ParakeetEngine supplies the real
+// steps.
 //
-// AirPods: these sequences touch the graph only through ParakeetAudioGraph,
-// which never creates an input node. The snapshot admission runs before the
-// caller reads the input node, so the config-change ignore window is armed
-// before a fresh engine can bind the macOS default input.
+// AirPods: these sequences touch the graph only through ParakeetAudioGraph.
+// The snapshot admission runs before the caller reads the input node, so the
+// config-change ignore window is armed before a fresh engine can bind the
+// macOS default input. The start's first input-node read is the driver's
+// `prepareTap`, after the lease check at entry, same as before the seam.
+// Native teardown (`ParakeetNativeInputGraphTeardown`) has no way to ask for
+// an input node at all, so stop and cleanup never bind the default input.
 
+import Combine
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
+
+// MARK: - Start lease
+
+/// Keeps the newest start's cancellation state, so a stop or zombie
+/// cancellation can cut tap delivery at once.
+@MainActor
+protocol ParakeetAudioStartLeaseHolder: AnyObject {
+    var audioStartCancellationState: ParakeetAudioStartCancellationState? { get set }
+}
+
+/// One start attempt's timed-work lease: the cancellation state that gates
+/// tap delivery, plus the exact graph-work lease a stop can claim.
+struct ParakeetAudioStartLease: Sendable {
+    let owner: ParakeetAudioEngineQueueOwnerToken
+    let state: ParakeetAudioStartCancellationState
+    let ownership: ParakeetTimedAudioEngineWorkOwnership
+
+    var isWorkCurrent: Bool {
+        state.canRunWork && ownership.isActive(owner: owner, phase: .audioStart)
+    }
+
+    var canDeliverSamples: Bool {
+        state.canDeliverSamples
+    }
+}
+
+struct ParakeetAudioStartSnapshot {
+    let engineWasRunning: Bool
+    let stageTimings: [String: Int]
+}
+
+/// How a leased start ended when it did not throw.
+enum ParakeetAudioStartOutcome {
+    case started(ParakeetAudioStartSnapshot)
+    /// A newer owner replaced the graph while the start ran.
+    case graphChanged
+    /// A stop cancelled the start after the engine came up.
+    case cancelled
+}
+
+/// Call-app process presence. `refresh` re-polls running processes;
+/// `isRunning` reads the result.
+struct ParakeetCallAppPresence {
+    let refresh: () -> Void
+    let isRunning: () -> Bool
+}
+
+extension ParakeetAudioGraph {
+    /// Starts a lease on `owner`. The previous start's lease, normal or
+    /// recovery, is cancelled first, so normal and recovery starts share one
+    /// replaceable lease and only the newest can deliver samples.
+    func beginStartLease(
+        owner: QueueOwner,
+        holder: some ParakeetAudioStartLeaseHolder
+    ) -> ParakeetAudioStartLease {
+        let state = ParakeetAudioStartCancellationState()
+        holder.audioStartCancellationState?.cancel()
+        holder.audioStartCancellationState = state
+        workOwnership.begin(owner: owner, phase: .audioStart)
+        return ParakeetAudioStartLease(owner: owner, state: state, ownership: workOwnership)
+    }
+
+    /// Ends a lease that will never deliver: cancels it, finishes its
+    /// graph-work lease, and forgets it unless a newer start replaced it.
+    func endStartLease(
+        _ lease: ParakeetAudioStartLease,
+        holder: some ParakeetAudioStartLeaseHolder
+    ) {
+        lease.state.cancel()
+        workOwnership.finish(owner: lease.owner, phase: .audioStart)
+        if holder.audioStartCancellationState === lease.state {
+            holder.audioStartCancellationState = nil
+        }
+    }
+
+    /// Runs the pre-tap format reads under their own replaceable lease, so a
+    /// stop can replace a graph blocked in a read instead of stranding the
+    /// next start. `work` gets the currency check for queued graph work.
+    /// Every exit ends the lease.
+    func withStartSnapshotLease<T>(
+        owner: QueueOwner,
+        holder: some ParakeetAudioStartLeaseHolder,
+        _ work: (_ isCurrent: @escaping () -> Bool) async throws -> T
+    ) async throws -> T {
+        let lease = beginStartLease(owner: owner, holder: holder)
+        defer { endStartLease(lease, holder: holder) }
+        return try await work { lease.isWorkCurrent }
+    }
+}
+
+extension ParakeetAudioGraph where Driver: ParakeetAudioGraphStartDriver {
+    /// Installs the dictation tap and starts the engine under one lease.
+    ///
+    /// Call apps are re-polled before the voice-processing choice, so a call
+    /// app that just opened keeps its mic. The lease is checked at entry, on
+    /// every tap buffer, and around `start`. A start that comes back to a
+    /// replaced graph or a cancelled lease runs `cleanUpLateStart` and never
+    /// delivers. A committed start keeps its state on `holder` (a stop
+    /// cancels delivery through it) and schedules one call-app recheck, for
+    /// a call app that opened while the engine was starting.
+    func start(
+        owner: QueueOwner,
+        holder: some ParakeetAudioStartLeaseHolder,
+        callApps: ParakeetCallAppPresence,
+        voiceProcessingEnabled: (_ callAppRunning: Bool) -> Bool,
+        wasPrewarmed: Bool,
+        timeoutNanoseconds: UInt64,
+        makeTapHandler: (ParakeetAudioStartLease) -> (Driver.TapBuffer) -> Void,
+        cleanUpLateStart: () -> Void,
+        recheckCallApps: () -> Void
+    ) async throws -> ParakeetAudioStartOutcome {
+        callApps.refresh()
+        let enableVoiceProcessing = voiceProcessingEnabled(callApps.isRunning())
+        let lease = beginStartLease(owner: owner, holder: holder)
+        let onBuffer = makeTapHandler(lease)
+        let driver = driver
+        let snapshot: ParakeetAudioStartSnapshot
+        do {
+            snapshot = try await runTimed(
+                operation: "start_recording",
+                timeoutNanoseconds: timeoutNanoseconds,
+                isWorkCurrent: { lease.isWorkCurrent },
+                cleanupAfterCancellation: driver.cleanUpLateStart,
+                cleanupAfterLateCompletion: driver.cleanUpLateStart
+            ) { engine in
+                try ParakeetAudioStartSequence.installTapAndStart(
+                    driver: driver,
+                    engine: engine,
+                    lease: lease,
+                    wasPrewarmed: wasPrewarmed,
+                    voiceProcessingEnabled: enableVoiceProcessing,
+                    onBuffer: onBuffer
+                )
+            }
+        } catch {
+            endStartLease(lease, holder: holder)
+            throw error
+        }
+        guard owns(owner) else {
+            endStartLease(lease, holder: holder)
+            cleanUpLateStart()
+            return .graphChanged
+        }
+        guard lease.state.commit() else {
+            endStartLease(lease, holder: holder)
+            cleanUpLateStart()
+            return .cancelled
+        }
+        workOwnership.finish(owner: owner, phase: .audioStart)
+        recheckCallApps()
+        return .started(snapshot)
+    }
+}
+
+enum ParakeetCallAppLaunchObservation {
+    /// Calls `onLaunch` each time a call app starts running during dictation,
+    /// so a running VPIO graph can hand the mic back. Repeats and closes are
+    /// ignored.
+    static func observe<Running: Publisher>(
+        _ isCallAppRunning: Running,
+        onLaunch: @escaping () -> Void
+    ) -> AnyCancellable where Running.Output == Bool, Running.Failure == Never {
+        isCallAppRunning
+            .removeDuplicates()
+            .sink { isRunning in
+                guard isRunning else { return }
+                onLaunch()
+            }
+    }
+}
+
+enum ParakeetAudioStartSequence {
+    /// The graph-queue half of a start. Every step re-checks the lease, so a
+    /// stop that lands mid-start never gets a running engine or samples.
+    static func installTapAndStart<Driver: ParakeetAudioGraphStartDriver>(
+        driver: Driver,
+        engine: Driver.Engine,
+        lease: ParakeetAudioStartLease,
+        wasPrewarmed: Bool,
+        voiceProcessingEnabled: Bool,
+        onBuffer: @escaping (Driver.TapBuffer) -> Void
+    ) throws -> ParakeetAudioStartSnapshot {
+        guard lease.isWorkCurrent else { throw CancellationError() }
+        let workStartedAt = CFAbsoluteTimeGetCurrent()
+        var stageTimings: [String: Int] = [:]
+        let tapFormat = try driver.prepareTap(
+            on: engine,
+            voiceProcessingEnabled: voiceProcessingEnabled,
+            isCurrent: { lease.isWorkCurrent },
+            stageTimings: &stageTimings
+        )
+        let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
+        try driver.installTap(on: engine, format: tapFormat) { buffer in
+            guard lease.canDeliverSamples else { return }
+            onBuffer(buffer)
+        }
+        guard lease.isWorkCurrent else { throw CancellationError() }
+        stageTimings["audio_tap_install_ms"] = elapsedMilliseconds(since: tapInstallStartedAt)
+
+        let engineWasRunning = driver.isRunning(engine)
+        if !wasPrewarmed || !engineWasRunning {
+            stageTimings["audio_engine_prepare_ms"] = 0
+            let engineStartStartedAt = CFAbsoluteTimeGetCurrent()
+            guard lease.isWorkCurrent else { throw CancellationError() }
+            try driver.start(engine)
+            guard lease.isWorkCurrent else { throw CancellationError() }
+            stageTimings["audio_engine_start_ms"] = elapsedMilliseconds(since: engineStartStartedAt)
+        } else {
+            stageTimings["audio_engine_prepare_ms"] = 0
+            stageTimings["audio_engine_start_ms"] = 0
+        }
+        stageTimings["audio_start_work_ms"] = elapsedMilliseconds(since: workStartedAt)
+        return ParakeetAudioStartSnapshot(
+            engineWasRunning: engineWasRunning,
+            stageTimings: stageTimings
+        )
+    }
+
+    private static func elapsedMilliseconds(since start: CFAbsoluteTime) -> Int {
+        max(0, Int((CFAbsoluteTimeGetCurrent() - start) * 1000))
+    }
+}
+
+// MARK: - Native input-graph teardown
+
+/// The AVAudioEngine calls dictation teardown makes. There is no way to ask
+/// for an input node here on purpose: `AVAudioEngine.inputNode` creates one
+/// on an untouched engine, which binds the macOS default input (and flips a
+/// default AirPods input into call mode).
+protocol ParakeetNativeInputGraph {
+    associatedtype InputNode
+    var isRunning: Bool { get }
+    /// The input node the engine already has, or nil. Never creates one.
+    var existingInputNode: InputNode? { get }
+    func stop()
+    func waitForStoppedInputCallbacks()
+    func removeTap(from node: InputNode)
+    /// Turns voice processing off. False when it stayed on.
+    func releaseVoiceProcessing(on node: InputNode) -> Bool
+    func isVoiceProcessingEnabled(on node: InputNode) -> Bool
+}
+
+enum ParakeetNativeInputGraphTeardown {
+    /// Removes the input tap without tripping AVAudioEngine's
+    /// `isSink || tap != nullptr` assertion: a running graph is stopped and
+    /// its input callbacks drained first (`AudioInputTapTeardownPolicy`, the
+    /// same order the meeting path uses), then voice processing is released
+    /// on the stopped graph. False when voice processing stayed on.
+    @discardableResult
+    static func removeInputTap<Graph: ParakeetNativeInputGraph>(_ graph: Graph) -> Bool {
+        let inputNode = graph.existingInputNode
+        for step in AudioInputTapTeardownPolicy.steps(engineIsRunning: graph.isRunning) {
+            switch step {
+            case .stopEngine:
+                graph.stop()
+            case .waitForStoppedInputCallbacks:
+                graph.waitForStoppedInputCallbacks()
+            case .removeInputTap:
+                if let inputNode {
+                    graph.removeTap(from: inputNode)
+                }
+            }
+        }
+        return releaseStoppedVoiceProcessing(graph)
+    }
+
+    /// Stops the graph if it runs, then releases stopped voice processing.
+    @discardableResult
+    static func stop<Graph: ParakeetNativeInputGraph>(_ graph: Graph) -> Bool {
+        if graph.isRunning {
+            graph.stop()
+        }
+        return releaseStoppedVoiceProcessing(graph)
+    }
+
+    /// Voice processing can be released only on a stopped graph. An untouched
+    /// graph has nothing to release and stays untouched.
+    static func releaseStoppedVoiceProcessing<Graph: ParakeetNativeInputGraph>(_ graph: Graph) -> Bool {
+        guard !graph.isRunning else { return false }
+        guard let inputNode = graph.existingInputNode else { return true }
+        return graph.releaseVoiceProcessing(on: inputNode)
+    }
+
+    /// The call-app probe: only an input node the graph already has can be
+    /// running voice processing.
+    static func usesVoiceProcessing<Graph: ParakeetNativeInputGraph>(_ graph: Graph) -> Bool {
+        guard let inputNode = graph.existingInputNode else { return false }
+        return graph.isVoiceProcessingEnabled(on: inputNode)
+    }
+}
 
 // MARK: - Stop
 

@@ -8,7 +8,7 @@ The status item and its popover: the glyph, the header status line, the Record a
 
 ## Public surface
 
-`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`.
+`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `StatusItemPresentation`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`, `MenuBarAutomationID` (the AX ids external automation looks up).
 
 ## May depend on
 
@@ -17,6 +17,7 @@ UIShared, UIOverlay, UISettings, AppState, Capture, Meeting, Dictation, Speech, 
 ## Entry points
 
 - `MenuBarPanelController.swift` builds and shows the popover. Left-click and right-click on the status item open the same popover (a product-surface rule in the root `AGENTS.md`).
+- `StatusItemPresentation.swift` picks the glyph and label for each capture state and writes them onto the status item button, at launch and on every refresh.
 - `MenuBarGlyph.swift` draws the icon; its geometry mirrors `docs/assets/menu-bar-icon/make_menu_bar_icons.py`, and `StatusItemPresentationTests` fails when they drift.
 
 ## Tests

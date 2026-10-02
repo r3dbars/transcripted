@@ -496,17 +496,30 @@ func testDictationInputDeviceSelectionPolicy() {
             "a mic moved back to the engine by empty takes (#1880) gets its warmup back"
         )
 
-        let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
-        assertTrue(
-            pinned.contains("for: try? Self.pinnedDictationInputSelection(),"),
-            "warmup is judged on the same selection the start records"
-        )
-        assertTrue(
-            pinned.contains("pinnedDictationFellBackToEngine = true"),
+        let speedPathOn: (DictationAudioDevice) -> Bool = { _ in false }
+        var warmup = PinnedDictationWarmupState()
+        for selection in [macDefault, usbDefault, pickedOverMac, virtualDefault] {
+            assertEqual(
+                warmup.skipsEngineWarmup(for: selection, speedPathIsOff: speedPathOn),
+                PinnedDictationInputPolicy.recorderIsNeeded(for: selection, speedPathIsOff: speedPathOn),
+                "warmup is judged on the same selection the start records (\(selection.selectedInput.name))"
+            )
+        }
+        assertTrue(warmup.skipsEngineWarmup(for: macDefault, speedPathIsOff: speedPathOn), "a fresh start skips the engine the recorder won't use")
+
+        warmup.recordEngineFallback()
+        assertFalse(
+            warmup.skipsEngineWarmup(for: macDefault, speedPathIsOff: speedPathOn),
             "an engine fallback turns warmup back on"
         )
         assertTrue(
-            pinned.contains("pinnedDictationRecording = recording\n        pinnedDictationFellBackToEngine = false"),
+            warmup.skipsEngineWarmup(for: skipsHeadset, speedPathIsOff: speedPathOn),
+            "even after a fallback, warmup never binds a Bluetooth macOS input"
+        )
+
+        warmup.recordRecorderStart()
+        assertTrue(
+            warmup.skipsEngineWarmup(for: macDefault, speedPathIsOff: speedPathOn),
             "a recorder start turns the fallback warmup off again"
         )
     }

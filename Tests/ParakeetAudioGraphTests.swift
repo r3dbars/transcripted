@@ -1,7 +1,7 @@
 // ParakeetAudioGraphTests.swift
 //
-// Behavior tests for ParakeetAudioGraph and the stop, route-change, restart
-// and snapshot orderings ParakeetEngine runs on it. A fake driver stands in
+// Behavior tests for ParakeetAudioGraph and the start, stop, route-change,
+// restart and snapshot orderings ParakeetEngine runs on it. A fake driver stands in
 // for AVAudioEngine and fake hosts stand in for the engine; all of them write
 // to one event log, so a test checks what happened and in which order. A
 // driver call can be held open to land a competing owner change mid-flight.
@@ -9,6 +9,7 @@
 // None of this proves real AVAudioEngine, AirPods, or CoreAudio behavior.
 // `bash check.sh hardware` still covers that.
 
+import Combine
 import Foundation
 
 @MainActor
@@ -20,6 +21,9 @@ func testParakeetAudioGraph() async {
     await runConfigChangeTeardownSuites()
     await runRouteRestartSuites()
     await runSnapshotSuites()
+    await runStartLeaseSuites()
+    await runStartCallAppSuites()
+    runNativeTeardownSuites()
 }
 
 // MARK: - Fakes
@@ -48,6 +52,7 @@ private final class GraphTestLog: @unchecked Sendable {
     private var queueCount = 0
     private var held: [String: HeldGraphWork] = [:]
     private var results: [String: Bool] = [:]
+    private var tap: ((Int) -> Void)?
 
     var events: [String] {
         lock.withLock { entries }
@@ -69,14 +74,14 @@ private final class GraphTestLog: @unchecked Sendable {
         events.firstIndex(of: entry)
     }
 
-    /// `removeTap`, `stop`, `usesVoiceProcessing` and `retire` default to true,
-    /// `usesVoiceProcessing` to false.
+    /// `removeTap`, `stop` and `retire` default to true; `usesVoiceProcessing`
+    /// and `isRunning` to false.
     func setResult(_ call: String, _ value: Bool) {
         lock.withLock { results[call] = value }
     }
 
     func result(_ call: String) -> Bool {
-        lock.withLock { results[call] ?? (call != "usesVoiceProcessing") }
+        lock.withLock { results[call] ?? (call != "usesVoiceProcessing" && call != "isRunning") }
     }
 
     /// Holds the next `call` open until the test releases it.
@@ -84,6 +89,20 @@ private final class GraphTestLog: @unchecked Sendable {
         let work = HeldGraphWork()
         lock.withLock { held[call] = work }
         return work
+    }
+
+    func installTap(_ onBuffer: @escaping (Int) -> Void) {
+        lock.withLock { tap = onBuffer }
+    }
+
+    var installedTap: ((Int) -> Void)? {
+        lock.withLock { tap }
+    }
+
+    /// Feeds one buffer to the installed tap, the way the IO thread would.
+    func deliver(_ buffer: Int) {
+        let tap = lock.withLock { self.tap }
+        tap?(buffer)
     }
 
     func makeEngine() -> FakeAudioEngine {
@@ -120,7 +139,7 @@ private final class GraphTestLog: @unchecked Sendable {
     }
 }
 
-private struct FakeGraphDriver: ParakeetAudioGraphDriver {
+private struct FakeGraphDriver: ParakeetAudioGraphStartDriver {
     let log: GraphTestLog
 
     func makeEngine() -> FakeAudioEngine { log.makeEngine() }
@@ -148,6 +167,34 @@ private struct FakeGraphDriver: ParakeetAudioGraphDriver {
     func retire(_ engine: FakeAudioEngine, reason: String) -> Bool {
         log.record("retire:e\(engine.id):\(reason)")
         return log.result("retire")
+    }
+
+    func prepareTap(
+        on engine: FakeAudioEngine,
+        voiceProcessingEnabled: Bool,
+        isCurrent: () -> Bool,
+        stageTimings: inout [String: Int]
+    ) throws -> String {
+        log.record("vpio:\(voiceProcessingEnabled)")
+        log.driverCall("prepareTap", engine)
+        return "tap-format"
+    }
+
+    func installTap(
+        on engine: FakeAudioEngine,
+        format: String,
+        onBuffer: @escaping (Int) -> Void
+    ) throws {
+        log.installTap(onBuffer)
+        log.driverCall("installTap", engine)
+    }
+
+    func isRunning(_ engine: FakeAudioEngine) -> Bool {
+        log.result("isRunning")
+    }
+
+    func start(_ engine: FakeAudioEngine) throws {
+        log.driverCall("start", engine)
     }
 }
 
@@ -1207,5 +1254,403 @@ private func runSnapshotSuites() async {
         } else {
             assertTrue(false, "a changed selection should be admitted")
         }
+    }
+}
+
+// MARK: - Start
+
+@MainActor
+private final class FakeStartLeaseHolder: ParakeetAudioStartLeaseHolder {
+    var audioStartCancellationState: ParakeetAudioStartCancellationState?
+
+    /// What a user stop or a zombie cancellation does to the newest start.
+    func cancelCurrentStart() {
+        audioStartCancellationState?.cancel()
+    }
+}
+
+/// Call-app presence the test controls. `opensOnRefresh` models a call app
+/// that launched since the last poll: only a refresh notices it.
+@MainActor
+private final class FakeCallApps {
+    let log: GraphTestLog
+    var isRunning = false
+    var opensOnRefresh = false
+
+    init(log: GraphTestLog) {
+        self.log = log
+    }
+
+    var presence: ParakeetCallAppPresence {
+        ParakeetCallAppPresence(
+            refresh: { [self] in
+                log.record("refreshCallApps")
+                if opensOnRefresh { isRunning = true }
+            },
+            isRunning: { [self] in isRunning }
+        )
+    }
+}
+
+/// Buffers that reached the engine's tap handler.
+private final class DeliveredBuffers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffers: [Int] = []
+
+    var values: [Int] { lock.withLock { buffers } }
+
+    func append(_ buffer: Int) {
+        lock.withLock { buffers.append(buffer) }
+    }
+}
+
+@MainActor
+private struct StartFixture {
+    let fixture: GraphFixture
+    let holder = FakeStartLeaseHolder()
+    let callApps: FakeCallApps
+    let delivered = DeliveredBuffers()
+
+    init() {
+        fixture = GraphFixture()
+        callApps = FakeCallApps(log: fixture.log)
+    }
+
+    var graph: TestGraph { fixture.graph }
+    var log: GraphTestLog { fixture.log }
+
+    /// Runs one start the way ParakeetEngine does. The voice-processing
+    /// choice follows the saved preference (on) unless a call app runs.
+    /// `onLease` runs once the lease exists, before any graph work.
+    func start(
+        owner: ParakeetAudioEngineQueueOwnerToken? = nil,
+        wasPrewarmed: Bool = false,
+        onLease: @escaping (ParakeetAudioStartLease) -> Void = { _ in }
+    ) async -> Result<ParakeetAudioStartOutcome, Error> {
+        let log = log
+        let delivered = delivered
+        do {
+            let outcome = try await graph.start(
+                owner: owner ?? graph.queueOwner,
+                holder: holder,
+                callApps: callApps.presence,
+                voiceProcessingEnabled: { callAppRunning in
+                    log.record("decideVoiceProcessing:callApp=\(callAppRunning)")
+                    return !callAppRunning
+                },
+                wasPrewarmed: wasPrewarmed,
+                timeoutNanoseconds: 30_000_000_000,
+                makeTapHandler: { lease in
+                    onLease(lease)
+                    return { buffer in delivered.append(buffer) }
+                },
+                cleanUpLateStart: { log.record("cleanUpLateStart") },
+                recheckCallApps: { log.record("recheckCallApps") }
+            )
+            return .success(outcome)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Starts, and returns once the start is parked inside `call`.
+    func startParked(
+        at call: String
+    ) async -> (HeldGraphWork, Task<Result<ParakeetAudioStartOutcome, Error>, Never>) {
+        let held = log.hold(call)
+        let task = await startHeld(held) { await self.start() }
+        return (held, task)
+    }
+
+    func driverEvents(_ prefix: String) -> [String] {
+        log.events.filter { $0.hasPrefix(prefix + ":") }
+    }
+}
+
+private func isCancellation(_ result: Result<ParakeetAudioStartOutcome, Error>) -> Bool {
+    if case .failure(let error) = result { return error is CancellationError }
+    return false
+}
+
+private func startSnapshot(_ result: Result<ParakeetAudioStartOutcome, Error>) -> ParakeetAudioStartSnapshot? {
+    if case .success(.started(let snapshot)) = result { return snapshot }
+    return nil
+}
+
+@MainActor
+private func runStartLeaseSuites() async {
+    await runSuite("A dictation start checks its lease at entry, on every buffer, and around engine start") {
+        let happy = StartFixture()
+        let result = await happy.start()
+        assertNotNil(startSnapshot(result), "an uncontested start reports a started graph")
+        assertEqual(
+            happy.log.events.filter { !$0.hasPrefix("refreshCallApps") && !$0.hasPrefix("decide") },
+            ["vpio:true", "prepareTap:e1@q1", "installTap:e1@q1", "start:e1@q1", "recheckCallApps"],
+            "a start prepares, installs the tap, starts the engine, then rechecks call apps"
+        )
+        assertFalse(
+            happy.graph.workOwnership.isActive(owner: happy.graph.queueOwner, phase: .audioStart),
+            "a committed start finishes its graph-work lease"
+        )
+        happy.log.deliver(1)
+        assertEqual(happy.delivered.values, [1], "a committed start delivers samples")
+
+        let beforeEntry = StartFixture()
+        let cancelledAtEntry = await beforeEntry.start { lease in lease.state.cancel() }
+        assertTrue(isCancellation(cancelledAtEntry), "a lease cancelled before the work runs cancels the start")
+        assertTrue(beforeEntry.driverEvents("prepareTap").isEmpty, "a cancelled start never reads the input node")
+        assertTrue(beforeEntry.driverEvents("installTap").isEmpty, "a cancelled start never installs a tap")
+        assertTrue(beforeEntry.driverEvents("start").isEmpty, "a cancelled start never starts the engine")
+        assertNil(beforeEntry.holder.audioStartCancellationState, "a cancelled start leaves no lease behind")
+        assertFalse(beforeEntry.log.contains("recheckCallApps"), "only a committed start rechecks call apps")
+
+        let betweenInstallAndStart = StartFixture()
+        let (heldInstall, installTask) = await betweenInstallAndStart.startParked(at: "installTap")
+        betweenInstallAndStart.holder.cancelCurrentStart()
+        heldInstall.release.signal()
+        assertTrue(isCancellation(await installTask.value), "a stop during tap install cancels the start")
+        assertTrue(betweenInstallAndStart.driverEvents("start").isEmpty, "a start cancelled after install never starts the engine")
+        assertEqual(
+            Array(betweenInstallAndStart.log.events.drop { !$0.hasPrefix("installTap:") }.dropFirst()),
+            ["removeTap:e1@q1", "reset:e1@q1"],
+            "the cancelled start removes its tap and resets on its own worker"
+        )
+        betweenInstallAndStart.log.deliver(2)
+        assertEqual(betweenInstallAndStart.delivered.values, [], "a cancelled start's tap delivers nothing")
+        assertFalse(betweenInstallAndStart.log.contains("recheckCallApps"), "a cancelled start rechecks nothing")
+
+        let duringStart = StartFixture()
+        let (heldStart, startTask) = await duringStart.startParked(at: "start")
+        duringStart.log.deliver(3)
+        duringStart.holder.cancelCurrentStart()
+        duringStart.log.deliver(4)
+        heldStart.release.signal()
+        assertTrue(isCancellation(await startTask.value), "a stop while the engine starts cancels the start")
+        assertEqual(duringStart.delivered.values, [3], "buffers stop at the moment the lease is cancelled")
+        assertTrue(duringStart.log.contains("removeTap:e1@q1"), "a start cancelled during engine start cleans up its tap")
+
+        let prewarmed = StartFixture()
+        prewarmed.log.setResult("isRunning", true)
+        let prewarmedResult = await prewarmed.start(wasPrewarmed: true)
+        assertEqual(startSnapshot(prewarmedResult)?.engineWasRunning, true, "a prewarmed running graph is reported as running")
+        assertTrue(prewarmed.driverEvents("start").isEmpty, "a prewarmed running graph is not started again")
+    }
+
+    await runSuite("A committed start delivers until a stop cancels it, and a lost graph never commits") {
+        let committed = StartFixture()
+        _ = await committed.start()
+        committed.log.deliver(1)
+        committed.holder.cancelCurrentStart()
+        committed.log.deliver(2)
+        assertEqual(committed.delivered.values, [1], "a stop cuts delivery of a committed start at once")
+
+        let replaced = StartFixture()
+        let (held, task) = await replaced.startParked(at: "installTap")
+        replaced.graph.abandonBlocked(reason: "test_successor")
+        held.release.signal()
+        let result = await task.value
+        if case .success(.graphChanged) = result {
+        } else if !isCancellation(result) {
+            assertTrue(false, "a start whose graph was replaced must not report a started graph")
+        }
+        assertTrue(replaced.driverEvents("start").filter { $0.contains("e1") }.isEmpty, "the replaced graph is never started")
+        assertNil(replaced.holder.audioStartCancellationState, "the lost start leaves no lease behind")
+        replaced.log.deliver(3)
+        assertEqual(replaced.delivered.values, [], "the lost start's tap delivers nothing")
+        assertFalse(replaced.log.contains("recheckCallApps"), "a lost start rechecks nothing")
+
+        let lateOwner = StartFixture()
+        let staleOwner = lateOwner.graph.queueOwner
+        lateOwner.graph.generation += 1
+        let staleResult = await lateOwner.start(owner: staleOwner)
+        if case .success(.graphChanged) = staleResult {
+            assertTrue(lateOwner.log.contains("cleanUpLateStart"), "a start that comes back to a newer owner cleans up its own graph")
+        } else {
+            assertTrue(false, "a start that comes back to a newer owner reports the graph change")
+        }
+        assertNil(lateOwner.holder.audioStartCancellationState, "the stale start leaves no lease behind")
+    }
+
+    await runSuite("Normal and recovery starts share one replaceable lease") {
+        let shared = StartFixture()
+        _ = await shared.start()
+        let firstTap = shared.log.installedTap
+        shared.log.setResult("isRunning", true)
+        _ = await shared.start(wasPrewarmed: true)
+        firstTap?(1)
+        shared.log.deliver(2)
+        assertEqual(shared.delivered.values, [2], "a newer start silences the committed start it replaced")
+
+        let graph = GraphFixture().graph
+        let holder = FakeStartLeaseHolder()
+        let normal = graph.beginStartLease(owner: graph.queueOwner, holder: holder)
+        graph.generation += 1
+        let recovery = graph.beginStartLease(owner: graph.queueOwner, holder: holder)
+        assertFalse(normal.isWorkCurrent, "a recovery start retires the normal start's work")
+        assertFalse(normal.canDeliverSamples, "a recovery start stops the normal start's delivery")
+        assertTrue(recovery.isWorkCurrent, "the newest start owns the lease")
+        assertTrue(holder.audioStartCancellationState === recovery.state, "the holder keeps only the newest lease")
+
+        graph.endStartLease(normal, holder: holder)
+        assertTrue(holder.audioStartCancellationState === recovery.state, "ending a replaced lease leaves the newer one alone")
+        graph.endStartLease(recovery, holder: holder)
+        assertNil(holder.audioStartCancellationState, "ending the newest lease forgets it")
+        assertFalse(
+            graph.workOwnership.isActive(owner: recovery.owner, phase: .audioStart),
+            "ending a lease finishes its graph work"
+        )
+    }
+
+    await runSuite("The pre-tap snapshot runs inside a lease a stop can claim") {
+        let graph = GraphFixture().graph
+        let holder = FakeStartLeaseHolder()
+        let owner = graph.queueOwner
+
+        var heldState: ParakeetAudioStartCancellationState?
+        let value = try? await graph.withStartSnapshotLease(owner: owner, holder: holder) { isCurrent in
+            heldState = holder.audioStartCancellationState
+            assertTrue(isCurrent(), "queued format reads see their lease")
+            assertTrue(graph.workOwnership.isActive(owner: owner, phase: .audioStart), "the lease is published before the read")
+            return 7
+        }
+        assertEqual(value, 7, "the snapshot's result comes back")
+        assertNotNil(heldState, "the snapshot holds a cancellable start lease")
+        assertEqual(heldState?.canRunWork, false, "the snapshot lease is finished after the read")
+        assertNil(holder.audioStartCancellationState, "the holder forgets a finished snapshot lease")
+        assertFalse(graph.workOwnership.isActive(owner: owner, phase: .audioStart), "no graph-work lease is left")
+
+        _ = try? await graph.withStartSnapshotLease(owner: owner, holder: holder) { isCurrent in
+            holder.cancelCurrentStart()
+            assertFalse(isCurrent(), "a stop during the read makes queued graph work stale")
+            return 0
+        }
+
+        struct ReadFailed: Error {}
+        var failure: Error?
+        do {
+            _ = try await graph.withStartSnapshotLease(owner: owner, holder: holder) { _ -> Int in
+                throw ReadFailed()
+            }
+        } catch {
+            failure = error
+        }
+        assertTrue(failure is ReadFailed, "a failed read keeps its own error")
+        assertNil(holder.audioStartCancellationState, "a failed read still ends its lease")
+        assertFalse(graph.workOwnership.isActive(owner: owner, phase: .audioStart), "a failed read still finishes its graph work")
+    }
+}
+
+@MainActor
+private func runStartCallAppSuites() async {
+    await runSuite("Dictation rechecks call apps around every start") {
+        let opened = StartFixture()
+        opened.callApps.opensOnRefresh = true
+        _ = await opened.start()
+        assertEqual(
+            Array(opened.log.events.prefix(3)),
+            ["refreshCallApps", "decideVoiceProcessing:callApp=true", "vpio:false"],
+            "a call app that just opened is seen before the voice-processing choice, so dictation leaves its mic alone"
+        )
+
+        let launchedMidStart = StartFixture()
+        let (held, task) = await launchedMidStart.startParked(at: "start")
+        launchedMidStart.callApps.isRunning = true
+        held.release.signal()
+        _ = await task.value
+        assertEqual(
+            launchedMidStart.log.events.filter { $0 == "recheckCallApps" }.count,
+            1,
+            "a call app that opens while the engine starts gets exactly one recheck after commit"
+        )
+        assertTrue(
+            (launchedMidStart.log.index(of: "start:e1@q1") ?? .max) < (launchedMidStart.log.index(of: "recheckCallApps") ?? -1),
+            "the recheck runs after the engine started"
+        )
+
+        let subject = PassthroughSubject<Bool, Never>()
+        var launches = 0
+        let observation = ParakeetCallAppLaunchObservation.observe(subject) { launches += 1 }
+        for running in [false, true, true, false, true] {
+            subject.send(running)
+        }
+        assertEqual(launches, 2, "each call-app launch during dictation is seen once; repeats and closes are not")
+        observation.cancel()
+    }
+}
+
+// MARK: - Native teardown
+
+/// A native graph that records each call. `inputNode` is nil on an
+/// untouched graph; the teardown protocol has no way to create one.
+private final class FakeNativeInputGraph: ParakeetNativeInputGraph {
+    var isRunning: Bool
+    var inputNode: Int?
+    var voiceProcessingOn: Bool
+    var stopStopsGraph = true
+    var releaseSucceeds = true
+    private(set) var events: [String] = []
+
+    init(isRunning: Bool, inputNode: Int?, voiceProcessingOn: Bool = false) {
+        self.isRunning = isRunning
+        self.inputNode = inputNode
+        self.voiceProcessingOn = voiceProcessingOn
+    }
+
+    var existingInputNode: Int? { inputNode }
+
+    func stop() {
+        events.append("stop")
+        if stopStopsGraph { isRunning = false }
+    }
+
+    func waitForStoppedInputCallbacks() {
+        events.append("drain")
+    }
+
+    func removeTap(from node: Int) {
+        events.append("removeTap")
+    }
+
+    func releaseVoiceProcessing(on node: Int) -> Bool {
+        events.append("releaseVoiceProcessing")
+        if releaseSucceeds { voiceProcessingOn = false }
+        return !voiceProcessingOn
+    }
+
+    func isVoiceProcessingEnabled(on node: Int) -> Bool {
+        voiceProcessingOn
+    }
+}
+
+private func runNativeTeardownSuites() {
+    runSuite("Stopped and cancelled dictation graphs disarm VPIO without opening an idle microphone") {
+        let running = FakeNativeInputGraph(isRunning: true, inputNode: 1, voiceProcessingOn: true)
+        assertTrue(ParakeetNativeInputGraphTeardown.removeInputTap(running), "a released graph reports success")
+        assertEqual(
+            running.events,
+            ["stop", "drain", "removeTap", "releaseVoiceProcessing"],
+            "the graph stops and drains before the tap comes off, and VPIO is disarmed last"
+        )
+
+        let untouched = FakeNativeInputGraph(isRunning: false, inputNode: nil)
+        assertTrue(ParakeetNativeInputGraphTeardown.removeInputTap(untouched), "an untouched graph is already released")
+        assertTrue(ParakeetNativeInputGraphTeardown.stop(untouched), "stopping an untouched graph succeeds")
+        assertFalse(ParakeetNativeInputGraphTeardown.usesVoiceProcessing(untouched), "an untouched graph runs no VPIO")
+        assertEqual(untouched.events, [], "teardown and the call-app probe leave an untouched graph untouched")
+
+        let stuck = FakeNativeInputGraph(isRunning: true, inputNode: 1, voiceProcessingOn: true)
+        stuck.stopStopsGraph = false
+        assertFalse(ParakeetNativeInputGraphTeardown.stop(stuck), "a graph that keeps running can't release VPIO")
+        assertFalse(stuck.events.contains("releaseVoiceProcessing"), "VPIO is never disarmed on a running graph")
+
+        let stubborn = FakeNativeInputGraph(isRunning: false, inputNode: 1, voiceProcessingOn: true)
+        stubborn.releaseSucceeds = false
+        assertFalse(ParakeetNativeInputGraphTeardown.removeInputTap(stubborn), "VPIO that stays on is reported")
+        assertEqual(stubborn.events, ["removeTap", "releaseVoiceProcessing"], "an idle graph skips the stop and drain")
+
+        let recording = FakeNativeInputGraph(isRunning: true, inputNode: 1, voiceProcessingOn: true)
+        assertTrue(ParakeetNativeInputGraphTeardown.usesVoiceProcessing(recording), "the probe sees VPIO on an owned node")
+        assertTrue(ParakeetNativeInputGraphTeardown.stop(recording), "a normal stop releases VPIO")
+        assertEqual(recording.events, ["stop", "releaseVoiceProcessing"], "a stop disarms VPIO after the graph stopped")
     }
 }

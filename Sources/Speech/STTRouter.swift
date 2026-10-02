@@ -505,46 +505,52 @@ class STTRouter: ObservableObject {
 
         guard let transcriptionOwner = parakeetEngine.currentRecordedTranscriptionLease else { return nil }
         let consumedRevision = parakeetEngine.currentRecordedSamplesRevision
-        defer {
-            parakeetEngine.finishExternalTranscription(
-                ownedBy: transcriptionOwner,
-                expectedRevision: consumedRevision
-            )
-        }
-        do {
-            let text = try await transcribe(recording)
-            try Task.checkCancellation()
-            guard parakeetEngine.ownsRecordedTranscription(
-                transcriptionOwner,
-                expectedRevision: consumedRevision
-            ) else { return nil }
-            if let emptyReason = DictationEmptyInferencePolicy.externalEngineEmptyReason(
-                text: text,
-                samples16k: recording.samples16k
-            ) {
-                lastEmptyTranscriptionReason = emptyReason
-                return nil
+        return await ExternalEngineTranscription.run(
+            lease: transcriptionOwner,
+            release: { lease in
+                parakeetEngine.finishExternalTranscription(
+                    ownedBy: lease,
+                    expectedRevision: consumedRevision
+                )
+            },
+            model: {
+                let text = try await transcribe(recording)
+                try Task.checkCancellation()
+                return text
+            },
+            accept: { text in
+                guard parakeetEngine.ownsRecordedTranscription(
+                    transcriptionOwner,
+                    expectedRevision: consumedRevision
+                ) else { return nil }
+                if let emptyReason = DictationEmptyInferencePolicy.externalEngineEmptyReason(
+                    text: text,
+                    samples16k: recording.samples16k
+                ) {
+                    lastEmptyTranscriptionReason = emptyReason
+                    return nil
+                }
+                return text
+            },
+            classify: { error in
+                guard let failureReason = DictationEmptyInferencePolicy.externalEngineFailureReason(
+                    for: error,
+                    taskCancelled: Task.isCancelled
+                ) else { return }
+                guard parakeetEngine.ownsRecordedTranscription(
+                    transcriptionOwner,
+                    expectedRevision: consumedRevision
+                ) else { return }
+                lastEmptyTranscriptionReason = failureReason
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: model.engineName,
+                    event: "dictation_transcription_failed",
+                    message: error.localizedDescription,
+                    context: ["model": model.rawValue]
+                )
             }
-            return text
-        } catch {
-            guard let failureReason = DictationEmptyInferencePolicy.externalEngineFailureReason(
-                for: error,
-                taskCancelled: Task.isCancelled
-            ) else { return nil }
-            guard parakeetEngine.ownsRecordedTranscription(
-                transcriptionOwner,
-                expectedRevision: consumedRevision
-            ) else { return nil }
-            lastEmptyTranscriptionReason = failureReason
-            EventReporter.shared.capture(
-                level: .error,
-                engine: model.engineName,
-                event: "dictation_transcription_failed",
-                message: error.localizedDescription,
-                context: ["model": model.rawValue]
-            )
-            return nil
-        }
+        )
     }
 
     func transcribeSegment(

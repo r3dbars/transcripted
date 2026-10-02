@@ -597,24 +597,41 @@ func testSentryEventPolicy() {
     }
 
     runSuite("Meeting stop emits one canonical Sentry terminal before generic degraded capture") {
-        let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
-        let stopSlice = sentrySourceSlice(
-            source,
-            from: "var healthSnapshotProperties = MeetingCaptureHealthTelemetry.snapshotProperties(",
-            to: "if files.micURL == nil {"
-        )
+        let mic = URL(fileURLWithPath: "/synthetic/mic.wav")
+        let system = URL(fileURLWithPath: "/synthetic/system.wav")
+        func run(_ result: CaptureStopResult) -> (MeetingStopSequence.StopTerminal, [String]) {
+            var fired: [String] = []
+            let terminal = MeetingStopSequence.stopTerminal(
+                stopResult: result,
+                files: (micURL: result.micURL, systemURL: result.systemURL),
+                onTimeout: { fired.append("timeout") },
+                onNoAudio: { fired.append("no_audio") },
+                report: { fired.append("degraded_report") }
+            )
+            return (terminal, fired)
+        }
 
-        let timedOutRange = stopSlice.range(of: "if stopResult.didTimeOut {")
-        let noAudioRange = stopSlice.range(of: "guard files.micURL != nil || files.systemURL != nil else {")
-        let degradedRange = stopSlice.range(of: "reportCaptureHealthIfNeeded(")
+        let timedOut = run(CaptureStopResult(micURL: mic, systemURL: nil, didTimeOut: true))
+        assertEqual(timedOut.0, .timedOut)
+        assertEqual(timedOut.1, ["timeout"], "a timed-out stop is one typed issue, with no degraded-capture report")
 
-        assertNotNil(timedOutRange, "the stop path should keep a typed timeout terminal")
-        assertNotNil(noAudioRange, "the stop path should keep a typed no-audio terminal")
-        assertNotNil(degradedRange, "partial captures should still emit degraded-capture diagnostics")
-        assertTrue(
-            degradedRange!.lowerBound > noAudioRange!.lowerBound,
-            "generic degraded-capture reporting must run only after timeout and no-audio terminals return"
-        )
+        let timedOutEmpty = run(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: true))
+        assertEqual(timedOutEmpty.0, .timedOut, "timeout wins over no-audio so the preallocated failed row is kept")
+        assertEqual(timedOutEmpty.1, ["timeout"])
+
+        let noAudio = run(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false))
+        assertEqual(noAudio.0, .noAudio)
+        assertEqual(noAudio.1, ["no_audio"], "a stop with no files is one typed issue, with no degraded-capture report")
+
+        for partial in [
+            CaptureStopResult(micURL: mic, systemURL: nil, didTimeOut: false),
+            CaptureStopResult(micURL: nil, systemURL: system, didTimeOut: false),
+            CaptureStopResult(micURL: mic, systemURL: system, didTimeOut: false),
+        ] {
+            let kept = run(partial)
+            assertEqual(kept.0, .continueToTranscription)
+            assertEqual(kept.1, ["degraded_report"], "a stop that kept audio still reports degraded capture")
+        }
     }
 
     runSuite("Meeting failures stay splittable by mic backend without raw pinned counts") {

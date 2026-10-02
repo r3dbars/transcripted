@@ -246,9 +246,8 @@ extension MeetingSessionController {
             transition(
                 to: .error(failureMessage),
                 reason: "capture_start_failed",
-                systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
-                    explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
-                )
+                systemAudioPermissionRecoveryNeeded: MeetingCaptureHealthEvidence.make(capture: capture)
+                    .systemAudioPermissionRecoveryNeeded
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
             trackDetectedPromptOutcome(
@@ -347,12 +346,13 @@ extension MeetingSessionController {
         // Read before any further suspension while this session still owns
         // the stopping state. Core retains this attempt's drained-tail signal;
         // a successor recording must not supply evidence for its predecessor.
+        let stopEvidence = MeetingCaptureHealthEvidence.make(capture: capture)
         let finalizedSystemSignalVerified = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
             observed: recordingSnapshot.healthInfo.systemAudioSignalVerified == true
-                || capture.hasObservedSystemAudioSignal,
+                || stopEvidence.systemAudioSignalVerified,
             micOnlyByChoice: recordingSnapshot.isMicOnlyByChoice
         )
-        let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed
+        let systemAudioFinalizationFailed = stopEvidence.systemAudioFinalizationFailed
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
@@ -486,7 +486,9 @@ extension MeetingSessionController {
         // Every timed-out stop keeps the preallocated task ID used by its late
         // completion callback. Handle this before partial-source recovery so an
         // initially absent mic URL cannot create an unrelated failed row.
-        if stopResult.didTimeOut {
+        // Timeout and no-audio are the canonical Sentry issues; degraded
+        // capture is reported only when some audio survived (one issue a stop).
+        let terminal = MeetingStopSequence.stopTerminal(stopResult: stopResult, files: files, onTimeout: {
             Self.runtimeDiagnosticsRecorder?.recordStall(
                 kind: "meeting",
                 stage: "recording_stop_timeout",
@@ -528,10 +530,7 @@ extension MeetingSessionController {
                 promptProperties: activeDetectedPromptRecordingTelemetryProperties
             )
             clearDetectedPromptRecordingTelemetry()
-            return
-        }
-
-        guard files.micURL != nil || files.systemURL != nil else {
+        }, onNoAudio: {
             let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: files.micURL,
                 systemAudioURL: files.systemURL,
@@ -560,23 +559,19 @@ extension MeetingSessionController {
                 outcome: "no_audio_captured"
             )
             transition(to: .error("No meeting audio was captured."), reason: "stop_missing_audio")
-            return
-        }
-
-        // The typed timeout/no-audio terminals above are the canonical Sentry
-        // issues for those failures. Emit the broader degraded-capture event
-        // only for recordings that retained at least one usable audio source,
-        // avoiding two issues for one stop.
-        reportCaptureHealthIfNeeded(
-            snapshot: recordingSnapshot.pipelineSnapshot,
-            captureDiagnostics: stopCaptureDiagnostics,
-            healthInfo: finalizedHealthInfo,
-            trigger: recordingSnapshot.trigger,
-            reason: reason,
-            durationSeconds: recordingSnapshot.durationSeconds,
-            files: files,
-            stopTimedOut: stopResult.didTimeOut
-        )
+        }, report: {
+            reportCaptureHealthIfNeeded(
+                snapshot: recordingSnapshot.pipelineSnapshot,
+                captureDiagnostics: stopCaptureDiagnostics,
+                healthInfo: finalizedHealthInfo,
+                trigger: recordingSnapshot.trigger,
+                reason: reason,
+                durationSeconds: recordingSnapshot.durationSeconds,
+                files: files,
+                stopTimedOut: stopResult.didTimeOut
+            )
+        })
+        guard terminal == .continueToTranscription else { return }
 
         if files.micURL == nil {
             DiagnosticsTrail.record(
@@ -661,17 +656,20 @@ extension MeetingSessionController {
         // state to .stoppingRecording before capture ever tears down, so by
         // the time capture reports an unexpected completion, state is only
         // ever still .recording when nothing else asked for the stop.
-        guard case .recording = state else { return }
-        // Leave `.recording` before any suspension so stop/cancel (which still
-        // require `.recording`) cannot interleave with this flush/preserve work.
-        transition(to: .stoppingRecording, reason: "unexpected_capture_stop")
-
-        _ = audioInactivityDetector.stopRecording()
-        audioInactivityWarning = nil
-        isMicBoostPromptVisible = false
-        await capture.flushSharedDictationMicHandler()
-        clearSharedDictationMicRelay()
-        await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        // Leaves `.recording` before any await so stop/cancel can't interleave.
+        let handled = await MeetingStopSequence.unexpectedStop(
+            state: state,
+            transition: { transition(to: $0, reason: $1) },
+            quietLiveWarnings: {
+                _ = audioInactivityDetector.stopRecording()
+                audioInactivityWarning = nil
+                isMicBoostPromptVisible = false
+            },
+            capture: capture,
+            clearRelay: { clearSharedDictationMicRelay() },
+            resumeDictation: { await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() }
+        )
+        guard handled else { return }
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let snapshotTakenAt = Date()
@@ -814,7 +812,7 @@ extension MeetingSessionController {
             if systemAudioDegradationWarning != nil { systemAudioDegradationWarning = nil }
             return
         }
-        let signalVerified = capture.hasObservedSystemAudioSignal
+        let signalVerified = MeetingCaptureHealthEvidence.make(capture: capture).systemAudioSignalVerified
         let verified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
             current: systemAudioDegradationWarning,
             signalVerified: signalVerified,

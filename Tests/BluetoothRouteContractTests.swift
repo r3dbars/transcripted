@@ -696,14 +696,6 @@ func testBluetoothRouteContract() async {
         }
     }
 
-    runSuite("Bluetooth route contract - app shutdown waits for persistent input restoration") {
-        // Still source text: the quit path lives in TranscriptedApp, which the
-        // fast runner can't compile. The controller's listener, relinquish, and
-        // shutdown behavior is tested in PersistentDictationInputControllerTests.
-        let app = readSourceFixture("Sources/App/TranscriptedApp.swift")
-        assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
-    }
-
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
         let bench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
         let benchDoc = readSourceFixture("docs/qa-test-bench.md")

@@ -99,15 +99,19 @@ final class EventReporter {
     }
 
     func flushLocalEventsForShutdown() async {
-        while !pendingAppendTasks.isEmpty {
-            let tasks = Array(pendingAppendTasks.values)
-            pendingAppendTasks.removeAll(keepingCapacity: true)
-            for task in tasks {
-                await task.value
-            }
-        }
-        await writer.flushForShutdown()
-        await ReliabilityPacketRecorder.flushForShutdown()
+        await LocalEventShutdownFlush.run(
+            flushEvents: {
+                while !self.pendingAppendTasks.isEmpty {
+                    let tasks = Array(self.pendingAppendTasks.values)
+                    self.pendingAppendTasks.removeAll(keepingCapacity: true)
+                    for task in tasks {
+                        await task.value
+                    }
+                }
+                await self.writer.flushForShutdown()
+            },
+            flushPackets: { await ReliabilityPacketRecorder.flushForShutdown() }
+        )
     }
 
     private func markAppendTaskFinished(_ id: Int) {
