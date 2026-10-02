@@ -17,7 +17,6 @@
     "Tests/PermissionStateHarnessContractTests.swift": 5,
     "Tests/SentryEventPolicyTests.swift": 2,
     "Tests/StatusItemPresentationTests.swift": 1,
-    "Tests/TestHelpers.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 113
   },

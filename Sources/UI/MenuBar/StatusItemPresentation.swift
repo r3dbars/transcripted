@@ -28,6 +28,7 @@ enum StatusItemPresentation {
     /// silhouettes (outline, filled, filled + dot) and accessibility labels
     /// preserve capture state; destructive Stop controls inside the open menus
     /// keep their red tone.
+    @MainActor
     static func apply(
         to button: NSButton,
         meetingRecording: Bool,

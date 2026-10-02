@@ -257,11 +257,7 @@ extension ParakeetAVAudioEngineGraphDriver: ParakeetAudioGraphStartDriver {
         // A route change after the format read makes installTap raise an
         // Objective-C exception; the guard turns it into a failed start.
         try AudioTapInstallGuard.run(operation: "dictation_start") {
-            inputNode.installTap(
-                onBus: 0,
-                bufferSize: TranscriptedConstants.audioTapBufferSize,
-                format: format
-            ) { buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: format) { buffer, _ in
                 onBuffer(buffer)
             }
         }

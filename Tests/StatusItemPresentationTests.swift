@@ -7,6 +7,7 @@
 import AppKit
 import Foundation
 
+@MainActor
 func testStatusItemPresentation() {
     runSuite("status item uses the app icon's bubble with quiet, distinct capture states") {
         let cases: [(meeting: Bool, dictating: Bool, glyph: MenuBarGlyph, label: String)] = [
