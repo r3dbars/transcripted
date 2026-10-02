@@ -754,7 +754,7 @@ class ContextCaptureEngine: ObservableObject {
 
         let frontApp = NSWorkspace.shared.frontmostApplication
         let wasDictating = sessionController?.isDictating ?? false
-        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .handsFree)
+        routeHandsFreeToggle(sourceApp: frontApp)
         if !wasDictating {
             handsFreePressStartedSessionID = sessionController?.activeDictationSessionID
         }
@@ -801,15 +801,7 @@ class ContextCaptureEngine: ObservableObject {
 
         // A press while the last take is still transcribing starts the next
         // one when it finishes, instead of being dropped.
-        if session.rememberStartPressIfFinishing(
-            sourceApp: frontApp,
-            trigger: .physicalKey,
-            shortcutMode: .pushToTalk
-        ) {
-            return
-        }
-        guard !session.isDictating else { return }
-        session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)
+        dictationHotkeyRouter(session: session, sourceApp: frontApp).pushToTalkPressed()
     }
 
     private func handlePhysicalDictationPushToTalkRelease() {
@@ -829,9 +821,7 @@ class ContextCaptureEngine: ObservableObject {
 
         // Let go before the remembered press could start: nothing was
         // recorded, so say the last one is still finishing.
-        if session.dropQueuedPushToTalkStart() { return }
-        guard session.isDictating else { return }
-        session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)
+        dictationHotkeyRouter(session: session, sourceApp: nil).pushToTalkReleased()
     }
 
     private func handlePhysicalMeetingPress() {
@@ -882,11 +872,8 @@ class ContextCaptureEngine: ObservableObject {
         isHotkeyRoutingActive = false
     }
 
-    private func routeDictationToggle(
-        sourceApp: NSRunningApplication?,
-        trigger: DictationTrigger,
-        shortcutMode: DictationShortcutMode
-    ) {
+    private func routeHandsFreeToggle(sourceApp: NSRunningApplication?) {
+        let trigger = DictationTrigger.physicalKey
         guard isHotkeyRoutingActive, let session = sessionController else { return }
         DiagnosticsTrail.record(
             logger: session.appState?.logger,
@@ -901,10 +888,31 @@ class ContextCaptureEngine: ObservableObject {
                 "overlay_state": overlayStateName(session.overlayController?.state)
             ]
         )
-        if session.isDictating {
-            session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)
-        } else {
-            session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)
-        }
+        dictationHotkeyRouter(session: session, sourceApp: sourceApp).handsFreePressed()
+    }
+
+    /// The session commands behind the physical dictation keys. The routing
+    /// itself (and which shortcut each command names) is `DictationHotkeyRouter`.
+    private func dictationHotkeyRouter(
+        session: DictationSessionController,
+        sourceApp: NSRunningApplication?
+    ) -> DictationHotkeyRouter {
+        DictationHotkeyRouter(
+            isDictating: { session.isDictating },
+            rememberStartPressIfFinishing: { trigger, shortcutMode in
+                session.rememberStartPressIfFinishing(
+                    sourceApp: sourceApp,
+                    trigger: trigger,
+                    shortcutMode: shortcutMode
+                )
+            },
+            dropQueuedPushToTalkStart: { session.dropQueuedPushToTalkStart() },
+            start: { trigger, shortcutMode in
+                session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)
+            },
+            stop: { trigger, shortcutMode in
+                session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)
+            }
+        )
     }
 }

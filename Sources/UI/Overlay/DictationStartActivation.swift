@@ -112,3 +112,33 @@ final class DictationStartActivation {
         pendingRestoration.restore()
     }
 }
+
+/// Whether a failed microphone start may try the foreground handshake.
+///
+/// A successful ordinary start never changes focus; the caller only asks
+/// after a real native failure. Even then it's at most once per session,
+/// only for the session still running, never when Transcripted is already
+/// frontmost, only for starts allowed to escalate (a hotkey from another
+/// app), and never while dictation borrows the meeting mic.
+///
+/// Keyed on the session id, so a new session gets its own chance without
+/// anything having to remember to reset a flag.
+struct DictationStartActivationRecoveryGate {
+    private var attemptedSessionID: UUID?
+
+    mutating func admit(
+        sessionID: UUID,
+        currentSessionID: UUID,
+        isDictating: Bool,
+        isCancelled: Bool,
+        appIsActive: Bool,
+        allowsEscalation: Bool,
+        usesMeetingMic: () -> Bool
+    ) -> Bool {
+        guard !isCancelled, isDictating, currentSessionID == sessionID,
+              attemptedSessionID != sessionID, !appIsActive,
+              allowsEscalation, !usesMeetingMic() else { return false }
+        attemptedSessionID = sessionID
+        return true
+    }
+}

@@ -44,6 +44,10 @@ enum DictationStartAdmission {
         var previousTakeIsTranscribing: @MainActor () -> Bool
         var unavailableReason: @MainActor () -> String?
         var countRefusal: @MainActor (Refusal) -> Void
+        /// Mints the new session. Runs only for an admitted press, after it
+        /// was counted, so the request event never borrows the previous
+        /// session's id.
+        var beginSession: @MainActor () -> Void = {}
     }
 
     static func decide(_ steps: Steps) -> Decision {
@@ -63,6 +67,7 @@ enum DictationStartAdmission {
             steps.countRefusal(.dictationUnavailable)
             return .refused(.dictationUnavailable, message: reason)
         }
+        steps.beginSession()
         return .admitted
     }
 }
