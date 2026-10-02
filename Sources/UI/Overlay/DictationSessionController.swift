@@ -139,7 +139,7 @@ class DictationSessionController: ObservableObject {
     var currentDictationSessionID = UUID()
     /// Whether this session's start click has played. It plays once, on key
     /// press or after recording starts (see `DictationStartCuePolicy`).
-    private var didPlayStartCue = false
+    var didPlayStartCue = false
     /// The shortcut that started this session, when a shortcut did. Read from
     /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
     var currentDictationShortcutMode: DictationShortcutMode?
@@ -206,59 +206,19 @@ class DictationSessionController: ObservableObject {
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
-        // DictationStartAdmission decides whether this press becomes a take
-        // and counts it: a press while already dictating or queued behind a
-        // finishing take isn't counted yet; every other press is counted
-        // (`dictation_start_requested`, the attempt denominator) before any
-        // guard can refuse it and before the session id is minted below.
-        let admission = DictationStartAdmission.decide(
-            DictationStartAdmission.Steps(
-                isDictating: { self.isDictating },
-                rememberPressIfFinishing: {
-                    self.rememberStartPressIfFinishing(
-                        sourceApp: sourceApp,
-                        trigger: trigger,
-                        shortcutMode: shortcutMode,
-                        isRetry: isRetry
-                    )
-                },
-                showStartingIsland: { overlayController.showIslandStartingStateIfSelected(near: sourceApp) },
-                countRequest: {
-                    self.trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
-                },
-                blocksNewCapture: {
-                    DictationTerminationAdmissionPolicy.blocksNewCapture(
-                        hasRecoverableRecording: appState.sttRouter.hasRecoverableRecording,
-                        recoveryWAVExists: self.currentStoppedAudioRecoveryWAVExists
-                    )
-                },
-                previousTakeIsTranscribing: { appState.sttRouter.isTranscribing },
-                unavailableReason: { self.dictationStartUnavailableReason(appState: appState) },
-                countRefusal: { refusal in
-                    self.trackDictationStartRefused(
-                        appState: appState,
-                        trigger: trigger,
-                        failureKind: refusal.rawValue
-                    )
-                },
-                beginSession: { self.currentDictationSessionID = UUID() }
-            )
-        )
-        guard admission == .admitted else {
-            switch admission {
-            case .refused(.unsavedCaptureRecoveryPending, _):
-                // A failed checkpoint may leave native audio as the only copy.
-                // Starting a fresh capture would clear that timeline.
-                showFailedCheckpointRecoveryError()
-            case .refused(.previousDictationTranscribing, _):
-                overlayController.showError("Still finishing the last dictation. Try again in a moment.")
-            case .refused(.dictationUnavailable, let message):
-                overlayController.showError(message ?? "")
-            case .alreadyDictating, .queuedBehindFinishingTake, .admitted:
-                break
-            }
-            return
-        }
+        // DictationStartAdmission (run by `admitDictationStart` in
+        // DictationSessionPipeline.swift) decides whether this press becomes
+        // a take and counts it: a press while already dictating or queued
+        // behind a finishing take isn't counted yet; every other press is
+        // counted (`dictation_start_requested`, the attempt denominator)
+        // before any guard can refuse it and before the session id is
+        // minted. A refused press shows why and changes nothing below.
+        guard admitDictationStart(
+            sourceApp: sourceApp,
+            trigger: trigger,
+            shortcutMode: shortcutMode,
+            isRetry: isRetry
+        ) else { return }
         // Issue #1743: decide the readiness plan BEFORE `isDictating` flips,
         // because that flip takes the App Nap suppression assertion and its
         // reason string names the plan.
@@ -417,15 +377,6 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    /// The start click, once per session, from whichever path gets there
-    /// first: the key press on a built-in or wired mic, otherwise the moment
-    /// recording starts.
-    func playStartCueOnce() {
-        guard !didPlayStartCue else { return }
-        didPlayStartCue = true
-        AppSoundPlayer.shared.play(.dictationStart)
-    }
-
     /// The tail every successful microphone start shares, fast path and
     /// recovery loop alike. See `DictationRecordingStarted`.
     func finishRecordingStart(
@@ -532,6 +483,48 @@ class DictationSessionController: ObservableObject {
         guard cancellationPlan.cancelSpeechEngine,
               let appState else { return }
         dictationSession.cancelEngine(appState: appState)
+    }
+}
+
+// The start/stop wiring in DictationSessionPipeline.swift runs on this
+// controller through DictationSessionPipelineHost; the tests run it on a fake.
+// Most requirements are the controller's own members; these adapt the rest.
+extension DictationSessionController: DictationSessionPipelineHost {
+    var appIsActive: Bool { NSApp.isActive }
+
+    var isPreviousTakeTranscribing: Bool { appState?.sttRouter.isTranscribing ?? false }
+
+    var dictationHasRecoverableRecording: Bool { appState?.sttRouter.hasRecoverableRecording ?? false }
+
+    func showIslandStartingState(near sourceApp: NSRunningApplication?) {
+        overlayController?.showIslandStartingStateIfSelected(near: sourceApp)
+    }
+
+    func trackDictationStartRequested(trigger: DictationTrigger, isRetry: Bool) {
+        guard let appState else { return }
+        trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
+    }
+
+    func trackDictationStartRefused(trigger: DictationTrigger, failureKind: String) {
+        guard let appState else { return }
+        trackDictationStartRefused(appState: appState, trigger: trigger, failureKind: failureKind)
+    }
+
+    func dictationStartUnavailableReason() -> String? {
+        guard let appState else { return nil }
+        return dictationStartUnavailableReason(appState: appState)
+    }
+
+    func playDictationStartSound() {
+        AppSoundPlayer.shared.play(.dictationStart)
+    }
+
+    func prepareStartActivation(sourceApp: NSRunningApplication?, isCurrent: () -> Bool) async {
+        _ = await startActivation.prepare(sourceApp: sourceApp, isCurrent: isCurrent)
+    }
+
+    func showDictationError(_ message: String) {
+        overlayController?.showError(message)
     }
 }
 

@@ -1751,7 +1751,6 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
         let appSource = readSourceFixture("Sources/TranscriptedApp.swift")
-        let meetingSessionSource = readMeetingSessionControllerSource()
 
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
@@ -1783,14 +1782,33 @@ func testAnalyticsEventPolicy() {
             1,
             "only an explicit user dismissal should be classified as prompt abandonment"
         )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: meetingSessionSource),
-            2,
-            "session-level outcomes should stay centralized for start/save/fail terminal recording results"
-        )
-        assertTrue(
-            meetingSessionSource.contains("guard let properties = promptProperties else { return }"),
+    }
+
+    runSuite("Meeting prompt outcomes belong only to meetings a detected prompt started") {
+        assertNil(
+            MeetingPromptTelemetry.sessionOutcomeProperties(
+                promptProperties: nil,
+                outcomeKind: .transcriptSaved,
+                elapsedSeconds: 120
+            ),
             "manual and hotkey meetings must not inherit stale detected-prompt properties"
+        )
+        let promptProperties = ["provider": "zoom", "app_signal": "native_mic"]
+        for outcome: MeetingPromptTelemetry.OutcomeKind in [
+            .recordingStarted, .recordingStartFailed, .transcriptSaved, .transcriptSkipped, .transcriptFailed,
+        ] {
+            let properties = MeetingPromptTelemetry.sessionOutcomeProperties(
+                promptProperties: promptProperties,
+                outcomeKind: outcome,
+                elapsedSeconds: 0
+            )
+            assertEqual(properties?["outcome_kind"], outcome.rawValue, "a prompted meeting reports its \(outcome.rawValue) outcome")
+            assertEqual(properties?["provider"], "zoom", "the prompt's own properties ride along")
+        }
+        assertEqual(
+            MeetingPromptTelemetry.OutcomeKind.transcriptSkipped.rawValue,
+            "transcript_skipped",
+            "a skipped no-speech transcript is its own outcome, not a failure"
         )
     }
 

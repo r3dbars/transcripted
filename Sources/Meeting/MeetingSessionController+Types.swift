@@ -42,13 +42,7 @@ extension MeetingSessionController {
         case unknown = "unknown"
     }
 
-    enum TerminalTranscriptionOutcome: Equatable {
-        case transcriptSaved
-        case failed(String)
-        /// A very short recording with no speech was thrown away as an
-        /// accidental start. Nothing was saved and nothing failed.
-        case discarded
-    }
+    typealias TerminalTranscriptionOutcome = MeetingTerminalTranscriptionOutcome
 
     struct RecordingStopSnapshot {
         let telemetryIdentity: UUID?

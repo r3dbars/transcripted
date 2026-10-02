@@ -10,13 +10,14 @@
 // AirPods/Bluetooth hardware still needs manual verification
 // (`bash check.sh hardware`).
 //
-// Two suites still read source as text because their code runs inside
-// ParakeetEngine / PersistentDictationInputController, which the fast runner
-// can't compile: the main-actor ordering in audioInputSnapshot (serialized
-// selection, fail-closed lookup, ignore window before the graph read, no
-// Mac-wide default-input write) and the persistent controller's CoreAudio
-// listener and shutdown wiring. The "QA report names mocked proof boundary"
-// suite is a docs/report consistency check.
+// Two suites still read source as text: a banned-call scan that no Parakeet
+// file writes the Mac-wide default input (the snapshot ordering it used to
+// pin is a behavior test in ParakeetAudioGraphTests), and TranscriptedApp
+// awaiting the persistent input restore on quit, which the fast runner can't
+// compile. The persistent controller itself runs against fakes in
+// PersistentDictationInputControllerTests. The
+// "QA report names mocked proof boundary" suite is a docs/report consistency
+// check.
 
 import AVFoundation
 import Foundation
@@ -676,87 +677,30 @@ func testBluetoothRouteContract() async {
         )
     }
 
-    runSuite("Bluetooth route contract - snapshot selection is serialized and pinned before the graph is touched") {
-        // Still source text: these steps run on the main actor inside
-        // ParakeetEngine, which the fast runner can't compile. The graph reads
-        // themselves are behavior-tested above.
-        let source = readSourceFixture("Sources/Speech/ParakeetInputRoute.swift")
-        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private nonisolated static func applyPreferredDictationInputDevice", range: snapshotStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find dictation audioInputSnapshot")
-            return
+    runSuite("Bluetooth route contract - dictation never writes the Mac-wide default input") {
+        // A banned-call check, not an ordering pin. The snapshot's ordering
+        // (serialized selection, fail-closed lookup, ignore window armed before
+        // the graph read) is a behavior test in ParakeetAudioGraphTests.swift.
+        // The only legitimate Mac-wide input writes are
+        // PersistentDictationInputController's, through DefaultInputDeviceMonitor.
+        let speechFolder = "Sources/Speech"
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(speechFolder).path)) ?? [])
+            .filter { $0.hasPrefix("Parakeet") && $0.hasSuffix(".swift") }
+            .filter { $0 != "ParakeetAudioDeviceLookup.swift" } // declares the CoreAudio setter
+            .sorted()
+        assertTrue(names.count > 10, "the dictation engine files should be found")
+        for name in names {
+            let text = readSourceFixture("\(speechFolder)/\(name)")
+            assertFalse(text.contains("setDefaultInputDeviceID("), "\(name) must not write the Mac-wide default input")
+            assertFalse(text.contains("setDefaultInputDevice("), "\(name) must not write the Mac-wide default input")
         }
-        let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
-
-        guard let loadSelection = snapshotBody.range(of: "let loadedSelection = try await Self.systemInputWorkCoordinator.run"),
-              let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
-              let confirmedSelection = snapshotBody.range(of: "DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)"),
-              let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
-              let graphRead = snapshotBody.range(of: "ParakeetDictationInputSnapshotRead.read("),
-              let bindingIntent = snapshotBody.range(of: "bindingIntent: bindingIntent") else {
-            assertTrue(false, "audioInputSnapshot should keep the AirPods override-before-read contract")
-            return
-        }
-
-        assertTrue(loadSelection.lowerBound < serializedSelectionLookup.lowerBound, "selection should be serialized with system-input restore work")
-        assertTrue(serializedSelectionLookup.lowerBound < confirmedSelection.lowerBound && confirmedSelection.lowerBound < graphRead.lowerBound,
-            "failed lookup must fail closed before touching a previously pinned graph")
-        assertTrue(avoidDefaultRead.lowerBound < graphRead.lowerBound, "the config-change ignore window should be armed before touching the input node")
-        assertTrue(graphRead.lowerBound < bindingIntent.lowerBound, "the graph read carries the native-setter notification intent")
-        assertFalse(
-            snapshotBody.contains("pendingSystemInputRestore.replace("),
-            "audioInputSnapshot must never arm a system-input restore; it performs no Mac-wide write"
-        )
-        assertFalse(
-            snapshotBody.contains("setDefaultInputDeviceID"),
-            "audioInputSnapshot must not contain any system default-input write"
-        )
     }
 
-    runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
-        // Still source text: PersistentDictationInputController wires CoreAudio
-        // listeners and isn't compiled in the fast runner. Its scheduling and
-        // restore decisions are behavior-tested above.
-        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
+    runSuite("Bluetooth route contract - app shutdown waits for persistent input restoration") {
+        // Still source text: the quit path lives in TranscriptedApp, which the
+        // fast runner can't compile. The controller's listener, relinquish, and
+        // shutdown behavior is tested in PersistentDictationInputControllerTests.
         let app = readSourceFixture("Sources/TranscriptedApp.swift")
-        guard let start = source.range(of: "func start()"),
-              let stop = source.range(of: "func stopAndRestore()"),
-              let monitoring = source.range(of: "func stopMonitoring()"),
-              let install = source.range(of: "private func installDefaultInputListener()"),
-              let installDeviceList = source.range(of: "private func installDeviceListListener()"),
-              let remove = source.range(of: "private func removeDefaultInputListener()"),
-              let removeDeviceList = source.range(of: "private func removeDeviceListListener()"),
-              let restore = source.range(of: "private func restoreIfStillOwned") else {
-            assertTrue(false, "persistent input controller should expose bounded lifecycle seams")
-            return
-        }
-
-        assertTrue(start.lowerBound < install.lowerBound, "controller startup should install its reconnect listener")
-        assertTrue(install.lowerBound < remove.lowerBound, "listener teardown should remain paired with installation")
-        assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
-        assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
-        assertTrue(
-            source.contains("mSelector: kAudioHardwarePropertyDevices"),
-            "the saved preferred microphone should be reconsidered when USB devices reconnect"
-        )
-        assertTrue(
-            source.contains("scheduleTopologyRefresh(defaultInputChanged: true)")
-                && source.contains("scheduleTopologyRefresh(deviceListChanged: true)"),
-            "default-input changes must remain distinguishable from device reconnects"
-        )
-        assertTrue(
-            source.contains("dictation_persistent_input_external_selection_preserved")
-                && source.contains("runtimeOwnershipRelinquished = true"),
-            "an external microphone selection must relinquish persistent runtime ownership"
-        )
-        let startupBody = String(source[start.upperBound..<stop.lowerBound])
-        assertTrue(startupBody.contains("scheduleTopologyRefresh(preferenceChanged: true)"), "preference notifications enter the deferred maintenance path")
-        assertTrue(startupBody.contains("scheduleTopologyRefresh()"), "startup must use capture-aware deferred maintenance")
-        assertFalse(startupBody.contains("reconcileCurrentPreference("), "neither launch nor a preference change may reconcile the system input directly")
-        let shutdownBody = String(source[stop.upperBound..<monitoring.lowerBound])
-        assertTrue(shutdownBody.contains("withDetachedTimeout"), "a blocked driver read must not prevent quitting")
-        assertTrue(shutdownBody.contains("DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit("), "shutdown restoration goes through the tested quit policy")
-        assertFalse(shutdownBody.contains("setRecoveryMarker(nil)"), "skipped shutdown restoration must leave a durable ownership marker")
         assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
     }
 

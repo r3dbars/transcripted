@@ -150,34 +150,11 @@ func testDictationSounds() {
 
     // When the stop click plays (after the mic stops, before the snapshot) is a
     // behavior test: "Stop click plays once, after the mic stops and before
-    // the snapshot" in DictationStopCheckpointTests.swift. The counts below
-    // read the controller core and every +Area extension together.
-    let controller = readDictationSessionControllerSource()
-    runSuite("Stop is the only end-of-take click in the dictation controller") {
-        assertEqual(
-            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,
-            1,
-            "Stop is the only end-of-take click; no second chime after paste"
-        )
-    }
-
-    runSuite("Start click answers the key press on the fast path, once") {
-        let fastPathBeforeMicStart = sourceSlice(
-            in: readDictationSessionControllerSource(part: "RecordingStart"),
-            from: "case .skipLoadingAndStartRecording:",
-            to: "recordingStartRetryTask = Task"
-        )
-        assertTrue(
-            fastPathBeforeMicStart.contains("DictationStartCuePolicy.playsOnKeyPress(")
-                && fastPathBeforeMicStart.contains("playStartCueOnce()"),
-            "the start click must be queued before the mic start task, so it doesn't wait on the mic"
-        )
-        assertEqual(
-            controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStart)").count - 1,
-            1,
-            "every start click goes through playStartCueOnce, so a session never clicks twice"
-        )
-    }
+    // the snapshot" in DictationStopCheckpointTests.swift. DictationSessionPipelineTests.swift
+    // covers one stop click from stop through transcription, and the start
+    // click going through playStartCueOnce (queued before the mic start, once
+    // per session). Not covered: a direct AppSoundPlayer call added to the
+    // paste or finalize tail, or a start path that skips playStartCueOnce.
 
     runSuite("Feedback submit paths stay silent") {
         let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
