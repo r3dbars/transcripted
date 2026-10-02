@@ -42,6 +42,8 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `Audio+BufferUtilities.swift` — buffer deep copy and downmix
   - `AudioCaptureStartState.swift` — start-state readiness policy, start-failure stage marker, and voice-processing start fallback policy
   - `AudioDeviceRecovery.swift` — `AudioRecoveryTuning` (shared mic/system recovery constants) and the mic recovery, retry, device-switch counting, tap-format, and watchdog policies
+  - `MeetingMicGraphStartSequence.swift` — the one order meeting start and mic recovery follow on the engine path: settle the route, size the mic file from the settled graph, then recheck the format and install the tap under the graph lock (the AirPods 24 kHz flip guard)
+  - `Audio+MicRecoverySegment.swift` — mic recovery's segment step: retire the old writer, create and register the recovery segment, clean it up when the attempt ends, and the restart-failure retry
   - `AudioLevelMonitor.swift` — `extension Audio` for level metering, silence detection, and rolling buffers (audio-callback threads)
   - `AudioPipelineDiagnosticsSnapshot.swift` — privacy-safe route/buffer-health snapshot for analytics and Sentry
   - `AudioResampler.swift` — pure-Swift Float32 mono resampling to 16 kHz
