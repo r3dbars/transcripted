@@ -173,8 +173,8 @@ struct HomeSettingsPage: View {
                 actionTitle: "Start a meeting",
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: onStartMeeting,
-                secondaryActionTitle: "Transcribe audio file",
-                secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
+                secondaryActionTitle: HomeCaptureListCopy.EmptyMeetingsImportAction.title,
+                secondaryAutomationIdentifier: HomeCaptureListCopy.EmptyMeetingsImportAction.automationIdentifier,
                 secondaryAction: onImportAudioFile
             ),
             // A background refresh of the recent slice shouldn't hide search

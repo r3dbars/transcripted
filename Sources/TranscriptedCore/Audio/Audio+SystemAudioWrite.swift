@@ -30,7 +30,7 @@ extension Audio {
         return true
     }
 
-    func surfaceSystemWriteFailureAndStop(generation: UInt64) {
+    private func surfaceSystemWriteFailureAndStop(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
             guard let self,
                   self.recordingSessionGeneration == generation,
@@ -40,8 +40,8 @@ extension Audio {
         }
     }
 
-    static let maxSystemRecoverySilencePadSeconds: TimeInterval = 180
-    static let systemRecoverySilencePadChunkSeconds: TimeInterval = 1
+    private static let maxSystemRecoverySilencePadSeconds: TimeInterval = 180
+    private static let systemRecoverySilencePadChunkSeconds: TimeInterval = 1
 
     /// Writes a bounded silence pad into the current system writer on the
     /// file queue. Called after confirmed SCK recovery, before new buffers
@@ -108,7 +108,7 @@ extension Audio {
     /// Marks system audio failed and tears down SCK + the system writer
     /// without stopping the microphone — the same mic-only policy as a
     /// system-audio start failure.
-    func failSystemAudioKeepMic(generation: UInt64) {
+    private func failSystemAudioKeepMic(generation: UInt64) {
         systemAudioFailed = true
         systemAudioStatus = .failed
         let captureAttempt = systemAudioCaptureAttemptOwnership.captureOwned(

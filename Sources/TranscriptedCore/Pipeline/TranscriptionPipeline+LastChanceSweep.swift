@@ -32,18 +32,18 @@ extension Transcription {
     /// arrives at the call app's playback level, so boosting it as hard as a
     /// muffled mic (12x) mostly turns hold music, typing and room noise into
     /// something STT will try to read.
-    nonisolated static let lastChanceSystemMaxGain: Float = 3.0
+    private nonisolated static let lastChanceSystemMaxGain: Float = 3.0
 
     /// Words that on their own are not evidence anyone spoke to the meeting:
     /// STT emits them for breaths, clicks and music.
-    nonisolated static let lastChanceFillerWords: Set<String> = [
+    private nonisolated static let lastChanceFillerWords: Set<String> = [
         "ah", "eh", "er", "hm", "hmm", "huh", "mhm", "mm", "mmm", "oh", "uh", "um", "uhm"
     ]
 
     /// Fewest non-filler words a channel must recover before the last-chance
     /// pass keeps any of them. Below this, "No speech found" (with a Try
     /// again button) is more honest than a transcript that says "Mm."
-    nonisolated static let lastChanceMinimumWords = 2
+    private nonisolated static let lastChanceMinimumWords = 2
 
     /// Whether utterances recovered by the last-chance pass hold enough real
     /// words to be worth saving.

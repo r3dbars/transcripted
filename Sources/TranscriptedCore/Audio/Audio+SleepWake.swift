@@ -22,7 +22,7 @@ extension Audio {
         )
     }
 
-    var systemSleepSequence: UInt64 {
+    private var systemSleepSequence: UInt64 {
         systemSleepPendingLock.lock()
         defer { systemSleepPendingLock.unlock() }
         return _systemSleepSequence

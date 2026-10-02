@@ -14,11 +14,10 @@
     "Tests/DictationStoppedAudioRecoveryTests.swift": 13,
     "Tests/DictationTerminationCheckpointTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 18,
-    "Tests/HomeImportAudioActionTests.swift": 6,
     "Tests/MeetingSessionUIPolicyTests.swift": 13,
     "Tests/NightlySecurityContractTests.swift": 34,
     "Tests/ObservabilityLogWriterTests.swift": 2,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 10,
+    "Tests/OverlayScreenSharePrivacyTests.swift": 4,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 3,
     "Tests/ParakeetRecoveryStateTests.swift": 9,
     "Tests/PermissionStateHarnessContractTests.swift": 20,
@@ -27,6 +26,6 @@
     "Tests/SingleInstanceGuardTests.swift": 3,
     "Tests/StatusItemPresentationTests.swift": 8,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
-    "Tests/UIAutomationSurfaceContractTests.swift": 257
+    "Tests/UIAutomationSurfaceContractTests.swift": 76
   }
 }

@@ -347,7 +347,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         let (panel, islandView) = ensurePanel()
         // Hidden from screen sharing and screenshots unless the person
         // turned it on in Settings; read each time so the switch applies at once.
-        panel.sharingType = NotchIslandPreferences.visibleInScreenSharing() ? .readOnly : .none
+        panel.applyScreenSharingPreference()
         let screen = currentScreen()
         live.dictationElapsed = listeningSince.map { Date().timeIntervalSince($0) } ?? 0
         islandView.targetAppIcon = targetApp?.icon

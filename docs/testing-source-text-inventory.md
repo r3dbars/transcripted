@@ -88,7 +88,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `AnalyticsEventPolicyTests.swift` | `Observability/WorkflowRecoveryTelemetry.swift`, `TranscriptedApp.swift`, `Meeting/MeetingSessionController.swift`, `TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift` (plus docs, `.psv` taxonomy, MCP tool source) | ~12 | Workflow recovery sends the allowlisted bucket key and a separate failed event. Meeting prompt events fire exactly once per path. Every Core speaker-finalization reason survives the sanitizer. Docs and taxonomy match the allowlist. | needs-seam: give `WorkflowRecoveryTelemetry` a `track` closure (like `DictationPasteRetryTelemetry.performUserRetry`) and move prompt-event firing into the compiled `MeetingPromptTelemetry`. The docs, taxonomy, MCP, and Core raw-value cross-checks are keep (cross-package and doc contracts). |
 | `AudioAutomationCoverageContractTests.swift` | none as code (names `Meeting/MeetingTranscriptStyler.swift` as data) | 0 | The daily audio script names every route lane, issue 500 manual proof stays explicit, and the E2E smoke compiles the transcript styler from the right shared array. | keep: script and doc contract. |
 | `AuditRegressionCoverageContractTests.swift` | `UI/Overlay/MeetingOverlayController.swift`, `UI/MenuBar/MenuBarPanelController.swift`, `Support/ClipboardRestoringTextPaster.swift`, `Meeting/TranscriptionQueueCoordinator.swift` | 9 | Pasteback re-checks the target before Cmd+V and downgrades to copied; a failed dispatch falls back to copy. Overlay and menubar duration ticks collapse to whole seconds. Terminal status handlers revisit the background queue. | **converted (partial)**: the pasteback suite runs the real paster with a non-frontmost target and a failing dispatcher (3 pins out). Rest needs-seam: one compiled whole-second duration publisher both controllers use; the queue revisit as a compiled coordinator policy. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
-| `BluetoothRouteContractTests.swift` | `Speech/Parakeet*.swift` (banned-call scan), `TranscriptedApp.swift` | ~3 | Dictation never writes the Mac-wide default input. Persistent input restores on shutdown. | **converted (partial)**: the input-snapshot ordering (serialized selection, fail-closed lookup, ignore window armed before the graph read) is a behavior test in `ParakeetAudioGraphTests.swift`, and the system-input restore it guarded was dead code and is deleted. The persistent-input listener, relinquish and shutdown pins run the real controller against fakes in `PersistentDictationInputControllerTests.swift` (`PersistentDictationInputSystem` seam). Keep: the no-Mac-wide-write scan (a banned-call contract) and the QA-report suite. Left: the `TranscriptedApp` awaits-`stopAndRestore` pin, held until #1946 lands. |
+| `BluetoothRouteContractTests.swift` | `Speech/Parakeet*.swift` (banned-call scan), `TranscriptedApp.swift` | ~3 | Dictation never writes the Mac-wide default input. Persistent input restores on shutdown. | **converted (partial)**: the input-snapshot ordering (serialized selection, fail-closed lookup, ignore window armed before the graph read) is a behavior test in `ParakeetAudioGraphTests.swift`, and the system-input restore it guarded was dead code and is deleted. The persistent-input listener, relinquish and shutdown pins run the real controller against fakes in `PersistentDictationInputControllerTests.swift` (`PersistentDictationInputSystem` seam). Keep: the no-Mac-wide-write scan (a banned-call contract) and the QA-report suite. Left: the `TranscriptedApp` awaits-`stopAndRestore` pin, held until the app's Quit handler gets a seam. |
 | `CaptureLibraryPathSafetySyncTests.swift` | compares three copies of `CaptureLibraryPathSafety.swift` | 3 | The three synced copies stay byte-identical. | keep: sync check is the point. |
 | `CrashReporterOptionsTests.swift` | `Observability/CrashReporter.swift` | 5 | Sentry privacy and noise options (no PII, no auto sessions, no network breadcrumbs, zero breadcrumbs, no stack traces, no failed-request capture) are set once before `SentrySDK.start`. | needs-seam: move the option values into a compiled function that applies them to a small protocol the Sentry `Options` type conforms to, so a fake records them. |
 | `ClipboardRestoringTextPasterTests.swift` | `Support/ClipboardRestoringTextPaster.swift`, `UI/Overlay/DictationSessionController.swift`, `UI/Overlay/FloatingOverlayController.swift` | ~15 | AX reads are bounded to 50 ms. The focused-element cast is type-checked. The Core import stays `canImport`-guarded. An ambiguous paste never offers a duplicate paste. Provider reads never confirm a paste or arm Auto Enter. | **deleted (partial)**: the provider-read pin is gone; covered by "a likely paste into a selected target never authorizes Auto Enter" and "a read with a silent AX source is a likely paste, not a confirmed one". Rest needs-seam: inject an AX element reader into `FocusedTextPasteConfirmation.capture()`; controller suite waits on the dictation pipeline seam. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
@@ -111,7 +111,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `FailedMeetingPresentationTests.swift` | `Meeting/MeetingSessionController.swift`, `UI/Settings/HomeView.swift`, `UI/Settings/TranscriptedSettingsView.swift` (was also `Meeting/FailedMeetingPresentation.swift`, `UI/Settings/FailedMeetingRecoveryPresentation.swift`) | ~19 | Skipped no-speech outcomes surface a visible error. Retry needs surviving audio while partial audio stays revealable. Retained WAVs read "raw audio kept". Retry counts show in metadata. Cleanup is a confirmed delete. | **converted (partial)**: the retry-readiness helper pin calls `FailedMeetingRecoveryPresentation.retryDisabled`, and (phase 2) every `FailedMeetingPresentation.swift` pin now builds rows through `FailedMeetingPresentation.item(from:)` from real files on disk. Rest needs-seam: the skipped no-speech pin needs the meeting capture protocol; the Home row and Settings cleanup pins need Home's row reveal/retry and delete wiring moved into a compiled presentation type. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
 | `FocusOrderContractTests.swift` | `UI/MenuBar/MenuBarActionRowView.swift`, `MenuBarContentView.swift`, `MenuBarPrimaryActionsView.swift`, `MenuBarUtilityActionsView.swift`, `UI/Settings/TranscriptedSettingsPage.swift`, `TranscriptedSettingsSidebar.swift` | 0 | Menu bar rows are focusable and chained in the declared order. Settings sidebar pages produce the declared identifiers in ⌘1–⌘5 order. | **converted** in PR #1949: no source reads left. |
 | `HomeFirstArtifactVisibilityTests.swift` | `UI/Settings/HomeView.swift`, `Pages/HomeSettingsPage.swift`, `QuietDictationLibrary.swift`, `QuietHomeLibrary.swift`, `TranscriptedSettingsView.swift` | 8 | Dictation rows show Open file and "saved only" on a failed paste. Only active work spins. Copy for agent prefers the portable bundle. Old vague copy doesn't return. | needs-seam: move the row copy and the tone-to-icon choice into a compiled presentation type the views read. (The meeting pill's "Saved to Markdown" pin left with the pill.) |
-| `HomeImportAudioActionTests.swift` | `UI/Settings/HomeView.swift`, `Pages/GeneralSettingsPage.swift`, `Pages/HomeSettingsPage.swift`, `TranscriptedSettingsView.swift` | 6 | Settings has a "Transcribe a file" row wired to `importAudioFile()`, and Home's empty meetings state offers the same route. | needs-seam: move the row and empty-state copy and identifiers into the compiled `HomeCaptureListCopy` and route the action through a compiled action table. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
+| `HomeImportAudioActionTests.swift` | none | 0 | Settings has a "Transcribe a file" row, and Home's empty meetings state offers the same route. | **converted** in Cleanup 2: the row and empty-state copy and identifiers moved to the compiled `HomeCaptureListCopy.ImportFileRow` / `EmptyMeetingsImportAction`, and the test checks them by value plus the identifier the QA import smoke presses. |
 | `MeetingMicrophonePreferencesTests.swift` | `Meeting/MeetingCaptureBridge.swift` | 0 | Meeting start picks the mic mode through the recorder-aware check and applies a Settings mic only while the recorder shows that picker. | **converted** in PR #1949: no source reads left. |
 | `MeetingStopSnapshotEvidenceTests.swift` | `Meeting/MeetingSessionController.swift` | 6 | Unexpected-stop evidence (status, warning, unheard seconds) is stashed before the warning clears and used by the stop snapshot. | needs-seam: meeting unexpected-stop seam. |
 | `MeetingSessionUIPolicyTests.swift` | `Meeting/MeetingSessionController.swift`, `UI/MenuBar/MenuBarPanelController.swift`, `UI/Overlay/MeetingOverlayController.swift` | ~21 | Audio sleep/wake listens on the workspace center. Unexpected stop leaves recording before any await. Start returns false for an active capture. Discard needs `session.recording` and re-checks after confirm. Menu start/stop uses capture-active state. | needs-seam: meeting capture protocol plus a compiled overlay-menu policy. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
@@ -120,7 +120,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `ParakeetAudioGraphOwnershipTests.swift` | `Speech/ParakeetEngine.swift`, `ParakeetDeviceRecovery.swift` | 0 | A config-change restart keeps the same recording claim when segments are retained. | **converted** in PR #1949: no source reads left. The route-restart call-site pin moved to `ParakeetAudioOwnershipSourceContractTests.swift`. |
 | `NightlySecurityContractTests.swift` | none as code (a manifest names `Observability/AnalyticsEventPolicy.swift` as data) | 0 | The nightly security checker, entitlement manifest, and docs stay in step. | keep: script, manifest, and doc contract. |
 | `ObservabilityLogWriterTests.swift` | `Observability/AppLogSink.swift`, `EventReporter.swift`, `LockedFileAppender.swift`, `ObservabilityLogRotation.swift`, `ReliabilityPacketRecorder.swift`, `TranscriptedApp.swift`, `TranscriptedCore/Logging/FileLogger.swift`, `TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift` | ~17 | Shutdown flushes buffered events. Local events carry build identity. The reliability recorder sees raw events. Logs are made owner-only before append. `AppLogSink` redacts. Console diagnostics avoid absolute paths. No NSException-throwing `FileHandle` APIs. | **converted (partial)**: log-file preparation now runs `ObservabilityLogFilePreparation.openPreparedHandle` on a world-readable log. Rest needs-seam: compile `EventReporter` and `AppLogSink` with an injected writer. The legacy `FileHandle` sweep is keep (banned-API lint across two build units). PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
-| `OverlayScreenSharePrivacyTests.swift` | `TranscriptedApp.swift`, `UI/Overlay/{MeetingOverlayController,NotchIslandController}.swift`, `UI/Settings/{TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift` | ~10 | Transient overlays stay out of screen capture. Settings and onboarding stay capturable. Every new window gets classified. Detected prompts use the call prompt controller. | **deleted (partial)**: the dictation window, meeting pill, call prompt pill and speaker naming window are gone, and their rows and the Return/Escape pin with them; `NotchIslandPanel` and `PasteLastDictationFeedbackPanel` are built for real. The rest is keep (privacy scan across `Sources/UI`). PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
+| `OverlayScreenSharePrivacyTests.swift` | `TranscriptedApp.swift`, `UI/Settings/{TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift`, plus the `Sources/UI` window scan | 4 | Transient overlays and transcript windows stay out of screen capture. Settings and onboarding stay capturable. Every new window gets classified. Detected prompts use the call prompt controller. | **converted (partial)** in Cleanup 2: the island's screen-sharing switch runs on a real `NotchIslandPanel` (`applyScreenSharingPreference(userDefaults:)`). The negative pins on `MeetingOverlayController` (no second prompt implementation) were deleted: they guarded the absence of code, not behavior. Left: the onboarding and settings window inits (need a window factory seam), the `TranscriptedApp` prompt wiring (needs an app-delegate seam), and the window scan (keep). |
 | `ParakeetRecoveryStateTests.swift` | `Speech/ParakeetDeviceRecovery.swift`, `ParakeetInputRoute.swift` (was `ParakeetEngine.swift`) | 10 | AUHAL and notification callbacks are timestamped on arrival, carry setter ownership, and confirm or fail echo ownership. | needs-seam: audio-graph driver protocol. |
 | `ParakeetMicrophoneSharingSourceContractTests.swift` | every engine file through `readParakeetEngineSource()`, `ParakeetDeviceRecovery.swift` | ~16 | Dictation rechecks call apps around every start. Sharing recovery is forced and keeps event-time suppression. Native teardown disarms VPIO without creating an input node. | **converted (partial)**: the owned-graph downgrade probe, the stop-in-progress guard, buffer preservation, and failed-VPIO graph disposal are behavior tests in `ParakeetAudioGraphTests.swift`. Rest needs-seam: start wiring and the route-change handler's policy arguments. The native `AVAudioEngine` teardown order is keep until a real-engine test can check it. |
 | `ParakeetShortAudioGateTests.swift` | `UI/Overlay/DictationSessionController.swift` | 5 | A mis-tap closes like a cancel, counts as cancelled, and shows no error. | needs-seam: the policy is covered by "treats only a quick, too-short press as a mis-tap"; the controller wiring needs the pipeline seam. |
@@ -132,7 +132,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `STTRouterPolicyTests.swift` | `Speech/STTRouter.swift` | 0 | Both Parakeet variants wait for the model with a deadline. Recording establishes the resolved variant before capture. Apple Speech is wired through every engine switch. | **converted** in PR #1949: no source reads left. |
 | `TestHelpers.swift` | `Speech/` engine files | 0 | Shared readers (`readSourceFixture`, `readParakeetEngineSource`) for the pinned suites. | keep: remove `readParakeetEngineSource` when its last caller converts. The device-recovery, zombie and system-input readers are gone. |
 | `SingleInstanceGuardTests.swift` | `TranscriptedApp.swift` | 5 | Reopening the app surfaces the existing controls (onboarding, popover, settings fallback) without a modal alert. | needs-seam: a compiled reopen policy that returns which surface to show. |
-| `UIAutomationSurfaceContractTests.swift` | 30+ files under `UI/`, `Meeting/`, `TranscriptedApp.swift`, `TranscriptedMenuCommands.swift` | ~109 | Menubar, Settings, and Home controls keep stable AX identifiers, hit targets, and shortcuts for the QA AX smoke. Empty and error states teach and act. Design tokens have one source. | keep: identifier contract with external automation. The copy and UX pins (WS4 states, the unverified-audio pill) are needs-seam. |
+| `UIAutomationSurfaceContractTests.swift` | `TranscriptedApp.swift`, `UI/Settings/{TranscriptedSettingsView*,SpeakerPeople*,HomeView,...}.swift`, the QA CLI and bench | 76 (main had 257 when this landed) | Menubar, Settings, and Home controls keep stable AX identifiers, hit targets, and shortcuts for the QA AX smoke. Empty and error states teach and act. | **converted (partial)** in Cleanup 2; see "Cleanup 2" below. What's left reads `TranscriptedApp`, `TranscriptedSettingsView`, `SpeakerPeopleSettingsSection` and `HomeView` (split during this pass; they need seams next), a few meeting-overlay controller pins, or the QA CLI and bench (keep). |
 | `WhisperCustomDictionaryTests.swift` | `Speech/WhisperEngine.swift` | 0 | Whisper output goes through the custom dictionary before it is returned. | **converted** in PR #1949: no source reads left. |
 
 ## Outside the grep
@@ -179,3 +179,71 @@ the row that comes back: a lone mic placeholder is revealable but not retry-read
 file doesn't hide retry while system audio survives, WAVs (any case) read as raw audio only
 while they're on disk, and titles, retry counts, and a running retry show in the row. The
 file's source-text count went 6 -> 3 (baseline 501 -> 498).
+
+## Cleanup 2: the pins #1946 was blocking
+
+#1946 (Notch island only) merged, so the pins held for it could move. This pass
+took the resolved pin count from 499 to 306 (`.agents/source-pin-baseline.json`)
+and the source-text reads from 260 to 164 (`.agents/test-shape-baseline.json`),
+counted against main after #1959, #1960, #1964 and #1966.
+
+New seams, all compiled into the fast runner:
+
+- `TranscriptedMenuCommandCatalog` (`UI/Settings/`): the Settings, Capture and Go
+  commands as values. `TranscriptedMenuCommands` builds its menus from it, and the
+  Go items come from `TranscriptedSettingsPage.navigationShortcutKey`, so the menu
+  and the sidebar tooltips can't drift. Replaced 46 pins on
+  `TranscriptedMenuCommands.swift` and the page-shortcut pins.
+- `OnboardingNavigation` (`UI/Settings/OnboardingNavigation.swift`): the three
+  steps, the microphone gate, and when Skip for now shows. Replaced the onboarding
+  step and gate pins.
+- `NotchIslandPanel.applyScreenSharingPreference`,
+  `MeetingAudioPlaybackLoadingPolicy.playableURL(for:)`,
+  `WritingSetupPresentation.screenRecordingAsk` /
+  `asksForScreenRecordingAfterSetup`, and `HomeCaptureListCopy.ImportFileRow`.
+- The 40pt hit-target literals in `TranscriptedSettingsGeneralControls`,
+  `TranscriptedSettingsRows`, `TranscriptedSettingsComponents` and
+  `MeetingAudioSourceMenu` now read `LibraryTokens.minimumHitTarget`; the test
+  checks the token.
+
+`AutomationSurfaceBehaviorTests.swift` builds the real menu bar rows (identifier,
+role, label, AXPress enabled and disabled, 40pt heights), checks build.sh's
+launch-smoke expectations against their smoke snapshots, and checks that the
+menu bar, sidebar and import identifiers the QA smokes press come from the real
+code. One cross-package scan stays in `UIAutomationSurfaceContractTests.swift`:
+every identifier the QA smokes press must exist somewhere in `Sources/`.
+
+Deleted, because they guarded nothing:
+
+- Identifier-presence pins for controls no script, smoke or tool presses (Home
+  rows and New menu, Settings rows and sections, Writing tab, Agent page,
+  onboarding back button, Home speaker sheet). An identifier nothing reads isn't a
+  contract; the ones the QA smokes press are still checked.
+- Pins already covered by behavior suites: `HomeDeleteConfirmationPolicy` copy,
+  the failed-meeting retry copy, `OwnFileResolver`'s two modes, the
+  `AgentSetupFailureCopy` and `SettingsActionFailureCopy` strings (now checked by
+  value), the settings page list (`FocusOrderContractTests`).
+- Style and refactor guards: `MenuTokens.Font` usage and `docs/DESIGN_TOKENS.md`
+  headings, "page struct X still exists", `.monospacedDigit()` on progress labels,
+  the Writing page's exhaustive `switch`, and negative pins on code that no longer
+  exists.
+
+Deferred, with the reason:
+
+- Pins on `TranscriptedApp.swift`, `TranscriptedSettingsView.swift`,
+  `SpeakerPeopleSettingsSection.swift` and `HomeView.swift`: another lane was
+  splitting those files during this pass (#1960, then #1964 pointed the guards
+  at the split files), so they were left alone. This includes the Quit pins
+  (`DictationTerminationCheckpointTests`, the `stopAndRestore` await in
+  `BluetoothRouteContractTests`), the Settings mic picker and Boost row pins
+  (`MicrophoneChoicePreferencesTests`, `MicrophoneProcessingPreferencesTests`), and the
+  failed-row delete pin (`FailedMeetingPresentationTests`).
+- `SpeakerNamingSheet.swift` and the meeting pill: #1966 deleted the naming
+  window and the pill while this ran, and their pins went with them (including
+  the data-source pin in `RetainedDataSourceComboBoxTests`).
+- The queued-start Esc pins in `DictationQueuedStartPolicyTests`
+  (`DictationSessionController` Esc wiring, `FloatingOverlayController` message
+  flag): #1959, which deleted the near-text window and rewrote
+  `FloatingOverlayController`, merged while this ran. Convert them against the
+  new controller next.
+

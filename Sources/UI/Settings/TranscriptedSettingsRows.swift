@@ -89,7 +89,7 @@ struct CorrectionEditorRow: View {
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.secondary)
-                    .frame(width: 40, height: 40)
+                    .frame(width: LibraryTokens.minimumHitTarget, height: LibraryTokens.minimumHitTarget)
             }
             .buttonStyle(SettingsHoverButtonStyle(tone: .destructive, cornerRadius: 7))
             .accessibilityLabel(Text("Remove correction"))

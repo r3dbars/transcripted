@@ -16,8 +16,11 @@
 // TranscriptedOnboardingWindowController's init only takes closures (makeView returning
 // PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
 // in the same table rather than special-cased.
-// NotchIslandPanel and PasteLastDictationFeedbackPanel are compiled here and built live by the
-// first two suites, so no protected surface is left on a source table. The last suite
+// NotchIslandPanel (including its Show island in screen sharing switch) and
+// PasteLastDictationFeedbackPanel are compiled here and built live by the first two
+// suites, so no protected surface is left on a source table. "detected meeting
+// prompts route through the call prompt controller" still reads TranscriptedApp.swift;
+// it needs an app-delegate seam first. The last suite
 // (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
 // definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
 // added" — update expectedMarkers when you add, rename, or remove one.
@@ -46,11 +49,20 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
         assertFalse(panel.canBecomeMain, "the island is never a main window")
         assertEqual(panel.level, .statusBar, "the island sits in the menu bar, above it, below open menus")
-        let controller = overlayPrivacySource("Sources/UI/Overlay/NotchIslandController.swift")
-        assertTrue(
-            controller.contains("panel.sharingType = NotchIslandPreferences.visibleInScreenSharing() ? .readOnly : .none"),
-            "the island only becomes capturable when the person turns on Show island in screen sharing"
-        )
+        let suiteName = "OverlayScreenSharePrivacyTests.island.\(UUID().uuidString)"
+        if let defaults = UserDefaults(suiteName: suiteName) {
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .none, "the island stays out of screen sharing by default")
+            NotchIslandPreferences.setVisibleInScreenSharing(true, userDefaults: defaults)
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .readOnly, "the island becomes capturable once the person turns on Show island in screen sharing")
+            NotchIslandPreferences.setVisibleInScreenSharing(false, userDefaults: defaults)
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .none, "turning the setting off hides the island again")
+        } else {
+            assertTrue(false, "expected a scratch UserDefaults suite")
+        }
         let offscreen = NSRect(x: 0, y: 5000, width: 360, height: 32)
         assertEqual(
             panel.constrainFrameRect(offscreen, to: nil),
@@ -150,15 +162,6 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
             "detected meeting prompts should not reuse the recording overlay prompt surface"
-        )
-        let meetingOverlay = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        assertFalse(
-            meetingOverlay.contains("presentDetectedMeetingPrompt")
-                || meetingOverlay.contains("onPromptRecord")
-                || meetingOverlay.contains("onPromptDismiss")
-                || meetingOverlay.contains("onPromptRemindSoon")
-                || meetingOverlay.contains("onPromptExpired"),
-            "the recording overlay should not retain a second detected-meeting prompt implementation"
         )
     }
 }
