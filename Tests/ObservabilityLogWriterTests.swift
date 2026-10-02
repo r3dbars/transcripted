@@ -3,10 +3,10 @@
 // ObservabilityTextRedactor are compiled into run-tests.sh's source lists, so most suites call
 // them for real, against temp files.
 //
-// Two suites still read source as text (grandfathered):
-// - "termination flush wiring" greps EventReporter.swift and Sources/TranscriptedApp.swift, because
-//   EventReporter drags in CrashReporter/Sentry and the app delegate is @MainActor AppKit that this
-//   runner never builds.
+// EventReporter drags in CrashReporter/Sentry, so this runner doesn't compile it; its shutdown
+// flush order lives in LocalEventShutdownFlush, which is tested here.
+//
+// One suite still reads source as text (grandfathered):
 // - "avoid legacy FileHandle APIs" is an absence-of-API sweep across both the app and the
 //   TranscriptedCore package (FileLogger, RetroactiveSpeakerUpdater), which has no runtime signal.
 
@@ -66,19 +66,29 @@ func testObservabilityLogWriter() async {
         )
     }
 
-    runSuite("EventReporter termination flush wiring") {
-        // Grandfathered source pins: EventReporter (CrashReporter/Sentry) and the
-        // app delegate are not compiled in this runner.
-        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
-        assertTrue(
-            reporterSource.contains("await ReliabilityPacketRecorder.flushForShutdown()"),
-            "the shared local-event shutdown flush should drain reliability packet writes too"
+    await runSuite("Local event shutdown flush awaits buffered events and reliability packets") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("LocalEventShutdownFlushTests-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("events.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: root) }
+
+        let writer = EventFileWriter(fileURL: logURL)
+        await writer.append(observabilityTestEvent(level: "info", event: "buffered_at_quit"))
+        var order: [String] = []
+        await LocalEventShutdownFlush.run(
+            flushEvents: {
+                await writer.flushForShutdown()
+                order.append("events")
+            },
+            flushPackets: {
+                await Task.yield()
+                order.append("packets")
+            }
         )
-        assertTrue(
-            appSource.contains("await EventReporter.shared.flushLocalEventsForShutdown()"),
-            "termination cleanup should flush buffered event logs before replying to AppKit"
-        )
+
+        assertEqual(order, ["events", "packets"], "both flushes finish, events first, before the Quit reply can go out")
+        let contents = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        assertTrue(contents.contains("\"buffered_at_quit\""), "the buffered event is on disk when the flush returns")
     }
 
     runSuite("Local events carry the exact build identity") {
