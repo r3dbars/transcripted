@@ -301,10 +301,11 @@ enum FirstRunExperience {
     ) -> MenuBarPrimaryActionState {
         if isDictating {
             // Clicking "Start Dictation" mid-dictation did nothing, so the
-            // button offers Stop here.
+            // button offers Stop here. The menu bar shows it as "Done" with a
+            // checkmark, so it doesn't read as a second meeting Stop.
             return MenuBarPrimaryActionState(
                 title: "Stop Dictation",
-                symbolName: "stop.circle.fill",
+                symbolName: "checkmark.circle.fill",
                 isEnabled: true,
                 subtitle: ""
             )

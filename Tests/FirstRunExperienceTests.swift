@@ -145,6 +145,7 @@ func testFirstRunExperience() {
 
         assertEqual(state.title, "Stop Dictation", "a Start row that does nothing mid-dictation was a dead click")
         assertTrue(state.isEnabled, "stop must stay clickable")
+        assertEqual(state.symbolName, "checkmark.circle.fill", "the menu bar labels it Done, so it shows a checkmark, not a second stop square")
         assertEqual(state.subtitle, "", "the stop row needs no subtitle")
         assertEqual(
             FirstRunExperience.dictationAction(for: .ready).title,

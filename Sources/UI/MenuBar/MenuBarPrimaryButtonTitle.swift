@@ -11,8 +11,11 @@ enum MenuBarPrimaryButtonTitle {
         switch title {
         case "Record Meeting":
             return "Record"
-        case "Stop Meeting", "Stop Dictation":
+        case "Stop Meeting":
             return "Stop"
+        case "Stop Dictation":
+            // "Done", not a second "Stop" beside the meeting's Stop.
+            return "Done"
         case "Saving Meeting…":
             return "Saving…"
         case "Start Dictation":
