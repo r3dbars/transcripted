@@ -252,6 +252,39 @@ enum PinnedDictationInputPolicy {
     }
 }
 
+/// Whether a fallback to the engine has turned idle warmup back on. A
+/// fallback turns it on until the recorder next starts; the decision is
+/// made on the same selection a start records
+/// (`ParakeetEngine.pinnedDictationInputSelection()`).
+struct PinnedDictationWarmupState: Equatable {
+    private(set) var fellBackToEngine = false
+
+    init(fellBackToEngine: Bool = false) {
+        self.fellBackToEngine = fellBackToEngine
+    }
+
+    /// A pinned start fell back to the engine: warm it again.
+    mutating func recordEngineFallback() {
+        fellBackToEngine = true
+    }
+
+    /// The recorder started: the engine isn't needed warm any more.
+    mutating func recordRecorderStart() {
+        fellBackToEngine = false
+    }
+
+    func skipsEngineWarmup(
+        for selection: DictationInputDeviceSelection?,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        PinnedDictationInputPolicy.skipsEngineWarmup(
+            for: selection,
+            afterEngineFallback: fellBackToEngine,
+            speedPathIsOff: speedPathIsOff
+        )
+    }
+}
+
 enum DictationInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset

@@ -1,21 +1,14 @@
 import Foundation
 
-// Source-text pins: most suites in this file exercise the real DictationStoppedAudioRecovery
-// types (registry retain/remove, WAV persistence/cleanup, the commit policy) against real temp
-// directories — genuine behavioral coverage. The last suites in testDictationStoppedAudioRecovery
-// ("A restart checkpoint imported as a meeting is retired once its transcript is saved" and
-// "Stopped audio is reused, retired and found again at launch") instead grep the
-// MeetingSessionController files, ParakeetDictationTranscription.swift and TranscriptedApp.swift,
-// because each is a @MainActor type
-// (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
-// TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
-// *ordering* of statements inside their real methods (ownership re-check before the prepared
-// snapshot clears native samples): the assertions compare string-range offsets, not just
-// presence, so reordering those statements without moving the matched substrings will break the
-// test even though nothing else changed. Treat the ordering as the real contract and keep it in
-// sync with the source. "External dictation classifies a model error before releasing its
-// lease" also reads STTRouter.swift for the same reason. What the router decides (blank
-// text, thrown errors, empty conversions) is tested through DictationEmptyInferencePolicy.
+// Most suites here run the real DictationStoppedAudioRecovery types (registry retain/remove,
+// WAV persistence/cleanup, the commit policy) against real temp directories. The prepared
+// Stop snapshot and the external-engine lease run through their compiled seams
+// (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes.
+//
+// Two source-text pins are left, each because the type it reads can't be built in this
+// Foundation-only runner: "A restart checkpoint imported as a meeting is retired once its
+// transcript is saved" greps the MeetingSessionController files, and "Stopped audio is found
+// again at launch" greps TranscriptedApp.swift (the @main app delegate).
 
 func testDictationStoppedAudioRecoveryRetryRegistry() {
     runSuite("stopped dictation recovery survives a failed retry until success") {
@@ -50,7 +43,8 @@ func testDictationStoppedAudioRecoveryRetryRegistry() {
     }
 }
 
-func testDictationStoppedAudioRecovery() {
+@MainActor
+func testDictationStoppedAudioRecovery() async {
     runSuite("Dictation stopped audio recovery writes a valid private WAV") {
         let directory = makeRecoveryTestDirectory("wav")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -265,36 +259,40 @@ func testDictationStoppedAudioRecovery() {
         )
     }
 
-    runSuite("Stopped audio is reused, retired and found again at launch") {
+    runSuite("An old Stop's prepared snapshot can't clear a newer recording") {
+        let oldRecording = UUID()
+        let timeline = FakePreparedRecordingTimeline(recordingIdentity: oldRecording, revision: 4)
+        let staleClaim = ParakeetRecordedSamplesClaim(recordingIdentity: oldRecording, revision: 4)
+
+        // A newer recording began while the old Stop was resampling.
+        timeline.recordingIdentity = UUID()
+        assertFalse(
+            PreparedRecordingConsumer.consume(claim: staleClaim, cancelled: false, timeline: timeline),
+            "a stale snapshot is not consumed"
+        )
+        assertEqual(timeline.clears, [], "an old Stop snapshot cannot clear a successor recording's native samples")
+
+        // Same recording, but its timeline changed after the snapshot.
+        let revised = FakePreparedRecordingTimeline(recordingIdentity: oldRecording, revision: 5)
+        assertFalse(PreparedRecordingConsumer.consume(claim: staleClaim, cancelled: false, timeline: revised))
+        assertEqual(revised.clears, [], "a snapshot from before the timeline changed leaves it alone")
+
+        let current = FakePreparedRecordingTimeline(recordingIdentity: oldRecording, revision: 4)
+        assertFalse(PreparedRecordingConsumer.consume(claim: staleClaim, cancelled: true, timeline: current))
+        assertEqual(current.clears, [], "a cancelled consume leaves the native samples")
+
+        assertTrue(
+            PreparedRecordingConsumer.consume(claim: staleClaim, cancelled: false, timeline: current),
+            "the current recording's snapshot is consumed"
+        )
+        assertEqual(current.clears, [true], "consuming the current snapshot clears its native samples once, keeping capacity")
+        // Dropped: the pin on `consumeRecordedSamples(preparedRecording: preparedRecording)`.
+        // It named a call site that skips a second resample, which is a speed choice with
+        // no observable result here; the safety half of it is checked above.
+    }
+
+    runSuite("Stopped audio is found again at launch") {
         do {
-            let speechSource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetDictationTranscription.swift"),
-                encoding: .utf8
-            )
-            assertTrue(
-                speechSource.contains("consumeRecordedSamples(preparedRecording: preparedRecording)"),
-                "speech inference should consume the prepared snapshot instead of resampling native buffers again"
-            )
-            guard let preparedStart = speechSource.range(of: "private func consumeRecordedSamples("),
-                  let preparedEnd = speechSource.range(
-                    of: "func snapshotRecordedSamplesForPersistence()",
-                    range: preparedStart.upperBound..<speechSource.endIndex
-                  ),
-                  let preparedClaim = speechSource.range(
-                    of: "preparedRecording.claim.isCurrent(",
-                    range: preparedStart.upperBound..<preparedEnd.lowerBound
-                  ),
-                  let preparedClear = speechSource.range(
-                    of: "clearRecoveredRecordingTimeline(keepingCapacity: true)",
-                    range: preparedClaim.upperBound..<preparedEnd.lowerBound
-                  ) else {
-                assertTrue(false, "prepared snapshots must revalidate recording ownership before native audio is consumed")
-                return
-            }
-            assertTrue(
-                preparedClaim.lowerBound < preparedClear.lowerBound,
-                "an old Stop snapshot cannot clear a successor recording's native samples"
-            )
             let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
             assertTrue(
                 appSource.contains("sessionController.presentPendingStoppedAudioRecoveryIfNeeded()"),
@@ -305,36 +303,44 @@ func testDictationStoppedAudioRecovery() {
         }
     }
 
-    runSuite("External dictation classifies a model error before releasing its lease") {
-        do {
-            let routerSource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/STTRouter.swift"),
-                encoding: .utf8
-            )
-            guard let externalStart = routerSource.range(of: "private func transcribeUsingExternalEngine("),
-                  let externalEnd = routerSource.range(of: "func transcribeSegment(", range: externalStart.upperBound..<routerSource.endIndex) else {
-                assertTrue(false, "external dictation source should expose its production branch")
-                return
+    await runSuite("External dictation classifies a model error before releasing its lease") {
+        struct ModelBroke: Error {}
+        var released: [String] = []
+        var leaseHeldWhenClassified: Bool?
+        var classified: Error?
+        let thrown = await ExternalEngineTranscription.run(
+            lease: "take-1",
+            release: { released.append($0) },
+            model: { throw ModelBroke() },
+            accept: { _ in
+                assertTrue(false, "a thrown model error never reaches accept")
+                return nil
+            },
+            classify: { error in
+                leaseHeldWhenClassified = released.isEmpty
+                classified = error
             }
-            let external = String(routerSource[externalStart.lowerBound..<externalEnd.lowerBound])
-            guard let owner = external.range(of: "currentRecordedTranscriptionLease"),
-                  let cleanup = external.range(of: "defer {", range: owner.upperBound..<external.endIndex),
-                  let modelCall = external.range(of: "do {", range: cleanup.upperBound..<external.endIndex),
-                  let failureCatch = external.range(of: "} catch {", range: modelCall.upperBound..<external.endIndex),
-                  let failureReason = external.range(
-                    of: "DictationEmptyInferencePolicy.externalEngineFailureReason(",
-                    range: failureCatch.upperBound..<external.endIndex
-                  ) else {
-                assertTrue(false, "external model errors need production classification")
-                return
-            }
-            assertTrue(
-                cleanup.lowerBound < modelCall.lowerBound && modelCall.lowerBound < failureCatch.lowerBound && failureCatch.lowerBound < failureReason.lowerBound,
-                "function-scope cleanup must not release the lease before a thrown model error is classified"
-            )
-        } catch {
-            assertTrue(false, "external dictation source should be readable: \(error)")
-        }
+        )
+        assertNil(thrown, "a model error returns no text")
+        assertTrue(classified is ModelBroke, "the thrown error is the one classified")
+        assertEqual(leaseHeldWhenClassified, true, "function-scope cleanup must not release the lease before a thrown model error is classified")
+        assertEqual(released, ["take-1"], "the lease is released once after classification")
+
+        var acceptedReleased: [String] = []
+        var leaseHeldWhenAccepted: Bool?
+        let text = await ExternalEngineTranscription.run(
+            lease: "take-2",
+            release: { acceptedReleased.append($0) },
+            model: { "hello" },
+            accept: { text in
+                leaseHeldWhenAccepted = acceptedReleased.isEmpty
+                return text.uppercased()
+            },
+            classify: { _ in assertTrue(false, "a returned transcript is never classified as a failure") }
+        )
+        assertEqual(text, "HELLO", "accept decides what a returned transcript becomes")
+        assertEqual(leaseHeldWhenAccepted, true, "a returned transcript is judged while the lease is held")
+        assertEqual(acceptedReleased, ["take-2"], "the lease is released once after a result too")
     }
 
     runSuite("External dictation classifies what came back") {
@@ -382,6 +388,24 @@ func testDictationStoppedAudioRecovery() {
 }
 
 private struct StoppedAudioRetireTestError: Error {}
+
+/// Stands in for ParakeetEngine's recorded timeline: which recording it
+/// holds, and each clear it was asked for (the keepingCapacity flag).
+@MainActor
+private final class FakePreparedRecordingTimeline: PreparedRecordingTimeline {
+    var recordingIdentity: UUID
+    var recordedSamplesRevision: UInt64
+    private(set) var clears: [Bool] = []
+
+    init(recordingIdentity: UUID, revision: UInt64) {
+        self.recordingIdentity = recordingIdentity
+        self.recordedSamplesRevision = revision
+    }
+
+    func clearRecoveredRecordingTimeline(keepingCapacity: Bool) {
+        clears.append(keepingCapacity)
+    }
+}
 
 private func makeRecoveryTestDirectory(_ suffix: String) -> URL {
     FileManager.default.temporaryDirectory
