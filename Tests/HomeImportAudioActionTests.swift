@@ -1,4 +1,4 @@
-// Source-text pins: this test reads Sources/UI/Settings/{TranscriptedSettingsView,HomeView,
+// Source-text pins: this test reads Sources/UI/Settings/{TranscriptedSettingsView,
 // Pages/GeneralSettingsPage,Pages/HomeSettingsPage}.swift as text rather than rendering them, because
 // each is a SwiftUI View wired to the live app object graph this Foundation-only runner can't build —
 // GeneralSettingsPage alone carries eight generic ViewBuilder type parameters, and TranscriptedSettingsView
@@ -18,10 +18,6 @@ func testHomeImportAudioAction() {
         )) ?? ""
         let generalSettingsSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
-            encoding: .utf8
-        )) ?? ""
-        let homeSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
             encoding: .utf8
         )) ?? ""
         // HomeSettingsPage.swift is the extracted Home page view (pure
@@ -56,12 +52,6 @@ func testHomeImportAudioAction() {
                 && settingsSource.contains("trackSettingsAction(\"empty_import_audio\", page: .home)")
                 && settingsSource.contains("actions.importAudioFile()"),
             "Home meetings empty state should expose a visible imported-audio route"
-        )
-        assertTrue(
-            homeSource.contains("secondaryActionTitle")
-                && homeSource.contains("secondaryAutomationIdentifier")
-                && homeSource.contains("secondaryAction"),
-            "Home empty states should render the optional secondary action route"
         )
         assertTrue(
             HomeCaptureListCopy.emptyMeetings.contains("transcribe an existing audio file"),

@@ -471,6 +471,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingMicBoostPromptPolicy.swift"
+    "Sources/Meeting/MeetingMicCapturePlan.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingQuickSummaryExtractor.swift"
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"
