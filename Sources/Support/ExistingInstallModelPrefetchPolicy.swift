@@ -11,6 +11,13 @@ struct ExistingInstallModelPrefetchContext: Equatable {
 enum ExistingInstallModelPrefetchPolicy {
     static let startupDelayNanoseconds: UInt64 = 12_000_000_000
 
+    /// Models warm at launch so the first dictation and meeting never wait on
+    /// a cold load. Only `TRANSCRIPTED_LAZY_MODEL_WARMUP=1` (for idle-memory
+    /// measurements) goes back to first-use loading.
+    static func launchWarmupEnabled(environment: [String: String]) -> Bool {
+        environment["TRANSCRIPTED_LAZY_MODEL_WARMUP"] != "1"
+    }
+
     static func hasExistingInstallSignals(
         onboardingCompleted: Bool,
         hasCaptureLibraryContent: Bool,

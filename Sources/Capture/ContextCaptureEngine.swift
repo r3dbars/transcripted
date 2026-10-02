@@ -13,16 +13,15 @@ import CoreGraphics
 // Use systemUptime (monotonic) instead of CFAbsoluteTimeGetCurrent (wall clock)
 // so NTP adjustments, manual time changes, or DST transitions can't make a
 // backward clock jump silently drop all subsequent hotkey presses.
-private var _lastAcceptedHotkeyTimesByAction: [String: TimeInterval] = [:]
+// Each toggle action has its own bucket; push-to-talk is never debounced
+// (see HotkeyActionDebouncer and PhysicalShortcutAction.hotkeyDebounceID).
+private var hotkeyActionDebouncer = HotkeyActionDebouncer()
 
 private func shouldAcceptHotkeyAction(
-    _ actionKey: String,
+    _ action: PhysicalShortcutAction,
     now: TimeInterval = ProcessInfo.processInfo.systemUptime
 ) -> Bool {
-    let elapsed = now - (_lastAcceptedHotkeyTimesByAction[actionKey] ?? 0)
-    guard elapsed >= TranscriptedConstants.hotkeyActionDebounceInterval else { return false }
-    _lastAcceptedHotkeyTimesByAction[actionKey] = now
-    return true
+    hotkeyActionDebouncer.shouldAccept(action, now: now)
 }
 
 @MainActor
@@ -62,7 +61,7 @@ private final class PhysicalShortcutDetector {
     /// which matches on this exact message to decide whether to poll for
     /// Accessibility permission. Keep both call sites on this constant so a
     /// wording change here can't silently break that retry.
-    static let accessibilityPermissionErrorMessage = "Shortcut trigger needs Accessibility permission"
+    static let accessibilityPermissionErrorMessage = PhysicalShortcutTriggerStatus.accessibilityPermissionErrorMessage
 
     /// Cached binding snapshot, rebuilt by ContextCaptureEngine on
     /// .hotkeysDidChange. The event tap runs on a dedicated run loop so
@@ -136,15 +135,15 @@ private final class PhysicalShortcutDetector {
             userInfo: userInfo
         ) else {
             resetState()
-            return TranscriptedPermissionAccess.isGranted(.accessibility)
-                ? "Shortcut trigger failed to start"
-                : Self.accessibilityPermissionErrorMessage
+            return PhysicalShortcutTriggerStatus.tapCreateFailureMessage(
+                accessibilityGranted: TranscriptedPermissionAccess.isGranted(.accessibility)
+            )
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
             resetState()
-            return "Shortcut trigger failed to start"
+            return PhysicalShortcutTriggerStatus.failedToStartMessage
         }
 
         eventTap = tap
@@ -427,7 +426,7 @@ private final class PhysicalShortcutDetector {
                 let shouldActivate = PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                     current: currentPress,
                     expected: press,
-                    isPhysicallyDown: Self.isExactPhysicalKeyDown(keyCode)
+                    keyState: Self.sessionKeyState
                 )
                 if currentPress == press {
                     self.pendingModifierShortcut = nil
@@ -460,31 +459,30 @@ private final class PhysicalShortcutDetector {
         // Its release may have been missed while the tap was off.
         handsFreeComboTracker.reset()
 
-        if PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
-            activeKeyCode: activePushToTalkKeyCode,
+        let reconciled = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+            activePushToTalkKeyCode: activePushToTalkKeyCode,
+            consumedKeyCodes: consumedKeyCodes,
             isPhysicallyDown: Self.isPhysicalKeyDown
-        ), let releasedKeyCode = activePushToTalkKeyCode {
-            activePushToTalkKeyCode = nil
-            consumedKeyCodes.remove(releasedKeyCode)
+        )
+        activePushToTalkKeyCode = reconciled.activePushToTalkKeyCode
+        consumedKeyCodes = reconciled.consumedKeyCodes
+        if reconciled.synthesizesPushToTalkRelease {
             onShortcut?(.dictationPushToTalk, .release)
         }
-
-        consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }
     }
 
+    /// Real session state, read when the tap may have missed events.
     private static func isPhysicalKeyDown(_ keyCode: UInt32) -> Bool {
-        if PhysicalDictationTriggerPreferences.isModifierKey(keyCode),
-           let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) {
-            let modifiers = PhysicalDictationTriggerPreferences.modifiers(
+        PhysicalShortcutMatcher.isPhysicalKeyDown(
+            keyCode,
+            modifierFlags: PhysicalDictationTriggerPreferences.modifiers(
                 from: CGEventSource.flagsState(.combinedSessionState)
-            )
-            return (modifiers & modifier) != 0
-        }
-
-        return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+            ),
+            keyState: sessionKeyState
+        )
     }
 
-    private static func isExactPhysicalKeyDown(_ keyCode: UInt32) -> Bool {
+    private static func sessionKeyState(_ keyCode: UInt32) -> Bool {
         CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
     }
 }
@@ -642,58 +640,30 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private static func currentShortcutBindings() -> [PhysicalShortcutBinding] {
-        var bindings = [
-            PhysicalShortcutBinding(
-                action: .meeting,
-                binding: PhysicalDictationTriggerPreferences.meetingBinding()
-            ),
-            PhysicalShortcutBinding(
-                action: .pasteLastDictation,
-                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
-            )
-        ]
-
-        guard HotkeyPreferences.dictationShortcutsEnabled() else {
-            return bindings
-        }
-
-        bindings.insert(
-            PhysicalShortcutBinding(
-                action: .dictationPushToTalk,
-                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-            ),
-            at: 0
-        )
-        bindings.insert(
-            PhysicalShortcutBinding(
-                action: .dictationHandsFree,
-                binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
-            ),
-            at: 1
-        )
-        return bindings
+        PhysicalShortcutMatcher.configuredBindings()
     }
 
     private func updateHotkeyError() {
-        let errors = [
-            physicalTriggerError,
-            HotkeyPreferences.dictationShortcutsEnabled()
+        // One warning at a time: two joined sentences got clipped in the
+        // menu bar header. The tap failure comes first; the Fn conflict
+        // only matters once shortcuts work at all.
+        let dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+        let nextError = PhysicalShortcutTriggerStatus.bannerMessage(
+            registrationError: physicalTriggerError,
+            dictationShortcutsEnabled: dictationShortcutsEnabled,
+            functionKeyConflictWarning: dictationShortcutsEnabled
                 ? PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
                     for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
                 )
                 : nil
-        ].compactMap { $0 }
-        // One warning at a time: two joined sentences got clipped in the
-        // menu bar header. The tap failure comes first; the Fn conflict
-        // only matters once shortcuts work at all.
-        let nextError = errors.first
+        )
         if hotkeyError != nextError {
             hotkeyError = nextError
         }
     }
 
     private func updateAccessibilityRetryMonitor() {
-        guard physicalTriggerError == PhysicalShortcutDetector.accessibilityPermissionErrorMessage else {
+        guard PhysicalShortcutTriggerStatus.retriesAfterAccessibilityGrant(registrationError: physicalTriggerError) else {
             accessibilityRetryTask?.cancel()
             accessibilityRetryTask = nil
             return
@@ -736,7 +706,7 @@ class ContextCaptureEngine: ObservableObject {
 
     private func handlePhysicalDictationHandsFreePress() {
         handsFreePressStartedSessionID = nil
-        guard shouldAcceptHotkeyAction("dictation_hands_free") else {
+        guard shouldAcceptHotkeyAction(.dictationHandsFree) else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
                 level: .info,
@@ -825,7 +795,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalMeetingPress() {
-        guard shouldAcceptHotkeyAction("meeting_physical_trigger") else {
+        guard shouldAcceptHotkeyAction(.meeting) else {
             EventReporter.shared.capture(
                 level: .info,
                 engine: "capture",
@@ -840,7 +810,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalPasteLastDictationPress() {
-        guard shouldAcceptHotkeyAction("paste_last_dictation_physical_trigger") else {
+        guard shouldAcceptHotkeyAction(.pasteLastDictation) else {
             EventReporter.shared.capture(
                 level: .info,
                 engine: "capture",

@@ -1,31 +1,15 @@
 // ContextCaptureEnginePolicyTests.swift
-// Tests for the externally-observable policy that ContextCaptureEngine relies on:
-// the hotkey-action debounce constant, the hotkeys-changed notification name,
-// the default binding set that feeds the detector's cached binding snapshot,
-// and the conflict-warning text that flows into the engine's hotkeyError
-// pipeline.
+// Promises the capture engine keeps, checked through the pure seams it
+// delegates to: the per-action hotkey repeat guard, the binding snapshot the
+// event tap matches against, tap-disabled recovery, the Accessibility retry
+// gate, the hotkey banner, and the default bindings, display strings and
+// chord matching the detector relies on.
 //
-// NOTE: ContextCaptureEngine itself is @MainActor and wired to AppKit,
-// NSWorkspace, DictationSessionController, FloatingOverlayController,
-// EventReporter, and DiagnosticsTrail. Its remaining internal seams
-// (shouldAcceptHotkeyAction, routeDictationToggle, PhysicalShortcutDetector)
-// are file-private. These tests cover the shared constants and preference seams
-// the engine consumes, plus the pure chord-resolution precedence the engine now
-// delegates to PhysicalShortcutMatcher (PhysicalShortcutAction /
-// PhysicalShortcutBinding live alongside it), not the engine class itself.
-//
-// Source-text pins: several suites above call readSourceFixture on
-// Sources/Capture/ContextCaptureEngine.swift, Sources/TranscriptedAppState.swift, and
-// Sources/UI/Overlay/DictationSessionController.swift and grep for exact symbol names or literal
-// strings (e.g. "_lastAcceptedHotkeyTimesByAction", "reconcileActivePushToTalkAfterTapDisabled()",
-// "overlayController.showError(...)") instead of calling the code — all three types are @MainActor
-// (ContextCaptureEngine is AppKit/NSWorkspace-wired as noted above, DictationSessionController is
-// AppKit-wired too, and TranscriptedAppState is SwiftUI-wired and owns ContextCaptureEngine plus
-// other engine dependencies), so this Foundation-only runner cannot construct them. What is
-// pinned: debounce/callback bookkeeping, tap re-enable and reconciliation ordering,
-// run-loop wiring, which error property wake-recovery reads, and the finishing-hotkey UX message.
-// If you rename or restructure any of that, update the matching source.contains(...)/source.range(of:)
-// string here to match.
+// ContextCaptureEngine itself is @MainActor and wired to AppKit, NSWorkspace,
+// CGEventTap and DictationSessionController, so this runner doesn't build it.
+// What still needs the real app (the tap's dedicated run-loop thread, the
+// Accessibility polling loop, lock-held delayed press delivery) is covered by
+// `bash check.sh hardware` and the manual checks in Sources/Capture/CLAUDE.md.
 
 import AppKit
 import Carbon
@@ -63,83 +47,139 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("ContextCaptureEngine hotkey debounce — tracks toggle actions and exempts push-to-talk press") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
+    runSuite("Hotkey repeat guard — a second press of the same toggle inside the window is dropped") {
+        var debouncer = HotkeyActionDebouncer(interval: 0.2)
+        assertTrue(debouncer.shouldAccept(.dictationHandsFree, now: 100), "first hands-free press goes through")
+        assertFalse(debouncer.shouldAccept(.dictationHandsFree, now: 100.1), "a Carbon double-fire 100ms later is dropped")
+        assertTrue(debouncer.shouldAccept(.dictationHandsFree, now: 100.3), "a press after the window goes through")
+        assertFalse(debouncer.shouldAccept(.dictationHandsFree, now: 100.4), "the window restarts from the last accepted press")
+    }
 
-        assertTrue(
-            source.contains("_lastAcceptedHotkeyTimesByAction"),
-            "hotkey debounce should store last accepted times per action instead of one global timestamp"
+    runSuite("Hotkey repeat guard — each toggle action has its own window") {
+        var debouncer = HotkeyActionDebouncer(interval: 0.2)
+        assertTrue(debouncer.shouldAccept(.dictationHandsFree, now: 50), "hands-free press goes through")
+        assertTrue(debouncer.shouldAccept(.meeting, now: 50.05), "a meeting press right after a dictation press still goes through")
+        assertTrue(debouncer.shouldAccept(.pasteLastDictation, now: 50.1), "paste-last-dictation has its own window too")
+        assertFalse(debouncer.shouldAccept(.meeting, now: 50.1), "a repeat meeting press is still dropped")
+    }
+
+    runSuite("Hotkey repeat guard — push-to-talk presses are never dropped") {
+        // Its release is paired to the physical key hold. A swallowed press
+        // would leave a release with nothing to stop.
+        var debouncer = HotkeyActionDebouncer(interval: 0.2)
+        assertNil(PhysicalShortcutAction.dictationPushToTalk.hotkeyDebounceID, "push-to-talk has no repeat bucket")
+        assertTrue(debouncer.shouldAccept(.dictationPushToTalk, now: 10), "first push-to-talk press goes through")
+        assertTrue(debouncer.shouldAccept(.dictationPushToTalk, now: 10.01), "a quick second hold still goes through")
+        assertTrue(debouncer.shouldAccept(.dictationHandsFree, now: 10.02), "push-to-talk presses don't use up the hands-free window")
+    }
+
+    runSuite("Hotkey repeat guard — default window is the shared debounce constant") {
+        var debouncer = HotkeyActionDebouncer()
+        let interval = TranscriptedConstants.hotkeyActionDebounceInterval
+        assertEqual(debouncer.interval, interval, "the engine's guard uses TranscriptedConstants.hotkeyActionDebounceInterval")
+        assertTrue(debouncer.shouldAccept(.meeting, now: 1000), "first press goes through")
+        assertFalse(debouncer.shouldAccept(.meeting, now: 1000 + interval / 2), "a repeat inside the shared window is dropped")
+        assertTrue(debouncer.shouldAccept(.meeting, now: 1000 + interval), "a press at the window edge goes through")
+    }
+
+    runSuite("Hotkey repeat guard — telemetry ids stay stable") {
+        assertEqual(PhysicalShortcutAction.dictationHandsFree.hotkeyDebounceID, "dictation_hands_free", "hands-free bucket id")
+        assertEqual(PhysicalShortcutAction.meeting.hotkeyDebounceID, "meeting_physical_trigger", "meeting bucket id")
+        assertEqual(
+            PhysicalShortcutAction.pasteLastDictation.hotkeyDebounceID,
+            "paste_last_dictation_physical_trigger",
+            "paste-last-dictation bucket id"
         )
+    }
+
+    runSuite("Tap re-enable — a push-to-talk key let go while the tap was off gets its release") {
+        let fn = UInt32(kVK_Function)
+        let m = UInt32(kVK_ANSI_M)
+        let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+            activePushToTalkKeyCode: fn,
+            consumedKeyCodes: [fn, m],
+            isPhysicallyDown: { _ in false }
+        )
+        assertTrue(result.synthesizesPushToTalkRelease, "the missed keyUp must become a push-to-talk release so the take stops and pastes")
+        assertNil(result.activePushToTalkKeyCode, "push-to-talk is no longer active")
+        assertEqual(result.consumedKeyCodes, [], "keys that are no longer down are forgotten so their next press isn't swallowed")
+    }
+
+    runSuite("Tap re-enable — a push-to-talk key still held keeps recording") {
+        let fn = UInt32(kVK_Function)
+        let m = UInt32(kVK_ANSI_M)
+        let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+            activePushToTalkKeyCode: fn,
+            consumedKeyCodes: [fn, m],
+            isPhysicallyDown: { $0 == fn }
+        )
+        assertFalse(result.synthesizesPushToTalkRelease, "a held key must not be released early")
+        assertEqual(result.activePushToTalkKeyCode, fn, "push-to-talk stays active")
+        assertEqual(result.consumedKeyCodes, [fn], "the held key stays consumed; the released one is dropped")
+    }
+
+    runSuite("Tap re-enable — nothing active means no release") {
+        let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+            activePushToTalkKeyCode: nil,
+            consumedKeyCodes: [],
+            isPhysicallyDown: { _ in false }
+        )
+        assertFalse(result.synthesizesPushToTalkRelease, "no push-to-talk hold means nothing to release")
+        assertNil(result.activePushToTalkKeyCode, "stays idle")
+    }
+
+    runSuite("Physical key state — a modifier key counts as down while its modifier family is held") {
+        let rightOption = UInt32(kVK_RightOption)
         assertTrue(
-            source.contains("shouldAcceptHotkeyAction(\"dictation_hands_free\")"),
-            "hands-free dictation should have its own debounce key"
+            PhysicalShortcutMatcher.isPhysicalKeyDown(
+                rightOption,
+                modifierFlags: PhysicalDictationTriggerModifiers.option,
+                keyState: { _ in false }
+            ),
+            "recovery reads the Option flag for an Option binding"
         )
         assertFalse(
-            source.contains("shouldAcceptHotkeyAction(\"dictation_push_to_talk\")"),
-            "push-to-talk press should not use toggle debounce because release is paired to the physical key hold"
+            PhysicalShortcutMatcher.isPhysicalKeyDown(rightOption, modifierFlags: 0, keyState: { _ in true }),
+            "no Option flag means the Option binding was let go"
         )
+        let m = UInt32(kVK_ANSI_M)
         assertTrue(
-            source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),
-            "meeting physical trigger should have its own debounce key"
-        )
-        assertTrue(
-            source.contains("shouldAcceptHotkeyAction(\"paste_last_dictation_physical_trigger\")"),
-            "paste-last-dictation trigger should have its own debounce key"
-        )
-    }
-
-    runSuite("ContextCaptureEngine hotkey unregister — preserves paste callback owner") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("var onPasteLastDictation: (() -> Void)?"),
-            "paste-last-dictation callback should stay on the engine like the meeting toggle callback"
+            PhysicalShortcutMatcher.isPhysicalKeyDown(m, modifierFlags: 0, keyState: { $0 == m }),
+            "a typing key reads its own key state"
         )
         assertFalse(
-            source.contains("onPasteLastDictation = nil"),
-            "hotkey unregister/re-register recovery should not clear the app-owned paste callback"
+            PhysicalShortcutMatcher.isPhysicalKeyDown(m, modifierFlags: PhysicalDictationTriggerModifiers.option, keyState: { _ in false }),
+            "modifier flags don't make a typing key look held"
         )
     }
 
-    runSuite("ContextCaptureEngine tap re-enable — reconciles missed push-to-talk release") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
-            "tapDisabledByTimeout/userInput should reconcile active push-to-talk state before re-enabling the tap"
+    runSuite("Delayed modifier press — checks the bound key, not the whole modifier family") {
+        let rightOption = UInt32(kVK_RightOption)
+        let leftOption = UInt32(kVK_Option)
+        let press = DelayedModifierShortcutPress(generation: 3, keyCode: rightOption, action: .dictationPushToTalk)
+        assertFalse(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: press,
+                expected: press,
+                keyState: { $0 == leftOption }
+            ),
+            "Left Option held must not start a Right Option push-to-talk"
         )
         assertTrue(
-            source.contains("PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease("),
-            "the detector should use the pure missed-release policy before synthesizing release"
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: press,
+                expected: press,
+                keyState: { $0 == rightOption }
+            ),
+            "the bound Right Option still held starts push-to-talk"
         )
-        assertTrue(
-            source.contains("CGEventSource.flagsState(.combinedSessionState)")
-                && source.contains("CGEventSource.keyState(.combinedSessionState"),
-            "reconciliation should query the real physical modifier/key state"
-        )
-        assertTrue(
-            source.contains("consumedKeyCodes.remove(releasedKeyCode)")
-                && source.contains("onShortcut?(.dictationPushToTalk, .release)"),
-            "synthesized release should clear the consumed key and route the normal release callback"
-        )
-    }
-
-    runSuite("ContextCaptureEngine delayed modifier — exact key state and ordered delivery") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("isPhysicallyDown: Self.isExactPhysicalKeyDown(keyCode)"),
-            "delayed modifier activation must check the bound side, not an aggregate modifier family flag"
-        )
-        assertTrue(
-            source.contains("private static func isExactPhysicalKeyDown")
-                && source.contains("CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))"),
-            "the exact-key check should query the bound virtual key state"
-        )
-        assertTrue(
-            source.contains("defer { self.stateLock.unlock() }")
-                && source.contains("self.onShortcut?(action, .press)"),
-            "delayed press ownership and delivery should remain one lock-protected transition"
+        assertFalse(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: nil,
+                expected: press,
+                keyState: { _ in true }
+            ),
+            "a press that was already cancelled never activates"
         )
     }
 
@@ -165,105 +205,115 @@ func testContextCaptureEnginePolicy() {
     // lookups plus migration fallbacks) per keystroke, which added latency to
     // all typing on the machine and raised the tapDisabledByTimeout risk.
 
-    runSuite("ContextCaptureEngine binding snapshot — tap callback reads cached bindings, not per-event UserDefaults") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
+    runSuite("Binding snapshot — dictation shortcuts on: push-to-talk, hands-free, meeting, paste") {
+        let (defaults, suiteName) = makeContextCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        assertTrue(
-            source.contains("physicalShortcutDetector.updateShortcutBindings(Self.currentShortcutBindings())"),
-            "engine should rebuild the detector's cached binding snapshot when it (re)configures the detector"
-        )
-        assertFalse(
-            source.contains("bindingProvider"),
-            "per-event binding provider closure must stay removed — the tap callback reads the cached snapshot instead of resolving preferences per keystroke"
-        )
-    }
-
-    runSuite("ContextCaptureEngine event tap — serviced on dedicated run loop instead of main") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("TranscriptedPhysicalShortcutTap"),
-            "physical shortcut event tap should run on its own named thread"
-        )
-        assertTrue(
-            source.contains("CFRunLoopAddSource(runLoop, source, .commonModes)"),
-            "event tap source should be installed on the dedicated thread run loop"
-        )
-        assertFalse(
-            source.contains("CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)"),
-            "system-wide keyboard events must not be serviced on the app's main run loop"
-        )
-    }
-
-    runSuite("ContextCaptureEngine tap-disabled recovery — reconciles missed push-to-talk release") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
-            "tap-disabled events should reconcile detector state before re-enabling the tap"
-        )
-        assertTrue(
-            source.contains("cancelPendingModifierShortcut()")
-                && source.contains("func reconcileActivePushToTalkAfterTapDisabled"),
-            "reconciliation should cancel any pending modifier-chord shortcut before re-enabling the tap"
-        )
-        assertTrue(
-            source.contains("consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }"),
-            "reconciliation should drop consumed key codes that are no longer physically down"
-        )
-        assertTrue(
-            source.contains("CGEventSource.keyState(.combinedSessionState"),
-            "reconciliation should check the physical key state for a missed keyUp"
-        )
-        assertTrue(
-            source.contains("onShortcut?(.dictationPushToTalk, .release)"),
-            "a released push-to-talk key should synthesize the missing release callback"
-        )
-    }
-
-    runSuite("ContextCaptureEngine Accessibility retry — re-registers after permission is granted") {
-        let source = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            source.contains("accessibilityRetryTask"),
-            "engine should keep a lightweight retry task while Accessibility is missing"
-        )
-        assertTrue(
-            source.contains("TranscriptedPermissionAccess.isGranted(.accessibility)"),
-            "retry task should poll the real Accessibility grant state"
-        )
-        assertTrue(
-            source.contains("self.reRegisterHotkeys()"),
-            "granting Accessibility should re-attempt physical trigger registration without waiting for wake or relaunch"
-        )
-    }
-
-    runSuite("TranscriptedAppState wake recovery — uses registration error, not advisory warning") {
-        let appStateSource = readSourceFixture("Sources/TranscriptedAppState.swift")
-        let contextSource = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-
-        assertTrue(
-            contextSource.contains("var hotkeyRegistrationError: String?"),
-            "ContextCaptureEngine should expose the real registration failure separately from advisory banner text"
-        )
-        assertTrue(
-            appStateSource.contains("self?.contextCapture.hotkeyRegistrationError"),
-            "wake recovery should ignore Fn-conflict advisory warnings when deciding whether registration succeeded"
-        )
-        assertFalse(
-            appStateSource.contains("self?.contextCapture.hotkeyError"),
-            "wake recovery must not treat advisory hotkeyError banner text as registration failure"
-        )
-    }
-
-    runSuite("DictationSessionController finishing hotkey — shows visible feedback instead of silent swallow") {
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
+            bindings.map(\.action),
+            [.dictationPushToTalk, .dictationHandsFree, .meeting, .pasteLastDictation],
+            "dictation shortcuts come first so they win shared-key ties"
+        )
+        assertEqual(bindings.map(\.binding), [
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
+        ], "a fresh install snapshots the default bindings")
+    }
+
+    runSuite("Binding snapshot — dictation shortcuts off still keeps meeting and paste") {
+        let (defaults, suiteName) = makeContextCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
+
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        assertEqual(
+            bindings.map(\.action),
+            [.meeting, .pasteLastDictation],
+            "turning dictation shortcuts off must not take the meeting or paste shortcuts with it"
+        )
+    }
+
+    runSuite("Binding snapshot — reflects saved bindings when rebuilt") {
+        let (defaults, suiteName) = makeContextCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let before = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
+        let after = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        assertEqual(before.count, 4, "first snapshot has all four shortcuts")
+        assertEqual(after.count, 2, "a rebuild after a preference change picks up the new state")
+    }
+
+    runSuite("Accessibility retry — only a missing grant waits for the grant") {
+        let missingGrant = PhysicalShortcutTriggerStatus.tapCreateFailureMessage(accessibilityGranted: false)
+        let otherFailure = PhysicalShortcutTriggerStatus.tapCreateFailureMessage(accessibilityGranted: true)
+
+        assertEqual(missingGrant, "Shortcut trigger needs Accessibility permission", "the menu bar matches on this text to offer the Accessibility pane")
+        assertTrue(
+            PhysicalShortcutTriggerStatus.retriesAfterAccessibilityGrant(registrationError: missingGrant),
+            "a missing grant keeps polling so granting it re-registers without wake or relaunch"
+        )
+        assertFalse(
+            PhysicalShortcutTriggerStatus.retriesAfterAccessibilityGrant(registrationError: otherFailure),
+            "a tap failure with Accessibility granted isn't fixed by waiting for the grant"
+        )
+        assertFalse(
+            PhysicalShortcutTriggerStatus.retriesAfterAccessibilityGrant(registrationError: nil),
+            "a working tap doesn't poll"
+        )
+    }
+
+    runSuite("Hotkey banner — a Fn conflict is advisory, never a registration failure") {
+        let warning = "Fn conflict"
+        assertEqual(
+            PhysicalShortcutTriggerStatus.bannerMessage(
+                registrationError: nil,
+                dictationShortcutsEnabled: true,
+                functionKeyConflictWarning: warning
+            ),
+            warning,
+            "with the tap working, the Fn conflict shows in the banner"
+        )
+        // Wake recovery reads the registration error (nil here), not this
+        // banner, so it doesn't retry registration over an advisory warning.
+        assertEqual(
+            PhysicalShortcutTriggerStatus.bannerMessage(
+                registrationError: "Shortcut trigger failed to start",
+                dictationShortcutsEnabled: true,
+                functionKeyConflictWarning: warning
+            ),
+            "Shortcut trigger failed to start",
+            "a registration failure wins: one message at a time so the header isn't clipped"
+        )
+        assertNil(
+            PhysicalShortcutTriggerStatus.bannerMessage(
+                registrationError: nil,
+                dictationShortcutsEnabled: false,
+                functionKeyConflictWarning: warning
+            ),
+            "the Fn conflict doesn't matter while dictation shortcuts are off"
+        )
+    }
+
+    runSuite("Ignored stop during finishing — says it's still finishing instead of a silent swallow") {
+        func route(finishing: Bool) -> DictationStopRoute {
             DictationStopRoute.route(
                 stopDecision: .ignoreInactive, trigger: .physicalKey,
-                isFinishingPreviousTake: true, isRecording: false, hasRecoverableRecording: false
-            ),
+                isFinishingPreviousTake: finishing, isRecording: false, hasRecoverableRecording: false
+            )
+        }
+        assertEqual(
+            route(finishing: true),
             .ignore(showStillFinishing: true),
-            "ignored stop intent during the drafting/transcribing window should be surfaced to the user"
+            "a stop press while the last take is drafting or transcribing gets the visible finishing message"
+        )
+        assertEqual(
+            route(finishing: false),
+            .ignore(showStillFinishing: false),
+            "with nothing finishing, an ignored stop stays quiet"
         )
         assertEqual(
             DictationStopRoute.stillFinishingMessage,
