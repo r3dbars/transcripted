@@ -574,6 +574,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
+    "Sources/UI/Settings/SettingsActionFailureCopy.swift"
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
     "Sources/UI/Settings/HomeScanWarningPolicy.swift"
