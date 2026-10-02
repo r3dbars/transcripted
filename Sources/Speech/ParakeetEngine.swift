@@ -309,7 +309,7 @@ class ParakeetEngine: ObservableObject {
         audioEngine.attachedNodes.compactMap { $0 as? AVAudioInputNode }.first
     }
 
-    nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
+    fileprivate nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
         guard !audioEngine.isRunning else { return false }
         guard let inputNode = existingInputNode(on: audioEngine) else { return true }
         return applyDictationVoiceProcessingPreference(false, to: inputNode)
