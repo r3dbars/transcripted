@@ -11,6 +11,7 @@
     {
       "name": "WritingCore",
       "paths": ["Sources/TranscriptedWriting/Core"],
+      "appTarget": false,
       "mayDependOn": [],
       "agentsDoc": "Sources/TranscriptedWriting/AGENTS.md"
     },
@@ -79,7 +80,7 @@
       "name": "UIOverlay",
       "paths": ["Sources/UI/Overlay"],
       "mayDependOn": ["UIShared", "AppState", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
-      "agentsDoc": "Sources/UI/AGENTS.md"
+      "agentsDoc": "Sources/UI/Overlay/AGENTS.md"
     },
     {
       "name": "UIMenuBar",

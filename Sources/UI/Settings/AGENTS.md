@@ -64,8 +64,8 @@ settings-side agent connection flow.
   and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
   automation ids, analytics `page_id`, and source pins stay stable. Then
   Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6. Also holds
-  `WritingSidebarNewBadge`, whose defaults key the Writing page sets when
-  setup finishes.
+  `WritingSidebarNewBadge.isShown(for:dismissed:)`; the badge's defaults key
+  lives in `Sources/Writing/WritingSidebarNewBadge.swift`.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
   `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
   rolling seven-day tape, and the sessions list all come from local capture
@@ -226,10 +226,8 @@ settings-side agent connection flow.
   it), `WritingEverydayView.swift` (after setup: summary, today's saved
   writing, autocomplete numbers), `WritingSettingsSection.swift` (the two
   features, personalized suggestions, model switch, storage meter, Delete
-  all writing), `WritingComponents.swift` (shared buttons), and
-  `WritingSetupPresentation.swift` (Foundation-pure copy and small rules from
-  the approved design in `docs/writing-plan.md`; covered by
-  `Tests/WritingSetupPresentationTests.swift`).
+  all writing), and `WritingComponents.swift` (shared buttons). The tab's
+  copy, `WritingSetupPresentation.swift`, lives in `Sources/Writing/`.
 
 ## Guardrails
 

@@ -39,7 +39,7 @@
     "Sources/UI/Settings/QuietHomeLibrary.swift": 1028,
     "Sources/UI/Settings/SpeakerNamingSheet.swift": 1416,
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894,
-    "Sources/Writing/WritingController.swift": 1313,
+    "Sources/Writing/WritingController.swift": 1302,
     "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/AutoResearch.swift": 820,
     "Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift": 803,
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/ToolHandlers.swift": 874,

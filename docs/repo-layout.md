@@ -86,7 +86,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
 - `Sources/Writing/` — Writing's app bridge: `WritingController` hosts the runtime, Save my writing day files, the Writing tab's model, count-only analytics
-- `Sources/TranscriptedWriting/` — Writing's autocomplete library, ported from Tilde: `Core/` (pure policy) and `Runtime/` (model, `llama-server` host, socket, Screen Memory); see `docs/writing-plan.md`
+- `Sources/TranscriptedWriting/` — Writing's autocomplete library, ported from Tilde: `Core/` (pure policy, built as the `TranscriptedWritingCore` module) and `Runtime/` (model, `llama-server` host, socket, Screen Memory); see `docs/writing-plan.md`
 - `Sources/TranscriptedKeyboard/` — Writing's IMKit keyboard; built by `scripts/entrypoints/lib/bundle-input-method.sh` into `Contents/Library/Input Methods/`, never into the app binary
 - `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
@@ -136,17 +136,18 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 ## Build system
 
 - `build.sh` is the authoritative app build, using raw `swiftc`. Core enters the app through the prebuilt static archive from `build-deps.sh`, never compiled into the app target.
+- `scripts/entrypoints/lib/swiftc-app-args.sh` (shared by `build.sh`, `build-beta.sh` and the typecheck scripts) first compiles `Sources/TranscriptedWriting/Core/` as its own static Swift module, `TranscriptedWritingCore`, into `build/modules/`, then links it into the app. App files that use its types import it under `#if canImport(TranscriptedWritingCore)`, so the fast tests and smokes can still compile the few Core files they need straight in.
 - `Package.swift` exists for the `TranscriptedCore` package tests and smoke coverage. It links `deps-libs/libExternalDeps.a` plus the binary frameworks under `deps-frameworks/` through `#filePath`-relative flags, so it works under `swift test` and Xcode alike.
 - The app build keeps `libDraftDeps.a` (legacy name: FluidAudio, deps, and TranscriptedCore objects) separate from the package path's `libExternalDeps.a`.
 
 ## Modules
 
-The app compiles as one Swift target, so folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Crossings that predate the check are in `.agents/module-boundary-baseline.json` and can only shrink. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
+The app compiles as one Swift target (plus the `TranscriptedWritingCore` module), so for the rest, folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Crossings that predate the check are in `.agents/module-boundary-baseline.json` and can only shrink. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
 
 | Module | Folders | May depend on |
 | --- | --- | --- |
 | Core | `Sources/TranscriptedCore/` (separate library) | nothing in the app |
-| WritingCore | `Sources/TranscriptedWriting/Core/` | nothing |
+| WritingCore | `Sources/TranscriptedWriting/Core/` (its own Swift module) | nothing |
 | WritingRuntime | `Sources/TranscriptedWriting/Runtime/` | WritingCore |
 | Keyboard | `Sources/TranscriptedKeyboard/` (separate bundle) | WritingCore |
 | Support | `Sources/Support/`, `Sources/Accessibility/`, `Sources/Reliability/` | Core `core-vocab` |
