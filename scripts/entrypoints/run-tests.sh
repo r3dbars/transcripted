@@ -590,7 +590,6 @@ APP_SOURCES=(
     "Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"
     "Sources/UI/Settings/HomeTranscriptionActivityCopy.swift"
     "Sources/UI/Overlay/CapturePillController.swift"
-    "Sources/UI/Overlay/CapturePillPlacementPolicy.swift"
     "Sources/UI/Overlay/NotchIslandPresentation.swift"
     "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
     "Sources/UI/Overlay/NotchIslandGeometry.swift"

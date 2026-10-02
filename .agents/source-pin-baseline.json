@@ -18,7 +18,7 @@
     "Tests/MeetingSessionUIPolicyTests.swift": 13,
     "Tests/NightlySecurityContractTests.swift": 34,
     "Tests/ObservabilityLogWriterTests.swift": 2,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 14,
+    "Tests/OverlayScreenSharePrivacyTests.swift": 10,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 3,
     "Tests/ParakeetRecoveryStateTests.swift": 9,
     "Tests/PermissionStateHarnessContractTests.swift": 20,

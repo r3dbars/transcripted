@@ -7,7 +7,7 @@ Module `UIOverlay` in `.agents/modules.json`. The file-by-file notes stay in `So
 Everything on screen while you dictate or record, plus the dictation session itself:
 
 - The Notch island (`NotchIsland*`): the only dictation, meeting and call-prompt window since #1946. One black shape grows out of the notch (or hangs from the top edge of a display without one) and carries dictation, the live meeting, the call-detected Record / Not now / Later prompt, and "Who was on this call?".
-- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording pill state, warnings, rest/wake) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. Their old panels (`FloatingOverlayPanel`, `MeetingOverlayPanel`, `CapturePillPanel` and their views) are still in the tree but nothing picks them, because `NotchIslandController.isSelected` is always true.
+- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording pill state, warnings, rest/wake) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. Their old panels (`FloatingOverlayPanel`, `MeetingOverlayPanel` and their views) are still in the tree but nothing picks them, because `NotchIslandController.isSelected` is always true. `CapturePillController` has no panel left; it only presents through the island.
 - `DictationSessionController` and its `+*.swift` extensions: start, stop, paste-back, persistence, recovery, presses, the 5-minute cap and telemetry. `DictationSessionPipeline` and `DictationStartAdmission` hold the start/stop wiring behind protocols so tests run them on fakes.
 - The dictation start and presentation policies (`Dictation*Policy`, `DictationTrigger`, `DictationStartActivation`) and the meeting pill policies (`MeetingPillRestPolicy`, `MeetingPromptPriority`, `MeetingDurationFormatter`).
 
@@ -37,7 +37,7 @@ Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 bash run-tests.sh --filter NotchIsland
 bash run-tests.sh --filter Dictation
 bash run-tests.sh --filter MeetingPill
-bash run-tests.sh --filter CapturePill
+bash run-tests.sh --filter CallPromptTimeoutClock
 ```
 
 Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOverlayPlacementPolicyTests`, and `OverlayScreenSharePrivacyTests` (it scans all of `Sources/UI`). The island normally can't be screenshotted; review a visual change by rendering `NotchIslandView` offscreen with `NSView.cacheDisplay(in:to:)`.

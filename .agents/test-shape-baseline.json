@@ -20,7 +20,7 @@
     "Tests/MeetingSessionUIPolicyTests.swift": 6,
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 8,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 19,
+    "Tests/OverlayScreenSharePrivacyTests.swift": 17,
     "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 1,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 4,
