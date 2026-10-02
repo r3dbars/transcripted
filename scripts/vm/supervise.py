@@ -78,6 +78,20 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int, name: 
             note(log, f"could not start {name}: {error}")
             os.write(ready_fd, b"error\n")
             return 1
+
+        def forward(num, _frame):
+            note(log, f"helper got {signal.Signals(num).name}; asking {name} to stop (SIGINT)")
+            try:
+                child.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
+
+        # Install the handlers before telling anyone the pid. Otherwise a signal
+        # that lands right after start kills the helper with the default action
+        # and the child is left running with no line in the log.
+        for num in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(num, forward)
+
         with open(pidfile, "w") as handle:
             handle.write(f"{child.pid}\n")
         note(log, f"{name} started (pid {child.pid}, helper pid {os.getpid()}, own session)")
@@ -89,16 +103,6 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int, name: 
             caffeinate = subprocess.Popen(["caffeinate", "-i", "-w", str(child.pid)],
                                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL)
-
-        def forward(num, _frame):
-            note(log, f"helper got {signal.Signals(num).name}; asking {name} to stop (SIGINT)")
-            try:
-                child.send_signal(signal.SIGINT)
-            except ProcessLookupError:
-                pass
-
-        for num in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-            signal.signal(num, forward)
 
         while True:
             try:

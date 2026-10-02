@@ -158,8 +158,8 @@ let package = Package(
         // Screen Memory, personal history, the outcome-ledger readers and the
         // keyboard installer. build.sh compiles these files straight into the
         // app module too, so their Core import is guarded with
-        // `#if canImport(TranscriptedWritingCore)`. Nothing starts it yet; the
-        // bridge in Sources/Writing/ will.
+        // `#if canImport(TranscriptedWritingCore)`. The app starts it through
+        // WritingController in Sources/Writing/.
         .target(
             name: "TranscriptedWritingRuntime",
             dependencies: ["TranscriptedWritingCore"],
