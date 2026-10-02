@@ -65,9 +65,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/voxceleb_sample.py` — hard-capped VoxCeleb1 identity/clip streaming sampler used by `download_voxceleb_sample.sh`
 - `scripts/build_voxceleb_sessions.py` — stitch sampled VoxCeleb clips into synthetic multi-identity sessions with ground-truth RTTM, for the cross-recording re-ID/false-merge test
 - `scripts/icsi_rttm_from_hf.py` — materialize per-meeting ICSI RTTMs from the gated HF `diarizers-community/icsi` dataset
-- `scripts/gen_synthetic_speaker_eval.py` — generate deterministic synthetic embeddings/RTTMs for `Tools/SpeakerEvalHarness` so write-path fixes can be A/B'd without a real corpus
-- `scripts/run_synthetic_speaker_eval.sh` — A/B the speaker write-path fixes on the synthetic corpora from `gen_synthetic_speaker_eval.py`
-- `scripts/ab_dot_vs_cloud.py` — A/B the dot-product-profile vs cloud-of-samples speaker matcher on cached VoxCeleb embeddings
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
 - `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
 - `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations

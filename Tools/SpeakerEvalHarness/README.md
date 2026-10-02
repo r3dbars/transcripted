@@ -374,21 +374,6 @@ holdout report (`final-report.md`). Ground-truth identities only answer prompts
 and score outputs; they are never passed into matching. Raw embeddings are not
 written to reports.
 
-## Network-free synthetic A/B (no corpus / no models)
-
-The real corpora need multi-GB downloads + CoreML models. When that's unavailable, the
-write-path fixes can still be A/B'd on **synthetic embeddings with controlled cosine geometry** —
-the `replay` stage only consumes embeddings + RTTMs, both of which can be fabricated:
-
-```bash
-python3 scripts/gen_synthetic_speaker_eval.py     # -> data/eval/synthetic/{normal,twopeople,contamination}
-MATCH=0.70 bash scripts/run_synthetic_speaker_eval.sh   # replay off/on + score each, print before/after
-```
-
-`normal` is a no-regression control; `twopeople` reproduces the #8 cross-cluster fusion bug;
-`contamination` reproduces the #6 voiceprint-drift bug. Data is gitignored; the generator + driver
-are committed so the probe is reproducible.
-
 ## Run the whole thing
 
 ```bash
@@ -489,7 +474,6 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `../../scripts/run_speaker_autoresearch.py` | resumable parameter sweep, safety gates, and locked holdout promotion |
 | `../../scripts/speaker_autoresearch_contract.py` | parameter grids, promotion guardrails, and reports |
 | `../../scripts/speaker_autoresearch_runtime.py` | frozen-input, build, and checkpoint integrity |
-| `../../scripts/ab_dot_vs_cloud.py` | dot-vs-cloud matcher A/B simulator (runs on cached embeddings) |
 | `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `lab` \| `full`) |
 | `../../scripts/download_icsi.sh` | ICSI audio (Edinburgh) + RTTMs (HF, gated) |
 | `../../scripts/download_voxconverse.sh` | VoxConverse dev+test audio + RTTMs |

@@ -700,10 +700,19 @@ def _self_test_serve(tmp: str) -> None:
     result: list[int] = []
     server = threading.Thread(target=lambda: result.append(serve("127.0.0.1", port, None, path)), daemon=True)
     server.start()
+    # The socket file appears at bind(), a moment before listen(), so wait
+    # until a connect goes through, not just until the file exists.
     deadline = time.monotonic() + 5
-    while not os.path.exists(path):
-        assert time.monotonic() < deadline, "serve never opened its socket"
-        time.sleep(0.02)
+    while True:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(path)
+            break
+        except OSError:
+            assert time.monotonic() < deadline, "serve never opened its socket"
+            time.sleep(0.02)
+        finally:
+            probe.close()
     shot = os.path.join(tmp, "shot.png")
     parser = build_parser()
     for argv in (["screenshot", shot], ["key", "cmd-q"], ["click", "1", "1"], ["screenshot", shot]):

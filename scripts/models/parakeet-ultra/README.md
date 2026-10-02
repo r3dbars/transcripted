@@ -67,17 +67,16 @@ any Mac are reproducible. The installed model's `transcripted-model.json` and
 ## Compare it with Parakeet V3
 
 ```bash
-python3 scripts/ops/compare-parakeet-models.py ~/Desktop/test-clips/
+bash scripts/stt-shootout/run.sh --engines parakeet-v3,parakeet-ultra \
+  --audio ~/Desktop/test-clips/standup.m4a --reference ~/Desktop/test-clips/standup.txt
 ```
 
-Runs both models through Transcripted's CLI on the same files and writes a
-report to the Desktop. Put a hand-checked transcript next to a recording
-(`standup.m4a` + `standup.txt`) to get a real word error rate for each model.
-Without one, the report shows how often they disagree and where. Use
-`--ultra-dir` for an Ultra copy somewhere else; it has to be a folder named
-`parakeet-tdt-0.6b-v3`, because that's the only name the engine loads.
+The speech-model shootout runs both models through Transcripted's CLI on the
+same file and reports word error rate and speed for each. It skips Ultra until
+`install.sh` has put it in place. For a suite of clips, use the hill-climb
+bench (`docs/hill-climb-lab.md`).
 
-The report says which encoder quantization Ultra used. By default the encoder
+The install records which encoder quantization Ultra used (`ATTRIBUTION.txt`). By default the encoder
 is palettized to 8 bits with k-means on your Mac, which may not match how
 stock v3's encoder was quantized. To rule quantization out, build with
 `PARAKEET_ULTRA_ENCODER=fp16` once and compare again.
