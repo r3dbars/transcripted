@@ -10,7 +10,6 @@ struct TodaySettingsPage: View {
     @ObservedObject var todayViewModel: TodayViewModel
     let now: Date
     let onOpenRecentItem: (TodayRecentItem) -> Void
-    let onLoadMoreRecent: () -> Void
     let onShowMeetings: () -> Void
     let onShowDictations: () -> Void
     let onStartMeeting: () -> Void
@@ -19,6 +18,9 @@ struct TodaySettingsPage: View {
 
     /// Shared by the week strip and the day card; nil means today.
     @State private var selectedDayID: TimeInterval?
+    /// The mark the day card shows; a session click picks one too.
+    @State private var pickedMarkID: String?
+    @State private var openSessionID: String?
 
     private var snapshot: TodaySnapshot { todayViewModel.snapshot }
     private var stats: TodayContextStats { snapshot.stats }
@@ -32,12 +34,14 @@ struct TodaySettingsPage: View {
 
             if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
                 emptyState
-            } else {
-                if let selectedDay {
-                    TodayDayCard(day: selectedDay, now: now, onOpen: onOpenRecentItem)
-                }
-                recentSection
+            } else if let selectedDay {
+                TodayDayCard(day: selectedDay, now: now, pickedMarkID: $pickedMarkID, onOpen: onOpenRecentItem)
+                sessionsSection(selectedDay)
             }
+        }
+        .onChange(of: selectedDay?.id) { _, _ in
+            pickedMarkID = nil
+            openSessionID = nil
         }
         .accessibilityIdentifier("transcripted.today.page")
     }
@@ -53,63 +57,66 @@ struct TodaySettingsPage: View {
     private var header: some View {
         let day = selectedDay
         let isToday = day?.isToday ?? true
-        return HStack(alignment: .bottom, spacing: 24) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(TodayCopy.dateLine(for: day?.day ?? now))
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? now))
-                    .font(LibraryTokens.title)
-                    .contentTransition(.opacity)
-                TodaySentence(stats: headerStats, isToday: isToday)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(TodayCopy.dateLine(for: day?.day ?? now))
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                    Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? now))
+                        .font(LibraryTokens.title)
+                        .contentTransition(.opacity)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !snapshot.tapeDays.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(snapshot.tapeDays) { day in
-                        TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id) {
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                selectedDayID = day.isToday ? nil : day.id
+                if !snapshot.tapeDays.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(snapshot.tapeDays) { day in
+                            TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id) {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    selectedDayID = day.isToday ? nil : day.id
+                                }
                             }
                         }
                     }
+                    .frame(width: 330)
                 }
-                .frame(width: 330)
             }
+            // Its own full-width line: next to the week strip it got clipped.
+            TodaySentence(stats: headerStats, isToday: isToday)
         }
     }
 
-    // MARK: Recent
+    // MARK: Sessions
 
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionLabel("RECENT CONTEXT", help: "The latest meetings, dictations and writing saved on this Mac")
-
-            if snapshot.recent.isEmpty {
-                Text(todayViewModel.hasLoaded ? "Nothing saved yet." : "Loading…")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .padding(.vertical, 6)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(snapshot.recent) { item in
-                        TodayRecentRow(item: item, now: now) {
-                            onOpenRecentItem(item)
+    /// The picked day in sessions, oldest first. Opening one picks its
+    /// latest mark on the tape; picking a mark opens its session.
+    private func sessionsSection(_ day: TodayTapeDay) -> some View {
+        let sessions = TodaySessionBuilder.sessions(day.allMarks.map(\.item))
+        return VStack(spacing: 2) {
+            ForEach(sessions) { session in
+                TodaySessionRow(
+                    session: session,
+                    isOpen: openSessionID == session.id,
+                    onToggle: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            if openSessionID == session.id {
+                                openSessionID = nil
+                            } else {
+                                openSessionID = session.id
+                                pickedMarkID = session.items.last?.id
+                            }
                         }
-                    }
-                }
-                if snapshot.canLoadMoreRecent {
-                    Button("Load more", action: onLoadMoreRecent)
-                        .buttonStyle(.plain)
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 4)
-                        .accessibilityIdentifier("transcripted.today.recent.load-more")
-                }
+                    },
+                    onOpen: onOpenRecentItem
+                )
             }
         }
+        .onChange(of: pickedMarkID) { _, picked in
+            guard let picked, let owner = sessions.first(where: { $0.items.contains { $0.id == picked } }) else { return }
+            withAnimation(.easeOut(duration: 0.15)) { openSessionID = owner.id }
+        }
+        .accessibilityIdentifier("transcripted.today.sessions")
     }
 
     // MARK: Empty
@@ -135,14 +142,6 @@ struct TodaySettingsPage: View {
             .padding(.top, 4)
         }
         .padding(.top, 8)
-    }
-
-    private func sectionLabel(_ title: String, help: String?) -> some View {
-        Text(title)
-            .font(LibraryTokens.label)
-            .tracking(LibraryTokens.labelTracking)
-            .foregroundStyle(LibraryTokens.ink3)
-            .help(help ?? "")
     }
 }
 
@@ -240,9 +239,11 @@ private struct TodaySentence: View {
 private struct TodayDayCard: View {
     let day: TodayTapeDay
     let now: Date
+    /// Owned by the page so a session click can pick a mark; it clears it
+    /// when the day changes.
+    @Binding var pickedMarkID: String?
     let onOpen: (TodayRecentItem) -> Void
 
-    @State private var pickedMarkID: String?
     @State private var hoveredMarkID: String?
 
     private static let laneLabelWidth: CGFloat = 84
@@ -313,7 +314,6 @@ private struct TodayDayCard: View {
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .stroke(LibraryTokens.raisedStroke, lineWidth: 0.5)
         )
-        .onChange(of: day.id) { _, _ in pickedMarkID = nil }
         .accessibilityIdentifier("transcripted.today.day-tape")
     }
 
@@ -573,9 +573,71 @@ private struct TodayWeekCell: View {
     }
 }
 
-private struct TodayRecentRow: View {
+/// One session: start time, a rule-made title, and a dot per stream. Open,
+/// it lists what's inside; clicking one of those opens it where it lives.
+private struct TodaySessionRow: View {
+    let session: TodaySession
+    let isOpen: Bool
+    let onToggle: () -> Void
+    let onOpen: (TodayRecentItem) -> Void
+
+    @State private var isHovering = false
+
+    /// Fits "11:15 AM – 12:31 PM".
+    private static let timeWidth: CGFloat = 124
+
+    private var time: String { TodayCopy.sessionTime(start: session.start, end: session.end) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: onToggle) {
+                HStack(spacing: 14) {
+                    Text(time)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .frame(width: Self.timeWidth, alignment: .leading)
+                    Text(session.title)
+                        .font(LibraryTokens.rowTitle)
+                        .lineLimit(1)
+                    Spacer(minLength: 12)
+                    HStack(spacing: 4) {
+                        ForEach(session.kinds, id: \.self) { kind in
+                            Circle().fill(kind.streamColor).frame(width: 7, height: 7)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(minHeight: 38)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .accessibilityLabel("\(session.title), \(time)")
+            .accessibilityAddTraits(isOpen ? .isSelected : [])
+            .accessibilityIdentifier("transcripted.today.session.row")
+
+            if isOpen {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(session.items) { item in
+                        TodaySessionItemRow(item: item) { onOpen(item) }
+                    }
+                }
+                .padding(.leading, 10 + Self.timeWidth + 14 - 8)
+                .padding(.trailing, 4)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                .fill(isOpen ? LibraryTokens.raisedFill : (isHovering ? LibraryTokens.rowHover : Color.clear))
+        )
+    }
+}
+
+private struct TodaySessionItemRow: View {
     let item: TodayRecentItem
-    let now: Date
     let action: () -> Void
 
     @State private var isHovering = false
@@ -583,29 +645,22 @@ private struct TodayRecentRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: item.kind.systemImage)
-                    .font(.system(size: 12))
-                    .foregroundStyle(item.kind.streamColor)
-                    .frame(width: 18)
-                Text(item.title)
-                    .font(LibraryTokens.rowTitle)
+                Circle().fill(item.kind.streamColor).frame(width: 6, height: 6)
+                Text(TodaySessionBuilder.line(for: item))
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(isHovering ? Color.primary : LibraryTokens.ink2)
                     .lineLimit(1)
-                    .truncationMode(.tail)
                 Spacer(minLength: 12)
                 if isHovering {
-                    Text("Open")
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.accent)
+                    Text(TodayCopy.sessionTime(start: item.date, end: item.date))
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .monospacedDigit()
                 }
-                Text(meta)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .monospacedDigit()
-                    .lineLimit(1)
             }
             .padding(.horizontal, 8)
-            .frame(minHeight: 34)
-            .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
+            .frame(minHeight: 26)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
                     .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
@@ -614,7 +669,7 @@ private struct TodayRecentRow: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(helpText)
-        .accessibilityIdentifier("transcripted.today.recent.row")
+        .accessibilityIdentifier("transcripted.today.session.item")
     }
 
     private var helpText: String {
@@ -622,18 +677,6 @@ private struct TodayRecentRow: View {
         case .meeting: return "Open in Meetings"
         case .dictation: return "Open in Dictations"
         case .writing: return "Open the day's writing file"
-        }
-    }
-
-    private var meta: String {
-        let when = TodayCopy.rowWhen(for: item.date, now: now)
-        switch item.kind {
-        case .writing:
-            let app = item.appName.map { "\($0) \u{00B7} " } ?? ""
-            return "\(app)\(when)"
-        case .meeting, .dictation:
-            guard let duration = TodayCopy.rowDuration(seconds: item.durationSeconds) else { return when }
-            return "\(duration) \u{00B7} \(when)"
         }
     }
 }

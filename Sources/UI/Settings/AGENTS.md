@@ -62,12 +62,17 @@ settings-side agent connection flow.
   setup finishes.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
   `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
-  rolling seven-day tape, and Recent context all come from local capture
+  rolling seven-day tape, and the sessions list all come from local capture
   files: the cached meeting index (`RecentMeetingsScanner.loadSearchIndex`),
   the dictation day files (`DictationTranscriptStore.savedDictationDayCounts`),
   and Save my writing's `Writing_<date>.md` files (`TodayWritingParser`).
   Picking a day in the week strip retitles the header and swaps in that
-  day's numbers (`TodayTapeBuilder.dayStats`). Writing bars are estimated
+  day's numbers (`TodayTapeBuilder.dayStats`). Under the tape, the picked day is split into sessions
+  (`TodaySessionBuilder`): a pause over 30 minutes starts a new one, and each
+  is titled by rule, never a model: the first meeting's title, else the first
+  dictation's opening words cut at a whole word, else "Writing in <app>".
+  Opening a session picks its latest mark on the tape, and picking a mark
+  opens its session. Writing bars are estimated
   from word count, since the files keep only the first keystroke; a writing
   click opens its day file until the Writing tab lands.
   No network, no new analytics event (only `settings_action_clicked` action

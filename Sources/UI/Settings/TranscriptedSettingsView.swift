@@ -500,10 +500,6 @@ struct TranscriptedSettingsView: View {
                     }
                 }
             },
-            onLoadMoreRecent: {
-                trackSettingsAction("today_load_more_recent", page: .today)
-                todayViewModel.loadMoreRecent()
-            },
             onShowMeetings: {
                 trackSettingsAction("today_show_meetings", page: .today)
                 navigation.selectedPage = .home
