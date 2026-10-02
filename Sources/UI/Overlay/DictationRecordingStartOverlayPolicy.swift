@@ -268,3 +268,145 @@ enum DictationActiveTaskCancellationPolicy {
         )
     }
 }
+
+/// The first decisions of a dictation stop request, in order. The steps are
+/// the controller's real checks; tests run them with fakes.
+///
+/// 1. No session running: ignore.
+/// 2. A hands-free key press after this take already stopped asks for the
+///    next take, not another stop.
+/// 3. A repeat stop for the session that's already finalizing returns here.
+///    Only `.proceed` goes on to the loading-state decision
+///    (`DictationStopRoute`). While the first stop waits for the model the
+///    overlay can look like a pending start again, and reading a repeat as
+///    "cancel pending start" would throw away its saved audio.
+@MainActor
+enum DictationStopRequestRouting {
+    enum Route: Equatable {
+        case ignoreNotDictating
+        case rememberedAsNextStart
+        case ignoreAlreadyFinalizing
+        case proceed
+    }
+
+    struct Steps {
+        var isDictating: @MainActor () -> Bool
+        var rememberHandsFreePressAsNextStart: @MainActor () -> Bool
+        var isAlreadyFinalizing: @MainActor () -> Bool
+    }
+
+    static func route(
+        trigger: DictationTrigger,
+        shortcutMode: DictationShortcutMode?,
+        _ steps: Steps
+    ) -> Route {
+        guard steps.isDictating() else { return .ignoreNotDictating }
+        if trigger == .physicalKey,
+           shortcutMode == .handsFree,
+           steps.rememberHandsFreePressAsNextStart() {
+            return .rememberedAsNextStart
+        }
+        if steps.isAlreadyFinalizing() { return .ignoreAlreadyFinalizing }
+        return .proceed
+    }
+}
+
+/// "Transcribe Captured Audio" after an interrupted recording readmits the
+/// same retained recording into the stop path. The interrupted stop may
+/// still be writing or cleaning up its WAV checkpoint, so the readmission
+/// waits for that first, then checks the session still owns the recording,
+/// and only then resets the stop fence.
+@MainActor
+enum DictationInterruptedAudioReadmission {
+    enum Outcome: Equatable {
+        case superseded
+        case audioGone
+        case readmitted
+    }
+
+    struct Steps {
+        var waitForInterruptedCheckpoint: @MainActor () async -> Void
+        /// Same session as the interruption, and no new take running.
+        var stillOwnsRecording: @MainActor () -> Bool
+        var hasRecoverableRecording: @MainActor () -> Bool
+        var audioGone: @MainActor () -> Void
+        var resetStopFence: @MainActor () -> Void
+        var readmit: @MainActor () -> Void
+    }
+
+    static func run(_ steps: Steps) async -> Outcome {
+        await steps.waitForInterruptedCheckpoint()
+        guard steps.stillOwnsRecording() else { return .superseded }
+        guard steps.hasRecoverableRecording() else {
+            steps.audioGone()
+            return .audioGone
+        }
+        steps.resetStopFence()
+        steps.readmit()
+        return .readmitted
+    }
+}
+
+/// What every successful microphone start does once the open lands, from the
+/// ready-engine fast path and from the recovery wait loop alike.
+///
+/// The start handle is dropped first: a stale handle makes a later Push to
+/// Talk release during a mid-session device recovery read as "cancel pending
+/// start", which throws away the audio the engine kept instead of
+/// transcribing it. `dictation_started` is only counted here, after the open
+/// succeeded.
+@MainActor
+enum DictationRecordingStarted {
+    struct Steps {
+        var clearStartHandle: @MainActor () -> Void
+        var recordStarted: @MainActor () -> Void
+        var playStartCue: @MainActor () -> Void
+        var installSessionTimeout: @MainActor () -> Void
+    }
+
+    static func finish(_ steps: Steps) {
+        steps.clearStartHandle()
+        steps.recordStarted()
+        steps.playStartCue()
+        steps.installSessionTimeout()
+    }
+}
+
+/// The ready-engine fast start: open the microphone right away, and fall
+/// back to the recovery wait loop when the open fails.
+///
+/// A start the user already ended (released the key, cancelled) gets
+/// neither: a late success is stopped so the microphone doesn't stay open,
+/// and a late failure doesn't start a wait nobody asked for.
+@MainActor
+enum DictationFastStart {
+    enum Outcome: Equatable {
+        case started
+        case fellBackToWait
+        case abandoned
+    }
+
+    struct Steps {
+        var openMicrophone: @MainActor () async -> Bool
+        var isStillWanted: @MainActor () -> Bool
+        var stopLateRecording: @MainActor () async -> Void
+        var started: @MainActor () -> Void
+        var fallBackToWait: @MainActor () async -> Void
+    }
+
+    static func run(_ steps: Steps) async -> Outcome {
+        let opened = await steps.openMicrophone()
+        guard !Task.isCancelled, steps.isStillWanted() else {
+            if opened {
+                await steps.stopLateRecording()
+            }
+            return .abandoned
+        }
+        if opened {
+            steps.started()
+            return .started
+        }
+        await steps.fallBackToWait()
+        return .fellBackToWait
+    }
+}

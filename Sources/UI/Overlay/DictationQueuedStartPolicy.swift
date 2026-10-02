@@ -44,3 +44,63 @@ enum DictationQueuedStartPolicy {
         shortcutMode != nil
     }
 }
+
+extension DictationQueuedStartPolicy {
+    /// The last take left a message the next take must not start over: a
+    /// failure, or a "press ⌘V" notice with its Transcribe It or Paste It
+    /// button. A passing note (no speech heard, press Return to send) can
+    /// give way.
+    static func previousLeftMessage(
+        isDrafting: Bool,
+        errorMessage: String,
+        messageCanGiveWayToNextStart: Bool
+    ) -> Bool {
+        isDrafting && !errorMessage.isEmpty && !messageCanGiveWayToNextStart
+    }
+
+    /// While the last take is still on screen transcribing, an error would
+    /// cover its pill (and can hide it and turn off Esc), so a dropped press
+    /// only says "still finishing" once nothing is dictating.
+    static func showsDropMessage(requested: Bool, isDictating: Bool) -> Bool {
+        requested && !isDictating
+    }
+
+    static let droppedFailureKind = "previous_dictation_transcribing"
+
+    /// Forgets a remembered press. It's counted then as a refused start, the
+    /// same as the old "still finishing" refusal was, so a press that waited
+    /// and never started is never lost from the start funnel.
+    struct DropSteps {
+        var countRequest: () -> Void
+        var countRefusal: (_ failureKind: String) -> Void
+        var showStillFinishing: () -> Void
+    }
+
+    static func drop(showMessage: Bool, isDictating: Bool, _ steps: DropSteps) {
+        steps.countRequest()
+        steps.countRefusal(droppedFailureKind)
+        if showsDropMessage(requested: showMessage, isDictating: isDictating) {
+            steps.showStillFinishing()
+        }
+    }
+}
+
+/// Keeps a press from queueing a new take while Quit waits for the current
+/// one to finish.
+///
+/// `DictationTerminationFinisher` shuts it when Quit starts. Once Quit is
+/// admitted it stays shut until the app is gone; a refused Quit opens it
+/// again so presses can queue.
+struct DictationQueuedStartGate {
+    private(set) var isTerminating = false
+
+    func admitsPress(shortcutMode: DictationShortcutMode?, previousIsFinishing: () -> Bool) -> Bool {
+        guard !isTerminating,
+              DictationQueuedStartPolicy.remembersPress(shortcutMode: shortcutMode) else { return false }
+        return previousIsFinishing()
+    }
+
+    mutating func setTerminating(_ shut: Bool) {
+        isTerminating = shut
+    }
+}
