@@ -140,19 +140,6 @@
       "manual_proof": ["Real sleep and wake during representative app states."]
     },
     {
-      "id": "writing",
-      "path_prefixes": ["Sources/Writing/", "Sources/TranscriptedWriting/", "Sources/TranscriptedKeyboard/", "Tests/TranscriptedWritingTests/"],
-      "docs": ["Sources/Writing/AGENTS.md", "Sources/TranscriptedWriting/AGENTS.md", "Sources/TranscriptedKeyboard/AGENTS.md", "docs/writing-plan.md"],
-      "keywords": ["writing", "autocomplete", "save my writing", "screen memory", "personal history", "input method", "llama-server"],
-      "owns": "Writing: the app bridge, the autocomplete and Save my writing library, and the IMKit keyboard.",
-      "invariants": [
-        "Writing never sends or logs typed text; analytics are counts and setup choices only.",
-        "Saved writing reaches disk only as day files after the secret scrubber.",
-        "The app reaches the Writing runtime only through Sources/Writing/."
-      ],
-      "manual_proof": ["Autocomplete and Save my writing in a real target app with a signed keyboard bundle."]
-    },
-    {
       "id": "beta-release",
       "path_prefixes": ["scripts/release/", "Casks/"],
       "exact_paths": [
@@ -228,12 +215,14 @@
     {
       "id": "writing",
       "path_prefixes": ["Sources/Writing/", "Sources/TranscriptedWriting/", "Sources/TranscriptedKeyboard/", "Tests/TranscriptedWritingTests/"],
-      "docs": ["Sources/Writing/AGENTS.md", "Sources/TranscriptedWriting/AGENTS.md", "Sources/TranscriptedKeyboard/AGENTS.md"],
-      "keywords": ["writing", "autocomplete", "ghost text", "suggestion", "input method", "screen memory", "llama", "personal history", "save my writing", "scrubber", "tilde"],
+      "docs": ["Sources/Writing/AGENTS.md", "Sources/TranscriptedWriting/AGENTS.md", "Sources/TranscriptedKeyboard/AGENTS.md", "docs/writing-plan.md"],
+      "keywords": ["writing", "autocomplete", "ghost text", "suggestion", "input method", "screen memory", "llama", "personal history", "save my writing", "scrubber", "tilde", "llama-server"],
       "owns": "Writing: the app bridge, the autocomplete and Save my writing library, the llama-server helper, Screen Memory, and the keyboard input method.",
       "invariants": [
         "Writing never sends or logs typed text; analytics are counts only.",
-        "A TranscriptedWriting Core change ships in two binaries: the app and the keyboard bundle."
+        "A TranscriptedWriting Core change ships in two binaries: the app and the keyboard bundle.",
+        "Saved writing reaches disk only as day files after the secret scrubber.",
+        "The app reaches the Writing runtime only through Sources/Writing/."
       ],
       "manual_proof": ["Ghost-text suggestions and accept keys in a real text field with the input method installed."]
     },
