@@ -3,12 +3,12 @@ import Foundation
 // Most suites here run the real DictationStoppedAudioRecovery types (registry retain/remove,
 // WAV persistence/cleanup, the commit policy) against real temp directories. The prepared
 // Stop snapshot and the external-engine lease run through their compiled seams
-// (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes.
+// (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes, and imported restart
+// checkpoints retire through MeetingStoppedAudioCheckpointPolicy.
 //
-// Two source-text pins are left, each because the type it reads can't be built in this
-// Foundation-only runner: "A restart checkpoint imported as a meeting is retired once its
-// transcript is saved" greps the MeetingSessionController files, and "Stopped audio is found
-// again at launch" greps TranscriptedApp.swift (the @main app delegate).
+// One source-text pin is left, because the type it reads can't be built in this
+// Foundation-only runner: "Stopped audio is found again at launch" greps TranscriptedApp.swift
+// (the @main app delegate).
 
 func testDictationStoppedAudioRecoveryRetryRegistry() {
     runSuite("stopped dictation recovery survives a failed retry until success") {
@@ -250,13 +250,34 @@ func testDictationStoppedAudioRecovery() async {
         }
     }
 
-    // Still source text: MeetingSessionController can't be built in this
-    // runner, and the meeting import isn't part of the dictation seam.
     runSuite("A restart checkpoint imported as a meeting is retired once its transcript is saved") {
-        assertTrue(
-            readMeetingSessionControllerSource().contains("transcriptPersisted: true"),
-            "a successfully imported restart checkpoint should be retired after its transcript is saved"
-        )
+        let ends: [MeetingStoppedAudioCheckpointPolicy.JobEnd] = [.transcriptSaved, .failed, .discardedAccidentalStart]
+        for end in ends {
+            let directory = makeRecoveryTestDirectory("meeting-import-\(end)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            do {
+                let recovery = try DictationStoppedAudioRecoveryStore.persist(
+                    samples16k: [0.1],
+                    sessionID: UUID(),
+                    directory: directory
+                )
+                let retired = MeetingStoppedAudioCheckpointPolicy.finish(recovery, after: end)
+                let saved = end == .transcriptSaved
+                assertEqual(retired, saved, "only a saved transcript retires the checkpoint (\(end))")
+                assertEqual(
+                    FileManager.default.fileExists(atPath: recovery!.url.path),
+                    !saved,
+                    saved ? "a saved meeting transcript retires the WAV" : "an unsaved meeting keeps the WAV for recovery"
+                )
+                assertEqual(
+                    DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).count,
+                    saved ? 0 : 1,
+                    "launch recovery stops offering a retired checkpoint (\(end))"
+                )
+            } catch {
+                assertTrue(false, "recovery audio should persist: \(error)")
+            }
+        }
     }
 
     runSuite("An old Stop's prepared snapshot can't clear a newer recording") {

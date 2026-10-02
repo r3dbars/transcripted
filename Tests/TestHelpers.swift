@@ -170,28 +170,6 @@ func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String
     }.joined(separator: "\n")
 }
 
-/// MeetingSessionController is one @MainActor class split into a core file
-/// plus `MeetingSessionController+Area.swift` extension files. `part: "Stop"`
-/// reads only `MeetingSessionController+Stop.swift`, so an ordering pin stays
-/// inside the one file both of its anchors live in. With no part, it reads the
-/// core file and every extension joined, for presence checks and call counts.
-func readMeetingSessionControllerSource(part: String? = nil, file: String = #file, line: Int = #line) -> String {
-    joinedSplitTypeText(directory: "Sources/Meeting", type: "MeetingSessionController", part: part, file: file, line: line)
-}
-
-private func joinedSplitTypeText(directory: String, type: String, part: String?, file: String, line: Int) -> String {
-    let names: [String]
-    if let part {
-        names = ["\(type)+\(part).swift"]
-    } else {
-        let listing = (try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(directory).path)) ?? []
-        names = ["\(type).swift"] + listing.filter { $0.hasPrefix("\(type)+") && $0.hasSuffix(".swift") }.sorted()
-    }
-    return names.map { name in
-        readSourceFixture("\(directory)/\(name)", description: name, file: file, line: line)
-    }.joined(separator: "\n")
-}
-
 func readSourceFixture(
     _ relativePath: String,
     description: String? = nil,
