@@ -2,7 +2,7 @@
 
 ## Install (for Transcripted users)
 
-You need Transcripted (a build that includes the live helper) and Claude Code 2.1.287 or newer
+You need Transcripted 1.1.69 or newer (the first release that ships the live helper) and Claude Code 2.1.287 or newer
 (desktop Code tab or terminal). In Claude Code:
 
 ```
