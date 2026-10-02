@@ -11,7 +11,6 @@
 - **Owns:** live meeting capture through Core, the record / dismiss / remind prompt flow, imported audio, the transcription queue, failed meetings, meeting storage and transcript restyling.
 - **Public surface:** `MeetingSessionController` and `MeetingSessionState`, `MeetingPromptDetector`, `FailedMeetingStore` and `FailedMeetingItem`, `MeetingArtifact*`, `MeetingSTTAdapter`, `TranscriptionQueueCoordinator`, `MeetingStoragePaths`, `MeetingInviteeSuggestionPolicy`, `MissedCallNudgePreferences`, `SpeakerEmbedderFactory`.
 - **May depend on:** Dictation, Speech, Support, Observability, and all of Core. This is the only module with full Core access; it's the gateway the rest of the app goes through.
-- **Grandfathered crossings:** `AppSoundPlayer` (UI/Shared) from the cancel and outcome extensions; moving that file to Support fixes it.
 - **Entry points:** `TranscriptedApp.swift` wires `MeetingSessionController` and `MeetingPromptDetector`; `startRecording` / `stopRecording` in `MeetingSessionController.swift`.
 - **Tests:** `bash run-tests.sh --filter Meeting`, `bash run-integration-smoke.sh`. After any change here, `bash build-deps.sh --force` first.
 - **Rules:** keep the record / dismiss / remind flow; one writer for state (`transition`, `updateDisplayStatus` in `+State.swift`); see "Key invariants" below.
