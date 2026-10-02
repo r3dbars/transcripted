@@ -14,7 +14,7 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
 
-Grandfathered crossings (in `.agents/module-boundary-baseline.json`): `HomeMeetingRename` and `SpeakerReviewQueueScanner` name Home preview types from `UI/Settings/HomeMeetingPreviewFormatter.swift` (fixed by moving that file here), and `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it to `Sources/App/`). Both moves wait for #1946.
+Grandfathered crossings (in `.agents/module-boundary-baseline.json`): `HomeMeetingRename` and `SpeakerReviewQueueScanner` name Home preview types from `UI/Settings/HomeMeetingPreviewFormatter.swift` (fixed by moving that file here), and `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it into a new Sources/App folder next to the app shell). Both moves wait for #1946.
 
 ## Entry points
 

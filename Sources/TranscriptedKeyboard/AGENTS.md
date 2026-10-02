@@ -4,6 +4,10 @@
 
 Writing's IMKit input method, ported from Tilde's InlineGhostIME. It shows autocomplete as marked text in the host app, handles Tab / `` ` `` / Esc / type-through, and sends typing events to the app for Save my writing. It's its own process and its own bundle: `Transcripted Keyboard.app`, named "Transcripted" in Input Sources.
 
+## Module
+
+`Keyboard` in `.agents/modules.json`, compiled as its own executable. It may use WritingCore and nothing else in `Sources/`, and no app module may name its types (`check-module-boundaries.py` checks both).
+
 ## Entry points
 
 - `main.swift` — starts the `IMKServer` with the connection name from `TildeProductProfile`; it must match `InputMethodConnectionName` in `Info.plist`.

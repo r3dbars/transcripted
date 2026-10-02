@@ -1,5 +1,7 @@
 # Reliability
 
+Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Accessibility/`): it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
+
 ## What this directory owns
 
 `Sources/Reliability/` contains cross-cutting runtime recovery logic that does

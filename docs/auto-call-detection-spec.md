@@ -201,9 +201,9 @@ results below are the provenance for the production monitor design.
 - `Sources/TranscriptedApp.swift:168` — `onPromptRequest = { … }`
 - `Sources/TranscriptedApp.swift` — `capturePillController.present(candidate:timeout:)`
 - `Sources/TranscriptedApp.swift:180` / `:261` — `start()` / `stop()`
-- `Sources/Meeting/MeetingPromptDetector.swift:189` — `evaluate()`; `:199-211` — candidates array; `:278` — `runtimeReminderCandidates`
+- `Sources/Meeting/MeetingPromptDetector.swift` — `evaluate()` builds the candidates array; `MeetingPromptDetector+CalendarRuntime.swift` — `runtimeReminderCandidates`, `upcomingCalendarCandidates`
 - `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:181` — `runtimePresentation`
-- `Sources/Meeting/MeetingSessionController.swift:150` — `isRecording`
+- `Sources/Meeting/MeetingSessionController+State.swift` — `isRecording`
 
 ## Phase 1 — results (2026-06-14)
 

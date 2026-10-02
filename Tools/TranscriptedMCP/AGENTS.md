@@ -63,9 +63,13 @@ reach the real one.
 | `UIResourceHandlers.swift` | MCP Apps (SEP-1865, `io.modelcontextprotocol/ui`) surface: the `ui://` HTML resource and the `show_recent_meetings` tool that returns it |
 | `RecentMeetingsWidget.swift` | Widget data model for one meeting card, shared by the widget builder and the HTML renderer / `structuredContent` payload |
 | `RecentMeetingsWidgetBuilder.swift` | Builds the recent-meetings widget model from the local capture library, reusing the same read-tool data access rather than re-plumbing it |
-| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations; routes `lexical`/`semantic`/`hybrid` search modes |
+| `TranscriptIndex.swift` | SQLite connection lifecycle, schema gate, reconcile, and per-file indexing (the write path) |
+| `TranscriptIndex+MeetingQueries.swift` | Meeting search (routes `lexical`/`semantic`/`hybrid` modes), speaker history, meeting lists, `who_is` |
+| `TranscriptIndex+DictationQueries.swift` | Dictation days, entry search, recent entries |
+| `TranscriptIndex+Context.swift` | Cross-kind search and the recent feed, index counts |
+| `TranscriptIndex+SummaryRollups.swift` | Summary items, action items, decisions, digest |
 | `TranscriptIndex+Schema.swift` | Declarative DDL: table, FTS5 virtual table, trigger, and index definitions for the index database, split out of `TranscriptIndex.swift` |
-| `TranscriptIndex+Writing.swift` | Writing day indexing and queries (`writing_days` / `writing_entries` + FTS), kept out of the `TranscriptIndex.swift` hotspot |
+| `TranscriptIndex+Writing.swift` | Writing day indexing and queries (`writing_days` / `writing_entries` + FTS) |
 | `SQLiteHelpers.swift` | Shared free-function SQLite plumbing used by both `TranscriptIndex` and `EmbeddingStore`'s independent connections |
 | `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
 | `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
@@ -160,7 +164,7 @@ The SQLite index keeps separate records for:
 - dictation entry search rows
 - writing day files and writing entry search rows (`writing_days`, `writing_entries` + FTS5; schema v6)
 
-Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from legacy meeting artifacts (an inline summary or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. Current app capture does not create new AI summaries. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
+Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from legacy meeting artifacts (an inline summary or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. Current app capture does not create new AI summaries. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` (in `TranscriptIndex+SummaryRollups.swift`) is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
 

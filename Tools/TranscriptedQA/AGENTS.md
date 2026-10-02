@@ -27,7 +27,12 @@ The current package is intentionally small:
 | `ImportedAudioSmoke.swift` | Deterministic imported-audio artifact smoke: synthetic WAV, imported meeting Markdown, retained single-file audio, parser and validator proof |
 | `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
-| `PackagedAppSmoke.swift` | Pre-publish packaged app smoke for app bundle metadata, Sparkle config, signing, dSYM, DMG, optional UI, and privacy-safe local logs |
+| `PackagedAppSmoke.swift` | Pre-publish packaged app smoke: the command, its check/report types, and the process runner |
+| `PackagedAppSmokeRunner.swift` | The packaged-app checks: bundle, Sparkle, observability, helper, keyboard, CLI, signing, dSYM, DMG, appcast and log privacy, plus the UI / first-run tail |
+| `FirstRunReliabilitySmokeRunner.swift` | First-run reliability scenarios and how each one is judged |
+| `FirstRunReliabilityLaunch.swift` | One isolated app launch: prefs, account-defaults seed and restore, fixtures, spawn / wait / terminate |
+| `FirstRunReliabilityReport.swift` | First-run report Codable models |
+| `PrivacyLogScanner.swift` | Scans local logs for privacy leaks |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `SpeakerStats.swift` | Speaker-recognition lifeline report: funnel, graduation, precision, and 30-day trends from `speaker_match_outcomes` |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |

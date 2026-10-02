@@ -27,10 +27,10 @@ Important entry points:
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting trigger routing, and trigger error surfacing
-- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
+- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; start, stop, paste-back, persistence, recovery, presses, the session cap and telemetry live in its `+*.swift` extensions
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
-- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
-- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; model selection cancels only unclaimed background warmup, while any dictation, meeting, or import that joins the load promotes it to protected foreground work; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
+- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`: the recording lifecycle here, the class declaration and state in `+State.swift`, and imported-audio handoff, queued transcription, warnings and telemetry in the other `+*.swift` extensions
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; model selection cancels only unclaimed background warmup, while any dictation, meeting, or import that joins the load promotes it to protected foreground work; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files, and the engine's input route, tap, recording start/teardown and transcription in its sibling `Parakeet*.swift` files
 
 ## Directory map
 
@@ -52,6 +52,20 @@ Historical planning docs were removed from the live tree so it reads like the
 current app surface. Git history remains the source for retired plans and
 point-in-time reviews.
 
+
+## Modules
+
+Every Swift file here belongs to a module in `.agents/modules.json`, and `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. The table is in `docs/repo-layout.md` ("Modules"); `--explain <file>` answers for one file. Each module's own `AGENTS.md` has its card (owns, public surface, may depend on, entry points, tests, rules). The cards for the three modules below live here for now, because their folder docs are being edited by open PRs (#1946, #1941).
+
+**AppShell** (`TranscriptedApp.swift`, `TranscriptedMenuCommands.swift`). The composition root: `TranscriptedApp` and `TranscriptedAppDelegate` build every controller and wire the status item, popover, overlays and meeting prompts. It may depend on anything and nothing may depend on it (the manifest check enforces that). Grandfathered crossing: `Support/LabControlChannel.swift` names `TranscriptedAppDelegate`; moving the lab-control files next to the shell fixes it. Most source-pinned file in the repo, so run `check-source-pins.py --changed-only` first. Tests: `bash run-tests.sh --filter StatusItem`, `bash run-e2e-smoke.sh`.
+
+**AppState** (`TranscriptedAppState.swift`). The service container: owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, the lazy `MeetingSessionController`, model warmup and wake recovery. Public surface: `TranscriptedAppState`. May depend on Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability and Core `core-vocab`. The UI modules (Overlay, MenuBar, Settings) may take the container; nothing below the UI may. Grandfathered: `Speech/DictationSession.swift` and `UI/Shared/TranscriptedSupportActions.swift` take it today; the fix is injecting the narrow dependencies they use.
+
+**Support** (`Support/`, `Accessibility/`, `Reliability/`). The base layer: preferences, storage paths, the capture library, permissions, constants, `AutomatedLaunchEnvironment`, clipboard paste-back, model-cache inventory, AX helpers and wake recovery. May depend only on Core `core-vocab`. Grandfathered: lab control naming the app delegate and meeting state, `SpeakerEmbedderFactory` using Core's embedders, `TranscriptedPermissionAccess` naming `CoreAudioSystemAudioCapture`, `ClaudeDesktopIntegrationInstaller` and `LabControlChannel` naming Observability types, and `MeetingInviteeSuggestionPolicy` naming `MeetingPromptHeuristics`. Details: `Support/AGENTS.md`, `Accessibility/AGENTS.md`, `Reliability/AGENTS.md`.
+
+**Observability** (`Observability/`). The sink every module may report into: `EventReporter`, `AnalyticsReporter`, `CrashReporter`, `DiagnosticsTrail`, the `*Telemetry` types, sanitizers and policies, and the Sparkle updater. May depend on Support and Core `core-vocab`. Grandfathered: `ActivationTelemetry` and `AnalyticsEventPolicy` name Dictation and Speech types (to be inverted by passing plain values), and `CrashReporter` names `SupportDiagnosticsBundle` (moving that file here fixes it). Details: `Observability/AGENTS.md`.
+
+**UIOverlay** (`UI/Overlay/`). The Notch island, dictation and meeting overlays, `DictationSessionController` and the dictation start policies. May depend on UIShared, AppState, Meeting, Dictation, Speech, Support, Observability and Core `core-vocab`. Grandfathered from below: Speech and Dictation name four overlay policy types (`DictationRecordingStart*`, `DictationStartAvailabilityPolicy`, `DictationSessionCapWarningPolicy`); moving those files down fixes it after #1946. Details: `UI/AGENTS.md`.
 
 ## Read before editing
 

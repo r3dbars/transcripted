@@ -6,6 +6,18 @@
 onboarding, the Home dashboard, people/speaker review settings, and the
 settings-side agent connection flow.
 
+## Module
+
+`UISettings` in `.agents/modules.json`.
+
+- **Owns:** the main window (sidebar, Today, Meetings, Dictations, Writing, Speakers, Agent, the combined settings page), first-run onboarding, and speaker naming and review.
+- **Public surface:** `TranscriptedSettingsWindowController`, `TranscriptedSettingsPage`, `PermissionsOnboardingView` and the onboarding window, `SpeakerNamingSheet`, `HomeView`, the `Pages/` views.
+- **May depend on:** UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab`. Only AppShell and UIMenuBar may depend on it.
+- **Grandfathered crossings:** the Speakers directory (`SpeakerPeopleSettingsSection.swift`, `SpeakerNamingSheet.swift` and friends) uses Core engine types like `SpeakerDatabase`, `SpeakerClipExtractor` and `TranscriptSaver` directly; the target is Meeting facades. `HotkeyRecorderAppKitView.swift` names `MenuTokens` from the menu bar. Both are in `.agents/module-boundary-baseline.json`; don't add more.
+- **Entry points:** `TranscriptedSettingsWindowController.swift` opens the window; `TranscriptedSettingsView.swift` is the shell.
+- **Tests:** `bash run-tests.sh --filter Home`, `--filter Settings`, `--filter Speaker`, `--filter UIAutomationSurfaceContract`.
+- **Rules:** keep the Speakers directory with review, rename, merge and delete, per-app Auto Enter, and model-cache inspection and cleanup (product surface). See "Guardrails" below.
+
 ## Main split
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
@@ -96,10 +108,18 @@ settings-side agent connection flow.
   `RecentMeetingsScanner.loadSearchIndex`, reuses unchanged rows on rebuild,
   and resolves audio only for the matches it shows. Timed by the Home
   recent-captures benchmark.
-- `HomeView.swift` - `HomeViewModel` plus Home building blocks: day-grouped
-  list and capture-list sections, row action buttons/menus, search field,
-  scan-warning card, inline failed-meeting row (retry/retained audio),
-  feedback sheet, and the preview/attention models.
+- `HomeViewModel.swift` - the Home view model: refresh, paging, the
+  scan-warning latch, the search index and its debounce, `groupByDay`, and
+  the activation return-proxy.
+- `HomeModels.swift` - Home value types plus `HomeActivityRowFormatting`.
+- `HomeFeedbackModels.swift` - feedback issue kind, target and submission.
+- `HomeScanWarningCard.swift` - the scan-warning card.
+- `HomeCaptureList.swift` - empty state, the day-grouped list, the search
+  field, and the capture-list section.
+- `HomeView.swift` - row actions and the ⋯ menu, the inline failed-meeting
+  row (retry/retained audio), the feedback sheet view, and Load more. These
+  stay together because `UIAutomationSurfaceContractTests` reads them from
+  this file.
 - `QuietHomeLibrary.swift` - quiet-library Meetings components (2026-08
   redesign): header sentence, meeting/working rows, and the in-place
   expansion with speaker labels and naming.

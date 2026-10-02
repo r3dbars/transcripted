@@ -1,5 +1,7 @@
 # Accessibility
 
+Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Reliability/`): it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
+
 ## What this directory owns
 
 `Sources/Accessibility/` is the small AX bridge used to understand the
