@@ -1,6 +1,6 @@
 // NotchIslandDictationPreviewView.swift
 // The dictation hover's live words: the whole take so far, scrolled to the
-// newest line, with older text fading out at the top. Scroll up to read
+// newest line, with no fade, so the top of the take reads as the top. Scroll up to read
 // back; it stops following until you scroll to the bottom again. Words the
 // decoder may still rewrite are dimmed. When the take is written, the rough
 // words crossfade into the real text. Kept alive by the island controller
@@ -30,7 +30,6 @@ final class NotchIslandDictationPreviewView: NSView {
     private let scrollView = NSScrollView()
     private let textView: NSTextView
     private let placeholder: NSTextField
-    private let fade = CAGradientLayer()
     /// The latest words while the drop-down is closed. Laying out text no
     /// one can see would only cost main-thread time during the dictation.
     private var pending: (preview: LiveDictationPreview, settling: Bool)?
@@ -74,14 +73,6 @@ final class NotchIslandDictationPreviewView: NSView {
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
 
-        // Older lines fade out under the top edge instead of being cut. The
-        // view isn't flipped, so the gradient runs bottom (0) to top (1):
-        // the newest line at the bottom stays fully lit.
-        wantsLayer = true
-        fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
-        fade.locations = [0, 0.8, 1]
-        layer?.mask = fade
-
         let placeholderHeight = ceil(placeholder.fittingSize.height)
         placeholder.frame = NSRect(x: 0, y: 0, width: width, height: placeholderHeight)
         addSubview(placeholder)
@@ -92,11 +83,6 @@ final class NotchIslandDictationPreviewView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func layout() {
-        super.layout()
-        fade.frame = bounds
-    }
 
     /// The rough words so far. A new take (nothing heard yet) also clears
     /// the last take's written text.
