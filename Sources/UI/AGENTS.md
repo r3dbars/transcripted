@@ -70,7 +70,6 @@ so tiny transient states do not get duplicated inside controllers.
 - `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate", "Done"); the full title stays the accessibility label
 - `MenuBar/MenuBarShortcutLabel.swift` — Foundation-pure shortcut text for those buttons: the full shortcut, then the first key of a pair ("Fn / Right ⌥" → "Fn") when the pair doesn't fit
 - `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
-- `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 
 The agent-connect surface is the Settings window's Agent page (onboarding no
@@ -137,6 +136,7 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows; fresh planning and reversible Trash/Undo run off-main through the transcript-update serializer so background rewrites cannot resurrect a deleted transcript. Includes legacy summary sidecar and retained-audio cleanup, stale-row checks, and active-retranscription protection.
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
+- `Shared/MenuTokens.swift` — design tokens for menubar views (Settings' AppKit hotkey recorder uses them too); colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `Shared/MeetingPillFinishPresentation.swift` — Foundation-pure copy and timing for how a meeting finishes: transcribing percent and "N more waiting" on the pill and menu bar header, the saved pill's dwell and meeting name, and when the error pill offers Open
 - `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback

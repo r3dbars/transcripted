@@ -8,7 +8,7 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 ## Public surface
 
-`LibraryTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `HomeMeetingPreviewContent` and the Home preview types in `HomeMeetingPreviewFormatter.swift`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
+`LibraryTokens`, `MenuTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `HomeMeetingPreviewContent` and the Home preview types in `HomeMeetingPreviewFormatter.swift`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
 
 ## May depend on
 

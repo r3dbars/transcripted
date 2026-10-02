@@ -67,7 +67,7 @@ Snap rule: 7 → `md`; 10 → `md` or `lg` by container size; 14/18 → `xl`.
 
 ## Where the tokens live in code
 
-- **Menubar (AppKit):** `Sources/UI/MenuBar/MenuTokens.swift` owns the menubar's
+- **Menubar (AppKit):** `Sources/UI/Shared/MenuTokens.swift` owns the menubar's
   colors and layout, and now its **type scale** (`MenuTokens.Font`). The menubar
   action rows and header read their fonts from there instead of raw
   `NSFont.systemFont(ofSize:)`. This is the reference adoption — the pattern to
