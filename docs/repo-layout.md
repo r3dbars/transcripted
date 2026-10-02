@@ -76,6 +76,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
+- `Sources/App/` — app-shell helpers: the lab control channel and Email Support / Send diagnostics
 - `Sources/Accessibility/` — AX helpers for overlay positioning
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
@@ -162,7 +163,7 @@ The app compiles as one Swift target (plus the `TranscriptedWritingCore` module)
 | UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
 | UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
 | AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
-| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedAppDelegate+*.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
+| AppShell | `Sources/App/`, `Sources/TranscriptedApp.swift`, `Sources/TranscriptedAppDelegate+*.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
 
 Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.
 

@@ -4,7 +4,7 @@
 The channel exists only in lab builds (`bash build.sh --lab`), and even there
 the app only listens when it was launched with TRANSCRIPTED_LAB_CONTROL_DIR set
 to a private (0700, owned by you, not a symlink) directory. See
-Sources/Support/LabControlChannel.swift and docs/lab-control-channel.md.
+Sources/App/LabControlChannel.swift and docs/lab-control-channel.md.
 This client speaks that file-drop protocol so the lab can time the real app:
 
     lab_control.py launch --dir DIR --app PATH --container CDIR

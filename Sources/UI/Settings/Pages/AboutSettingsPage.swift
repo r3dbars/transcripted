@@ -43,7 +43,7 @@ struct AboutSettingsPage: View {
                     automationIdentifier: "transcripted.settings.about.version"
                 ) {
                     HStack(spacing: 8) {
-                        Text("\(TranscriptedSupportActions.appVersionDescription) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
+                        Text("\(TranscriptedAppVersion.description) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
                             .font(.caption)
                             .foregroundStyle(aboutUpdateStatusInkColor)
                             .lineLimit(1)

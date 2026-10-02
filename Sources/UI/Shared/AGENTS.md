@@ -14,8 +14,6 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
 
-Grandfathered crossing (in `.agents/module-boundary-baseline.json`): `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it into a new Sources/App folder next to the app shell, after #1946).
-
 ## Entry points
 
 - `RecentCaptureScanners.swift` (`RecentMeetingsScanner`) feeds Home and the Meetings search.
