@@ -1,7 +1,8 @@
-// Repo-structure / contract suite, not behavioral coverage.
-// It asserts that menubar sources keep their stable AX identifiers and that
-// the smoke script still references them, so external UI automation stays in sync.
-// It runs no UI and exercises no runtime behavior; it only greps source text.
+// Contract suite for the surfaces external UI automation and users rely on.
+// The menubar and app-command suites build the real compiled pieces (the
+// command table, MenuBarAutomationID, the AppKit menubar rows) and check them
+// directly. The rest is grandfathered source text that greps Settings and Home
+// files for stable AX identifiers and copy.
 //
 // Adding a new contract guard is purely additive: call `contractSource("Sources/.../X.swift")`
 // inline inside an assertion. Do NOT reintroduce a top-of-suite block of
@@ -11,6 +12,7 @@
 // memoizes each file on demand, so repeated reads of the same path are free and two
 // PRs can add guards for the same file without redeclaring anything.
 
+import AppKit
 import Foundation
 
 // On-demand, memoized source reader. Each path is read at most once per run.
@@ -90,7 +92,8 @@ private func writingSurfaceContractContains(_ needle: String) -> Bool {
     ].contains { contractSource($0).contains(needle) }
 }
 
-func testUIAutomationSurfaceContract() {
+@MainActor
+func testUIAutomationSurfaceContract() async {
     // Guards that read TranscriptedSettingsView.swift alone before the shell was
     // split into TranscriptedSettingsView+*.swift extensions. They now read the
     // whole split, so they hold wherever the code lives.
@@ -188,102 +191,231 @@ func testUIAutomationSurfaceContract() {
         )
     }
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
-        assertTrue(
-            contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")
-                && contractSource("Sources/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
-            "the real menu bar status item should expose a stable AX identifier for external UI automation"
-        )
-
-        assertTrue(
-            contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("let automationIdentifier: String")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(visibleTitle)")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),
-            "menubar smoke snapshots should carry the same accessibility identifier and AXPress path AppKit automation sees"
-        )
-
-        assertTrue(
-            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let minimumHitTargetSize: CGFloat = 40")
-                && contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let panelHeight: CGFloat = 480")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.utilityActionRowHeight")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.compactActionRowHeight"),
-            "menubar action rows should keep a real 40pt hit-target floor and a panel height that keeps default rows visible"
-        )
-
-        for identifier in [
-            "transcripted.menubar.primary.start-dictation",
-            "transcripted.menubar.primary.start-meeting",
-        ] {
+        // These raw values are the strings external automation looks up. The
+        // QA AX smoke (Tools/TranscriptedQA UISmoke) and the build.sh launch
+        // smoke keep their own copies, so the cross-package lists stay pinned
+        // here against the compiled enum.
+        let expected: [MenuBarAutomationID: String] = [
+            .statusItemButton: "transcripted.status-item.button",
+            .startMeeting: "transcripted.menubar.primary.start-meeting",
+            .startDictation: "transcripted.menubar.primary.start-dictation",
+            .openTranscripted: "transcripted.menubar.utility.open-transcripted",
+            .checkUpdates: "transcripted.menubar.utility.check-updates",
+            .quit: "transcripted.menubar.utility.quit",
+        ]
+        assertEqual(MenuBarAutomationID.allCases.count, expected.count, "every menubar automation id should be listed here")
+        for id in MenuBarAutomationID.allCases {
+            assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
             assertTrue(
-                contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
-                    && contractSource("scripts/entrypoints/build.sh").contains(identifier),
-                "\(identifier) should be attached in source and enforced by launch smoke"
+                contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(id.rawValue),
+                "\(id.rawValue) should stay in the QA AX smoke's expected list"
+            )
+        }
+        for id in MenuBarAutomationID.allCases where id != .statusItemButton {
+            assertTrue(
+                contractSource("scripts/entrypoints/build.sh").contains(id.rawValue),
+                "\(id.rawValue) should stay enforced by the build.sh launch smoke"
             )
         }
 
-        for identifier in [
-            "transcripted.menubar.utility.check-updates",
-            "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.quit",
-        ] {
-            assertTrue(
-                contractSource("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift").contains(identifier)
-                    && contractSource("scripts/entrypoints/build.sh").contains(identifier),
-                "\(identifier) should be attached in source and enforced by launch smoke"
-            )
-        }
+        _ = NSApplication.shared
+        let primary = MenuBarPrimaryActionsView(frame: .zero)
+        let utility = MenuBarUtilityActionsView(frame: .zero)
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true
+        )
+        assertEqual(
+            Set((primary.keyboardFocusableRows + utility.keyboardFocusableRows).map { $0.accessibilityIdentifier() }),
+            Set(MenuBarAutomationID.allCases.filter { $0 != .statusItemButton }.map(\.rawValue)),
+            "the real popover rows should carry every row identifier as their AX identifier"
+        )
+        assertEqual(
+            utility.smokeSnapshot.mapValues(\.automationIdentifier),
+            [
+                "checkUpdates": MenuBarAutomationID.checkUpdates.rawValue,
+                "openTranscripted": MenuBarAutomationID.openTranscripted.rawValue,
+                "quit": MenuBarAutomationID.quit.rawValue,
+            ],
+            "the utility smoke snapshot should report the identifiers AppKit automation sees"
+        )
+    }
 
+    await runSuite("UI automation surface contract - menubar action rows are AX buttons with a real press path") {
+        _ = NSApplication.shared
+        let row = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        row.setAutomationIdentifier(.openTranscripted)
+        row.update(symbolName: "mic.fill", title: "Record Meeting", displayTitle: "Record", detail: "Mic and system audio", size: .button)
+        var presses = 0
+        row.onPress = { presses += 1 }
+
+        assertEqual(row.accessibilityIdentifier(), MenuBarAutomationID.openTranscripted.rawValue, "the row should expose its automation id to AX")
+        assertEqual(row.identifier?.rawValue, MenuBarAutomationID.openTranscripted.rawValue, "the row's NSView identifier should match its AX identifier")
+        assertEqual(row.smokeSnapshot.automationIdentifier, MenuBarAutomationID.openTranscripted.rawValue, "the smoke snapshot should report the AX identifier")
+        assertEqual(row.accessibilityRole(), .button, "a menubar row should be an AX button")
+        assertTrue(row.isAccessibilityElement(), "a menubar row should be an AX element")
+        assertEqual(row.accessibilityLabel(), "Record", "the AX label should be the title on screen, so Voice Control can match it")
+
+        assertTrue(row.accessibilityPerformPress(), "AXPress on an enabled row should succeed")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on an enabled row should run its action")
+
+        row.update(symbolName: "mic.fill", title: "Record Meeting", detail: "", size: .button, isEnabled: false)
+        assertFalse(row.accessibilityPerformPress(), "AXPress on a disabled row should fail")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on a disabled row should not run its action")
     }
 
     runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
-        assertTrue(
-            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("minimumHitTargetSize: CGFloat = 40")
-                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize"),
-            "menubar rows should stay at or above the 40px minimum hit target"
-        )
-    }
+        assertEqual(MenuTokens.minimumHitTargetSize, 40, "the menubar hit-target floor is 40pt")
+        assertEqual(MenuTokens.panelHeight, 480, "the popover height keeps the default rows visible")
 
-    runSuite("UI automation surface contract - app commands expose capture shortcuts") {
-        for requiredCommandHook in [
-            "CommandMenu(\"Capture\")",
-            "Button(\"Start Dictation\")",
-            "appDelegate.menuStartDictation()",
-            ".keyboardShortcut(\"d\", modifiers: .command)",
-            "Button(\"Start / Stop Meeting Recording\")",
-            "appDelegate.menuToggleMeetingRecording()",
-            ".keyboardShortcut(\"r\", modifiers: .command)",
-            "Button(\"Transcribe Audio File",
-            "appDelegate.menuImportAudio()",
-            ".keyboardShortcut(\"o\", modifiers: .command)",
-        ] {
-            assertTrue(contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the app command menu")
+        _ = NSApplication.shared
+        for size in [MenuBarActionRowView.Size.primary, .utility, .button] {
+            for detail in ["", "Detail line"] {
+                let row = MenuBarActionRowView(frame: .zero)
+                row.update(symbolName: "power", title: "Quit", detail: detail, size: size)
+                assertTrue(
+                    row.intrinsicContentSize.height >= MenuTokens.minimumHitTargetSize,
+                    "a \(size) row (detail: \(!detail.isEmpty)) should be at least the 40pt hit target"
+                )
+            }
         }
-    }
 
-    runSuite("UI automation surface contract - native Settings routes to the real window") {
-        for requiredCommandHook in [
-            "CommandGroup(replacing: .appSettings)",
-            "Button(\"Settings…\")",
-            "appDelegate.menuOpenSettings()",
-            ".keyboardShortcut(\",\", modifiers: .command)",
-        ] {
+        let utility = MenuBarUtilityActionsView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: 200))
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "You're up to date",
+            updateVersion: "1.1.68",
+            updateTone: .standard,
+            updateEnabled: true
+        )
+        utility.layout()
+        for row in utility.keyboardFocusableRows {
             assertTrue(
-                contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook),
-                "\(requiredCommandHook) should keep Settings… and Command-, routed through the real Transcripted window"
+                row.frame.height >= MenuTokens.minimumHitTargetSize,
+                "\(row.accessibilityIdentifier()) should be laid out at least 40pt tall"
             )
         }
+    }
 
-        let appSource = contractSource("Sources/TranscriptedApp.swift")
-        assertTrue(
-            appSource.contains("func menuOpenSettings()")
-                && appSource.contains("showSettingsWindow(page: .general, source: \"app_menu\")"),
-            "the declarative app Settings command should open the owned General settings page"
+    runSuite("UI automation surface contract - app command table") {
+        func item(_ title: String) -> AppMenuCommandItem? {
+            TranscriptedMenuCommandTable.items.first { $0.title == title }
+        }
+        func describe(_ items: [AppMenuCommandItem]) -> [String] {
+            items.map { "\($0.title) \($0.modifiers.rawValue):\($0.key)" }
+        }
+
+        // Settings… and ⌘, open the app's own Settings window on General.
+        assertEqual(
+            TranscriptedMenuCommandTable.items(in: .appSettings).map(\.action),
+            [.openSettings],
+            "the app menu's Settings group should hold only Settings…"
         )
+        assertEqual(item("Settings…")?.key, ",", "Settings… should keep ⌘,")
+        assertEqual(item("Settings…")?.modifiers, .command, "Settings… should keep ⌘,")
+        assertEqual(AppMenuSettingsRoute.settingsPage, .general, "Settings… should open the General page")
+        assertEqual(AppMenuSettingsRoute.settingsSource, "app_menu", "Settings… should report the app_menu source")
+
+        let command = AppMenuModifiers.command
+        let commandShift: AppMenuModifiers = [.command, .shift]
+        assertEqual(
+            describe(TranscriptedMenuCommandTable.items(in: .capture)),
+            describe([
+                AppMenuCommandItem(group: .capture, title: "Start Dictation", key: "d", modifiers: command, action: .startDictation),
+                AppMenuCommandItem(group: .capture, title: "Start / Stop Meeting Recording", key: "r", modifiers: command, action: .toggleMeetingRecording),
+                AppMenuCommandItem(group: .capture, title: "Transcribe Audio File…", key: "o", modifiers: command, action: .importAudio),
+            ]),
+            "the Capture menu should keep its titles and ⌘D / ⌘R / ⌘O"
+        )
+        assertEqual(
+            TranscriptedMenuCommandTable.items(in: .capture).map(\.action),
+            [.startDictation, .toggleMeetingRecording, .importAudio],
+            "the Capture menu should route to dictation, the meeting toggle, and file import"
+        )
+
+        let goItems = TranscriptedMenuCommandTable.items(in: .go)
+        assertEqual(
+            goItems.map { "\($0.title) \($0.modifiers.rawValue):\($0.key)" },
+            [
+                "Today \(command.rawValue):1",
+                "Meetings \(command.rawValue):2",
+                "Dictations \(command.rawValue):3",
+                "Writing \(command.rawValue):4",
+                "Speakers \(command.rawValue):5",
+                "Agent \(command.rawValue):6",
+                "Find Meetings… \(command.rawValue):f",
+                "Find Speaker… \(commandShift.rawValue):f",
+            ],
+            "the Go menu should keep its titles and ⌘1–⌘6, ⌘F, ⇧⌘F"
+        )
+        assertEqual(
+            goItems.map(\.action),
+            [
+                .openPage(.today), .openPage(.home), .openPage(.dictations),
+                .openPage(.writing), .openPage(.people), .openPage(.connectAgent),
+                .findCaptures, .findSpeaker,
+            ],
+            "the Go menu should open the matching sidebar pages and searches"
+        )
+
+        // The sidebar shows the same ⌘ key in its tooltips.
+        for goItem in goItems {
+            guard case .openPage(let page) = goItem.action else { continue }
+            assertEqual(page.navigationShortcutKey, String(goItem.key), "\(page) sidebar shortcut should match the Go menu")
+            assertEqual(page.navigationHelp, "\(page.title)  ⌘\(goItem.key)", "\(page) sidebar help should show its Go shortcut")
+        }
+
+        // App-active commands never shadow the global recordable triggers:
+        // only ⌘ (plus ⇧) shortcuts, nothing on M, no duplicate key combos.
+        for entry in TranscriptedMenuCommandTable.items {
+            assertTrue(entry.modifiers.contains(.command), "\(entry.title) should be a ⌘ shortcut")
+            assertTrue(
+                entry.modifiers.isDisjoint(with: [.option, .control]),
+                "\(entry.title) must not use option or control, which the recordable triggers own"
+            )
+            assertFalse(entry.key == "m", "\(entry.title) must not take ⌘M")
+        }
+        let combos = TranscriptedMenuCommandTable.items.map { "\($0.modifiers.rawValue):\($0.key)" }
+        assertEqual(Set(combos).count, combos.count, "no two menu commands should share a shortcut")
+    }
+
+    runSuite("UI automation surface contract - app commands route through the delegate entry points") {
+        let delegate = UIAutomationMenuActionRecorder()
+        for entry in TranscriptedMenuCommandTable.items {
+            delegate.perform(entry.action)
+        }
+        assertEqual(
+            delegate.calls,
+            [
+                "menuOpenSettings",
+                "menuStartDictation",
+                "menuToggleMeetingRecording",
+                "menuImportAudio",
+                "menuOpenPage(today)",
+                "menuOpenPage(home)",
+                "menuOpenPage(dictations)",
+                "menuOpenPage(writing)",
+                "menuOpenPage(people)",
+                "menuOpenPage(connectAgent)",
+                "menuFindCaptures",
+                "menuFindSpeaker",
+            ],
+            "each menu command should call its own delegate entry point exactly once"
+        )
+    }
+
+    // Kept as source text: the SwiftUI Settings scene and its fallback view live
+    // in the @main App, which the fast runner can't build. They guard the old
+    // bug where Command-, left a blank Settings scene on screen.
+    runSuite("UI automation surface contract - native Settings routes to the real window") {
+        let appSource = contractSource("Sources/TranscriptedApp.swift")
         assertTrue(
             appSource.contains("TranscriptedSettingsFallbackView")
                 && appSource.contains("transcripted.settings.fallback.open")
@@ -297,85 +429,6 @@ func testUIAutomationSurfaceContract() {
                 || appSource.contains("openSettingsFromAppMenu"),
             "Settings must not depend on a blank scene plus a one-shot AppKit menu mutation"
         )
-    }
-
-    runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
-        for requiredCommandHook in [
-            "CommandMenu(\"Go\")",
-            "Button(\"Today\")",
-            "appDelegate.menuOpenPage(.today)",
-            ".keyboardShortcut(\"1\", modifiers: .command)",
-            "Button(\"Meetings\")",
-            "appDelegate.menuOpenPage(.home)",
-            ".keyboardShortcut(\"2\", modifiers: .command)",
-            "Button(\"Dictations\")",
-            "appDelegate.menuOpenPage(.dictations)",
-            ".keyboardShortcut(\"3\", modifiers: .command)",
-            "Button(\"Writing\")",
-            "appDelegate.menuOpenPage(.writing)",
-            ".keyboardShortcut(\"4\", modifiers: .command)",
-            "Button(\"Speakers\")",
-            "appDelegate.menuOpenPage(.people)",
-            ".keyboardShortcut(\"5\", modifiers: .command)",
-            "Button(\"Agent\")",
-            "appDelegate.menuOpenPage(.connectAgent)",
-            ".keyboardShortcut(\"6\", modifiers: .command)",
-            "Button(\"Find Speaker",
-            "appDelegate.menuFindSpeaker()",
-            ".keyboardShortcut(\"f\", modifiers: .command)",
-        ] {
-            assertTrue(contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the Go command menu")
-        }
-
-        for requiredPageHook in [
-            "case .today: return \"1\"",
-            "case .home: return \"2\"",
-            "case .dictations: return \"3\"",
-            "case .writing: return \"4\"",
-            "case .people: return \"5\"",
-            "case .connectAgent: return \"6\"",
-            "return \"\\(title)  ⌘\\(key)\"",
-        ] {
-            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
-        }
-    }
-
-    runSuite("UI automation surface contract - app commands route through existing delegate entry points") {
-        for requiredAppHook in [
-            "TranscriptedMenuCommands(appDelegate: appDelegate)",
-            "func menuStartDictation()",
-            "startDictationFromSettings()",
-            "func menuToggleMeetingRecording()",
-            "meetingOverlayController.toggleFromHotkey()",
-            "func menuImportAudio()",
-            "importAudioFileFromSettings()",
-            "func menuOpenPage(_ page: TranscriptedSettingsPage)",
-            "showSettingsWindow(page: page, source: \"menu_command\")",
-            "func menuFindSpeaker()",
-            "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
-        ] {
-            assertTrue(contractSource("Sources/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
-        }
-    }
-
-    runSuite("UI automation surface contract - app commands do not remap global trigger preferences") {
-        for forbiddenTriggerHook in [
-            "PhysicalDictationTriggerPreferences",
-            "HotkeyPreferences",
-            "RegisterEventHotKey",
-            "pushToTalk",
-            "handsFree",
-            ".keyboardShortcut(\"m\"",
-            "modifiers: .option",
-            "modifiers: [.option",
-            "modifiers: .control",
-            "modifiers: [.control",
-        ] {
-            assertFalse(
-                contractSource("Sources/TranscriptedMenuCommands.swift").contains(forbiddenTriggerHook),
-                "app-active commands must not remap or shadow global recordable trigger preferences (\(forbiddenTriggerHook))"
-            )
-        }
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
@@ -1092,28 +1145,37 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - WS4 design tokens are the single source") {
-        let tokens = contractSource("Sources/UI/MenuBar/MenuTokens.swift")
-        let actionRow = contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift")
-        let header = contractSource("Sources/UI/MenuBar/MenuBarHeaderView.swift")
-        let doc = contractSource("docs/DESIGN_TOKENS.md")
+        _ = NSApplication.shared
+        @MainActor func label(in view: NSView, showing text: String) -> NSTextField? {
+            view.layout()
+            return view.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == text }
+        }
 
+        let primaryRow = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 42))
+        primaryRow.update(symbolName: "mic.fill", title: "Record Meeting", detail: "", size: .primary)
         assertTrue(
-            tokens.contains("enum Font")
-                && tokens.contains("static let rowTitlePrimary")
-                && tokens.contains("static let headerStatus"),
-            "MenuTokens should own the menubar's type roles so views never reach for a raw NSFont literal"
+            label(in: primaryRow, showing: "Record Meeting")?.font == MenuTokens.Font.rowTitlePrimary,
+            "a primary row title should use MenuTokens.Font.rowTitlePrimary"
         )
+        let utilityRow = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        utilityRow.update(symbolName: "power", title: "Quit", detail: "", size: .utility)
         assertTrue(
-            actionRow.contains("MenuTokens.Font.rowTitlePrimary")
-                && actionRow.contains("MenuTokens.Font.rowTitleUtility")
-                && header.contains("MenuTokens.Font.headerStatus"),
-            "menubar rows and header should read their fonts from MenuTokens.Font"
+            label(in: utilityRow, showing: "Quit")?.font == MenuTokens.Font.rowTitleUtility,
+            "a utility row title should use MenuTokens.Font.rowTitleUtility"
+        )
+        // MenuBarHeaderView needs MeetingSessionController, which the fast
+        // runner doesn't compile, so its font stays a source-text check.
+        let header = contractSource("Sources/UI/MenuBar/MenuBarHeaderView.swift")
+        assertTrue(
+            header.contains("MenuTokens.Font.headerStatus"),
+            "the header status line should read its font from MenuTokens.Font"
         )
         assertFalse(
-            actionRow.contains("NSFont.systemFont(ofSize: 12.5")
-                || header.contains("NSFont.systemFont(ofSize: 11.5"),
-            "menubar labels should not re-inline raw NSFont sizes now that MenuTokens.Font owns them"
+            header.contains("NSFont.systemFont(ofSize: 11.5"),
+            "the header should not re-inline a raw NSFont size now that MenuTokens.Font owns it"
         )
+
+        let doc = contractSource("docs/DESIGN_TOKENS.md")
         assertTrue(
             doc.contains("Type scale")
                 && doc.contains("Spacing grid")
@@ -1135,4 +1197,26 @@ private func sourceBlock(named startMarker: String, endingBefore endMarker: Stri
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
     guard !needle.isEmpty else { return 0 }
     return haystack.components(separatedBy: needle).count - 1
+}
+
+@MainActor
+private final class UIAutomationMenuActionRecorder: AppMenuActionPerforming {
+    var calls: [String] = []
+
+    func menuOpenSettings() { calls.append("menuOpenSettings") }
+    func menuStartDictation() { calls.append("menuStartDictation") }
+    func menuToggleMeetingRecording() { calls.append("menuToggleMeetingRecording") }
+    func menuImportAudio() { calls.append("menuImportAudio") }
+    func menuOpenPage(_ page: TranscriptedSettingsPage) { calls.append("menuOpenPage(\(page.rawValue))") }
+    func menuFindCaptures() { calls.append("menuFindCaptures") }
+    func menuFindSpeaker() { calls.append("menuFindSpeaker") }
+}
+
+/// The row answers AXPress first and runs its action on the next main-queue
+/// turn; anything queued after the press runs after the action.
+@MainActor
+private func drainMainQueue() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { continuation.resume() }
+    }
 }

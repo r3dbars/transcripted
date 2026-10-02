@@ -8,7 +8,7 @@ The status item and its popover: the glyph, the header status line, the Record a
 
 ## Public surface
 
-`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `StatusItemPresentation`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`, `MenuTokens`.
+`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `StatusItemPresentation`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`, `MenuTokens`, `MenuBarAutomationID` (the AX ids external automation looks up).
 
 ## May depend on
 

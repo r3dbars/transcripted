@@ -744,8 +744,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
         StatusItemPresentation.apply(to: button, meetingRecording: false, dictating: false, updateTooltip: nil)
         button.imagePosition = .imageOnly
-        button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
-        button.setAccessibilityIdentifier("transcripted.status-item.button")
+        button.identifier = NSUserInterfaceItemIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
+        button.setAccessibilityIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
         button.action = #selector(togglePopover)
         button.target = self
         // Right-click opens the same popover as a left-click; there is no
@@ -801,12 +801,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func menuOpenPage(_ page: TranscriptedSettingsPage) {
-        showSettingsWindow(page: page, source: "menu_command")
+        showSettingsWindow(page: page, source: AppMenuSettingsRoute.pageSource)
     }
 
     func menuOpenSettings() {
         closePopover()
-        showSettingsWindow(page: .general, source: "app_menu")
+        showSettingsWindow(page: AppMenuSettingsRoute.settingsPage, source: AppMenuSettingsRoute.settingsSource)
     }
 
     func menuFindSpeaker() {

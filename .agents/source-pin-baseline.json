@@ -24,6 +24,6 @@
     "Tests/ReleaseMetadataContractTests.swift": 6,
     "Tests/RetranscribeLocalSpeakerPreferenceContractTests.swift": 2,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
-    "Tests/UIAutomationSurfaceContractTests.swift": 257
+    "Tests/UIAutomationSurfaceContractTests.swift": 158
   }
 }
