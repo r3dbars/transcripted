@@ -92,19 +92,11 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                 activeWorkers: activeWorkerCount
             )
         }
-        let resumeLock = NSLock()
-        var didResume = false
+        let resumeGate = ParakeetTimedWorkResumeGate()
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
-            func resumeOnce(_ result: Result<T, Error>) {
-                var shouldResume = false
-                resumeLock.withLock {
-                    if !didResume {
-                        didResume = true
-                        shouldResume = true
-                    }
-                }
-                guard shouldResume else { return }
+            @Sendable func resumeOnce(_ result: Result<T, Error>) {
+                guard resumeGate.claim() else { return }
                 continuation.resume(with: result)
             }
 
@@ -115,8 +107,7 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                 // occupied and later work fails closed instead of spawning more
                 // blocked queues and native graphs.
                 defer { workerLease.release() }
-                let shouldRun = resumeLock.withLock { !didResume }
-                guard shouldRun else { return }
+                guard !resumeGate.hasResumed else { return }
                 guard isWorkCurrent?() != false else {
                     resumeOnce(.failure(CancellationError()))
                     return
@@ -135,13 +126,7 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                     result = .failure(CancellationError())
                 }
 
-                var completedBeforeTimeout = false
-                resumeLock.withLock {
-                    if !didResume {
-                        didResume = true
-                        completedBeforeTimeout = true
-                    }
-                }
+                let completedBeforeTimeout = resumeGate.claim()
 
                 if completedBeforeTimeout {
                     continuation.resume(with: result)
@@ -165,6 +150,26 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                     )
                 )
             }
+        }
+    }
+}
+
+/// The one-shot latch that lets either the work or the timeout resume the
+/// caller, never both.
+private final class ParakeetTimedWorkResumeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    var hasResumed: Bool {
+        lock.withLock { didResume }
+    }
+
+    /// True for the first caller only.
+    func claim() -> Bool {
+        lock.withLock {
+            guard !didResume else { return false }
+            didResume = true
+            return true
         }
     }
 }
