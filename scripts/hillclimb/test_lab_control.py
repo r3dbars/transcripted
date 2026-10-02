@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for lab_control.py. Run: python3 scripts/hillclimb/lab_control.py --self-test
 
-The real responder is Swift (Sources/Support/LabControlChannel.swift), compiled
+The real responder is Swift (Sources/App/LabControlChannel.swift), compiled
 only into lab builds, and only runs on a Mac. These tests use a Python stand-in
 that follows the same file protocol: read inbox/*.json in name order, move each
 to done/, append one response line to responses.jsonl. The launch preflight's

@@ -700,7 +700,7 @@ func testBluetoothRouteContract() async {
         // Still source text: the quit path lives in TranscriptedApp, which the
         // fast runner can't compile. The controller's listener, relinquish, and
         // shutdown behavior is tested in PersistentDictationInputControllerTests.
-        let app = readSourceFixture("Sources/TranscriptedApp.swift")
+        let app = readSourceFixture("Sources/App/TranscriptedApp.swift")
         assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
     }
 

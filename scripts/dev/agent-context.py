@@ -365,7 +365,7 @@ def self_test(contract_path: Path) -> None:
         "Sources/Speech/ParakeetEngine.swift": {"speech"},
         "Sources/Meeting/MeetingSessionController.swift": {"meeting-app"},
         "Sources/TranscriptedCore/Audio/Audio.swift": {"meeting-core"},
-        "Sources/TranscriptedApp.swift": {"app-shell"},
+        "Sources/App/TranscriptedApp.swift": {"app-shell"},
         "Package.swift": {"meeting-core"},
         "build.sh": {"build-system"},
         "scripts/entrypoints/build-beta.sh": {"beta-release", "build-system"},
@@ -383,7 +383,7 @@ def self_test(contract_path: Path) -> None:
         if missing:
             raise ContractError(f"{path} is missing owners: {sorted(missing)}")
     fallback_cases = {
-        "Sources/TranscriptedApp.swift": {"app-shell"},
+        "Sources/App/TranscriptedApp.swift": {"app-shell"},
         "scripts/download_ami.sh": {"scripts"},
         "archive/README.md": {"repository-fallback"},
     }

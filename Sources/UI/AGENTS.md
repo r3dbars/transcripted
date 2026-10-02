@@ -23,11 +23,9 @@ The module card (owns, public surface, may depend on, entry points, tests, rules
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts, plus the "Transcribe It" button title on messages about a saved recording (it runs the same import as Capture → Transcribe Audio File on that file)
 - `Overlay/DictationOverlayPlacementPolicy.swift` — AX-rect-to-Cocoa conversion the Notch island uses to find the display holding the focused text field
-- `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
 - `Overlay/DictationStartCuePolicy.swift` — decides whether the start click plays on key press (built-in or wired mic) or waits until recording starts (a headset, any input that could be one, or a mic `PinnedDictationSpeedPath` moved back to the engine)
 - `Overlay/DictationSessionCapWarningPolicy.swift` — the live "28s left" countdown the listening pill shows in the last 30 seconds before the 5-minute dictation cap, worded for push-to-talk vs hands-free
 - `Overlay/DictationQueuedStartPolicy.swift` — a dictation shortcut press while the last take is still transcribing is remembered and starts when that take finishes (up to 2 s), instead of being refused
-- `Overlay/DictationTrigger.swift` — what started or stopped a dictation (physical key, keyboard shortcut, menu, overlay button, onboarding, session cap); the raw values are telemetry values, and `DictationStartReadinessPolicy.hotkeyTriggerRawValues` must match them
 - `Overlay/DictationStartAdmission.swift` — the first step of starting a dictation: whether a press becomes a take, and how it is counted. A press while dictating or queued behind a finishing take is not counted yet; every other press is counted (`dictation_start_requested`) before any guard can refuse it, and each refusal reports its own reason. `DictationSessionController.startDictation` runs it with real closures; `Tests/DictationStartAdmissionTests.swift` runs it with fakes
 - `Overlay/DictationSessionPipeline.swift` — the start and stop wiring `DictationSessionController` runs through `DictationSessionPipelineHost` (the controller conforms): start admission and refusal messages, Try Again restarts marked as retries, the start click (once per session, queued before the fast-path mic start), focus recovery after a failed background mic start, the stop task from the stale-task fence through the checkpoint and model wait to the text, a stop before capture started, an empty take (mis-tap, no speech, Paste Anyway, saved recording, Retry Saving), and Quit's mark/wait/cancel. `Tests/DictationSessionPipelineTests.swift` runs it on a fake controller
 - `Overlay/DictationStartActivation.swift` — optional foreground-activation handshake (and focus restore) tried after a background microphone start fails; a recovery attempt, not a mic-readiness signal
@@ -70,7 +68,6 @@ so tiny transient states do not get duplicated inside controllers.
 - `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate", "Done"); the full title stays the accessibility label
 - `MenuBar/MenuBarShortcutLabel.swift` — Foundation-pure shortcut text for those buttons: the full shortcut, then the first key of a pair ("Fn / Right ⌥" → "Fn") when the pair doesn't fit
 - `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
-- `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
 
 The agent-connect surface is the Settings window's Agent page (onboarding no
@@ -128,7 +125,6 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 
 - `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, and portable meeting bundle copy for the agent-connect flow
 - `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
-- `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/CaptureUndo.swift` — shared "delete now, offer Undo for a few seconds" seam used by Home and Dictations in place of delete-confirmation dialogs; performs and reverses the move/rewrite and runs the grace-window bookkeeping
 - `Shared/DictionaryPastMeetingFix.swift` — applies a Settings dictionary correction to saved meetings using the same matcher live transcription uses (longer rules win, as live). Only the spoken turns between `## Transcript` and the next section change: never frontmatter, the title, labels, timestamps, trailing notes/summaries, links, paths, or code. Backs up each original under `state/dictionary-fix-backups/` (kept 3 days; pruned at launch, and a meeting's backup is dropped when it is deleted from Home or goes missing) before writing, keeps creation dates, writes through the transcript-update serializer, and undoes only files nobody changed since. Meetings are found by file name in the current meetings folder, so a moved library keeps its Undo; busy meetings keep their backups so Undo can try again
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
@@ -138,6 +134,7 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows; fresh planning and reversible Trash/Undo run off-main through the transcript-update serializer so background rewrites cannot resurrect a deleted transcript. Includes legacy summary sidecar and retained-audio cleanup, stale-row checks, and active-retranscription protection.
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Rename item in a Home meeting row's ⋯ menu (the expanded preview's title is plain, non-editable text): rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and legacy summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
+- `Shared/MenuTokens.swift` — design tokens for menubar views (Settings' AppKit hotkey recorder uses them too); colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `Shared/MeetingPillFinishPresentation.swift` — Foundation-pure copy and timing for how a meeting finishes: transcribing percent and "N more waiting" on the pill and menu bar header, the saved pill's dwell and meeting name, and when the error pill offers Open
 - `Shared/LibraryTokens.swift` — shared design tokens (accent, ink levels, hairline, radii, type roles) for the main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu bar popover); overlays keep their own tokens
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
@@ -150,7 +147,6 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
 - `Shared/SystemAudioPermissionRevalidator.swift` — single owner for revalidating System Audio Recording permission from the Settings shell and onboarding, with an in-flight-task guard so both call sites can't run overlapping checks
 - `Shared/SupportEmailDispatcher.swift` — native mail handoff and explicit failure fallback; callers retain feedback drafts when handoff fails, and the public support address is copied only on request
-- `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same

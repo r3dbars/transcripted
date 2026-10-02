@@ -295,7 +295,7 @@ func testDictationStoppedAudioRecovery() {
                 preparedClaim.lowerBound < preparedClear.lowerBound,
                 "an old Stop snapshot cannot clear a successor recording's native samples"
             )
-            let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
+            let appSource = try String(contentsOf: repoFixtureURL("Sources/App/TranscriptedApp.swift"), encoding: .utf8)
             assertTrue(
                 appSource.contains("sessionController.presentPendingStoppedAudioRecoveryIfNeeded()"),
                 "launch should scan for pending stopped audio"

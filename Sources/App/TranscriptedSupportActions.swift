@@ -52,22 +52,6 @@ enum TranscriptedSupportActions {
         SupportDiagnosticsBundle.text(snapshot: await diagnosticsSnapshot(appState: appState))
     }
 
-    static var appVersionDescription: String {
-        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-
-        switch (shortVersion, buildVersion) {
-        case let (short?, build?) where !short.isEmpty && !build.isEmpty && short != build:
-            return "Version \(short) (\(build))"
-        case let (short?, _) where !short.isEmpty:
-            return "Version \(short)"
-        case let (_, build?) where !build.isEmpty:
-            return "Build \(build)"
-        default:
-            return "Version unavailable"
-        }
-    }
-
     private static func diagnosticsSnapshot(appState: TranscriptedAppState) async -> SupportDiagnosticsSnapshot {
         // The model-cache walk and the reliability log read touch disk (the
         // cache holds many CoreML files, the log can be ~10 MB), so they run

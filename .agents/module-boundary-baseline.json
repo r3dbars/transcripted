@@ -6,16 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Meeting/MeetingSessionController+CancelAndTermination.swift": {
-      "UIShared": [
-        "AppSoundPlayer"
-      ]
-    },
-    "Sources/Meeting/MeetingSessionController+TranscriptionOutcomes.swift": {
-      "UIShared": [
-        "AppSoundPlayer"
-      ]
-    },
     "Sources/Observability/ActivationTelemetry.swift": {
       "Dictation": [
         "SavedDictationTranscript"
@@ -29,16 +19,6 @@
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
-      ],
-      "UIOverlay": [
-        "DictationRecordingStartFailurePolicy",
-        "DictationRecordingStartOverlayPolicy",
-        "DictationStartAvailabilityPolicy"
-      ]
-    },
-    "Sources/Speech/DictationSessionTypes.swift": {
-      "UIOverlay": [
-        "DictationRecordingStartFailureCleanupPlan"
       ]
     },
     "Sources/Speech/ParakeetASRInference.swift": {
@@ -53,21 +33,7 @@
     },
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift": {
       "Observability": [
-        "AnalyticsPreferences",
         "AnalyticsRuntimeConfiguration"
-      ]
-    },
-    "Sources/Support/LabControlChannel.swift": {
-      "AppShell": [
-        "TranscriptedAppDelegate"
-      ],
-      "Observability": [
-        "LockedFileAppender"
-      ]
-    },
-    "Sources/Support/LabControlCommand.swift": {
-      "Meeting": [
-        "MeetingSessionState"
       ]
     },
     "Sources/Support/TranscriptedPermissionAccess.swift": {
@@ -92,11 +58,6 @@
     "Sources/UI/Settings/HomeTranscriptionActivityPresentation.swift": {
       "Core": [
         "DisplayStatus"
-      ]
-    },
-    "Sources/UI/Settings/HotkeyRecorderAppKitView.swift": {
-      "UIMenuBar": [
-        "MenuTokens"
       ]
     },
     "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
@@ -167,14 +128,6 @@
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
       "Core": [
         "UtteranceChannel"
-      ]
-    },
-    "Sources/UI/Shared/TranscriptedSupportActions.swift": {
-      "AppState": [
-        "TranscriptedAppState"
-      ],
-      "Core": [
-        "DisplayStatus"
       ]
     }
   }

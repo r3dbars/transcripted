@@ -6,7 +6,7 @@
   toggle; trigger scope is **browsers + known conferencing apps only** (unknown mic users map
   to no provider → no prompt). Phase 2 UDP hardening intentionally deferred.
 - **Area:** `Sources/Meeting/` (app-side meeting detection)
-- **Primary files:** `Sources/Meeting/MeetingPromptDetector.swift`, `Sources/Meeting/MeetingPromptHeuristics.swift`, `Sources/TranscriptedApp.swift`
+- **Primary files:** `Sources/Meeting/MeetingPromptDetector.swift`, `Sources/Meeting/MeetingPromptHeuristics.swift`, `Sources/App/TranscriptedApp.swift`
 - **Related:** existing calendar/runtime meeting prompts; `docs/ui-settings-menubar-spec.md`
 
 ## Summary
@@ -185,7 +185,7 @@ results below are the provenance for the production monitor design.
   frontmost-browser score of 4 — mic-in-use is a stronger signal than "a browser
   is frontmost").
 
-### Self-exclusion in `Sources/TranscriptedApp.swift`
+### Self-exclusion in `Sources/App/TranscriptedApp.swift`
 - Add `var isOwnCaptureActive: (() -> Bool)?` to the detector; wire it beside the
   existing `onPromptRequest` block to return
   `meetingSession.isRecording == true || <dictation active>`.
@@ -197,10 +197,10 @@ results below are the provenance for the production monitor design.
   `start()` it beside `detector.start()`, `stop()` it beside `detector.stop()`.
 
 ### Current wiring anchors (as of 2026-06-13, branch `fix/home-row-actions`; verify line numbers before editing)
-- `Sources/TranscriptedApp.swift:82` — `lazy var meetingPromptDetector = MeetingPromptDetector()`
-- `Sources/TranscriptedApp.swift:168` — `onPromptRequest = { … }`
-- `Sources/TranscriptedApp.swift` — `capturePillController.present(candidate:timeout:)`
-- `Sources/TranscriptedApp.swift:180` / `:261` — `start()` / `stop()`
+- `Sources/App/TranscriptedApp.swift:82` — `lazy var meetingPromptDetector = MeetingPromptDetector()`
+- `Sources/App/TranscriptedApp.swift:168` — `onPromptRequest = { … }`
+- `Sources/App/TranscriptedApp.swift` — `capturePillController.present(candidate:timeout:)`
+- `Sources/App/TranscriptedApp.swift:180` / `:261` — `start()` / `stop()`
 - `Sources/Meeting/MeetingPromptDetector.swift` — `evaluate()` builds the candidates array; `MeetingPromptDetector+CalendarRuntime.swift` — `runtimeReminderCandidates`, `upcomingCalendarCandidates`
 - `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:181` — `runtimePresentation`
 - `Sources/Meeting/MeetingSessionController+State.swift` — `isRecording`
@@ -285,7 +285,7 @@ calls, so Phase 1 alone is likely enough.
 - **New:** `Sources/Meeting/MicActivityMonitor.swift`
 - **Edit:** `Sources/Meeting/MeetingPromptDetector.swift` (new candidate source + setter),
   `Sources/Meeting/MeetingPromptHeuristics.swift` (bundle→provider for browsers,
-  mic presentation/score), `Sources/TranscriptedApp.swift` (construct/wire/start/stop
+  mic presentation/score), `Sources/App/TranscriptedApp.swift` (construct/wire/start/stop
   + self-capture closure)
 - **Maybe:** a `Sources/Support` preference + a Settings toggle
 - **Tests:** extend `Tests/MeetingPromptHeuristicsTests.swift`; any new root

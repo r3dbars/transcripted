@@ -9,8 +9,10 @@
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `AutomatedLaunchEnvironment.swift` — the one check for "this launch is our own harness" (build.sh launch smoke, launch benchmark, packaged first-run smoke); analytics, Sentry, the setup resume step, Sparkle and the permission probes all skip real-user behavior when it is active
 - `AudioImportQueue.swift` — FIFO of files the user asked to transcribe (open panel, several at once, or dropped on Home) that the app delegate feeds to `MeetingSessionController.importAudioFile(from:)` one at a time; files added during a recording wait until capture stops. Also filters dropped URLs to audio/video files
+- `AppSoundPlayer.swift` — UI sound preferences (`UISoundPreferences`) and the cue playback helper (`AppSoundPlayer`) used by dictation, meetings and the menu bar
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
+- `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference (the Settings toggle; `AnalyticsReporter` and `ClaudeDesktopIntegrationInstaller` read it)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)
 - `CaptureLibraryPathSafety.swift` — the dependency-free (pure Foundation) definition of the save-path safety predicate (system-directory rejection with a home-directory escape hatch) so `RecordingValidator.validateSavePath` (TranscriptedCore), `CaptureLibraryResolver.validatedConfiguredDirectory` (TranscriptedCaptureKit), and `TranscriptedStoragePreferences.isSafeCaptureLibraryURL` here all enforce the same rule. This is a SYNCED COPY: byte-identical real files (not a symlink — a `core.symlinks=false` checkout would materialize one as a broken text file) also live at `Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift` and `Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift`. Edit all three together; `Tests/CaptureLibraryPathSafetySyncTests.swift` fails if they diverge.
@@ -29,8 +31,7 @@
 - `NotchIslandPreferences.swift` — the Notch island's opt-in "Show island in screen sharing" switch (off by default; on sets the panel's `sharingType` to `.readOnly`, so it also shows in screenshots and recordings). The island is the only dictation, meeting and call-prompt window; the old dictation window picker (near text box, mini cursor) is gone and its saved `dictationOverlayPresentationMode` value is ignored (see `Sources/UI/Overlay/NotchIslandController.swift`)
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
-- `LabControlChannel.swift` — **lab builds only** (`#if TRANSCRIPTED_LAB_CONTROL`, set by `build.sh --lab`, never by `build-beta.sh`, which fails if the channel's env var name is in the binary). File-drop control channel the hill-climb lab uses to drive the real app (start/stop dictation and meetings, import audio, status) when launched with `TRANSCRIPTED_LAB_CONTROL_DIR`; refuses non-0700/foreign/symlinked control dirs, reads commands `O_NOFOLLOW|O_NONBLOCK` + `fstat`. Its hook is the one `#if` line at the end of `applicationDidFinishLaunching`. See `docs/lab-control-channel.md`
-- `LabControlCommand.swift` — the pure, always-compiled half of the lab channel: command parsing/validation (`stop_dictation` paste defaults to false), meeting-state gates, response encoding, and `LabControlFilePolicy` (the stat-based dir/file accept rules). Must not contain the channel's env var name as a literal. Fast-tested by `Tests/LabControlCommandTests.swift`
+- `TranscriptedAppVersion.swift` — the "Version 1.2.3 (456)" string from the running bundle's Info.plist, shown in Settings and About
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed), the needs-approval check, and opening Login Items
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy, plus `LaunchAtLoginNoticePolicy` for the inline failure/needs-approval line in Settings
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
@@ -74,7 +75,6 @@
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - Quit confirmation during meeting work is always on; there is no opt-out preference. Quitting during a live meeting stops capture, so the dialog is not optional.
 - `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings. The in-meeting boost prompt and the Home "Boost mic next meeting" row apply it to one meeting only.
-- The lab control channel must stay compiled out of beta/release builds. Keep everything that references its env var inside `LabControlChannel.swift`'s `#if`; `build-beta.sh` greps the built binary for that name and fails the release if it's there.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
 ## Verification
@@ -101,7 +101,6 @@ Relevant direct coverage includes:
 - `Tests/DictationAutoSendPreferencesTests.swift`
 - `Tests/NotchIslandPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
-- `Tests/LabControlCommandTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`

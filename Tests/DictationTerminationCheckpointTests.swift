@@ -191,7 +191,7 @@ func testDictationTerminationCheckpoint() async {
     // before the model) runs through DictationSessionPipeline.swift and is a
     // behavior test in DictationSessionPipelineTests.swift.
     do {
-        let app = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
+        let app = try String(contentsOf: repoFixtureURL("Sources/App/TranscriptedApp.swift"), encoding: .utf8)
         let appAdmission = app.range(of: "guard await self.sessionController.finishDictationForTermination() else")
         let appAdmissionEnd = appAdmission?.upperBound ?? app.startIndex
         let appDeferral = app.range(of: "self.replyToPendingTerminationRequests(sender, shouldTerminate: false)", range: appAdmissionEnd..<app.endIndex)

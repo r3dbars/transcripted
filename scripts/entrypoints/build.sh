@@ -20,7 +20,7 @@ BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
 # BUNDLE_VOICEPRINT_MODEL=0 leaves it out to try the app's fallback model.
 BUNDLE_VOICEPRINT_MODEL="${BUNDLE_VOICEPRINT_MODEL:-1}"
 # Lab builds compile in the hill-climb lab control channel
-# (Sources/Support/LabControlChannel.swift). Local dev only: never distribute
+# (Sources/App/LabControlChannel.swift). Local dev only: never distribute
 # one. build-beta.sh refuses this flag and rejects any binary that has it.
 TRANSCRIPTED_LAB_BUILD="${TRANSCRIPTED_LAB_BUILD:-0}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
