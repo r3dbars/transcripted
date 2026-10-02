@@ -7,6 +7,13 @@ Writing's autocomplete and Save my writing logic, ported from Tilde at `f36f6562
 - `Core/` — pure policy, Foundation only: suggestion state, activation and reveal policies, the prompt builder (`RawContinuationPrompt`), output cleaning, decision reasons, the socket wire format (`GhostBrainWire`), scene and Screen Memory policies, Personal History events and the personal predictor, `SecretRules` and `WritingSecretScrubber`. No AppKit, IMKit, processes, sockets or files.
 - `Runtime/` — Tilde's app half minus its UI: the owner-only socket and peer auth (`GhostBrainServerHost`), the `llama-server` child (`LlamaServerProcessHost`, `LlamaCompletionEngine`, `ScaffoldPrewarmer`, `WritingHelperWakeRecovery`), model download and Tilde-model adoption (`ModelManager`, `WritingModelAdoption`), Screen Memory (`ScreenMemory/`), Personal History (`PersonalHistory/`), Save my writing (`SaveMyWriting/`), outcome-ledger readers (`Stats/`), the keyboard installer and Input Sources calls, settings, and the diagnostics log.
 
+## Modules
+
+Two modules in `.agents/modules.json`, both covered by this page:
+
+- **WritingCore** (`Core/`): may depend on nothing. It's the one folder with no edges back into the app, so it's the first candidate to compile as its own Swift module (planned after #1945). Public surface the app uses: `TildeModelChoice`, `WritingKeyboardSetupState`, `PersonalHistoryEvent`, `TypingTargetIdentity`, `TildeProductProfile`, `PersonalNextWordPrediction`, `WritingAppScope`, `ScreenScene`.
+- **WritingRuntime** (`Runtime/`): may depend on WritingCore. Only WritingBridge, UISettings and AppShell may name it. Its facade (`OutcomeLedger*`, `WritingDayFileRecorder`, `ModelState`, `WritingPreferences`, `DiagnosticsLog`, `LlamaRuntimeSnapshot`, `TildeLocalOutcomeStores`, `GhostBrainServerHost`, `EncryptedPersonalHistoryStore`) is all `internal` today; making it a real module needs an access-control pass first.
+
 ## How it's built
 
 - `build.sh` compiles both layers straight into the app module. That's why Runtime files guard their Core import with `#if canImport(TranscriptedWritingCore)`.

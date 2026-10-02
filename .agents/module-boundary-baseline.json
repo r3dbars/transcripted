@@ -1,0 +1,215 @@
+{
+  "_comment": "Grandfathered module-boundary crossings: file -> module it reaches into -> type names. scripts/dev/check-module-boundaries.py --shrink only removes entries; adding one is a reviewed human edit.",
+  "edges": {
+    "Sources/Dictation/DictationSessionCapTimer.swift": {
+      "UIOverlay": [
+        "DictationSessionCapWarningPolicy"
+      ]
+    },
+    "Sources/Meeting/MeetingSessionController+CancelAndTermination.swift": {
+      "UIShared": [
+        "AppSoundPlayer"
+      ]
+    },
+    "Sources/Meeting/MeetingSessionController+TranscriptionOutcomes.swift": {
+      "UIShared": [
+        "AppSoundPlayer"
+      ]
+    },
+    "Sources/Observability/ActivationTelemetry.swift": {
+      "Dictation": [
+        "SavedDictationTranscript"
+      ]
+    },
+    "Sources/Observability/AnalyticsEventPolicy.swift": {
+      "Speech": [
+        "DictationInputDeviceSelectionReason"
+      ]
+    },
+    "Sources/Observability/CrashReporter.swift": {
+      "UIShared": [
+        "SupportDiagnosticsBundle"
+      ]
+    },
+    "Sources/Speech/DictationSession.swift": {
+      "AppState": [
+        "TranscriptedAppState"
+      ],
+      "UIOverlay": [
+        "DictationRecordingStartFailurePolicy",
+        "DictationRecordingStartOverlayPolicy",
+        "DictationStartAvailabilityPolicy"
+      ]
+    },
+    "Sources/Speech/DictationSessionTypes.swift": {
+      "UIOverlay": [
+        "DictationRecordingStartFailureCleanupPlan"
+      ]
+    },
+    "Sources/Speech/ParakeetASRInference.swift": {
+      "Core": [
+        "TimedTranscriptToken"
+      ]
+    },
+    "Sources/Speech/STTRouter.swift": {
+      "Core": [
+        "TimedTranscriptToken"
+      ]
+    },
+    "Sources/Support/ClaudeDesktopIntegrationInstaller.swift": {
+      "Observability": [
+        "AnalyticsPreferences",
+        "AnalyticsRuntimeConfiguration"
+      ]
+    },
+    "Sources/Support/LabControlChannel.swift": {
+      "AppShell": [
+        "TranscriptedAppDelegate"
+      ],
+      "Observability": [
+        "LockedFileAppender"
+      ]
+    },
+    "Sources/Support/LabControlCommand.swift": {
+      "Meeting": [
+        "MeetingSessionState"
+      ]
+    },
+    "Sources/Support/MeetingInviteeSuggestionPolicy.swift": {
+      "Meeting": [
+        "MeetingPromptHeuristics"
+      ]
+    },
+    "Sources/Support/SpeakerEmbedderFactory.swift": {
+      "Core": [
+        "BackgroundLoadedSpeakerSegmentEmbedder",
+        "CoreMLSpeakerEmbedderConfiguration",
+        "DiarizationBackend",
+        "ERes2NetEmbedder",
+        "FluidWeSpeakerSegmentEmbedder",
+        "ReDimNet2Embedder",
+        "SpeakerSegmentEmbedder"
+      ]
+    },
+    "Sources/Support/TranscriptedPermissionAccess.swift": {
+      "Core": [
+        "CoreAudioSystemAudioCapture"
+      ]
+    },
+    "Sources/UI/Overlay/MeetingOverlayController.swift": {
+      "Core": [
+        "CaptureRouteStabilizationOutcome",
+        "DisplayStatus"
+      ]
+    },
+    "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
+      "Core": [
+        "SpeakerIdentityOption",
+        "SpeakerMatchOutcomeKind",
+        "SpeakerNameUpdate",
+        "SpeakerReviewPrioritizer"
+      ]
+    },
+    "Sources/UI/Settings/HomeTranscriptionActivityPresentation.swift": {
+      "Core": [
+        "DisplayStatus"
+      ]
+    },
+    "Sources/UI/Settings/HotkeyRecorderAppKitView.swift": {
+      "UIMenuBar": [
+        "MenuTokens"
+      ]
+    },
+    "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
+      "Core": [
+        "SpeakerIdentityOption"
+      ]
+    },
+    "Sources/UI/Settings/QuietHomeLibrary.swift": {
+      "Core": [
+        "SpeakerIdentityOption"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerNameAutocompleteField.swift": {
+      "Core": [
+        "SpeakerIdentityOption"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerNamingSheet.swift": {
+      "Core": [
+        "SpeakerIdentityOption",
+        "SpeakerMatchOutcomeKind",
+        "SpeakerNameUpdate",
+        "SpeakerReviewPrioritizer",
+        "TranscriptSaver",
+        "TranscriptionTaskManager"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerPeopleSettingsSection.swift": {
+      "Core": [
+        "CoreStoragePaths",
+        "SpeakerClipExtractor",
+        "SpeakerDatabase",
+        "SpeakerIdentityMutationService",
+        "SpeakerIdentityOption",
+        "SpeakerMergeRecord",
+        "SpeakerPeopleReviewPolicy",
+        "SpeakerUserConfirmation",
+        "SpeakerVectorMath",
+        "SpeakerVoiceprintMigrationGate",
+        "TranscriptSaver"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift": {
+      "Core": [
+        "SpeakerIdentityOption",
+        "UtteranceChannel"
+      ]
+    },
+    "Sources/UI/Settings/TranscriptedSettingsView.swift": {
+      "Core": [
+        "SpeakerIdentityOption"
+      ]
+    },
+    "Sources/UI/Settings/TranscriptedSettingsWindowController.swift": {
+      "Core": [
+        "SpeakerDatabase"
+      ]
+    },
+    "Sources/UI/Shared/HomeMeetingRename.swift": {
+      "UISettings": [
+        "HomeMeetingSpeakerAssignment",
+        "HomeMeetingSpeakerChannel",
+        "HomeMeetingSpeakerIdentity"
+      ]
+    },
+    "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
+      "Core": [
+        "SQLiteHandle"
+      ]
+    },
+    "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
+      "Core": [
+        "UtteranceChannel"
+      ],
+      "UISettings": [
+        "HomeMeetingPreviewContent",
+        "HomeMeetingTranscriptLine"
+      ]
+    },
+    "Sources/UI/Shared/TranscriptedSupportActions.swift": {
+      "AppState": [
+        "TranscriptedAppState"
+      ],
+      "Core": [
+        "DisplayStatus"
+      ]
+    },
+    "Sources/Writing/WritingSettingsModel.swift": {
+      "UISettings": [
+        "WritingSetupPresentation",
+        "WritingSidebarNewBadge"
+      ]
+    }
+  }
+}

@@ -368,7 +368,7 @@ Rules:
 
   The keyboard gets hardened runtime, a timestamp, and its own `config/entitlements/keyboard.plist`.
 - **Pinned text.** `Tests/BuildDependencies/CLIPackagingTests.sh:82-88` pins the signing-call lines. Update it with the change.
-- **Smoke checks.** Add checks for `Contents/Helpers/llama-server` and the keyboard bundle to `PackagedAppSmoke.swift` (the helper checks at `:241-247`).
+- **Smoke checks.** Add checks for `Contents/Helpers/llama-server` and the keyboard bundle to `PackagedAppSmokeRunner.swift` (the helper checks are `validateBundledLlamaServer` and `validateBundledKeyboard`).
 - **Size.** The installed app is about 547 MB against a 650 MB budget. The helper fits; models are never bundled.
 - **Licenses.** Add llama.cpp (MIT) to `THIRD_PARTY_LICENSES.md`. Show the Gemma Terms of Use and Qwen's Apache 2.0 license at model download.
 - **Sparkle.** Sparkle replaces the whole app, and the keyboard runs from its copy in `~/Library/Input Methods`, not from inside the app. On launch the installer compares `CFBundleVersion`, re-copies, and kills the running keyboard, as Tilde does. Moving the app doesn't break the keyboard for the same reason.

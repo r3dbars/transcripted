@@ -11,7 +11,8 @@
   "global_invariants": [
     "Keep Transcripted local-first.",
     "Never send or print private transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute paths, raw URLs, or raw device names.",
-    "Keep Sources/TranscriptedCore as a library boundary consumed through Sources/Meeting.",
+    "Keep Sources/TranscriptedCore a linked library: only Sources/Meeting uses all of it; other modules name only the Core types their tier in .agents/modules.json grants.",
+    "Every Sources/ file belongs to a module in .agents/modules.json; name only types from modules yours may depend on (scripts/dev/check-module-boundaries.py).",
     "Run mapped checks sequentially because build.sh and run-tests.sh share build output.",
     "Keep deterministic, hosted, and manual proof separate.",
     "Do not claim real microphone, system-audio, Bluetooth, pasteback, or UI proof from synthetic tests."

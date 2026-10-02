@@ -212,6 +212,29 @@ def nearest_local_doc(path: str) -> str | None:
     return None
 
 
+MODULES_MANIFEST = REPO_ROOT / ".agents/modules.json"
+
+
+def module_for_path(path: str) -> dict[str, Any] | None:
+    """The module in .agents/modules.json that owns a Sources/ path (longest prefix wins)."""
+    if not path.startswith("Sources/") or not MODULES_MANIFEST.is_file():
+        return None
+    best: tuple[int, dict[str, Any]] | None = None
+    for module in json.loads(MODULES_MANIFEST.read_text(encoding="utf-8")).get("modules", []):
+        for prefix in module.get("paths", []):
+            if path == prefix or path.startswith(prefix.rstrip("/") + "/"):
+                if best is None or len(prefix) > best[0]:
+                    best = (len(prefix), module)
+    if best is None:
+        return None
+    module = best[1]
+    return {
+        "name": module["name"],
+        "may_depend_on": list(module.get("mayDependOn", [])),
+        "agents_doc": module.get("agentsDoc"),
+    }
+
+
 def select_areas(
     contract: dict[str, Any], paths: list[str], symptom: str | None
 ) -> list[dict[str, Any]]:
@@ -267,6 +290,13 @@ def build_context(
     areas = select_areas(contract, paths, symptom)
     docs = [contract["start_doc"]]
     docs.extend(guide for path in paths if (guide := nearest_local_doc(path)))
+    modules: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        module = module_for_path(path)
+        if module:
+            modules.setdefault(module["name"], module)
+            if module["agents_doc"]:
+                docs.append(module["agents_doc"])
     invariants = list(contract["global_invariants"])
     manual_proof: list[str] = []
     for area in areas:
@@ -277,6 +307,7 @@ def build_context(
         "schema_version": contract["schema_version"],
         "paths": paths,
         "areas": [{"id": area["id"], "owns": area["owns"]} for area in areas],
+        "modules": [modules[name] for name in sorted(modules)],
         "docs": list(dict.fromkeys(docs)),
         "invariants": list(dict.fromkeys(invariants)),
         "checks": select_checks(contract, paths),
@@ -300,6 +331,12 @@ def print_human(context: dict[str, Any]) -> None:
     if not context["areas"]:
         print("- no matching area; use AGENTS.md and inspect the nearest owner")
     print()
+    if context.get("modules"):
+        print("Modules (.agents/modules.json; check with scripts/dev/check-module-boundaries.py):")
+        for module in context["modules"]:
+            deps = ", ".join(module["may_depend_on"]) or "nothing"
+            print(f"- {module['name']}: may depend on {deps}")
+        print()
     print("Read:")
     for doc in context["docs"]:
         print(f"- {doc}")

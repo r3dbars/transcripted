@@ -138,33 +138,61 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 - `Package.swift` exists for the `TranscriptedCore` package tests and smoke coverage. It links `deps-libs/libExternalDeps.a` plus the binary frameworks under `deps-frameworks/` through `#filePath`-relative flags, so it works under `swift test` and Xcode alike.
 - The app build keeps `libDraftDeps.a` (legacy name: FluidAudio, deps, and TranscriptedCore objects) separate from the package path's `libExternalDeps.a`.
 
+## Modules
+
+The app compiles as one Swift target, so folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Crossings that predate the check are in `.agents/module-boundary-baseline.json` and can only shrink. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
+
+| Module | Folders | May depend on |
+| --- | --- | --- |
+| Core | `Sources/TranscriptedCore/` (separate library) | nothing in the app |
+| WritingCore | `Sources/TranscriptedWriting/Core/` | nothing |
+| WritingRuntime | `Sources/TranscriptedWriting/Runtime/` | WritingCore |
+| Keyboard | `Sources/TranscriptedKeyboard/` (separate bundle) | WritingCore |
+| Support | `Sources/Support/`, `Sources/Accessibility/`, `Sources/Reliability/` | Core `core-vocab` |
+| Observability | `Sources/Observability/` | Support, Core `core-vocab` |
+| Speech | `Sources/Speech/` | Support, Observability, Core `core-vocab` + `mic-primitives` |
+| Dictation | `Sources/Dictation/` | Speech, Support, Observability, Core `core-vocab` |
+| Meeting | `Sources/Meeting/` | Dictation, Speech, Support, Observability, all of Core |
+| WritingBridge | `Sources/Writing/` | WritingCore, WritingRuntime, Support, Observability |
+| Capture | `Sources/Capture/` | UIOverlay, Dictation, Speech, Support, Observability |
+| UIShared | `Sources/UI/Shared/` | Meeting, Dictation, Speech, WritingBridge, Support, Observability, Core `core-vocab` |
+| UIOverlay | `Sources/UI/Overlay/` | UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
+| UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
+| UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
+| AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
+| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
+
+Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.
+
 ## Hotspots
 
-Files over 1,500 lines. Read the whole file and its folder's `AGENTS.md` before editing, and don't add another responsibility to any of them. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 45 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
-find Sources Tools/*/Sources -name '*.swift' -not -path '*/.build/*' | xargs wc -l | awk '$1>1500 && $2!="total"' | sort -rn
+python3 scripts/dev/check-file-size.py --hotspots
 ```
 
-As of 2026-10-01, largest first:
+Over 1,500 lines as of 2026-10-02, largest first:
 
-- `Sources/Meeting/MeetingSessionController.swift` — the meeting state machine. Failed-meeting and queue bookkeeping moved to `FailedMeetingStore.swift` and `TranscriptionQueueCoordinator.swift`; permission gating, capture start/stop, and transcript-save handoff are still here.
-- `Sources/UI/Settings/TranscriptedSettingsView.swift` — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
-- `Sources/Speech/ParakeetEngine.swift` — the dictation STT engine and `@MainActor` home for recording state. Device recovery and model lifecycle moved to `ParakeetDeviceRecovery.swift` and `ParakeetModelLifecycle.swift`.
-- `Sources/UI/Overlay/DictationSessionController.swift` — dictation session orchestration. The engine-facing half moved to `Sources/Speech/DictationSession.swift`; `stopDictationAndPaste` and `installSessionTimeout` stay, pinned by source-text tests.
-- `Sources/TranscriptedCore/Audio/Audio.swift` — the riskiest file: mic and system capture, CoreAudio real-time callbacks, tap lifecycle, and the recording-session generation token. A real-time rule violation is a crash or silent corruption, and no hosted CI job exercises this path (`hardware-smokes` needs a self-hosted Apple Silicon runner). Most open PRs touch it at once, so expect semantic merge conflicts.
-- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` — the single-flight transcription queue and failed-queue retention. A transcription failure must archive audio into the failed queue before deleting scratch. Exceptions: the sub-2s live-capture gate (pinned by `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry`), the imported-audio gates (scratch is a copy), and an accidental start (`isAccidentalStart` plus `tracksHaveSpeechLikeSignal`: a healthy live session under 10 s ending in `noSpeechDetected` with no speech-like track).
-- `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` — the packaged-app release smoke; a break here blocks shipping.
-- `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions to the speaker DB and transcript.
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` — the speakers settings surface.
-- `Sources/TranscriptedApp.swift` — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching.
-- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` — the MCP server's SQLite query and reconcile surface (schema in `TranscriptIndex+Schema.swift`).
-- `Sources/Support/ClipboardRestoringTextPaster.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits also need `bash run-slow-pasteback-smoke.sh`.
-- `Sources/Meeting/MeetingPromptDetector.swift` — decides when to offer "record this meeting?".
-- `Sources/UI/Settings/HomeView.swift` — the Meetings page (page id `home`); small helpers live in sibling files.
-- `Sources/UI/Overlay/MeetingOverlayController.swift` — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
-- `Sources/TranscriptedCore/Audio/AudioFileManager.swift` — `extension Audio` for capture setup, WAV writing, and mic/system buffer writes, plus the system-audio start-attempt serializer. Same real-time rules as `Audio.swift`.
-- `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching, utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (3,897) — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (2,431) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live here.
+- `Sources/TranscriptedApp.swift` (1,927) — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching. The most source-pinned file.
+- `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
+
+Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
+
+- Meeting capture in Core: `Audio.swift` is the class shell. The riskiest code is the stop ordering in `Audio+CaptureLifecycle.swift` and the AirPods-sensitive engine touch in `Audio+MeetingInputGraph.swift`. `AudioFileManager.swift`, `Audio+MicBufferWrite.swift`, `Audio+SystemAudioWrite.swift`, `Audio+BufferUtilities.swift` and `SystemAudioCaptureStartAttempt.swift` run on or next to the CoreAudio real-time path. A real-time rule violation is a crash or silent corruption, and no hosted CI job exercises this path (`hardware-smokes` needs a self-hosted Apple Silicon runner).
+- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` plus `+Start`, `+FailedAudioRetention`, `+FailureClassification`, `+OrphanedRecordingRecovery`, `+Retry`, `+CleanupPaths` — the single-flight transcription queue and failed-queue retention. A transcription failure must archive audio into the failed queue before deleting scratch. Exceptions: the sub-2s live-capture gate (pinned by `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry`), the imported-audio gates (scratch is a copy), and an accidental start (`isAccidentalStart` plus `tracksHaveSpeechLikeSignal`: a healthy live session under 10 s ending in `noSpeechDetected` with no speech-like track). The starts and the gate are in `+Start.swift`, the archiving in `+FailedAudioRetention.swift`.
+- `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` (orchestrator) plus `+MicrophoneOnly`, `+MicDiarization`, `+Stages`, `+LastChanceSweep` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching, utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
+- `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue`, `+Finish`, and the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions.
+- `Sources/Meeting/MeetingSessionController.swift` (the recording lifecycle) plus `+State.swift` (declares the class) and its other `+*.swift` extensions — the meeting state machine.
+- `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
+- `Sources/Speech/ParakeetEngine.swift` (core state, graph identity, rebuild/retire) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
+- `Sources/UI/Overlay/DictationSessionController.swift` plus `+RecordingStart`, `+Stop`, `+PasteBack`, `+Persistence`, `+Recovery`, `+Presses`, `+SessionCap`, `+Telemetry` and `DictationSessionDeliveryTypes.swift` — dictation session orchestration. `stopDictationAndPaste` is in `+Stop`, `installSessionTimeout` in `+SessionCap`.
+- `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
+- `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
+- `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
+- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 
 ## Historical Zones
 

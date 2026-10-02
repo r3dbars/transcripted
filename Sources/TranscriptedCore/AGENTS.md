@@ -2,7 +2,18 @@
 
 ## What this directory does
 
-`Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
+`Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. The app links it as a library and `Sources/Meeting/` is the one module that uses all of it (see "Module" below); it can also be tested as a standalone Swift package through the root `Package.swift`.
+
+## Module
+
+`Core` in `.agents/modules.json`, compiled as its own Swift library and linked into the app from the prebuilt archive.
+
+- **Owns:** meeting capture (mic + system audio), the transcription pipeline and queue, diarization, the speaker database and naming, transcript save and formatting.
+- **Public surface:** only `public` declarations count. They come in tiers: `core-vocab` (logging, `PrivacyTextRedactor`, `SupersessionEpoch`, `ClaimSlot`, `DateFormattingHelper`, `TranscriptFrontmatter*`, `TranscriptFileRewrite`, `AudioResampler`, `TranscriptionLanguage*`, `SpeakerProfile`, `SpeakerNaming*`, `NameSource`) that any app module may name; `mic-primitives` (`PinnedMicrophoneCapture*`, `MicrophoneDownmix`, `MacLidState`, `AudioTapInstallGuard`, `AudioInputTapTeardownPolicy`, `ModelDownloadService`) for Speech; and `core-engine`, everything else, for Meeting. The lists live in `.agents/modules.json`.
+- **May depend on:** nothing in the app; the compiler enforces it. Grandfathered app uses of `core-engine` types outside Meeting (mostly the Speakers directory in `UI/Settings`) are in `.agents/module-boundary-baseline.json`.
+- **Entry points:** `Audio` (capture), `TranscriptionTaskManager` (queue), `Transcription` (pipeline), `SpeakerDatabase`; see "The seams embedders should know" below.
+- **Tests:** `swift test`, `bash run-integration-smoke.sh`; after any change, `bash build-deps.sh --force` before `bash build.sh --no-open`.
+- **Rules:** CoreAudio real-time callbacks do no I/O, locks, allocations or ObjC calls; see "Editing rules" below.
 
 ## Subsystems
 
@@ -10,8 +21,25 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
 
 - `ObjCSupport/` — the `TranscriptedObjCSupport` Objective-C target (its own SPM target, excluded from Core's) holding `TRNObjCExceptionCatcher`. It lives here so the deps staleness digest and CI deps cache key cover it; Core imports it `@_implementationOnly` (keep it that way, so the CLI and other prebuilt-Core consumers need no extra `-I`); `build-deps.sh` still copies its `include/` into `deps-modules/`
 - `Audio/` — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, bounded retry-availability signal probing, real-time AGC, resampling, level metering, Core Audio process-tap and legacy ScreenCaptureKit system-audio capture, backend selection, bounded buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots; also `PinnedMicrophoneBufferRing.swift` (the single-producer ring behind `PinnedMicrophoneCapture`, all storage allocated before the IOProc) and `Audio+UnheardPlayback.swift` (flags a system-audio tap that hears only silence while another app plays, so the other side is probably not being recorded)
-  - `Audio.swift` — the `Audio` capture class plus its stop-cleanup, lifecycle-cue (`CaptureLifecycleCue`), `SystemAudioStatus`, and recording-format policy types
-  - `AudioFileManager.swift` — `extension Audio` for capture setup, WAV writing, and mic/system buffer writes, plus the system-audio start-attempt serializer and generation-scoped attempt ownership
+  - `Audio.swift` — the `Audio` class shell: stored state, the recording-session generation token, inits, system-audio publisher wiring, `deinit`
+  - `AudioCaptureTypes.swift` — the top-level capture types: `RecordingStopFinalizationDisposition`, `AudioStopCleanup`, `CaptureLifecycleCue`, `CaptureRouteStabilizationOutcome`, `SystemAudioStatus`, `AudioRecordingFormatSnapshot`/`Policy`, `AudioCaptureStaleSessionError`, `AudioInputTapTeardownStep`/`Policy`, `AudioSleepWakeNotifications`
+  - `Audio+CaptureLifecycle.swift` — start and stop; the stop ordering is the riskiest code in Core
+  - `Audio+MeetingInputGraph.swift` — the `AVAudioEngine` mic graph: the AirPods-sensitive engine and `inputNode` touch
+  - `Audio+VoiceProcessing.swift` — VPIO arm/disarm, AGC refresh, the start-fallback marker, processing-change and shared-mic restarts
+  - `Audio+RecordingHealth.swift` — gaps, counters, mic recovery ownership and segments, the system write hold, `createHealthInfo`
+  - `Audio+MeetingRouteState.swift` — meeting route state
+  - `Audio+RecordingRequests.swift` — per-recording language and system-audio requests
+  - `Audio+SleepWake.swift` — sleep/wake handling
+  - `Audio+RecordingArtifacts.swift` — stop finalization, journal abandon, discard APIs, system URL publish/resolve, fan-out flush
+  - `Audio+SignalDiagnostics.swift`, `Audio+WriteErrorTracking.swift` — signal diagnostics and write-error tracking
+  - `Audio+PinnedMicrophone.swift`, `Audio+UnheardPlayback.swift` — the pinned-mic meeting path and unheard-playback detection
+  - `AudioFileManager.swift` — `extension Audio` capture setup: `startAudioCapture` and failed-start mic cleanup
+  - `SystemAudioCaptureStartAttempt.swift` — the system-audio start/stop serializer plus its failure copy
+  - `SystemAudioCaptureAttemptOwnership.swift` — generation-scoped attempt and writer ownership
+  - `Audio+MicBufferWrite.swift` — the mic tap sink, stop tail, bounded file writes, write-failure and backpressure stops, segment merge (audio-callback threads)
+  - `Audio+SystemAudioWrite.swift` — system write failures, the recovery silence pad, mic-only fallback, status mapping
+  - `Audio+RecordingTimer.swift` — the duration timer, attenuation cue, disk check
+  - `Audio+BufferUtilities.swift` — buffer deep copy and downmix
   - `AudioCaptureStartState.swift` — start-state readiness policy, start-failure stage marker, and voice-processing start fallback policy
   - `AudioDeviceRecovery.swift` — `AudioRecoveryTuning` (shared mic/system recovery constants) and the mic recovery, retry, device-switch counting, tap-format, and watchdog policies
   - `AudioLevelMonitor.swift` — `extension Audio` for level metering, silence detection, and rolling buffers (audio-callback threads)
@@ -47,11 +75,21 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `RecordingHealthInfo.swift` — recording-health metadata for transcript frontmatter
   - `TranscriptionLanguage.swift` — `TranscriptionLanguageSelection` / `TranscriptionLanguageContext`
 - `Pipeline/` — transcription orchestration, pipeline runner, task queue, and per-flow failure display copy keyed by `PipelineErrorKind`; also `SpeechSegmentPacking.swift` (packs short speech segments into one STT call and splits the text back per segment) and `TranscriptionJobActivity.swift` (holds off App Nap and idle sleep while a job runs after Stop)
-  - `TranscriptionTaskManager.swift` — the host-facing single-flight queue/orchestrator
+  - `TranscriptionTaskManager.swift` — the host-facing single-flight queue/orchestrator. It keeps `tasks` private behind `beginTaskLifecycle`, `forgetTaskLifecycle` and `lifecycleOwnedAudioPaths`; the rest is in extensions:
+    - `TranscriptionTaskManager+Start.swift` — live, imported and saved-audio retranscription starts, plus the accidental-start gate
+    - `TranscriptionTaskManager+FailureClassification.swift` — pipeline error to `PipelineErrorKind` and display copy
+    - `TranscriptionTaskManager+FailedAudioRetention.swift` — retaining and archiving failed audio into the failed queue
+    - `TranscriptionTaskManager+OrphanedRecordingRecovery.swift` — launch-time orphaned-journal recovery
+    - `TranscriptionTaskManager+Retry.swift` — failed-row retry
+    - `TranscriptionTaskManager+CleanupPaths.swift` — notifications, audio duration, cleanup-path safety helpers
   - `OrphanedRecordingRecoveryClock.swift` — time source for launch-time orphaned-recording recovery (owner deadline, rescan waits, "recently written" cutoff); real clocks in production, a virtual one in tests
   - `TranscriptionPipelineRunner.swift` — `extension TranscriptionTaskManager` that runs the pipeline off the main actor (multichannel, mic-only, imported audio) with speaker identification, plus the rollback registry
   - `Transcription.swift` — the `Transcription` service object
-  - `TranscriptionPipeline.swift` — `extension Transcription` for local multichannel / mic-only transcription, mic-channel diarization, and speech-segment detection
+  - `TranscriptionPipeline.swift` — `extension Transcription`: the `transcribeMultichannel` orchestrator
+    - `TranscriptionPipeline+MicrophoneOnly.swift` — the mic-only entry point
+    - `TranscriptionPipeline+MicDiarization.swift` — split-mode mic diarization plus the ghost / remap / `embeddingWeight` helpers
+    - `TranscriptionPipeline+Stages.swift` — shared stage helpers: durations, diarization, batch STT, merge, mic segment prep, silence segmentation
+    - `TranscriptionPipeline+LastChanceSweep.swift` — the last-chance speech sweep
   - `TranscriptionLanguageSampling.swift` — picks bounded voiced samples for language detection
   - `MeetingPipelineTimings.swift` — task-local per-job stage timer (models ready, resample, diarize, speech-to-text, sleep); the task manager binds one per job and hands the snapshot to the host with the save
   - `PipelineFailureDisplayCopy.swift` — per-flow failure copy table
@@ -74,7 +112,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - Lifeline: `SpeakerMatchOutcome.swift` (outcome kinds + `SpeakerProfileHealth` demotion)
   - Failures: `SpeakerFinalizationFailure.swift` (coarse, off-device-safe reason codes for why a speaker review could not be saved)
   - Model switch: `SpeakerVoiceprintMigration.swift` (actor; carries every user-named person from one voiceprint model's database to another's under the same UUID, name, counts and confirmation ledger, re-embedding their saved review clips and retained meeting audio with the new model; the app runs it at launch through `Sources/Meeting/MeetingVoiceprintMigrationLaunch.swift`), `SpeakerVoiceprintMigrationGate.swift` (`@MainActor` gate: starts one run per launch off the main actor, stays closed until it ends, and every speaker-database writer awaits `waitUntilOpen()` first; a failure opens it with a reason code only and the next launch runs again; publishes progress and how many people still need one confirmation), `SpeakerVoiceprintSourceSnapshot.swift` (read-only in-memory copy of the source database via SQLite backup; the source file is never opened with `SpeakerDatabase`), `SpeakerVoiceprintMigrationEvidence.swift` (finds each person's clips and transcript rows, reads retained `.wav`/`.m4a` stretches as 16 kHz mono), `SpeakerVoiceprintMigrationPolicy.swift` (pure: rows to ranges, pooling, the self-agreement gate that holds confirmations back), `SpeakerVoiceprintMigrationLedger.swift` (`speaker_voiceprint_migrations` ledger table in the target database, the one-transaction-per-person write, and the release of a held person's carried confirmations, which `recordUserConfirmations` runs in its own transaction for the profiles it confirms and each run repeats at start)
-  - Naming and transcript rewrites: `SpeakerNamingCoordinator.swift` (`extension TranscriptionTaskManager` + review-ownership registry), `SpeakerIdentityMutationService.swift`, `SpeakerClipExtractor.swift`, `RetroactiveSpeakerUpdater.swift` plus `RetroactiveSpeakerUpdater+Scanning.swift`, `RetroactiveSpeakerUpdater+TranscriptRewrite.swift`, and `RetroactiveSpeakerUpdater+BreakdownRewrite.swift` (all `extension TranscriptSaver`)
+  - Naming and transcript rewrites: `SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue` and `+Finish` (all `extension TranscriptionTaskManager`), the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift`, `SpeakerIdentityMutationService.swift`, `SpeakerClipExtractor.swift`, `RetroactiveSpeakerUpdater.swift` plus `RetroactiveSpeakerUpdater+Scanning.swift`, `RetroactiveSpeakerUpdater+TranscriptRewrite.swift`, and `RetroactiveSpeakerUpdater+BreakdownRewrite.swift` (all `extension TranscriptSaver`)
 - `Stats/` — recording stats database (`StatsDatabase.swift`), models (`StatsDatabaseModels.swift`), and queries (`StatsDatabaseQueries.swift`)
 - `Storage/` — transcript save (`TranscriptSaver.swift`), formatter (`TranscriptFormatter.swift`), format options (`TranscriptFormatOptions.swift`), shared frontmatter parsing (`TranscriptFrontmatter.swift`), retained-recording audio archiving (`RecordingAudioArchiver.swift`), and `SQLiteHandle` (shared low-level SQLite open/permission/pragma bootstrap used by `SpeakerDatabase` and `StatsDatabase`); also `TranscriptFileRewrite.swift` (rewrites a saved transcript in place so renames, merges and fixes don't reset its Created date)
 - `Utilities/` — date formatting (`DateFormattingHelper.swift`), file permission helpers (`FilePermissions.swift`), `SupersessionEpoch` (a generation/epoch counter for superseded async work), and `LabKnobOverrides.swift` (hill-climb lab knob overrides; see "Environment variables Core reads" below)

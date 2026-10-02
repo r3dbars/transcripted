@@ -1,0 +1,140 @@
+{
+  "_comment": "Module map for the app's Swift sources. Every Sources/**/*.swift file maps to exactly one module (longest path prefix wins). mayDependOn lists the modules whose types a module may name; Core:<tier> grants a slice of TranscriptedCore's public types (Core:core-engine is all of it). Checked by scripts/dev/check-module-boundaries.py; grandfathered crossings live in .agents/module-boundary-baseline.json. A new top-level Sources/ folder needs an entry here and an AGENTS.md.",
+  "modules": [
+    {
+      "name": "Core",
+      "paths": ["Sources/TranscriptedCore"],
+      "appTarget": false,
+      "mayDependOn": [],
+      "agentsDoc": "Sources/TranscriptedCore/AGENTS.md"
+    },
+    {
+      "name": "WritingCore",
+      "paths": ["Sources/TranscriptedWriting/Core"],
+      "mayDependOn": [],
+      "agentsDoc": "Sources/TranscriptedWriting/AGENTS.md"
+    },
+    {
+      "name": "WritingRuntime",
+      "paths": ["Sources/TranscriptedWriting/Runtime"],
+      "mayDependOn": ["WritingCore"],
+      "agentsDoc": "Sources/TranscriptedWriting/AGENTS.md"
+    },
+    {
+      "name": "Keyboard",
+      "paths": ["Sources/TranscriptedKeyboard"],
+      "appTarget": false,
+      "mayDependOn": ["WritingCore"],
+      "agentsDoc": "Sources/TranscriptedKeyboard/AGENTS.md"
+    },
+    {
+      "name": "Support",
+      "paths": ["Sources/Support", "Sources/Accessibility", "Sources/Reliability"],
+      "mayDependOn": ["Core:core-vocab"],
+      "agentsDoc": "Sources/Support/AGENTS.md"
+    },
+    {
+      "name": "Observability",
+      "paths": ["Sources/Observability"],
+      "mayDependOn": ["Support", "Core:core-vocab"],
+      "agentsDoc": "Sources/Observability/AGENTS.md"
+    },
+    {
+      "name": "Speech",
+      "paths": ["Sources/Speech"],
+      "mayDependOn": ["Support", "Observability", "Core:core-vocab", "Core:mic-primitives"],
+      "agentsDoc": "Sources/Speech/AGENTS.md"
+    },
+    {
+      "name": "Dictation",
+      "paths": ["Sources/Dictation"],
+      "mayDependOn": ["Speech", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/Dictation/AGENTS.md"
+    },
+    {
+      "name": "Meeting",
+      "paths": ["Sources/Meeting"],
+      "mayDependOn": ["Dictation", "Speech", "Support", "Observability", "Core:core-engine"],
+      "agentsDoc": "Sources/Meeting/AGENTS.md"
+    },
+    {
+      "name": "WritingBridge",
+      "paths": ["Sources/Writing"],
+      "mayDependOn": ["WritingCore", "WritingRuntime", "Support", "Observability"],
+      "agentsDoc": "Sources/Writing/AGENTS.md"
+    },
+    {
+      "name": "Capture",
+      "paths": ["Sources/Capture"],
+      "mayDependOn": ["UIOverlay", "Dictation", "Speech", "Support", "Observability"],
+      "agentsDoc": "Sources/Capture/AGENTS.md"
+    },
+    {
+      "name": "UIShared",
+      "paths": ["Sources/UI/Shared"],
+      "mayDependOn": ["Meeting", "Dictation", "Speech", "WritingBridge", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/UI/Shared/AGENTS.md"
+    },
+    {
+      "name": "UIOverlay",
+      "paths": ["Sources/UI/Overlay"],
+      "mayDependOn": ["UIShared", "AppState", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/UI/AGENTS.md"
+    },
+    {
+      "name": "UIMenuBar",
+      "paths": ["Sources/UI/MenuBar"],
+      "mayDependOn": ["UIShared", "UIOverlay", "UISettings", "AppState", "Capture", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/UI/MenuBar/AGENTS.md"
+    },
+    {
+      "name": "UISettings",
+      "paths": ["Sources/UI/Settings"],
+      "mayDependOn": ["UIShared", "UIOverlay", "AppState", "Capture", "WritingBridge", "WritingCore", "WritingRuntime", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/UI/Settings/AGENTS.md"
+    },
+    {
+      "name": "AppState",
+      "paths": ["Sources/TranscriptedAppState.swift"],
+      "mayDependOn": ["Capture", "WritingBridge", "Meeting", "Dictation", "Speech", "UIShared", "Support", "Observability", "Core:core-vocab"],
+      "agentsDoc": "Sources/AGENTS.md"
+    },
+    {
+      "name": "AppShell",
+      "paths": ["Sources/TranscriptedApp.swift", "Sources/TranscriptedMenuCommands.swift"],
+      "mayDependOn": ["*"],
+      "agentsDoc": "Sources/AGENTS.md"
+    }
+  ],
+  "cycleAllowedEdges": [
+    ["UIOverlay", "AppState"],
+    ["UIMenuBar", "AppState"],
+    ["UISettings", "AppState"]
+  ],
+  "coreTiers": {
+    "core-vocab": [
+      "AppLogger",
+      "PrivacyTextRedactor",
+      "LogTailTrimmer",
+      "SupersessionEpoch",
+      "ClaimSlot",
+      "DateFormattingHelper",
+      "TranscriptFrontmatter*",
+      "TranscriptFileRewrite",
+      "AudioResampler",
+      "TranscriptionLanguage*",
+      "SpeakerProfile",
+      "SpeakerNaming*",
+      "NameSource"
+    ],
+    "mic-primitives": [
+      "PinnedMicrophoneCapture*",
+      "MicrophoneDownmix",
+      "MacLidState",
+      "AudioTapInstallGuard",
+      "AudioInputTapTeardownPolicy",
+      "ModelDownloadService"
+    ]
+  },
+  "ambiguousNames": {}
+}

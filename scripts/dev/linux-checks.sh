@@ -192,6 +192,10 @@ else
 fi
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
+check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"
+check "module boundaries (.agents/modules.json; baseline only shrinks)" "python3 scripts/dev/check-module-boundaries.py"
+check "file size self-test" "python3 scripts/dev/check-file-size.py --self-test"
+check "file size (no new Swift file over 800 lines)" "python3 scripts/dev/check-file-size.py"
 check "missing-source explainer self-test" "python3 scripts/dev/explain-missing-sources.py --self-test"
 check "concurrency census self-test" "python3 scripts/dev/concurrency-census.py --self-test"
 check "doc paths self-test" "python3 scripts/dev/check-doc-paths.py --self-test"

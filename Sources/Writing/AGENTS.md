@@ -6,6 +6,15 @@
 
 The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/TranscriptedKeyboard/`) have their own `AGENTS.md`. The tab's views are in `Sources/UI/Settings/Writing/` and `Sources/UI/Settings/Pages/WritingSettingsPage.swift`.
 
+## Module
+
+`WritingBridge` in `.agents/modules.json`.
+
+- **Public surface:** `WritingController`, `WritingSettingsModel`, `WritingSetupState`, `WritingDayFileReader`, `WritingDayFileWriter`, `WritingStorageUsage`, `WritingAnalytics`.
+- **May depend on:** WritingCore, WritingRuntime, Support, Observability. It's the only app module besides UISettings and AppShell that may name the runtime.
+- **Grandfathered crossing:** `WritingSettingsModel.swift` names `WritingSetupPresentation` and `WritingSidebarNewBadge` from `UI/Settings`. Moving `WritingSetupPresentation.swift` here and the badge's defaults key into its own file fixes it; both edits touch `run-tests.sh`, so they wait for #1946 and #1941.
+- **Tests:** see "Tests" below.
+
 ## Entry points
 
 - `WritingController.swift` — the runtime host. `TranscriptedAppState` owns one, calls `startIfEnabled(log:)` at launch, `handleSystemWake()` on wake and `stop()` at quit; `TranscriptedApp` calls `noteTerminationRequest()`. It starts the keyboard socket (`GhostBrainServerHost`), the `llama-server` helper and its model, Screen Memory, Personal History and the keyboard installer. With only Save my writing on, the model, helper and Screen Memory stay off. The Writing tab calls `applyRunState()` after "Turn on writing" and after any feature toggle.

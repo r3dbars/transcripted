@@ -4,6 +4,18 @@
 
 `Sources/Dictation/` owns the small persistence helpers behind completed dictation sessions. It does not handle audio capture or STT itself; that stays in `DictationSessionController` and `Speech/`.
 
+## Module
+
+`Dictation` in `.agents/modules.json`.
+
+- **Owns:** saving finished dictations to the day files, the stop checkpoint and stopped-audio recovery, stop and finalize policies, the session cap clock, dictation storage paths.
+- **Public surface:** `DictationTranscriptStore`, `DictationTranscriptWriter`, `DictationTranscriptPersistenceResult`, `SavedDictation*`, `DictationStoppedAudioRecovery*`, `DictationStopFinalizationPolicy`, `DictationStoragePaths`.
+- **May depend on:** Speech, Support, Observability, Core `core-vocab`.
+- **Grandfathered crossing:** `DictationSessionCapTimer.swift` names `DictationSessionCapWarningPolicy` from `UI/Overlay`; moving that policy file here fixes it after #1946.
+- **Entry points:** `DictationTranscriptStore.save(...)`, `DictationStopCheckpoint`.
+- **Tests:** `bash run-tests.sh --filter Dictation`.
+- **Rules:** writes go through `DictationTranscriptMutationLock`; nothing here records audio or runs STT.
+
 ## Files
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
@@ -23,8 +35,8 @@
 
 ## Flow
 
-1. `Sources/UI/Overlay/DictationSessionController.swift` transcribes audio with `STTRouter`.
-2. The session tries to paste the text back into the target app.
+1. `DictationSessionController` (stop path in `Sources/UI/Overlay/DictationSessionController+Stop.swift`) transcribes audio with `STTRouter`.
+2. The session tries to paste the text back into the target app (`DictationSessionController+PasteBack.swift`).
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
 4. `DictationStopFinalizationPolicy.order` decides whether the session saves before or after the optional Auto Enter keystroke. The current default starts the save before Auto Enter, then awaits the save result.
 5. `DictationTranscriptStore.save(...)` appends a new section to that day's markdown file, with mutations serialized through `DictationTranscriptMutationLock`.
@@ -97,4 +109,4 @@ bash run-tests.sh
 - If you change the markdown layout, update the tests. The `Dictations_YYYY-MM-DD.md` day-file format is also parsed by the standalone tools through `Tools/TranscriptedCaptureKit` — update its parser and tests in the same change.
 - The day-file format (frontmatter keys including `format_version`, section grammar, metadata lines) is specified in `docs/capture-format.md`. Keep that spec in sync, and keep new frontmatter keys flat.
 - Dictation artifacts are append-only by day; do not assume one file per session.
-- This directory owns dictation persistence plus the newest-saved-dictation lookup seam. Recording lifecycle changes still belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.
+- This directory owns dictation persistence plus the newest-saved-dictation lookup seam. Recording lifecycle changes still belong in `Sources/UI/Overlay/DictationSessionController.swift` (start in `+RecordingStart.swift`, stop in `+Stop.swift`, saving in `+Persistence.swift`) and `Sources/Speech/`.

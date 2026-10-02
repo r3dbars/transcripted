@@ -34,6 +34,11 @@ rules:
   - paths:
       - "Tests/E2E/SlowPastebackSmoke.swift"
       - "Sources/Support/ClipboardRestoringTextPaster.swift"
+      - "Sources/Support/ClipboardRestoringTextPaster+Pasteboard.swift"
+      - "Sources/Support/ClipboardRestoringTextPaster+SavedClipboard.swift"
+      - "Sources/Support/ClipboardPasteOutcome.swift"
+      - "Sources/Support/ClipboardPasteTarget.swift"
+      - "Sources/Support/FocusedTextPasteConfirmation.swift"
       - "Sources/Support/TranscriptedConstants.swift"
       - "run-slow-pasteback-smoke.sh"
       - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
@@ -197,6 +202,24 @@ rules:
     checks:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
+
+  # Module-boundary and file-size ratchets: every Sources/ file belongs to a
+  # module in .agents/modules.json and names only types its module may depend
+  # on; no new Swift file over 800 lines. Both baselines can only shrink.
+  - paths:
+      - "Sources/**/*.swift"
+      - "Tools/*/Sources/**/*.swift"
+      - ".agents/modules.json"
+      - ".agents/module-boundary-baseline.json"
+      - ".agents/file-size-baseline.json"
+      - "scripts/dev/check-module-boundaries.py"
+      - "scripts/dev/check-duplicate-declarations.py"
+      - "scripts/dev/check-file-size.py"
+    checks:
+      - "python3 scripts/dev/check-module-boundaries.py --self-test"
+      - "python3 scripts/dev/check-module-boundaries.py"
+      - "python3 scripts/dev/check-file-size.py --self-test"
+      - "python3 scripts/dev/check-file-size.py"
 
   - paths:
       - "Tools/*/Package.swift"

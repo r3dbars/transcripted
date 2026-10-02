@@ -9,6 +9,17 @@
 - meeting start/stop
 - configurable physical-key dictation triggers (default: right Option)
 
+## Module
+
+`Capture` in `.agents/modules.json`.
+
+- **Owns:** global physical triggers and their routing (dictation, paste-last-dictation, meeting start/stop).
+- **Public surface:** `ContextCaptureEngine`, `PhysicalShortcutMatcher`.
+- **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because `ContextCaptureEngine` drives `DictationSessionController` and `FloatingOverlayController` directly; a trigger-sink protocol would let it drop below the UI later.
+- **Entry points:** `ContextCaptureEngine` (owned by `TranscriptedAppState`).
+- **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`.
+- **Rules:** see "Guardrails" below. Not to be confused with the capture *library* (`Sources/Support/CaptureLibrary*.swift`).
+
 ## Key Files
 
 - `ContextCaptureEngine.swift` — accessibility-backed physical trigger detection,

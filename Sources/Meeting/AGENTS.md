@@ -4,6 +4,18 @@
 
 `Sources/Meeting/` is the app-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and selected STT ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
 
+## Module
+
+`Meeting` in `.agents/modules.json`.
+
+- **Owns:** live meeting capture through Core, the record / dismiss / remind prompt flow, imported audio, the transcription queue, failed meetings, meeting storage and transcript restyling.
+- **Public surface:** `MeetingSessionController` and `MeetingSessionState`, `MeetingPromptDetector`, `FailedMeetingStore` and `FailedMeetingItem`, `MeetingArtifact*`, `MeetingSTTAdapter`, `TranscriptionQueueCoordinator`, `MeetingStoragePaths`.
+- **May depend on:** Dictation, Speech, Support, Observability, and all of Core. This is the only module with full Core access; it's the gateway the rest of the app goes through.
+- **Grandfathered crossings:** `AppSoundPlayer` (UI/Shared) from the cancel and outcome extensions; moving that file to Support fixes it.
+- **Entry points:** `TranscriptedApp.swift` wires `MeetingSessionController` and `MeetingPromptDetector`; `startRecording` / `stopRecording` in `MeetingSessionController.swift`.
+- **Tests:** `bash run-tests.sh --filter Meeting`, `bash run-integration-smoke.sh`. After any change here, `bash build-deps.sh --force` first.
+- **Rules:** keep the record / dismiss / remind flow; one writer for state (`transition`, `updateDisplayStatus` in `+State.swift`); see "Key invariants" below.
+
 ## Files
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
@@ -28,7 +40,12 @@
 - `MeetingImportPreparationFailureCopy.swift` — maps an imported-audio preparation failure into the shared `MeetingFailureKind` taxonomy and user-facing retry copy, extracted out of `MeetingSessionController` so it stays unit-testable
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
-- `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
+- `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff The core file holds state, init and polling; the rest is in extensions:
+  - `MeetingPromptDetector+Backoff.swift` — dismiss, remind, snooze, expire, and learned backoff
+  - `MeetingPromptDetector+CalendarRuntime.swift` — calendar and running-app candidates, workspace and calendar-store observers
+  - `MeetingPromptDetector+AdHocCalls.swift` — mic, audio-output and camera signals, detected-call sessions
+  - `MeetingPromptDetector+BrowserEvidence.swift` — browser title reads and the browser-mic evidence rechecks
+  - `MeetingPromptCalendarReader.swift` — background-queue `EKEventStore` reader plus the private event-to-snapshot init
 - `MeetingInviteeCalendarReader.swift` — read-only EventKit lookup of who was invited to the calendar event a saved meeting started with, for speaker review's name buttons. Never asks for calendar access (only looks when the meeting prompt already has it), keeps events without a meeting link, and never logs or sends invitee names. Policy lives in `Sources/Support/MeetingInviteeSuggestionPolicy.swift`
 - `MeetingPromptRecordAction.swift` — owns the async work kicked off by the detected-meeting prompt's Record action so the app lifecycle drives the start instead of the prompt panel, and dismissing the panel cannot cancel a start the user already chose
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, browser-family + mic-input provider mapping, and provider-aware remind/dismiss backoff rules for calendar-, runtime-, and mic-activity-based prompt candidates
@@ -46,7 +63,19 @@
 - `MeetingProcessingTelemetry.swift` — turns a saved meeting's `MeetingPipelineTimings` snapshot into the rounded speed properties on `meeting_transcript_saved`
 - `MeetingSessionState.swift` — `MeetingSessionState`, the meeting session's high-level state enum (`idle`/`loadingModels`/`ready`/`startingRecording`/`recording`/`stoppingRecording`/`transcribing`/`error`); `MeetingSessionController.State` is a typealias onto it
 - `MeetingSessionStateMachine.swift` — pure legal-transition table over `MeetingSessionState` plus the `isCaptureSessionActive`/`isSteadyStateRecording`/`mayReportUnrelatedFailureAsError` queries, consulted by `MeetingSessionController.transition(to:reason:)`
-- `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
+- `MeetingSessionController.swift` — the recording lifecycle: `startRecording`, `stopRecording`, the unexpected capture stop, the stop snapshot and signal verification. The class and the rest of its behavior are split across extensions:
+  - `MeetingSessionController+State.swift` — declares the class: stored and published state, init, and the single writers `transition` and `updateDisplayStatus`
+  - `MeetingSessionController+Types.swift` — nested types and small value helpers
+  - `MeetingSessionController+RecordingStart.swift` — start-permission decision, system-audio access, the shared dictation mic relay
+  - `MeetingSessionController+CancelAndTermination.swift` — confirmed discard, stop joining a pending start, app-termination waits
+  - `MeetingSessionController+MicBoost.swift` — the in-meeting mic boost prompt
+  - `MeetingSessionController+LiveCaptureWarnings.swift` — audio inactivity, route stability, system-audio degradation, mic-only notices, the call-audio ask
+  - `MeetingSessionController+ModelWarmup.swift` — model preparation and warmup status
+  - `MeetingSessionController+TranscriptionRequests.swift` — imports, saved-meeting retranscription, cancel
+  - `MeetingSessionController+Subscriptions.swift` — Combine wiring and background transcript restyling
+  - `MeetingSessionController+TranscriptionOutcomes.swift` — job start, failure, queue settle, accidental-start discard, detected-prompt outcome telemetry
+  - `MeetingSessionController+Telemetry.swift` — capture-health and saved-transcript analytics properties
+  - `MeetingSessionController+FailedMeetings.swift` — failed-meeting retry and delete
 - `MeetingSpeakerSeparation.swift` — picks each meeting's call-channel speaker separation (`SpeakerSeparationOptions.tuned`) from the backend, the voiceprint model's bars and the calendar invite size; also the lineup for lineup naming
 - `MeetingSpeakerSeparationProvider.swift` — builds the task manager's separation provider so every meeting reads the diarizer's `activeBackend` when it runs (pyannote after a Nemotron load failure), never the backend asked for at launch
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
