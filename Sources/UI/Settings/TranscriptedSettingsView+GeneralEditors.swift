@@ -58,7 +58,7 @@ extension TranscriptedSettingsView {
                 VStack(alignment: .leading, spacing: 0) {
                     // With the Mac mic recorder on, the one Microphone choice
                     // above covers meetings too, including the macOS input.
-                    if !pinnedMicrophoneRecorderOn {
+                    if microphoneSettingsRows.showsMeetingMacInputToggle {
                         MeetingMicrophoneSettingRow(usesSystemInput: persistedSettingsBinding(
                             $useSystemMeetingMicrophone,
                             persist: { MeetingMicrophonePreferences.setUsesSystemInput($0) }
@@ -246,15 +246,24 @@ extension TranscriptedSettingsView {
         }
     }
 
+    /// Which mic rows show; the rules live in `MicrophoneSettingsPolicy`.
+    private var microphoneSettingsRows: MicrophoneSettingsRows {
+        MicrophoneSettingsPolicy.rows(
+            recorderOn: pinnedMicrophoneRecorderOn,
+            usesAppleVoiceProcessing: meetingMicProcessingMode.usesAppleVoiceProcessing
+        )
+    }
+
     @ViewBuilder
     private var generalBluetoothMicEditor: some View {
-        if pinnedMicrophoneRecorderOn {
+        let rows = microphoneSettingsRows
+        if rows.showsMicrophoneChoicePicker {
             VStack(alignment: .leading, spacing: 0) {
                 generalMicrophoneChoiceEditor
                 // Apple voice processing keeps dictation off the recorder, so
                 // this toggle's Mac-wide switch is still what keeps it off
                 // AirPods (`DictationPersistentInputPreferences.recorderReplacesToggle`).
-                if meetingMicProcessingMode.usesAppleVoiceProcessing {
+                if rows.showsFasterBluetoothDictationToggle {
                     Divider()
                     generalFasterBluetoothDictationToggle
                 }
@@ -284,19 +293,24 @@ extension TranscriptedSettingsView {
                     track: { trackSettingsAction("change_microphone_choice_\($0.analyticsValue)", page: .general) },
                     sideEffect: { preferredDictationInputUID = $0.deviceUID ?? preferredDictationInputUID }
                 )) {
-                    Text("Automatic").tag(MicrophoneChoice.automatic)
-                    ForEach(preferredDictationInputCandidates, id: \.id) { device in
-                        if let uid = device.uid {
-                            Text(device.name).tag(MicrophoneChoice.device(uid: uid))
+                    let options = MicrophoneSettingsPolicy.pickerOptions(
+                        candidates: preferredDictationInputCandidates.map { (uid: $0.uid, name: $0.name) },
+                        selection: microphoneChoice
+                    )
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                        switch option {
+                        case .automatic:
+                            Text("Automatic").tag(MicrophoneChoice.automatic)
+                        case let .device(uid, name):
+                            Text(name).tag(MicrophoneChoice.device(uid: uid))
+                        case let .savedDeviceNotConnected(uid):
+                            Text("Saved mic (not connected)").tag(MicrophoneChoice.device(uid: uid))
+                        case .divider:
+                            Divider()
+                        case .macOSInput:
+                            Text("Same as macOS Sound settings").tag(MicrophoneChoice.macOSInput)
                         }
                     }
-                    if let savedUID = microphoneChoice.deviceUID,
-                       !preferredDictationInputCandidates.contains(where: { $0.uid == savedUID }) {
-                        // Keep an unplugged pick visible instead of a blank menu.
-                        Text("Saved mic (not connected)").tag(MicrophoneChoice.device(uid: savedUID))
-                    }
-                    Divider()
-                    Text("Same as macOS Sound settings").tag(MicrophoneChoice.macOSInput)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)

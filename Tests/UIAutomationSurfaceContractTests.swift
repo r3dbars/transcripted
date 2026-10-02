@@ -130,27 +130,8 @@ func testUIAutomationSurfaceContract() async {
             "failed-row cleanup should have one canonical destructive seam"
         )
 
-        // The one Microphone picker shows only while the Mac mic recorder is on.
-        assertTrue(
-            settingsShellSource().contains("if pinnedMicrophoneRecorderOn {\n            VStack(alignment: .leading, spacing: 0) {\n                generalMicrophoneChoiceEditor"),
-            "the one picker shows while the recorder is on"
-        )
-        assertTrue(
-            settingsShellSource().contains("if meetingMicProcessingMode.usesAppleVoiceProcessing {\n                    Divider()\n                    generalFasterBluetoothDictationToggle"),
-            "voice-processing users keep the toggle that still protects their dictation"
-        )
-        assertTrue(
-            settingsShellSource().contains("        } else {\n            generalFasterBluetoothDictationEditor\n        }"),
-            "the old Bluetooth dictation rows stay while the recorder is off"
-        )
-        assertTrue(
-            settingsShellSource().contains("if !pinnedMicrophoneRecorderOn {\n                        MeetingMicrophoneSettingRow("),
-            "the meetings-only macOS-input toggle is folded into the one picker while the recorder is on"
-        )
-        assertTrue(
-            settingsShellSource().contains("Text(\"Same as macOS Sound settings\").tag(MicrophoneChoice.macOSInput)"),
-            "the picker keeps a way to record the AirPods mic on purpose"
-        )
+        // Microphone picker visibility and its "Same as macOS Sound settings"
+        // entry are behavior tests now: MicrophoneSettingsPolicyTests.
     }
 
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
