@@ -33,7 +33,7 @@ func testMeetingPromptHeuristics() {
             "a rebound shortcut should replace the default in the app reminder"
         )
         let mic = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected", meetingShortcut: "⌃⇧R")
-        assertEqual(mic.detail, "Start recording now or press ⌃⇧R anytime.", "a rebound shortcut should replace the default in the call prompt")
+        assertEqual(mic.detail, "Or press ⌃⇧R anytime.", "a rebound shortcut should replace the default in the call prompt")
     }
 
     runSuite("MeetingPromptHeuristics.runtimePresentation — recent app launches still get a reminder") {

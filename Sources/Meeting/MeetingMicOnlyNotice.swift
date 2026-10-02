@@ -141,7 +141,7 @@ enum MeetingMicOnlyNoticeCopy {
 
     /// Title and detail for the mid-meeting "not verified" / "unavailable"
     /// warning's Check Access button.
-    static let checkAccessTitle = "Check Access"
+    static let checkAccessTitle = "Open Settings"
     static let checkAccessAccessibilityLabel = "Open System Audio Recording settings"
     static let checkAccessTooltip = "Opens System Audio Recording in System Settings"
 }

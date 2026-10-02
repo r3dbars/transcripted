@@ -294,48 +294,48 @@ enum MeetingSystemAudioDegradationCopy {
     static func title(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
-            return "System audio not verified"
+            return "Can't confirm call audio"
         case (.unheardPlayback, .recovered):
             return "Call audio is back"
         case (.unheardPlayback, _):
             return "Can't hear the call"
         case (.interruption, .recovering):
-            return "System audio interrupted"
+            return "Call audio cut out"
         case (.interruption, .recovered):
-            return "System audio reconnected"
+            return "Call audio is back"
         case (.silence, .recovered):
-            return "System audio resumed"
+            return "Call audio is back"
         case (.failure, .recovered):
-            return "System audio restored"
+            return "Call audio is back"
         case (.failure, _):
-            return "System audio unavailable"
+            return "Lost call audio"
         case (.silence, _):
-            return "System audio is silent"
+            return "The call is silent"
         case (.interruption, .degraded):
-            return "System audio interrupted"
+            return "Call audio cut out"
         }
     }
 
     static func detail(for warning: MeetingSystemAudioDegradationWarning) -> String {
         switch (warning.cause, warning.phase) {
         case (.unverified, _):
-            return "Mic is recording. Check System Audio access."
+            return "Your mic is recording. Check call audio access."
         case (.unheardPlayback, .recovered):
-            return "Some call audio may be missing."
+            return "A few seconds may be missing."
         case (.unheardPlayback, _):
-            return "Audio is playing but Transcripted hears silence. Mic is safe."
+            return "Sound is playing but Transcripted hears nothing. Your mic is still recording."
         case (.interruption, .recovering):
-            return "Trying once to reconnect. Your mic recording is still safe."
+            return "Reconnecting. Your mic is still recording."
         case (.interruption, .recovered):
-            return "A few seconds of call audio may be missing."
+            return "A few seconds may be missing."
         case (.silence, .recovered), (.failure, .recovered):
-            return "Some call audio may be missing."
+            return "A few seconds may be missing."
         case (.failure, _):
-            return "Mic is still recording. This transcript will be saved as partial."
+            return "Your mic is still recording. Part of the call will be missing."
         case (.silence, _):
-            return "Transcripted is still recording your mic."
+            return "Your mic is still recording."
         case (.interruption, .degraded):
-            return "Mic is still recording. Some call audio may be missing."
+            return "Your mic is still recording. Some of the call may be missing."
         }
     }
 

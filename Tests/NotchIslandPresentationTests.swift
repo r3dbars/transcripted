@@ -203,12 +203,12 @@ func testNotchIslandPresentation() {
 
         var callAudioOn = recording()
         callAudioOn.callAudioNote = .onForNextMeeting
-        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio on", .secondary)])
+        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio next time", .secondary)])
 
         var unverified = recording()
         unverified.systemAudioUnverified = true
         unverified.callAudioNote = .off
-        assertEqual(notchLayout(meeting: unverified).right, [.text("Audio unverified", .warning)])
+        assertEqual(notchLayout(meeting: unverified).right, [.text("Can't confirm call", .warning)])
     }
 
     runSuite("NotchIslandPresentation opens meeting warnings by itself") {
@@ -252,7 +252,7 @@ func testNotchIslandPresentation() {
             )
         )
         let layout = notchLayout(meeting: meeting)
-        assertEqual(layout.left, [.symbol(.video, .accent), .text("Meeting", .title)])
+        assertEqual(layout.left, [.symbol(.video, .accent), .text("Missed call", .title)])
         assertEqual(layout.drop, .meetingPrompt(meeting.prompt!))
     }
 
@@ -274,7 +274,7 @@ func testNotchIslandPresentation() {
 
         let failed = NotchIslandMeetingContent(phase: .error(title: "Microphone didn't start", message: "Check your input device.", canOpen: false))
         let error = notchLayout(meeting: failed)
-        assertEqual(error.left, [.symbol(.warning, .warning), .text("Meeting not saved", .title)])
+        assertEqual(error.left, [.symbol(.warning, .warning), .text("Meeting failed", .title)])
         assertEqual(error.drop, .meetingError(title: "Microphone didn't start", message: "Check your input device.", canOpen: false))
 
         let denied = NotchIslandMeetingContent(phase: .error(

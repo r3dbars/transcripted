@@ -11,7 +11,7 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "Recording ended too soon", "short captures should stop looking like generic retries")
         assertEqual(
             copy.detail,
-            "Nothing broke - there just was not enough audio to transcribe. Record at least two seconds before stopping.",
+            "Record at least 2 seconds before you stop.",
             "short captures should explain the intentional terminal outcome"
         )
     }
@@ -34,10 +34,10 @@ func testFailedMeetingPresentation() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Turn on System Audio Recording", "permission failures should name the missing permission")
+        assertEqual(copy.title, "Allow call audio", "permission failures should name the missing permission")
         assertEqual(
             copy.detail,
-            "Turn on System Audio Recording in System Settings, then retry the meeting.",
+            "Turn on System Audio Recording for Transcripted, then try again.",
             "permission failures should point to the recovery step"
         )
     }
@@ -49,10 +49,10 @@ func testFailedMeetingPresentation() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Turn on Microphone", "microphone failures should name the missing permission")
+        assertEqual(copy.title, "Allow the mic", "microphone failures should name the missing permission")
         assertEqual(
             copy.detail,
-            "Turn on Microphone access in System Settings, then retry the meeting.",
+            "Turn on Microphone for Transcripted in System Settings, then try again.",
             "microphone failures should point to the recovery step"
         )
     }
@@ -64,10 +64,10 @@ func testFailedMeetingPresentation() {
             isRetryable: true
         )
 
-        assertEqual(copy.title, "Couldn't verify system audio access", "inconclusive probes need honest copy")
+        assertEqual(copy.title, "Can't check call audio access", "inconclusive probes need honest copy")
         assertEqual(
             copy.detail,
-            "Try again. If it keeps happening, review System Audio Recording in System Settings.",
+            "Try again. If it keeps failing, check System Audio Recording in System Settings.",
             "the detail may offer settings as a fallback without asserting denial"
         )
     }
@@ -89,9 +89,9 @@ func testFailedMeetingPresentation() {
             isRetryable: true
         )
 
-        assertEqual(mic.title, "Microphone didn't start", "mic start failure should name the input")
-        assertEqual(system.title, "System audio didn't start", "system start failure should name the stream")
-        assertEqual(both.title, "Meeting audio didn't start", "generic start failure should name the capture stage")
+        assertEqual(mic.title, "Mic didn't start", "mic start failure should name the input")
+        assertEqual(system.title, "Call audio didn't start", "system start failure should name the stream")
+        assertEqual(both.title, "Audio didn't start", "generic start failure should name the capture stage")
     }
 
     runSuite("FailedMeetingPresentation save failures keep the short error detail") {
@@ -115,7 +115,7 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
         assertEqual(
             copy.detail,
-            "Transcripted kept the audio but couldn't find spoken words in it. If people were talking, open the Meetings page and choose Try again.",
+            "The audio is saved but has no words. If people talked, try again from Meetings.",
             "saved no-speech rows offer Try again unless their audio is silent, so the copy points there conditionally"
         )
     }
@@ -127,7 +127,7 @@ func testFailedMeetingPresentation() {
             isRetryable: true
         )
 
-        assertEqual(copy.title, "Audio device disconnected", "the mic watchdog give-up should be named as device loss")
+        assertEqual(copy.title, "Mic disconnected", "the mic watchdog give-up should be named as device loss")
         assertTrue(copy.detail.contains("Reconnect"), "device-loss copy should tell the user to reconnect the device")
         assertFalse(copy.title.contains("didn't start"), "a mid-meeting device loss must not read as a start failure")
     }
@@ -139,10 +139,10 @@ func testFailedMeetingPresentation() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Microphone audio was not captured", "unusable mic artifacts should name the failed source")
+        assertEqual(copy.title, "Your mic recorded nothing", "unusable mic artifacts should name the failed source")
         assertEqual(
             copy.detail,
-            "Transcripted kept the meeting audio, but the microphone track had no usable signal. Try again to transcribe the other side of the call, then check the selected microphone before your next meeting.",
+            "The call audio is saved. Try again to transcribe it, and check your mic before the next meeting.",
             "unusable mic artifacts should offer the recovery that actually works before pointing at hardware"
         )
     }
@@ -649,7 +649,7 @@ func testFailedMeetingPresentation() {
         assertEqual(row(title: "  Weekly sync \n").item.title, "Weekly sync", "a queued meeting keeps its own title, trimmed")
         assertEqual(
             row(title: "   ", message: "Something unexpected happened.").item.title,
-            "Meeting transcript failed",
+            "Transcript failed",
             "an untitled generic retry reads as a failed meeting transcript"
         )
         assertEqual(
