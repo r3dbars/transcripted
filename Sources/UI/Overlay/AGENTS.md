@@ -9,11 +9,11 @@ Everything on screen while you dictate or record, plus the dictation session its
 - The Notch island (`NotchIsland*`): the only dictation, meeting and call-prompt window since #1946. One black shape grows out of the notch (or hangs from the top edge of a display without one) and carries dictation, the live meeting, the call-detected Record / Not now / Later prompt, and "Who was on this call?".
 - The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording pill state, warnings, rest/wake) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. The old dictation panel is gone; the meeting and capture panels (`MeetingOverlayPanel`, `CapturePillPanel` and their views) are still in the tree but nothing picks them, because `NotchIslandController.isSelected` is always true.
 - `DictationSessionController` and its `+*.swift` extensions: start, stop, paste-back, persistence, recovery, presses, the 5-minute cap and telemetry. `DictationSessionPipeline` and `DictationStartAdmission` hold the start/stop wiring behind protocols so tests run them on fakes.
-- The dictation start and presentation policies (`Dictation*Policy`, `DictationTrigger`, `DictationStartActivation`) and the meeting pill policies (`MeetingPillRestPolicy`, `MeetingPromptPriority`, `MeetingDurationFormatter`).
+- The dictation presentation policies (`Dictation*Policy`, `DictationStartActivation`; the start/stop policies and `DictationTrigger` live in Speech) and the meeting pill policies (`MeetingPillRestPolicy`, `MeetingPromptPriority`, `MeetingDurationFormatter`).
 
 ## Public surface
 
-What other modules name today: `DictationSessionController`, `FloatingOverlayController`, `MeetingOverlayController`, `CapturePillController`, `NotchIslandController`, `NotchIslandSpeakerReviewView`, `NotchIslandSpeakerReviewContent`, `NotchIslandSpeakerReviewPolicy`, `DictationTrigger`, `DictationHotkeyRouter`, `MeetingDurationFormatter`. AppShell builds the controllers; Capture routes presses into `DictationSessionController`; Settings asks the island for speaker review; the menu bar formats the meeting timer.
+What other modules name today: `DictationSessionController`, `FloatingOverlayController`, `MeetingOverlayController`, `CapturePillController`, `NotchIslandController`, `NotchIslandSpeakerReviewView`, `NotchIslandSpeakerReviewContent`, `NotchIslandSpeakerReviewPolicy`, `MeetingDurationFormatter`. AppShell builds the controllers; Capture routes presses into `DictationSessionController`; Settings asks the island for speaker review; the menu bar formats the meeting timer.
 
 ## May depend on
 
@@ -22,7 +22,7 @@ UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core
 Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
 - Into Core outside `core-vocab`: `MeetingOverlayController` (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
-- From below: Speech names `DictationRecordingStart*` and `DictationStartAvailabilityPolicy`, and Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving those policy files down into Speech and Dictation removes the edges.
+- From below: Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving that policy file down into Dictation removes the edge.
 
 ## Entry points
 

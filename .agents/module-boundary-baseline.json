@@ -29,16 +29,6 @@
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
-      ],
-      "UIOverlay": [
-        "DictationRecordingStartFailurePolicy",
-        "DictationRecordingStartOverlayPolicy",
-        "DictationStartAvailabilityPolicy"
-      ]
-    },
-    "Sources/Speech/DictationSessionTypes.swift": {
-      "UIOverlay": [
-        "DictationRecordingStartFailureCleanupPlan"
       ]
     },
     "Sources/Speech/ParakeetASRInference.swift": {
