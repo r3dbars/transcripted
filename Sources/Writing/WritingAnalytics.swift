@@ -1,3 +1,6 @@
+#if canImport(TranscriptedWritingCore)
+import TranscriptedWritingCore
+#endif
 import Foundation
 
 /// Count-only Writing analytics (docs/writing-plan.md, "Analytics" and

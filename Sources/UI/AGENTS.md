@@ -16,6 +16,8 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Overlay/
 
+The module card (owns, public surface, may depend on, entry points, tests, rules) is `Overlay/AGENTS.md`.
+
 - `Overlay/DictationCancelHintPolicy.swift` — decides when the compact dictation overlay should show the cancel hint instead of only the shortcut hint
 - `Overlay/DictationMeterPolicy.swift` — tiny presentation policy that decides when the dictation waveform meter should render and clamps its displayed level
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
@@ -125,7 +127,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — focused capture and support callbacks (start dictation, start meeting, import audio, send feedback, and send a diagnostic event) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`persistedSettingsBinding`, `SettingsPageIntro`, hover/inline button styles, `SettingsStatusCard`, permission status rows) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection, plus the ⌘F Home find-focus token
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (today, home, dictations, writing, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts (⌘1 Today through ⌘6 Agent, Writing on ⌘4), plus `WritingSidebarNewBadge` (the defaults key the Writing page sets to drop the sidebar's "New" badge); Meetings keeps the `home` raw value so automation ids and analytics `page_id` stay stable; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (today, home, dictations, writing, general, people, connectAgent) with titles, SF Symbol names, and navigation shortcuts (⌘1 Today through ⌘6 Agent, Writing on ⌘4), plus `WritingSidebarNewBadge.isShown` (the badge's defaults key lives in `Sources/Writing/WritingSidebarNewBadge.swift`); Meetings keeps the `home` raw value so automation ids and analytics `page_id` stay stable; `.storage`/`.about` and the earlier legacy alias cases were deleted once configuration collapsed onto the single combined settings page
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Today/Meetings/Dictations/Writing/Speakers/Agent), and the row view with its optional trailing "New" badge (Writing, until setup finishes); configuration is one combined scrolling settings page reached from the sidebar gear (no tab strip)
 - `Settings/TodayPresentation.swift` — Foundation-pure Today numbers and copy: today/this-week counts, the seven-day tape marks (`TodayTapeBuilder`), the day's sessions (`TodaySessionBuilder`), and the latest-captures merge

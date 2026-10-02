@@ -172,12 +172,6 @@
       "Core": [
         "DisplayStatus"
       ]
-    },
-    "Sources/Writing/WritingSettingsModel.swift": {
-      "UISettings": [
-        "WritingSetupPresentation",
-        "WritingSidebarNewBadge"
-      ]
     }
   }
 }

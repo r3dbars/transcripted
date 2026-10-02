@@ -1,3 +1,6 @@
+#if canImport(TranscriptedWritingCore)
+import TranscriptedWritingCore
+#endif
 import AppKit
 import Foundation
 

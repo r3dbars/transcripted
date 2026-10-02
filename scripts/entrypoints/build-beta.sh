@@ -637,7 +637,15 @@ bundle_llama_server
 echo "Dependencies found"
 
 # Shared frameworks/linker/source arguments — single source of truth with
-# build.sh so dev and shipped builds cannot diverge.
+# build.sh so dev and shipped builds cannot diverge. WritingCore gets the same
+# debug-info flags as the app compile below so the dSYM covers it too.
+WRITING_CORE_SWIFTC_FLAGS=(
+    -O
+    -whole-module-optimization
+    -gline-tables-only
+    -debug-info-format=dwarf
+    -debug-prefix-map "$REPO_ROOT=."
+)
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
 

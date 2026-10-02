@@ -44,7 +44,7 @@ Important entry points:
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `Writing/` — the app side of Writing: `WritingController` hosts the runtime, Save my writing day files, the Writing tab's model, count-only analytics
-- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde (`Core/` pure policy, `Runtime/` model, helper, socket, Screen Memory, Personal History, Save my writing); compiled into the app module, tested under `swift test`
+- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde (`Core/` pure policy, `Runtime/` model, helper, socket, Screen Memory, Personal History, Save my writing). `Core/` builds as its own static module, `TranscriptedWritingCore`; `Runtime/` compiles into the app module. Both are tested under `swift test`
 - `TranscriptedKeyboard/` — Writing's IMKit input method, a separate bundle built by `scripts/entrypoints/lib/bundle-input-method.sh`; excluded from the app binary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 
@@ -55,7 +55,7 @@ point-in-time reviews.
 
 ## Modules
 
-Every Swift file here belongs to a module in `.agents/modules.json`, and `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. The table is in `docs/repo-layout.md` ("Modules"); `--explain <file>` answers for one file. Each module's own `AGENTS.md` has its card (owns, public surface, may depend on, entry points, tests, rules). The cards for the three modules below live here for now, because their folder docs are being edited by open PRs (#1946, #1941).
+Every Swift file here belongs to a module in `.agents/modules.json`, and `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. The table is in `docs/repo-layout.md` ("Modules"); `--explain <file>` answers for one file. Each module's own `AGENTS.md` has its card (owns, public surface, may depend on, entry points, tests, rules). The cards below live here because these modules have no single folder of their own (AppShell, AppState) or their folder docs are file guides (Support, Observability). UIOverlay's card is `UI/Overlay/AGENTS.md`.
 
 **AppShell** (`TranscriptedApp.swift`, `TranscriptedMenuCommands.swift`). The composition root: `TranscriptedApp` and `TranscriptedAppDelegate` build every controller and wire the status item, popover, overlays and meeting prompts. It may depend on anything and nothing may depend on it (the manifest check enforces that). Grandfathered crossing: `Support/LabControlChannel.swift` names `TranscriptedAppDelegate`; moving the lab-control files next to the shell fixes it. Most source-pinned file in the repo, so run `check-source-pins.py --changed-only` first. Tests: `bash run-tests.sh --filter StatusItem`, `bash run-e2e-smoke.sh`.
 
@@ -65,8 +65,6 @@ Every Swift file here belongs to a module in `.agents/modules.json`, and `script
 
 **Observability** (`Observability/`). The sink every module may report into: `EventReporter`, `AnalyticsReporter`, `CrashReporter`, `DiagnosticsTrail`, the `*Telemetry` types, sanitizers and policies, `SupportDiagnosticsBundle`, and the Sparkle updater. May depend on Support and Core `core-vocab`. Grandfathered: `ActivationTelemetry` and `AnalyticsEventPolicy` name Dictation and Speech types (to be inverted by passing plain values). Details: `Observability/AGENTS.md`.
 
-**UIOverlay** (`UI/Overlay/`). The Notch island, dictation and meeting overlays, `DictationSessionController` and the dictation start policies. May depend on UIShared, AppState, Meeting, Dictation, Speech, Support, Observability and Core `core-vocab`. Grandfathered from below: Speech and Dictation name four overlay policy types (`DictationRecordingStart*`, `DictationStartAvailabilityPolicy`, `DictationSessionCapWarningPolicy`); moving those files down fixes it after #1946. Details: `UI/AGENTS.md`.
-
 ## Read before editing
 
 - touching dictation persistence: `Sources/Dictation/AGENTS.md`
@@ -74,7 +72,7 @@ Every Swift file here belongs to a module in `.agents/modules.json`, and `script
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/AGENTS.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/AGENTS.md`
 - touching app-wide support utilities: `Sources/Support/AGENTS.md`
-- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/AGENTS.md`
+- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/AGENTS.md`; the Notch island, overlays, or `DictationSessionController`: also `Sources/UI/Overlay/AGENTS.md`
 - touching the Settings window, Home, onboarding, or speaker settings files: also `Sources/UI/Settings/AGENTS.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/AGENTS.md`
 - touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/AGENTS.md`

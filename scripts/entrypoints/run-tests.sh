@@ -571,6 +571,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
+    "Sources/Writing/WritingSidebarNewBadge.swift"
     "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
@@ -630,7 +631,7 @@ APP_SOURCES=(
     "Sources/Writing/WritingSetupState.swift"
     "Sources/Writing/WritingDayFileReader.swift"
     "Sources/Writing/WritingStorageUsage.swift"
-    "Sources/UI/Settings/Writing/WritingSetupPresentation.swift"
+    "Sources/Writing/WritingSetupPresentation.swift"
     "Sources/UI/Settings/Writing/WritingDemoScript.swift"
 )
 
