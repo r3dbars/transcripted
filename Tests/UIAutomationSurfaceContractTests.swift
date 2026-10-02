@@ -273,23 +273,10 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
-
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar rows should expose each page's automation identifier"
         )
-
-            ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
-            ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
-            ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
-            ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
-            ("WritingSettingsPage", "Sources/UI/Settings/Pages/WritingSettingsPage.swift"),
-        ] {
-            assertTrue(
-                contractSource(path).contains("struct \(typeName)"),
-                "\(typeName) should stay extracted while the Settings shell owns its bindings"
-            )
-        }
 
         for requiredSourceHook in [
             "actions.importAudioFile()",

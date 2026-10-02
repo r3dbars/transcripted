@@ -184,7 +184,7 @@ file's source-text count went 6 -> 3 (baseline 501 -> 498).
 
 #1946 (Notch island only) merged, so the pins held for it could move. This pass
 took the resolved pin count from 535 to 338 (`.agents/source-pin-baseline.json`)
-and the source-text reads from 287 to 195 (`.agents/test-shape-baseline.json`),
+and the source-text reads from 287 to 190 (`.agents/test-shape-baseline.json`),
 counted against main after #1959, #1960 and #1964.
 
 New seams, all compiled into the fast runner:

@@ -32,7 +32,7 @@
     "Tests/TestHelpers.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 73
+    "Tests/UIAutomationSurfaceContractTests.swift": 68
   },
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2,
