@@ -70,10 +70,12 @@ extension DictationSession {
         isRecoveryAttempt: Bool = false,
         // No defaults: every native start says which session its stage
         // reports belong to and what happens after a failed open, so the
-        // recovery loop can't silently drop either one.
+        // recovery loop can't silently drop either one. `onStartFailed` is
+        // non-optional on purpose: passing nil here would silently drop the
+        // background-hotkey focus recovery, so the compiler refuses it.
         isCurrentSession: () -> Bool,
         onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
-        onStartFailed: (() async -> Void)?
+        onStartFailed: @escaping () async -> Void
     ) async -> Bool {
         if canUseActiveMeetingMicForDictation(appState: appState) {
             if appState.meetingSession.startDictationFromActiveMeetingMic() {
@@ -202,7 +204,7 @@ extension DictationSession {
         appState: TranscriptedAppState,
         sessionStartTime: CFAbsoluteTime,
         isDictating: @escaping () -> Bool,
-        onStartFailed: (() async -> Void)?,
+        onStartFailed: @escaping () async -> Void,
         onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
         onWaitUpdate: @escaping (WaitStatus) -> Void,
         onRecordingStarted: @escaping () -> Void
@@ -381,7 +383,7 @@ extension DictationSession {
         startedAt: TimeInterval,
         sessionStartTime: CFAbsoluteTime,
         isDictating: () -> Bool,
-        onStartFailed: (() async -> Void)?,
+        onStartFailed: @escaping () async -> Void,
         onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
         onRecordingStarted: () -> Void,
         startAttempts: inout Int,

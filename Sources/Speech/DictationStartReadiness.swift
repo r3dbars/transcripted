@@ -192,7 +192,7 @@ enum DictationNativeMicrophoneStart {
         isRecoveryAttempt: Bool,
         isCurrentSession: () -> Bool,
         onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
-        onStartFailed: (() async -> Void)?,
+        onStartFailed: @escaping () async -> Void,
         startRecording: () async -> Bool,
         startRecordingRecoveryAttempt: () async -> Bool
     ) async -> Bool {
