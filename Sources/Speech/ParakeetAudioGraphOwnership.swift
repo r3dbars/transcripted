@@ -231,16 +231,30 @@ enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
 /// Work already executing may still finish, and callers reconcile that late
 /// side effect through `cleanupAfterLateCompletion`.
 final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
+    /// Starts one operation's budget and calls `expire` when it runs out.
+    /// Tests pass a timer they fire by hand, so "the work entered before its
+    /// budget ran out" is a fact the test sets up, not a race with host load.
+    typealias TimeoutScheduler = (_ timeoutNanoseconds: UInt64, _ expire: @escaping () -> Void) -> Void
+
+    static let wallClockTimeouts: TimeoutScheduler = { timeoutNanoseconds, expire in
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + .nanoseconds(Int(timeoutNanoseconds)),
+            execute: expire
+        )
+    }
+
     private static let maximumTimedOutWorkers = 2
 
     private let lock = NSLock()
     private let label: String
+    private let scheduleTimeout: TimeoutScheduler
     private var queue: DispatchQueue
     private var generation: UInt64 = 0
     private var activeTimedOutWorkerCount = 0
 
-    init(label: String) {
+    init(label: String, scheduleTimeout: @escaping TimeoutScheduler = wallClockTimeouts) {
         self.label = label
+        self.scheduleTimeout = scheduleTimeout
         queue = DispatchQueue(label: "\(label).0", qos: .utility)
     }
 
@@ -316,9 +330,7 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
             }
         }
 
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(
-            deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
-        ) { [self] in
+        scheduleTimeout(timeoutNanoseconds) { [self] in
             let timedOut = completionLock.withLock { () -> Bool in
                 guard !didComplete else { return false }
                 didComplete = true

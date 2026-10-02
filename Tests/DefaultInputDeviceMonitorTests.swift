@@ -11,6 +11,30 @@
 import CoreAudio
 import Foundation
 
+/// Lookup timeouts that fire only when the test says so. Real 30 ms timers
+/// raced the test on a loaded Mac: the timeout could fire before the worker
+/// started, or before a burst of callbacks landed.
+private final class ManualLookupTimeouts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [() -> Void] = []
+    private let armed = DispatchSemaphore(value: 0)
+
+    /// Waits for the next armed timeout and fires it. False if none was armed.
+    func fireNext() -> Bool {
+        guard armed.wait(timeout: .now() + 30) == .success else { return false }
+        let expire = lock.withLock { pending.removeFirst() }
+        expire()
+        return true
+    }
+
+    func coordinator(_ label: String) -> ParakeetReplaceableSystemInputWorkCoordinator {
+        ParakeetReplaceableSystemInputWorkCoordinator(label: label) { [self] _, expire in
+            lock.withLock { pending.append(expire) }
+            armed.signal()
+        }
+    }
+}
+
 // Waits for something that should happen get 30 s: they return as soon as
 // it does, and a loaded Mac can take seconds to start a worker thread. Waits
 // for something that must NOT happen stay short.
@@ -263,6 +287,8 @@ func testDefaultInputDeviceMonitor() {
         let lock = NSLock()
         var reads = 0
         var seen: [Bool] = []
+        // The timeout isn't what this checks, so it never fires.
+        let timeouts = ManualLookupTimeouts()
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "test.default-input-two-writes",
             timeoutNanoseconds: 250_000_000,
@@ -279,6 +305,7 @@ func testDefaultInputDeviceMonitor() {
                 // lookup completes. Tokens, not current tracker state, decide.
                 return 43
             },
+            workCoordinator: timeouts.coordinator("test.default-input-two-writes"),
             deliver: { deviceID, request in
                 let isSelfWrite = request.pendingSelfWrite?.matches(
                     currentDeviceID: deviceID,
@@ -312,13 +339,17 @@ func testDefaultInputDeviceMonitor() {
         _ = registry.add { isSelfWrite in
             if !isSelfWrite { recoveryNotifications += 1 }
         }
+        let timeouts = ManualLookupTimeouts()
+        let workerStarted = DispatchSemaphore(value: 0)
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "test.default-input-blocked",
             timeoutNanoseconds: 30_000_000,
             lookup: {
+                workerStarted.signal()
                 blocker.wait()
                 return 42
             },
+            workCoordinator: timeouts.coordinator("test.default-input-blocked"),
             deliver: { deviceID, request in
                 lock.withLock {
                     delivered.append((deviceID, request.notificationAt))
@@ -339,6 +370,8 @@ func testDefaultInputDeviceMonitor() {
         }
         assertTrue(submitted.wait(timeout: .now() + 30) == .success,
                    "listener-queue submission must not await a blocked HAL read")
+        assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "lookup starts")
+        assertTrue(timeouts.fireNext(), "the blocked lookup arms a timeout")
         assertTrue(callback.wait(timeout: .now() + 30) == .success,
                    "a timed-out read must still notify route recovery")
         let first = lock.withLock { delivered }
@@ -362,6 +395,7 @@ func testDefaultInputDeviceMonitor() {
         let blocker = DispatchSemaphore(value: 0)
         let workerStarted = DispatchSemaphore(value: 0)
         let callback = DispatchSemaphore(value: 0)
+        let timeouts = ManualLookupTimeouts()
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "test.default-input-shutdown",
             timeoutNanoseconds: 30_000_000,
@@ -370,11 +404,13 @@ func testDefaultInputDeviceMonitor() {
                 blocker.wait()
                 return 42
             },
+            workCoordinator: timeouts.coordinator("test.default-input-shutdown"),
             deliver: { _, _ in callback.signal() }
         )
         dispatcher.submit(at: 123)
         assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "lookup starts")
         dispatcher.close()
+        assertTrue(timeouts.fireNext(), "the in-flight lookup times out after shutdown")
         assertFalse(callback.wait(timeout: .now() + 0.1) == .success,
                     "shutdown must discard the timeout result")
         blocker.signal()
@@ -389,6 +425,7 @@ func testDefaultInputDeviceMonitor() {
         let lock = NSLock()
         var started = 0
         var notifications: [CFAbsoluteTime] = []
+        let timeouts = ManualLookupTimeouts()
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "test.default-input-storm",
             timeoutNanoseconds: 30_000_000,
@@ -398,6 +435,7 @@ func testDefaultInputDeviceMonitor() {
                 blocker.wait()
                 return 42
             },
+            workCoordinator: timeouts.coordinator("test.default-input-storm"),
             deliver: { deviceID, request in
                 assertTrue(deviceID == nil, "blocked lookups must time out or circuit-open")
                 lock.withLock { notifications.append(request.notificationAt) }
@@ -409,8 +447,10 @@ func testDefaultInputDeviceMonitor() {
         assertTrue(dispatcher.hasScheduledWorker, "an in-flight self-write must serialize later callbacks")
         assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "first worker starts")
         for index in 2...100 { dispatcher.submit(at: CFAbsoluteTime(index)) }
+        assertTrue(timeouts.fireNext(), "first lookup arms a timeout")
         assertTrue(callback.wait(timeout: .now() + 30) == .success, "first notification times out")
         assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "replacement worker starts")
+        assertTrue(timeouts.fireNext(), "replacement lookup arms a timeout")
         assertTrue(callback.wait(timeout: .now() + 30) == .success, "latest notification times out")
         dispatcher.submit(at: 101)
         assertTrue(callback.wait(timeout: .now() + 30) == .success, "circuit-open still delivers recovery event")
@@ -426,9 +466,8 @@ func testDefaultInputDeviceMonitor() {
     }
 
     runSuite("DefaultInputDeviceNotificationLookupDispatcher — restart shares the blocked-worker circuit") {
-        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
-            label: "test.default-input-restart-shared"
-        )
+        let timeouts = ManualLookupTimeouts()
+        let coordinator = timeouts.coordinator("test.default-input-restart-shared")
         let blocker = DispatchSemaphore(value: 0)
         let workerStarted = DispatchSemaphore(value: 0)
         let callback = DispatchSemaphore(value: 0)
@@ -453,11 +492,13 @@ func testDefaultInputDeviceMonitor() {
         let first = restartedDispatcher("1")
         first.submit(at: 1)
         assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "first worker starts")
+        assertTrue(timeouts.fireNext(), "first worker arms a timeout")
         assertTrue(callback.wait(timeout: .now() + 30) == .success, "first worker times out")
         first.close()
         let second = restartedDispatcher("2")
         second.submit(at: 2)
         assertTrue(workerStarted.wait(timeout: .now() + 30) == .success, "replacement worker starts")
+        assertTrue(timeouts.fireNext(), "replacement worker arms a timeout")
         assertTrue(callback.wait(timeout: .now() + 30) == .success, "replacement worker times out")
         second.close()
         let third = restartedDispatcher("3")
