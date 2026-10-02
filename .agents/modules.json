@@ -102,7 +102,7 @@
     },
     {
       "name": "AppShell",
-      "paths": ["Sources/TranscriptedApp.swift", "Sources/TranscriptedAppDelegate+LaunchReports.swift", "Sources/TranscriptedAppDelegate+Lifecycle.swift", "Sources/TranscriptedAppDelegate+MenuBar.swift", "Sources/TranscriptedAppDelegate+SettingsActions.swift", "Sources/TranscriptedMenuCommands.swift"],
+      "paths": ["Sources/App", "Sources/TranscriptedApp.swift", "Sources/TranscriptedAppDelegate+LaunchReports.swift", "Sources/TranscriptedAppDelegate+Lifecycle.swift", "Sources/TranscriptedAppDelegate+MenuBar.swift", "Sources/TranscriptedAppDelegate+SettingsActions.swift", "Sources/TranscriptedMenuCommands.swift"],
       "mayDependOn": ["*"],
       "agentsDoc": "Sources/AGENTS.md"
     }

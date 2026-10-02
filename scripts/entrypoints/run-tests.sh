@@ -460,7 +460,7 @@ APP_SOURCES=(
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
     "Sources/Speech/PersistentDictationInputController.swift"
     "Sources/Meeting/MeetingSessionState.swift"
-    "Sources/Support/LabControlCommand.swift"
+    "Sources/App/LabControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingCallAudioAsk.swift"

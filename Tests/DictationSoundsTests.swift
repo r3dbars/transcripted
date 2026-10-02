@@ -19,7 +19,7 @@
 // queued once, before the transcription task, so it acknowledges Stop without waiting
 // on paste. The "Start click answers the key press" suite pins that the fast path
 // queues the start cue before the mic start task, and that it plays once per session.
-// The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// The "Feedback submit paths stay silent" suite reads Sources/App/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
 // `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
@@ -157,7 +157,7 @@ func testDictationSounds() {
     // paste or finalize tail, or a start path that skips playStartCueOnce.
 
     runSuite("Feedback submit paths stay silent") {
-        let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
+        let supportActions = readRepoTextFile("Sources/App/TranscriptedSupportActions.swift")
         assertFalse(
             supportActions.contains("AppSoundPlayer.shared.play("),
             "support email actions should not play any UI sound cue"

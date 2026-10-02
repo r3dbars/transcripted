@@ -7,8 +7,8 @@ press-to-recording and Stop-to-notes on the real app instead of only on benches.
 
 - **Lab builds only.** `bash build.sh --lab` (or `TRANSCRIPTED_LAB_BUILD=1 bash build.sh`)
   adds `-D TRANSCRIPTED_LAB_CONTROL`. Without it the channel isn't compiled in.
-- App side: `Sources/Support/LabControlChannel.swift` (runtime, wrapped in
-  `#if TRANSCRIPTED_LAB_CONTROL`) and `Sources/Support/LabControlCommand.swift`
+- App side: `Sources/App/LabControlChannel.swift` (runtime, wrapped in
+  `#if TRANSCRIPTED_LAB_CONTROL`) and `Sources/App/LabControlCommand.swift`
   (pure parsing/validation and the file/dir accept rules, compiled into every
   build and covered by `Tests/LabControlCommandTests.swift`)
 - Launch hook: one `#if TRANSCRIPTED_LAB_CONTROL` line at the end of

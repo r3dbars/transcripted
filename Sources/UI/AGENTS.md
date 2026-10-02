@@ -149,7 +149,6 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
 - `Shared/SystemAudioPermissionRevalidator.swift` — single owner for revalidating System Audio Recording permission from the Settings shell and onboarding, with an in-flight-task guard so both call sites can't run overlapping checks
 - `Shared/SupportEmailDispatcher.swift` — native mail handoff and explicit failure fallback; callers retain feedback drafts when handoff fails, and the public support address is copied only on request
-- `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same

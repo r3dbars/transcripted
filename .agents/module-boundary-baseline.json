@@ -46,19 +46,6 @@
         "AnalyticsRuntimeConfiguration"
       ]
     },
-    "Sources/Support/LabControlChannel.swift": {
-      "AppShell": [
-        "TranscriptedAppDelegate"
-      ],
-      "Observability": [
-        "LockedFileAppender"
-      ]
-    },
-    "Sources/Support/LabControlCommand.swift": {
-      "Meeting": [
-        "MeetingSessionState"
-      ]
-    },
     "Sources/Support/TranscriptedPermissionAccess.swift": {
       "Core": [
         "CoreAudioSystemAudioCapture"
@@ -156,14 +143,6 @@
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
       "Core": [
         "UtteranceChannel"
-      ]
-    },
-    "Sources/UI/Shared/TranscriptedSupportActions.swift": {
-      "AppState": [
-        "TranscriptedAppState"
-      ],
-      "Core": [
-        "DisplayStatus"
       ]
     }
   }
