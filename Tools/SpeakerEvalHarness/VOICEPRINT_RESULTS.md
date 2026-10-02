@@ -1,5 +1,7 @@
 # Voiceprint bake-off: results
 
+> **Finished, scripts removed.** ReDimNet2 b4 won and ships. The bake-off's scoring, audit and dataset scripts were deleted from `scripts/voiceprint/` in the October 2026 cleanup; only the converter that `scripts/models/redimnet2/install.sh` needs is left. To rerun the bake-off, restore them with `git checkout 85bbcc09 -- scripts/voiceprint`.
+
 _Generated 2026-09-29 00:18 by `scripts/voiceprint/build_report.py` from `data/eval/voiceprint/results`. Rerun it any time; numbers that haven't landed show as pending. The charts and raw tables live under `data/eval/voiceprint/results/report/` (gitignored with the rest of `data/`)._
 
 ## The short version

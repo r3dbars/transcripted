@@ -1,5 +1,7 @@
 # Voiceprint bake-off
 
+> **Finished, scripts removed.** ReDimNet2 b4 won and ships. The bake-off's scoring, audit and dataset scripts were deleted from `scripts/voiceprint/` in the October 2026 cleanup; only the converter that `scripts/models/redimnet2/install.sh` needs is left. To rerun the bake-off, restore them with `git checkout 85bbcc09 -- scripts/voiceprint`.
+
 Which voice fingerprint model should Transcripted use to recognize the same person across meetings?
 
 Nemotron 3 now separates speakers (PR #1887), so the voiceprint model only decides "who is who". Today that model is WeSpeaker ResNet34-LM, the pyannote community-1 embedding that FluidAudio runs. This bake-off tests every voiceprint model we could legally ship, on human-labeled speech. It also measures what users feel: how many meetings until someone is named automatically, and wrong names, which must stay at zero.
