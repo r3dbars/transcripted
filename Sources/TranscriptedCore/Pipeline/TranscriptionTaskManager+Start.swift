@@ -715,3 +715,23 @@ extension TranscriptionTaskManager {
         return selection
     }
 }
+
+extension TranscriptionTaskManager {
+    /// Shared "is this audio long enough to transcribe" computation for the
+    /// live-capture and saved-audio start gates.
+    private func audioUsability(
+        micURL: URL?,
+        systemURL: URL?,
+        minDuration: TimeInterval = 2.0
+    ) -> (micDuration: TimeInterval?, systemDuration: TimeInterval?, usableMic: Bool, usableSystem: Bool, unknownDuration: Bool) {
+        let micDuration = micURL.flatMap { audioDuration(url: $0) }
+        let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
+        return (
+            micDuration,
+            systemDuration,
+            micDuration.map { $0 >= minDuration } ?? false,
+            systemDuration.map { $0 >= minDuration } ?? false,
+            (micURL != nil && micDuration == nil) || (systemURL != nil && systemDuration == nil)
+        )
+    }
+}
