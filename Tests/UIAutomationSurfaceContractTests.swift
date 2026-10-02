@@ -160,17 +160,15 @@ func testUIAutomationSurfaceContract() {
             "Acknowledgement must not hide the unverified capture state")
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
-            "The warning must resolve from this capture's PCM evidence, not a cached permission")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
-            "Saved health must include failures discovered while draining the tail")
+        // The PCM-evidence and tail-failure halves are behavior tests now:
+        // "Capture health evidence comes from this capture, not a cached
+        // permission" in MeetingSessionUIPolicyTests.
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
         let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
-        let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
-        assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
-            "the recovery action should come from typed permission evidence")
+        // Typed permission evidence behind the action: MeetingSessionUIPolicyTests,
+        // "Capture health evidence comes from this capture, not a cached permission".
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
         assertTrue(view.contains("Grant System Audio Access")

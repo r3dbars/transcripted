@@ -32,6 +32,7 @@
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
 - `MeetingCaptureBridge+AudioRouting.swift` — bridge extension for recording health snapshots plus the bounded shared-meeting-mic dictation handoff
 - `MeetingMicPCMRelay.swift` — synchronous handler switch behind TranscriptedCore's bounded off-tap FIFO that lets borrowed-mic dictation opt in and out of live meeting mic PCM without replacing the installed capture callback; deliberately a single queue so admitted audio is never duplicated or coalesced
+- `MeetingStopSequence.swift` — Foundation-only ordering rules for the stop paths, run against `MeetingCaptureControlling` (which `MeetingCaptureBridge` conforms to) so tests use a fake capture: an unexpected stop leaves `.recording` before any await, drains the shared PCM relay and resumes dictation; a finished stop fires exactly one terminal (timeout, no audio, or degraded report then transcription); `MeetingCaptureHealthEvidence` reads system-audio signal, tail failure and typed denial from the capture itself
 - `MeetingCaptureSupport.swift` — small support types for meeting capture stop results and pending async-attempt bookkeeping
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
