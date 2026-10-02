@@ -777,10 +777,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     // MARK: - Menu Bar Commands
 
-    /// Thin entry points for `TranscriptedMenuCommands`. They live here (rather
-    /// than in an extension) so they can reuse the existing private action
-    /// helpers. Each one mirrors a path users already have via the popover, the
-    /// sidebar, or a recordable trigger — nothing here remaps those triggers.
+    /// Thin entry points for `TranscriptedMenuCommands`, reusing the action
+    /// helpers in the `TranscriptedAppDelegate+*` extensions. Each one mirrors
+    /// a path users already have via the popover, the sidebar, or a recordable
+    /// trigger — nothing here remaps those triggers.
 
     func menuStartDictation() {
         startDictationFromSettings()

@@ -1,6 +1,6 @@
 # Transcripted agent guide
 
-The one set of rules for every coding agent (Claude, Codex, or other). Agent docs are `AGENTS.md` only, here and in each folder; Claude Code reads them natively (v2.1.277+), so there's no `CLAUDE.md`. Don't add a `CLAUDE.md` or `CLAUDE.local.md` in the repo: by default Claude Code then reads it instead of `AGENTS.md`. `check-known-traps.py` fails on any `CLAUDE.md` that isn't a bare `@AGENTS.md` stub.
+The one set of rules for every coding agent (Claude, Codex, or other). Agent docs are `AGENTS.md` only, here and in each folder; Claude Code reads them natively (v2.1.277+), so there's no `CLAUDE.md`. Don't add a `CLAUDE.md` or `CLAUDE.local.md` in the repo: by default Claude Code then reads it instead of `AGENTS.md`. `check-known-traps.py` fails on any `CLAUDE.md` that isn't a bare `@AGENTS.md` stub, and on any `CLAUDE.local.md` at all.
 
 Transcripted is a macOS 26+, Apple Silicon menubar app: dictation with paste-back, meeting capture (mic + system audio) with local transcription, imported audio and video, and Writing. Everything it captures is saved as agent-readable Markdown on disk.
 

@@ -44,31 +44,6 @@ extension Audio {
         return (try? deviceID.readIsAlive()) ?? false
     }
 
-    @discardableResult
-    private func ensureEngineInitialized() throws -> (AVAudioEngine, AVAudioInputNode) {
-        // Delay AVAudioEngine/input-node access until recording actually
-        // begins. Launch-time warmup can construct Audio long before the
-        // user has explicitly asked to record anything.
-        if engine == nil {
-            engine = AVAudioEngine()
-        }
-
-        if inputNode == nil, let engine {
-            inputNode = engine.inputNode
-            AppLogger.audioMic.info("Using system default microphone")
-        }
-
-        guard let engine, let inputNode else {
-            throw NSError(
-                domain: "Audio",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"]
-            )
-        }
-
-        return (engine, inputNode)
-    }
-
     /// Create a detached mic graph instead of inheriting one used by
     /// monitoring or a failed device switch. The new graph is not published
     /// on `self` until its device and format are validated for the current
