@@ -327,6 +327,47 @@ struct DictationPasteTarget: Equatable {
 }
 
 enum FocusedTextPasteConfirmationPolicy {
+    /// Accessibility clients can otherwise block for several seconds when an editor is
+    /// briefly busy applying a paste (Notes is a common example). Confirmation is a
+    /// best-effort signal and must never stall delivery or the target application.
+    static let messagingTimeout: Float = 0.05
+
+    /// The focused UI element, with every AX read on it and on the system-wide
+    /// element bounded by `messagingTimeout`. Returns nil when the focused-element
+    /// attribute isn't an AXUIElement: AXUIElement is a toll-free-bridged CF opaque
+    /// type, so Swift can't runtime-check `as?`/`as!` against it (the compiler treats
+    /// the downcast as unconditionally successful), and CFGetTypeID is the actual
+    /// safety net before the value goes to AX APIs that assume its type.
+    static func boundedFocusedElement(
+        systemWide: AXUIElement,
+        setMessagingTimeout: (AXUIElement, Float) -> Void = { element, timeout in
+            AXUIElementSetMessagingTimeout(element, timeout)
+        },
+        copyFocusedElement: (AXUIElement) -> CFTypeRef? = { systemWide in
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                systemWide,
+                kAXFocusedUIElementAttribute as CFString,
+                &value
+            ) == .success else { return nil }
+            return value
+        }
+    ) -> AXUIElement? {
+        setMessagingTimeout(systemWide, messagingTimeout)
+        guard let focusedElement = copyFocusedElement(systemWide) else { return nil }
+        // This file is compiled directly into the fast-test binary without the
+        // TranscriptedCore module's search path (see APP_SOURCES in run-tests.sh),
+        // so the app logger isn't available here; this follows the same
+        // fputs(..., stderr) idiom Sources/Observability/AppLogSink.swift falls back to.
+        guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else {
+            fputs("⚠️ ClipboardRestoringTextPaster | focused UI element attribute returned an unexpected CF type (expected AXUIElement)\n", stderr)
+            return nil
+        }
+        let element = focusedElement as! AXUIElement
+        setMessagingTimeout(element, messagingTimeout)
+        return element
+    }
+
     /// Roles where a paste can't land: a web page body, plain text, links,
     /// images, and controls like buttons and menus. Any of them still counts
     /// as text entry when its value is settable or it sits inside an editable
@@ -554,11 +595,6 @@ private final class FocusedTextChangeObserver {
 }
 
 private struct FocusedTextPasteConfirmation {
-    /// Accessibility clients can otherwise block for several seconds when an editor is
-    /// briefly busy applying a paste (Notes is a common example). Confirmation is a
-    /// best-effort signal and must never stall delivery or the target application.
-    private static let messagingTimeout: Float = 0.05
-
     private let focusedElement: AXUIElement
     private let initialValue: String?
     private let replacedSelectionLength: Int
@@ -581,33 +617,11 @@ private struct FocusedTextPasteConfirmation {
     }
 
     static func capture() -> FocusedTextPasteConfirmation? {
-        let systemWideElement = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(systemWideElement, messagingTimeout)
-        var focusedElementValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            systemWideElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedElementValue
-        ) == .success,
-            let focusedElement = focusedElementValue else {
+        guard let element = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+            systemWide: AXUIElementCreateSystemWide()
+        ) else {
             return nil
         }
-
-        // AXUIElement is a toll-free-bridged CF opaque type: Swift can't runtime-check
-        // `as?`/`as!` against it (the compiler treats the downcast as unconditionally
-        // successful), so CFGetTypeID is the actual safety net before we hand this
-        // value to AX APIs that assume it really is an AXUIElement. This file is
-        // compiled directly into the fast-test binary without the TranscriptedCore
-        // module's search path (see APP_SOURCES in run-tests.sh), so importing that
-        // module here isn't an option — this follows the same fputs(..., stderr)
-        // idiom Sources/Observability/AppLogSink.swift itself falls back to for
-        // internal diagnostics.
-        guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else {
-            fputs("⚠️ ClipboardRestoringTextPaster | focused UI element attribute returned an unexpected CF type (expected AXUIElement)\n", stderr)
-            return nil
-        }
-        let element = focusedElement as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, messagingTimeout)
         return FocusedTextPasteConfirmation(
             focusedElement: element,
             initialValue: stringAttribute(kAXValueAttribute as CFString, from: element),
