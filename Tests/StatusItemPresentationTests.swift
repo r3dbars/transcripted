@@ -1,4 +1,4 @@
-// Source-text pins: the first suite reads Sources/TranscriptedApp.swift as text instead of calling
+// Source-text pins: the first suite reads Sources/App/TranscriptedApp.swift as text instead of calling
 // refreshStatusItemPresentation(), because that method lives on TranscriptedAppDelegate (@MainActor
 // NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
 // runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
@@ -15,7 +15,7 @@ import Foundation
 
 func testStatusItemPresentation() {
     runSuite("status item uses the app icon's bubble with quiet, distinct capture states") {
-        let source = readSourceFixture("Sources/TranscriptedApp.swift")
+        let source = readSourceFixture("Sources/App/TranscriptedApp.swift")
         let presentation = statusItemPresentationSlice(source)
 
         assertTrue(

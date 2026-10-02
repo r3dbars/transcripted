@@ -4,7 +4,7 @@
 // them for real, against temp files.
 //
 // Two suites still read source as text (grandfathered):
-// - "termination flush wiring" greps EventReporter.swift and Sources/TranscriptedApp.swift, because
+// - "termination flush wiring" greps EventReporter.swift and Sources/App/TranscriptedApp.swift, because
 //   EventReporter drags in CrashReporter/Sentry and the app delegate is @MainActor AppKit that this
 //   runner never builds.
 // - "avoid legacy FileHandle APIs" is an absence-of-API sweep across both the app and the
@@ -70,7 +70,7 @@ func testObservabilityLogWriter() async {
         // Grandfathered source pins: EventReporter (CrashReporter/Sentry) and the
         // app delegate are not compiled in this runner.
         let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
+        let appSource = readObservabilityTestRepoTextFile("Sources/App/TranscriptedApp.swift")
         assertTrue(
             reporterSource.contains("await ReliabilityPacketRecorder.flushForShutdown()"),
             "the shared local-event shutdown flush should drain reliability packet writes too"

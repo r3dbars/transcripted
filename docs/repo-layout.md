@@ -77,6 +77,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
 - `Sources/Accessibility/` — AX helpers for overlay positioning
+- `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
@@ -162,7 +163,7 @@ The app compiles as one Swift target (plus the `TranscriptedWritingCore` module)
 | UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
 | UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
 | AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
-| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedAppDelegate+*.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
+| AppShell | `Sources/App/` | anything; nothing depends on it |
 
 Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.
 
@@ -185,7 +186,7 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` (orchestrator) plus `+MicrophoneOnly`, `+MicDiarization`, `+Stages`, `+LastChanceSweep`, `+SystemSpeakerIdentity` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching (in `+SystemSpeakerIdentity`), utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
 - `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue`, `+Finish`, and the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions.
 - `Sources/Meeting/MeetingSessionController.swift` (the recording lifecycle) plus `+State.swift` (declares the class) and its other `+*.swift` extensions — the meeting state machine.
-- `Sources/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`. The most source-pinned file: its pins still read `TranscriptedApp.swift` only, so pinned code stays there.
+- `Sources/App/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`. The most source-pinned file: its pins still read `TranscriptedApp.swift` only, so pinned code stays there.
 - `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
 - `Sources/Speech/ParakeetEngine.swift` (core state, native AVAudioEngine calls; the graph itself, with rebuild/retire, is `ParakeetAudioGraph`) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
 - `Sources/UI/Overlay/DictationSessionController.swift` plus `+RecordingStart`, `+Stop`, `+PasteBack`, `+Persistence`, `+Recovery`, `+Presses`, `+SessionCap`, `+Telemetry` and `DictationSessionDeliveryTypes.swift` — dictation session orchestration. `stopDictationAndPaste` is in `+Stop`, `installSessionTimeout` in `+SessionCap`.

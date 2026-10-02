@@ -32,7 +32,7 @@ func testSingleInstanceGuard() {
 
     runSuite("SingleInstanceGuard reopen presents controls without a modal alert") {
         let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/TranscriptedApp.swift")
+            .deletingLastPathComponent().appendingPathComponent("Sources/App/TranscriptedApp.swift")
         let source = (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
         let body = source.components(separatedBy: "private func handleSingleInstanceReopenRequest() {")
             .dropFirst().first?.components(separatedBy: "@objc func togglePopover()").first ?? ""
