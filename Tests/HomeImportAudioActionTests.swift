@@ -2,7 +2,9 @@
 // list offers the same picker, so imported audio is never more than one click
 // away. The rows read their copy and identifiers from HomeCaptureListCopy,
 // which this runner compiles, so this checks real values, plus the identifier
-// the QA import smoke presses. No Swift source is read as text.
+// the QA import smoke presses. No Swift source is read as text. That the
+// views really render both entry points is checked by `transcripted-qa
+// ui-smoke`, which the release-candidate packaged smoke runs.
 
 import Foundation
 
