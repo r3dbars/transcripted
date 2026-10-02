@@ -7,7 +7,7 @@ app already uses most, so adopting them is a snap-to-grid, not a redesign.
 
 Scope note: this is the visual language (type, spacing, radii). Color tokens
 already live per surface in `MenuTokens` (menubar popover, light + dark) and
-`OverlayTokens` (a few overlay colors). Those stay where they are; this document
+the Notch island's own views. Those stay where they are; this document
 governs the cross-surface geometry that had drifted into ~21 ad-hoc font sizes,
 12 corner radii, and ~26 padding values across the two main windows.
 
