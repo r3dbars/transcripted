@@ -17,7 +17,7 @@ func testMenuBarPrimaryButtonTitle() {
         ]
         assertEqual(
             dictationTitles.map(MenuBarPrimaryButtonTitle.short(for:)),
-            ["Dictate", "Stop"],
+            ["Dictate", "Done"],
             "dictation button titles should be short enough to share a row"
         )
     }
