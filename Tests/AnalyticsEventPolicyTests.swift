@@ -1455,7 +1455,7 @@ func testAnalyticsEventPolicy() {
                 "result": "updates_submitted",
                 "review_item_bucket": "4_9",
                 "review_reason": "mixed",
-                "surface": "speaker_review_sheet",
+                "surface": "speaker_review_island",
                 "updates_submitted_bucket": "2_3",
                 "audio_path": "/Users/jane/Private/customer.wav",
                 "meeting_title": "Customer Roadmap",
@@ -1474,7 +1474,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["result"], "updates_submitted", "coarse result should survive")
         assertEqual(sanitized["review_item_bucket"], "4_9", "review item bucket should survive")
         assertEqual(sanitized["review_reason"], "mixed", "review reason should survive")
-        assertEqual(sanitized["surface"], "speaker_review_sheet", "surface should survive")
+        assertEqual(sanitized["surface"], "speaker_review_island", "surface should survive")
         assertEqual(sanitized["updates_submitted_bucket"], "2_3", "submitted update bucket should survive")
         assertNil(sanitized["audio_path"], "audio paths must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
