@@ -3,7 +3,7 @@ import XCTest
 
 /// Contract test for W3-A (audit 2026-07-08 wave 3): TranscriptFrontmatter is
 /// one of three independent parsers of the same Markdown frontmatter shape
-/// (see Tests/Fixtures/frontmatter-corpus/README.md for the other two and the
+/// (see Tests/Fixtures/frontmatter-corpus/README.txt for the other two and the
 /// scope of the equivalence contract). This suite pins TranscriptFrontmatter's
 /// behavior against the shared fixture corpus so any future edit that quietly
 /// changes fence detection or flat-value parsing here — without a matching

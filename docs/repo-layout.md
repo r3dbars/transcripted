@@ -48,7 +48,7 @@ Command ownership:
 
 - `scripts/dev/agent-preflight.sh` — agent preflight and suggested verification map for the current branch
 - `check.sh` — thin root wrapper for the one-command check runner: the checks your diff needs by default, or the `quick`, `full`, and `hardware` tiers
-- `build-deps.sh` — thin root wrapper for the dependency build entrypoint
+- `build-deps.sh` — thin root wrapper for `scripts/entrypoints/build-deps.sh`, which builds `deps-libs/`, `deps-modules/`, `deps-frameworks/` and `deps-tools/`. A fresh worktree has none of these, so run it once first. Vendor pins live at the top of that script (`FLUID_AUDIO_VERSION` and friends).
 - `build.sh` — thin root wrapper for the authoritative local app build; use `--no-open` for agent verification
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
@@ -94,7 +94,8 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `docs/` — live project docs, indexed in `docs/README.md`
 - `docs/qa/` — manual QA checklists
 - `docs/archive/` — finished records (eval output and the like), listed in `docs/archive/README.md`
-- `docs/marketing/`, `docs/launch-assets/`, `docs/assets/`, `docs/screenshots/` — launch and marketing material, not engineering docs
+- `docs/marketing/`, `docs/launch-assets/`, `docs/assets/`, `docs/screenshots/` — launch and marketing material, not engineering docs. A video or other code project goes in `docs/marketing/<name>/` with its own `.gitignore` for `node_modules/` and output.
+- The transcripted.app website is not in this repo: it's `r3dbars/transcripted-webapp` (Astro on Cloudflare Pages, clone at `~/transcripted-webapp`, with its own `AGENTS.md`). Build site changes there, not as standalone HTML.
 - `experiments/` — standalone probes (e.g. `audio-only-probe/`), not part of the app build
 - `config/` — app config artifacts including entitlements and nightly security manifests
 - `Casks/` — committed Homebrew cask release surface

@@ -70,13 +70,20 @@ Both app build flows build and sign these release helpers under
 `Transcripted.app/Contents/Helpers/`:
 
 - `transcripted-mcp`, for the in-app Claude Desktop installer.
+- `transcripted-live`, the live meeting helper the Claude Code mod starts.
+- `llama-server`, Writing's inference helper (pinned by `build-deps.sh`).
 - `transcripted-cli`, with the full macOS 26+ meeting-import pipeline enabled.
   Packaging checks its compiled `build-info` capabilities and fails if a stale
   retrieval-only/basic-audio helper is produced. It also fails if the helper
   still has an rpath into the build checkout (`deps-frameworks/`), so it can
   only load frameworks from the app bundle. No PATH shim is installed.
 
-Neither helper requires users to install Swift or clone the repo. To import a
+The copy steps are `bundle_mcp_server`, `bundle_live_helper` and
+`bundle_llama_server` in `scripts/entrypoints/build.sh`, plus
+`scripts/entrypoints/lib/bundle-cli.sh`; `build-beta.sh` has its own copies of
+the bundle functions, so change both scripts.
+
+No helper requires users to install Swift or clone the repo. To import a
 file using an installed app:
 
 ```bash
@@ -211,6 +218,33 @@ gate against the restored version.
 
 ## Release Flow
 
+Shipping builds come from the Release Candidate workflow
+(`.github/workflows/release-candidate.yml`), not from a local Mac. It checks out
+`source_ref`, builds deps, signs, notarizes and staples the DMG, builds the
+Sparkle appcast item and delta updates, updates the cask, runs the packaged-app
+smoke, and uploads all of it as the `Transcripted-<version>-release-candidate`
+artifact. The owner's Mac has no notarytool profile, so a local `build-beta.sh`
+only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
+
+1. Branch off `origin/main` and run
+   `python3 scripts/release/bump-release-version.py --version <version>`. The
+   branch must differ from main only by that `Info.plist` bump; the workflow
+   checks.
+2. `gh workflow run release-candidate.yml -f source_ref=<branch> -f version=<version>`
+3. Download the artifact, publish GitHub release `v<version>` with the DMG and
+   any `.delta` files, and tag `source_ref` (not the run's head SHA).
+4. Land the appcast, the cask and a new
+   `Tests/Fixtures/release-health-github-release-<version>.json` on main in one
+   PR (#1863 is the example).
+5. Sync and deploy the website. It's the separate repo
+   `r3dbars/transcripted-webapp` (clone at `~/transcripted-webapp`, Cloudflare
+   Pages project `transcripted-web`); its README has the sync and deploy
+   commands. Deploys are manual, so the site keeps the old version until
+   someone runs them.
+
+A local signed and notarized build, for a machine that does have a notarytool
+profile:
+
 ```bash
 bash build-deps.sh --force
 NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
@@ -341,6 +375,11 @@ appcast, cask, or Sentry release work:
 ```bash
 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
 ```
+
+In the active macOS account the UI part stops before launching the app,
+because a temporary `HOME` doesn't isolate `UserDefaults.standard`. Run it from
+a clean VM or let the Release Candidate workflow run it. See "Native smoke
+isolation" in `Tools/TranscriptedQA/AGENTS.md`.
 
 Or use the QA bench wrapper:
 

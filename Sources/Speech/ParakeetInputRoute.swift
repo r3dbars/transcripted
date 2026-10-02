@@ -9,7 +9,7 @@
 // the macOS default input on a fresh engine. The selection is loaded and
 // the config-change ignore window armed before that read, and the
 // override is applied to this engine's AUHAL only; nothing here writes the
-// Mac-wide default input. Read Sources/Speech/CLAUDE.md before changing it.
+// Mac-wide default input. Read Sources/Speech/AGENTS.md before changing it.
 //
 // These are internal collaborator methods on ParakeetEngine. ParakeetEngine
 // (ParakeetEngine.swift) stays the public-API owner and @MainActor home for

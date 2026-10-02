@@ -7,7 +7,7 @@
 - dictation start/stop
 - paste-last-dictation
 - meeting start/stop
-- configurable physical-key dictation triggers (default: right Option)
+- configurable physical-key triggers. Defaults: hold Fn = push-to-talk dictation, right Option = hands-free dictation, Option-M = meeting, Option-Shift-V = paste last dictation (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
 
 ## Module
 
@@ -31,7 +31,7 @@
 
 - The physical dictation trigger routes into `DictationSessionController`
 - Dictation has separate hands-free toggle and push-to-talk bindings; the physical shortcut action identifies the mode passed to `DictationSessionController`
-- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to right Option for hands-free dictation, Option-Shift-V for paste-last-dictation, and supporting modifier-only or keyed chords
+- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Fn for push-to-talk, right Option for hands-free dictation, Option-M for meetings, Option-Shift-V for paste-last-dictation, and supporting modifier-only or keyed chords
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
 - Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
