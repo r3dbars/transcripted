@@ -17,6 +17,12 @@ extension MeetingSessionController {
             mayInfer: { [weak self] in
                 guard let self else { return false }
                 return !self.taskManager.hasActiveTranscriptionWorkRequiringQuitConfirmation
+            },
+            // A dictation gets the Neural Engine to itself; the island's live
+            // transcript queues its audio and catches up after.
+            shouldCaptionsYield: { [weak router = sttRouter] in
+                guard let router else { return false }
+                return router.isRecording || router.isTranscribing
             }
         )
     }

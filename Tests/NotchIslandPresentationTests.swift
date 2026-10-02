@@ -192,6 +192,16 @@ func testNotchIslandPresentation() {
             .meetingControls(callAudioNote: nil, systemAudioUnverified: false)
         )
 
+        var transcribing = recording()
+        transcribing.showsLiveTranscript = true
+        assertEqual(
+            notchLayout(meeting: transcribing, expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            "with Live transcript on, hovering shows the conversation"
+        )
+        assertEqual(notchLayout(meeting: transcribing).right, [.meetingMeters], "the collapsed island doesn't change")
+        assertEqual(NotchIslandAction.meetingCopyTranscript.owner, .island, "the island copies the transcript itself")
+
         var micOnly = recording()
         micOnly.callAudioNote = .off
         assertEqual(notchLayout(meeting: micOnly).right, [.chip("Mic only", .warning, .meetingCallAudio)])

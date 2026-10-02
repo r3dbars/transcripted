@@ -29,11 +29,30 @@ final class LiveMeetingTranscriptService {
     private var deliveryDrops: (() -> Int)?
     private var mayInfer: (() -> Bool)?
     private var lastErrorCode: String?
+    private var captionsYield: (@MainActor () -> Bool)?
+    private var captionsSetting = NotchIslandPreferences.showsLiveTranscript()
+    private var settingsObserver: NSObjectProtocol?
+
+    private init() {
+        // Turning "Live transcript" on or off mid-meeting applies at once.
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let setting = NotchIslandPreferences.showsLiveTranscript()
+                guard setting != self.captionsSetting else { return }
+                self.captionsSetting = setting
+                self.refreshCaptions()
+            }
+        }
+    }
 
     func beginCapture(sessionID: UUID, router: STTRouter, model: TranscriptionModelChoice,
                       languageSelection: TranscriptionLanguageSelection,
                       deliveryEnabled: @escaping (Bool, UInt64) -> Void, deliveryDrops: @escaping () -> Int,
-                      mayInfer: @escaping () -> Bool) {
+                      mayInfer: @escaping () -> Bool,
+                      shouldCaptionsYield: @escaping @MainActor () -> Bool = { false }) {
         self.deliveryEnabled?(false, previewEpoch)
         previewEpoch &+= 1
         worker?.cancel()
@@ -59,6 +78,28 @@ final class LiveMeetingTranscriptService {
         liveStatus = "disabled"
         lastErrorCode = nil
         transcript = LiveMeetingTranscriptState()
+        captionsYield = shouldCaptionsYield
+        refreshCaptions()
+    }
+
+    /// Starts or stops the island's live transcript to match the setting,
+    /// for the recording in progress. Safe to call any time.
+    func refreshCaptions() {
+        let captions = LiveMeetingCaptions.shared
+        let wanted = state == "recording" && NotchIslandPreferences.showsLiveTranscript()
+        if wanted, let sessionID, let captionsYield {
+            captions.start(sessionID: sessionID, shouldYield: captionsYield)
+        } else if !wanted {
+            captions.stop()
+        }
+        updateDelivery()
+    }
+
+    /// Live PCM flows while either consumer wants it: agent sharing (gated by
+    /// the preview epoch in the inbox) or the island's live transcript.
+    private func updateDelivery() {
+        let wanted = state == "recording" && (sharingEnabled || LiveMeetingCaptions.shared.isActive)
+        deliveryEnabled?(wanted, previewEpoch)
     }
 
     @discardableResult
@@ -77,6 +118,7 @@ final class LiveMeetingTranscriptService {
             latestTextAt = nil
             liveStatus = "disabled"
             lastErrorCode = nil
+            updateDelivery()
         } else if state == "recording" {
             inbox.begin(sessionID: sessionID, origin: origin, previewEpoch: previewEpoch)
             deliveryEnabled?(true, previewEpoch)
@@ -90,6 +132,7 @@ final class LiveMeetingTranscriptService {
     func finishCapture(sessionID: UUID) {
         guard self.sessionID == sessionID else { return }
         deliveryEnabled?(false, previewEpoch)
+        LiveMeetingCaptions.shared.stop(sessionID: sessionID)
         state = "finished"
         finishedElapsed = max(0, CACurrentMediaTime() - origin)
         inbox.finish()
@@ -102,6 +145,7 @@ final class LiveMeetingTranscriptService {
         let rate = buffer.format.sampleRate
         guard rate.isFinite, rate >= 8_000, rate <= 192_000 else { return }
         let resampled = AudioResampler.resample(samples, from: rate, to: 16_000)
+        LiveMeetingCaptions.shared.offer(resampled, track: source == .microphone ? .microphone : .system)
         inbox.append(samples: resampled, source: source == .microphone ? .microphone : .system,
             capturedAt: capturedAt, expectedEpoch: previewEpoch)
     }
@@ -171,7 +215,8 @@ final class LiveMeetingTranscriptService {
             guard router.isModelLoaded(for: retainedModel) else {
                 self.liveStatus = "unavailable"
                 self.lastErrorCode = "model_unavailable"
-                self.deliveryEnabled?(false, self.previewEpoch)
+                // The island's live transcript may still need the audio.
+                self.deliveryEnabled?(LiveMeetingCaptions.shared.isActive, self.previewEpoch)
                 self.inbox.cancel()
                 return
             }

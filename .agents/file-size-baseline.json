@@ -33,7 +33,7 @@
     "Sources/UI/Overlay/MeetingOverlayController.swift": 1617,
     "Sources/UI/Overlay/MeetingOverlayRootView.swift": 1279,
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": 1335,
-    "Sources/UI/Overlay/NotchIslandView.swift": 1462,
+    "Sources/UI/Overlay/NotchIslandView.swift": 1339,
     "Sources/UI/Settings/AgentConnectionSettingsPage.swift": 801,
     "Sources/UI/Settings/PermissionsOnboardingView.swift": 976,
     "Sources/UI/Settings/QuietHomeLibrary.swift": 1028,

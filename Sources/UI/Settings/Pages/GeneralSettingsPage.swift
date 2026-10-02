@@ -113,6 +113,8 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
 
+                NotchIslandLiveTranscriptRow()
+
                 micProcessingEditor()
             }
             .accessibilityIdentifier("transcripted.settings.section.meetings")

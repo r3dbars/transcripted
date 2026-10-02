@@ -9,6 +9,7 @@
 // one), and routes taps back to whichever controller owns them.
 
 import AppKit
+import Combine
 
 @MainActor
 final class NotchIslandController: NotchIslandCallPromptPresenting {
@@ -83,6 +84,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// everywhere except over the island itself, and hover is judged from
     /// the pointer instead of tracking areas on a window that may ignore it.
     private var pointerMonitors: [Any] = []
+    private var liveTranscriptWatch: AnyCancellable?
 
     /// Always on: the Notch island is the only dictation, meeting and call
     /// prompt window. The old near-text, mini cursor and meeting pill panels
@@ -90,6 +92,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     static var isSelected: Bool { true }
 
     init() {
+        watchLiveTranscript()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -196,6 +199,9 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     // MARK: - Meetings
 
     func updateMeeting(_ content: NotchIslandMeetingContent?) {
+        var content = content
+        let showsTranscript = Self.showsLiveTranscript(content)
+        content?.showsLiveTranscript = showsTranscript
         guard content != meeting else { return }
         meeting = content
         live.meetingElapsed = content?.duration ?? 0
@@ -213,6 +219,37 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard now - lastMeterPush >= Self.meterInterval else { return }
         lastMeterPush = now
         islandView?.pushMeetingLevels(mic: mic, system: system)
+    }
+
+    /// The meeting's live transcript changed. The view lives as long as the
+    /// island so its scroll position survives the drop-down being rebuilt;
+    /// it is updated in place, never by re-rendering the island.
+    func updateLiveTranscript(_ log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status) {
+        // Nothing to show yet: don't build the panel for it.
+        if islandView == nil, log.isEmpty, status == .off { return }
+        let (_, islandView) = ensurePanel()
+        let view = islandView.liveTranscriptView ?? NotchIslandLiveTranscriptView(width: NotchIslandDropView.contentWidth)
+        islandView.liveTranscriptView = view
+        view.apply(log, status: status)
+        // The setting was flipped mid-meeting: swap lanes and transcript.
+        if var meeting, meeting.showsLiveTranscript != Self.showsLiveTranscript(meeting) {
+            meeting.showsLiveTranscript = Self.showsLiveTranscript(meeting)
+            self.meeting = meeting
+            render()
+        }
+    }
+
+    private static func showsLiveTranscript(_ meeting: NotchIslandMeetingContent?) -> Bool {
+        meeting?.isRecording == true && NotchIslandPreferences.showsLiveTranscript()
+    }
+
+    private func watchLiveTranscript() {
+        let captions = LiveMeetingCaptions.shared
+        liveTranscriptWatch = captions.$log.combineLatest(captions.$status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] log, status in
+                MainActor.assumeIsolated { self?.updateLiveTranscript(log, status: status) }
+            }
     }
 
     // MARK: - Call prompt
@@ -734,6 +771,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     private func handleOwnAction(_ action: NotchIslandAction) {
         switch action {
+        case .meetingCopyTranscript:
+            let text = LiveMeetingCaptions.shared.log.plainText()
+            guard !text.isEmpty else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
         case .copyLastDictation:
             guard let text = recentInsert?.text, !text.isEmpty else { return }
             let pasteboard = NSPasteboard.general

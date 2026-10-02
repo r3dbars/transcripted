@@ -91,6 +91,9 @@ struct NotchIslandMeetingContent: Equatable {
     /// The island skipped the "can't hear the other side" question so the
     /// meeting could start at once; ask it now, from the island, once.
     var asksAboutCallAudio = false
+    /// "Live transcript" is on: the recording drop-down shows the
+    /// conversation so far instead of the level lanes.
+    var showsLiveTranscript = false
 
     var isRecording: Bool { phase == .recording }
 
@@ -189,6 +192,8 @@ enum NotchIslandAction: Equatable {
     case meetingCallAudioDismiss
     case meetingOpen
     case meetingDismissError
+    /// Copy all on the live transcript.
+    case meetingCopyTranscript
     case callRecord
     case callDismiss
     case callRemind
@@ -204,7 +209,7 @@ enum NotchIslandAction: Equatable {
         switch self {
         case .dictationStop, .dictationCancel, .dictationMessageAction, .dictationDismissMessage:
             return .dictation
-        case .copyLastDictation, .pasteLastDictation:
+        case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
         case .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
@@ -237,7 +242,7 @@ enum NotchIslandDrop: Equatable {
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -476,7 +481,8 @@ enum NotchIslandPresentation {
         case .recording:
             return .meetingControls(
                 callAudioNote: meeting.callAudioNote,
-                systemAudioUnverified: meeting.systemAudioUnverified
+                systemAudioUnverified: meeting.systemAudioUnverified,
+                showsTranscript: meeting.showsLiveTranscript
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)
