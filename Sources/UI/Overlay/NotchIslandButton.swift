@@ -24,7 +24,9 @@ final class NotchIslandButton: NSButton {
     private let buttonHeight: CGFloat
     private let horizontalPadding: CGFloat
 
-    init(title: String, style: Style, height: CGFloat = 32, fontSize: CGFloat = 13, symbolName: String? = nil) {
+    /// `appIcon` puts a small app icon before the title, drawn in its own
+    /// colors ("Insert into Slack").
+    init(title: String, style: Style, height: CGFloat = 32, fontSize: CGFloat = 13, symbolName: String? = nil, appIcon: NSImage? = nil) {
         self.style = style
         self.buttonHeight = height
         self.horizontalPadding = style == .link ? 4 : (height < 26 ? 9 : 14)
@@ -45,6 +47,14 @@ final class NotchIslandButton: NSButton {
             imagePosition = .imageLeading
             imageHugsTitle = true
             contentTintColor = foreground
+        } else if let appIcon {
+            let side = (height * 0.6).rounded()
+            self.image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+                appIcon.draw(in: rect)
+                return true
+            }
+            imagePosition = .imageLeading
+            imageHugsTitle = true
         }
         target = self
         action = #selector(pressed)

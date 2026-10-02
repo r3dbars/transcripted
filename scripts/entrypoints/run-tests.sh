@@ -498,6 +498,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingMicCapturePlan.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/LiveMeetingTranscriptState.swift"
+    "Sources/Meeting/LiveDictationPreview.swift"
     "Sources/Meeting/LiveMeetingCaptionLog.swift"
     "Sources/Meeting/LiveMeetingCaptionSampleQueue.swift"
     "Sources/Meeting/MeetingQuickSummaryExtractor.swift"

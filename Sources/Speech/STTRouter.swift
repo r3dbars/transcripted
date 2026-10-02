@@ -65,6 +65,15 @@ class STTRouter: ObservableObject {
     var lastRecordingWasDigitalSilence: Bool { parakeetEngine.lastRecordingWasDigitalSilence }
     var isRecordingFromSharedMeetingMic: Bool { parakeetEngine.isRecordingFromSharedMeetingMic }
     var hasRecoverableRecording: Bool { parakeetEngine.hasRecoverableRecording }
+
+    /// One take, kept across a device-recovery restart within it.
+    var dictationRecordingIdentity: UUID { parakeetEngine.recordingIdentity }
+
+    /// Sends a copy of this dictation's mic audio to the island's live
+    /// preview, or stops (nil). Every model records through the same engine.
+    func setDictationPreviewSink(_ sink: DictationPreviewSampleSink?) {
+        parakeetEngine.pendingSamplesLock.withLock { parakeetEngine.previewSink = sink }
+    }
     var dictationAudioRouteAnalyticsContext: [String: String] {
         parakeetEngine.currentAudioRouteAnalyticsContext
     }

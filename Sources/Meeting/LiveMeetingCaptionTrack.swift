@@ -97,6 +97,23 @@ actor LiveMeetingCaptionTrack {
         await manager.cleanup()
     }
 
+    /// Stops feeding and starts the decoder fresh, but keeps the model
+    /// loaded for the next `start`. The dictation preview's track lives for
+    /// the whole app session this way. The queue is left alone: the caller
+    /// clears it when the take ends, and the next take may already be
+    /// filling it.
+    func pause() async {
+        onEvent = nil
+        shouldYield = nil
+        drainTask?.cancel()
+        await drainTask?.value
+        drainTask = nil
+        lastPartial = ""
+        lastPartialAt = nil
+        utteranceSamples = 0
+        await manager.reset()
+    }
+
     private func drain() async {
         while !Task.isCancelled {
             guard queue.count >= Self.minimumFeedSamples else {

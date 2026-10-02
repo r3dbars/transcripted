@@ -551,14 +551,14 @@ final class NotchIslandDropView: NSView {
 
     var onAction: ((NotchIslandAction) -> Void)?
     private(set) var drop: NotchIslandDrop
-    private let stack = NSStackView()
+    let stack = NSStackView()
     private var youLane: NotchIslandBarsView?
     private var callLane: NotchIslandBarsView?
     private var promptCountdownLabel: NSTextField?
     private var countdownButton: NotchIslandButton?
     /// A dictation message's words and hint. A click on them is someone
     /// reading, so it never reaches the island's click-to-dismiss.
-    private var readableText: [NSView] = []
+    var readableText: [NSView] = []
 
     func setCountdownPaused(_ paused: Bool) {
         countdownButton?.setCountdownPaused(paused)
@@ -569,17 +569,21 @@ final class NotchIslandDropView: NSView {
     private let speakerReviewView: NSView?
     /// The live transcript, kept alive by the controller like the review.
     private let liveTranscriptView: NotchIslandLiveTranscriptView?
+    /// The dictation's live words, kept alive by the controller the same way.
+    let dictationPreviewView: NotchIslandDictationPreviewView?
 
     init(
         drop: NotchIslandDrop,
         live: NotchIslandLiveValues,
         targetIcon: NSImage?,
         speakerReviewView: NSView? = nil,
-        liveTranscriptView: NotchIslandLiveTranscriptView? = nil
+        liveTranscriptView: NotchIslandLiveTranscriptView? = nil,
+        dictationPreviewView: NotchIslandDictationPreviewView? = nil
     ) {
         self.drop = drop
         self.speakerReviewView = speakerReviewView
         self.liveTranscriptView = liveTranscriptView
+        self.dictationPreviewView = dictationPreviewView
         super.init(frame: NSRect(x: 0, y: 0, width: NotchIslandGeometry.dropWidth, height: 10))
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -632,13 +636,8 @@ final class NotchIslandDropView: NSView {
 
     private func build(live: NotchIslandLiveValues, targetIcon: NSImage?) {
         switch drop {
-        case .dictationTarget(let appName, let microphone):
-            let title = appName.map { "Inserting into \($0)" } ?? "Inserting where you're typing"
-            add(row([appIcon(targetIcon, name: appName), titleBlock(title, microphone ?? "")]))
-            add(buttonRow(leading: [], trailing: [
-                button("Cancel", .plain, .dictationCancel),
-                button("Insert now", .accent, .dictationStop),
-            ]))
+        case .dictationTarget(let appName, let showsPreview, let isWriting):
+            buildDictationTarget(appName: appName, icon: targetIcon, showsPreview: showsPreview, isWriting: isWriting)
         case .dictationLoading(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
         case .dictationMessage(let message) where message.preview != nil:
@@ -672,11 +671,7 @@ final class NotchIslandDropView: NSView {
             }
             add(buttonRow(leading: [], trailing: trailing))
         case .justInserted(let text, _):
-            add(body("“\(text)”", maxLines: 3))
-            add(buttonRow(leading: [
-                button("Copy", .plain, .copyLastDictation),
-                button("Paste again", .plain, .pasteLastDictation),
-            ], trailing: []))
+            buildJustInserted(text: text)
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
         case .meetingControls(let note, let unverified, let showsTranscript):
@@ -798,7 +793,7 @@ final class NotchIslandDropView: NSView {
         super.mouseDown(with: event)
     }
 
-    private func add(_ view: NSView) {
+    func add(_ view: NSView) {
         stack.addArrangedSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(lessThanOrEqualToConstant: Self.contentWidth).isActive = true
@@ -812,7 +807,7 @@ final class NotchIslandDropView: NSView {
         return row
     }
 
-    private func buttonRow(leading: [NSView], trailing: [NSView]) -> NSView {
+    func buttonRow(leading: [NSView], trailing: [NSView]) -> NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
@@ -847,7 +842,7 @@ final class NotchIslandDropView: NSView {
         return block
     }
 
-    private func body(_ text: String, maxLines: Int = 0) -> NSTextField {
+    func body(_ text: String, maxLines: Int = 0) -> NSTextField {
         let label = NotchIslandPalette.label(
             text,
             font: .systemFont(ofSize: 13),
@@ -868,26 +863,6 @@ final class NotchIslandDropView: NSView {
         return row([label, bars])
     }
 
-    private func appIcon(_ icon: NSImage?, name: String?) -> NSView {
-        if let icon {
-            let view = NSImageView(image: icon)
-            view.imageScaling = .scaleProportionallyUpOrDown
-            view.translatesAutoresizingMaskIntoConstraints = false
-            view.widthAnchor.constraint(equalToConstant: 36).isActive = true
-            view.heightAnchor.constraint(equalToConstant: 36).isActive = true
-            return view
-        }
-        let tile = NotchIslandPalette.label(String((name ?? "?").prefix(1)), font: .systemFont(ofSize: 16, weight: .heavy), color: .white)
-        tile.alignment = .center
-        tile.wantsLayer = true
-        tile.layer?.backgroundColor = NotchIslandPalette.buttonPlain.cgColor
-        tile.layer?.cornerRadius = 9
-        tile.translatesAutoresizingMaskIntoConstraints = false
-        tile.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        tile.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        return tile
-    }
-
     /// Copy all, which says "Copied" for a beat.
     private func copyTranscriptButton() -> NSView {
         let button = NotchIslandButton(title: "Copy all", style: .plain, symbolName: "doc.on.doc")
@@ -904,8 +879,8 @@ final class NotchIslandDropView: NSView {
         return button
     }
 
-    private func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil) -> NSView {
-        let button = NotchIslandButton(title: title, style: style, symbolName: symbol)
+    func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil, appIcon: NSImage? = nil) -> NSView {
+        let button = NotchIslandButton(title: title, style: style, symbolName: symbol, appIcon: appIcon)
         button.onPress = { [weak self] in self?.onAction?(action) }
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -945,6 +920,7 @@ final class NotchIslandView: NSView {
     var speakerReviewView: NSView?
     /// Set by the controller while a meeting with live transcript records.
     var liveTranscriptView: NotchIslandLiveTranscriptView?
+    var dictationPreviewView: NotchIslandDictationPreviewView?
     private let edge = NSView()
     private var rowHeight: CGFloat = NotchIslandGeometry.tabRowHeight
     private var notchWidth: CGFloat?
@@ -1023,7 +999,8 @@ final class NotchIslandView: NSView {
                     live: live,
                     targetIcon: targetAppIcon,
                     speakerReviewView: speakerReviewView,
-                    liveTranscriptView: liveTranscriptView
+                    liveTranscriptView: liveTranscriptView,
+                    dictationPreviewView: dictationPreviewView
                 )
                 view.onAction = { [weak self] action in self?.onAction?(action) }
                 itemsView.addSubview(view)
