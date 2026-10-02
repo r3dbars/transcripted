@@ -163,6 +163,27 @@ private func runPersistentDictationInputControllerSuites() async {
         assertEqual(hal.deviceListRemoves, 1, "including the device-list listener")
     }
 
+    await runSuite("Persistent input - app Quit waits for the restore before replying to AppKit") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        let controller = hal.makeController()
+        controller.start()
+        await controller.pendingRefresh?.value
+
+        var writesAtReply: [UInt32] = []
+        let quit = await AppTerminationSequence.run(AppTerminationSequence.Steps(
+            finishDictationForTermination: { true },
+            resetCleanupAdmission: {},
+            prepareMeetingForTermination: {},
+            shutDownAppState: {},
+            stopAndRestorePersistentInput: { await controller.stopAndRestore() },
+            flushLocalEvents: {},
+            markCleanupFinished: {},
+            replyToPendingRequests: { _ in writesAtReply = hal.writes }
+        ))
+        assertTrue(quit, "Quit goes ahead")
+        assertEqual(writesAtReply, [persistentBuiltIn.id, persistentAirPods.id], "AirPods are back before AppKit is told to terminate")
+    }
+
     await runSuite("Persistent input - quitting during another app's call leaves the input and keeps the marker") {
         let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
         let controller = hal.makeController()

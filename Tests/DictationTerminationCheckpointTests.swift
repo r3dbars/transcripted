@@ -190,29 +190,53 @@ func testDictationTerminationCheckpoint() async {
     // that offers Retry Saving, and an unavailable checkpoint ending the take
     // before the model) runs through DictationSessionPipeline.swift and is a
     // behavior test in DictationSessionPipelineTests.swift.
-    do {
-        let app = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
-        let appAdmission = app.range(of: "guard await self.sessionController.finishDictationForTermination() else")
-        let appAdmissionEnd = appAdmission?.upperBound ?? app.startIndex
-        let appDeferral = app.range(of: "self.replyToPendingTerminationRequests(sender, shouldTerminate: false)", range: appAdmissionEnd..<app.endIndex)
-        let appDeferralEnd = appDeferral?.upperBound ?? app.startIndex
-        let meetingPrep = app.range(of: "await self.appState.meetingSession.prepareForTermination()", range: appDeferralEnd..<app.endIndex)
+    await runSuite("App Quit refused by dictation replies false before any shutdown and allows a later Quit") { @MainActor in
+        let refused = AppTerminationRecorder(dictationAdmits: false)
+        let refusedQuit = await AppTerminationSequence.run(refused.steps())
+        assertFalse(refusedQuit, "unsafe dictation audio refuses Quit")
+        assertEqual(
+            refused.events, ["finishDictation", "resetAdmission", "reply:false"],
+            "the refusal resets cleanup admission and replies false, with no meeting prep, input restore, or flush"
+        )
 
-        // Still read as text until the app's Quit handler has a seam:
-        // TranscriptedApp.swift is in open PR #1946.
-        runSuite("Production Quit wiring defers shutdown before an unsafe checkpoint") {
-            assertTrue(app.contains("self.terminationCleanupStarted = false"), "deferred Quit must reset cleanup admission for a later request")
-            assertTrue(appAdmission != nil && appDeferral != nil && meetingPrep != nil,
-                       "unsafe dictation must reply false before meeting termination or app shutdown")
-            if let appAdmission, let appDeferral, let meetingPrep {
-                assertTrue(appAdmission.lowerBound < appDeferral.lowerBound && appDeferral.lowerBound < meetingPrep.lowerBound,
-                           "meeting/app shutdown must not run after dictation Quit deferral")
-            }
-        }
-    } catch {
-        runSuite("Production Quit source fixtures are readable") {
-            assertTrue(false, "could not inspect production Quit wiring: \(error)")
-        }
+        let accepted = AppTerminationRecorder(dictationAdmits: true)
+        let acceptedQuit = await AppTerminationSequence.run(accepted.steps())
+        assertTrue(acceptedQuit, "saved dictation audio admits Quit")
+        assertEqual(
+            accepted.events,
+            ["finishDictation", "meetingPrepare", "appStateShutdown", "restoreInput", "flushEvents", "markFinished", "reply:true"],
+            "meeting prep, shutdown, input restore, and the event flush all finish before AppKit hears true"
+        )
+    }
+}
+
+/// Records the app's Quit steps. Each async step yields first, so a step
+/// that isn't awaited would land after the reply.
+@MainActor
+private final class AppTerminationRecorder {
+    var events: [String] = []
+    private let dictationAdmits: Bool
+
+    init(dictationAdmits: Bool) {
+        self.dictationAdmits = dictationAdmits
+    }
+
+    private func record(_ event: String) async {
+        await Task.yield()
+        events.append(event)
+    }
+
+    func steps() -> AppTerminationSequence.Steps {
+        AppTerminationSequence.Steps(
+            finishDictationForTermination: { await self.record("finishDictation"); return self.dictationAdmits },
+            resetCleanupAdmission: { self.events.append("resetAdmission") },
+            prepareMeetingForTermination: { await self.record("meetingPrepare") },
+            shutDownAppState: { self.events.append("appStateShutdown") },
+            stopAndRestorePersistentInput: { await self.record("restoreInput") },
+            flushLocalEvents: { await self.record("flushEvents") },
+            markCleanupFinished: { self.events.append("markFinished") },
+            replyToPendingRequests: { self.events.append("reply:\($0)") }
+        )
     }
 }
 
