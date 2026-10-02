@@ -178,7 +178,6 @@ Over 1,500 lines as of 2026-10-02, largest first:
 - `Sources/UI/Settings/TranscriptedSettingsView.swift` (3,897) — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (2,431) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live here.
 - `Sources/TranscriptedApp.swift` (1,927) — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching. The most source-pinned file.
-- `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
 
 Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
 

@@ -1,6 +1,6 @@
 // MeetingOverlayController.swift
-// Owns the non-activating meeting overlay panel lifecycle and state updates.
-// Views are kept in separate files and receive explicit update calls from here.
+// The meeting overlay's state machine. It has no window of its own: the
+// Notch island draws every state from snapshots pushed from here.
 
 import AppKit
 import Combine
@@ -8,8 +8,9 @@ import TranscriptedCore
 
 // MARK: - Controller
 
-/// Owns the `MeetingOverlayPanel`, subscribes to `MeetingSessionController`
-/// @Published state, and pushes updates to `MeetingOverlayRootView`.
+/// Subscribes to `MeetingSessionController` @Published state, keeps the
+/// meeting prompts, countdowns and recording-pill actions, and pushes
+/// `NotchIslandMeetingContent` snapshots to the Notch island.
 ///
 /// Also forwards the ⌥M hotkey intent (toggle meeting recording) through its
 /// `toggleFromHotkey()` method — wired by the `TranscriptedAppDelegate` onto
@@ -54,7 +55,6 @@ final class MeetingOverlayController: NSObject {
     private var currentDuration: TimeInterval = 0
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
-    private var currentParticipants: [String] = []
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
     /// Mirrors `MeetingSessionController.asksAboutCallAudioWhileRecording`.
@@ -99,21 +99,18 @@ final class MeetingOverlayController: NSObject {
     // for an old, unrelated one). Refreshed on every non-error state.
     private var failedMeetingIDsBeforeError: Set<UUID> = []
 
-    // MARK: - Panel & views
+    // MARK: - Subscriptions & tasks
 
-    private var panel: MeetingOverlayPanel?
-    private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
     /// Hides a "call audio is back" notice after a few seconds. Kept apart
-    /// from `autoHideTask`, which hides the whole panel after a save.
+    /// from `autoHideTask`, which hides the whole meeting after a save.
     private var systemAudioAutoHideTask: Task<Void, Never>?
     private var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
     private var isShowingCancelConfirmation = false
     private var isRestingCondensed = false
     private var isPanelHovered = false
     private var restTask: Task<Void, Never>?
-    private var lastRequestedPanelSize: NSSize?
 
     // The precedence lattice for these kinds lives in the pure
     // `MeetingPromptPriority.resolve` — kept in its own Foundation-pure file
@@ -124,6 +121,9 @@ final class MeetingOverlayController: NSObject {
 
     // Kept for the countdown-refresh pass, which rebuilds the display each tick.
     private var missedCallPrompt: MeetingPromptUnrecordedCall?
+
+    /// How long the missed-call nudge stays up before it expires unanswered.
+    private static let missedCallNudgeTimeoutSeconds = 30
 
     deinit {
         autoHideTask?.cancel()
@@ -144,8 +144,8 @@ final class MeetingOverlayController: NSObject {
     /// button. A transcript URL asks the page to expand that meeting.
     var onOpenMeetings: ((URL?) -> Void)?
 
-    /// Draws the meeting instead of the pill when Settings › Dictation
-    /// window is Notch island. States, prompts and timers stay here.
+    /// Draws the meeting. States, prompts and timers stay here. Set once at
+    /// launch, right after `setup(meetingSession:)`.
     weak var island: NotchIslandController? {
         didSet {
             island?.meetingActionHandler = { [weak self] action in self?.handleIslandAction(action) }
@@ -153,45 +153,16 @@ final class MeetingOverlayController: NSObject {
             island?.meetingMenuProvider = { [weak self] in self?.makeStripMenu() }
         }
     }
-    /// Whether the island is carrying the meeting (the pill's `isVisible`).
+    /// Whether the island is carrying the meeting.
     private var islandShown = false
-
-    private var isIslandMode: Bool {
-        island != nil && NotchIslandController.isSelected
-    }
 
     // MARK: - Setup
 
-    /// Create the panel, wire subscriptions, and keep it hidden until state
-    /// becomes non-idle. Safe to call once at app launch; re-calls are ignored.
+    /// Wire subscriptions; nothing shows until state becomes non-idle. Safe
+    /// to call once at app launch; re-calls are ignored.
     func setup(meetingSession: MeetingSessionController) {
-        guard panel == nil else { return }
+        guard self.meetingSession == nil else { return }
         self.meetingSession = meetingSession
-
-        let frame = NSRect(
-            x: 0, y: 0,
-            width: MeetingOverlayTokens.panelWidth,
-            height: MeetingOverlayTokens.panelHeight
-        )
-
-        let panel = MeetingOverlayPanel(
-            contentRect: frame,
-            styleMask: [],
-            backing: .buffered,
-            defer: true
-        )
-
-        let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
-        rootView.autoresizingMask = [.width, .height]
-        rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
-        rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
-        rootView.onCallAudioAction = { [weak self] in self?.handleCallAudioActionTapped() }
-        rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
-        rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
-        panel.contentView?.addSubview(rootView)
-
-        self.panel = panel
-        self.rootView = rootView
 
         wireSubscriptions(to: meetingSession)
     }
@@ -218,7 +189,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     /// The capture pill dismisses before its Record callback returns. Keep a
-    /// visible, non-interactive status panel up while the app checks
+    /// visible, non-interactive status up while the app checks
     /// permissions, models, and the audio route so Record never looks ignored.
     func showDetectedMeetingStartInProgress() {
         autoHideTask?.cancel()
@@ -239,7 +210,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     /// Post-call awareness nudge: a detected call just ended without a
-    /// recording. Same non-activating prompt panel; no candidate, no detector
+    /// recording. Shown as a meeting prompt on the island; no candidate, no detector
     /// backoff — resolution is reported through `onMissedCallNudgeResolved`.
     @discardableResult
     func presentMissedCallNudge(_ call: MeetingPromptUnrecordedCall) -> Bool {
@@ -258,7 +229,7 @@ final class MeetingOverlayController: NSObject {
 
         missedCallPrompt = call
         promptKind = .missedCall
-        promptSecondsRemaining = MeetingOverlayTokens.missedCallNudgeTimeoutSeconds
+        promptSecondsRemaining = Self.missedCallNudgeTimeoutSeconds
         currentPrompt = missedCallPromptDisplay(call: call)
         state = .prompt
         showPanel()
@@ -732,94 +703,20 @@ final class MeetingOverlayController: NSObject {
         pushToView()
     }
 
-    // MARK: - Panel show/hide
+    // MARK: - Show/hide
 
     private func showPanel() {
-        if isIslandMode {
-            islandShown = true
-            return
-        }
-        guard let panel = panel else { return }
-        if panel.isVisible { return }
-
-        let desiredHeight = currentPanelHeight()
-        let desiredWidth = currentPanelWidth()
-
-        // Position at top-center of the screen containing the mouse.
-        let mousePos = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { NSMouseInRect(mousePos, $0.frame, false) })
-            ?? NSScreen.main
-        if let visibleFrame = screen?.visibleFrame {
-            let origin = NSPoint(
-                x: visibleFrame.midX - desiredWidth / 2,
-                y: visibleFrame.maxY - desiredHeight - 12
-            )
-            panel.setFrameOrigin(origin)
-        }
-        panel.setContentSize(NSSize(
-            width: desiredWidth,
-            height: desiredHeight
-        ))
-        lastRequestedPanelSize = NSSize(width: desiredWidth, height: desiredHeight)
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.18)
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1.0
-        }
-    }
-
-    /// Target height for the panel based on the current `isExpanded` flag.
-    /// Kept as a helper so show/animate paths agree on the value.
-    private func currentPanelHeight() -> CGFloat {
-        switch state {
-        case .preparing:
-            return MeetingOverlayTokens.warmupHeight
-        case .prompt:
-            return MeetingOverlayTokens.promptHeight
-        case .recording where isVisuallyCondensed:
-            return MeetingOverlayTokens.condensedPillHeight
-        case .error:
-            return MeetingOverlayTokens.errorHeight
-        default:
-            return MeetingOverlayTokens.panelHeight
-        }
-    }
-
-    private func currentPanelWidth() -> CGFloat {
-        switch state {
-        case .recording where isVisuallyCondensed:
-            return showsMicOnlyNote && micOnlyNotice == .callAudioOff
-                ? MeetingOverlayTokens.condensedPillWidthWithMicOnlyCue
-                : MeetingOverlayTokens.condensedPillWidth
-        case .recording where showsMicOnlyNote:
-            return MeetingOverlayTokens.recordingPanelWidthWithMicOnlyNote
-        case .recording:
-            return MeetingOverlayTokens.recordingPanelWidth
-        default:
-            return MeetingOverlayTokens.panelWidth
-        }
+        guard island != nil else { return }
+        islandShown = true
     }
 
     private func hidePanel() {
-        if islandShown {
-            islandShown = false
-            isPanelHovered = false
-            island?.updateMeeting(nil)
-        }
-        guard let panel = panel, panel.isVisible else { return }
-        lastRequestedPanelSize = nil
-        // A panel hidden under the cursor never delivers mouseExited; a
+        guard islandShown else { return }
+        islandShown = false
+        // Hidden under the cursor, the island never reports hover-out; a
         // stale hover flag would silently block resting next recording.
         isPanelHovered = false
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.14)
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
-            panel?.orderOut(nil)
-        })
+        island?.updateMeeting(nil)
     }
 
     /// Discard lives behind the pill's context menu (with this confirmation)
@@ -1015,19 +912,6 @@ final class MeetingOverlayController: NSObject {
 
     // MARK: - Rest / wake
 
-    /// True when the pill should currently render as the compact capsule.
-    /// Hovering wakes the pill (clears the resting state) rather than
-    /// temporarily overriding rendering, so hover-out never resizes anything
-    /// directly — only the countdown does. That asymmetry is what makes the
-    /// interaction immune to spurious enter/exit events during animations.
-    private var isVisuallyCondensed: Bool {
-        return MeetingPillRestPolicy.isCondensedRendered(
-            isResting: isRestingCondensed,
-            isRecording: state == .recording,
-            hasSystemAudioWarning: systemAudioDegradationWarning != nil
-        )
-    }
-
     private func scheduleRestIfNeeded() {
         restTask?.cancel()
         guard !isRestingCondensed,
@@ -1050,7 +934,7 @@ final class MeetingOverlayController: NSObject {
                 hasSystemAudioWarning: self.systemAudioDegradationWarning != nil
             ) else { return }
             // Belt and braces against a lost exit/enter pair: never rest
-            // while the pointer is physically over the panel, even if the
+            // while the pointer is physically over the island, even if the
             // hover flag went stale.
             guard !self.pointerIsOverPanel() else {
                 self.scheduleRestIfNeeded()
@@ -1062,11 +946,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pointerIsOverPanel() -> Bool {
-        if islandShown {
-            return island?.isPointerOverIsland == true
-        }
-        guard let panel, panel.isVisible else { return false }
-        return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+        islandShown && island?.isPointerOverIsland == true
     }
 
     /// Leaving the recording flow entirely: stop the countdown and forget
@@ -1322,9 +1202,8 @@ final class MeetingOverlayController: NSObject {
         )
     }
 
-    // The prompt panel renders `detail` as a single truncating line (~336pt
-    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The scope and
-    // ducking trade-off must be the detail on its own and fit untruncated
+    // The scope and ducking trade-off must be the detail on its own and fit
+    // untruncated
     // (the user has to see the cost before consenting to VPIO), so the
     // cause lives in the title instead. Accepting never saves the mode.
     private func micBoostPromptDisplay() -> PromptDisplay {
@@ -1340,8 +1219,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     // Awareness, not blame: name the call surface and length, then point at the
-    // two ways to capture next time. The panel renders `detail` as one
-    // truncating line, so the copy stays short.
+    // two ways to capture next time. Keep the copy short.
     private func missedCallPromptDisplay(call: MeetingPromptUnrecordedCall) -> PromptDisplay {
         let surface = call.provider == .googleMeet
             ? "That browser call"
@@ -1482,26 +1360,8 @@ final class MeetingOverlayController: NSObject {
     // MARK: - View push
 
     private func pushToView() {
-        if islandShown {
-            island?.updateMeeting(islandContent())
-            return
-        }
-        resizePanelIfNeeded()
-        rootView?.update(
-            state: state,
-            duration: currentDuration,
-            micLevel: currentMicLevel,
-            systemLevel: currentSystemLevel,
-            participants: currentParticipants,
-            warmupStatus: currentWarmupStatus,
-            prompt: currentPrompt,
-            isCondensed: isVisuallyCondensed,
-            systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
-            finishDetail: finishDetail,
-            hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError,
-            micOnlyNotice: showsMicOnlyNote ? micOnlyNotice : nil,
-            systemAudioPermissionDenied: meetingSession?.systemAudioPermissionRecoveryNeeded == true
-        )
+        guard islandShown else { return }
+        island?.updateMeeting(islandContent())
     }
 
     private func snapshotFailedMeetingIDs(from session: MeetingSessionController? = nil) {
@@ -1538,59 +1398,8 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pushAudioLevelsToView() {
-        if islandShown {
-            island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
-            return
-        }
-        rootView?.updateAudioLevels(
-            micLevel: currentMicLevel,
-            systemLevel: currentSystemLevel
-        )
-    }
-
-    private func resizePanelIfNeeded() {
-        guard let panel, panel.isVisible else {
-            lastRequestedPanelSize = nil
-            return
-        }
-        let desired = NSSize(width: currentPanelWidth(), height: currentPanelHeight())
-
-        // Compare against the last *requested* size, not the live frame: the
-        // per-second duration tick lands mid-animation, and re-targeting the
-        // same size against an intermediate frame restarts the animation and
-        // makes the resize stutter.
-        if let last = lastRequestedPanelSize,
-           abs(last.width - desired.width) < 0.5,
-           abs(last.height - desired.height) < 0.5 {
-            return
-        }
-        lastRequestedPanelSize = desired
-
-        // Keep the top edge and horizontal center fixed; both are invariant
-        // across our resizes, so reading them mid-animation is safe.
-        let frame = panel.frame
-        let top = frame.origin.y + frame.height
-        var target = NSRect(
-            x: frame.midX - desired.width / 2,
-            y: top - desired.height,
-            width: desired.width,
-            height: desired.height
-        )
-
-        // Never grow past the bottom or sides of the screen the panel is on.
-        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
-            target.origin.y = max(target.origin.y, visible.minY + 8)
-            target.origin.x = min(
-                max(target.origin.x, visible.minX + 8),
-                visible.maxX - target.width - 8
-            )
-        }
-
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.20)
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(target, display: true)
-        }
+        guard islandShown else { return }
+        island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
     }
 }
 

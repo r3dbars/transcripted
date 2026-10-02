@@ -86,7 +86,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     /// Always on: the Notch island is the only dictation, meeting and call
     /// prompt window. The old near-text, mini cursor and meeting pill panels
-    /// are still in the tree until they're deleted, but nothing picks them.
+    /// are deleted; the call-prompt pill panel is still in the tree until it
+    /// is, but nothing picks it.
     static var isSelected: Bool { true }
 
     init() {

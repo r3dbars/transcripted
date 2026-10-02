@@ -1,15 +1,12 @@
 // Source-text pins: this test reads Sources/UI/Settings/{HomeView,TranscriptedSettingsView,
-// QuietDictationLibrary,QuietHomeLibrary,Pages/HomeSettingsPage}.swift and
-// Sources/UI/Overlay/MeetingOverlayRootView.swift
-// as text rather than rendering them, because each is a SwiftUI view (MeetingOverlayRootView is an
-// @MainActor NSView) wired to live app state this Foundation-only runner can't construct —
+// QuietDictationLibrary,QuietHomeLibrary,Pages/HomeSettingsPage}.swift
+// as text rather than rendering them, because each is a SwiftUI view wired to live app state this Foundation-only runner can't construct —
 // TranscriptedSettingsView holds @ObservedObject STTRouter/MeetingSessionController/SparkleUpdaterController,
 // and HomeSettingsPage carries an @ObservedObject HomeViewModel plus CaptureUndoManager.shared and real
 // domain closures; HomeViewModel's own init is cheap, but its data only loads once the shell calls
 // refresh() from navigation state. What's pinned: the dictation row's "Open file" action/title/identifier, the
 // "saved only" failed-paste-back copy, QuietDictationRow's tap-to-open wiring, the shared "Open Markdown"
-// menu wording, QuietWorkingRow's presence and terminal-state icon behavior on Home, and the meeting
-// overlay's "Saved to Markdown" title —
+// menu wording, and QuietWorkingRow's presence and terminal-state icon behavior on Home —
 // plus a negative check that older vague copy doesn't come back. If you rename these views or move this
 // wording, update the literal strings here; they're standing in for a real UX regression check.
 
@@ -23,10 +20,6 @@ func testHomeFirstArtifactVisibility() {
         )) ?? ""
         let settingsSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
-            encoding: .utf8
-        )) ?? ""
-        let meetingOverlaySource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayRootView.swift"),
             encoding: .utf8
         )) ?? ""
         let dictationLibrarySource = (try? String(
@@ -85,10 +78,6 @@ func testHomeFirstArtifactVisibility() {
                 && quietHomeLibrarySource.contains("Image(systemName: symbolName)"),
             "only active work should spin; saved and failed activity should show a static status icon"
         )
-        assertTrue(
-            meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved to Markdown""#),
-            "the meeting saved overlay should name the Markdown artifact at the moment of first value"
-        )
         // Quiet-library onboarding redesign: the old 14-step flow's dedicated
         // "meeting value" recap step (with its own Open Markdown action card)
         // is gone. Onboarding is now three quiet steps (welcome, permissions,
@@ -103,8 +92,7 @@ func testHomeFirstArtifactVisibility() {
         assertFalse(
             homeSource.contains(#"HomeArtifactStatus(text: "Saved only""#)
                 || settingsSource.contains(#"HomeRowMenuItem(title: "Open saved file""#)
-                || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#)
-                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#),
+                || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#),
             "old vague saved-file copy should not return"
         )
     }

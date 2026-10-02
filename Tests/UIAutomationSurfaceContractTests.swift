@@ -60,8 +60,6 @@ private func writingSurfaceContractContains(_ needle: String) -> Bool {
 
 func testUIAutomationSurfaceContract() {
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
-        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
-            "Acknowledgement must not hide the unverified capture state")
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
         assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
@@ -71,44 +69,11 @@ func testUIAutomationSurfaceContract() {
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
         let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
         assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
             "the recovery action should come from typed permission evidence")
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
-        assertTrue(view.contains("Grant System Audio Access")
-            && view.contains("transcripted.meeting-overlay.grant-system-audio-access"),
-            "the denial action should be clear and accessible")
-    }
-    runSuite("Meeting stop visual keeps its generous hit target") {
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopVisualDiameter: CGFloat = 28")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("image.isTemplate = false"),
-            "Stop should use a smaller full-color circle without shrinking its interactive frame"
-        )
-    }
-    runSuite("Meeting title clears recording-only accessibility state on every update") {
-        let source = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
-        let update = source.components(separatedBy: "    func update(").last?
-            .components(separatedBy: "    private func applyStripContentFade").first ?? ""
-        let reset = update.range(of: "titleLabel.setAccessibilityLabel(nil)")
-        let prepareBranch = update.range(of: "if isPreparing {")
-        let stateSwitch = update.range(of: "switch state {")
-        assertTrue(
-            reset != nil && prepareBranch != nil && stateSwitch != nil
-                && reset!.lowerBound < prepareBranch!.lowerBound
-                && reset!.lowerBound < stateSwitch!.lowerBound,
-            "Each state update must clear the recording AX override before preparing or selecting transcribing/saved/error copy"
-        )
-        assertTrue(
-            update.contains("titleLabel.setAccessibilityLabel(systemAudioUnverified ?")
-                && update.contains("titleLabel.stringValue = \"Transcribing meeting…\"")
-                && update.contains("titleLabel.stringValue = \"Saved to Markdown\"")
-                && update.contains("titleLabel.stringValue = copy.title"),
-            "Recording may describe uncertainty, while terminal states must expose their current visible titles"
-        )
     }
     runSuite("Meetings header exposes existing capture actions") {
         for identifier in ["transcripted.home.new.menu", "transcripted.home.new.record-meeting", "transcripted.home.new.transcribe-file"] {
@@ -699,17 +664,6 @@ func testUIAutomationSurfaceContract() {
             assertTrue(contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift").contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
 
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("transcripted.meeting-overlay.recording"),
-            "the recording pill body should keep a stable automation identifier"
-        )
-        let meetingPillBodySource = contractSource("Sources/UI/Overlay/MeetingPillBodyView.swift")
-        assertTrue(
-            meetingPillBodySource.contains("setAccessibilityElement(false)")
-                && !meetingPillBodySource.contains("setAccessibilityRole(.button)")
-                && !meetingPillBodySource.contains("accessibilityPerformPress"),
-            "the inert recording drag surface must not masquerade as an accessible button"
-        )
         assertTrue(
             contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Keep Controls Visible")
                 && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),

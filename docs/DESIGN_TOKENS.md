@@ -72,7 +72,7 @@ Snap rule: 7 → `md`; 10 → `md` or `lg` by container size; 14/18 → `xl`.
   action rows and header read their fonts from there instead of raw
   `NSFont.systemFont(ofSize:)`. This is the reference adoption — the pattern to
   follow when the SwiftUI surfaces (Home, Settings) migrate onto tokens.
-- **Overlay (AppKit):** `Sources/UI/Overlay/OverlayTokens.swift` — a few shared colors; the meeting overlay keeps the rest in `MeetingOverlayTokens`.
+- **Overlay (AppKit):** the Notch island draws dictation and meetings and keeps its own colors and geometry in `Sources/UI/Overlay/NotchIslandView.swift` and `NotchIslandGeometry.swift`.
 - **SwiftUI surfaces (Home, Settings):** still hold ad-hoc sizes. Migrate them
   onto these steps incrementally, one view per PR, snapping to the nearest step.
   Do not convert every view at once — correctness over a big-bang refactor.

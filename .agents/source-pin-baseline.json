@@ -14,7 +14,7 @@
     "Tests/DictationStoppedAudioRecoveryTests.swift": 13,
     "Tests/DictationTerminationCheckpointTests.swift": 1,
     "Tests/FailedMeetingPresentationTests.swift": 4,
-    "Tests/HomeFirstArtifactVisibilityTests.swift": 20,
+    "Tests/HomeFirstArtifactVisibilityTests.swift": 18,
     "Tests/HomeImportAudioActionTests.swift": 9,
     "Tests/MeetingSessionUIPolicyTests.swift": 13,
     "Tests/MicrophoneChoicePreferencesTests.swift": 5,
@@ -31,6 +31,6 @@
     "Tests/SingleInstanceGuardTests.swift": 3,
     "Tests/StatusItemPresentationTests.swift": 8,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
-    "Tests/UIAutomationSurfaceContractTests.swift": 347
+    "Tests/UIAutomationSurfaceContractTests.swift": 333
   }
 }

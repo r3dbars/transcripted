@@ -9,8 +9,7 @@
 // with `sharingType = .none`.
 //
 // Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
-// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift
-// and Sources/UI/Settings/{SpeakerNamingSheet,
+// stay capturable" below read Sources/UI/Settings/{SpeakerNamingSheet,
 // TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
 // constructing every surface. TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
 // graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
@@ -18,8 +17,7 @@
 // PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
 // in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
 // CapturePillPanel, NotchIslandPanel, and PasteLastDictationFeedbackPanel are
-// compiled here and built live by the first three suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
-// live in a file this runner does not compile, so they stay on it. The CapturePillController suite greps
+// compiled here and built live by the first three suites, so they are not on the source table. The CapturePillController suite greps
 // present()/installEventMonitor() because proving real Return/Escape key routing needs a live
 // NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
 // (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
@@ -126,25 +124,8 @@ func testOverlayScreenSharePrivacy() async {
         // CapturePillPanel and NotchIslandPanel are
         // compiled here and built for real by the suites above; only the
         // surfaces this runner cannot construct stay on this source table.
-        let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
         let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let inits: [(name: String, body: String)] = [
-            (
-                "MeetingOverlayPanel",
-                overlayPrivacySlice(
-                    panelSource,
-                    from: "final class MeetingOverlayPanel: NSPanel {",
-                    to: "final class MeetingOverlayTooltipPanel"
-                )
-            ),
-            (
-                "MeetingOverlayTooltipPanel",
-                overlayPrivacySlice(
-                    panelSource,
-                    from: "final class MeetingOverlayTooltipPanel: NSPanel {",
-                    to: "final class MeetingOverlayTooltipView"
-                )
-            ),
             (
                 "NamingWindowController",
                 overlayPrivacySlice(
@@ -202,8 +183,6 @@ func testOverlayScreenSharePrivacy() async {
         let expectedMarkers: [String] = [
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
             "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
             "Sources/UI/Settings/SpeakerNamingSheet.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
