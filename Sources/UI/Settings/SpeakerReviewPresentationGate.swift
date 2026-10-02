@@ -1,13 +1,14 @@
 // SpeakerReviewPresentationGate.swift
-// Foundation-pure rule for when the post-meeting speaker review window may
-// appear: never on top of a meeting that is being recorded.
+// Foundation-pure rule for when the post-meeting speaker review (the Notch
+// island's "Who was on this call?") may appear: never on top of a meeting
+// that is being recorded.
 
 import Foundation
 
 /// Tracks the current speaker review request and whether a meeting is being
 /// captured, and says what the presenter should do. A review that arrives
 /// while a meeting records (back-to-back calls) waits until that recording
-/// stops, so the window never lands in the middle of the next call. A window
+/// stops, so the review never lands in the middle of the next call. A review
 /// that is already open stays open: the user may be typing in it.
 struct SpeakerReviewPresentationGate: Equatable {
     enum Action: Equatable {
@@ -51,9 +52,9 @@ struct SpeakerReviewPresentationGate: Equatable {
         return .present(currentRequestID)
     }
 
-    /// A review window closed (Save, Review Later, the close box, or being
-    /// replaced). Only the window for the presented request counts, so a
-    /// replaced window closing can't forget its replacement. That request is
+    /// A review closed (Done, Later, or being replaced). Only the review for
+    /// the presented request counts, so a replaced review closing can't
+    /// forget its replacement. That request is
     /// finished either way, so it is never shown again even if its clearing
     /// arrives after a recording stops.
     mutating func windowClosed(requestID: UUID) {

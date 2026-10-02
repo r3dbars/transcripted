@@ -7,9 +7,9 @@ Module `UIOverlay` in `.agents/modules.json`. The file-by-file notes stay in `So
 Everything on screen while you dictate or record, plus the dictation session itself:
 
 - The Notch island (`NotchIsland*`): the only dictation, meeting and call-prompt window since #1946. One black shape grows out of the notch (or hangs from the top edge of a display without one) and carries dictation, the live meeting, the call-detected Record / Not now / Later prompt, and "Who was on this call?".
-- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording pill state, warnings, rest/wake) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. The old dictation panel is gone; the meeting and capture panels (`MeetingOverlayPanel`, `CapturePillPanel` and their views) are still in the tree but nothing picks them, because `NotchIslandController.isSelected` is always true.
+- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording state, warnings, prompts) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. None of them has a window of its own: the old dictation panel, meeting pill, call prompt pill and speaker naming window are deleted.
 - `DictationSessionController` and its `+*.swift` extensions: start, stop, paste-back, persistence, recovery, presses, the 5-minute cap and telemetry. `DictationSessionPipeline` and `DictationStartAdmission` hold the start/stop wiring behind protocols so tests run them on fakes.
-- The dictation start and presentation policies (`Dictation*Policy`, `DictationTrigger`, `DictationStartActivation`) and the meeting pill policies (`MeetingPillRestPolicy`, `MeetingPromptPriority`, `MeetingDurationFormatter`).
+- The dictation start and presentation policies (`Dictation*Policy`, `DictationTrigger`, `DictationStartActivation`) and the meeting policies (`MeetingPromptPriority`, `MeetingDurationFormatter`).
 
 ## Public surface
 
