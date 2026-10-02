@@ -35,7 +35,7 @@ The module card (owns, public surface, may depend on, entry points, tests, rules
 - `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe); `DictationPostStopModelWaitPolicy` in the same file decides the model-unavailable copy after that post-stop wait and keeps paste-back on the original app after a long wait instead of following focus
 - `Overlay/FloatingOverlayController.swift` — the dictation state machine (starting, loading, listening, writing, message, success), its timers, the global Esc monitor and confirm, and the not-pasted notice; it has no window of its own and pushes each state to the Notch island as a `NotchIslandDictationContent` snapshot
 - `Overlay/OverlayTokens.swift` — the few overlay colors `MeetingOverlayTokens` builds on (mint accent, secondary and muted text)
-- `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+- `Overlay/WaveformLayer.swift` — Core Animation layer drawing the meeting overlay's split mic/system waveform
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingPromptPriority.swift` — pure precedence lattice for the meeting overlay's four warning-driven prompts (audio inactivity, system-audio degradation, audio route instability, mic boost), extracted out of `MeetingOverlayController` so the rule is defined once
 - `Overlay/MeetingOverlayPanel.swift` — non-activating meeting panel plus its hover tooltip panel and tooltip view
