@@ -6,7 +6,7 @@ import AppKit
 // MARK: - Panel
 
 /// Non-activating NSPanel for the meeting overlay. Distinct from
-/// `FloatingOverlayPanel` so cross-feature regressions to one don't break the
+/// `NotchIslandPanel` so cross-feature regressions to one don't break the
 /// other.
 @available(macOS 14.0, *)
 final class MeetingOverlayPanel: NSPanel {
