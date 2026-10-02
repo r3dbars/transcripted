@@ -8,13 +8,13 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 ## Public surface
 
-`LibraryTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `AppSoundPlayer`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
+`LibraryTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `HomeMeetingPreviewContent` and the Home preview types in `HomeMeetingPreviewFormatter.swift`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `AppSoundPlayer`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
 
 ## May depend on
 
 Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
 
-Grandfathered crossings (in `.agents/module-boundary-baseline.json`): `HomeMeetingRename` and `SpeakerReviewQueueScanner` name Home preview types from `UI/Settings/HomeMeetingPreviewFormatter.swift` (fixed by moving that file here), and `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it into a new Sources/App folder next to the app shell). Both moves wait for #1946.
+Grandfathered crossing (in `.agents/module-boundary-baseline.json`): `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it into a new Sources/App folder next to the app shell, after #1946).
 
 ## Entry points
 
@@ -24,10 +24,10 @@ Grandfathered crossings (in `.agents/module-boundary-baseline.json`): `HomeMeeti
 
 ## Tests
 
-`bash run-tests.sh --filter HomeMeeting`, `--filter CaptureUndo`, `--filter FocusOrderContract`, `--filter SupportDiagnosticsBundle`.
+`bash run-tests.sh --filter HomeMeeting`, `--filter CaptureUndo`, `--filter FocusOrderContract`.
 
 ## Rules
 
 - Deletes, renames and rewrites of saved meetings go through the transcript-update serializer, and anything that deletes checks the path is under the capture library first.
 - Retained meeting-audio playback stays: clicking a row's time plays from there, and rows don't follow the playhead.
-- Nothing here sends transcript text, titles, speaker names or paths off the device; `SupportDiagnosticsBundle` is the privacy-safe summary.
+- Nothing here sends transcript text, titles, speaker names or paths off the device; the privacy-safe support summary is `Sources/Observability/SupportDiagnosticsBundle.swift`.
