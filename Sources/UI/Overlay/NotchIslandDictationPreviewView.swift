@@ -11,7 +11,7 @@ import AppKit
 
 @MainActor
 final class NotchIslandDictationPreviewView: NSView {
-    static let visibleLines = 3
+    static let visibleLines = 4
     static let lineHeight: CGFloat = 20
     static var height: CGFloat { CGFloat(visibleLines) * lineHeight }
     /// The last words of the partial are still settling.
@@ -74,10 +74,12 @@ final class NotchIslandDictationPreviewView: NSView {
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
 
-        // Older lines fade out under the top edge instead of being cut.
+        // Older lines fade out under the top edge instead of being cut. The
+        // view isn't flipped, so the gradient runs bottom (0) to top (1):
+        // the newest line at the bottom stays fully lit.
         wantsLayer = true
-        fade.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor]
-        fade.locations = [0, 0.28, 1]
+        fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+        fade.locations = [0, 0.8, 1]
         layer?.mask = fade
 
         let placeholderHeight = ceil(placeholder.fittingSize.height)
