@@ -14,7 +14,7 @@
     "Tests/DictationRecordingStartOverlayPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/DictationStartedTelemetryContractTests.swift": 2,
-    "Tests/DictationStoppedAudioRecoveryTests.swift": 4,
+    "Tests/DictationStoppedAudioRecoveryTests.swift": 3,
     "Tests/DictationTerminationCheckpointTests.swift": 2,
     "Tests/FailedMeetingPresentationTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 6,
