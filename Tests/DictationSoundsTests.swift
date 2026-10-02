@@ -157,15 +157,18 @@ func testDictationSounds() {
     // paste or finalize tail, or a start path that skips playStartCueOnce.
 
     runSuite("Feedback submit paths stay silent") {
+        // Banned-call scan (keep). TranscriptedSupportActions needs the whole
+        // app graph, so the runner can't compile it, and an injected sound
+        // player wouldn't catch a direct call added beside it. The mail handoff
+        // itself is behavior-tested in TranscriptedSupportActionsTests: a
+        // failed open shows the fallback window, never a sound.
         let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
-        assertFalse(
-            supportActions.contains("AppSoundPlayer.shared.play("),
-            "support email actions should not play any UI sound cue"
-        )
-        assertFalse(
-            supportActions.contains("NSSound.beep()"),
-            "support email actions should not fall back to a system beep"
-        )
+        for (bannedCall, reason) in [
+            ("AppSoundPlayer.shared.play(", "support email actions should not play any UI sound cue"),
+            ("NSSound.beep()", "support email actions should not fall back to a system beep"),
+        ] {
+            assertFalse(supportActions.contains(bannedCall), reason)
+        }
 
         let settingsView = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeFeedbackSubmit = sourceSlice(
