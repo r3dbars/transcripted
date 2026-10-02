@@ -33,7 +33,7 @@
     "Tests/SentryEventPolicyTests.swift": 4,
     "Tests/SingleInstanceGuardTests.swift": 1,
     "Tests/StatusItemPresentationTests.swift": 3,
-    "Tests/TestHelpers.swift": 5,
+    "Tests/TestHelpers.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 198
