@@ -618,6 +618,8 @@ def failing_cases(output: str) -> Tuple[List[str], List[str]]:
     asserts: List[str] = []
     current: Optional[str] = None
     for line in output.splitlines():
+        if line == "Failures:":
+            break  # the summary's recap of FAIL lines already counted above
         running = _running_case(line)
         if running:
             current = running
@@ -1264,6 +1266,11 @@ def self_test() -> int:
         "Running Suite A...\nRunning Suite B...\n  FAIL [BTests.swift:9] boom\n  FAIL [BTests.swift:9] boom\nRunning Suite C...\n"
     )
     check(cases == ["Suite B"] and asserts == ["BTests.swift:9"], f"failure attribution: {cases} {asserts}")
+    cases, asserts = failing_cases(
+        "Running Suite B...\n  FAIL [BTests.swift:9] boom\nRunning Suite C...\n\n"
+        "3 tests, 2 passed, 1 failed\nFailures:\n  FAIL [BTests.swift:9] boom  (in Suite B)\nFAILED\n"
+    )
+    check(cases == ["Suite B"], f"the summary's Failures: recap blames no later suite: {cases}")
     runner_output = "Compiling tests...\nRunning tests...\n\nRunning Suite A...\nRunning Suite B...\n"
     check(all_cases(runner_output) == ["Suite A", "Suite B"], f"runner banner is not a test case: {all_cases(runner_output)}")
     check(last_running_case("Running tests...\nFatal error: boom") is None, "a crash before any case names no case")

@@ -66,6 +66,12 @@ suite: earlier tests warm the process, which hides cold-start timing bugs. If
 you add a watchdog `(sleep N; kill ...) &`, send its output to `/dev/null`, or
 `| tail` waits for it.
 
+Give every run its own log file. Two `run-tests.sh` runs sent to one file with
+`>` overwrite each other's lines, which looks like a second summary with a
+failure count and no FAIL lines. That's a shared log, not a flake. Each
+summary repeats its FAIL lines, with the suite they came from, so check the
+`Failures:` list under the count before chasing one.
+
 ### One command
 
 ```bash
