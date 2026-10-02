@@ -501,7 +501,7 @@ func testDictationRecordingStartOverlayPolicy() async {
     // Convert both together once that lands.
     runSuite("Unexpected meeting capture stop releases shared dictation mic") {
         let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
-        guard let start = source.range(of: "private func handleUnexpectedCaptureStop"),
+        guard let start = source.range(of: "func handleUnexpectedCaptureStop("),
               let end = source.range(of: "// preserveQueuedTranscriptionJobsForShutdown", range: start.upperBound..<source.endIndex) else {
             assertTrue(false, "unexpected capture-stop handler should remain present")
             return
