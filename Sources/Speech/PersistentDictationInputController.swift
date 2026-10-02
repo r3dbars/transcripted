@@ -1,6 +1,39 @@
 import CoreAudio
 import Foundation
 
+/// Everything `PersistentDictationInputController` reaches outside itself: the
+/// shared default-input monitor, the HAL device-list listener, CoreAudio
+/// lookups and the one Mac-wide input write, preferences, and reporting.
+/// Production always uses `.live` (PersistentDictationInputController+Live.swift);
+/// tests hand in fakes so the wiring runs without CoreAudio or real prefs.
+struct PersistentDictationInputSystem {
+    struct Report: Equatable {
+        enum Level: Equatable { case info, warning }
+        let level: Level
+        let event: String
+        let message: String
+        let context: [String: String]?
+    }
+
+    var userDefaults: UserDefaults
+    var defaultInputMonitor: any DefaultInputDeviceSubscribing
+    /// The Mac-wide default-input write. Live: `DefaultInputDeviceMonitor.shared.setDefaultInputDevice(_:)`.
+    var setDefaultInput: (AudioDeviceID) throws -> Void
+    /// Registers `handler` for `kAudioHardwarePropertyDevices` changes. Returns
+    /// the registration to remove later, or nil when the HAL refused it.
+    var addDeviceListListener: (_ handler: @escaping @MainActor () -> Void) -> AudioObjectPropertyListenerBlock?
+    var removeDeviceListListener: (@escaping AudioObjectPropertyListenerBlock) -> Void
+    /// The current default input plus the faster-start (built-in over Bluetooth) recommendation.
+    var recommendedSelection: () throws -> DictationInputDeviceSelection
+    var availableInputs: () throws -> [DictationAudioDevice]
+    var currentDefaultInputID: () throws -> AudioDeviceID
+    /// May block in a driver; always called off the main actor.
+    var hasExternalInputActivity: @Sendable () throws -> Bool
+    var report: (Report) -> Void
+    /// Wait between deferred maintenance checks.
+    var refreshDelay: () async -> Void
+}
+
 /// Applies the recommended non-Bluetooth microphone once per app lifetime when
 /// the user explicitly opts in. Keeping that device as the system default avoids
 /// paying the CoreAudio Bluetooth route-switch penalty on every dictation start.
@@ -14,21 +47,22 @@ final class PersistentDictationInputController {
 
     private var activeOverride: ActiveOverride?
     private var preferenceObserver: NSObjectProtocol?
-    private var defaultInputObserverToken: DefaultInputDeviceMonitor.ObserverToken?
+    private var defaultInputObserverToken: DefaultInputDeviceObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var externalInputActivityTask: Task<Bool?, Never>?
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
     private let isDictationActive: () -> Bool
     private let isMeetingCaptureActive: () -> Bool
+    private let system: PersistentDictationInputSystem
     private lazy var refreshScheduler = DictationPersistentInputRefreshScheduler(
         isMonitoring: { [weak self] in self?.preferenceObserver != nil },
-        preferenceEnabled: { DictationPersistentInputPreferences.isEnabled() },
-        hasRecoveryMarker: { DictationPersistentInputPreferences.recoveryMarker() != nil },
+        preferenceEnabled: { [system] in DictationPersistentInputPreferences.isEnabled(userDefaults: system.userDefaults) },
+        hasRecoveryMarker: { [system] in DictationPersistentInputPreferences.recoveryMarker(userDefaults: system.userDefaults) != nil },
         isDictationActive: { [weak self] in self?.isDictationActive() ?? false },
         isMeetingCaptureActive: { [weak self] in self?.isMeetingCaptureActive() ?? false },
         readExternalInputActivity: { [weak self] in await self?.readExternalInputActivity() },
-        delay: { try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay) },
+        delay: { [system] in await system.refreshDelay() },
         reconcile: { [weak self] defaultInputChanged, deviceListChanged in
             self?.reconcileCurrentPreference(
                 defaultInputChanged: defaultInputChanged,
@@ -39,11 +73,16 @@ final class PersistentDictationInputController {
 
     init(
         isDictationActive: @escaping () -> Bool = { false },
-        isMeetingCaptureActive: @escaping () -> Bool = { false }
+        isMeetingCaptureActive: @escaping () -> Bool = { false },
+        system: PersistentDictationInputSystem
     ) {
         self.isDictationActive = isDictationActive
         self.isMeetingCaptureActive = isMeetingCaptureActive
+        self.system = system
     }
+
+    /// The deferred maintenance pass currently scheduled, if any. Tests await it.
+    var pendingRefresh: Task<Void, Never>? { refreshScheduler.refreshTask }
 
     func start() {
         guard preferenceObserver == nil else { return }
@@ -117,8 +156,8 @@ final class PersistentDictationInputController {
     // to classify).
     private func installDefaultInputListener() {
         guard defaultInputObserverToken == nil else { return }
-        DefaultInputDeviceMonitor.shared.start()
-        defaultInputObserverToken = DefaultInputDeviceMonitor.shared.addObserver { [weak self] isSelfWrite in
+        system.defaultInputMonitor.start()
+        defaultInputObserverToken = system.defaultInputMonitor.addObserver { [weak self] isSelfWrite in
             guard !isSelfWrite else { return }
             self?.scheduleTopologyRefresh(defaultInputChanged: true)
         }
@@ -126,34 +165,19 @@ final class PersistentDictationInputController {
 
     private func removeDefaultInputListener() {
         guard let defaultInputObserverToken else { return }
-        DefaultInputDeviceMonitor.shared.removeObserver(defaultInputObserverToken)
+        system.defaultInputMonitor.removeObserver(defaultInputObserverToken)
         self.defaultInputObserverToken = nil
     }
 
     private func installDeviceListListener() {
         guard deviceListListener == nil else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task { @MainActor in
-                self?.scheduleTopologyRefresh(deviceListChanged: true)
-            }
-        }
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            listener
-        )
-        if status == noErr {
+        if let listener = system.addDeviceListListener({ [weak self] in
+            self?.scheduleTopologyRefresh(deviceListChanged: true)
+        }) {
             deviceListListener = listener
         } else {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
+            report(
+                .warning,
                 event: "dictation_persistent_input_device_listener_failed",
                 message: "Could not monitor microphone connections for the faster-start preference"
             )
@@ -162,17 +186,7 @@ final class PersistentDictationInputController {
 
     private func removeDeviceListListener() {
         guard let deviceListListener else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            deviceListListener
-        )
+        system.removeDeviceListListener(deviceListListener)
         self.deviceListListener = nil
     }
 
@@ -194,8 +208,9 @@ final class PersistentDictationInputController {
         if let externalInputActivityTask {
             return await externalInputActivityTask.value
         }
+        let hasExternalInputActivity = system.hasExternalInputActivity
         let task = Task.detached(priority: .utility) {
-            try? CoreAudioInputDeviceLookup.hasExternalInputActivity()
+            try? hasExternalInputActivity()
         }
         externalInputActivityTask = task
         let activity = await task.value
@@ -218,7 +233,7 @@ final class PersistentDictationInputController {
         defaultInputChanged: Bool,
         deviceListChanged: Bool
     ) {
-        if !DictationPersistentInputPreferences.isEnabled() {
+        if !DictationPersistentInputPreferences.isEnabled(userDefaults: system.userDefaults) {
             restoreIfStillOwned(operation: "preference_disabled")
             runtimeOwnershipRelinquished = false
             lastMaintainedInput = nil
@@ -228,17 +243,15 @@ final class PersistentDictationInputController {
         guard !runtimeOwnershipRelinquished else { return }
 
         do {
-            let selection = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-                prefersBuiltInBluetoothInput: true
-            )
-            let availableInputs = try CoreAudioInputDeviceLookup.availableInputDevices()
+            let selection = try system.recommendedSelection()
+            let availableInputs = try system.availableInputs()
             if activeOverride == nil,
-               let marker = DictationPersistentInputPreferences.recoveryMarker(),
+               let marker = DictationPersistentInputPreferences.recoveryMarker(userDefaults: system.userDefaults),
                selection.defaultInput.uid == marker.selectedUID {
                 return
             }
             let selectedInput = DictationPreferredInputPolicy.input(
-                preferredUID: DictationPersistentInputPreferences.preferredDeviceUID(),
+                preferredUID: DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: system.userDefaults),
                 availableInputs: availableInputs,
                 automaticFallback: selection.selectedInput
             )
@@ -258,10 +271,9 @@ final class PersistentDictationInputController {
                 activeOverride = nil
                 lastMaintainedInput = nil
                 runtimeOwnershipRelinquished = true
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                report(
+                    .info,
                     event: "dictation_persistent_input_external_selection_preserved",
                     message: "Preserved a microphone selection changed outside Transcripted",
                     context: [
@@ -278,12 +290,11 @@ final class PersistentDictationInputController {
                     return
                 }
                 activeOverride = nil
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             }
             guard selectedInput.id != selection.defaultInput.id else {
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
+                report(
+                    .info,
                     event: "dictation_persistent_input_already_safe",
                     message: "Persistent dictation microphone preference required no system input change",
                     context: [
@@ -311,11 +322,11 @@ final class PersistentDictationInputController {
                     )
                 }
             }
-            DictationPersistentInputPreferences.setRecoveryMarker(recoveryMarker)
+            DictationPersistentInputPreferences.setRecoveryMarker(recoveryMarker, userDefaults: system.userDefaults)
             do {
-                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(selectedInput.id)
+                try system.setDefaultInput(selectedInput.id)
             } catch {
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                 throw error
             }
             activeOverride = ActiveOverride(
@@ -324,22 +335,20 @@ final class PersistentDictationInputController {
                 marker: recoveryMarker
             )
             lastMaintainedInput = selectedInput.id
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
+            report(
+                .info,
                 event: "dictation_persistent_input_selected",
                 message: "Kept the recommended microphone active for faster Bluetooth dictation starts",
                 context: [
                     "previous_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput),
                     "selected_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selectedInput),
-                    "selection_mode": selectedInput.uid == DictationPersistentInputPreferences.preferredDeviceUID() ? "preferred" : "automatic",
+                    "selection_mode": selectedInput.uid == DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: system.userDefaults) ? "preferred" : "automatic",
                     "default_output_class": selection.defaultOutput.map(DictationInputDeviceSelectionPolicy.deviceClass(for:)) ?? "unknown"
                 ]
             )
         } catch {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
+            report(
+                .warning,
                 event: "dictation_persistent_input_failed",
                 message: "Could not keep the recommended microphone active",
                 context: ["operation": "apply"]
@@ -351,34 +360,31 @@ final class PersistentDictationInputController {
         guard let activeOverride else { return }
         self.activeOverride = nil
         do {
-            let currentInput = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
+            let currentInput = try system.currentDefaultInputID()
             guard DictationPersistentInputRestorePolicy.shouldRestorePrevious(
                 currentInput: currentInput,
                 ownedSelectedInput: activeOverride.selectedInput
             ) else {
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                report(
+                    .info,
                     event: "dictation_persistent_input_restore_skipped",
                     message: "Preserved a microphone selection changed outside Transcripted",
                     context: ["operation": operation]
                 )
                 return
             }
-            try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(activeOverride.previousInput)
-            DictationPersistentInputPreferences.setRecoveryMarker(nil)
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
+            try system.setDefaultInput(activeOverride.previousInput)
+            DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+            report(
+                .info,
                 event: "dictation_persistent_input_restored",
                 message: "Restored the microphone selected before Transcripted's faster-start preference",
                 context: ["operation": operation]
             )
         } catch {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
+            report(
+                .warning,
                 event: "dictation_persistent_input_restore_failed",
                 message: "Could not restore the previous system microphone",
                 context: ["operation": operation]
@@ -387,10 +393,10 @@ final class PersistentDictationInputController {
     }
 
     private func recoverPersistedOwnership() {
-        guard let marker = DictationPersistentInputPreferences.recoveryMarker() else { return }
+        guard let marker = DictationPersistentInputPreferences.recoveryMarker(userDefaults: system.userDefaults) else { return }
         do {
-            let availableInputs = try CoreAudioInputDeviceLookup.availableInputDevices()
-            let currentInputID = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
+            let availableInputs = try system.availableInputs()
+            let currentInputID = try system.currentDefaultInputID()
             let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
             let availableByUID = Dictionary(
                 availableInputs.compactMap { device in
@@ -403,7 +409,7 @@ final class PersistentDictationInputController {
                 uniquingKeysWith: { first, _ in first }
             )
             let action = DictationPersistentInputRecoveryPolicy.action(
-                preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
+                preferenceEnabled: DictationPersistentInputPreferences.isEnabled(userDefaults: system.userDefaults),
                 currentUID: currentUID,
                 marker: marker,
                 availableUIDs: Set(availableByUID.keys)
@@ -414,7 +420,7 @@ final class PersistentDictationInputController {
             case .adopt:
                 guard let selected = availableByUID[marker.selectedUID],
                       let previous = availableByUID[marker.previousUID] else {
-                    DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                    DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                     return
                 }
                 activeOverride = ActiveOverride(
@@ -422,32 +428,38 @@ final class PersistentDictationInputController {
                     previousInput: previous.id,
                     marker: marker
                 )
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
+                report(
+                    .info,
                     event: "dictation_persistent_input_ownership_recovered",
                     message: "Recovered microphone restoration ownership after an unclean app exit"
                 )
             case .restore:
                 guard let previous = availableByUID[marker.previousUID] else {
-                    DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                    DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                     return
                 }
-                try DefaultInputDeviceMonitor.shared.setDefaultInputDevice(previous.id)
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                try system.setDefaultInput(previous.id)
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             case .preserve:
                 return
             case .clear:
-                DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             }
         } catch {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
+            report(
+                .warning,
                 event: "dictation_persistent_input_ownership_recovery_failed",
                 message: "Could not reconcile microphone ownership after an unclean app exit"
             )
         }
     }
 
+    private func report(
+        _ level: PersistentDictationInputSystem.Report.Level,
+        event: String,
+        message: String,
+        context: [String: String]? = nil
+    ) {
+        system.report(.init(level: level, event: event, message: message, context: context))
+    }
 }

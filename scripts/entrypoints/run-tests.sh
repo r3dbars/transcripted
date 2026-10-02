@@ -445,6 +445,7 @@ APP_SOURCES=(
     # SupersessionEpoch.swift now arrives via SHARED_PASTEBACK_SUPPORT_SOURCES
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
+    "Sources/Speech/PersistentDictationInputController.swift"
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/Support/LabControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"

@@ -3,7 +3,7 @@
     "Tests/AnalyticsEventPolicyTests.swift": 10,
     "Tests/AudioAutomationCoverageContractTests.swift": 8,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
-    "Tests/BluetoothRouteContractTests.swift": 10,
+    "Tests/BluetoothRouteContractTests.swift": 8,
     "Tests/CaptureLibraryPathSafetySyncTests.swift": 2,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/CrashReporterOptionsTests.swift": 1,
