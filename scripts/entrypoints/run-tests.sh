@@ -531,7 +531,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/UpdateActionSafetyPolicy.swift"
     "Sources/Observability/ObservabilityLogRotation.swift"
-    "Sources/Observability/AnalyticsPreferences.swift"
+    "Sources/Support/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
     "Sources/Observability/EventFileWritePolicy.swift"
     "Sources/Observability/LocalObservabilityPayloadSanitizer.swift"

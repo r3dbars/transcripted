@@ -57,8 +57,8 @@ GUARD_ENV = "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"
 CONTAINER_ENV = "TRANSCRIPTED_CONTAINER_DIR"
 # The app's UserDefaults domain (Info.plist CFBundleIdentifier) and the keys the
 # launch preflight reads. Sources: TranscriptedStoragePaths.swift
-# (captureLibraryLocationKey), AnalyticsPreferences.swift and
-# CrashReportingPreferences.swift (enabledKey; a missing key means ON).
+# (captureLibraryLocationKey), Support/AnalyticsPreferences.swift and
+# Observability/CrashReportingPreferences.swift (enabledKey; a missing key means ON).
 DEFAULTS_DOMAIN = "com.justinbetker.draft"
 SAVE_LOCATION_KEY = "transcriptSaveLocation"
 ANALYTICS_KEY = "observability-anonymous-analytics-enabled"
