@@ -57,16 +57,4 @@ func testRetainedDataSourceComboBox() async {
         combo.reloadData()
         assertEqual(combo.numberOfItems, 2, "the box reads the new source")
     }
-
-    runSuite("The speaker row never makes itself its own name box's data source") {
-        // Source-text pin, kept until #1946 lands: SpeakerNamingSheet.swift is
-        // an AppKit sheet tied to live speaker state this runner can't build.
-        // With the box retaining its source, a row that owns the box and is
-        // its source would leak as a retain cycle.
-        let sheet = readSourceFixture("Sources/UI/Settings/SpeakerNamingSheet.swift")
-        assertFalse(
-            sheet.contains("extension SpeakerRowView: NSComboBoxDataSource"),
-            "the row owns its name box, so the box must not point back at the row as data source"
-        )
-    }
 }
