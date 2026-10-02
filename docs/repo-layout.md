@@ -57,7 +57,6 @@ Command ownership:
 - `run-slow-pasteback-smoke.sh` — thin root wrapper for the deterministic fake slow Cmd+V pasteback target smoke
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
-- `scripts/ops/compare-parakeet-models.py` — runs Parakeet V3 and the experimental Parakeet Ultra through `transcripted-cli` on the same recordings and reports word error rate (with `<name>.txt` references) or where they disagree
 - `scripts/models/parakeet-ultra/` — converts Moondream's Parakeet Ultra to Core ML with FluidInference/mobius and installs it as an experimental model (macOS only; see its README)
 - `scripts/models/redimnet2/` — installs the ReDimNet2 b4 voiceprint model into the local model cache, from the bake-off's build, a given `.mlmodelc`/`.mlpackage`, or a fresh conversion; `build.sh` and `build-beta.sh` bundle it from there (macOS only; see its README)
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
