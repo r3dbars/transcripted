@@ -208,6 +208,23 @@ final class FailedMeetingStore {
         return true
     }
 
+    /// Preserves a row built by `MeetingTranscriptionRequestBuilder`, so the
+    /// People-in-the-room choice comes from the request, not this call site.
+    @discardableResult
+    func preserveFailedMeetingForRetry(_ row: FailedMeetingRetryRow, taskId: UUID = UUID()) -> Bool {
+        preserveFailedMeetingForRetry(
+            taskId: taskId,
+            micAudioURL: row.micURL,
+            systemAudioURL: row.systemURL,
+            errorMessage: row.errorMessage,
+            meetingTitle: row.meetingTitle,
+            recordingDate: row.recordingDate,
+            splitLocalSpeakers: row.splitLocalSpeakers,
+            languageSelection: row.languageSelection,
+            micOnlyByChoice: row.micOnlyByChoice
+        )
+    }
+
     @discardableResult
     func preserveFailedMeetingForRetry(
         taskId: UUID = UUID(),
