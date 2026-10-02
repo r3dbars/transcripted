@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "transcripted": {
+      "type": "stdio",
+      "command": "/bin/bash",
+      "args": ["${PLUGIN_ROOT}/scripts/launch.sh"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

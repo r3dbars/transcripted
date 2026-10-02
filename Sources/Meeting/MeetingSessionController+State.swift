@@ -370,6 +370,7 @@ final class MeetingSessionController: ObservableObject {
         }
         #endif
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
+        if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
         switch newState {
         case .startingRecording, .recording:
@@ -644,6 +645,9 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func clearActiveRecordingIdentity() {
+        if let identity = activeRecordingIdentity {
+            LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
+        }
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
