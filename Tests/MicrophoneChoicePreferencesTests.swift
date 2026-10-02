@@ -132,28 +132,4 @@ func testMicrophoneChoicePreferences() {
             "the test-build environment switch counts as the recorder being on"
         )
     }
-
-    runSuite("Settings shows the one Microphone picker only while the recorder is on") {
-        let settings = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            settings.contains("if pinnedMicrophoneRecorderOn {\n            VStack(alignment: .leading, spacing: 0) {\n                generalMicrophoneChoiceEditor"),
-            "the one picker shows while the recorder is on"
-        )
-        assertTrue(
-            settings.contains("if meetingMicProcessingMode.usesAppleVoiceProcessing {\n                    Divider()\n                    generalFasterBluetoothDictationToggle"),
-            "voice-processing users keep the toggle that still protects their dictation"
-        )
-        assertTrue(
-            settings.contains("        } else {\n            generalFasterBluetoothDictationEditor\n        }"),
-            "the old Bluetooth dictation rows stay while the recorder is off"
-        )
-        assertTrue(
-            settings.contains("if !pinnedMicrophoneRecorderOn {\n                        MeetingMicrophoneSettingRow("),
-            "the meetings-only macOS-input toggle is folded into the one picker while the recorder is on"
-        )
-        assertTrue(
-            settings.contains("Text(\"Same as macOS Sound settings\").tag(MicrophoneChoice.macOSInput)"),
-            "the picker keeps a way to record the AirPods mic on purpose"
-        )
-    }
 }

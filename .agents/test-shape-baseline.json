@@ -15,12 +15,9 @@
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/DictationStoppedAudioRecoveryTests.swift": 4,
     "Tests/DictationTerminationCheckpointTests.swift": 1,
-    "Tests/FailedMeetingPresentationTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 6,
-    "Tests/HomeImportAudioActionTests.swift": 3,
+    "Tests/HomeImportAudioActionTests.swift": 2,
     "Tests/MeetingSessionUIPolicyTests.swift": 6,
-    "Tests/MicrophoneChoicePreferencesTests.swift": 2,
-    "Tests/MicrophoneProcessingPreferencesTests.swift": 1,
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 8,
     "Tests/OverlayScreenSharePrivacyTests.swift": 19,
@@ -36,7 +33,7 @@
     "Tests/TestHelpers.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 197
+    "Tests/UIAutomationSurfaceContractTests.swift": 174
   },
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2,

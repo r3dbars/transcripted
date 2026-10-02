@@ -161,13 +161,13 @@ The app compiles as one Swift target, so folders are the only module lines. `.ag
 | UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
 | UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
 | AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
-| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
+| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedAppDelegate+*.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
 
 Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.
 
 ## Hotspots
 
-Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 45 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 42 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
 python3 scripts/dev/check-file-size.py --hotspots
@@ -175,9 +175,6 @@ python3 scripts/dev/check-file-size.py --hotspots
 
 Over 1,500 lines as of 2026-10-02, largest first:
 
-- `Sources/UI/Settings/TranscriptedSettingsView.swift` (3,897) — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (2,431) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live here.
-- `Sources/TranscriptedApp.swift` (1,927) — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching. The most source-pinned file.
 - `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
 
 Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
@@ -187,11 +184,14 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` (orchestrator) plus `+MicrophoneOnly`, `+MicDiarization`, `+Stages`, `+LastChanceSweep`, `+SystemSpeakerIdentity` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching (in `+SystemSpeakerIdentity`), utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
 - `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue`, `+Finish`, and the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions.
 - `Sources/Meeting/MeetingSessionController.swift` (the recording lifecycle) plus `+State.swift` (declares the class) and its other `+*.swift` extensions — the meeting state machine.
+- `Sources/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`. The most source-pinned file: its pins still read `TranscriptedApp.swift` only, so pinned code stays there.
 - `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
 - `Sources/Speech/ParakeetEngine.swift` (core state, native AVAudioEngine calls; the graph itself, with rebuild/retire, is `ParakeetAudioGraph`) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
 - `Sources/UI/Overlay/DictationSessionController.swift` plus `+RecordingStart`, `+Stop`, `+PasteBack`, `+Persistence`, `+Recovery`, `+Presses`, `+SessionCap`, `+Telemetry` and `DictationSessionDeliveryTypes.swift` — dictation session orchestration. `stopDictationAndPaste` is in `+Stop`, `installSessionTimeout` in `+SessionCap`.
 - `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (stored state, `init`, `body`, Home row actions) plus `+Pages`, `+HomeMeetingActions`, `+GeneralEditors`, `+Refresh`, `+Preferences` — the Settings window shell, page routing, and every Home side effect. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings. The Home row actions in the core file are still pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeopleRows.swift` (the voice-to-name and person rows), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live in the view model.
 - `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 

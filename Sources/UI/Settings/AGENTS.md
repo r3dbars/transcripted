@@ -32,13 +32,19 @@ settings-side agent connection flow.
   state and runtime work stay behind injected bindings and actions. Home's
   extraction (`Pages/HomeSettingsPage.swift`) only moved pure view assembly —
   the shell still owns every Home side effect (delete/rename/copy/
-  retranscribe, the shared root alert, undo staging, analytics) both because
-  those are runtime work and because several pieces
-  (`handleCopyMeeting`/`handleRetranscribeMeeting`,
-  `toggleHomeMeetingExpansion`/`collapseHomeMeetingExpansion`, the
-  `RootAlert` enum and `rootAlertBinding`, `dictationRowMenuItems`/
-  `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
-  by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
+  retranscribe, the shared root alert, undo staging, analytics).
+  The shell file keeps the stored state, `init`, `body`, and the Home row
+  actions (copy, re-transcribe, expansion, row menus, delete with undo), which
+  `Tests/UIAutomationSurfaceContractTests.swift` still pins by source text.
+  The rest are extensions of the same view:
+  `TranscriptedSettingsView+Pages.swift` (sidebar, detail column, page
+  routing, Today/Meetings/Dictations and the other page hosts),
+  `+HomeMeetingActions.swift` (the shared `RootAlert`, rename, speaker
+  naming, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts),
+  `+GeneralEditors.swift` (the combined page and its injected editors),
+  `+Refresh.swift` (state refresh, analytics, model cache, launch at login),
+  and `+Preferences.swift` (corrections, capture library, Auto Enter,
+  update actions).
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Today/Meetings/Dictations/Writing/Speakers/Agent); the
   Writing row carries a quiet trailing "New" badge until
@@ -161,7 +167,10 @@ settings-side agent connection flow.
   recent) and that call's calendar invitees as one-tap names; "Skip this
   call" is saved (`SpeakerReviewSkippedCalls`) and moves its voices to
   Everyone. Then compact duplicate-merge suggestions and the searchable
-  all-speakers list with per-row play/rename/merge/delete.
+  all-speakers list with per-row play/rename/merge/delete. The voice and
+  person rows are in `SpeakerPeopleRows.swift`; the view model is
+  `SpeakerPeopleSettingsViewModel.swift`, with duplicate detection and clip
+  files in `SpeakerPeopleSettingsViewModel+Duplicates.swift`.
 - `SpeakerReviewStack.swift` - Foundation-pure card stack behind that page:
   call order (skipped calls out, Later ones last), which voices Everyone
   hides (only the open top card's, never during a search, so voices on
