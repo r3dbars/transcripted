@@ -190,3 +190,14 @@ enum DictationActiveTaskCancellationPolicy {
         )
     }
 }
+
+/// Whether a stop press that gets ignored tells the person why.
+enum DictationIgnoredStopFeedback {
+    /// A stop press that lands while the last take is still drafting or
+    /// transcribing can't do anything, but it shows "Still finishing the last
+    /// dictation" instead of being silently swallowed. With nothing
+    /// finishing, it stays quiet.
+    static func showsStillFinishing(isDraftingOverlay: Bool, isTranscribing: Bool) -> Bool {
+        isDraftingOverlay || isTranscribing
+    }
+}

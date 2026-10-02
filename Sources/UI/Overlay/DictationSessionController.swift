@@ -1156,7 +1156,10 @@ class DictationSessionController: ObservableObject {
         }
 
         guard stopDecision == .stopRecording else {
-            if overlayController.state == .drafting || appState.sttRouter.isTranscribing {
+            if DictationIgnoredStopFeedback.showsStillFinishing(
+                isDraftingOverlay: overlayController.state == .drafting,
+                isTranscribing: appState.sttRouter.isTranscribing
+            ) {
                 overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             }
             DiagnosticsTrail.record(
