@@ -1,6 +1,6 @@
 {
   "source-text": {
-    "Tests/AnalyticsEventPolicyTests.swift": 10,
+    "Tests/AnalyticsEventPolicyTests.swift": 9,
     "Tests/AudioAutomationCoverageContractTests.swift": 8,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 10,
@@ -17,11 +17,10 @@
     "Tests/DictationStartedTelemetryContractTests.swift": 1,
     "Tests/DictationStoppedAudioRecoveryTests.swift": 5,
     "Tests/DictationTerminationCheckpointTests.swift": 2,
-    "Tests/FailedMeetingPresentationTests.swift": 2,
+    "Tests/FailedMeetingPresentationTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 6,
     "Tests/HomeImportAudioActionTests.swift": 3,
     "Tests/MeetingSessionUIPolicyTests.swift": 6,
-    "Tests/MeetingStopSnapshotEvidenceTests.swift": 2,
     "Tests/MicrophoneChoicePreferencesTests.swift": 2,
     "Tests/MicrophoneProcessingPreferencesTests.swift": 1,
     "Tests/NightlySecurityContractTests.swift": 1,

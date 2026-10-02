@@ -49,6 +49,48 @@ enum MeetingCaptureHealthTelemetry {
         return live ?? atCaptureStop
     }
 
+    /// Capture stopped. Stopping resets capture's system-audio status and
+    /// clears the controller's warnings, so when the controller was still
+    /// recording (the stop came from underneath it) the evidence is read and
+    /// stashed first, then the live warnings are torn down.
+    static func captureStopped<Evidence, TearDown>(
+        whileRecording: Bool,
+        readEvidence: () -> Evidence,
+        stashEvidence: (Evidence) -> Void,
+        tearDown: () -> TearDown
+    ) -> TearDown {
+        if whileRecording {
+            stashEvidence(readEvidence())
+        }
+        return tearDown()
+    }
+
+    /// The evidence a stop snapshot uses: the live values, falling back to
+    /// what was stashed when capture stopped underneath the controller.
+    static func stopSnapshotEvidence<Status: Equatable>(
+        liveStatus: Status,
+        unknown: Status,
+        liveWarning: MeetingSystemAudioDegradationWarning?,
+        liveUnheardWarningStartedAt: Date?,
+        atCaptureStop: MeetingCaptureStopEvidence<Status>?,
+        now: Date
+    ) -> (systemAudioStatus: Status, degradationWarning: MeetingSystemAudioDegradationWarning?, unheardSeconds: TimeInterval) {
+        (
+            stopSnapshotSystemAudioStatus(
+                live: liveStatus,
+                atCaptureStop: atCaptureStop?.systemAudioStatus,
+                unknown: unknown
+            ),
+            stopSnapshotDegradationWarning(
+                live: liveWarning,
+                atCaptureStop: atCaptureStop?.degradationWarning
+            ),
+            atCaptureStop?.unheardSeconds
+                ?? liveUnheardWarningStartedAt.map { max(0, now.timeIntervalSince($0)) }
+                ?? 0
+        )
+    }
+
     struct HealthFacts {
         let captureQuality: String
         let audioGaps: Int
@@ -152,5 +194,28 @@ enum MeetingCaptureHealthTelemetry {
 
     private static func boolString(_ value: Bool) -> String {
         value ? "true" : "false"
+    }
+}
+
+/// System-audio status, degradation warning, and how long "can't hear the
+/// call" had been open, as they stood the moment capture stopped underneath
+/// the controller (state still `.recording`). That same moment resets
+/// capture's status to `.unknown` and clears the warning, so the
+/// unexpected-stop snapshot reads these instead.
+struct MeetingCaptureStopEvidence<Status: Equatable>: Equatable {
+    var systemAudioStatus: Status
+    var degradationWarning: MeetingSystemAudioDegradationWarning?
+    /// nil when no "can't hear the call" warning was open.
+    var unheardSeconds: TimeInterval?
+
+    init(
+        systemAudioStatus: Status,
+        degradationWarning: MeetingSystemAudioDegradationWarning?,
+        unheardWarningStartedAt: Date?,
+        now: Date
+    ) {
+        self.systemAudioStatus = systemAudioStatus
+        self.degradationWarning = degradationWarning
+        self.unheardSeconds = unheardWarningStartedAt.map { max(0, now.timeIntervalSince($0)) }
     }
 }

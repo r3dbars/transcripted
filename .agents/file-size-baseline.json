@@ -6,7 +6,7 @@
     "Sources/Meeting/MeetingAudioStorageManager.swift": 1252,
     "Sources/Meeting/MeetingImportedAudioPreparer.swift": 1052,
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,
-    "Sources/Meeting/MeetingSessionController.swift": 848,
+    "Sources/Meeting/MeetingSessionController.swift": 844,
     "Sources/Observability/AnalyticsReporter.swift": 889,
     "Sources/Observability/SparkleUpdaterController.swift": 1177,
     "Sources/Speech/ParakeetDeviceRecovery.swift": 936,
