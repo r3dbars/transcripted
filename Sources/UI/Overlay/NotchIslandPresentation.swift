@@ -91,6 +91,9 @@ struct NotchIslandMeetingContent: Equatable {
     /// The island skipped the "can't hear the other side" question so the
     /// meeting could start at once; ask it now, from the island, once.
     var asksAboutCallAudio = false
+    /// "Live transcript" is on: the recording drop-down shows the
+    /// conversation so far instead of the level lanes.
+    var showsLiveTranscript = false
 
     var isRecording: Bool { phase == .recording }
 
@@ -189,6 +192,8 @@ enum NotchIslandAction: Equatable {
     case meetingCallAudioDismiss
     case meetingOpen
     case meetingDismissError
+    /// Copy all on the live transcript.
+    case meetingCopyTranscript
     case callRecord
     case callDismiss
     case callRemind
@@ -204,7 +209,7 @@ enum NotchIslandAction: Equatable {
         switch self {
         case .dictationStop, .dictationCancel, .dictationMessageAction, .dictationDismissMessage:
             return .dictation
-        case .copyLastDictation, .pasteLastDictation:
+        case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
         case .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
@@ -237,7 +242,7 @@ enum NotchIslandDrop: Equatable {
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -458,6 +463,10 @@ enum NotchIslandPresentation {
         meeting: NotchIslandMeetingContent?,
         recentInsert: NotchIslandRecentInsert?
     ) -> NotchIslandDrop? {
+        // A recording meeting owns the hover except while a dictation is
+        // live: once the key is up, hovering shows the meeting again rather
+        // than the dictation's writing beat or its Paste again linger.
+        let meetingRecords = meeting?.isRecording == true
         if let dictation {
             switch dictation.phase {
             case .starting, .listening:
@@ -465,10 +474,10 @@ enum NotchIslandPresentation {
             case .loading(let title, let detail, _):
                 return .dictationLoading(title: title, detail: detail)
             case .writing, .success, .message:
-                return nil
+                if !meetingRecords { return nil }
             }
         }
-        if let recentInsert, let text = recentInsert.text, !text.isEmpty {
+        if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {
             return .justInserted(text: text, words: recentInsert.words)
         }
         guard let meeting else { return nil }
@@ -476,7 +485,8 @@ enum NotchIslandPresentation {
         case .recording:
             return .meetingControls(
                 callAudioNote: meeting.callAudioNote,
-                systemAudioUnverified: meeting.systemAudioUnverified
+                systemAudioUnverified: meeting.systemAudioUnverified,
+                showsTranscript: meeting.showsLiveTranscript
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)

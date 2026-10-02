@@ -164,6 +164,27 @@ struct NotchIslandScreenSharingRow: View {
     }
 }
 
+/// Whether a recording meeting shows its live transcript in the island.
+struct NotchIslandLiveTranscriptRow: View {
+    @AppStorage(NotchIslandPreferences.showsLiveTranscriptKey)
+    private var showsLiveTranscript = false
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Live transcript",
+            isOn: $showsLiveTranscript,
+            help: showsLiveTranscript
+                ? "Hover the island during a meeting to read and copy it."
+                : "Meetings are transcribed after they end.",
+            info: GeneralInfo(
+                title: "Live transcript",
+                message: "Transcribes meetings as they happen, on this Mac, so hovering the island shows everything said so far, with Copy all. It's a quick draft: the saved meeting is transcribed again after Stop, with speaker names. The first meeting downloads a small speech model, and it uses some extra battery while you record."
+            ),
+            automationIdentifier: "transcripted.settings.general.live-transcript"
+        )
+    }
+}
+
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool

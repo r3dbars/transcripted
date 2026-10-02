@@ -192,6 +192,38 @@ func testNotchIslandPresentation() {
             .meetingControls(callAudioNote: nil, systemAudioUnverified: false)
         )
 
+        var transcribing = recording()
+        transcribing.showsLiveTranscript = true
+        assertEqual(
+            notchLayout(meeting: transcribing, expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            "with Live transcript on, hovering shows the conversation"
+        )
+        assertEqual(notchLayout(meeting: transcribing).right, [.meetingMeters], "the collapsed island doesn't change")
+        assertEqual(NotchIslandAction.meetingCopyTranscript.owner, .island, "the island copies the transcript itself")
+
+        let meetingDrop = NotchIslandDrop.meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true)
+        assertEqual(
+            notchLayout(dictation: listening(), meeting: transcribing, expanded: true).drop,
+            .dictationTarget(appName: listening().targetAppName, microphone: listening().microphoneName),
+            "a live dictation keeps Insert now and Cancel on hover"
+        )
+        assertEqual(
+            notchLayout(dictation: NotchIslandDictationContent(phase: .writing), meeting: transcribing, expanded: true).drop,
+            meetingDrop,
+            "once the key is up, hovering shows the meeting again"
+        )
+        assertEqual(
+            notchLayout(meeting: transcribing, recentInsert: NotchIslandRecentInsert(title: "Pasted", text: "Hi there"), expanded: true).drop,
+            meetingDrop,
+            "the dictation that just landed doesn't take the meeting's hover"
+        )
+        assertEqual(
+            notchLayout(recentInsert: NotchIslandRecentInsert(title: "Pasted", text: "Hi there"), expanded: true).drop,
+            .justInserted(text: "Hi there", words: 2),
+            "with no meeting, the hover still offers Copy and Paste again"
+        )
+
         var micOnly = recording()
         micOnly.callAudioNote = .off
         assertEqual(notchLayout(meeting: micOnly).right, [.chip("Mic only", .warning, .meetingCallAudio)])
