@@ -146,7 +146,7 @@ The table below names every root fast-test file at the supplied main snapshot. `
 | `Tests/DictationAudioLevelMeterTests.swift` | 48 | 2 | 5 | 0 | 0 |
 | `Tests/DictationAudioRecoveryTests.swift` | 196 | 5 | 28 | 2 | 0 |
 | `Tests/DictationAutoSendPreferencesTests.swift` | 284 | 8 | 38 | 0 | 0 |
-| `Tests/DictationCancelHintPolicyTests.swift` | 80 | 4 | 11 | 0 | 0 |
+| Tests/DictationCancelHintPolicyTests.swift (removed since) | 80 | 4 | 11 | 0 | 0 |
 | `Tests/DictationCleanupPreferencesTests.swift` | 36 | 3 | 4 | 0 | 0 |
 | `Tests/DictationConcurrentWriteTests.swift` | 74 | 1 | 3 | 0 | 0 |
 | `Tests/DictationEmptyTranscriptPolicyTests.swift` | 92 | 9 | 21 | 0 | 0 |
