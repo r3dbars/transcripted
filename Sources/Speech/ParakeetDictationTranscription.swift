@@ -12,6 +12,8 @@
 import Foundation
 import TranscriptedCore
 
+extension ParakeetEngine: ParakeetInterruptionTerminalState, PreparedRecordingTimeline {}
+
 extension ParakeetEngine {
     // MARK: - Recorded Audio Buffering
 
@@ -45,9 +47,9 @@ extension ParakeetEngine {
     private func markRecordingInterrupted() {
         // Retained audio is available for an explicit recovery action; it is
         // not permission to restart capture or append it to the next dictation.
-        preservingRecordingAcrossRecovery = false
-        configChangeWasRecording = false
-        recordingInterrupted = true
+        ParakeetInterruptionTerminal.apply(state: self) {
+            recordingInterrupted = true
+        }
     }
 
     func loadRecordedSamplesForDictationBenchmark(_ samples: [Float], sampleRate: Double) {
@@ -86,12 +88,11 @@ extension ParakeetEngine {
         // The persistence snapshot already resampled this exact stopped
         // recording. Consume the native buffers without repeating that work.
         drainPendingSamplesIntoTimeline()
-        guard preparedRecording.claim.isCurrent(
-            recordingIdentity: recordingIdentity,
-            revision: recordedSamplesRevision,
-            cancelled: Task.isCancelled
+        guard PreparedRecordingConsumer.consume(
+            claim: preparedRecording.claim,
+            cancelled: Task.isCancelled,
+            timeline: self
         ) else { return nil }
-        clearRecoveredRecordingTimeline(keepingCapacity: true)
         return preparedRecording
     }
 

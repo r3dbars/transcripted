@@ -203,6 +203,172 @@ enum MeetingPromptTelemetry {
     }
 }
 
+// MARK: - Prompt events
+
+/// The analytics events one detected-prompt action fires, built in one place
+/// so tests can check each action sends the right set exactly once. The app
+/// emits them through `emit`, which defaults to AnalyticsReporter and
+/// ActivationTelemetry.
+@available(macOS 14.0, *)
+extension MeetingPromptTelemetry {
+    enum PromptAction {
+        /// The capture pill actually appeared.
+        case shown(MeetingPromptDetector.Candidate, signals: MeetingPromptSignalSnapshot?)
+        /// The user picked Record and the start was accepted.
+        case record(MeetingPromptDetector.Candidate, elapsedSeconds: TimeInterval?, signals: MeetingPromptSignalSnapshot?)
+        /// The user picked Not now. `backoffKind`, `signals` and
+        /// `dismissStreak` are read after the detector applies the dismissal.
+        case dismiss(
+            MeetingPromptDetector.Candidate,
+            elapsedSeconds: TimeInterval?,
+            backoffKind: MeetingPromptBackoffKind,
+            signals: MeetingPromptSignalSnapshot?,
+            dismissStreak: Int
+        )
+        case remindLater(MeetingPromptDetector.Candidate, elapsedSeconds: TimeInterval?)
+        /// The pill timed out with no choice; an outcome, not a user choice.
+        case expire(MeetingPromptDetector.Candidate, elapsedSeconds: TimeInterval?)
+        /// The detector held a prompt back. One event only: the matching
+        /// meeting_prompt_outcome_recorded(outcome_kind=suppressed) doubled
+        /// about 33k events a month and carried nothing this one lacks.
+        case suppress(MeetingPromptSuppression, signals: MeetingPromptSignalSnapshot?)
+    }
+
+    enum PromptEvent: Equatable {
+        case analytics(name: String, properties: [String: String])
+        /// Only an explicit dismissal counts as abandoning the prompt.
+        case promptAbandoned(priorReadyState: String)
+    }
+
+    static func events(
+        for action: PromptAction,
+        readiness: MeetingPromptTelemetryReadiness
+    ) -> [PromptEvent] {
+        switch action {
+        case let .shown(candidate, signals):
+            return [
+                .analytics(
+                    name: "meeting_prompt_shown",
+                    properties: properties(for: candidate, readiness: readiness, signals: signals)
+                ),
+            ]
+        case let .record(candidate, elapsedSeconds, signals):
+            return [
+                .analytics(
+                    name: "meeting_prompt_choice_made",
+                    properties: choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .record,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+                .analytics(
+                    name: "meeting_prompt_record_selected",
+                    properties: properties(for: candidate, readiness: readiness, signals: signals)
+                ),
+            ]
+        case let .dismiss(candidate, elapsedSeconds, backoffKind, signals, dismissStreak):
+            return [
+                .analytics(
+                    name: "meeting_prompt_choice_made",
+                    properties: choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .dismiss,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+                .analytics(
+                    name: "meeting_prompt_outcome_recorded",
+                    properties: outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .dismissed,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+                .analytics(
+                    name: "meeting_prompt_dismissed",
+                    properties: properties(
+                        for: candidate,
+                        readiness: readiness,
+                        backoffKind: backoffKind,
+                        signals: signals,
+                        dismissStreak: dismissStreak
+                    )
+                ),
+                .promptAbandoned(priorReadyState: readyState(readiness: readiness)),
+            ]
+        case let .remindLater(candidate, elapsedSeconds):
+            return [
+                .analytics(
+                    name: "meeting_prompt_choice_made",
+                    properties: choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .remindLater,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+                .analytics(
+                    name: "meeting_prompt_outcome_recorded",
+                    properties: outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .remindedLater,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+            ]
+        case let .expire(candidate, elapsedSeconds):
+            return [
+                .analytics(
+                    name: "meeting_prompt_outcome_recorded",
+                    properties: outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .expired,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                ),
+            ]
+        case let .suppress(suppression, signals):
+            return [
+                .analytics(
+                    name: "meeting_prompt_suppressed",
+                    properties: properties(for: suppression, readiness: readiness, signals: signals)
+                ),
+            ]
+        }
+    }
+
+    /// Fires `events(for:readiness:)` in order.
+    static func emit(
+        _ action: PromptAction,
+        readiness: MeetingPromptTelemetryReadiness,
+        track: (String, [String: String]) -> Void = { AnalyticsReporter.track($0, properties: $1) },
+        trackPromptAbandoned: (String) -> Void = { priorReadyState in
+            ActivationTelemetry.trackWorkflowAbandoned(
+                workflowKind: .meetingPrompt,
+                stage: "prompt_shown",
+                reasonKind: .dismissed,
+                surface: .meetingOverlay,
+                priorReadyState: priorReadyState
+            )
+        }
+    ) {
+        for event in events(for: action, readiness: readiness) {
+            switch event {
+            case let .analytics(name, properties):
+                track(name, properties)
+            case let .promptAbandoned(priorReadyState):
+                trackPromptAbandoned(priorReadyState)
+            }
+        }
+    }
+}
+
 @available(macOS 14.0, *)
 private extension MeetingPromptSource {
     var analyticsValue: String {

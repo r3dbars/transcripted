@@ -19,6 +19,7 @@
 // memoizes each file on demand, so repeated reads of the same path are free and two
 // PRs can add guards for the same file without redeclaring anything.
 
+import AppKit
 import Foundation
 
 // On-demand, memoized source reader. Each path is read at most once per run.
@@ -86,7 +87,8 @@ private func settingsSurfaceContractContains(_ needle: String) -> Bool {
     ].contains { contractSource($0).contains(needle) }
 }
 
-func testUIAutomationSurfaceContract() {
+@MainActor
+func testUIAutomationSurfaceContract() async {
     // Guards that read TranscriptedSettingsView.swift alone before the shell was
     // split into TranscriptedSettingsView+*.swift extensions. They now read the
     // whole split, so they hold wherever the code lives.
@@ -154,16 +156,14 @@ func testUIAutomationSurfaceContract() {
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
-            "The warning must resolve from this capture's PCM evidence, not a cached permission")
-        assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let systemAudioFinalizationFailed = capture.systemAudioFinalizationFailed"),
-            "Saved health must include failures discovered while draining the tail")
+        // The PCM-evidence and tail-failure halves are behavior tests now:
+        // "Capture health evidence comes from this capture, not a cached
+        // permission" in MeetingSessionUIPolicyTests.
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
-        assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
-            "the recovery action should come from typed permission evidence")
+        // Typed permission evidence behind the action: MeetingSessionUIPolicyTests,
+        // "Capture health evidence comes from this capture, not a cached permission".
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
     }
@@ -190,15 +190,87 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
-        assertTrue(
-            contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")
-                && contractSource("Sources/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
-            "the real menu bar status item should expose a stable AX identifier for external UI automation"
+        // These raw values are the strings external automation looks up. The
+        // QA AX smoke (Tools/TranscriptedQA UISmoke) and the build.sh launch
+        // smoke keep their own copies, so the cross-package lists stay pinned
+        // here against the compiled enum.
+        let expected: [MenuBarAutomationID: String] = [
+            .statusItemButton: "transcripted.status-item.button",
+            .startMeeting: "transcripted.menubar.primary.start-meeting",
+            .startDictation: "transcripted.menubar.primary.start-dictation",
+            .openTranscripted: "transcripted.menubar.utility.open-transcripted",
+            .checkUpdates: "transcripted.menubar.utility.check-updates",
+            .quit: "transcripted.menubar.utility.quit",
+        ]
+        assertEqual(MenuBarAutomationID.allCases.count, expected.count, "every menubar automation id should be listed here")
+        for id in MenuBarAutomationID.allCases {
+            assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
+            assertTrue(
+                contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(id.rawValue),
+                "\(id.rawValue) should stay in the QA AX smoke's expected list"
+            )
+        }
+        for id in MenuBarAutomationID.allCases where id != .statusItemButton {
+            assertTrue(
+                contractSource("scripts/entrypoints/build.sh").contains(id.rawValue),
+                "\(id.rawValue) should stay enforced by the build.sh launch smoke"
+            )
+        }
+
+        _ = NSApplication.shared
+        let primary = MenuBarPrimaryActionsView(frame: .zero)
+        let utility = MenuBarUtilityActionsView(frame: .zero)
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true
+        )
+        assertEqual(
+            Set((primary.keyboardFocusableRows + utility.keyboardFocusableRows).map { $0.accessibilityIdentifier() }),
+            Set(MenuBarAutomationID.allCases.filter { $0 != .statusItemButton }.map(\.rawValue)),
+            "the real popover rows should carry every row identifier as their AX identifier"
+        )
+        assertEqual(
+            utility.smokeSnapshot.mapValues(\.automationIdentifier),
+            [
+                "checkUpdates": MenuBarAutomationID.checkUpdates.rawValue,
+                "openTranscripted": MenuBarAutomationID.openTranscripted.rawValue,
+                "quit": MenuBarAutomationID.quit.rawValue,
+            ],
+            "the utility smoke snapshot should report the identifiers AppKit automation sees"
         )
     }
 
+    await runSuite("UI automation surface contract - menubar action rows are AX buttons with a real press path") {
+        _ = NSApplication.shared
+        let row = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        row.setAutomationIdentifier(.openTranscripted)
+        row.update(symbolName: "mic.fill", title: "Record Meeting", displayTitle: "Record", detail: "Mic and system audio", size: .button)
+        var presses = 0
+        row.onPress = { presses += 1 }
+
+        assertEqual(row.accessibilityIdentifier(), MenuBarAutomationID.openTranscripted.rawValue, "the row should expose its automation id to AX")
+        assertEqual(row.identifier?.rawValue, MenuBarAutomationID.openTranscripted.rawValue, "the row's NSView identifier should match its AX identifier")
+        assertEqual(row.smokeSnapshot.automationIdentifier, MenuBarAutomationID.openTranscripted.rawValue, "the smoke snapshot should report the AX identifier")
+        assertEqual(row.accessibilityRole(), .button, "a menubar row should be an AX button")
+        assertTrue(row.isAccessibilityElement(), "a menubar row should be an AX element")
+        assertEqual(row.accessibilityLabel(), "Record", "the AX label should be the title on screen, so Voice Control can match it")
+
+        assertTrue(row.accessibilityPerformPress(), "AXPress on an enabled row should succeed")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on an enabled row should run its action")
+
+        row.update(symbolName: "mic.fill", title: "Record Meeting", detail: "", size: .button, isEnabled: false)
+        assertFalse(row.accessibilityPerformPress(), "AXPress on a disabled row should fail")
+        await drainMainQueue()
+        assertEqual(presses, 1, "AXPress on a disabled row should not run its action")
+    }
+
     runSuite("UI automation surface contract - native Settings routes to the real window") {
-        let appSource = contractSource("Sources/TranscriptedApp.swift")
+        let appSource = contractSource("Sources/App/TranscriptedApp.swift")
         assertTrue(
             appSource.contains("func menuOpenSettings()")
                 && appSource.contains("showSettingsWindow(page: .general, source: \"app_menu\")"),
@@ -233,7 +305,7 @@ func testUIAutomationSurfaceContract() {
             "func menuFindSpeaker()",
             "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
         ] {
-            assertTrue(contractSource("Sources/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
+            assertTrue(contractSource("Sources/App/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
         }
     }
 
@@ -671,4 +743,13 @@ private func sourceBlock(named startMarker: String, endingBefore endMarker: Stri
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
     guard !needle.isEmpty else { return 0 }
     return haystack.components(separatedBy: needle).count - 1
+}
+
+/// The row answers AXPress first and runs its action on the next main-queue
+/// turn; anything queued after the press runs after the action.
+@MainActor
+private func drainMainQueue() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { continuation.resume() }
+    }
 }

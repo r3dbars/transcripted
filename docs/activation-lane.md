@@ -39,7 +39,7 @@ Good activation work should improve at least one of these moments:
 | agent setup, first prompt, agent connect rows, or folder handoff | `Sources/UI/Shared/AgentConnectionGuide.swift`, `Sources/UI/Settings/AgentConnectionSettingsPage.swift`, `Sources/Support/ClaudeDesktopIntegrationInstaller.swift`, `Sources/Support/AgentMCPConnector.swift`, `docs/agent-connect.md` |
 | pasteback, copied text, Auto Enter, or clipboard restore | `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/UI/Overlay/DictationSessionController+PasteBack.swift`, `Sources/Accessibility/AGENTS.md` |
 | Bluetooth or AirPods dictation reliability | `Sources/Speech/AGENTS.md`, `docs/audio-reliability-daily-check.md` |
-| Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/AGENTS.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
+| Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/AGENTS.md`, `Sources/UI/Overlay/CapturePillController.swift` (the Notch island's call prompt), `Sources/UI/Overlay/MeetingOverlayController.swift` (the island's meeting), `docs/qa-issue-500-meeting-audio.md` |
 | activation analytics or health probes | `Sources/Observability/ActivationTelemetry.swift`, `Sources/Observability/AnalyticsEventPolicy.swift`, `docs/privacy-first-observability.md`, `docs/ops-credentials.md` |
 
 ## PostHog Funnel Report

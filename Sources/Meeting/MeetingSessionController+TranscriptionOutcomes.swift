@@ -63,9 +63,9 @@ extension MeetingSessionController {
             if let stoppedAudioRecovery = activeStoppedAudioRecovery {
                 activeStoppedAudioRecovery = nil
                 Task.detached(priority: .utility) {
-                    DictationStoppedAudioRecoveryStore.cleanup(
+                    MeetingStoppedAudioCheckpointPolicy.finish(
                         stoppedAudioRecovery,
-                        transcriptPersisted: true
+                        after: .transcriptSaved
                     )
                 }
             }

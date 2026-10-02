@@ -568,8 +568,10 @@ func testParakeetAudioGraphOwnership() async {
     }
 
     await runSuite("Parakeet system-input timeout replaces the blocked queue and reconciles late writes") {
+        let timeouts = ManualSystemInputTimeouts()
         let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
-            label: "test.parakeet.replaceable-system-input"
+            label: "test.parakeet.replaceable-system-input",
+            scheduleTimeout: timeouts.schedule
         )
         let temporaryInput = "built-in-input"
         let previousInput = "bluetooth-input"
@@ -592,7 +594,8 @@ func testParakeetAudioGraphOwnership() async {
                     }
                 ) {
                     Task { await blockedWorkEntered.open() }
-                    _ = releaseBlockedWork.wait(timeout: .now() + 2)
+                    // Backstop only, so a regression can't strand this worker.
+                    _ = releaseBlockedWork.wait(timeout: .now() + .seconds(30))
                     route.restoreIfStillTemporary(
                         temporaryInput: temporaryInput,
                         previousInput: previousInput
@@ -606,18 +609,33 @@ func testParakeetAudioGraphOwnership() async {
             }
         }
 
+        // The budget runs out only after the work is inside its HAL call.
         await blockedWorkEntered.wait()
-        assertTrue(await blockedWork.value, "the blocked operation should hit its deterministic timeout")
+        await timeouts.expireNext()
+        assertTrue(await blockedWork.value, "the blocked operation should hit its timeout")
 
-        let successorCompleted = (try? await coordinator.run(
+        // The successor's own budget never expires: it must finish on the
+        // replacement queue while the old work is still blocked. The wait is
+        // bounded so a queue-replacement regression fails instead of hanging.
+        let successorFinished = DispatchSemaphore(value: 0)
+        let successorLock = NSLock()
+        var successorCompleted = false
+        coordinator.schedule(
             operation: "successor_apply",
-            timeoutNanoseconds: 500_000_000
+            timeoutNanoseconds: 500_000_000,
+            completion: { (result: Result<Bool, Error>) in
+                if case .success(true) = result {
+                    successorLock.withLock { successorCompleted = true }
+                }
+                successorFinished.signal()
+            }
         ) {
             route.applyReplacementInput(temporaryInput)
             return true
-        }) ?? false
+        }
+        let successorReturned = await signalled(successorFinished)
         assertTrue(
-            successorCompleted,
+            successorReturned && successorLock.withLock { successorCompleted },
             "a successor must run on the replacement queue before old HAL work returns"
         )
 
@@ -631,8 +649,10 @@ func testParakeetAudioGraphOwnership() async {
     }
 
     await runSuite("Parakeet system-input timeout circuit caps permanently blocked workers") {
+        let timeouts = ManualSystemInputTimeouts()
         let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
-            label: "test.parakeet.bounded-system-input"
+            label: "test.parakeet.bounded-system-input",
+            scheduleTimeout: timeouts.schedule
         )
         let releaseWorkers = DispatchSemaphore(value: 0)
         let allWorkersCompleted = ParakeetAsyncInterleavingGate()
@@ -642,13 +662,27 @@ func testParakeetAudioGraphOwnership() async {
         var timeoutErrors = 0
         var circuitOpenErrors = 0
 
-        for attempt in 0..<12 {
-            do {
-                _ = try await coordinator.run(
+        func record(_ error: Error) {
+            switch error as? ParakeetSystemInputWorkError {
+            case .timedOut:
+                timeoutErrors += 1
+            case .circuitOpen:
+                circuitOpenErrors += 1
+            case nil:
+                assertTrue(false, "unexpected system-input circuit error: \(error)")
+            }
+        }
+
+        // Two workers enter, block, and run out of budget while blocked.
+        for attempt in 0..<2 {
+            let entered = DispatchSemaphore(value: 0)
+            let blocked = Task {
+                try await coordinator.run(
                     operation: "blocked_\(attempt)",
                     timeoutNanoseconds: 20_000_000
                 ) {
                     countLock.withLock { workersEntered += 1 }
+                    entered.signal()
                     releaseWorkers.wait()
                     let allDone = countLock.withLock {
                         workersCompleted += 1
@@ -659,34 +693,146 @@ func testParakeetAudioGraphOwnership() async {
                     }
                     return true
                 }
-            } catch let error as ParakeetSystemInputWorkError {
-                switch error {
-                case .timedOut:
-                    timeoutErrors += 1
-                case .circuitOpen:
-                    circuitOpenErrors += 1
-                }
+            }
+            guard await signalled(entered) else {
+                // The queue wasn't replaced after the last timeout. Unblock
+                // everything and fail rather than hang the fast suite.
+                assertTrue(false, "blocked_\(attempt) must enter on a replacement queue")
+                releaseWorkers.signal()
+                releaseWorkers.signal()
+                await timeouts.expireNext()
+                _ = try? await blocked.value
+                return
+            }
+            await timeouts.expireNext()
+            do {
+                _ = try await blocked.value
+                assertTrue(false, "a blocked worker must not report success")
             } catch {
-                assertTrue(false, "unexpected system-input circuit error: \(error)")
+                record(error)
             }
         }
 
-        let entered = countLock.withLock { workersEntered }
-        assertEqual(entered, 2, "the circuit must cap permanently blocked worker closures")
-        // The timeout starts when work is enqueued, not when its utility
-        // queue enters the closure. Under host load an attempt can expire
-        // before entry; that correctly consumes no blocked-worker capacity.
-        let queueExpiryErrors = timeoutErrors - entered
-        assertTrue(queueExpiryErrors >= 0, "every admitted blocked worker must time out")
-        assertEqual(timeoutErrors + circuitOpenErrors, 12, "every attempt must fail through the bounded coordinator")
-        assertTrue(circuitOpenErrors > 0, "after two workers block, later attempts must fail without entering work")
-        assertEqual(circuitOpenErrors, 10 - queueExpiryErrors, "only pre-entry queue expiries may replace circuit-open outcomes")
-
-        for _ in 0..<entered {
-            releaseWorkers.signal()
+        // With both still blocked, the circuit is open: later work fails
+        // without entering or scheduling a timeout.
+        for attempt in 2..<12 {
+            do {
+                _ = try await coordinator.run(
+                    operation: "blocked_\(attempt)",
+                    timeoutNanoseconds: 20_000_000
+                ) {
+                    countLock.withLock { workersEntered += 1 }
+                    return true
+                }
+                assertTrue(false, "an open circuit must not run work")
+            } catch {
+                record(error)
+            }
         }
+
+        assertEqual(countLock.withLock { workersEntered }, 2, "the circuit must cap permanently blocked worker closures")
+        assertEqual(timeoutErrors, 2, "every admitted blocked worker must time out")
+        assertEqual(circuitOpenErrors, 10, "after two workers block, later attempts must fail without entering work")
+        assertEqual(timeouts.pendingCount, 0, "circuit-open attempts must not start a budget")
+
+        releaseWorkers.signal()
+        releaseWorkers.signal()
         await allWorkersCompleted.wait()
         assertEqual(countLock.withLock { workersCompleted }, 2, "bounded test workers should shut down after release")
+    }
+
+    runSuite("Parakeet system-input budget that runs out before work starts skips it and spends no capacity") {
+        let timeouts = ManualSystemInputTimeouts()
+        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+            label: "test.parakeet.expired-before-start",
+            scheduleTimeout: timeouts.schedule
+        )
+        let outcomeLock = NSLock()
+        var outcomes: [String: Result<Bool, Error>] = [:]
+        func submit(_ operation: String, _ work: @escaping () -> Bool) -> DispatchSemaphore {
+            let finished = DispatchSemaphore(value: 0)
+            coordinator.schedule(
+                operation: operation,
+                timeoutNanoseconds: 20_000_000,
+                completion: { (result: Result<Bool, Error>) in
+                    outcomeLock.withLock { outcomes[operation] = result }
+                    finished.signal()
+                },
+                work
+            )
+            return finished
+        }
+        func outcome(_ operation: String) -> Result<Bool, Error>? {
+            outcomeLock.withLock { outcomes[operation] }
+        }
+        func isTimedOut(_ result: Result<Bool, Error>?) -> Bool {
+            guard case .failure(let error)? = result,
+                  case .timedOut? = error as? ParakeetSystemInputWorkError else { return false }
+            return true
+        }
+
+        // A holder occupies the first queue; its budget is never expired.
+        let holderEntered = DispatchSemaphore(value: 0)
+        let releaseHolder = DispatchSemaphore(value: 0)
+        let holderFinished = submit("holder") {
+            holderEntered.signal()
+            _ = releaseHolder.wait(timeout: .now() + .seconds(30))
+            return true
+        }
+        assertTrue(holderEntered.wait(timeout: .now() + .seconds(10)) == .success, "holder should enter")
+
+        // Two operations queue behind it. The first one's budget runs out
+        // before it can start.
+        let skippedLock = NSLock()
+        var expiredWorkRan = false
+        let expiredFinished = submit("expired_before_start") {
+            skippedLock.withLock { expiredWorkRan = true }
+            return true
+        }
+        let trailingFinished = submit("queued_behind") { true }
+        timeouts.expire(at: 1)
+        assertTrue(expiredFinished.wait(timeout: .now()) == .success, "an expired budget should fail the caller right away")
+        assertTrue(isTimedOut(outcome("expired_before_start")), "work that never started should report a timeout")
+
+        // Nothing blocked, so the circuit still admits two blocked workers.
+        let releaseWorkers = DispatchSemaphore(value: 0)
+        for attempt in 0..<2 {
+            let entered = DispatchSemaphore(value: 0)
+            let finished = submit("blocked_\(attempt)") {
+                entered.signal()
+                _ = releaseWorkers.wait(timeout: .now() + .seconds(30))
+                return true
+            }
+            guard entered.wait(timeout: .now() + .seconds(10)) == .success else {
+                assertTrue(false, "blocked_\(attempt) should get its own queue; unstarted work must not spend capacity")
+                releaseHolder.signal()
+                releaseWorkers.signal()
+                releaseWorkers.signal()
+                return
+            }
+            timeouts.expire(at: timeouts.pendingCount - 1)
+            assertTrue(finished.wait(timeout: .now()) == .success, "blocked_\(attempt) should time out")
+            assertTrue(isTimedOut(outcome("blocked_\(attempt)")), "blocked_\(attempt) should report a timeout")
+        }
+        let openFinished = submit("after_two_blocked") { true }
+        assertTrue(openFinished.wait(timeout: .now()) == .success, "an open circuit should fail right away")
+        let circuitOpened: Bool = {
+            guard case .failure(let error)? = outcome("after_two_blocked"),
+                  case .circuitOpen? = error as? ParakeetSystemInputWorkError else { return false }
+            return true
+        }()
+        assertTrue(circuitOpened, "two started-then-blocked workers should open the circuit")
+
+        // Releasing the holder drains the first queue in order. The trailing
+        // operation finishing proves the expired one's slot already passed.
+        releaseHolder.signal()
+        assertTrue(holderFinished.wait(timeout: .now() + .seconds(10)) == .success, "holder should finish")
+        assertTrue(trailingFinished.wait(timeout: .now() + .seconds(10)) == .success, "queued work should finish")
+        assertTrue(outcome("queued_behind").flatMap { try? $0.get() } == true, "queued work within budget should succeed")
+        assertFalse(skippedLock.withLock { expiredWorkRan }, "work whose budget ran out before it started must never run")
+
+        releaseWorkers.signal()
+        releaseWorkers.signal()
     }
 
     runSuite("Parakeet queued recovery start cancellation skips retired work") {
@@ -937,5 +1083,61 @@ private actor RecordedAudioConversionBarrier {
         let waiters = releaseWaiters
         releaseWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
+    }
+}
+
+/// A system-input budget timer the test expires by hand. `expireNext` waits
+/// until an operation has started its budget, so the test never races the
+/// coordinator's own scheduling.
+private final class ManualSystemInputTimeouts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [() -> Void] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    var pendingCount: Int { lock.withLock { pending.count } }
+
+    func schedule(_ timeoutNanoseconds: UInt64, _ expire: @escaping () -> Void) {
+        let ready = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            pending.append(expire)
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        ready.forEach { $0.resume() }
+    }
+
+    /// Expires one specific pending budget, oldest first.
+    func expire(at index: Int) {
+        let expire = lock.withLock { pending.indices.contains(index) ? pending.remove(at: index) : nil }
+        expire?()
+    }
+
+    func expireNext() async {
+        while true {
+            let next = lock.withLock { pending.isEmpty ? nil : pending.removeFirst() }
+            if let next {
+                next()
+                return
+            }
+            await withCheckedContinuation { continuation in
+                let alreadyScheduled = lock.withLock { () -> Bool in
+                    if pending.isEmpty {
+                        waiters.append(continuation)
+                        return false
+                    }
+                    return true
+                }
+                if alreadyScheduled { continuation.resume() }
+            }
+        }
+    }
+}
+
+/// Waits for `semaphore` off the cooperative pool. The bound only turns a
+/// regression into a failure instead of a hung fast suite.
+private func signalled(_ semaphore: DispatchSemaphore) async -> Bool {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            continuation.resume(returning: semaphore.wait(timeout: .now() + .seconds(10)) == .success)
+        }
     }
 }

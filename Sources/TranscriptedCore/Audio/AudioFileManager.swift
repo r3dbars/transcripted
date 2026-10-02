@@ -73,14 +73,11 @@ extension Audio {
         guard sessionIsCurrent() else {
             throw AudioCaptureStaleSessionError()
         }
-        var recordingFormat: AVAudioFormat
-        var recordingSnapshot: AudioRecordingFormatSnapshot
+        let recordingSnapshot: AudioRecordingFormatSnapshot
         if let pinnedMicrophone {
-            recordingFormat = pinnedMicrophone.recordingFormat
             recordingSnapshot = pinnedMicrophone.recordingSnapshot
             recordRecordingStartCapturedInput(deviceID: pinnedMicrophone.deviceID)
         } else if let preparedGraph {
-            recordingFormat = preparedGraph.recordingFormat
             recordingSnapshot = preparedGraph.recordingSnapshot
             recordRecordingStartCapturedInput(deviceID: preparedGraph.inputNode.auAudioUnit.deviceID)
         } else {
@@ -404,186 +401,108 @@ extension Audio {
             }
         }
 
-        // AirPods can flip to their call profile after the graph above was
-        // validated. Rebuild on the settled route before the mic file is
-        // sized for the old rate; installTap would otherwise have to refuse it.
-        // The pinned recorder keeps one format and resamples any later
-        // device format itself, so only the engine graph needs this.
-        if let unsettledGraph = preparedGraph {
-            let settledGraph = try settleMeetingInputGraphFormat(
-                unsettledGraph,
-                operation: "start_recording",
-                sessionGeneration: sessionGeneration
-            )
-            if settledGraph.engine !== unsettledGraph.engine {
-                preparedGraph = settledGraph
-                recordingFormat = settledGraph.recordingFormat
-                recordingSnapshot = settledGraph.recordingSnapshot
-                recordRecordingStartCapturedInput(deviceID: settledGraph.inputNode.auAudioUnit.deviceID)
-                refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
-                AppLogger.audioMic.info("Mic input format after route settled", [
-                    "sampleRate": "\(recordingSnapshot.sampleRate)",
-                    "channels": "\(recordingSnapshot.channelCount)",
-                    "voiceProcessing": "\(voiceProcessingEnabled)"
-                ])
-            }
-        }
-
-        // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
-        let micWriteContext: MicPCMWriteContext
-        do {
-            let captureDir = self.paths.audioCaptures
-            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
-            let journalURL = captureDir.appendingPathComponent(
-                fileURL.deletingPathExtension().lastPathComponent
-                    + MeetingRecordingJournalStore.filenameSuffix
-            )
-
-            // A timestamp collision must not let AVAudioFile truncate an
-            // earlier recording before begin() can reject its journal.
-            guard !FileManager.default.fileExists(atPath: fileURL.path),
-                  !FileManager.default.fileExists(atPath: journalURL.path) else {
-                throw MeetingRecordingJournalStartError.alreadyExists
-            }
-
-            guard sessionIsCurrent() else {
-                throw AudioCaptureStaleSessionError()
-            }
-
-            self.originalMicAudioFileURL = fileURL
-            self.micSegments = [MicRecordingSegment(url: fileURL)]
-            DispatchQueue.main.async {
-                guard sessionGeneration == self.recordingSessionGeneration else { return }
-                self.micAudioFileURL = fileURL
-            }
-
-            // Always create mono output format at the hardware sample rate
-            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
-                sampleRate: recordingSnapshot.sampleRate
-            )
-            self.monoOutputFormat = monoFormat
-            micWriteContext = MicPCMWriteContext(
-                generation: sessionGeneration,
-                monoFormat: monoFormat,
-                inputChannelCount: recordingSnapshot.channelCount
-            )
-
-            // Track channel count for manual downmix
-            self.inputChannelCount = recordingSnapshot.channelCount
-            if recordingSnapshot.channelCount > 1 {
-                AppLogger.audioMic.debug("Will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
-            }
-
-            // Save as mono WAV file
-            let newMicAudioFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: monoFormat.settings,
-                commonFormat: monoFormat.commonFormat,
-                interleaved: monoFormat.isInterleaved
-            )
-            let writerInstall = micAudioFileQueue.sync {
-                micAudioFileOwnership.installSessionWriter(
-                    newMicAudioFile,
-                    generation: sessionGeneration
-                )
-            }
-            guard writerInstall.didInstall else {
-                newMicAudioFile.close()
-                try? FileManager.default.removeItem(at: fileURL)
-                throw AudioCaptureStaleSessionError()
-            }
-            writerInstall.displacedWriter?.close()
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+        if let pinnedMicrophone {
+            // The pinned recorder keeps one format and resamples any later
+            // device format itself, so it skips the settle and tap steps.
+            let micWriteContext: MicPCMWriteContext
             do {
-                journalSession = try recordingJournal.begin(
-                    primaryMicURL: fileURL,
-                    languageSelection: languageSelectionForCurrentRecording,
-                    micOnlyByChoice: !currentRecordingCapturesSystemAudio
-                )
-            } catch {
-                // The input tap is not installed yet. Close only the writer
-                // this start still owns, then remove only its newly-created
-                // header-only WAV; a concurrent stop may already have taken
-                // ownership, in which case its finalizer owns the file.
-                discardUnjournaledMicStartFileIfOwned(
-                    fileURL,
+                micWriteContext = try createMeetingMicStartFile(
+                    recordingSnapshot: recordingSnapshot,
                     sessionGeneration: sessionGeneration
                 )
-                if sessionIsCurrent() {
-                    originalMicAudioFileURL = nil
-                    micSegments = []
-                    DispatchQueue.main.async {
-                        guard sessionGeneration == self.recordingSessionGeneration else { return }
-                        self.micAudioFileURL = nil
-                    }
-                }
-                throw error
+            } catch {
+                throw await surfacedMicStartFileFailure(error, sessionGeneration: sessionGeneration)
             }
-            if let systemURL = originalSystemAudioFileURL {
-                recordingJournal.recordSystemAudio(systemURL, session: journalSession)
-            }
-            AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
-        } catch let error as MeetingRecordingJournalStartError {
-            await MainActor.run {
-                guard sessionGeneration == self.recordingSessionGeneration else { return }
-                self.recordStartFailureStage(.microphoneFile)
-            }
-            throw error
-        } catch {
-            await MainActor.run {
-                guard sessionGeneration == self.recordingSessionGeneration else { return }
-                self.recordStartFailureStage(.microphoneFile)
-            }
-            throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
-        }
-
-        if let pinnedMicrophone {
             try startPinnedMeetingMicrophone(
                 pinnedMicrophone,
                 writeContext: micWriteContext,
                 sessionGeneration: sessionGeneration
             )
-        } else if let preparedGraph {
-            let engine = preparedGraph.engine
-            let inputNode = preparedGraph.inputNode
-            try withAudioGraphLock {
-                guard sessionIsCurrent() else {
-                    throw AudioCaptureStaleSessionError()
-                }
-                // Remove any existing tap (safety check)
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: inputNode,
-                    operation: "start_recording_install"
-                )
-
-                try ensureMicTapFormatStillMatches(
-                    recordingFormat,
-                    on: inputNode,
-                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
-                    operation: "start_recording"
-                )
-                // Install tap on microphone. The route can still move after
-                // the check above; the guard makes that a failed start, not a crash.
-                try AudioTapInstallGuard.run(operation: "start_recording") {
-                    inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                        self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+        } else if let unsettledGraph = preparedGraph {
+            do {
+                _ = try MeetingMicGraphStartSequence.run(
+                    unsettledGraph,
+                    settle: { unsettledGraph in
+                        // AirPods can flip to their call profile after the
+                        // graph above was validated. Rebuild on the settled
+                        // route before the mic file is sized for the old rate;
+                        // installTap would otherwise have to refuse it.
+                        let settledGraph = try settleMeetingInputGraphFormat(
+                            unsettledGraph,
+                            operation: "start_recording",
+                            sessionGeneration: sessionGeneration
+                        )
+                        if settledGraph.engine !== unsettledGraph.engine {
+                            recordRecordingStartCapturedInput(deviceID: settledGraph.inputNode.auAudioUnit.deviceID)
+                            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+                            AppLogger.audioMic.info("Mic input format after route settled", [
+                                "sampleRate": "\(settledGraph.recordingSnapshot.sampleRate)",
+                                "channels": "\(settledGraph.recordingSnapshot.channelCount)",
+                                "voiceProcessing": "\(voiceProcessingEnabled)"
+                            ])
+                        }
+                        return settledGraph
+                    },
+                    createSegment: { settledGraph in
+                        try createMeetingMicStartFile(
+                            recordingSnapshot: settledGraph.recordingSnapshot,
+                            sessionGeneration: sessionGeneration
+                        )
+                    },
+                    checkFormat: { settledGraph in
+                        try ensureMicTapFormatStillMatches(
+                            settledGraph.recordingFormat,
+                            on: settledGraph.inputNode,
+                            voiceProcessingEnabled: settledGraph.voiceProcessingEnabled,
+                            operation: "start_recording"
+                        )
+                    },
+                    installTap: { settledGraph, micWriteContext in
+                        // Install tap on microphone. The route can still move
+                        // after the check; the guard makes that a failed
+                        // start, not a crash.
+                        try AudioTapInstallGuard.run(operation: "start_recording") {
+                            settledGraph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: settledGraph.recordingFormat) { [weak self] buffer, _ in
+                                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                            }
+                        }
+                    },
+                    withinGraphLock: { settledGraph, checkAndInstallTap in
+                        let engine = settledGraph.engine
+                        let inputNode = settledGraph.inputNode
+                        try withAudioGraphLock {
+                            guard sessionIsCurrent() else {
+                                throw AudioCaptureStaleSessionError()
+                            }
+                            // Remove any existing tap (safety check)
+                            tearDownInputTapSafely(
+                                engine: engine,
+                                inputNode: inputNode,
+                                operation: "start_recording_install"
+                            )
+                            try checkAndInstallTap()
+                            do {
+                                engine.prepare()
+                                try engine.start()
+                            } catch {
+                                tearDownInputTapSafely(
+                                    engine: engine,
+                                    inputNode: inputNode,
+                                    operation: "start_recording_failed"
+                                )
+                                throw error
+                            }
+                        }
                     }
-                }
-
-                do {
-                    engine.prepare()
-                    try engine.start()
-                } catch {
-                    tearDownInputTapSafely(
-                        engine: engine,
-                        inputNode: inputNode,
-                        operation: "start_recording_failed"
+                )
+            } catch let failure as MeetingMicGraphStartSequence.Failure {
+                if failure.step == .createSegment {
+                    throw await surfacedMicStartFileFailure(
+                        failure.underlying,
+                        sessionGeneration: sessionGeneration
                     )
-                    throw error
                 }
+                throw failure.underlying
             }
         }
 
@@ -596,5 +515,121 @@ extension Audio {
             self.startTimer()
             cueHandler?(.recordingStarted)
         }
+    }
+
+    /// Creates the session's mono mic WAV, sized for `recordingSnapshot`, and
+    /// opens its journal. The input tap is not installed yet.
+    private func createMeetingMicStartFile(
+        recordingSnapshot: AudioRecordingFormatSnapshot,
+        sessionGeneration: UInt64
+    ) throws -> MicPCMWriteContext {
+        // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
+        let captureDir = self.paths.audioCaptures
+        try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
+        let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
+        let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
+        let journalURL = captureDir.appendingPathComponent(
+            fileURL.deletingPathExtension().lastPathComponent
+                + MeetingRecordingJournalStore.filenameSuffix
+        )
+
+        // A timestamp collision must not let AVAudioFile truncate an
+        // earlier recording before begin() can reject its journal.
+        guard !FileManager.default.fileExists(atPath: fileURL.path),
+              !FileManager.default.fileExists(atPath: journalURL.path) else {
+            throw MeetingRecordingJournalStartError.alreadyExists
+        }
+
+        guard sessionGeneration == recordingSessionGeneration else {
+            throw AudioCaptureStaleSessionError()
+        }
+
+        self.originalMicAudioFileURL = fileURL
+        self.micSegments = [MicRecordingSegment(url: fileURL)]
+        DispatchQueue.main.async {
+            guard sessionGeneration == self.recordingSessionGeneration else { return }
+            self.micAudioFileURL = fileURL
+        }
+
+        // Always create mono output format at the hardware sample rate
+        let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
+            sampleRate: recordingSnapshot.sampleRate
+        )
+        self.monoOutputFormat = monoFormat
+        let micWriteContext = MicPCMWriteContext(
+            generation: sessionGeneration,
+            monoFormat: monoFormat,
+            inputChannelCount: recordingSnapshot.channelCount
+        )
+
+        // Track channel count for manual downmix
+        self.inputChannelCount = recordingSnapshot.channelCount
+        if recordingSnapshot.channelCount > 1 {
+            AppLogger.audioMic.debug("Will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
+        }
+
+        // Save as mono WAV file
+        let newMicAudioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: monoFormat.settings,
+            commonFormat: monoFormat.commonFormat,
+            interleaved: monoFormat.isInterleaved
+        )
+        let writerInstall = micAudioFileQueue.sync {
+            micAudioFileOwnership.installSessionWriter(
+                newMicAudioFile,
+                generation: sessionGeneration
+            )
+        }
+        guard writerInstall.didInstall else {
+            newMicAudioFile.close()
+            try? FileManager.default.removeItem(at: fileURL)
+            throw AudioCaptureStaleSessionError()
+        }
+        writerInstall.displacedWriter?.close()
+        FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+        do {
+            journalSession = try recordingJournal.begin(
+                primaryMicURL: fileURL,
+                languageSelection: languageSelectionForCurrentRecording,
+                micOnlyByChoice: !currentRecordingCapturesSystemAudio
+            )
+        } catch {
+            // The input tap is not installed yet. Close only the writer
+            // this start still owns, then remove only its newly-created
+            // header-only WAV; a concurrent stop may already have taken
+            // ownership, in which case its finalizer owns the file.
+            discardUnjournaledMicStartFileIfOwned(
+                fileURL,
+                sessionGeneration: sessionGeneration
+            )
+            if sessionGeneration == recordingSessionGeneration {
+                originalMicAudioFileURL = nil
+                micSegments = []
+                DispatchQueue.main.async {
+                    guard sessionGeneration == self.recordingSessionGeneration else { return }
+                    self.micAudioFileURL = nil
+                }
+            }
+            throw error
+        }
+        if let systemURL = originalSystemAudioFileURL {
+            recordingJournal.recordSystemAudio(systemURL, session: journalSession)
+        }
+        AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
+        return micWriteContext
+    }
+
+    /// Marks the start as failed at the mic-file stage and returns the error
+    /// to throw: journal collisions pass through, the rest become code 3.
+    private func surfacedMicStartFileFailure(_ error: Error, sessionGeneration: UInt64) async -> Error {
+        await MainActor.run {
+            guard sessionGeneration == self.recordingSessionGeneration else { return }
+            self.recordStartFailureStage(.microphoneFile)
+        }
+        if error is MeetingRecordingJournalStartError {
+            return error
+        }
+        return NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
     }
 }

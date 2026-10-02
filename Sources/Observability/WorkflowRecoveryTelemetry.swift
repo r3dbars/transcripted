@@ -1,17 +1,22 @@
 import Foundation
 
 enum WorkflowRecoveryTelemetry {
+    /// `track` sends one analytics event. Production uses the default,
+    /// `AnalyticsReporter.track`; tests pass a recorder.
     static func attempted(
         workflowKind: String,
         failureKind: String,
         retrySource: String,
         attempt: Int = 1,
         surface: String,
-        artifactRetained: Bool
+        artifactRetained: Bool,
+        track: (String, [String: String]) -> Void = { event, properties in
+            AnalyticsReporter.track(event, properties: properties)
+        }
     ) {
-        AnalyticsReporter.track(
+        track(
             "workflow_recovery_attempted",
-            properties: baseProperties(
+            baseProperties(
                 workflowKind: workflowKind,
                 failureKind: failureKind,
                 retrySource: retrySource,
@@ -30,7 +35,10 @@ enum WorkflowRecoveryTelemetry {
         result: String,
         elapsedSeconds: TimeInterval? = nil,
         surface: String,
-        artifactRetained: Bool
+        artifactRetained: Bool,
+        track: (String, [String: String]) -> Void = { event, properties in
+            AnalyticsReporter.track(event, properties: properties)
+        }
     ) {
         var properties = baseProperties(
             workflowKind: workflowKind,
@@ -45,16 +53,10 @@ enum WorkflowRecoveryTelemetry {
             properties["elapsed_bucket"] = AnalyticsReporter.durationBucket(seconds: elapsedSeconds)
         }
 
-        AnalyticsReporter.track(
-            "workflow_recovery_finished",
-            properties: properties
-        )
+        track("workflow_recovery_finished", properties)
 
         if result == "failed" {
-            AnalyticsReporter.track(
-                "workflow_recovery_failed",
-                properties: properties
-            )
+            track("workflow_recovery_failed", properties)
         }
     }
 

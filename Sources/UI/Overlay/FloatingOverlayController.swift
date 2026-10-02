@@ -156,6 +156,7 @@ class FloatingOverlayController {
             return
         }
         self.sttRouter = sttRouter
+        LiveDictationCaptions.shared.attach(router: sttRouter)
 
         // Combine subscriptions: push live engine data to the island
         sttRouter.$audioLevel
@@ -239,8 +240,7 @@ class FloatingOverlayController {
         return NotchIslandDictationContent(
             phase: phase,
             notice: listeningNotice,
-            targetAppName: islandSourceApp?.localizedName,
-            microphoneName: sttRouter?.inputDeviceName
+            targetAppName: islandSourceApp?.localizedName
         )
     }
 

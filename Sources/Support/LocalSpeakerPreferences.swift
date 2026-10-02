@@ -3,7 +3,7 @@
 //
 // When enabled, the meeting pipeline runs PyAnnote offline diarization on
 // the mic track and surfaces multiple local speakers in the post-meeting
-// SpeakerNamingSheet. When disabled (default) the mic track is tagged as
+// speaker review. When disabled (default) the mic track is tagged as
 // a single "You" speaker exactly as before.
 //
 // Shipped default-off so the feature rolls out behind a settings toggle.

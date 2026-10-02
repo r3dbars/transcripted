@@ -100,17 +100,21 @@ extension ParakeetEngine {
     /// press after a wake or route change waited on an engine it never used.
     /// An unreadable route counts as a headset.
     func pinnedDictationSkipsEngineWarmup() async -> Bool {
-        let afterEngineFallback = pinnedDictationFellBackToEngine
+        let warmup = pinnedDictationWarmup
         let skipsEngineWarmup = try? await Self.systemInputWorkCoordinator.run(
             operation: "pinned_dictation_warmup_decision",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
         ) { () -> Bool in
-            PinnedDictationInputPolicy.skipsEngineWarmup(
-                for: try? Self.pinnedDictationInputSelection(),
-                afterEngineFallback: afterEngineFallback
-            )
+            warmup.skipsEngineWarmup(for: try? Self.pinnedDictationInputSelection())
         }
         return skipsEngineWarmup ?? true
+    }
+
+    /// `pinnedDictationFellBackToEngine` (stored on ParakeetEngine) seen
+    /// through its transitions.
+    var pinnedDictationWarmup: PinnedDictationWarmupState {
+        get { PinnedDictationWarmupState(fellBackToEngine: pinnedDictationFellBackToEngine) }
+        set { pinnedDictationFellBackToEngine = newValue.fellBackToEngine }
     }
 
     /// Idle wake with the pinned switch on. Mirrors the idle route-change
@@ -259,7 +263,7 @@ extension ParakeetEngine {
         discardPinnedDictationRecording()
         recording.startedUptime = ProcessInfo.processInfo.systemUptime
         pinnedDictationRecording = recording
-        pinnedDictationFellBackToEngine = false
+        pinnedDictationWarmup.recordRecorderStart()
         updateCachedInputDeviceSelection(prepared.selection)
         updateNativeSampleRate(prepared.format.sampleRate)
         isRecording = true
@@ -309,7 +313,7 @@ extension ParakeetEngine {
     /// Bluetooth default goes back into call mode. Counted so a rise shows up.
     /// Also turns engine warmup back on until the recorder next starts.
     private func reportPinnedDictationEngineFallback(stage: String, extra: [String: String] = [:]) {
-        pinnedDictationFellBackToEngine = true
+        pinnedDictationWarmup.recordEngineFallback()
         EventReporter.shared.capture(
             level: .warning,
             engine: "parakeet",
@@ -372,6 +376,7 @@ extension ParakeetEngine {
             lastAudioSampleAt = sampleArrivalTime
             if firstAudioSampleAt == nil { firstAudioSampleAt = sampleArrivalTime }
             pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
+            previewSink?.append(monoSamples, sampleRate: effectiveSampleRate)
             var droppedSeconds = 0.0
             let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
             if pendingSamples.totalDurationSeconds > capacitySeconds + 1 {

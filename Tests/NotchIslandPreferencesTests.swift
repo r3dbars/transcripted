@@ -17,6 +17,18 @@ func testNotchIslandPreferences() {
             "the Settings toggle and the island read the same key"
         )
     }
+
+    runSuite("NotchIslandPreferences keeps the live transcript off until turned on") {
+        let (defaults, suiteName) = makeNotchIslandPreferencesDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            NotchIslandPreferences.showsLiveTranscript(userDefaults: defaults),
+            "meetings don't run live transcription unless asked"
+        )
+        NotchIslandPreferences.setShowsLiveTranscript(true, userDefaults: defaults)
+        assertTrue(NotchIslandPreferences.showsLiveTranscript(userDefaults: defaults), "turning it on persists")
+    }
 }
 
 private func makeNotchIslandPreferencesDefaults() -> (UserDefaults, String) {

@@ -19,7 +19,7 @@
 // queued once, before the transcription task, so it acknowledges Stop without waiting
 // on paste. The "Start click answers the key press" suite pins that the fast path
 // queues the start cue before the mic start task, and that it plays once per session.
-// The "Feedback submit paths stay silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// The "Feedback submit paths stay silent" suite reads Sources/App/TranscriptedSupportActions.swift and
 // Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
 // `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
 // paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
@@ -57,18 +57,21 @@ func testDictationSounds() {
     }
 
     runSuite("UISoundPreferences reads the Mac's interface-sounds switch") {
-        let suiteName = "DictationSoundsTests.systemInterfaceSounds"
-        guard let defaults = UserDefaults(suiteName: suiteName) else {
-            assertTrue(false, "test defaults suite should open")
-            return
+        // The runner's own standard domain, not a named suite: run-tests.sh gives
+        // each run its own domain and deletes it after. A fixed suite name lives in
+        // cfprefsd and is shared by every process on the Mac, so a parallel run's
+        // cleanup could wipe this value between the write and the read.
+        let key = "com.apple.sound.uiaudio.enabled"
+        let original = UserDefaults.standard.object(forKey: key)
+        defer {
+            restoreUserDefault(original, forKey: key)
         }
-        defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        defaults.set(0, forKey: "com.apple.sound.uiaudio.enabled")
-        assertFalse(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "0 turns interface sounds off")
+        UserDefaults.standard.set(0, forKey: key)
+        assertFalse(UISoundPreferences.systemInterfaceSoundsEnabled(), "0 turns interface sounds off")
 
-        defaults.set(1, forKey: "com.apple.sound.uiaudio.enabled")
-        assertTrue(UISoundPreferences.systemInterfaceSoundsEnabled(userDefaults: defaults), "1 keeps interface sounds on")
+        UserDefaults.standard.set(1, forKey: key)
+        assertTrue(UISoundPreferences.systemInterfaceSoundsEnabled(), "1 keeps interface sounds on")
     }
 
     runSuite("AppSoundPlayer uses expected bundled files only") {
@@ -157,15 +160,18 @@ func testDictationSounds() {
     // paste or finalize tail, or a start path that skips playStartCueOnce.
 
     runSuite("Feedback submit paths stay silent") {
-        let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
-        assertFalse(
-            supportActions.contains("AppSoundPlayer.shared.play("),
-            "support email actions should not play any UI sound cue"
-        )
-        assertFalse(
-            supportActions.contains("NSSound.beep()"),
-            "support email actions should not fall back to a system beep"
-        )
+        // Banned-call scan (keep). TranscriptedSupportActions needs the whole
+        // app graph, so the runner can't compile it, and an injected sound
+        // player wouldn't catch a direct call added beside it. The mail handoff
+        // itself is behavior-tested in TranscriptedSupportActionsTests: a
+        // failed open shows the fallback window, never a sound.
+        let supportActions = readRepoTextFile("Sources/App/TranscriptedSupportActions.swift")
+        for (bannedCall, reason) in [
+            ("AppSoundPlayer.shared.play(", "support email actions should not play any UI sound cue"),
+            ("NSSound.beep()", "support email actions should not fall back to a system beep"),
+        ] {
+            assertFalse(supportActions.contains(bannedCall), reason)
+        }
 
         let settingsView = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeFeedbackSubmit = sourceSlice(

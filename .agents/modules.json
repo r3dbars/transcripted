@@ -96,15 +96,15 @@
     },
     {
       "name": "AppState",
-      "paths": ["Sources/TranscriptedAppState.swift"],
+      "paths": ["Sources/App/TranscriptedAppState.swift"],
       "mayDependOn": ["Capture", "WritingBridge", "Meeting", "Dictation", "Speech", "UIShared", "Support", "Observability", "Core:core-vocab"],
       "agentsDoc": "Sources/AGENTS.md"
     },
     {
       "name": "AppShell",
-      "paths": ["Sources/TranscriptedApp.swift", "Sources/TranscriptedAppDelegate+LaunchReports.swift", "Sources/TranscriptedAppDelegate+Lifecycle.swift", "Sources/TranscriptedAppDelegate+MenuBar.swift", "Sources/TranscriptedAppDelegate+SettingsActions.swift", "Sources/TranscriptedMenuCommands.swift"],
+      "paths": ["Sources/App"],
       "mayDependOn": ["*"],
-      "agentsDoc": "Sources/AGENTS.md"
+      "agentsDoc": "Sources/App/AGENTS.md"
     }
   ],
   "cycleAllowedEdges": [

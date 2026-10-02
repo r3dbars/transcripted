@@ -248,16 +248,9 @@ extension MeetingSessionController {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            case .recorded:
                 failedMeetingStore.preserveFailedMeetingForRetry(
-                    micAudioURL: micURL,
-                    systemAudioURL: systemURL,
-                    errorMessage: "Transcription cancelled",
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate,
-                    splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection,
-                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
+                    transcriptionQueue.failedQueueRow(for: job, errorMessage: "Transcription cancelled")
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
@@ -401,14 +394,21 @@ extension MeetingSessionController {
         activeTranscriptionTrigger = .savedMeetingRetranscription
         transition(to: .transcribing, reason: "retranscribe_started")
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "saved_audio_retranscribing")
-        taskManager.startSavedAudioRetranscription(
+        let request = transcriptionQueue.requestBuilder.savedAudioRetranscription(
             micURL: micAudioURL,
             systemURL: systemAudioURL,
-            outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
             replacementTranscriptURL: transcriptURL,
-            recordingDate: recordingDate,
+            recordingDate: recordingDate
+        )
+        taskManager.startSavedAudioRetranscription(
+            micURL: request.micURL,
+            systemURL: request.systemURL,
+            outputFolder: MeetingStoragePaths.transcriptsFolder,
+            meetingTitle: request.meetingTitle,
+            splitLocalSpeakers: request.options.splitLocalSpeakers,
+            replacementTranscriptURL: request.replacementTranscriptURL,
+            recordingDate: request.recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
                 self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
             }

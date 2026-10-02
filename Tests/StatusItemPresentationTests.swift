@@ -1,51 +1,64 @@
-// Source-text pins: the first suite reads Sources/TranscriptedApp.swift as text instead of calling
-// refreshStatusItemPresentation(), because that method lives on TranscriptedAppDelegate (@MainActor
-// NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
-// runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
-// for the glyph states and accessibility labels, and guards against a red or stock-symbol treatment that
-// would make the always-visible capture icon alarming instead of quiet; its MenuBarGlyph checks render the
-// real images (template flag, neutral ink) instead of reading MenuBarGlyph.swift. The second suite is real behavioral
-// coverage: it renders every MenuBarGlyph into a bitmap and checks the silhouettes actually differ where
-// they are meant to. The third keeps MenuBarGlyphGeometry (numbers and the drawn tail curves) in step with
-// the generator that draws the committed SVGs in docs/assets/menu-bar-icon/. If you rename refreshStatusItemPresentation or the
-// method after it, update statusItemPresentationSlice below to match.
+// The first suite drives StatusItemPresentation, the same code the app delegate runs at launch and on
+// every recording change, against a plain NSButton, and renders every MenuBarGlyph to check it stays a
+// neutral template. The second renders every MenuBarGlyph into a bitmap and checks the silhouettes
+// actually differ where they are meant to. The third keeps MenuBarGlyphGeometry (numbers and the drawn
+// tail curves) in step with the generator that draws the committed SVGs in docs/assets/menu-bar-icon/.
 
 import AppKit
 import Foundation
 
+@MainActor
 func testStatusItemPresentation() {
     runSuite("status item uses the app icon's bubble with quiet, distinct capture states") {
-        let source = readSourceFixture("Sources/TranscriptedApp.swift")
-        let presentation = statusItemPresentationSlice(source)
+        let cases: [(meeting: Bool, dictating: Bool, glyph: MenuBarGlyph, label: String)] = [
+            (false, false, .idle, "Transcripted"),
+            (false, true, .dictating, "Transcripted — dictating"),
+            (true, false, .meetingRecording, "Transcripted — recording meeting"),
+            (true, true, .meetingRecording, "Transcripted — recording meeting"),
+        ]
+        for state in cases {
+            let presentation = StatusItemPresentation.for(meetingRecording: state.meeting, dictating: state.dictating)
+            assertEqual(presentation.glyph, state.glyph, "meeting \(state.meeting), dictating \(state.dictating) glyph")
+            assertEqual(presentation.label, state.label, "meeting \(state.meeting), dictating \(state.dictating) label")
 
-        assertTrue(
-            presentation.contains("glyph = .meetingRecording")
-                && presentation.contains("label = \"Transcripted — recording meeting\""),
-            "meeting recording should use the filled bubble with a dot while preserving its accessible state"
+            // The button the delegate writes: a template bubble, no tint, the state's label everywhere.
+            let button = NSButton(frame: .zero)
+            button.contentTintColor = .systemRed
+            StatusItemPresentation.apply(
+                to: button,
+                meetingRecording: state.meeting,
+                dictating: state.dictating,
+                updateTooltip: nil
+            )
+            assertTrue(
+                button.image === state.glyph.image(accessibilityDescription: state.label),
+                "\(state.label) should show the MenuBarGlyph image so every state matches the app icon"
+            )
+            assertTrue(button.image?.isTemplate == true, "\(state.label) should stay a template image")
+            assertEqual(button.image?.accessibilityDescription, state.label, "the image should carry the state's label")
+            assertNil(button.contentTintColor, "\(state.label) should not be tinted an attention color")
+            assertEqual(button.accessibilityLabel(), state.label, "VoiceOver should hear the capture state")
+            assertEqual(button.toolTip, state.label, "the tooltip should name the capture state")
+        }
+
+        // Launch shows the idle bubble, the same thing a refresh with nothing recording shows.
+        let launch = StatusItemPresentation.for(meetingRecording: false, dictating: false)
+        assertEqual(launch.glyph, .idle, "the status item should launch showing the idle bubble")
+        assertEqual(launch.label, StatusItemPresentation.idleLabel, "launch should use the plain app name")
+
+        let updating = NSButton(frame: .zero)
+        StatusItemPresentation.apply(
+            to: updating,
+            meetingRecording: false,
+            dictating: true,
+            updateTooltip: "update 1.2.3 available"
         )
-        assertTrue(
-            presentation.contains("glyph = .dictating")
-                && presentation.contains("label = \"Transcripted — dictating\""),
-            "dictation should use the filled bubble while preserving its accessible state"
+        assertEqual(
+            updating.toolTip,
+            "Transcripted — dictating - update 1.2.3 available",
+            "an available update should add to the tooltip without hiding the capture state"
         )
-        assertTrue(
-            presentation.contains("glyph = .idle") && presentation.contains("label = \"Transcripted\""),
-            "idle should use the outline bubble"
-        )
-        assertTrue(
-            presentation.contains("glyph.image(accessibilityDescription: label)"),
-            "the status item image should come from MenuBarGlyph so every state matches the app icon"
-        )
-        assertFalse(
-            presentation.contains("systemSymbolName")
-                || presentation.contains("systemRed")
-                || presentation.contains("isTemplate = false"),
-            "the always-visible capture glyphs should not fall back to stock symbols or a red treatment"
-        )
-        assertTrue(
-            source.contains("button.image = MenuBarGlyph.idle.image(accessibilityDescription: \"Transcripted\")"),
-            "the status item should launch showing the idle bubble, not a stock symbol"
-        )
+        assertEqual(updating.accessibilityLabel(), "Transcripted — dictating", "the update note should stay out of the label")
 
         // MenuBarGlyph is compiled here: check the images it actually makes
         // instead of grepping its source for isTemplate and systemRed.
@@ -284,15 +297,4 @@ private func inkedPixelsThroughNSImage(_ glyph: MenuBarGlyph) -> Int {
         }
     }
     return inked
-}
-
-private func statusItemPresentationSlice(_ source: String) -> String {
-    guard let start = source.range(of: "func refreshStatusItemPresentation()") else {
-        return ""
-    }
-    let tail = source[start.lowerBound...]
-    guard let end = tail.range(of: "func closePopover()") else {
-        return String(tail)
-    }
-    return String(tail[..<end.lowerBound])
 }

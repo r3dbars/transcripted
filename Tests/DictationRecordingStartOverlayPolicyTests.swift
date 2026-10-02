@@ -495,34 +495,45 @@ func testDictationRecordingStartOverlayPolicy() async {
         )
     }
 
-    // Still source-text, deliberately. MeetingSessionController can't be
-    // built in the fast runner, and the same handler is pinned by
-    // MeetingSessionUIPolicyTests, which the meeting lane (b09) owns.
-    // Convert both together once that lands.
-    runSuite("Unexpected meeting capture stop releases shared dictation mic") {
-        let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
-        guard let start = source.range(of: "func handleUnexpectedCaptureStop("),
-              let end = source.range(of: "// preserveQueuedTranscriptionJobsForShutdown", range: start.upperBound..<source.endIndex) else {
-            assertTrue(false, "unexpected capture-stop handler should remain present")
-            return
-        }
-        let body = String(source[start.lowerBound..<end.lowerBound])
-        assertTrue(body.contains("clearSharedDictationMicRelay()"), "unexpected stop should drain the shared PCM relay")
-        assertTrue(
-            body.contains("resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded"),
-            "unexpected stop should resume any in-flight dictation on the regular mic"
+    await runSuite("Unexpected meeting capture stop releases shared dictation mic") {
+        // A dictation borrowing the meeting mic must get its regular mic back
+        // after the meeting's PCM relay is drained, never before.
+        let capture = SharedMicHandoffCaptureFake()
+        var relayAttached = true
+        var dictationOnRegularMic = false
+        let handled = await MeetingStopSequence.unexpectedStop(
+            state: .recording,
+            transition: { _, _ in capture.events.append("leave_recording") },
+            quietLiveWarnings: {},
+            capture: capture,
+            clearRelay: {
+                relayAttached = false
+                capture.events.append("clear_relay")
+            },
+            resumeDictation: {
+                assertFalse(relayAttached, "dictation resumes only after the shared relay is drained")
+                dictationOnRegularMic = true
+                capture.events.append("resume_dictation")
+            }
         )
-        guard let recordingGuard = body.range(of: "guard case .recording = state"),
-              let leaveRecording = body.range(of: "transition(to: .stoppingRecording, reason: \"unexpected_capture_stop\")"),
-              let firstAwait = body.range(of: "await capture.flushSharedDictationMicHandler()") else {
-            assertTrue(false, "unexpected stop must leave .recording before any await")
-            return
-        }
-        assertTrue(
-            recordingGuard.lowerBound < leaveRecording.lowerBound
-                && leaveRecording.lowerBound < firstAwait.lowerBound,
-            "unexpected stop must enter .stoppingRecording before flush/preserve awaits"
-        )
+        assertTrue(handled)
+        assertFalse(relayAttached, "unexpected stop should drain the shared PCM relay")
+        assertTrue(dictationOnRegularMic, "unexpected stop should resume any in-flight dictation on the regular mic")
+        assertEqual(capture.events, ["leave_recording", "flush", "clear_relay", "resume_dictation"])
+    }
+}
+
+/// Stands in for `MeetingCaptureBridge` behind `MeetingCaptureControlling`.
+@MainActor
+private final class SharedMicHandoffCaptureFake: MeetingCaptureControlling {
+    var events: [String] = []
+    let hasObservedSystemAudioSignal = false
+    let systemAudioFinalizationFailed = false
+    let systemAudioStartPermissionExplicitlyDenied = false
+
+    func flushSharedDictationMicHandler() async {
+        events.append("flush")
+        await Task.yield()
     }
 }
 

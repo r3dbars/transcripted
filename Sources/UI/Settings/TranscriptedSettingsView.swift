@@ -537,7 +537,7 @@ struct TranscriptedSettingsView: View {
             occurredAt: submission.target.createdAt,
             issueKind: submission.issueKind.label,
             userNotes: submission.notes,
-            appVersion: TranscriptedSupportActions.appVersionDescription,
+            appVersion: TranscriptedAppVersion.description,
             includeDiagnostics: submission.includeDiagnostics
         )
 

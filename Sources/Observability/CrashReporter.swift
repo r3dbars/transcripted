@@ -24,30 +24,18 @@ final class CrashReporter {
     static func setup(dsn: String? = SentryRuntimeConfiguration.dsn()) {
         guard let dsn, !shared.hasStarted else { return }
 
-        let options = Options()
+        var options = Options()
         options.dsn = dsn
         options.environment = SentryRuntimeConfiguration.environment()
         options.releaseName = SentryRuntimeConfiguration.releaseName()
         options.dist = SentryRuntimeConfiguration.dist()
-        options.sendDefaultPii = false
+        CrashReporterPrivacyOptions.apply(to: &options)
         options.enableCrashHandler = true
         options.enableUncaughtNSExceptionReporting = true
         options.enableAppHangTracking = SentryRuntimeConfiguration.appHangTrackingEnabled()
         // Only a freeze of 5+ seconds counts, and `beforeSend` drops any hang
         // while a popup was on screen (see AppHangReportPolicy).
         options.appHangTimeoutInterval = AppHangReportPolicy.timeoutSeconds
-        // Session tracking is started explicitly after onboarding and when the
-        // user changes the crash-reporting preference. That keeps the first-run
-        // choice and later opt-outs aligned with Release Health envelopes.
-        options.enableAutoSessionTracking = false
-        options.enableNetworkBreadcrumbs = false
-        // The SDK otherwise files every URLSession 5xx as its own error issue
-        // (`HTTPClientError: HTTP Client Error with status code: 503`) with no
-        // URL attached. Those are the appcast or analytics endpoints having a
-        // bad hour, not app failures, and they bury the real issues.
-        options.enableCaptureFailedRequests = false
-        options.maxBreadcrumbs = 0
-        options.attachStacktrace = false
         options.beforeBreadcrumb = { _ in nil }
         options.beforeCaptureScreenshot = { _ in false }
         options.beforeCaptureViewHierarchy = { _ in false }
@@ -360,3 +348,5 @@ private func transcriptedUnrecognizedSelectorHandler(_ exception: NSException) {
     }
     CrashReporter.forwardUncaughtException(exception)
 }
+
+extension Options: SentryPrivacyOptionsSettable {}

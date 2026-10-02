@@ -7,6 +7,31 @@ var totalTests = 0
 var passedTests = 0
 var failedTests = 0
 
+/// Every FAIL line, in order. The runner repeats them under its summary, so a
+/// summary always names the tests behind its count. If two runs ever write to
+/// one log, each summary still says what failed. See Tests/README.md.
+var failureLines: [String] {
+    failureLinesLock.lock()
+    defer { failureLinesLock.unlock() }
+    return recordedFailureLines
+}
+private var recordedFailureLines: [String] = []
+private let failureLinesLock = NSLock()
+
+/// The suite runSuite is running now, so a recapped FAIL line says which test
+/// it came from.
+var currentSuiteName = ""
+
+/// Counts one failed check and prints its FAIL line.
+func recordFailure(_ line: String) {
+    failedTests += 1
+    let suite = currentSuiteName
+    failureLinesLock.lock()
+    recordedFailureLines.append(suite.isEmpty ? line : "\(line)  (in \(suite))")
+    failureLinesLock.unlock()
+    print(line)
+}
+
 struct ObservabilitySanitizerCorpus: Decodable {
     let cases: [ObservabilitySanitizerCorpusCase]
 }
@@ -30,9 +55,8 @@ func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String = "
     if actual == expected {
         passedTests += 1
     } else {
-        failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] \(message.isEmpty ? "" : message + " — ")expected \(expected), got \(actual)")
+        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "" : message + " — ")expected \(expected), got \(actual)")
     }
 }
 
@@ -41,9 +65,8 @@ func assertTrue(_ condition: Bool, _ message: String = "", file: String = #file,
     if condition {
         passedTests += 1
     } else {
-        failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] \(message.isEmpty ? "expected true" : message)")
+        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected true" : message)")
     }
 }
 
@@ -56,9 +79,8 @@ func assertNil<T>(_ value: T?, _ message: String = "", file: String = #file, lin
     if value == nil {
         passedTests += 1
     } else {
-        failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(String(describing: value))")
+        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(String(describing: value))")
     }
 }
 
@@ -67,9 +89,8 @@ func assertNotNil<T>(_ value: T?, _ message: String = "", file: String = #file, 
     if value != nil {
         passedTests += 1
     } else {
-        failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] \(message.isEmpty ? "expected non-nil" : message)")
+        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected non-nil" : message)")
     }
 }
 
@@ -103,12 +124,14 @@ private func skipQuarantinedSuite(_ name: String) -> Bool {
 
 func runSuite(_ name: String, _ block: () -> Void) {
     if skipQuarantinedSuite(name) { return }
+    currentSuiteName = name
     print("Running \(name)...")
     block()
 }
 
 func runSuite(_ name: String, _ block: () async -> Void) async {
     if skipQuarantinedSuite(name) { return }
+    currentSuiteName = name
     print("Running \(name)...")
     await block()
 }
@@ -144,54 +167,6 @@ func repoFixtureURL(_ relativePath: String) -> URL {
         .appendingPathComponent(relativePath)
 }
 
-/// ParakeetEngine is one @MainActor class split by area into a core file plus
-/// extension files. Its source contracts read the core and these extensions
-/// together. Each file ends with its closing brace at column zero, so a slice
-/// ending at "\n}\n" stops at the end of the file it started in.
-let parakeetEngineSourceFiles = [
-    "ParakeetEngine.swift",
-    "ParakeetInputReadiness.swift",
-    "ParakeetInputRoute.swift",
-    "ParakeetAudioTap.swift",
-    "ParakeetRecordingStart.swift",
-    "ParakeetRecordingTeardown.swift",
-    "ParakeetDictationTranscription.swift",
-    "ParakeetASRInference.swift",
-]
-
-func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
-    parakeetEngineSourceFiles.map { name in
-        readSourceFixture(
-            "Sources/Speech/\(name)",
-            description: name,
-            file: file,
-            line: line
-        )
-    }.joined(separator: "\n")
-}
-
-/// MeetingSessionController is one @MainActor class split into a core file
-/// plus `MeetingSessionController+Area.swift` extension files. `part: "Stop"`
-/// reads only `MeetingSessionController+Stop.swift`, so an ordering pin stays
-/// inside the one file both of its anchors live in. With no part, it reads the
-/// core file and every extension joined, for presence checks and call counts.
-func readMeetingSessionControllerSource(part: String? = nil, file: String = #file, line: Int = #line) -> String {
-    joinedSplitTypeText(directory: "Sources/Meeting", type: "MeetingSessionController", part: part, file: file, line: line)
-}
-
-private func joinedSplitTypeText(directory: String, type: String, part: String?, file: String, line: Int) -> String {
-    let names: [String]
-    if let part {
-        names = ["\(type)+\(part).swift"]
-    } else {
-        let listing = (try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(directory).path)) ?? []
-        names = ["\(type).swift"] + listing.filter { $0.hasPrefix("\(type)+") && $0.hasSuffix(".swift") }.sorted()
-    }
-    return names.map { name in
-        readSourceFixture("\(directory)/\(name)", description: name, file: file, line: line)
-    }.joined(separator: "\n")
-}
-
 func readSourceFixture(
     _ relativePath: String,
     description: String? = nil,
@@ -203,9 +178,8 @@ func readSourceFixture(
         return try String(contentsOf: url, encoding: .utf8)
     } catch {
         totalTests += 1
-        failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read \(description ?? relativePath): \(error)")
+        recordFailure("  FAIL [\(loc)] could not read \(description ?? relativePath): \(error)")
         return ""
     }
 }
@@ -217,10 +191,9 @@ func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.s
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(T.self, from: data)
     } catch {
-        failedTests += 1
         totalTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not load fixture \(relativePath): \(error)")
+        recordFailure("  FAIL [\(loc)] could not load fixture \(relativePath): \(error)")
         fatalError("Missing required fixture \(relativePath)")
     }
 }

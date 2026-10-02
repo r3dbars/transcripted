@@ -17,144 +17,151 @@ import Foundation
 import TranscriptedCore
 
 extension ParakeetEngine {
+    /// Installs the dictation tap and starts the engine through
+    /// `ParakeetAudioGraph.start`, which owns the lease checks, the call-app
+    /// refresh before the voice-processing choice, and the commit.
+    /// `attemptEngine` and `attemptQueue` name the graph this attempt began
+    /// on, so a start that loses it cleans up there, not on the successor.
     func installTapAndStartEngine(
         startLeaseOwner: ParakeetAudioEngineQueueOwnerToken,
-        startCancellationState: ParakeetAudioStartCancellationState,
-        voiceProcessingEnabled: Bool
-    ) async throws -> ParakeetAudioStartSnapshot {
-        let wasPrewarmed = isEnginePrewarmed
-        let workOwnership = audioEngineWorkOwnership
-        let startWorkIsCurrent: () -> Bool = { [workOwnership] in
-            startCancellationState.canRunWork
-                && workOwnership.isActive(
-                    owner: startLeaseOwner,
-                    phase: .audioStart
+        attemptEngine: AVAudioEngine,
+        attemptQueue: DispatchQueue,
+        selection: DictationInputDeviceSelection?
+    ) async throws -> ParakeetAudioStartOutcome {
+        let driver = audioGraph.driver
+        return try await audioGraph.start(
+            owner: startLeaseOwner,
+            holder: self,
+            callApps: ParakeetCallAppPresence(
+                refresh: { CallAppMicrophoneSharingMonitor.shared.refresh() },
+                isRunning: { CallAppMicrophoneSharingMonitor.shared.isCallAppRunning }
+            ),
+            voiceProcessingEnabled: { callAppRunning in
+                let decision = DictationVoiceProcessingRoutePolicy.decision(
+                    requested: DictationVoiceProcessingRoutePolicy.isRequested(
+                        savedPreference: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+                        callAppRunning: callAppRunning
+                    ),
+                    selection: selection
                 )
-        }
-        return try await runTimedAudioEngineWork(
-            operation: "start_recording",
-            isWorkCurrent: startWorkIsCurrent,
-            cleanupAfterCancellation: Self.cleanUpLateAudioStart(on:),
-            cleanupAfterLateCompletion: Self.cleanUpLateAudioStart(on:)
-        ) { audioEngine in
-            guard startWorkIsCurrent() else { throw CancellationError() }
-            let workStartedAt = CFAbsoluteTimeGetCurrent()
-            var stageTimings: [String: Int] = [:]
-            let inputNode = audioEngine.inputNode
-            let tapFormat = try ParakeetDictationTapPreparation.prepare(
-                LiveDictationTapNode(inputNode: inputNode),
-                voiceProcessingEnabled: voiceProcessingEnabled,
-                isCurrent: startWorkIsCurrent,
-                stageTimings: &stageTimings
-            )
-            let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            // A route change after the format read makes installTap raise an
-            // Objective-C exception; the guard turns it into a failed start.
-            try AudioTapInstallGuard.run(operation: "dictation_start") { inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat) { [weak self] buffer, _ in
-                guard startCancellationState.canDeliverSamples else { return }
-                guard let self = self,
-                      let monoSamples = self.extractMonoSamples(from: buffer) else { return }
-                let frameLength = monoSamples.count
-                guard frameLength > 0 else { return }
-                let bufferFormat = Self.audioFormatSummary(buffer.format)
-                let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
-                    bufferSampleRate: bufferFormat.sampleRate
-                )
-                let hasNonZeroSignal = ParakeetSampleSignalPolicy.hasNonZeroSignal(monoSamples)
-                let sampleArrivalTime = CFAbsoluteTimeGetCurrent()
-                let admitted = self.pendingSamplesLock.withLock { () -> (firstSample: Bool, droppedSeconds: Double)? in
-                    // Recheck admission after acquiring the buffer lock: a cancelled
-                    // tap must not append into the next recording's timeline.
-                    guard startCancellationState.canDeliverSamples else { return nil }
-                    self.nativeSampleRate = effectiveSampleRate
-                    let firstSample = !self.didReceiveAudioSamples
-                    self.didReceiveAudioSamples = true
-                    if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
-                    self.lastAudioSampleAt = sampleArrivalTime
-                    if self.firstAudioSampleAt == nil { self.firstAudioSampleAt = sampleArrivalTime }
-                    self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
-                    var droppedSeconds = 0.0
-                    let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
-                    if self.pendingSamples.totalDurationSeconds > capacitySeconds + 1 {
-                        let dropped = self.pendingSamples.trimToLatest(
-                            durationSeconds: capacitySeconds
-                        )
-                        if !self.didReportPendingSampleTruncation {
-                            self.didReportPendingSampleTruncation = true
-                            droppedSeconds = dropped
-                        }
-                    }
-                    return (firstSample, droppedSeconds)
+                if decision == .deferredForSplitBluetoothOutput {
+                    AppLogger.transcription.info(
+                        "PARAKEET | Apple voice processing deferred for split Bluetooth output route"
+                    )
                 }
-                guard let admitted else { return }
-
-                if admitted.firstSample {
-                    let startToFirstSampleMs = self.audioStartReferenceTime.map {
-                        Int((CFAbsoluteTimeGetCurrent() - $0) * 1000)
-                    }
-                    Task { @MainActor in
-                        var context = [
-                            "sample_rate": "\(effectiveSampleRate)",
-                            "channels": "\(bufferFormat.channelCount)",
-                            "frames": "\(frameLength)",
-                            "sample_signal_started": "\(hasNonZeroSignal)"
-                        ]
-                        if let startToFirstSampleMs {
-                            context["start_to_first_sample_ms"] = "\(startToFirstSampleMs)"
-                        }
-                        EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_samples_detected",
-                            message: "Audio samples started flowing",
-                            context: context)
-                    }
+                return decision.shouldEnable
+            },
+            wasPrewarmed: isEnginePrewarmed,
+            timeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout,
+            makeTapHandler: { [weak self] lease in
+                self?.makeDictationTapHandler(lease: lease) ?? { _ in }
+            },
+            cleanUpLateStart: {
+                attemptQueue.async {
+                    driver.cleanUpLateStart(attemptEngine)
                 }
-
-                if admitted.droppedSeconds > 0 {
-                    let droppedSeconds = admitted.droppedSeconds
-                    Task { @MainActor in
-                        EventReporter.shared.capture(
-                            level: .warning,
-                            engine: "parakeet",
-                            event: "audio_buffer_truncated",
-                            message: "Recording exceeded the audio buffer capacity; oldest audio was dropped",
-                            context: [
-                                "dropped_seconds": String(format: "%.1f", droppedSeconds),
-                                "capacity_seconds": "\(Int(TranscriptedConstants.audioBufferCapacitySeconds))",
-                            ]
-                        )
-                    }
-                }
-
-                let now = CFAbsoluteTimeGetCurrent()
-                guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
-                self.lastLevelUpdate = now
-
-                let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
-
+            },
+            recheckCallApps: {
+                // A call app can launch while the worker starts the graph, and
+                // the launch observer can't recover a graph an in-flight start
+                // still owns. This task runs after the start's MainActor turn.
                 Task { @MainActor [weak self] in
-                    guard startCancellationState.canDeliverSamples else { return }
-                    self?.audioLevel = normalized
+                    await self?.shareMicrophoneWithCallAppIfNeeded()
                 }
-            } }
-            guard startWorkIsCurrent() else { throw CancellationError() }
-            stageTimings["audio_tap_install_ms"] = Self.elapsedMilliseconds(since: tapInstallStartedAt)
-
-            let engineWasRunning = audioEngine.isRunning
-            if !wasPrewarmed || !audioEngine.isRunning {
-                stageTimings["audio_engine_prepare_ms"] = 0
-                let engineStartStartedAt = CFAbsoluteTimeGetCurrent()
-                guard startWorkIsCurrent() else { throw CancellationError() }
-                try audioEngine.start()
-                guard startWorkIsCurrent() else { throw CancellationError() }
-                stageTimings["audio_engine_start_ms"] = Self.elapsedMilliseconds(since: engineStartStartedAt)
-            } else {
-                stageTimings["audio_engine_prepare_ms"] = 0
-                stageTimings["audio_engine_start_ms"] = 0
             }
-            stageTimings["audio_start_work_ms"] = Self.elapsedMilliseconds(since: workStartedAt)
-            return ParakeetAudioStartSnapshot(
-                engineWasRunning: engineWasRunning,
-                stageTimings: stageTimings
+        )
+    }
+
+    /// The tap block for one start. `ParakeetAudioGraph.start` already drops
+    /// buffers once the lease is cancelled; the second check under the
+    /// buffer lock keeps a cancelled tap out of the next recording.
+    private func makeDictationTapHandler(
+        lease: ParakeetAudioStartLease
+    ) -> (AVAudioPCMBuffer) -> Void {
+        return { [weak self] buffer in
+            guard let self,
+                  let monoSamples = self.extractMonoSamples(from: buffer) else { return }
+            let frameLength = monoSamples.count
+            guard frameLength > 0 else { return }
+            let bufferFormat = Self.audioFormatSummary(buffer.format)
+            let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+                bufferSampleRate: bufferFormat.sampleRate
             )
+            let hasNonZeroSignal = ParakeetSampleSignalPolicy.hasNonZeroSignal(monoSamples)
+            let sampleArrivalTime = CFAbsoluteTimeGetCurrent()
+            let admitted = self.pendingSamplesLock.withLock { () -> (firstSample: Bool, droppedSeconds: Double)? in
+                // Recheck admission after acquiring the buffer lock: a cancelled
+                // tap must not append into the next recording's timeline.
+                guard lease.canDeliverSamples else { return nil }
+                self.nativeSampleRate = effectiveSampleRate
+                let firstSample = !self.didReceiveAudioSamples
+                self.didReceiveAudioSamples = true
+                if hasNonZeroSignal { self.didReceiveNonZeroAudioSamples = true }
+                self.lastAudioSampleAt = sampleArrivalTime
+                if self.firstAudioSampleAt == nil { self.firstAudioSampleAt = sampleArrivalTime }
+                self.pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)
+                self.previewSink?.append(monoSamples, sampleRate: effectiveSampleRate)
+                var droppedSeconds = 0.0
+                let capacitySeconds = Double(TranscriptedConstants.audioBufferCapacitySeconds)
+                if self.pendingSamples.totalDurationSeconds > capacitySeconds + 1 {
+                    let dropped = self.pendingSamples.trimToLatest(
+                        durationSeconds: capacitySeconds
+                    )
+                    if !self.didReportPendingSampleTruncation {
+                        self.didReportPendingSampleTruncation = true
+                        droppedSeconds = dropped
+                    }
+                }
+                return (firstSample, droppedSeconds)
+            }
+            guard let admitted else { return }
+
+            if admitted.firstSample {
+                let startToFirstSampleMs = self.audioStartReferenceTime.map {
+                    Int((CFAbsoluteTimeGetCurrent() - $0) * 1000)
+                }
+                Task { @MainActor in
+                    var context = [
+                        "sample_rate": "\(effectiveSampleRate)",
+                        "channels": "\(bufferFormat.channelCount)",
+                        "frames": "\(frameLength)",
+                        "sample_signal_started": "\(hasNonZeroSignal)"
+                    ]
+                    if let startToFirstSampleMs {
+                        context["start_to_first_sample_ms"] = "\(startToFirstSampleMs)"
+                    }
+                    EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_samples_detected",
+                        message: "Audio samples started flowing",
+                        context: context)
+                }
+            }
+
+            if admitted.droppedSeconds > 0 {
+                let droppedSeconds = admitted.droppedSeconds
+                Task { @MainActor in
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "audio_buffer_truncated",
+                        message: "Recording exceeded the audio buffer capacity; oldest audio was dropped",
+                        context: [
+                            "dropped_seconds": String(format: "%.1f", droppedSeconds),
+                            "capacity_seconds": "\(Int(TranscriptedConstants.audioBufferCapacitySeconds))",
+                        ]
+                    )
+                }
+            }
+
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
+            self.lastLevelUpdate = now
+
+            let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
+
+            Task { @MainActor [weak self] in
+                guard lease.canDeliverSamples else { return }
+                self?.audioLevel = normalized
+            }
         }
     }
 
@@ -218,5 +225,50 @@ extension ParakeetEngine {
         var liveInputFormat: AVAudioFormat { inputNode.inputFormat(forBus: 0) }
         var liveOutputFormat: AVAudioFormat { inputNode.outputFormat(forBus: 0) }
         var isVoiceProcessingActive: Bool { inputNode.isVoiceProcessingEnabled }
+    }
+}
+
+/// The start-side AVAudioEngine calls behind `ParakeetAudioGraph.start`.
+/// `prepareTap` reads `engine.inputNode`, which on a fresh engine binds the
+/// macOS default input. With AirPods as the default input that is the call
+/// that flips them into call mode; it runs after the start's lease check and
+/// after the input snapshot moved the app's AUHAL input off a Bluetooth
+/// default, exactly where the pre-seam code touched it.
+extension ParakeetAVAudioEngineGraphDriver: ParakeetAudioGraphStartDriver {
+    func prepareTap(
+        on engine: AVAudioEngine,
+        voiceProcessingEnabled: Bool,
+        isCurrent: () -> Bool,
+        stageTimings: inout [String: Int]
+    ) throws -> AVAudioFormat {
+        try ParakeetDictationTapPreparation.prepare(
+            ParakeetEngine.LiveDictationTapNode(inputNode: engine.inputNode),
+            voiceProcessingEnabled: voiceProcessingEnabled,
+            isCurrent: isCurrent,
+            stageTimings: &stageTimings
+        )
+    }
+
+    func installTap(
+        on engine: AVAudioEngine,
+        format: AVAudioFormat,
+        onBuffer: @escaping (AVAudioPCMBuffer) -> Void
+    ) throws {
+        let inputNode = engine.inputNode
+        // A route change after the format read makes installTap raise an
+        // Objective-C exception; the guard turns it into a failed start.
+        try AudioTapInstallGuard.run(operation: "dictation_start") {
+            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: format) { buffer, _ in
+                onBuffer(buffer)
+            }
+        }
+    }
+
+    func isRunning(_ engine: AVAudioEngine) -> Bool {
+        engine.isRunning
+    }
+
+    func start(_ engine: AVAudioEngine) throws {
+        try engine.start()
     }
 }

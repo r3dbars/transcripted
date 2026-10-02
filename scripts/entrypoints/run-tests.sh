@@ -335,15 +335,21 @@ EOF
 
 cat >> "$GENERATED_RUNNER" <<'EOF'
 
-        print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
+        // One print, so the count and the FAIL lines behind it land together
+        // even if something else writes to the same log.
+        var summary = "\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed\n"
         if quarantinedSuiteCount > 0 {
-            print("\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt")
+            summary += "\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt\n"
         }
         if failedTests > 0 {
-            print("FAILED")
+            summary += "Failures:\n"
+            for line in failureLines { summary += line + "\n" }
+            summary += "FAILED"
+            print(summary)
             exit(1)
         } else {
-            print("ALL TESTS PASSED")
+            summary += "ALL TESTS PASSED"
+            print(summary)
         }
     }
 
@@ -409,6 +415,8 @@ APP_SOURCES=(
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
+    "Sources/Support/SingleInstanceReopenPolicy.swift"
+    "Sources/Support/AppLaunchSteps.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/DictationPersistentInputPreferences.swift"
     "Sources/Support/MicrophoneChoicePreferences.swift"
@@ -441,12 +449,20 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetAudioGraphOwnership.swift"
     "Sources/Speech/ParakeetAudioGraph.swift"
     "Sources/Speech/ParakeetAudioGraphSequences.swift"
+    "Sources/Speech/ParakeetDeviceRecoverySequence.swift"
+    # AudioInputTapTeardownPolicy, the shared tap teardown order the
+    # sequences' native teardown follows.
+    "Sources/TranscriptedCore/Audio/AudioCaptureTypes.swift"
     "Sources/Speech/ParakeetTimedAudioEngineWorkLimiter.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
+    "Sources/Speech/ParakeetConfigChangeAdmission.swift"
     "Sources/Speech/ParakeetRecordingContinuityPolicy.swift"
     "Sources/Speech/ParakeetZombieEngineRecoverySequence.swift"
     "Sources/Speech/ParakeetStartRecordingFailurePolicy.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
+    "Sources/Speech/ParakeetInterruptionTerminal.swift"
+    "Sources/Speech/PreparedRecordingConsumer.swift"
+    "Sources/Speech/ExternalEngineTranscription.swift"
     "Sources/Speech/DictationLanguageScriptPolicy.swift"
     "Sources/Speech/ParakeetSystemWakePolicy.swift"
     "Sources/Speech/DictationAudioRecovery.swift"
@@ -459,19 +475,24 @@ APP_SOURCES=(
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
     "Sources/Speech/PersistentDictationInputController.swift"
+    "Sources/Support/AppTerminationSequence.swift"
     "Sources/Meeting/MeetingSessionState.swift"
-    "Sources/Support/LabControlCommand.swift"
+    "Sources/App/LabControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingCallAudioAsk.swift"
     "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
+    "Sources/Meeting/MeetingStopSequence.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/FailedMeetingUsableAudio.swift"
     "Sources/Meeting/FailedMeetingItem.swift"
+    "Sources/Meeting/MeetingTranscriptionRequestBuilder.swift"
+    "Sources/Meeting/MeetingStoppedAudioCheckpointPolicy.swift"
+    "Sources/Support/LocalSpeakerPreferences.swift"
     "Sources/Meeting/FailedMeetingPresentation.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
     "Sources/Meeting/MeetingPromptDetector+Backoff.swift"
@@ -498,6 +519,9 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingMicCapturePlan.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/LiveMeetingTranscriptState.swift"
+    "Sources/Meeting/LiveDictationPreview.swift"
+    "Sources/Meeting/LiveMeetingCaptionLog.swift"
+    "Sources/Meeting/LiveMeetingCaptionSampleQueue.swift"
     "Sources/Meeting/MeetingQuickSummaryExtractor.swift"
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
@@ -507,7 +531,9 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarPrimaryButtonTitle.swift"
     "Sources/UI/MenuBar/MenuBarShortcutLabel.swift"
     "Sources/UI/MenuBar/MenuBarGlyph.swift"
-    "Sources/UI/MenuBar/MenuTokens.swift"
+    "Sources/UI/Shared/MenuTokens.swift"
+    "Sources/UI/MenuBar/StatusItemPresentation.swift"
+    "Sources/UI/MenuBar/MenuBarAutomationID.swift"
     "Sources/UI/MenuBar/MenuBarActionRowView.swift"
     "Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift"
     "Sources/UI/MenuBar/MenuBarUtilityActionsView.swift"
@@ -523,6 +549,8 @@ APP_SOURCES=(
     "Sources/Observability/MachineClassTelemetry.swift"
     "Sources/Meeting/MeetingProcessingTelemetry.swift"
     "Sources/Observability/DictationPasteRetryTelemetry.swift"
+    "Sources/Observability/WorkflowRecoveryTelemetry.swift"
+    "Sources/Observability/CrashReporterPrivacyOptions.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
     "Sources/Observability/AgentSetupLifecycleTelemetry.swift"
@@ -531,7 +559,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/UpdateActionSafetyPolicy.swift"
     "Sources/Observability/ObservabilityLogRotation.swift"
-    "Sources/Observability/AnalyticsPreferences.swift"
+    "Sources/Support/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
     "Sources/Observability/EventFileWritePolicy.swift"
     "Sources/Observability/LocalObservabilityPayloadSanitizer.swift"
@@ -539,6 +567,7 @@ APP_SOURCES=(
     "Sources/Observability/ReliabilityPacketRecorder.swift"
     "Sources/Observability/ObservabilityEventCapturePlan.swift"
     "Sources/Observability/EventFileWriter.swift"
+    "Sources/Observability/LocalEventShutdownFlush.swift"
     "Sources/Observability/AppLogSink.swift"
     "Sources/TranscriptedCore/Logging/LogTailTrimmer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
@@ -569,7 +598,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
     "Sources/UI/Shared/SupportEmailDispatcher.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
-    "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/Support/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift"
@@ -603,12 +632,12 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationEscapeCancelPolicy.swift"
     "Sources/UI/Overlay/DictationSessionCapWarningPolicy.swift"
     "Sources/UI/Overlay/DictationQueuedStartPolicy.swift"
-    "Sources/UI/Overlay/DictationTrigger.swift"
+    "Sources/Speech/DictationTrigger.swift"
     "Sources/UI/Overlay/DictationStartAdmission.swift"
     "Sources/UI/Overlay/DictationNoSpeechPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationMicrophoneLoadingPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationWarmupPresentationPolicy.swift"
-    "Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift"
+    "Sources/Speech/DictationRecordingStartOverlayPolicy.swift"
     "Sources/UI/Overlay/DictationStartCuePolicy.swift"
     "Sources/UI/Overlay/DictationStartActivation.swift"
     "Sources/UI/Overlay/DictationSessionPipeline.swift"

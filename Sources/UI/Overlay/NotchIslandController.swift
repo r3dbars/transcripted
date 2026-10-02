@@ -9,6 +9,7 @@
 // one), and routes taps back to whichever controller owns them.
 
 import AppKit
+import Combine
 
 @MainActor
 final class NotchIslandController: NotchIslandCallPromptPresenting {
@@ -42,8 +43,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private static let recentInsertLinger: UInt64 = 2_600_000_000
     private static let meterInterval: CFTimeInterval = 0.05
 
-    private var dictation: NotchIslandDictationContent?
-    private var meeting: NotchIslandMeetingContent?
+    var dictation: NotchIslandDictationContent?
+    var meeting: NotchIslandMeetingContent?
     private var callPrompt: NotchIslandCallPromptContent?
     private var speakerReview: NotchIslandSpeakerReviewContent?
     private var reportedSpeakerReviewVisible: Bool?
@@ -64,7 +65,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private var lastMeterPush: CFTimeInterval = 0
 
     private var panel: NotchIslandPanel?
-    private var islandView: NotchIslandView?
+    private(set) var islandView: NotchIslandView?
     /// The screen the island is on, kept while it is up so it never jumps.
     private var screen: NotchIslandScreenInfo?
     private var isShown = false
@@ -80,8 +81,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// everywhere except over the island itself, and hover is judged from
     /// the pointer instead of tracking areas on a window that may ignore it.
     private var pointerMonitors: [Any] = []
+    var liveTranscriptWatch: AnyCancellable?
+    var dictationPreviewWatch: AnyCancellable?
 
     init() {
+        watchLiveTranscript()
+        watchDictationPreview()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -145,6 +150,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     // MARK: - Dictation
 
     func updateDictation(_ content: NotchIslandDictationContent?, targetApp: NSRunningApplication?) {
+        let content = withLivePreview(content)
         if content?.phase == .starting || content == nil {
             listeningSince = nil
         }
@@ -179,6 +185,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         recentInsertTask?.cancel()
         recentInsertTask = nil
         recentInsert = NotchIslandRecentInsert(title: title, text: lastDictationTextProvider?())
+        if let text = recentInsert?.text { islandView?.dictationPreviewView?.showFinal(text) }
         if dictation == nil {
             scheduleRecentInsertExpiry()
             render()
@@ -188,7 +195,13 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     // MARK: - Meetings
 
     func updateMeeting(_ content: NotchIslandMeetingContent?) {
+        var content = content
+        let showsTranscript = Self.showsLiveTranscript(content)
+        content?.showsLiveTranscript = showsTranscript
         guard content != meeting else { return }
+        // The view must exist before a drop-down asks for it, or the first
+        // hover would draw the level lanes instead.
+        if showsTranscript { ensureLiveTranscriptView() }
         meeting = content
         live.meetingElapsed = content?.duration ?? 0
         if case .transcribing(let progress, _)? = content?.phase {
@@ -320,7 +333,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     // MARK: - Rendering
 
-    private func render(animated: Bool = true) {
+    func render(animated: Bool = true) {
         if NotchIslandPresentation.stickyKey(dictation: dictation, meeting: meeting, callPrompt: callPrompt, speakerReview: speakerReview) == nil {
             collapsedStickyKey = nil
         }
@@ -557,7 +570,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         }
     }
 
-    private func ensurePanel() -> (NotchIslandPanel, NotchIslandView) {
+    func ensurePanel() -> (NotchIslandPanel, NotchIslandView) {
         if let panel, let islandView { return (panel, islandView) }
         let initial = NSRect(x: 0, y: 0, width: NotchIslandGeometry.minimumTabWidth, height: NotchIslandGeometry.tabRowHeight)
         let panel = NotchIslandPanel(contentRect: initial, styleMask: [], backing: .buffered, defer: true)
@@ -722,6 +735,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     private func handleOwnAction(_ action: NotchIslandAction) {
         switch action {
+        case .meetingCopyTranscript:
+            copyLiveTranscript()
         case .copyLastDictation:
             guard let text = recentInsert?.text, !text.isEmpty else { return }
             let pasteboard = NSPasteboard.general

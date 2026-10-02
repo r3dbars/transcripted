@@ -48,9 +48,9 @@ final class MenuBarUtilityActionsView: NSView {
             NSApplication.shared.terminate(nil)
         }
 
-        openTranscriptedRow.setAutomationIdentifier("transcripted.menubar.utility.open-transcripted")
-        updatesRow.setAutomationIdentifier("transcripted.menubar.utility.check-updates")
-        quitRow.setAutomationIdentifier("transcripted.menubar.utility.quit")
+        openTranscriptedRow.setAutomationIdentifier(.openTranscripted)
+        updatesRow.setAutomationIdentifier(.checkUpdates)
+        quitRow.setAutomationIdentifier(.quit)
 
         [openTranscriptedRow, updatesRow, quitRow].forEach(addSubview(_:))
     }

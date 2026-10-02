@@ -19,7 +19,7 @@ final class TranscriptedSettingsNavigationModel {
         homeFindFocusToken += 1
     }
 
-    /// Bumped by the meeting pill's Open (and Home's own Open on a just-saved
+    /// Bumped by the Notch island meeting's Open (and Home's own Open on a just-saved
     /// transcript). Home expands the meeting at `homeRevealMeetingURL` once
     /// it appears in the list, using the same mount-safe `.task(id:)` pattern
     /// as the find token.

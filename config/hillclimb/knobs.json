@@ -66,7 +66,7 @@
         "dictation-stop-latency",
         "meeting-turnaround"
       ],
-      "source": "Sources/TranscriptedAppState.swift:43",
+      "source": "Sources/App/TranscriptedAppState.swift:43",
       "risk": "Lazy loading saves idle memory but makes the first dictation or meeting after launch wait for a model load.",
       "notes": "Controlled today by env TRANSCRIPTED_LAZY_MODEL_WARMUP=1, which is INVERTED relative to this knob (true = eager = env unset). Deliberately no env apply entry: the registry encodes true as '1', which would set LAZY=1 and turn warmup OFF. Needs either an inverted apply mode or a positive env name. The stop benches preload the model, so they would not see this anyway."
     },

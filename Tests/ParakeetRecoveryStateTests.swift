@@ -328,27 +328,150 @@ func testParakeetRecoveryState() async {
                     "post-window external default change must recover")
     }
 
-    runSuite("Production AUHAL and notification callbacks carry event-time binding ownership") {
-        let recovery = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        let engine = readSourceFixture("Sources/Speech/ParakeetInputRoute.swift")
-        assertTrue(recovery.contains("let observedAt = CFAbsoluteTimeGetCurrent()"),
-                   "audio-engine callback must timestamp before asynchronous HAL lookup")
-        assertTrue(recovery.contains("queue: nil"),
-                   "audio-engine post must be timestamped before MainActor dispatch")
-        assertTrue(recovery.contains("bindingIntent.tokenForNotification("),
-                   "callback must capture current native setter ownership")
-        assertTrue(recovery.contains("observedAt: request.observedAt"),
-                   "mailbox drain must retain matching source arrival")
-        assertTrue(recovery.contains("ParakeetSelfInducedConfigChangePolicy.shouldIgnore("),
-                   "recovery must consult exact-route event-time admission")
-        assertTrue(recovery.contains("await bindingToken.waitForResolution("),
-                   "pending setter callback must await only native remaining budget")
-        assertTrue(engine.contains("let token = bindingIntent.begin("),
-                   "native setter must issue command intent at its actual write")
-        assertTrue(engine.contains("token.finish(succeeded: true)"),
-                   "successful native setter must confirm echo ownership")
-        assertTrue(engine.contains("token.finish(succeeded: false)"),
-                   "failed native setter must fail echo ownership")
+    runSuite("Route callback arrival is stamped once, owns the setter token, and survives the mailbox") {
+        let engine = NSObject()
+        let selected = route(defaultInputID: 1, selectedInputID: 2)
+        let intent = ParakeetAUHALBindingIntent()
+        let first = intent.begin(engine: engine, route: selected, at: 100)
+        var clockReads = 0
+        let arrival = ParakeetConfigChangeArrival.stamp(
+            engineID: ObjectIdentifier(engine), bindingIntent: intent, window: 2.5,
+            now: { clockReads += 1; return 100.4 }
+        )
+        assertEqual(arrival.observedAt, 100.4, "arrival keeps the callback clock value")
+        assertEqual(clockReads, 1, "arrival reads the clock exactly once")
+        assertTrue(arrival.bindingToken === first, "arrival owns the setter command current at that moment")
+
+        let second = intent.begin(engine: engine, route: selected, at: 101)
+        assertTrue(arrival.bindingToken !== second, "a later setter does not take over an earlier callback")
+
+        let late = ParakeetConfigChangeArrival.stamp(
+            engineID: ObjectIdentifier(engine), bindingIntent: intent, window: 2.5, now: { 104 }
+        )
+        assertTrue(late.bindingToken == nil, "a callback past the setter window owns no token")
+        let otherEngine = ParakeetConfigChangeArrival.stamp(
+            engineID: ObjectIdentifier(NSObject()), bindingIntent: intent, window: 2.5, now: { 101.2 }
+        )
+        assertTrue(otherEngine.bindingToken == nil, "another engine's callback owns no token")
+
+        let mailbox = ParakeetInputDeviceRefreshMailbox()
+        _ = mailbox.submit(configChangeSource: .audioEngine, observedAt: arrival.observedAt,
+                           bindingToken: arrival.bindingToken)
+        let drained = mailbox.takeNext()
+        assertEqual(drained?.observedAt, 100.4, "the drained request carries arrival time, not drain time")
+        assertTrue(drained?.bindingToken === first, "the drained request carries the arrival token")
+    }
+
+    await runSuite("Config-change admission classifies arrival time and waits only on the setter it owns") {
+        let engine = NSObject()
+        let stable = route(defaultInputID: 1, selectedInputID: 1)
+        let selected = route(defaultInputID: 1, selectedInputID: 2)
+        func request(_ source: ParakeetConfigChangeSource, at observedAt: CFAbsoluteTime,
+                     token: ParakeetAUHALBindingToken? = nil, force: Bool = false,
+                     until: CFAbsoluteTime = 0) -> ParakeetConfigChangeAdmissionRequest {
+            ParakeetConfigChangeAdmissionRequest(source: source, observedAt: observedAt, bindingToken: token,
+                                                 forceForMicrophoneSharing: force, ignoreWindowUntil: until)
+        }
+        @MainActor func decide(_ request: ParakeetConfigChangeAdmissionRequest,
+                               observed: ParakeetAudioRouteIdentity?,
+                               admitted: Bool = true,
+                               onWait: @MainActor (ParakeetAUHALBindingToken) -> Void = { _ in },
+                               policy: ParakeetConfigChangeAdmission.ShouldIgnore? = nil) async
+            -> (ParakeetConfigChangeAdmission.Decision, Int) {
+            var waits = 0
+            let decision = await ParakeetConfigChangeAdmission.decide(
+                request, observedRoute: observed, stableRoute: stable, windowDuration: 2.5,
+                currentEngine: { engine },
+                waitForResolution: { token in waits += 1; onWait(token) },
+                stillAdmitted: { admitted },
+                shouldIgnore: policy ?? ParakeetConfigChangeAdmission.eventTimePolicy
+            )
+            return (decision, waits)
+        }
+
+        var seen: (observedAt: CFAbsoluteTime, until: CFAbsoluteTime)?
+        let (_, noTokenWaits) = await decide(
+            request(.audioEngine, at: 100.1, until: 102.5), observed: stable,
+            policy: { _, observedAt, until, _, _, _, _, _, _ in seen = (observedAt, until); return false }
+        )
+        assertEqual(seen?.observedAt, 100.1, "policy classifies the callback's arrival time")
+        assertEqual(seen?.until, 102.5, "policy keeps the bounded restore window")
+        assertEqual(noTokenWaits, 0, "no setter token means no wait")
+
+        let intent = ParakeetAUHALBindingIntent()
+        let pending = intent.begin(engine: engine, route: selected, at: 100)
+        let (echo, echoWaits) = await decide(
+            request(.audioEngine, at: 100.2, token: pending), observed: selected,
+            onWait: { $0.finish(succeeded: true) }
+        )
+        assertEqual(echoWaits, 1, "a callback that arrived mid-write waits on its setter")
+        assertEqual(echo, .ignoreSelfInduced, "a confirmed setter echo on its own route is ignored")
+
+        let failing = intent.begin(engine: engine, route: selected, at: 100)
+        let (failed, _) = await decide(
+            request(.audioEngine, at: 100.2, token: failing, until: 102.5), observed: selected,
+            onWait: { $0.finish(succeeded: false) }
+        )
+        assertEqual(failed, .recover, "a failed setter cannot hide behind the generic window")
+
+        let lost = intent.begin(engine: engine, route: selected, at: 100)
+        let (superseded, _) = await decide(
+            request(.audioEngine, at: 100.2, token: lost), observed: selected, admitted: false,
+            onWait: { $0.finish(succeeded: true) }
+        )
+        assertEqual(superseded, .superseded, "lifecycle change during the wait drops the callback")
+
+        let foreign = ParakeetAUHALBindingToken(engine: NSObject(), route: selected, issuedAt: 100)
+        let (_, foreignWaits) = await decide(request(.audioEngine, at: 100.2, token: foreign), observed: selected)
+        assertEqual(foreignWaits, 0, "a token from a retired engine is never waited on")
+
+        let defaultToken = intent.begin(engine: engine, route: selected, at: 100)
+        let (_, defaultWaits) = await decide(request(.defaultInputDevice, at: 100.2, token: defaultToken),
+                                             observed: selected)
+        assertEqual(defaultWaits, 0, "default-input callbacks never wait on AUHAL setters")
+
+        let (inWindow, _) = await decide(request(.audioEngine, at: 100.1, until: 102.5), observed: stable)
+        assertEqual(inWindow, .ignoreSelfInduced, "an unchanged echo inside the restore window is ignored")
+        let (forced, _) = await decide(request(.audioEngine, at: 100.1, force: true, until: 102.5),
+                                       observed: stable)
+        assertEqual(forced, .recover, "a call-app downgrade forces recovery through the restore window")
+        let confirmed = intent.begin(engine: engine, route: selected, at: 100)
+        confirmed.finish(succeeded: true)
+        let (forcedEcho, _) = await decide(request(.audioEngine, at: 100.2, token: confirmed, force: true),
+                                           observed: selected)
+        assertEqual(forcedEcho, .recover, "a call-app downgrade is not postponed by our own setter echo")
+    }
+
+    runSuite("Native AUHAL setter owns its echo while writing and settles on return") {
+        struct WriteFailed: Error {}
+        let engine = NSObject()
+        let selected = route(defaultInputID: 1, selectedInputID: 2)
+        let intent = ParakeetAUHALBindingIntent()
+        var midWrite: ParakeetAUHALBindingToken?
+        ParakeetInputBindingWrite.perform(intent: intent, engine: engine, route: selected, now: { 100 }) {
+            midWrite = intent.tokenForNotification(engineID: ObjectIdentifier(engine), at: 100.1, window: 2.5)
+        }
+        assertTrue(midWrite != nil, "a callback during the write is owned by this setter")
+        assertEqual(midWrite?.route, selected, "the setter intent names the route it writes")
+        assertTrue(midWrite?.wasConfirmed == true, "a successful write confirms its echo")
+
+        var failedToken: ParakeetAUHALBindingToken?
+        var rethrown = false
+        do {
+            try ParakeetInputBindingWrite.perform(intent: intent, engine: engine, route: selected, now: { 101 }) {
+                failedToken = intent.tokenForNotification(engineID: ObjectIdentifier(engine), at: 101.1, window: 2.5)
+                throw WriteFailed()
+            }
+        } catch is WriteFailed {
+            rethrown = true
+        } catch {}
+        assertTrue(rethrown, "the write's error reaches the caller")
+        assertTrue(failedToken != nil, "a failing write still owns callbacks during the write")
+        assertTrue(failedToken !== midWrite, "each write issues its own intent")
+        assertTrue(failedToken?.wasConfirmed == false, "a failed write never confirms its echo")
+        assertFalse(ignored(.audioEngine, at: 101.1, until: 103.5, observed: selected,
+                            token: failedToken, engine: engine),
+                    "a failed write's callback is not suppressed")
     }
 
     runSuite("ParakeetRecoveryState.canStartRecording — requires recovery to be done and format ready") {

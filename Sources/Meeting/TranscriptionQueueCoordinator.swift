@@ -110,6 +110,8 @@ final class TranscriptionQueueCoordinator {
     }
 
     unowned let controller: MeetingSessionController
+    /// Where every queued request picks up People-in-the-room.
+    let requestBuilder: MeetingTranscriptionRequestBuilder
 
     var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
@@ -143,9 +145,11 @@ final class TranscriptionQueueCoordinator {
     init(
         controller: MeetingSessionController,
         importedQueueJournalDirectory: URL = MeetingStoragePaths.importedTranscriptionQueueFolder,
-        importedAudioScratchDirectory: URL = MeetingStoragePaths.recordingsScratch
+        importedAudioScratchDirectory: URL = MeetingStoragePaths.recordingsScratch,
+        requestBuilder: MeetingTranscriptionRequestBuilder = MeetingTranscriptionRequestBuilder()
     ) {
         self.controller = controller
+        self.requestBuilder = requestBuilder
         self.importedQueueJournalDirectory = importedQueueJournalDirectory
         self.importedAudioScratchDirectory = importedAudioScratchDirectory
     }
@@ -164,16 +168,22 @@ final class TranscriptionQueueCoordinator {
         promptRecordingStartedAt: Date? = nil,
         sessionLength: TimeInterval? = nil
     ) -> QueueInsertionOutcome {
+        let request = requestBuilder.recordedMeeting(
+            micURL: micURL,
+            systemURL: systemURL,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
+        )
         let job = QueuedTranscriptionJob(
             id: UUID(),
             kind: .recorded(
-                micURL: micURL,
-                systemURL: systemURL,
+                micURL: request.micURL,
+                systemURL: request.systemURL,
                 healthInfo: healthInfo,
                 captureDiagnostics: captureDiagnostics,
-                meetingTitle: meetingTitle,
-                recordingDate: recordingDate,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                meetingTitle: request.meetingTitle,
+                recordingDate: request.recordingDate,
+                splitLocalSpeakers: request.options.splitLocalSpeakers
             ),
             startTrigger: startTrigger,
             sttModel: sttModel ?? controller.sttRouter.selectedModel,
@@ -448,29 +458,9 @@ final class TranscriptionQueueCoordinator {
             controller.activeQueuedTranscriptionJobID = nil
         }
 
-        var preserved = false
-        switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
-            preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: micURL,
-                systemAudioURL: systemURL,
-                errorMessage: message,
-                meetingTitle: meetingTitle,
-                recordingDate: recordingDate,
-                splitLocalSpeakers: splitLocalSpeakers,
-                languageSelection: job.languageSelection,
-                micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
-            )
-        case .imported(let audioURL, let suggestedTitle, let recordingDate):
-            preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: nil,
-                systemAudioURL: audioURL,
-                errorMessage: message,
-                meetingTitle: suggestedTitle,
-                recordingDate: recordingDate,
-                languageSelection: job.languageSelection
-            )
-        }
+        let preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
+            failedQueueRow(for: job, errorMessage: message)
+        )
         if preserved {
             job.importedRecoverySession?.failedQueueHandoffConfirmed()
         }
@@ -754,34 +744,42 @@ final class TranscriptionQueueCoordinator {
 
         var preservedCount = 0
         for job in jobs {
-            switch job.kind {
-            case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
-                if controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                    micAudioURL: micURL,
-                    systemAudioURL: systemURL,
-                    errorMessage: errorMessage,
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate,
-                    splitLocalSpeakers: splitLocalSpeakers,
-                    languageSelection: job.languageSelection,
-                    micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
-                ) {
-                    preservedCount += 1
-                }
-            case .imported(let audioURL, let suggestedTitle, let recordingDate):
-                if controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                    micAudioURL: nil,
-                    systemAudioURL: audioURL,
-                    errorMessage: errorMessage,
-                    meetingTitle: suggestedTitle,
-                    recordingDate: recordingDate,
-                    languageSelection: job.languageSelection
-                ) {
-                    preservedCount += 1
-                    job.importedRecoverySession?.failedQueueHandoffConfirmed()
-                }
+            if controller.failedMeetingStore.preserveFailedMeetingForRetry(
+                failedQueueRow(for: job, errorMessage: errorMessage)
+            ) {
+                preservedCount += 1
+                job.importedRecoverySession?.failedQueueHandoffConfirmed()
             }
         }
         return preservedCount
+    }
+
+    /// The failed-queue row a job falls back to when it can't run. Recorded
+    /// jobs keep their enqueue snapshot of People-in-the-room; imports never
+    /// split the mic.
+    func failedQueueRow(for job: QueuedTranscriptionJob, errorMessage: String) -> FailedMeetingRetryRow {
+        switch job.kind {
+        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate, let splitLocalSpeakers):
+            return requestBuilder.failedQueueRow(
+                forQueued: RecordedMeetingTranscriptionRequest(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate,
+                    options: MeetingTranscriptionOptions(splitLocalSpeakers: splitLocalSpeakers)
+                ),
+                errorMessage: errorMessage,
+                languageSelection: job.languageSelection,
+                micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
+            )
+        case .imported(let audioURL, let suggestedTitle, let recordingDate):
+            return requestBuilder.failedQueueRow(
+                forImportedAudio: audioURL,
+                suggestedTitle: suggestedTitle,
+                recordingDate: recordingDate,
+                errorMessage: errorMessage,
+                languageSelection: job.languageSelection
+            )
+        }
     }
 }

@@ -8,29 +8,24 @@
 // sample-rate handling. These run the real logic and assert real outputs (analysis flags,
 // diagnostic context, retry sample shaping).
 //
-// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final suite
-// ("preserves dictation audio across route recovery") reads
-// the ParakeetEngine source files (readParakeetEngineSource)
-// as TEXT and asserts specific call sites, statement order in the terminal interruption
-// helper, and a single canonical `recordingInterrupted = true` assignment. (Checks that
-// only matched a declaration were dropped: the compiler already enforces those, and the
-// multi-rate timeline itself is covered by RecordedAudioTimelineTests. The call-site pin
-// on preserveCurrentRecordingBuffersForRecovery() lives in
-// ParakeetMicrophoneSharingSourceContractTests and ParakeetAudioOwnershipSourceContractTests.) The engine is
-// CoreAudio-wired and are NOT compiled into this Foundation-only runner, so these
-// greps pin source structure, not runtime behavior. They guard the REAL invariant that
-// audio buffered before a mid-recording route change is preserved across teardown (so a
-// device switch does not silently drop dictation audio), and that every interruption path
-// routes through the single cleanup helper. The session controller's half (a stop
-// before capture started cancels the engine; a stale stop task touches nothing) is a
-// behavior test in DictationSessionPipelineTests.swift. They are intentionally kept as source-text
-// contracts rather than a runtime seam: extracting one would restructure real-time
-// CoreAudio recovery/teardown control flow, which is too risky to refactor for
-// testability. If you move/rename these declarations or change the interruption path,
-// update both the source and these greps together.
+// The last suite ("preserves dictation audio across route recovery") runs the compiled
+// ParakeetInterruptionTerminal, the one helper ParakeetEngine marks a recording interrupted
+// through, against a fake engine state. The multi-rate timeline is covered by
+// RecordedAudioTimelineTests, and buffer preservation across recovery by
+// ParakeetAudioGraphTests.
 
 import Foundation
 
+/// Stands in for ParakeetEngine's restart flags and its published
+/// interruption.
+@MainActor
+private final class FakeInterruptionTerminalState: ParakeetInterruptionTerminalState {
+    var preservingRecordingAcrossRecovery = true
+    var configChangeWasRecording = true
+    var recordingInterrupted = false
+}
+
+@MainActor
 func testDictationAudioRecovery() {
     runSuite("DictationAudioRecovery.analyze — detects silent audio") {
         let samples = [Float](repeating: 0, count: 32_000)
@@ -112,33 +107,21 @@ func testDictationAudioRecovery() {
     }
 
     runSuite("ParakeetEngine — preserves dictation audio across route recovery") {
-        let engineSource = readParakeetEngineSource()
-
-        // Rate-preserving drains are behavior tests now: "Pending tap audio
-        // joins the take one segment at a time, each at its own rate" and
-        // "Bluetooth 48k to 24k transition preserves speech duration and order"
-        // in RecordedAudioTimelineTests.swift.
-        if let start = engineSource.range(of: "private func markRecordingInterrupted()"),
-           let end = engineSource.range(of: "func loadRecordedSamplesForDictationBenchmark", range: start.upperBound..<engineSource.endIndex) {
-            let terminal = String(engineSource[start.lowerBound..<end.lowerBound])
-            let publication = terminal.range(of: "recordingInterrupted = true")
-            for reset in ["preservingRecordingAcrossRecovery = false", "configChangeWasRecording = false"] {
-                if let resetRange = terminal.range(of: reset), let publication {
-                    assertTrue(resetRange.lowerBound < publication.lowerBound, "terminal interruption must clear restart intent before notifying its subscriber")
-                } else {
-                    assertTrue(false, "terminal interruption must reset every restart flag")
-                }
-            }
-            assertFalse(terminal.contains("removeAll"), "clearing restart intent must retain captured speech for explicit recovery")
-        } else {
-            assertTrue(false, "interruption publication should have one terminal helper")
+        let state = FakeInterruptionTerminalState()
+        var seenAtPublish: (preserving: Bool, configChange: Bool)?
+        ParakeetInterruptionTerminal.apply(state: state) {
+            seenAtPublish = (state.preservingRecordingAcrossRecovery, state.configChangeWasRecording)
+            state.recordingInterrupted = true
         }
-        let directInterruptAssignments = engineSource.components(separatedBy: "recordingInterrupted = true").count - 1
-        assertEqual(
-            directInterruptAssignments,
-            1,
-            "all recording interruption paths should go through the cleanup helper"
-        )
+        assertTrue(state.recordingInterrupted, "the interruption is published")
+        assertEqual(seenAtPublish?.preserving, false, "terminal interruption must clear restart intent before notifying its subscriber")
+        assertEqual(seenAtPublish?.configChange, false, "terminal interruption must reset every restart flag before notifying its subscriber")
+        // Captured speech stays for explicit recovery by construction: the
+        // terminal only sees the restart flags (ParakeetInterruptionTerminalState),
+        // never the recorded timeline, so it can't call removeAll on it.
+        // Dropped: the count of `recordingInterrupted = true` assignments in the
+        // engine source. Which paths call the helper is code shape, not a promise
+        // a test can observe; the ordering it existed to protect is checked above.
         // The controller's half moved to behavior tests in
         // DictationSessionPipelineTests.swift: "A stop before capture started
         // cancels the engine and offers a retried start" and "A stale stop

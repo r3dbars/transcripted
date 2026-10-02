@@ -72,25 +72,39 @@ def supervise(log_path: str, pidfile: str, cmd: list[str], ready_fd: int, name: 
     for fd in (0, 1, 2):
         os.dup2(devnull, fd)
     with open(log_path, "a", buffering=1) as log:
+        child = None
+        stop_early = False
+
+        def forward(num, _frame):
+            nonlocal stop_early
+            note(log, f"helper got {signal.Signals(num).name}; asking {name} to stop (SIGINT)")
+            if child is None:
+                stop_early = True
+                return
+            try:
+                child.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
+
+        # Install the handlers before starting the child, for two reasons.
+        # A caller that runs us in the background (a non-interactive shell's
+        # `&`) hands us SIGINT ignored, and an ignored signal stays ignored
+        # across exec, so the child would shrug off the SIGINT we forward.
+        # A handled signal resets to default on exec, so the child gets a
+        # normal SIGINT. And a signal that lands right after start must not
+        # kill the helper with the default action and leave the child
+        # running with no line in the log.
+        for num in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(num, forward)
+
         try:
             child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
         except OSError as error:
             note(log, f"could not start {name}: {error}")
             os.write(ready_fd, b"error\n")
             return 1
-
-        def forward(num, _frame):
-            note(log, f"helper got {signal.Signals(num).name}; asking {name} to stop (SIGINT)")
-            try:
-                child.send_signal(signal.SIGINT)
-            except ProcessLookupError:
-                pass
-
-        # Install the handlers before telling anyone the pid. Otherwise a signal
-        # that lands right after start kills the helper with the default action
-        # and the child is left running with no line in the log.
-        for num in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-            signal.signal(num, forward)
+        if stop_early:
+            child.send_signal(signal.SIGINT)
 
         with open(pidfile, "w") as handle:
             handle.write(f"{child.pid}\n")
@@ -172,10 +186,13 @@ def self_test() -> int:
         os.kill(pid, signal.SIGTERM)
         wait_for(log, "stopped by SIGTERM")
 
-        # A signal to the helper is logged and turned into a graceful SIGINT.
+        # A signal to the helper is logged and turned into a graceful SIGINT,
+        # even when the caller ignores SIGINT (any `&` job in a script does),
+        # since an ignored signal would otherwise carry over to the child.
         open(log, "w").close()
         out = subprocess.run([sys.executable, me, "--log", log, "--pidfile", pidfile, "--", "sleep", "30"],
-                             capture_output=True, text=True, check=True)
+                             capture_output=True, text=True, check=True,
+                             preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
         pid = int(out.stdout.strip())
         helper = os.getpgid(pid)  # the helper leads the new session and group
         os.kill(helper, signal.SIGTERM)

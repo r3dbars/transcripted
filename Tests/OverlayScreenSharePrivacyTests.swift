@@ -137,7 +137,7 @@ func testOverlayScreenSharePrivacy() async {
     }
 
     runSuite("detected meeting prompts route through the call prompt controller") {
-        let app = overlayPrivacySource("Sources/TranscriptedApp.swift")
+        let app = overlayPrivacySource("Sources/App/TranscriptedApp.swift")
         let promptRequest = overlayPrivacySlice(
             app,
             from: "meetingPromptDetector.onPromptRequest =",

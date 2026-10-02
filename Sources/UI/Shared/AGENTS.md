@@ -8,13 +8,11 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 ## Public surface
 
-`LibraryTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `HomeMeetingPreviewContent` and the Home preview types in `HomeMeetingPreviewFormatter.swift`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `AppSoundPlayer`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
+`LibraryTokens`, `MenuTokens`, `RecentMeetingsScanner`, `RecentMeetingMetadataCache`, `RecentMeetingItem`, `HomeMeetingPreviewContent` and the Home preview types in `HomeMeetingPreviewFormatter.swift`, `MeetingAudioPlayback`, `MeetingAudioArchiveResolver`, `SpeakerClipPlayback`, `SpeakerReviewQueueScanner`, `HomeMeetingRename`, `HomeMeetingDeletion`, `HomeMeetingRowActionTargets`, `CaptureUndoManager`, `OwnFileResolver`, `DictionaryPastMeetingFix`, `AccessibilityDisplayPolicy`, `FirstRunExperience`, `FocusOrderContract`, `MeetingPillFinishPresentation`, `FeedbackIssueBuilder`, `SupportEmailDispatcher`.
 
 ## May depend on
 
 Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
-
-Grandfathered crossing (in `.agents/module-boundary-baseline.json`): `TranscriptedSupportActions` takes `TranscriptedAppState` (fixed by moving it into a new Sources/App folder next to the app shell, after #1946).
 
 ## Entry points
 

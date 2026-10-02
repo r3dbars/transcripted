@@ -7,13 +7,13 @@ Module `UIOverlay` in `.agents/modules.json`. The file-by-file notes stay in `So
 Everything on screen while you dictate or record, plus the dictation session itself:
 
 - The Notch island (`NotchIsland*`): the only dictation, meeting and call-prompt window since #1946. One black shape grows out of the notch (or hangs from the top edge of a display without one) and carries dictation, the live meeting, the call-detected Record / Not now / Later prompt, and "Who was on this call?".
-- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording pill state, warnings, rest/wake) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. The old dictation panel is gone; the meeting and capture panels (`MeetingOverlayPanel`, `CapturePillPanel` and their views) are still in the tree but nothing picks them, because `NotchIslandController.isSelected` is always true.
+- The three controllers that feed it: `FloatingOverlayController` (dictation), `MeetingOverlayController` (recording state, warnings, prompts) and `CapturePillController` (the detected-meeting prompt and its timeout). Each keeps its own state machine, timers and actions and pushes a plain `NotchIsland*Content` snapshot to the island; the island routes taps back. None of them has a window of its own: the old dictation panel, meeting pill, call prompt pill and speaker naming window are deleted.
 - `DictationSessionController` and its `+*.swift` extensions: start, stop, paste-back, persistence, recovery, presses, the 5-minute cap and telemetry. `DictationSessionPipeline` and `DictationStartAdmission` hold the start/stop wiring behind protocols so tests run them on fakes.
-- The dictation start and presentation policies (`Dictation*Policy`, `DictationTrigger`, `DictationStartActivation`) and the meeting pill policies (`MeetingPillRestPolicy`, `MeetingPromptPriority`, `MeetingDurationFormatter`).
+- The dictation presentation policies (`Dictation*Policy`, `DictationStartActivation`; the start/stop policies and `DictationTrigger` live in Speech) and the meeting policies (`MeetingPromptPriority`, `MeetingDurationFormatter`).
 
 ## Public surface
 
-What other modules name today: `DictationSessionController`, `FloatingOverlayController`, `MeetingOverlayController`, `CapturePillController`, `NotchIslandController`, `NotchIslandSpeakerReviewView`, `NotchIslandSpeakerReviewContent`, `NotchIslandSpeakerReviewPolicy`, `DictationTrigger`, `DictationHotkeyRouter`, `MeetingDurationFormatter`. AppShell builds the controllers; Capture routes presses into `DictationSessionController`; Settings asks the island for speaker review; the menu bar formats the meeting timer.
+What other modules name today: `DictationSessionController`, `FloatingOverlayController`, `MeetingOverlayController`, `CapturePillController`, `NotchIslandController`, `NotchIslandSpeakerReviewView`, `NotchIslandSpeakerReviewContent`, `NotchIslandSpeakerReviewPolicy`, `MeetingDurationFormatter`. AppShell builds the controllers; Capture routes presses into `DictationSessionController`; Settings asks the island for speaker review; the menu bar formats the meeting timer.
 
 ## May depend on
 
@@ -22,14 +22,16 @@ UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core
 Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
 - Into Core outside `core-vocab`: `MeetingOverlayController` (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
-- From below: Speech names `DictationRecordingStart*` and `DictationStartAvailabilityPolicy`, and Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving those policy files down into Speech and Dictation removes the edges.
+- From below: Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving that policy file down into Dictation removes the edge.
 
 ## Entry points
 
 - `NotchIslandController.swift` — builds the island panel at launch (`prewarm`), picks a display per show, runs the Core Animation grow/shrink, and owns hover and click-through.
 - `NotchIslandPresentation.swift` / `NotchIslandGeometry.swift` — Foundation-pure rules for what shows where, and the geometry and springs. Change behavior here, not in the view.
+- `NotchIslandLiveTranscriptView.swift` — the recording drop-down's scrolling live transcript. The controller keeps one alive across drop-down rebuilds and feeds it from `LiveMeetingCaptions`; it appends finished words and replaces only the faded tail, so long meetings stay cheap. Copy all (`meetingCopyTranscript`) is handled by the island itself, in `NotchIslandController+LiveTranscript.swift`.
+- `NotchIslandDictationPreviewView.swift` / `NotchIslandDropView+Dictation.swift` / `NotchIslandController+DictationPreview.swift` — the dictation hover: a four-line window onto the whole take (newest line at the bottom; no fade, so scrolling up clearly stops at the start), scrollable back to the start (it follows the newest words unless you scrolled up) from `LiveDictationCaptions` (newest at the bottom, last two words dimmed), then Cancel and "Insert into <app>" with the app's icon. The words stay through Writing and Pasted and crossfade into the written text, which the recent-insert hover then keeps. The controller keeps one preview view alive like the live transcript and sets `NotchIslandDictationContent.showsLivePreview`; during a meeting the hover is the meeting's.
 - `DictationSessionController.swift` — `startDictation` / stop entry; the STT control flow it composes lives in `Sources/Speech/DictationSession.swift`.
-- `MeetingOverlayController.swift` / `CapturePillController.swift` — meeting pill state and the detected-meeting prompt (the record / dismiss / remind flow is a protected product surface).
+- `MeetingOverlayController.swift` / `CapturePillController.swift` — the island's meeting state and the detected-meeting prompt (the record / dismiss / remind flow is a protected product surface).
 
 ## Tests
 

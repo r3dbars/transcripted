@@ -18,11 +18,11 @@ anonymous analytics, and Sparkle update plumbing.
 - `RuntimeDiagnosticsStore.swift` — JSON marker persistence and privacy-safe dirty-shutdown context builder
 - `RuntimeDiagnosticsContextWriter.swift` — serial background delivery of runtime context to Sentry; preference reads and scope mutation must not block the main-thread heartbeat
 - `CrashReporter.swift` — crash reporting setup
+- `CrashReporterPrivacyOptions.swift` — the six Sentry SDK switches (no default PII, no auto sessions, no network breadcrumbs, zero breadcrumbs, no stack traces, no failed-request capture) CrashReporter applies before `SentrySDK.start`; `Sentry.Options` conforms to its protocol so tests check the values on a fake
 - `SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog (sends nothing when `AutomatedLaunchEnvironment` is active)
-- `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`; also holds `AnalyticsEventForwardingPolicy`, the short table of local `EventReporter` events (today only the pinned dictation mic's `pinned_microphone_*` lifecycle) that `EventReporter.capture` also tracks in PostHog with bounded, rebuilt properties
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
 - `AgentSetupLifecycleTelemetry.swift` — bounded connect lifecycle telemetry for agent setup, verification, retries, and repair outcomes
@@ -34,7 +34,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `UsageHealthStore.swift` — bounded `UserDefaults` usage/failure ledger populated from event enums only (never scans captures or logs); feeds the daily usage digests `AnalyticsReporter` enqueues and the recent-failures list in support diagnostics
 - `UsageHealthModels.swift` — `UsageFailure`, `UsageDay`, `UsageHealthSnapshot`, and `UsageDigest` value types for that store
 - `DictationPasteRetryTelemetry.swift` — tracks the `dictation_paste_retry_completed` PostHog event when a user retries a failed/copied paste, bucketing the outcome and copy reason
-- `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome
+- `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome; takes a `track` closure (default `AnalyticsReporter.track`) so tests record the events
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityLogRotation.swift` — rename-based, O(1) rotation for append-only JSONL observability logs once they exceed a size threshold; keeps one rotated generation
 - `ObservabilityTextRedactor.swift` — app-specific adapter over TranscriptedCore's generic `PrivacyTextRedactor`, preserving the existing observability path-boundary profile for support-facing and diagnostic strings

@@ -51,7 +51,10 @@ struct NotchIslandDictationContent: Equatable {
     /// The Esc-confirm prompt or the 5-minute cap countdown, while listening.
     var notice: String = ""
     var targetAppName: String?
-    var microphoneName: String?
+    /// The live preview is streaming this take, so the hover shows the
+    /// words as they're spoken (set by the island from
+    /// `LiveDictationCaptions`).
+    var showsLivePreview = false
 }
 
 struct NotchIslandMeetingContent: Equatable {
@@ -91,6 +94,9 @@ struct NotchIslandMeetingContent: Equatable {
     /// The island skipped the "can't hear the other side" question so the
     /// meeting could start at once; ask it now, from the island, once.
     var asksAboutCallAudio = false
+    /// "Live transcript" is on: the recording drop-down shows the
+    /// conversation so far instead of the level lanes.
+    var showsLiveTranscript = false
 
     var isRecording: Bool { phase == .recording }
 
@@ -189,6 +195,8 @@ enum NotchIslandAction: Equatable {
     case meetingCallAudioDismiss
     case meetingOpen
     case meetingDismissError
+    /// Copy all on the live transcript.
+    case meetingCopyTranscript
     case callRecord
     case callDismiss
     case callRemind
@@ -204,7 +212,7 @@ enum NotchIslandAction: Equatable {
         switch self {
         case .dictationStop, .dictationCancel, .dictationMessageAction, .dictationDismissMessage:
             return .dictation
-        case .copyLastDictation, .pasteLastDictation:
+        case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
         case .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
@@ -232,12 +240,15 @@ enum NotchIslandItem: Equatable {
 }
 
 enum NotchIslandDrop: Equatable {
-    case dictationTarget(appName: String?, microphone: String?)
+    /// Hovering a dictation: the words so far (when the live preview is
+    /// streaming), then Cancel and "Insert into <app>". While the words are
+    /// being written only the words stay.
+    case dictationTarget(appName: String?, showsPreview: Bool, isWriting: Bool = false)
     case dictationLoading(title: String, detail: String)
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -458,17 +469,26 @@ enum NotchIslandPresentation {
         meeting: NotchIslandMeetingContent?,
         recentInsert: NotchIslandRecentInsert?
     ) -> NotchIslandDrop? {
-        if let dictation {
+        // A recording meeting owns the hover: a dictation inside it, and the
+        // dictation that just landed, never take it over.
+        let meetingRecords = meeting?.isRecording == true
+        if let dictation, !meetingRecords {
             switch dictation.phase {
             case .starting, .listening:
-                return .dictationTarget(appName: dictation.targetAppName, microphone: dictation.microphoneName)
+                return .dictationTarget(appName: dictation.targetAppName, showsPreview: dictation.showsLivePreview)
             case .loading(let title, let detail, _):
                 return .dictationLoading(title: title, detail: detail)
-            case .writing, .success, .message:
+            case .writing, .success:
+                // The words stay while they're written, then turn into the
+                // real text.
+                return dictation.showsLivePreview
+                    ? .dictationTarget(appName: dictation.targetAppName, showsPreview: true, isWriting: true)
+                    : nil
+            case .message:
                 return nil
             }
         }
-        if let recentInsert, let text = recentInsert.text, !text.isEmpty {
+        if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {
             return .justInserted(text: text, words: recentInsert.words)
         }
         guard let meeting else { return nil }
@@ -476,7 +496,8 @@ enum NotchIslandPresentation {
         case .recording:
             return .meetingControls(
                 callAudioNote: meeting.callAudioNote,
-                systemAudioUnverified: meeting.systemAudioUnverified
+                systemAudioUnverified: meeting.systemAudioUnverified,
+                showsTranscript: meeting.showsLiveTranscript
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)

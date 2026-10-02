@@ -90,7 +90,7 @@ enum SpeakerVoiceRowMenuPolicy {
 /// There is no `collapsedToMe`/"Keep as You" mechanism reachable from
 /// `SpeakerPeopleSettingsViewModel` for "This is me" to reuse: that logic
 /// lives in `SpeakerNamingCoordinator` and only runs against a single
-/// in-progress meeting's `SpeakerNamingSheet` review (it deletes or restores
+/// meeting's post-meeting speaker review (it deletes or restores
 /// one specific mic-channel profile created *during that meeting*, tracked by
 /// `newlyCreatedMicProfileIds`). This queue instead scans *saved* transcripts
 /// across every past meeting (`SpeakerReviewQueueScanner`), so there is no
@@ -108,9 +108,9 @@ enum SpeakerVoiceQueueRowActionPolicy {
     static let skipTitle = "Skip"
 
     /// "This is me" only makes sense for a voice heard on the local mic.
-    /// Matches `SpeakerNamingSheet`'s own gating, which only offers the
-    /// "You" autocomplete option for `.mic`-channel entries — a remote
-    /// participant's voice can never be "you".
+    /// Matches the post-meeting review's own gating, which only offers the
+    /// "You" option for `.mic`-channel voices — a remote participant's voice
+    /// can never be "you".
     static func showsThisIsMe(channel: UtteranceChannel) -> Bool {
         channel == .mic
     }
