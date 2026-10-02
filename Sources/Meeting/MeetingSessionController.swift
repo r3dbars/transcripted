@@ -261,7 +261,6 @@ extension MeetingSessionController {
 
         activeRecordingStartedAt = Date()
         unexpectedCaptureStopEvidence = nil
-        unheardSecondsAtCaptureStop = nil
         if trigger == .detectedPrompt {
             activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
             trackDetectedPromptOutcome(
@@ -677,7 +676,6 @@ extension MeetingSessionController {
         let recordingSnapshot = makeRecordingStopSnapshot()
         let snapshotTakenAt = Date()
         unexpectedCaptureStopEvidence = nil
-        unheardSecondsAtCaptureStop = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage
             ?? "Recording stopped unexpectedly. Open the Meetings page to retry the saved audio."
@@ -758,12 +756,15 @@ extension MeetingSessionController {
     // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
 
     func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
-        let atCaptureStop = unexpectedCaptureStopEvidence
-        let systemAudioStatus = MeetingCaptureHealthTelemetry.stopSnapshotSystemAudioStatus(
-            live: capture.systemAudioStatus,
-            atCaptureStop: atCaptureStop?.systemAudioStatus,
-            unknown: .unknown
+        let evidence = MeetingCaptureHealthTelemetry.stopSnapshotEvidence(
+            liveStatus: capture.systemAudioStatus,
+            unknown: .unknown,
+            liveWarning: systemAudioDegradationWarning,
+            liveUnheardWarningStartedAt: unheardPlaybackWarningStartedAt,
+            atCaptureStop: unexpectedCaptureStopEvidence,
+            now: Date()
         )
+        let systemAudioStatus = evidence.systemAudioStatus
         let durationSeconds = recordingDuration
         var baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
         if let signalEvidence = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
@@ -778,14 +779,9 @@ extension MeetingSessionController {
         // meetings degraded even when system audio finished healthy.
         let healthInfo: RecordingHealthInfo
         if MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
-            MeetingCaptureHealthTelemetry.stopSnapshotDegradationWarning(
-                live: systemAudioDegradationWarning,
-                atCaptureStop: atCaptureStop?.degradationWarning
-            ),
+            evidence.degradationWarning,
             didLosePlayback: capture.systemAudioDidLosePlayback,
-            unheardSeconds: unheardSecondsAtCaptureStop
-                ?? unheardPlaybackWarningStartedAt.map { max(0, Date().timeIntervalSince($0)) }
-                ?? 0
+            unheardSeconds: evidence.unheardSeconds
         ) {
             healthInfo = baseHealthInfo.markingSystemAudioDegraded()
         } else {

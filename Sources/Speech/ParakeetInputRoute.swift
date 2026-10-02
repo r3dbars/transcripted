@@ -9,7 +9,7 @@
 // the macOS default input on a fresh engine. The selection is loaded and
 // the config-change ignore window armed before that read, and the
 // override is applied to this engine's AUHAL only; nothing here writes the
-// Mac-wide default input. Read Sources/Speech/CLAUDE.md before changing it.
+// Mac-wide default input. Read Sources/Speech/AGENTS.md before changing it.
 //
 // These are internal collaborator methods on ParakeetEngine. ParakeetEngine
 // (ParakeetEngine.swift) stays the public-API owner and @MainActor home for
@@ -186,41 +186,55 @@ extension ParakeetEngine {
         return context
     }
 
+    /// `isEngineWorkCurrent` has no default on purpose: a caller holding a
+    /// lease a stop can claim must pass it, or graph work queued behind a
+    /// stuck CoreAudio call still reads `inputNode` (and binds the default
+    /// input) after the stop. Only an unleased caller passes nil.
     func audioInputSnapshot(
         operation: String,
         recoveryGeneration: UInt64? = nil,
         allowsBuiltInBluetoothFallback: Bool = true,
-        isEngineWorkCurrent: (() -> Bool)? = nil
+        isEngineWorkCurrent: (() -> Bool)?
     ) async throws -> ParakeetAudioInputSnapshot {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
-        let loadedSelection = try await Self.systemInputWorkCoordinator.run(
-            operation: "\(operation)_selection",
-            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
-        ) {
-            Self.loadDictationInputDeviceSelection(
-                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
-            )
-        }
-        guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
-        try Task.checkCancellation()
-        // A readable format on a previously pinned graph does not establish
-        // which microphone is selected now. Failed lookup must stay unready.
-        let selection = try DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)
+        var selectionLoadMs = 0
+        // Selection is serialized on the system-input worker, a failed lookup
+        // fails closed, and the ignore window is armed before the graph read
+        // below touches the input node (`ParakeetAudioInputSelectionAdmission`).
+        let selection = try await ParakeetAudioInputSelectionAdmission.admit(
+            loadSelection: {
+                let loadedSelection = try await Self.systemInputWorkCoordinator.run(
+                    operation: "\(operation)_selection",
+                    timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+                ) {
+                    Self.loadDictationInputDeviceSelection(
+                        allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+                    )
+                }
+                selectionLoadMs = Self.elapsedMilliseconds(since: selectionStartedAt)
+                return loadedSelection
+            },
+            ownsGraph: { ownsAudioEngineQueue(operationOwner) },
+            needsIgnoreWindow: { selection in
+                selection.didOverrideDefault
+                    || cachedInputDeviceSelection?.selectedInput.id != selection.selectedInput.id
+            },
+            armIgnoreWindow: {
+                // Avoid touching the current default input before the override is applied.
+                // On AirPods routes, even a short read of the default input can briefly
+                // pull playback toward headset-mode audio.
+                ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+                    + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+            },
+            isRecoveryStale: {
+                recoveryGeneration.map { recoveryState.isStale(generation: $0) } ?? false
+            }
+        )
         var stageTimings = [
-            "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
+            "audio_input_selection_load_ms": selectionLoadMs
         ]
-        if selection.didOverrideDefault || cachedInputDeviceSelection?.selectedInput.id != selection.selectedInput.id {
-            // Avoid touching the current default input before the override is applied.
-            // On AirPods routes, even a short read of the default input can briefly
-            // pull playback toward headset-mode audio.
-            ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
-                + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-        }
-        if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
-            throw CancellationError()
-        }
         let snapshotReadStartedAt = CFAbsoluteTimeGetCurrent()
         let snapshotResult: (
             outputFormat: ParakeetAudioFormatSummary,

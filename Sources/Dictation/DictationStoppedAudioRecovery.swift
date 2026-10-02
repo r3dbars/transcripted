@@ -151,6 +151,17 @@ enum DictationStoppedAudioRecoveryStore {
         }
     }
 
+    /// Retires a take's checkpoint once its transcript is saved. A failed
+    /// save keeps the WAV, so the take can still be transcribed later.
+    @discardableResult
+    static func retire(
+        _ recovery: DictationStoppedAudioRecovery?,
+        afterSaving result: DictationTranscriptPersistenceResult,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        cleanup(recovery, transcriptPersisted: result.saved != nil, fileManager: fileManager)
+    }
+
     /// Stops the launch reminder for one saved recording without deleting it.
     /// The user closed its "Transcribe It" message, so asking again on every
     /// launch is a nag; the WAV stays where it is. Returns `true` when marked.

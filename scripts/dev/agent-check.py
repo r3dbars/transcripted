@@ -32,9 +32,17 @@ MANUAL_COMMAND_FRAGMENTS = (
     "run-live-capture-smoke.sh",
 )
 ALLOWED_EXECUTABLES = {"bash", "python3", "ruby", "swift"}
+DEPS_COMMAND = "bash build-deps.sh --force"
+DEPS_BUILD_STAMP = REPO_ROOT / "deps-libs/.build-deps-stamp"
+DEPS_COMMAND_PATTERN = re.compile(r"^bash[ \t]+build-deps\.sh(?:[ \t]|$)")
+NEEDS_DEPS_PATTERN = re.compile(
+    r"^(?:bash[ \t]+(?:build|build-beta|run-integration-smoke)\.sh(?:[ \t]|$)"
+    r"|swift[ \t]+test(?!.*--package-path))"
+)
 BOOTSTRAP_COMMANDS = {
     "python3 -m py_compile scripts/dev/agent-check.py",
     "python3 scripts/dev/agent-check.py --self-test",
+    DEPS_COMMAND,
 }
 
 
@@ -276,8 +284,30 @@ def trusted_manual_requirements(base_sha: str, paths: list[str]) -> list[str]:
     return manual_requirements_for_paths(contract, paths)
 
 
-def proof_commands(selected: list[str], required: list[str]) -> list[str]:
-    return list(dict.fromkeys([*required, *selected]))
+def proof_commands(
+    selected: list[str],
+    required: list[str],
+    deps_ready: bool = True,
+) -> list[str]:
+    """Trusted checks first, but the deps build just before the first check
+    that links prebuilt deps.
+
+    The matrix lists build.sh ahead of build-deps.sh, so a Core change used to
+    build against the stale archive. A fresh worktree has no deps-libs/ at all;
+    then the deps build is added even when no rule asked for it.
+    """
+    commands = list(dict.fromkeys([*required, *selected]))
+    deps = [command for command in commands if DEPS_COMMAND_PATTERN.match(command)]
+    if not deps and not deps_ready:
+        deps = [DEPS_COMMAND]
+    rest = [command for command in commands if command not in deps]
+    first_needing = next(
+        (index for index, command in enumerate(rest) if NEEDS_DEPS_PATTERN.match(command)),
+        None,
+    )
+    if first_needing is None:
+        return commands
+    return [*rest[:first_needing], *deps, *rest[first_needing:]]
 
 
 def path_state_fingerprint(paths: list[str]) -> str:
@@ -499,6 +529,21 @@ def run_commands(
     return results
 
 
+def failure_summary(results: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    for result in results:
+        if result["status"] == "FAIL":
+            detail = (
+                f"exit {result['exit_code']}"
+                if result.get("exit_code") is not None
+                else result.get("reason")
+            )
+            lines.append(f"FAIL     {result['command']} ({detail})")
+        elif result["status"] == "BLOCKED":
+            lines.append(f"BLOCKED  {result['command']} ({result.get('reason')})")
+    return lines
+
+
 def deterministic_status(results: list[dict[str, Any]]) -> str:
     statuses = {result["status"] for result in results}
     if "FAIL" in statuses:
@@ -661,6 +706,40 @@ def self_test() -> None:
     )
     if merged_checks[:2] != ["bash build.sh --no-open", "bash run-tests.sh"]:
         raise ProofError("trusted path-specific checks must run before branch additions")
+
+    core_checks = proof_commands(
+        [],
+        ["python3 scripts/dev/fast.py", "bash build.sh --no-open", "bash run-tests.sh", DEPS_COMMAND],
+    )
+    if core_checks[:3] != ["python3 scripts/dev/fast.py", DEPS_COMMAND, "bash build.sh --no-open"]:
+        raise ProofError("the deps build must run right before the app build")
+    if proof_commands([], ["swift test"], deps_ready=False) != [DEPS_COMMAND, "swift test"]:
+        raise ProofError("root swift test links prebuilt deps")
+    if proof_commands([], ["swift test --package-path Tools/X"], deps_ready=False) != [
+        "swift test --package-path Tools/X"
+    ]:
+        raise ProofError("Tools package tests must not trigger a deps build")
+    if proof_commands([], ["bash build.sh --no-open"], deps_ready=False) != [
+        DEPS_COMMAND,
+        "bash build.sh --no-open",
+    ]:
+        raise ProofError("missing deps must be built before the app build")
+    if proof_commands([], ["bash run-tests.sh"], deps_ready=False) != [
+        "bash run-tests.sh"
+    ]:
+        raise ProofError("checks that do not link deps must not trigger a deps build")
+    summary = failure_summary(
+        [
+            {"command": "bash build.sh --no-open", "status": "FAIL", "exit_code": 1, "reason": None},
+            {"command": "bash run-tests.sh", "status": "PASS", "exit_code": 0, "reason": None},
+            {"command": "release <operator>", "status": "BLOCKED", "exit_code": None, "reason": "operator-input-required"},
+        ]
+    )
+    if summary != [
+        "FAIL     bash build.sh --no-open (exit 1)",
+        "BLOCKED  release <operator> (operator-input-required)",
+    ]:
+        raise ProofError("failed and blocked checks must be named in the summary")
 
     new_check = "python3 scripts/dev/new-proof-check.py --self-test"
     new_matrix = f"""rules:
@@ -896,7 +975,13 @@ def main() -> int:
                 ]
             )
         )
-        commands = proof_commands(checks, required_checks)
+        commands = proof_commands(
+            checks,
+            required_checks,
+            deps_ready=DEPS_BUILD_STAMP.is_file(),
+        )
+        if DEPS_COMMAND in commands and DEPS_COMMAND not in [*checks, *required_checks]:
+            print("Prebuilt deps are missing in this checkout; building them first.")
         results = run_commands(commands, trusted_commands=trusted_commands)
         source_stable = source_snapshot_is_stable(source_snapshot, context_paths)
         if not source_stable:
@@ -917,6 +1002,11 @@ def main() -> int:
         )
         write_report(report_path, report)
         deterministic = report["proof"]["deterministic"]["status"]
+        failures = failure_summary(results)
+        if failures:
+            print("\nChecks that did not pass:")
+            for line in failures:
+                print(f"  {line}")
         print(f"\nDeterministic proof: {deterministic}")
         print(f"Proof report: {report_path.relative_to(REPO_ROOT)}")
         if report["proof"]["manual"]["status"] == "UNKNOWN":

@@ -28,7 +28,8 @@ Usage: bash check.sh [changed|quick|full|hardware] [--base <ref>] [--keep-going]
   full       everything Swift CI runs on a PR
   hardware   real mic, system audio and paste-back smokes on this Mac
 
-  --base <ref>    diff base for "changed" (default origin/main)
+  --base <ref>    diff base for "changed" (default origin/main); uncommitted and
+                  untracked files count too
   --keep-going    in full/hardware, run every step even after a failure
 EOF
 }

@@ -48,19 +48,11 @@ extension MeetingSessionController {
     /// The transcription queue has nothing left running or queued — settle
     /// `state` onto the terminal outcome of the last job that finished.
     func transcriptionQueueSettled() {
-        guard !isCaptureSessionActive else { return }
-        switch lastTerminalTranscriptionOutcome {
-        case .failed(let message):
-            transition(to: .error(message), reason: "transcription_queue_settled_failed")
-        case .transcriptSaved:
-            transition(to: .ready, reason: "transcription_queue_settled_saved")
-        case .discarded:
-            transition(to: .ready, reason: "transcription_queue_settled_discarded")
-        case .none:
-            if case .transcribing = state {
-                transition(to: .ready, reason: "transcription_queue_settled_idle")
-            }
-        }
+        guard let settled = MeetingSessionStateMachine.settledTransition(
+            after: lastTerminalTranscriptionOutcome,
+            current: state
+        ) else { return }
+        transition(to: settled.state, reason: settled.reason)
     }
 
     func handleDisplayStatusChange(from previousStatus: DisplayStatus, to status: DisplayStatus) {
@@ -169,12 +161,18 @@ extension MeetingSessionController {
                     failureKind: failureKind.rawValue,
                     modelState: state.diagnosticName
                 )
-                lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)
                 // taskManager runs one job at a time, but that job can be an
                 // earlier meeting's queued transcript finishing in the
                 // background while a different meeting is actively
                 // recording live right now — must not stomp that capture.
-                reportUnrelatedFailure(diagnosticMessage, reason: "transcript_skipped")
+                let skipped = MeetingSessionStateMachine.skippedTranscript(
+                    diagnosticMessage: diagnosticMessage,
+                    while: state
+                )
+                lastTerminalTranscriptionOutcome = skipped.terminalOutcome
+                if let visibleState = skipped.visibleState {
+                    transition(to: visibleState, reason: "transcript_skipped")
+                }
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
                 transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
@@ -415,15 +413,12 @@ extension MeetingSessionController {
         // that legitimately want the currently-transcribing job's properties
         // must pass `activeDetectedPromptTranscriptionTelemetryProperties`
         // explicitly.
-        guard let properties = promptProperties else { return }
-        AnalyticsReporter.track(
-            "meeting_prompt_outcome_recorded",
-            properties: MeetingPromptTelemetry.outcomeProperties(
-                promptProperties: properties,
-                outcomeKind: outcomeKind,
-                elapsedSeconds: elapsedSeconds
-            )
-        )
+        guard let properties = MeetingPromptTelemetry.sessionOutcomeProperties(
+            promptProperties: promptProperties,
+            outcomeKind: outcomeKind,
+            elapsedSeconds: elapsedSeconds
+        ) else { return }
+        AnalyticsReporter.track("meeting_prompt_outcome_recorded", properties: properties)
     }
 
     private func detectedPromptRecordingElapsedSeconds() -> TimeInterval? {

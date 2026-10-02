@@ -327,6 +327,10 @@ extension Audio {
                             return
                         }
 
+                        if let liveHandler = self.onLivePCMBuffer {
+                            self.livePCMDelivery.enqueue(bufferForAsyncUse, source: .system, captureGeneration: sessionGeneration, handler: liveHandler)
+                        }
+
                         // The reservation is made before dispatch, so a slow
                         // writer can retain at most the gate's byte limit.
                         let backpressure = self.systemAudioWriteBackpressure

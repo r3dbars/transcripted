@@ -88,48 +88,10 @@ func testDictationStartedTelemetryContract() async {
         )
     }
 
-    // Still source-text, deliberately: these are the controller's own call
-    // sites, and DictationSessionController can't be built in the fast
-    // runner. The counting rules themselves are behavior tests above and in
-    // DictationStartAdmissionTests / DictationQueuedStartPolicyTests.
-    // The core file comes first, then every +Area extension.
-    let source = readDictationSessionControllerSource()
-
-    runSuite("The controller wires the real start events into admission") {
-        let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
-        let countRequest = sourceSlice(start, from: "countRequest:", to: "blocksNewCapture:")
-        assertTrue(countRequest.contains("trackDictationStartRequested("),
-                   "admission's request count must be the real dictation_start_requested event")
-        let countRefusal = sourceSlice(start, from: "countRefusal:", to: "beginSession:")
-        assertTrue(countRefusal.contains("trackDictationStartRefused(") && countRefusal.contains("failureKind: refusal.rawValue"),
-                   "each refusal must be reported with its own failure kind")
-        let beginSession = sourceSlice(start, from: "beginSession:", to: "guard admission == .admitted")
-        assertTrue(beginSession.contains("currentDictationSessionID = UUID()"),
-                   "the session id is minted by admission, after the request was counted")
-    }
-
-    runSuite("internal restart paths are marked as retries") {
-        // The Try Again actions sit in the DictationSessionController+*.swift
-        // extensions, so count across the core file and all of them.
-        let internalCalls = Array(source.components(separatedBy: ".startDictation(").dropFirst())
-
-        // Nine: the eight error-alert restart affordances, plus the start of a
-        // press remembered while the last take finished. That one is the
-        // user's own press, so it passes the press's own flag through.
-        assertEqual(
-            internalCalls.count,
-            9,
-            "the error-alert restart affordances in the controller plus the remembered press; update this count deliberately, not to make the suite pass"
-        )
-        for call in internalCalls {
-            let arguments = call.components(separatedBy: ")").first ?? ""
-            if arguments.contains("isRetry: request.isRetry") { continue }
-            assertTrue(
-                arguments.contains("isRetry: true"),
-                "a restart from a Try Again action must be marked, or four taps read as five independent attempts"
-            )
-        }
-    }
+    // The controller's wiring of these rules (the real request and refusal
+    // events, the session id minted after the count, and every Try Again
+    // restart marked as a retry) runs through DictationSessionPipeline.swift
+    // and is a behavior test in DictationSessionPipelineTests.swift.
 }
 
 @MainActor
@@ -156,12 +118,4 @@ private func admissionSteps(into record: @escaping @MainActor (String) -> Void) 
         countRefusal: { record("count refusal \($0.rawValue)") },
         beginSession: { record("begin session") }
     )
-}
-
-private func sourceSlice(_ source: String, from start: String, to end: String) -> String {
-    guard let startRange = source.range(of: start),
-          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
-        return ""
-    }
-    return String(source[startRange.lowerBound..<endRange.lowerBound])
 }

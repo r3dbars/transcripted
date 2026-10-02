@@ -294,7 +294,7 @@ jobs:
           restore-keys: |
             swiftpm-tools-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
-      # Build-independent (no prebuilt deps): the four Tools packages compile
+      # Build-independent (no prebuilt deps): the five Tools packages compile
       # with no TRANSCRIPTEDCLI_ENABLE_* set, so they never link the deps. They
       # live here (not in `checks`) purely to balance wall-clock — see the
       # comment on the `checks` job.
@@ -306,6 +306,7 @@ jobs:
           swift test --package-path Tools/TranscriptedCLI
           swift test --package-path Tools/TranscriptedMCP
           swift test --package-path Tools/TranscriptedQA
+          swift test --package-path Tools/TranscriptedLive
 
       # These modes import the prebuilt audio/Core modules. The real-model
       # executable tests remain opt-in (no audio/model downloads on hosted CI).

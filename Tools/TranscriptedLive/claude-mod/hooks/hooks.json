@@ -1,0 +1,4 @@
+{
+  "description": "Live meeting pane, status line, /meeting command and read_live tool, fed by the transcripted-live helper's files",
+  "modules": ["./register.tsx"]
+}

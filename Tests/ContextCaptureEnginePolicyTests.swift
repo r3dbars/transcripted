@@ -9,7 +9,7 @@
 // CGEventTap and DictationSessionController, so this runner doesn't build it.
 // What still needs the real app (the tap's dedicated run-loop thread, the
 // Accessibility polling loop, lock-held delayed press delivery) is covered by
-// `bash check.sh hardware` and the manual checks in Sources/Capture/CLAUDE.md.
+// `bash check.sh hardware` and the manual checks in Sources/Capture/AGENTS.md.
 
 import AppKit
 import Carbon

@@ -80,7 +80,10 @@ extension ParakeetEngine {
 
         let snapshot: ParakeetAudioInputSnapshot
         do {
-            snapshot = try await audioInputSnapshot(operation: "prewarm")
+            snapshot = try await audioInputSnapshot(
+                operation: "prewarm",
+                isEngineWorkCurrent: nil
+            )
         } catch {
             guard canContinuePrewarm(owner: prewarmOwner) else { return }
             EventReporter.shared.capture(

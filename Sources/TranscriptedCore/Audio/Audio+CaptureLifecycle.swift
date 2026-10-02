@@ -9,6 +9,7 @@ import Synchronization
 // streaming latches, and `stop()`.
 extension Audio {
     func prepareForNewRecordingStart() {
+        livePCMDelivery.setEnabled(false)
         // A fast retry can begin before stop()'s deferred main-thread cleanup.
         // Reset the old timer here so every recording gets a fresh watchdog
         // and buffer timestamp.
@@ -288,6 +289,7 @@ extension Audio {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
+        livePCMDelivery.setEnabled(false)
         let finishingCapture = systemAudioCaptureAttemptOwnership.captureOwned(by: captureGeneration)
         signalDiagnosticsLock.lock()
         finishingSystemSignalAttempt = finishingCapture

@@ -17,6 +17,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `RuntimeDiagnostics.swift` — app runtime heartbeat, dirty-shutdown detection, and active session stage tracking for force quits / silent exits
 - `RuntimeDiagnosticsStore.swift` — JSON marker persistence and privacy-safe dirty-shutdown context builder
 - `CrashReporter.swift` — crash reporting setup
+- `SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog (sends nothing when `AutomatedLaunchEnvironment` is active)
@@ -98,6 +99,7 @@ Relevant direct coverage:
 - `Tests/SpeakerRecognitionTelemetryTests.swift`
 - `Tests/ObservabilityPreferencesTests.swift`
 - `Tests/SentryEventPolicyTests.swift`
+- `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/SentryPayloadSanitizerTests.swift`
 - `Tests/SentryRuntimeConfigurationTests.swift`
 - `Tests/UnrecognizedSelectorReasonTests.swift`

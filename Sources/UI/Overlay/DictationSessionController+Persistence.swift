@@ -151,7 +151,7 @@ extension DictationSessionController {
                 )
             }
             // Clean only this writer's checkpoint, even if a new session has started.
-            _ = DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)
+            DictationStoppedAudioRecoveryStore.retire(recovery, afterSaving: result)
             return result
         }
     }

@@ -36,6 +36,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 
 The wrappers share code from `scripts/entrypoints/lib/`:
 
+- `scripts/entrypoints/lib/running-bundle-guard.sh` — `refuse_if_bundle_running`, called by `build.sh` and `build-beta.sh` before they delete the app bundle; refuses while that bundle is running (`FORCE_REBUILD_RUNNING=1` overrides)
 - `scripts/entrypoints/lib/deps-staleness.sh` — dependency-staleness-check functions shared by `build-deps.sh`, `build.sh`, and `run-integration-smoke.sh` (mtime then sha256 freshness check against `deps-libs/.build-deps-stamp`)
 - `scripts/entrypoints/lib/shared-smoke-sources.sh` — the overlapping subset of the hand-listed swiftc source files used by `run-tests.sh`, `run-e2e-smoke.sh`, and `run-slow-pasteback-smoke.sh`
 - `scripts/entrypoints/lib/swiftc-app-args.sh` — shared swiftc argument construction (frameworks, linker inputs, source list) for the Transcripted app target, sourced by `build.sh` and `build-beta.sh` so they cannot silently diverge
@@ -50,10 +51,10 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `bash Tests/BuildDependencies/ArchiveInputsTests.sh` — exercises library-only archive guards and matching native/Xcode parser-module exports without compiling/downloading dependencies; actual builds also validate archive symbols
 - `bash Tests/BuildDependencies/CLIManifestTests.sh` — evaluates the actual CLI manifest with inert dependency fixtures to reject silent audio-mode fallback and incomplete module exports
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression
-- `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report
+- `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report; runs the deps build right before the first check that links prebuilt deps (adding it when `deps-libs/` is missing), and names every failed or blocked check before the overall verdict
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
-- `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up
+- `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up; with `--pr` it first checks whether that PR is merged or its head is already on `origin/main`
 - `scripts/dev/mutation-probe.py` — mutation-testing probe for one `Sources/**/*.swift` file: flips one operator or literal at a time, runs your `--test` command, and reports KILLED/SURVIVED/COMPILE-ERROR plus a mutation score (JSON under `build/mutation/`). Refuses dirty files and a red baseline, and always restores the source. `--list` plans without running; `--self-test`. See `docs/mutation-testing.md`
 - `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--reroute` (from `.github/workflows/mac-runner-sweep.yml`) re-runs on hosted any run stuck behind a Mac that went quiet; `--self-test` checks the rules
 - `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `rebuild`, `uninstall` the service that runs each Mac CI job in a fresh throwaway Tart VM, plus the VM-side fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
@@ -81,7 +82,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/recalibrate_eres2net_groundtruth.py` — recomputes the ERes2Net match/consolidation thresholds against AMI ground truth; reproducibility record for the thresholds in `Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift`
 - `scripts/make_eres2net_swift_fixture.py` — regenerates the checked-in golden fixture `Tests/TranscriptedCoreTests/SpeakerTests/Fixtures/eres2net_swift_golden.json` used by the Swift ERes2NetEmbedder parity test
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
-- `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes
+- `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes (`--version <x.y.z>`; `--dry-run` to preview)
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
 - `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
