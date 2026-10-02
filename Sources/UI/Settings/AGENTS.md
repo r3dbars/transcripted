@@ -82,7 +82,7 @@ settings-side agent connection flow.
   from word count, since the files keep only the first keystroke; a writing
   click opens its day file until the Writing tab lands.
   No network, no new analytics event (only `settings_action_clicked` action
-  ids). Meeting clicks reuse the pill's `requestHomeRevealMeeting` path;
+  ids). Meeting clicks reuse the meeting overlay's `requestHomeRevealMeeting` path;
   dictation clicks open Dictations. The tape copies the Context app's Days
   view (week cells with mini lines, full day below, 6 AM to midnight) and
   its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`).
@@ -177,22 +177,19 @@ settings-side agent connection flow.
   cards further down stay reachable with a "Waiting in review" badge), and
   Home's "speakers need names" count (skipped calls don't count). The model
   rebuilds it once when the queue, a skip, or Later changes.
-- `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet. It is
-  held while a meeting records (`SpeakerReviewPresentationGate.swift`) and
-  its header names the meeting. When the recording started with a calendar event
-  (same window as the record-this-meeting pop-up),
-  its invitees show as one-click name buttons on each row and lead the name
-  list, and a 1:1 pre-fills the one remote voice
-  (`MeetingInviteeSuggestionPolicy`). Suggestions only; the user still saves.
-  With the Notch island selected the review asks in the island instead
+- `SpeakerNamingSheet.swift` - presenter for the completed-meeting speaker
+  review. It is held while a meeting records
+  (`SpeakerReviewPresentationGate.swift`), then asks in the Notch island
   (`Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift`); Later there saves
-  what was answered and the rest waits in Speakers.
+  what was answered and the rest waits in Speakers. When the recording started
+  with a calendar event, its invitees show as one-tap names
+  (`MeetingInviteeSuggestionPolicy`). The old review window is deleted.
 - `SpeakerReviewPresentationGate.swift` - Foundation-pure rule for when the
-  speaker review window may appear (waits for Stop while a meeting records).
+  speaker review may appear (waits for Stop while a meeting records).
 - `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow
   menu, and name-suggestion policies for the voice-to-name rows.
-- `SpeakerNameAutocompleteField.swift` - SwiftUI wrapper over the naming
-  sheet's `NSComboBox` autocomplete.
+- `SpeakerNameAutocompleteField.swift` - SwiftUI wrapper over an
+  `NSComboBox` name autocomplete for the Speakers screen.
 - `RetainedDataSourceComboBox.swift` - `NSComboBox` subclass that keeps its
   data source alive (fixes a dangling `assign` data-source crash).
 - `Pages/` - one file per standalone settings page split out of

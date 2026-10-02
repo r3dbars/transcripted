@@ -7,7 +7,7 @@ app already uses most, so adopting them is a snap-to-grid, not a redesign.
 
 Scope note: this is the visual language (type, spacing, radii). Color tokens
 already live per surface in `MenuTokens` (menubar popover, light + dark) and
-`OverlayTokens` (a few overlay colors). Those stay where they are; this document
+the Notch island's own drawing code. Those stay where they are; this document
 governs the cross-surface geometry that had drifted into ~21 ad-hoc font sizes,
 12 corner radii, and ~26 padding values across the two main windows.
 
@@ -72,7 +72,9 @@ Snap rule: 7 → `md`; 10 → `md` or `lg` by container size; 14/18 → `xl`.
   action rows and header read their fonts from there instead of raw
   `NSFont.systemFont(ofSize:)`. This is the reference adoption — the pattern to
   follow when the SwiftUI surfaces (Home, Settings) migrate onto tokens.
-- **Overlay (AppKit):** `Sources/UI/Overlay/OverlayTokens.swift` — a few shared colors; the meeting overlay keeps the rest in `MeetingOverlayTokens`.
+- **Overlay (AppKit):** the Notch island is the only overlay; its colors and
+  sizes live with its drawing (`Sources/UI/Overlay/NotchIslandView.swift`,
+  `NotchIslandGeometry.swift`).
 - **SwiftUI surfaces (Home, Settings):** still hold ad-hoc sizes. Migrate them
   onto these steps incrementally, one view per PR, snapping to the nearest step.
   Do not convert every view at once — correctness over a big-bang refactor.

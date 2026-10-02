@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 import TranscriptedCore
 
-/// SwiftUI wrapper around the same `NSComboBox`-based autocomplete the
-/// post-meeting speaker naming sheet uses (`SpeakerRowView`'s `nameField`).
+/// SwiftUI wrapper around an `NSComboBox`-based name autocomplete.
 /// It reuses `SpeakerNameSelectionPolicy` for label building, suggestion
 /// ordering, and inline completion so the Speakers screen's "Who is this?"
 /// field matches existing voices exactly the way naming does elsewhere.

@@ -3,8 +3,8 @@
 //   - the code lives in TranscriptedApp.swift, the TranscriptedSettingsView
 //     split, the SpeakerPeople split, or HomeView.swift, which need seams of
 //     their own next;
-//   - the code is the meeting pill or the speaker naming window, which the
-//     #1946 follow-ups delete;
+//   - the code is the meeting overlay controller, whose island path still
+//     needs a seam;
 //   - it's a contract with a script or another package (the QA CLI and bench,
 //     and the identifiers the QA smokes press).
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
@@ -152,8 +152,6 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
-        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
-            "Acknowledgement must not hide the unverified capture state")
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
         assertTrue(contractSource("Sources/Meeting/MeetingSessionController.swift").contains("let signalVerified = capture.hasObservedSystemAudioSignal"),
@@ -163,44 +161,11 @@ func testUIAutomationSurfaceContract() {
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
         let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let view = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
         let session = contractSource("Sources/Meeting/MeetingSessionController.swift")
         assertTrue(session.contains("systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery("),
             "the recovery action should come from typed permission evidence")
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
-        assertTrue(view.contains("Grant System Audio Access")
-            && view.contains("transcripted.meeting-overlay.grant-system-audio-access"),
-            "the denial action should be clear and accessible")
-    }
-    runSuite("Meeting stop visual keeps its generous hit target") {
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopHeight: CGFloat  = 40")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("static let stopVisualDiameter: CGFloat = 28")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("image.isTemplate = false"),
-            "Stop should use a smaller full-color circle without shrinking its interactive frame"
-        )
-    }
-    runSuite("Meeting title clears recording-only accessibility state on every update") {
-        let source = contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift")
-        let update = source.components(separatedBy: "    func update(").last?
-            .components(separatedBy: "    private func applyStripContentFade").first ?? ""
-        let reset = update.range(of: "titleLabel.setAccessibilityLabel(nil)")
-        let prepareBranch = update.range(of: "if isPreparing {")
-        let stateSwitch = update.range(of: "switch state {")
-        assertTrue(
-            reset != nil && prepareBranch != nil && stateSwitch != nil
-                && reset!.lowerBound < prepareBranch!.lowerBound
-                && reset!.lowerBound < stateSwitch!.lowerBound,
-            "Each state update must clear the recording AX override before preparing or selecting transcribing/saved/error copy"
-        )
-        assertTrue(
-            update.contains("titleLabel.setAccessibilityLabel(systemAudioUnverified ?")
-                && update.contains("titleLabel.stringValue = \"Transcribing meeting…\"")
-                && update.contains("titleLabel.stringValue = \"Saved to Markdown\"")
-                && update.contains("titleLabel.stringValue = copy.title"),
-            "Recording may describe uncertainty, while terminal states must expose their current visible titles"
-        )
     }
     runSuite("UI automation surface contract - every identifier the QA smokes press exists in the app") {
         // A cross-package contract: the QA CLI and the launch smoke press
@@ -459,20 +424,6 @@ func testUIAutomationSurfaceContract() {
         assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
         assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
 
-        for identifier in [
-            "transcripted.speaker-review.save-names",
-            "transcripted.speaker-review.review-later",
-            "transcripted.speaker-review.keep-local-mic-as-you",
-            "transcripted.speaker-review.row.name",
-            "transcripted.speaker-review.row.play-sample",
-            "transcripted.speaker-review.row.confirm-match",
-            "transcripted.speaker-review.row.discard-voice",
-        ] {
-            assertTrue(
-                contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains(identifier),
-                "\(identifier) should keep speaker review scriptable without using speaker names"
-            )
-        }
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = selectedOption?.id")
                 && contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = nil"),
@@ -485,35 +436,10 @@ func testUIAutomationSurfaceContract() {
         // Batch speaker naming order (saved identities first, local links
         // remapped to surviving profiles) is covered by
         // HomeMeetingPreviewFormatterTests through HomeMeetingSpeakerNamingPolicy.
-        assertTrue(
-            contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let minimum: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let btnH = SpeakerNamingHitTargets.minimum")
-                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let fieldH = SpeakerNamingHitTargets.minimum")
-                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let hitTarget = SpeakerNamingHitTargets.minimum"),
-            "speaker review save/cancel/name/play/confirm/discard controls should keep a 40pt hit floor"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let sectionHeaderHeight: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight")
-                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("keepAsYouButton.frame = NSRect("),
-            "speaker review Keep Local Mic as You should keep a 40pt section-header hit floor"
-        )
 
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("transcripted.meeting-overlay.recording"),
-            "the recording pill body should keep a stable automation identifier"
-        )
-        let meetingPillBodySource = contractSource("Sources/UI/Overlay/MeetingPillBodyView.swift")
-        assertTrue(
-            meetingPillBodySource.contains("setAccessibilityElement(false)")
-                && !meetingPillBodySource.contains("setAccessibilityRole(.button)")
-                && !meetingPillBodySource.contains("accessibilityPerformPress"),
-            "the inert recording drag surface must not masquerade as an accessible button"
-        )
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Keep Controls Visible")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
-            "pill context-menu actions should keep stable titles for automation"
+            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
+            "the island's meeting right-click menu should keep a stable Discard title for automation"
         )
 
     }
