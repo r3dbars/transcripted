@@ -2581,9 +2581,10 @@ class ParakeetEngine: ObservableObject {
         }
         guard ownsRecordedTranscription(transcriptionLease) else { return nil }
         guard let recorded else {
-            if lastEmptyTranscriptionReason == nil && !recoveredRecordingTimeline.isEmpty {
-                lastEmptyTranscriptionReason = .audioNeedsRecovery
-            }
+            lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reasonAfterEmptyConversion(
+                current: lastEmptyTranscriptionReason,
+                retainsNativeAudio: !recoveredRecordingTimeline.isEmpty
+            )
             finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
             return nil
         }
@@ -2771,9 +2772,10 @@ class ParakeetEngine: ObservableObject {
         }
         guard ownsRecordedTranscription(transcriptionLease) else { return nil }
         guard let recorded else {
-            if lastEmptyTranscriptionReason == nil && !recoveredRecordingTimeline.isEmpty {
-                lastEmptyTranscriptionReason = .audioNeedsRecovery
-            }
+            lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reasonAfterEmptyConversion(
+                current: lastEmptyTranscriptionReason,
+                retainsNativeAudio: !recoveredRecordingTimeline.isEmpty
+            )
             finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
             return nil
         }
