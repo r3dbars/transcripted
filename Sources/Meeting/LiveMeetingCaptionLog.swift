@@ -51,8 +51,11 @@ struct LiveMeetingCaptionLog: Equatable, Sendable {
             committedCharacters += trimmed.count
         }
         guard committedCharacters > maximumCharacters else { return }
+        // Drop a quarter at once: every trim makes the island redraw the
+        // whole transcript, so it should happen rarely, not on every commit.
+        let target = maximumCharacters - maximumCharacters / 4
         var removed = 0
-        while committedCharacters > maximumCharacters, lines.count > 1 {
+        while committedCharacters > target, lines.count > 1 {
             committedCharacters -= lines.removeFirst().text.count
             removed += 1
         }

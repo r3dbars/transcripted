@@ -76,4 +76,15 @@ func testLiveMeetingCaptionLog() {
         log.commit("and more", track: .microphone)
         assertEqual(log.trimGeneration, 0, "a lone line can't be trimmed, so nothing changed for the view")
     }
+
+    runSuite("LiveMeetingCaptionLog trims a quarter at a time so redraws stay rare") {
+        var log = LiveMeetingCaptionLog(maximumCharacters: 100)
+        var track = LiveMeetingTrack.microphone
+        for index in 0..<40 {
+            log.commit("turn \(index) has some words", track: track)
+            track = track == .microphone ? .system : .microphone
+        }
+        assertTrue(log.trimGeneration < 20, "40 turns past the cap redraw a handful of times, not on every commit")
+        assertEqual(log.lines.last?.text, "turn 39 has some words", "the newest turn is kept")
+    }
 }

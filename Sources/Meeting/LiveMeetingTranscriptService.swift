@@ -53,8 +53,10 @@ final class LiveMeetingTranscriptService {
                 guard setting != self.captionsSetting else { return }
                 self.captionsSetting = setting
                 self.refreshCaptions()
+                if setting { LiveMeetingCaptions.shared.prewarm() }
             }
         }
+        if captionsSetting { LiveMeetingCaptions.shared.prewarm() }
     }
 
     func beginCapture(sessionID: UUID, router: STTRouter, model: TranscriptionModelChoice,

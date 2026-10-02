@@ -43,12 +43,38 @@ final class LiveMeetingCaptions: ObservableObject {
     /// models are never loaded at once.
     private var teardown: Task<Void, Never>?
 
+    private var prewarmTask: Task<Void, Never>?
+    private var prewarmed = false
+
+    /// Downloads and compiles the model in the background, once per launch,
+    /// so a meeting never waits on it. The first Neural Engine compile takes
+    /// ~20 s on an M5 and can take a minute on an M1, longer than the 30 s
+    /// the tracks can queue. Loads one copy and frees it straight away.
+    func prewarm() {
+        guard !prewarmed, prewarmTask == nil, status == .off else { return }
+        prewarmTask = Task(priority: .background) { [weak self] in
+            // Out of the way of launch and the dictation model's warmup.
+            try? await Task.sleep(for: .seconds(20))
+            guard let self, !Task.isCancelled, self.status == .off else {
+                self?.prewarmTask = nil
+                return
+            }
+            let track = LiveMeetingCaptionTrack()
+            let result = await track.load()
+            await track.stop()
+            self.prewarmed = result == .ready
+            self.prewarmTask = nil
+        }
+    }
+
     /// Loading or listening: it wants audio.
     var isActive: Bool { status == .preparing || status == .listening }
 
     /// Starts transcribing this recording. Clears the last meeting's text.
     func start(sessionID: UUID, shouldYield: @escaping @MainActor () -> Bool) {
         guard self.sessionID != sessionID || status == .off else { return }
+        prewarmTask?.cancel()
+        prewarmTask = nil
         stopTracks()
         self.sessionID = sessionID
         generation += 1
