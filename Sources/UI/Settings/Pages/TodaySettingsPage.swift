@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Today page: one sentence for the day, the week as a strip, the picked
 /// day as three lanes (meetings, dictation, writing) with a preview of the
-/// picked capture under them, then the latest captures. Pure view assembly;
+/// picked capture under them, then the day in sessions. Pure view assembly;
 /// loading lives in `TodayViewModel`, numbers and copy in
 /// `TodayPresentation.swift`, and every navigation or capture action is
 /// injected by the settings shell.
@@ -37,6 +37,10 @@ struct TodaySettingsPage: View {
             } else if let selectedDay {
                 TodayDayCard(day: selectedDay, now: now, pickedMarkID: $pickedMarkID, onOpen: onOpenRecentItem)
                 sessionsSection(selectedDay)
+            } else if !todayViewModel.hasLoaded {
+                Text("Loading…")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
             }
         }
         .onChange(of: selectedDay?.id) { _, _ in

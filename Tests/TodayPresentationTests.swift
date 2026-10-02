@@ -132,6 +132,8 @@ func testTodayPresentation() {
         assertEqual(trimmed, "Can you use a workflow for\u{2026}", "cut at the last whole word")
         assertEqual(TodaySessionBuilder.wordTrimmed("Reply to Sam, then the rest of it", maxLength: 13), "Reply to Sam\u{2026}", "trailing comma dropped")
         assertEqual(TodaySessionBuilder.wordTrimmed("short  text", maxLength: 30), "short text", "short text untouched")
+        let early = TodaySessionBuilder.wordTrimmed("a " + String(repeating: "x", count: 100), maxLength: 20)
+        assertEqual(early, "a " + String(repeating: "x", count: 18) + "\u{2026}", "no late word break cuts hard instead of leaving just \"a\"")
         let quoted = TodayRecentItem(kind: .dictation, id: "d", title: "\u{201C}Hi there\u{201D}", date: now, durationSeconds: nil, transcriptURL: nil)
         assertEqual(TodaySessionBuilder.line(for: quoted), "Hi there", "dictation quotes are dropped without a preview")
         let mixed = [
@@ -148,6 +150,8 @@ func testTodayPresentation() {
         assertEqual(TodaySessionBuilder.title(for: [quick, said]), "Plan the release notes", "a 1-minute meeting gives way to the dictation")
         assertEqual(TodaySessionBuilder.title(for: [quick, said, sync]), "Sync", "a real meeting still names it")
         assertEqual(TodaySessionBuilder.title(for: [quick]), "Quick notes", "a short meeting alone keeps its title")
+        let slack = TodayRecentItem(kind: .writing, id: "w", title: "Reply", date: date(24, 5, 18), durationSeconds: 60, transcriptURL: nil, appName: "Slack")
+        assertEqual(TodaySessionBuilder.title(for: [quick, slack]), "Writing in Slack", "a short meeting doesn't beat one-app writing")
     }
 
     runSuite("TodayCopy - session times") {

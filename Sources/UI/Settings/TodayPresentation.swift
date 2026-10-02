@@ -185,7 +185,7 @@ enum TodayTapeBuilder {
     static let dayCount = 7
 
     /// Seven days, oldest first, the last one is today. Captures are the same
-    /// rows the Recent list uses; a meeting's end comes from its duration.
+    /// rows the sessions list uses; a meeting's end comes from its duration.
     static func days(
         captures: [TodayRecentItem],
         now: Date,
@@ -348,18 +348,20 @@ enum TodaySessionBuilder {
 
     static func title(for items: [TodayRecentItem]) -> String {
         let meetings = items.filter { $0.kind == .meeting }
-        let longMeeting = meetings.first { ($0.durationSeconds ?? 0) >= titleMeetingMinimumSeconds }
-        if let meeting = longMeeting ?? (meetings.count == items.count ? meetings.first : nil) {
+        if let meeting = meetings.first(where: { ($0.durationSeconds ?? 0) >= titleMeetingMinimumSeconds }) {
             return wordTrimmed(meeting.title, maxLength: titleLength)
         }
         if let dictation = items.first(where: { $0.kind == .dictation }) {
             return wordTrimmed(line(for: dictation), maxLength: titleLength)
         }
-        let apps = Set(items.compactMap(\.appName).filter { $0 != "Unknown app" })
-        if apps.count == 1, let app = apps.first, items.allSatisfy({ $0.appName == app }) {
+        let writing = items.filter { $0.kind == .writing }
+        let apps = Set(writing.compactMap(\.appName))
+        if apps.count == 1, let app = apps.first, app != "Unknown app", writing.allSatisfy({ $0.appName == app }) {
             return "Writing in \(app)"
         }
-        return wordTrimmed(items.first.map(line(for:)) ?? "", maxLength: titleLength)
+        // Only short meetings left, or writing across several apps.
+        let first = writing.first ?? meetings.first
+        return wordTrimmed(first.map(line(for:)) ?? "", maxLength: titleLength)
     }
 
     /// One capture as plain text: a meeting's title, else what was said or
@@ -374,12 +376,15 @@ enum TodaySessionBuilder {
 
     /// At most `maxLength` characters, cut at a word boundary with an
     /// ellipsis, so a title never ends in half a word.
+    /// A word boundary in the first half would throw most of the room
+    /// away, so a run with no early space is cut hard instead.
     static func wordTrimmed(_ text: String, maxLength: Int) -> String {
         let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard collapsed.count > maxLength else { return collapsed }
         let head = collapsed.prefix(maxLength + 1)
         var cut = head.lastIndex(of: " ").map { head[..<$0] } ?? head.prefix(maxLength)
         while let last = cut.last, ",;:-\u{2013}\u{2014}".contains(last) { cut = cut.dropLast() }
+        if cut.count < maxLength / 2 { cut = collapsed.prefix(maxLength) }
         return cut.trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 }
@@ -473,7 +478,7 @@ enum TodayWritingParser {
 }
 
 enum TodayRecentActivity {
-    /// Rows per page of the Recent context list.
+    /// How many latest captures the snapshot keeps.
     static let pageSize = 10
 
     /// Newest first across every kind.
@@ -588,7 +593,7 @@ enum TodayCopy {
     }
 }
 
-/// Today's copy runs per Recent row and twice per tape mark on every render
+/// Today's copy runs per session row and twice per tape mark on every render
 /// (hover re-renders the tape), so building a DateFormatter per call adds up
 /// on a busy day. Formatters are reused per template, locale, calendar and
 /// time zone. Foundation formatters are safe to share for reads; the lock
@@ -633,8 +638,11 @@ enum TodayFormatterCache {
             formatter.dateTemplate = "jmm"
             intervalFormatters[key] = formatter
         }
+        // Unlike DateFormatter, DateIntervalFormatter isn't documented as
+        // safe to share, so it formats under the lock.
+        let text = formatter.string(from: start, to: end)
         lock.unlock()
-        return formatter.string(from: start, to: end)
+        return text
     }
 
     static func decimalString(_ value: Int, locale: Locale = .current) -> String {
