@@ -241,4 +241,80 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(byKey["system_0"], Voice(key: "system_0", similarity: 0.61), "an asked voice wins a shared key")
         assertTrue(byKey["mic_1"] == nil)
     }
+
+    runSuite("A calendar 1:1 fills the one unnamed remote voice with the other invitee") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim"], remoteVoicesInMeeting: 1, askedRemoteVoicesHaveSuggestion: [false]),
+            "Dana Kim",
+            "one invitee, one remote voice, no guess: fill in the invitee"
+        )
+        assertNil(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim", "Luis Ortega"], remoteVoicesInMeeting: 1, askedRemoteVoicesHaveSuggestion: [false]),
+            "a group invite fills nothing"
+        )
+        assertNil(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim"], remoteVoicesInMeeting: 2, askedRemoteVoicesHaveSuggestion: [false]),
+            "a second remote voice (even one recognized and not asked) fills nothing"
+        )
+        assertNil(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim"], remoteVoicesInMeeting: nil, askedRemoteVoicesHaveSuggestion: [false]),
+            "an unknown voice count fills nothing"
+        )
+        assertNil(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim"], remoteVoicesInMeeting: 1, askedRemoteVoicesHaveSuggestion: [true]),
+            "a voice that already has a guess keeps its Is this …? question"
+        )
+        assertNil(
+            Policy.oneOnOnePrefill(invitees: ["Dana Kim"], remoteVoicesInMeeting: 1, askedRemoteVoicesHaveSuggestion: []),
+            "nothing remote is asked about: nothing to fill"
+        )
+    }
+
+    runSuite("A calendar name nobody touched saves on Done, not on Later") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(
+            Policy.answerOnFinish(committed: nil, typed: "Dana Kim", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, finish: .done),
+            "Dana Kim",
+            "Done confirms the filled-in name like a typed one"
+        )
+        assertNil(
+            Policy.answerOnFinish(committed: nil, typed: "Dana Kim", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, finish: .later),
+            "Later (or its ring) never saves a name the person didn't look at"
+        )
+        assertEqual(
+            Policy.answerOnFinish(committed: nil, typed: "Dana", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: false, finish: .later),
+            "Dana",
+            "a name the person typed still counts on Later"
+        )
+        assertEqual(
+            Policy.answerOnFinish(committed: "Dana Kim", typed: "", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, finish: .later),
+            "Dana Kim",
+            "a submitted name stands on Later"
+        )
+    }
+
+    runSuite("Keep Local Mic as You covers every local mic voice and wins over a discard") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.lock(isMic: true, keepMicAsYou: true, discarded: false), .keptAsYou)
+        assertEqual(Policy.lock(isMic: true, keepMicAsYou: true, discarded: true), .keptAsYou, "Keep as You wins, as in the review window")
+        assertEqual(Policy.lock(isMic: false, keepMicAsYou: true, discarded: false), nil, "remote voices are never kept as You")
+        assertEqual(Policy.lock(isMic: false, keepMicAsYou: true, discarded: true), .discarded)
+        assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: true), .discarded)
+        assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: false), nil, "a voice left alone is asked as usual")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: false), "Keep Local Mic as You")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: true), "Review Local Mic Voices", "pressing it again lifts it")
+        assertEqual(Policy.lockNote(.keptAsYou), "Will be saved as \u{201C}You\u{201D}")
+    }
+
+    runSuite("Discard Voice is offered on an asked voice with its name box open") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: false), "an unknown voice can be thrown away")
+        assertFalse(Policy.offersDiscard(isRecognized: false, nameBoxOpen: false, keptAsYou: false), "Is this Maya? asks Yes/No first; No opens the box")
+        assertFalse(Policy.offersDiscard(isRecognized: true, nameBoxOpen: true, keptAsYou: false), "a recognized voice is corrected, not discarded")
+        assertFalse(Policy.offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: true), "not while kept as You")
+        assertEqual(Policy.discardTitle(discarded: false), "Discard Voice")
+        assertEqual(Policy.discardTitle(discarded: true), "Undo Discard")
+        assertEqual(Policy.lockNote(.discarded), "Will not be saved to People")
+    }
 }

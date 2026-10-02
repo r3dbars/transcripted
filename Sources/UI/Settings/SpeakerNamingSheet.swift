@@ -43,8 +43,8 @@ final class SpeakerNamingSheet {
     private var latestRequest: SpeakerNamingRequest?
     private var gate = SpeakerReviewPresentationGate()
 
-    /// With Settings › Dictation window set to Notch island, the review asks
-    /// "Who was on this call?" in the island instead of opening a window.
+    /// The review asks "Who was on this call?" in the Notch island instead of
+    /// opening a window.
     weak var island: NotchIslandController?
     /// Open transcript on the island's "Everyone's named".
     var onOpenTranscript: ((URL) -> Void)?
@@ -240,7 +240,7 @@ final class SpeakerNamingSheet {
         Task { @MainActor [weak self, weak view] in
             guard let invitees = await Self.invitees(for: request),
                   let self, let view, self.islandReviewView === view else { return }
-            view.setInvitees(invitees.names)
+            view.setInvitees(invitees.names, remoteVoicesInMeeting: invitees.remoteVoices)
         }
     }
 

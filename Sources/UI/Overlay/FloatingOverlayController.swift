@@ -1263,9 +1263,9 @@ class FloatingOverlayController {
 
     // MARK: - Cursor Following
 
-    private var isCursorMiniPresentationMode: Bool {
-        DictationOverlayPresentationPreferences.mode() == .cursorMini
-    }
+    /// The mini cursor window was retired with the dictation window picker;
+    /// the Notch island is the only dictation window now.
+    private var isCursorMiniPresentationMode: Bool { false }
 
     private var isCursorMiniPanelMode: Bool {
         guard isCursorMiniPresentationMode else { return false }

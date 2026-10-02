@@ -2,7 +2,9 @@
 // Foundation-pure rules for the island's "Who was on this call?" review:
 // which question each voice gets, which calendar invitees show as one-tap
 // names, what the name box suggests as you type, and what the island says
-// once names are saved. NotchIslandSpeakerReviewView draws them.
+// once names are saved; plus the 1:1 calendar name, Keep Local Mic as You,
+// and Discard Voice carried over from the review window.
+// NotchIslandSpeakerReviewView draws them.
 
 import Foundation
 
@@ -162,12 +164,104 @@ enum NotchIslandSpeakerReviewPolicy {
         return rows[index].label
     }
 
+    /// How the review was closed.
+    enum Finish: Equatable {
+        /// Done: the person looked over the list and saved it.
+        case done
+        /// Later, or its ring running out.
+        case later
+    }
+
     /// The name a voice ends up with when Done or Later is pressed: one
     /// already submitted, else whatever is sitting in its name box, read the
-    /// same way Return would. No typed name is lost.
-    static func answerOnFinish(committed: String?, typed: String, suggestions: [Suggestion], highlighted: Int?) -> String? {
+    /// same way Return would. No typed name is lost. A name the calendar
+    /// filled in for a 1:1 that nobody touched is only a suggestion: Done
+    /// saves it like a typed name, Later leaves the voice unnamed.
+    static func answerOnFinish(
+        committed: String?,
+        typed: String,
+        suggestions: [Suggestion],
+        highlighted: Int?,
+        typedIsUntouchedPrefill: Bool = false,
+        finish: Finish = .done
+    ) -> String? {
         if let committed { return committed }
+        if typedIsUntouchedPrefill, finish == .later { return nil }
         return nameToSave(typed: typed, suggestions: suggestions, highlighted: highlighted)
+    }
+
+    // MARK: 1:1 calendar name
+
+    /// The name to fill into the one remote voice's box when the calendar
+    /// meeting was a 1:1, by the review window's rule
+    /// (`MeetingInviteeSuggestionPolicy.oneOnOnePrefill`): exactly one
+    /// invitee, exactly one remote voice in the whole meeting, and that voice
+    /// is asked about with no suggested name. `askedRemoteVoicesHaveSuggestion`
+    /// has one entry per remote voice the review asks about (recognized
+    /// voices aren't asked; they only count in `remoteVoicesInMeeting`).
+    /// The name is filled in, never saved on its own.
+    static func oneOnOnePrefill(
+        invitees: [String],
+        remoteVoicesInMeeting: Int?,
+        askedRemoteVoicesHaveSuggestion: [Bool]
+    ) -> String? {
+        MeetingInviteeSuggestionPolicy.oneOnOnePrefill(
+            inviteeNames: invitees,
+            remoteVoicesInMeeting: remoteVoicesInMeeting,
+            remoteRowsInReview: askedRemoteVoicesHaveSuggestion.count,
+            remoteRowHasSuggestion: askedRemoteVoicesHaveSuggestion.first ?? false
+        )
+    }
+
+    /// The line under a voice whose name the calendar filled in (short: the
+    /// caption is one truncating line).
+    static let prefillNote = "Filled in from your calendar"
+
+    // MARK: Keep as You and Discard Voice
+
+    /// A voice set aside from naming: kept as you, or thrown away.
+    enum Lock: Equatable {
+        /// "Keep Local Mic as You" is on: every local mic voice saves as You.
+        case keptAsYou
+        /// "Discard Voice": not saved to People. The transcript stays saved.
+        case discarded
+    }
+
+    /// Which lock a voice is under. Keep as You covers every local mic voice
+    /// and wins over a discard, the same as the review window.
+    static func lock(isMic: Bool, keepMicAsYou: Bool, discarded: Bool) -> Lock? {
+        if isMic, keepMicAsYou { return .keptAsYou }
+        return discarded ? .discarded : nil
+    }
+
+    /// The local mic section's switch, shown only when local mic voices are asked about.
+    static func keepAsYouTitle(keepMicAsYou: Bool) -> String {
+        keepMicAsYou ? "Review Local Mic Voices" : "Keep Local Mic as You"
+    }
+
+    static let keepAsYouHelp = "Use one \u{201C}You\u{201D} label for everyone picked up by the local microphone."
+
+    /// The per-voice discard button.
+    static func discardTitle(discarded: Bool) -> String {
+        discarded ? "Undo Discard" : "Discard Voice"
+    }
+
+    static let discardHelp = "Do not save this voice to People. The transcript stays saved."
+
+    /// The line a locked voice shows in place of its question.
+    static func lockNote(_ lock: Lock) -> String {
+        switch lock {
+        case .keptAsYou: return "Will be saved as \u{201C}You\u{201D}"
+        case .discarded: return "Will not be saved to People"
+        }
+    }
+
+    /// Discard is offered on a voice the review asks about while its name
+    /// box is open (a voice with no guess, or after No), and never under Keep
+    /// as You. Voices Transcripted recognized on its own are corrected, not
+    /// discarded.
+    static func offersDiscard(isRecognized: Bool, nameBoxOpen: Bool, keptAsYou: Bool) -> Bool {
+        !isRecognized && nameBoxOpen && !keptAsYou
     }
 
     private static func exactMatchIndex(typed: String, suggestions: [Suggestion]) -> Int? {

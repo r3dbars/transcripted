@@ -33,7 +33,6 @@ struct TranscriptedSettingsView: View {
     @State private var customDictionaryPreviewInput = ""
     @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
-    @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
     @StateObject private var pastMeetingsModel = DictionaryPastMeetingsModel()
     @State private var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
@@ -2098,11 +2097,6 @@ struct TranscriptedSettingsView: View {
                 $dictationCleanupEnabled,
                 persist: { DictationCleanupPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("dictation_cleanup", enabled: $0, page: .general) }
-            ),
-            dictationOverlayMode: persistedSettingsBinding(
-                $dictationOverlayMode,
-                persist: { DictationOverlayPresentationPreferences.setMode($0) },
-                track: { _ in trackSettingsAction("change_dictation_overlay_mode", page: .general) }
             ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,

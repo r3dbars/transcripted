@@ -732,8 +732,7 @@ func testUIAutomationSurfaceContract() {
 
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("generalAutomationIdentifier")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.dictation-window.options")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.dictation-window.\\(mode.rawValue)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.island-screen-sharing")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.info.\\(automationSlug(info.title))"),
             "general settings controls should keep scriptable row and choice IDs"
         )

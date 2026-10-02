@@ -13,6 +13,10 @@
 //     autocomplete from people already saved in Speakers
 //   - each voice has a clip to play; while it plays the button is Pause
 //     and a ring fills around it until the clip ends
+//   - a calendar 1:1 with one unnamed remote voice fills that voice's name
+//     box with the other invitee; it saves on Done like a typed name
+//   - local mic voices sit under a "Keep Local Mic as You" switch, and an
+//     open name box offers "Discard Voice" for a voice that isn't a person
 //
 // Done saves the answers through the same `SpeakerNameUpdate`s the review
 // window builds, then shows "Everyone's named" with Open transcript. Later
@@ -54,6 +58,10 @@ final class NotchIslandSpeakerReviewView: NSView {
     let isRecognizedOnly: Bool
     private var meetingTitle: String?
     private var invitees: [String] = []
+    /// The calendar 1:1 name has been offered (it is offered once).
+    private var didOfferOneOnOnePrefill = false
+    /// "Keep Local Mic as You" is on: every asked local mic voice saves as You.
+    private var keepMicAsYou = false
     /// The button carrying the countdown ring: Later, or Done when nothing is asked.
     private var countdownButton: NotchIslandButton?
     private var laterTask: Task<Void, Never>?
@@ -145,9 +153,23 @@ final class NotchIslandSpeakerReviewView: NSView {
         rebuild()
     }
 
-    func setInvitees(_ names: [String]) {
+    /// The calendar invitees, and how many remote voices the whole meeting
+    /// heard (nil when unknown). In a 1:1 with one unnamed remote voice, that
+    /// voice's name box is filled in with the other invitee, the same rule
+    /// the review window used; it is still only saved on Done.
+    func setInvitees(_ names: [String], remoteVoicesInMeeting: Int?) {
         invitees = names
         refreshInvitees()
+        guard !didOfferOneOnOnePrefill, !isFinished else { return }
+        didOfferOneOnOnePrefill = true
+        let askedRemote = rows.filter { !$0.isMic }
+        guard let name = NotchIslandSpeakerReviewPolicy.oneOnOnePrefill(
+            invitees: names,
+            remoteVoicesInMeeting: remoteVoicesInMeeting,
+            askedRemoteVoicesHaveSuggestion: askedRemote.map { $0.hasSuggestedName }
+        ), let row = askedRemote.first, row.prefill(name) else { return }
+        refreshInvitees()
+        onLayoutChange?()
     }
 
     /// The island is (or stopped) showing this review. The Later ring only
@@ -206,7 +228,15 @@ final class NotchIslandSpeakerReviewView: NSView {
             stack.addArrangedSubview(row)
             lastRow = row
         }
+        let firstMicRow = rows.first(where: { $0.isMic })
         for row in rows {
+            if row === firstMicRow {
+                // The local mic voices get their own small header with the
+                // review window's "Keep Local Mic as You" escape hatch.
+                let micHeader = micSectionHeader()
+                stack.addArrangedSubview(micHeader)
+                stack.setCustomSpacing(4, after: micHeader)
+            }
             stack.addArrangedSubview(row)
             lastRow = row
         }
@@ -243,6 +273,45 @@ final class NotchIslandSpeakerReviewView: NSView {
         guard !laterStopped else { return }
         button.startCountdown(seconds: max(1, laterDeadline.map { $0.timeIntervalSinceNow } ?? laterRemaining))
         button.setCountdownPaused(!laterRuns)
+    }
+
+    private func micSectionHeader() -> NSView {
+        let label = NotchIslandPalette.label(
+            "Local mic voices",
+            font: .systemFont(ofSize: 12, weight: .semibold),
+            color: NotchIslandPalette.secondaryText
+        )
+        let keep = NotchIslandButton(
+            title: NotchIslandSpeakerReviewPolicy.keepAsYouTitle(keepMicAsYou: keepMicAsYou),
+            style: .subtle,
+            height: 24,
+            fontSize: 12
+        )
+        keep.onPress = { [weak self] in self?.toggleKeepMicAsYou() }
+        keep.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.keepAsYouHelp)
+        keep.setContentHuggingPriority(.required, for: .horizontal)
+        keep.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let line = NSStackView(views: [label, NSView(), keep])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.spacing = 8
+        line.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 0, right: 0)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        return line
+    }
+
+    /// "Keep Local Mic as You": every asked local mic voice saves as You
+    /// (`.collapsedToMe`), whatever was typed for it. Pressing it again
+    /// ("Review Local Mic Voices") lifts that.
+    private func toggleKeepMicAsYou() {
+        stopLaterCountdown()
+        keepMicAsYou.toggle()
+        for row in rows where row.isMic {
+            row.setKeptAsYou(keepMicAsYou)
+        }
+        rebuild()
+        onLayoutChange?()
     }
 
     private func recognizedRow(_ name: String) -> NSView {
@@ -348,11 +417,13 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// Every answer, including a name left typed in an open box. Recognized
     /// voices only add an update when they were corrected; `unanswered`
     /// counts the asked voices still unnamed.
-    private func collectUpdates() -> (updates: [SpeakerNameUpdate], unanswered: Int) {
-        var updates = recognizedRows.compactMap { $0.buildUpdate() }
+    private func collectUpdates(
+        finish: NotchIslandSpeakerReviewPolicy.Finish
+    ) -> (updates: [SpeakerNameUpdate], unanswered: Int) {
+        var updates = recognizedRows.compactMap { $0.buildUpdate(finish: finish) }
         var unanswered = 0
         for row in rows {
-            if let update = row.buildUpdate() {
+            if let update = row.buildUpdate(finish: finish) {
                 updates.append(update)
             } else {
                 unanswered += 1
@@ -366,7 +437,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         isFinished = true
         laterTask?.cancel()
         SpeakerClipPlayback.stop()
-        let updates = collectUpdates().updates
+        let updates = collectUpdates(finish: .later).updates
         if isRecognizedOnly {
             trackMatchOutcomes(updates)
         } else {
@@ -377,7 +448,7 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     private func finishDone() {
         guard !isFinished else { return }
-        let result = collectUpdates()
+        let result = collectUpdates(finish: .done)
         guard NotchIslandSpeakerReviewPolicy.doneShowsSummary(
             recognizedOnly: isRecognizedOnly,
             updates: result.updates.count
@@ -543,6 +614,12 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     private var highlightedRow: Int?
     private var isPointerInside = false
     private var hoverArea: NSTrackingArea?
+    /// "Discard Voice": not saved to People.
+    private var isDiscarded = false
+    /// "Keep Local Mic as You" is on for this local mic voice.
+    private var isKeptAsYou = false
+    /// The name box holds the calendar 1:1 name and nobody has touched it.
+    private var prefilledUntouched = false
 
     private let stack = NSStackView()
     private let clip: NotchIslandClipButton
@@ -614,7 +691,19 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
     override var isFlipped: Bool { true }
 
+    var isMic: Bool { entry.channel == .mic }
+
+    /// The voice came with a suggested name (the window's `hasSuggestedName`).
+    var hasSuggestedName: Bool {
+        !(entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private var lock: NotchIslandSpeakerReviewPolicy.Lock? {
+        NotchIslandSpeakerReviewPolicy.lock(isMic: isMic, keepMicAsYou: isKeptAsYou, discarded: isDiscarded)
+    }
+
     var isAnswered: Bool {
+        if lock != nil { return true }
         switch answer {
         case .confirmed, .named: return true
         case .none: return isRecognized
@@ -625,6 +714,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// The name this voice has been given here, so invitee chips don't
     /// offer the same person twice.
     var chosenName: String? {
+        if lock != nil { return nil }
         switch answer {
         case .confirmed: return entry.currentName
         case .named(let label): return knownPeopleByLabel[label]?.displayName ?? label
@@ -648,6 +738,52 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         rebuild()
         onChange?()
         focusField()
+    }
+
+    /// Fills the open, empty name box with the calendar 1:1 name, as the
+    /// review window did: under a saved person's label when exactly one saved
+    /// person has that name, else as typed. Still editable; it saves on Done
+    /// like a typed name. Returns whether the box was filled.
+    @discardableResult
+    func prefill(_ name: String) -> Bool {
+        guard !isRecognized, isEditing, answer == .none, lock == nil,
+              nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let label = MeetingInviteeSuggestionPolicy.suggestionLabels(
+            inviteeNames: [name],
+            labels: knownPeople.map { $0.label },
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName }
+        ).first ?? name
+        nameField.stringValue = label
+        highlightedRow = nil
+        prefilledUntouched = true
+        rebuild()
+        return true
+    }
+
+    /// "Keep Local Mic as You" was switched on or off for the local mic voices.
+    func setKeptAsYou(_ kept: Bool) {
+        guard isMic, kept != isKeptAsYou else { return }
+        isKeptAsYou = kept
+        if kept, let editor = nameField.currentEditor(), window?.firstResponder === editor {
+            window?.makeFirstResponder(nil)
+        }
+        rebuild()
+    }
+
+    /// "Discard Voice" / "Undo Discard".
+    private func toggleDiscard() {
+        onInteract?()
+        guard !isKeptAsYou else { return }
+        isDiscarded.toggle()
+        if isDiscarded {
+            stopClipIfPlaying()
+            if let editor = nameField.currentEditor(), window?.firstResponder === editor {
+                window?.makeFirstResponder(nil)
+            }
+        }
+        rebuild()
+        onChange?()
     }
 
     // MARK: Hover (recognized voices)
@@ -687,7 +823,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     private func rebuild() {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         stack.addArrangedSubview(topLine())
-        if isEditing {
+        // A voice kept as You or discarded shows only its note, dimmed like the window's.
+        alphaValue = lock == nil ? 1 : 0.62
+        if isEditing, lock == nil {
             let field = fieldLine()
             stack.addArrangedSubview(field)
             if let chips = inviteeLine() { stack.addArrangedSubview(chips) }
@@ -713,6 +851,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         text.alignment = .leading
         text.spacing = 1
         switch (answer, question) {
+        case _ where lock != nil:
+            text.addArrangedSubview(title(lock.map(NotchIslandSpeakerReviewPolicy.lockNote) ?? ""))
+            text.addArrangedSubview(caption(quote))
         case (.confirmed, _):
             text.addArrangedSubview(title(entry.currentName ?? "Confirmed"))
             text.addArrangedSubview(caption("confirmed"))
@@ -727,12 +868,20 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             text.addArrangedSubview(caption(quote))
         default:
             text.addArrangedSubview(title(isEditing ? "Who is this?" : "Unknown voice"))
-            text.addArrangedSubview(caption(quote))
+            text.addArrangedSubview(caption(prefilledUntouched ? NotchIslandSpeakerReviewPolicy.prefillNote : quote))
         }
         views.append(text)
         views.append(NSView())
 
         switch (answer, question) {
+        case _ where lock == .keptAsYou:
+            break
+        case _ where lock == .discarded:
+            let undo = pill(NotchIslandSpeakerReviewPolicy.discardTitle(discarded: true), style: .subtle) { [weak self] in
+                self?.toggleDiscard()
+            }
+            undo.setAccessibilityHelp("Save this voice to People after all.")
+            views.append(undo)
         case (.none, _) where isRecognized:
             if isPointerInside, let name = entry.currentName {
                 let correct = pill(NotchIslandSpeakerReviewPolicy.correctionPrompt(name: name), style: .subtle) { [weak self] in
@@ -757,7 +906,18 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         case (.confirmed, _), (.named, _):
             views.append(pill("Change", style: .subtle) { [weak self] in self?.change() })
         default:
-            break
+            if NotchIslandSpeakerReviewPolicy.offersDiscard(isRecognized: isRecognized, nameBoxOpen: isEditing, keptAsYou: isKeptAsYou) {
+                let discard = pill(
+                    NotchIslandSpeakerReviewPolicy.discardTitle(discarded: false),
+                    style: .link,
+                    height: 26,
+                    fontSize: 12
+                ) { [weak self] in
+                    self?.toggleDiscard()
+                }
+                discard.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.discardHelp)
+                views.append(discard)
+            }
         }
         let line = NSStackView(views: views)
         line.orientation = .horizontal
@@ -916,6 +1076,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     }
 
     private var accessibilitySummary: String {
+        if let lock { return NotchIslandSpeakerReviewPolicy.lockNote(lock) }
         switch (answer, question) {
         case (.confirmed, _): return "\(entry.currentName ?? "Voice"), confirmed"
         case (.named(let label), _):
@@ -951,6 +1112,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         isEditing = true
         nameField.stringValue = ""
         highlightedRow = nil
+        prefilledUntouched = false
         rebuild()
         onChange?()
         focusField()
@@ -963,6 +1125,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         isEditing = false
         nameField.stringValue = ""
         highlightedRow = nil
+        prefilledUntouched = false
         window?.makeFirstResponder(nil)
         rebuild()
         onChange?()
@@ -974,6 +1137,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         isEditing = true
         nameField.stringValue = ""
         highlightedRow = nil
+        prefilledUntouched = false
         rebuild()
         onChange?()
         focusField()
@@ -998,6 +1162,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         isEditing = false
         nameField.stringValue = ""
         highlightedRow = nil
+        prefilledUntouched = false
         window?.makeFirstResponder(nil)
         rebuild()
         onChange?()
@@ -1020,8 +1185,32 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// The same `SpeakerNameUpdate` the review window would build for this
     /// row, or nil when the voice was left unnamed (or, for a recognized
     /// voice, left as it was). A name still sitting in an open box counts,
-    /// read the way Return would read it.
-    func buildUpdate() -> SpeakerNameUpdate? {
+    /// read the way Return would read it, except an untouched calendar name
+    /// on Later. Keep as You and Discard Voice win over any name, and build
+    /// the window's `.collapsedToMe` and `.discardedFromDatabase` updates.
+    func buildUpdate(finish: NotchIslandSpeakerReviewPolicy.Finish) -> SpeakerNameUpdate? {
+        if let lock {
+            switch lock {
+            case .keptAsYou:
+                return SpeakerNameUpdate(
+                    persistentSpeakerId: entry.id,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
+                    channel: entry.channel,
+                    newName: "You",
+                    previousName: entry.currentName,
+                    action: .collapsedToMe
+                )
+            case .discarded:
+                return SpeakerNameUpdate(
+                    persistentSpeakerId: entry.id,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
+                    channel: entry.channel,
+                    newName: entry.currentName ?? "Speaker \(entry.diarizerSpeakerId)",
+                    previousName: entry.currentName,
+                    action: .discardedFromDatabase
+                )
+            }
+        }
         switch answer {
         case .confirmed:
             return confirmedUpdate()
@@ -1033,7 +1222,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
                     committed: nil,
                     typed: nameField.stringValue,
                     suggestions: currentSuggestions,
-                    highlighted: highlightedRow
+                    highlighted: highlightedRow,
+                    typedIsUntouchedPrefill: prefilledUntouched,
+                    finish: finish
                   ) else { return nil }
             if isRecognized, Self.sameName(pending, entry.currentName) { return nil }
             if case .confirm(let suggested) = question, Self.sameName(pending, suggested) {
@@ -1081,7 +1272,15 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         onInteract?()
         highlightedRow = nil
+        clearPrefillNote()
         refreshSuggestions()
+    }
+
+    /// Typing over the calendar name makes it the person's own answer.
+    private func clearPrefillNote() {
+        guard prefilledUntouched else { return }
+        prefilledUntouched = false
+        if isEditing { replaceTopLine() }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -1112,6 +1311,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.cancelOperation(_:)):
             nameField.stringValue = ""
             highlightedRow = nil
+            clearPrefillNote()
             refreshSuggestions()
             window?.makeFirstResponder(nil)
             return true
@@ -1123,7 +1323,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// Only the list under the box changes while typing, so the box keeps
     /// focus and the caret.
     private func refreshSuggestions() {
-        guard isEditing else { return }
+        guard isEditing, lock == nil else { return }
         // Keep the top line and the name box; redo the invitees and the list.
         while stack.arrangedSubviews.count > 2 {
             stack.arrangedSubviews.last?.removeFromSuperview()
@@ -1132,243 +1332,4 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         if let list = suggestionList() { stack.addArrangedSubview(list) }
         onChange?()
     }
-}
-
-// MARK: - Controls
-
-/// Play / pause for a voice clip: a round 30 pt face with the glyph on
-/// top. While the clip plays, a ring fills around it; a full circle means
-/// the clip has finished. A plain view rather than an NSButton so it stays
-/// exactly square (and so exactly round) inside the row's stack.
-@available(macOS 14.0, *)
-@MainActor
-final class NotchIslandClipButton: NSView {
-    var onPress: (() -> Void)?
-    private let clipURL: URL
-    private let glyph = NSImageView()
-    private let track = CAShapeLayer()
-    private let progressRing = CAShapeLayer()
-    private var pollTimer: Timer?
-    private var observer: NSObjectProtocol?
-    private var isPlaying = false
-    private static let size: CGFloat = 30
-
-    init(clipURL: URL) {
-        self.clipURL = clipURL
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
-        wantsLayer = true
-        layer?.masksToBounds = false
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.size),
-            heightAnchor.constraint(equalToConstant: Self.size),
-        ])
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentHuggingPriority(.required, for: .vertical)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .vertical)
-        glyph.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(glyph)
-        NSLayoutConstraint.activate([
-            glyph.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 0.5),
-            glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        for (shape, color) in [(track, NSColor(white: 1, alpha: 0.14)), (progressRing, NSColor.white)] {
-            shape.fillColor = nil
-            shape.strokeColor = color.cgColor
-            shape.lineWidth = 2
-            shape.lineCap = .round
-            shape.isHidden = true
-            layer?.addSublayer(shape)
-        }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        observer = NotificationCenter.default.addObserver(
-            forName: SpeakerClipPlayback.stateDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sync() }
-        }
-        sync()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    deinit {
-        pollTimer?.invalidate()
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-    }
-
-    override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: Self.size, height: Self.size) }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func layout() {
-        super.layout()
-        let side = min(bounds.width, bounds.height)
-        layer?.cornerRadius = side / 2
-        // The ring: a circle 4 pt outside the face, from the top, clockwise
-        // (y grows downward in this flipped view).
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let path = CGMutablePath()
-        path.addArc(
-            center: center,
-            radius: side / 2 + 4,
-            startAngle: -.pi / 2,
-            endAngle: 1.5 * .pi,
-            clockwise: false
-        )
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        track.frame = bounds
-        progressRing.frame = bounds
-        track.path = path
-        progressRing.path = path
-        CATransaction.commit()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        layer?.opacity = 0.8
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        layer?.opacity = 1
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        press()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        press()
-        return true
-    }
-
-    private func press() {
-        onPress?()
-        SpeakerClipPlayback.play(clipURL)
-        sync()
-    }
-
-    private func sync() {
-        let playing = SpeakerClipPlayback.isPlaying(clipURL)
-        isPlaying = playing
-        glyph.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .bold))
-        glyph.contentTintColor = playing ? .black : .white
-        layer?.backgroundColor = (playing ? NSColor.white : NotchIslandPalette.buttonPlain).cgColor
-        setAccessibilityLabel(playing ? "Pause clip" : "Play clip")
-        track.isHidden = !playing
-        progressRing.isHidden = !playing
-        pollTimer?.invalidate()
-        pollTimer = nil
-        if playing {
-            updateProgress()
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.updateProgress() }
-            }
-        }
-    }
-
-    private func updateProgress() {
-        guard let progress = SpeakerClipPlayback.progress(of: clipURL) else {
-            if !SpeakerClipPlayback.isPlaying(clipURL) { sync() }
-            return
-        }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        progressRing.strokeEnd = CGFloat(progress)
-        CATransaction.commit()
-    }
-}
-
-/// A name box on the island's black surface. Clicking it asks for the
-/// keyboard, since the island never has it otherwise.
-@MainActor
-final class NotchIslandNameField: NSTextField {
-    var onFocusRequest: (() -> Void)?
-
-    init() {
-        super.init(frame: .zero)
-        isBezeled = false
-        drawsBackground = true
-        backgroundColor = NotchIslandPalette.buttonSubtle
-        textColor = NotchIslandPalette.primaryText
-        font = .systemFont(ofSize: 14, weight: .semibold)
-        focusRingType = .none
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        placeholderAttributedString = NSAttributedString(
-            string: "Type a name…",
-            attributes: [
-                .foregroundColor: NotchIslandPalette.secondaryText,
-                .font: NSFont.systemFont(ofSize: 14),
-            ]
-        )
-        cell?.usesSingleLineMode = true
-        cell?.lineBreakMode = .byTruncatingTail
-        setAccessibilityLabel("Name for this voice")
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func mouseDown(with event: NSEvent) {
-        onFocusRequest?()
-        window?.makeKey()
-        super.mouseDown(with: event)
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        onFocusRequest?()
-        return super.becomeFirstResponder()
-    }
-}
-
-/// One autocomplete row under the name box.
-@MainActor
-final class NotchIslandSuggestionButton: NSButton {
-    var onPress: (() -> Void)?
-    var isHighlightedRow = false {
-        didSet { layer?.backgroundColor = (isHighlightedRow ? NotchIslandPalette.buttonPlain : .clear).cgColor }
-    }
-
-    init(title: String, detail: String, width: CGFloat) {
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 28))
-        isBordered = false
-        wantsLayer = true
-        layer?.cornerRadius = 7
-        self.title = ""
-        target = self
-        action = #selector(pressed)
-        translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: width).isActive = true
-        heightAnchor.constraint(equalToConstant: 28).isActive = true
-        let name = NotchIslandPalette.label(title, font: .systemFont(ofSize: 13, weight: .semibold), color: NotchIslandPalette.primaryText)
-        let note = NotchIslandPalette.label(detail, font: .systemFont(ofSize: 11), color: NotchIslandPalette.secondaryText)
-        let row = NSStackView(views: [name, NSView(), note])
-        row.orientation = .horizontal
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        setAccessibilityLabel("\(title), \(detail)")
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    @objc private func pressed() { onPress?() }
 }

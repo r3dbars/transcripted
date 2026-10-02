@@ -26,7 +26,7 @@
 - `MicrophoneChoicePreferences.swift` — the one Settings "Microphone" choice for dictation and meetings (`automatic`, `device(uid:)`, `macOSInput`), used only while the Mac mic recorder is on. The picked mic's UID is the one `DictationPersistentInputPreferences` already stores. An older pick carries over only if Faster Bluetooth dictation was on, and the carry-over is settled once, the first time the choice is read with the recorder on
 - `DictationCleanupPreferences.swift` — persisted General toggle for filler-word cleanup after dictation
 - `DictationFillerCleanupPolicy.swift` — text cleanup policy for light dictation filler removal
-- `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode: near text box (default), mini cursor, or the Notch island, which also carries meetings and the call-detected prompt (see `Sources/UI/Overlay/NotchIslandController.swift`). `NotchIslandPreferences` in the same file holds the island's opt-in "Show island in screen sharing" switch (off by default; on sets the panel's `sharingType` to `.readOnly`, so it also shows in screenshots and recordings)
+- `NotchIslandPreferences.swift` — the Notch island's opt-in "Show island in screen sharing" switch (off by default; on sets the panel's `sharingType` to `.readOnly`, so it also shows in screenshots and recordings). The island is the only dictation, meeting and call-prompt window; the old dictation window picker (near text box, mini cursor) is gone and its saved `dictationOverlayPresentationMode` value is ignored (see `Sources/UI/Overlay/NotchIslandController.swift`)
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LabControlChannel.swift` — **lab builds only** (`#if TRANSCRIPTED_LAB_CONTROL`, set by `build.sh --lab`, never by `build-beta.sh`, which fails if the channel's env var name is in the binary). File-drop control channel the hill-climb lab uses to drive the real app (start/stop dictation and meetings, import audio, status) when launched with `TRANSCRIPTED_LAB_CONTROL_DIR`; refuses non-0700/foreign/symlinked control dirs, reads commands `O_NOFOLLOW|O_NONBLOCK` + `fstat`. Its hook is the one `#if` line at the end of `applicationDidFinishLaunching`. See `docs/lab-control-channel.md`
@@ -100,7 +100,7 @@ Relevant direct coverage includes:
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DiarizationBackendPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
-- `Tests/DictationOverlayPresentationPreferencesTests.swift`
+- `Tests/NotchIslandPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LabControlCommandTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`

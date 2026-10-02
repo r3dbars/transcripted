@@ -413,7 +413,7 @@ APP_SOURCES=(
     "Sources/Support/DictationPersistentInputPreferences.swift"
     "Sources/Support/MicrophoneChoicePreferences.swift"
     "Sources/Support/DictationCleanupPreferences.swift"
-    "Sources/Support/DictationOverlayPresentationPreferences.swift"
+    "Sources/Support/NotchIslandPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
