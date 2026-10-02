@@ -4,10 +4,10 @@ import Foundation
 
 extension TranscriptSaver {
 
-    public enum DeferredSpeakerNameUpdateError: Error, LocalizedError, Equatable {
+    enum DeferredSpeakerNameUpdateError: Error, LocalizedError, Equatable {
         case transcriptRestoreFailed(fileCount: Int)
 
-        public var errorDescription: String? {
+        var errorDescription: String? {
             switch self {
             case .transcriptRestoreFailed(let count):
                 return "Could not restore \(count) transcript(s) after the speaker update failed."
@@ -39,7 +39,7 @@ extension TranscriptSaver {
     /// and replaces it in both YAML frontmatter and transcript body.
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
     /// Convenience overload that writes into `defaultSaveDirectory`.
-    public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
+    static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
         serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: defaultSaveDirectory)
         }
@@ -478,7 +478,7 @@ extension TranscriptSaver {
     /// This keeps transcript labels generic, but refreshes frontmatter db_id/source
     /// so Settings > People can safely name the right local profile later.
     @discardableResult
-    public static func markSpeakerReviewDeferred(
+    static func markSpeakerReviewDeferred(
         transcriptURL: URL,
         entries: [SpeakerNamingEntry],
         redirectedSpeakerIdsByKey: [String: UUID]
@@ -530,7 +530,7 @@ extension TranscriptSaver {
     ///   - updates: Speaker name updates from the naming flow
     /// - Returns: true if the file was updated successfully
     @discardableResult
-    public static func updateSpeakerNames(
+    static func updateSpeakerNames(
         transcriptURL: URL,
         updates: [SpeakerNameUpdate],
         transcriptionResult: TranscriptionResult,
@@ -660,7 +660,7 @@ extension TranscriptSaver {
     /// body today; Obsidian wiki links only wrap system-speaker names in the Full
     /// Transcript section at render time).
     @discardableResult
-    public static func collapseMicSpeakersToYou(
+    static func collapseMicSpeakersToYou(
         transcriptURL: URL,
         collapsedUpdates: [SpeakerNameUpdate]
     ) -> Bool {
@@ -1280,7 +1280,7 @@ extension TranscriptSaver {
         }
     }
 
-    static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
+    private static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
         guard content.hasPrefix("---\n"),
               let endRange = content.range(
                 of: "\n---\n",
