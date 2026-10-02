@@ -45,7 +45,7 @@ extension Audio {
     }
 
     @discardableResult
-    func ensureEngineInitialized() throws -> (AVAudioEngine, AVAudioInputNode) {
+    private func ensureEngineInitialized() throws -> (AVAudioEngine, AVAudioInputNode) {
         // Delay AVAudioEngine/input-node access until recording actually
         // begins. Launch-time warmup can construct Audio long before the
         // user has explicitly asked to record anything.
@@ -74,7 +74,7 @@ extension Audio {
     /// on `self` until its device and format are validated for the current
     /// recording generation, so a concurrent Stop cannot miss a newly claimed
     /// audio device.
-    func makeDetachedFreshInputEngine() -> (AVAudioEngine, AVAudioInputNode) {
+    private func makeDetachedFreshInputEngine() -> (AVAudioEngine, AVAudioInputNode) {
         if let currentEngine = engine {
             if currentEngine.isRunning, let currentInputNode = inputNode {
                 tearDownInputTapSafely(

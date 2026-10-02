@@ -135,7 +135,7 @@ extension Audio {
     /// gone, so those buffers still reach this recording's file. The meter,
     /// watchdog, and live host consumer are skipped: the session they report
     /// on has already ended.
-    func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+    private func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
         let sessionGeneration = writeContext.generation
         guard buffer.frameLength > 0,
               micAudioWriteBackpressure.isFinishing(generation: sessionGeneration),
@@ -232,7 +232,7 @@ extension Audio {
     /// during teardown), so it can't double-stop. The user sees a stopped
     /// recording with a clear reason instead of a dead one that still looks
     /// alive.
-    func surfaceWriteFailureAndStop(generation: UInt64) {
+    private func surfaceWriteFailureAndStop(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
             guard let self,
                   self.recordingSessionGeneration == generation,
@@ -242,7 +242,7 @@ extension Audio {
         }
     }
 
-    func surfaceMicWriteBackpressureAndStop(generation: UInt64) {
+    private func surfaceMicWriteBackpressureAndStop(generation: UInt64) {
         guard writeBackpressureStopAdmission.claim(generation: generation) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self,
