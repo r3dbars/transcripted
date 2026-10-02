@@ -97,7 +97,6 @@ extension ParakeetEngine {
         let started = await startRecording(isRecoveryAttempt: true)
         guard sharedMeetingMicTransition.finishResume(token: transitionToken) else {
             if started {
-                let pendingRestoreOwner = pendingSystemInputRestore.owner
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
                 let staleResumeOwner = currentAudioEngineQueueOwnerToken()
@@ -110,10 +109,6 @@ extension ParakeetEngine {
                 if !releasedVoiceProcessing {
                     discardStoppedVoiceProcessingGraph(ownedBy: staleResumeOwner)
                 }
-                await restorePendingSystemInputAfterRecording(
-                    ownedBy: pendingRestoreOwner,
-                    operation: "stale_shared_meeting_mic_resume"
-                )
             }
             return
         }

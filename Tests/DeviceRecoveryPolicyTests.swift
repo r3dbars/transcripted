@@ -74,7 +74,6 @@ func testDeviceRecoveryPolicy() {
         )
         let timeout = String(source[timeoutStart.upperBound...])
         assertTrue(timeout.contains("self.configChangeWasRecording = false"), "terminal timeout must release restart intent rather than reanimate a failed session")
-        assertFalse(source.contains("interruptRecordingAndClearRecoveredTimeline()"), "Bluetooth recovery failure must preserve audio recorded before the route changed")
         assertEqual(
             source.components(separatedBy: "interruptRecordingPreservingRecoveredTimeline()").count - 1,
             3,

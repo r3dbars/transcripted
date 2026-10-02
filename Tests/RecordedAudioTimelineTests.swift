@@ -68,6 +68,22 @@ func testRecordedAudioTimeline() {
         assertEqual(timeline.totalSourceSampleCount, 0, "cleared timelines should report zero samples")
     }
 
+    runSuite("Pending tap audio joins the take one segment at a time, each at its own rate") {
+        var take = RecordedAudioTimeline()
+        take.append([0.1, 0.2], sampleRate: 48_000)
+        var pending = RecordedAudioTimeline()
+        pending.append([0.3], sampleRate: 24_000)
+        pending.append([0.4, 0.5], sampleRate: 48_000)
+
+        for segment in pending.drain() {
+            take.append(segment)
+        }
+
+        assertEqual(take.segments.map(\.sampleRate), [48_000, 24_000, 48_000], "each drained segment keeps the rate it was captured at")
+        assertEqual(take.totalSourceSampleCount, 5, "no captured samples are lost")
+        assertTrue(pending.isEmpty, "the pending buffer is empty after the drain")
+    }
+
     runSuite("RecordedAudioTimeline.append — drops invalid and non-finite sample rates") {
         var timeline = RecordedAudioTimeline()
 
