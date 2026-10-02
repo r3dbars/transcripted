@@ -700,10 +700,39 @@ def _self_test_serve(tmp: str) -> None:
     result: list[int] = []
     server = threading.Thread(target=lambda: result.append(serve("127.0.0.1", port, None, path)), daemon=True)
     server.start()
+
+    def hang_up(payload: bytes) -> None:
+        """Send PAYLOAD, hang up, and wait until serve has finished with it.
+
+        Waiting matters: serve takes one request at a time, and macOS refuses
+        a connect once listen()'s backlog (4) is full, so connections fired
+        back to back can overflow it before serve accepts any.
+        """
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(10)
+        try:
+            conn.connect(path)
+            conn.sendall(payload)
+            try:
+                conn.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass  # macOS: serve already answered a whole line and closed
+            while conn.recv(4096):
+                pass  # serve's reply, if any; EOF means it is done with us
+        finally:
+            conn.close()
+
+    # Ready means serve accepts and answers a connection, not just that the
+    # file exists: bind() creates it before listen(), and a connect in that
+    # gap is refused.
     deadline = time.monotonic() + 5
-    while not os.path.exists(path):
-        assert time.monotonic() < deadline, "serve never opened its socket"
-        time.sleep(0.02)
+    while True:
+        try:
+            hang_up(b"")
+            break
+        except (FileNotFoundError, ConnectionRefusedError):
+            assert time.monotonic() < deadline and server.is_alive(), "serve never opened its socket"
+            time.sleep(0.02)
     shot = os.path.join(tmp, "shot.png")
     parser = build_parser()
     for argv in (["screenshot", shot], ["key", "cmd-q"], ["click", "1", "1"], ["screenshot", shot]):
@@ -718,10 +747,7 @@ def _self_test_serve(tmp: str) -> None:
     # Client-side trouble fails only that request; the session stays up.
     assert via_socket(path, parser.parse_args(["screenshot", os.path.join(tmp, "no", "dir.png")])) == 1
     for payload in (b"", b'{"args": {"command": "screenshot"', b"\xff\n"):
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.connect(path)
-        conn.sendall(payload)
-        conn.close()  # hangs up before (or instead of) sending a whole request
+        hang_up(payload)  # hangs up before (or instead of) sending a whole request
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.connect(path)
     conn.sendall(json.dumps({"args": vars(parser.parse_args(["key", "a"]))}).encode() + b"\n")
