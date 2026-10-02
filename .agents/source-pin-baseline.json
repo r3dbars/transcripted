@@ -1,6 +1,5 @@
 {
   "resolved-pins": {
-    "Tests/AnalyticsEventPolicyTests.swift": 3,
     "Tests/AudioAutomationCoverageContractTests.swift": 20,
     "Tests/AuditRegressionCoverageContractTests.swift": 3,
     "Tests/BluetoothRouteContractTests.swift": 3,
