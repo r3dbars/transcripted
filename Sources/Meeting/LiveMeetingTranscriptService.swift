@@ -30,7 +30,7 @@ final class LiveMeetingTranscriptService {
     private var deliveryDrops: (() -> Int)?
     private var mayInfer: (() -> Bool)?
     private var lastErrorCode: String?
-    private var captionsYield: (@MainActor () -> Bool)?
+    private var captionsYield: (@MainActor @Sendable () -> Bool)?
     private var lastDelivery: (enabled: Bool, epoch: UInt64)?
     private var captionsStatusWatch: AnyCancellable?
     private var captionsSetting = NotchIslandPreferences.showsLiveTranscript()
@@ -65,7 +65,7 @@ final class LiveMeetingTranscriptService {
                       languageSelection: TranscriptionLanguageSelection,
                       deliveryEnabled: @escaping (Bool, UInt64) -> Void, deliveryDrops: @escaping () -> Int,
                       mayInfer: @escaping () -> Bool,
-                      shouldCaptionsYield: @escaping @MainActor () -> Bool = { false }) {
+                      shouldCaptionsYield: @escaping @MainActor @Sendable () -> Bool = { false }) {
         self.setDelivery(false)
         previewEpoch &+= 1
         worker?.cancel()
@@ -168,7 +168,7 @@ final class LiveMeetingTranscriptService {
         let rate = buffer.format.sampleRate
         guard rate.isFinite, rate >= 8_000, rate <= 192_000 else { return }
         let resampled = AudioResampler.resample(samples, from: rate, to: 16_000)
-        LiveMeetingCaptions.shared.offer(resampled, track: source == .microphone ? .microphone : .system)
+        LiveMeetingCaptions.inlet.offer(resampled, track: source == .microphone ? .microphone : .system)
         inbox.append(samples: resampled, source: source == .microphone ? .microphone : .system,
             capturedAt: capturedAt, expectedEpoch: previewEpoch)
     }
