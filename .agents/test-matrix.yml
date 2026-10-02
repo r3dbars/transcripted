@@ -614,6 +614,14 @@ rules:
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:
+      - "Tools/TranscriptedLive/**"
+      - ".claude-plugin/marketplace.json"
+    checks:
+      - "swift test --package-path Tools/TranscriptedLive"
+      - "claude plugin validate Tools/TranscriptedLive/claude-mod"
+      - "claude plugin test Tools/TranscriptedLive/claude-mod"
+
+  - paths:
       - "scripts/stt_fluidaudio_ab.sh"
       - "scripts/stt_fluidaudio_ab.py"
       - "scripts/test_stt_fluidaudio_ab.py"
