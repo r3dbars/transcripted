@@ -543,6 +543,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Logging/LogTailTrimmer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/Observability/RuntimeDiagnosticsStore.swift"
+    "Sources/Observability/RuntimeDiagnosticsContextWriter.swift"
     "Sources/Observability/UpdateFailureKind.swift"
     "Sources/Observability/UpdateInstallDetection.swift"
     "Sources/Observability/SentryRuntimeConfiguration.swift"
