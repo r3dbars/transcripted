@@ -603,3 +603,14 @@ extension TranscriptionTaskManager {
             || ProcessInfo.processInfo.processName == "xctest"
     }
 }
+
+extension TranscriptionTaskManager {
+    /// Placeholder transcript path a failed-audio archive is keyed under; the
+    /// stem format is shared with RecordingAudioArchiver's audio folder naming.
+    private nonisolated static func placeholderFailedTranscriptURL(taskId: UUID, in directory: URL) -> URL {
+        let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
+        return directory
+            .appendingPathComponent(failedStem)
+            .appendingPathExtension("md")
+    }
+}
