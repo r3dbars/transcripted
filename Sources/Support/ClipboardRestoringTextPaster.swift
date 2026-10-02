@@ -675,7 +675,7 @@ final class ClipboardRestoringTextPaster {
     }
 
     @discardableResult
-    func writeTemporaryString(
+    private func writeTemporaryString(
         _ text: String,
         to pasteboard: any ClipboardPasteboard
     ) -> Bool {

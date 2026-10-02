@@ -21,7 +21,7 @@ extension PersistentDictationInputController {
 
 extension PersistentDictationInputSystem {
     @MainActor
-    static var live: PersistentDictationInputSystem {
+    fileprivate static var live: PersistentDictationInputSystem {
         PersistentDictationInputSystem(
             userDefaults: .standard,
             defaultInputMonitor: DefaultInputDeviceMonitor.shared,

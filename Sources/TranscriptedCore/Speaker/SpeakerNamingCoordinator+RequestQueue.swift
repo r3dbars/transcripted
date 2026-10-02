@@ -83,7 +83,7 @@ extension TranscriptionTaskManager {
     }
 
     @discardableResult
-    public func deferPendingSpeakerNamingReview(reason: String) -> Bool {
+    func deferPendingSpeakerNamingReview(reason: String) -> Bool {
         guard let request = speakerNamingRequest else { return false }
         speakerNamingRequest = nil
         deferredSpeakerNamingRequests[request.id] = request
@@ -96,7 +96,7 @@ extension TranscriptionTaskManager {
         return true
     }
 
-    public func hasPendingSpeakerNamingReviewForLastSavedTranscript() -> Bool {
+    func hasPendingSpeakerNamingReviewForLastSavedTranscript() -> Bool {
         if let transcriptId = lastSavedTranscriptId,
            hasPendingSpeakerNamingReview(transcriptId: transcriptId) {
             return true
@@ -115,12 +115,12 @@ extension TranscriptionTaskManager {
             || pendingSpeakerNamingRequests.contains { $0.asksAboutVoices }
     }
 
-    public func hasPendingSpeakerNamingReview(transcriptId: UUID) -> Bool {
+    private func hasPendingSpeakerNamingReview(transcriptId: UUID) -> Bool {
         speakerNamingRequest?.transcriptId == transcriptId
             || pendingSpeakerNamingRequests.contains { $0.transcriptId == transcriptId }
     }
 
-    public func hasPendingSpeakerNamingReview(transcriptURL: URL) -> Bool {
+    private func hasPendingSpeakerNamingReview(transcriptURL: URL) -> Bool {
         let standardizedURL = transcriptURL.standardizedFileURL
         return speakerNamingRequest?.transcriptURL.standardizedFileURL == standardizedURL
             || pendingSpeakerNamingRequests.contains { request in

@@ -267,7 +267,7 @@ enum MeetingSystemAudioPromptPolicy {
     /// How long a "call audio is back" notice stays up before it hides on
     /// its own. It's good news with nothing to decide, so it shows only OK
     /// and never waits for a click.
-    static let recoveredAutoHideSeconds: Double = 4
+    private static let recoveredAutoHideSeconds: Double = 4
 
     static func shouldPresentSystemAudioPrompt(
         warning: MeetingSystemAudioDegradationWarning?,
