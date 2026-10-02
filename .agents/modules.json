@@ -102,9 +102,9 @@
     },
     {
       "name": "AppShell",
-      "paths": ["Sources/App", "Sources/TranscriptedApp.swift", "Sources/TranscriptedAppDelegate+LaunchReports.swift", "Sources/TranscriptedAppDelegate+Lifecycle.swift", "Sources/TranscriptedAppDelegate+MenuBar.swift", "Sources/TranscriptedAppDelegate+SettingsActions.swift", "Sources/TranscriptedMenuCommands.swift"],
+      "paths": ["Sources/App"],
       "mayDependOn": ["*"],
-      "agentsDoc": "Sources/AGENTS.md"
+      "agentsDoc": "Sources/App/AGENTS.md"
     }
   ],
   "cycleAllowedEdges": [

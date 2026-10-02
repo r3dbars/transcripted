@@ -191,14 +191,14 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
-            contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")
-                && contractSource("Sources/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
+            contractSource("Sources/App/TranscriptedApp.swift").contains("transcripted.status-item.button")
+                && contractSource("Sources/App/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
             "the real menu bar status item should expose a stable AX identifier for external UI automation"
         )
     }
 
     runSuite("UI automation surface contract - native Settings routes to the real window") {
-        let appSource = contractSource("Sources/TranscriptedApp.swift")
+        let appSource = contractSource("Sources/App/TranscriptedApp.swift")
         assertTrue(
             appSource.contains("func menuOpenSettings()")
                 && appSource.contains("showSettingsWindow(page: .general, source: \"app_menu\")"),
@@ -233,7 +233,7 @@ func testUIAutomationSurfaceContract() {
             "func menuFindSpeaker()",
             "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
         ] {
-            assertTrue(contractSource("Sources/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
+            assertTrue(contractSource("Sources/App/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
         }
     }
 

@@ -94,7 +94,7 @@
 
 ## End-to-end flow
 
-1. `Sources/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, the `⌥M` hotkey, and the detected-meeting `CapturePillController` prompt flow.
+1. `Sources/App/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, the `⌥M` hotkey, and the detected-meeting `CapturePillController` prompt flow.
 2. `MeetingPromptDetector` polls upcoming Calendar events, observes supported runtime apps, scores candidate prompts, and asks `CapturePillController` to present a short-lived prompt when the app is idle. `MeetingOverlayController` takes over only after Record is dispatched, and for prompts tied to an active or completed recording.
 3. Dismissed prompts feed back into `MeetingPromptDetector.snooze(...)`, which uses `MeetingPromptHeuristics` to choose shorter runtime reminders, calendar-aware resume windows, and longer Teams-specific suppression when appropriate.
 4. `Sources/App/TranscriptedAppState.swift` warms dictation at launch; heavier meeting diarization stays lazy until meeting start or audio import.

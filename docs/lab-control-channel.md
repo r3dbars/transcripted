@@ -12,7 +12,7 @@ press-to-recording and Stop-to-notes on the real app instead of only on benches.
   (pure parsing/validation and the file/dir accept rules, compiled into every
   build and covered by `Tests/LabControlCommandTests.swift`)
 - Launch hook: one `#if TRANSCRIPTED_LAB_CONTROL` line at the end of
-  `applicationDidFinishLaunching` in `Sources/TranscriptedApp.swift`
+  `applicationDidFinishLaunching` in `Sources/App/TranscriptedApp.swift`
 - Client: `scripts/hillclimb/lab_control.py` (stdlib Python, `--self-test` runs on Linux)
 
 ## Safety model
