@@ -7,7 +7,6 @@
     "Tests/CaptureLibraryPathSafetySyncTests.swift": 2,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/CrashReporterOptionsTests.swift": 1,
-    "Tests/DeviceRecoveryPolicyTests.swift": 6,
     "Tests/DictationAudioRecoveryTests.swift": 1,
     "Tests/DictationInputDeviceSelectionPolicyTests.swift": 2,
     "Tests/DictationQueuedStartPolicyTests.swift": 4,
