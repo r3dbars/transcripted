@@ -145,7 +145,7 @@
         "UtteranceChannel"
       ]
     },
-    "Sources/UI/Settings/TranscriptedSettingsView.swift": {
+    "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": {
       "Core": [
         "SpeakerIdentityOption"
       ]
