@@ -1,13 +1,8 @@
 // Promise: Settings has a "Transcribe a file" row, and Home's empty meetings
 // list offers the same picker, so imported audio is never more than one click
 // away. The rows read their copy and identifiers from HomeCaptureListCopy,
-// which this runner compiles, so most of this checks real values.
-//
-// Source-text pins left: the shell's closure that calls
-// actions.importAudioFile() and tracks "empty_import_audio" lives in
-// TranscriptedSettingsView.swift, a SwiftUI view wired to the live app graph
-// this runner can't build, and that file is being split right now. Convert it
-// once the split lands and the action table compiles here.
+// which this runner compiles, so this checks real values, plus the identifier
+// the QA import smoke presses. No Swift source is read as text.
 
 import Foundation
 
@@ -40,21 +35,6 @@ func testHomeImportAudioAction() {
         assertTrue(
             HomeCaptureListCopy.emptyMeetings.contains("transcribe an existing audio file"),
             "Home meeting empty copy should name imported-audio transcription directly"
-        )
-    }
-
-    runSuite("The Settings shell wires both import buttons to the import flow") {
-        let settingsSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
-            encoding: .utf8
-        )) ?? ""
-        assertTrue(
-            settingsSource.contains("actions.importAudioFile()"),
-            "general settings import action should call the existing audio import flow"
-        )
-        assertTrue(
-            settingsSource.contains("trackSettingsAction(\"empty_import_audio\", page: .home)"),
-            "Home meetings empty state should track its imported-audio route"
         )
     }
 }

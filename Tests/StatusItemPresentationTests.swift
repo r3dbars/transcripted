@@ -1,5 +1,5 @@
 // Source-text pins: the first suite reads Sources/TranscriptedApp.swift as text instead of calling
-// refreshStatusItemPresentation(), because that method is private on TranscriptedAppDelegate (@MainActor
+// refreshStatusItemPresentation(), because that method lives on TranscriptedAppDelegate (@MainActor
 // NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
 // runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
 // for the glyph states and accessibility labels, and guards against a red or stock-symbol treatment that
@@ -287,11 +287,11 @@ private func inkedPixelsThroughNSImage(_ glyph: MenuBarGlyph) -> Int {
 }
 
 private func statusItemPresentationSlice(_ source: String) -> String {
-    guard let start = source.range(of: "private func refreshStatusItemPresentation()") else {
+    guard let start = source.range(of: "func refreshStatusItemPresentation()") else {
         return ""
     }
     let tail = source[start.lowerBound...]
-    guard let end = tail.range(of: "private func closePopover()") else {
+    guard let end = tail.range(of: "func closePopover()") else {
         return String(tail)
     }
     return String(tail[..<end.lowerBound])

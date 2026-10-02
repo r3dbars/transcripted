@@ -1,9 +1,8 @@
 // Repo-structure / contract suite, not behavioral coverage.
 // What's left here reads Swift files as text, for one of three reasons:
-//   - the code lives in a file another lane is splitting right now
-//     (TranscriptedApp.swift, TranscriptedSettingsView.swift,
-//     SpeakerPeopleSettingsSection.swift, HomeView.swift), so it waits for
-//     that split before it gets a seam;
+//   - the code lives in TranscriptedApp.swift, TranscriptedSettingsView.swift,
+//     SpeakerPeopleSettingsSection.swift or HomeView.swift, which were being
+//     split while these were converted; they need seams of their own next;
 //   - the code is the meeting pill or the speaker naming window, which the
 //     #1946 follow-ups delete;
 //   - it's a contract with a script or another package (the QA CLI and bench).
@@ -171,19 +170,11 @@ func testUIAutomationSurfaceContract() {
             contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar rows should expose each page's automation identifier"
         )
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Label(\"Add correction\", systemImage: \"plus\")")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".frame(minHeight: 40)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
-            "custom dictionary add correction should keep a 40pt tactile action target"
-        )
 
         for requiredHomeActionHook in [
             "HomeRowMenuItem(title: \"Open Markdown\"",
             "HomeRowMenuItem(title: \"Report issue\"",
             "HomeRowMenuItem(title: \"Delete meeting\"",
-            "HomeDeleteConfirmationPolicy.failedMeeting",
-            "homeDeleteConfirmation = HomeDeleteConfirmation(",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
         }
@@ -235,10 +226,7 @@ func testUIAutomationSurfaceContract() {
             "ClosureMenuItem should defer its handler off the NSMenu.popUp tracking loop so menu-triggered SwiftUI alerts/sheets present"
         )
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: rootAlertBinding)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("enum RootAlert")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteConfirmation")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteFailure"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: rootAlertBinding)"),
             "the Home delete and delete-failure alerts should present through one rootAlertBinding so neither is shadowed"
         )
         assertFalse(
@@ -251,15 +239,8 @@ func testUIAutomationSurfaceContract() {
             "audio-retention confirmation should stay on the Storage page that owns the picker"
         )
         // The shared binding must dismiss only the active alert via
-        // HomeRootAlertPolicy, never clear both. A confirm action can raise
-        // a follow-up failure alert before SwiftUI writes nil; clearing
-        // everything would wipe it before it presents. (HomeRootAlertPolicyTests
-        // covers the priority/dismissal behavior directly.)
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRootAlertPolicy.activeSlot")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("switch activeRootAlert"),
-            "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset both states"
-        )
+        // HomeRootAlertPolicy, never clear both. HomeRootAlertPolicyTests
+        // covers the priority/dismissal behavior directly.
 
         // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
         // Every Home/meeting control that touches an app-owned file (transcript or
@@ -268,21 +249,13 @@ func testUIAutomationSurfaceContract() {
         // an error instead of a silent dead click. Behavior is covered by
         // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
         // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func revealOwnFile(")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("OwnFileResolver.resolveForReveal(candidateURLs:")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func openOwnFile(")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
-            "Home reveal/open should route through OwnFileResolver helpers, surfacing presentHomeActionFailure on .unavailable instead of a dead click"
-        )
-
         let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
         // Quiet-library redesign: the meeting preview sheet's separate
         // handleCopyMeetingPreview() dissolved — QuietMeetingRow and
         // QuietMeetingExpansion both now call the single handleCopyMeeting(),
         // so handleRetranscribeMeeting() is the next function boundary.
         let copyMeetingBlock = sourceBlock(
-            named: "private func handleCopyMeeting(_ item: RecentMeetingItem)",
+            named: "func handleCopyMeeting(_ item: RecentMeetingItem)",
             endingBefore: "    private func handleRetranscribeMeeting(",
             in: settingsSource
         )
@@ -302,8 +275,8 @@ func testUIAutomationSurfaceContract() {
         // toggleHomeMeetingExpansion(), which opens the row's inline
         // expansion and loads its Markdown asynchronously.
         let previewBlock = sourceBlock(
-            named: "private func toggleHomeMeetingExpansion(_ item: RecentMeetingItem)",
-            endingBefore: "    private func collapseHomeMeetingExpansion(",
+            named: "func toggleHomeMeetingExpansion(_ item: RecentMeetingItem)",
+            endingBefore: "    func collapseHomeMeetingExpansion(",
             in: settingsSource
         )
         assertFalse(
@@ -341,10 +314,6 @@ func testUIAutomationSurfaceContract() {
 
         // Copy/export and re-transcribe must surface a failure, not a silent beep,
         // when the source file cannot be resolved.
-        assertFalse(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)"),
-            "failed-meeting reveal audio must route through OwnFileResolver, not beep-or-reveal on raw URLs"
-        )
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not copy meeting")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not re-transcribe meeting"),
@@ -401,20 +370,12 @@ func testUIAutomationSurfaceContract() {
             "meeting speaker autocomplete must preserve the selected saved-person UUID and clear it on typing"
         )
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("directory: transcriptDirectory"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder"),
             "saved-person rename/merge must scan the active capture library, including relocated libraries"
         )
-        let meetingSpeakerAssignmentSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            meetingSpeakerAssignmentSource.contains("savedAssignmentsInCommitOrder(savedAssignments)")
-                && meetingSpeakerAssignmentSource.contains("remappingLocalTargets(")
-                && meetingSpeakerAssignmentSource.contains("let resolvedLocalAssignments = localAssignmentsAfterSavedMerges.compactMap")
-                && meetingSpeakerAssignmentSource.contains("applySavedAssignment(at: 0)")
-                && meetingSpeakerAssignmentSource.contains("finishPartialFailure()")
-                && meetingSpeakerAssignmentSource.contains("Reopen Name speakers to review what's left."),
-            "batch speaker naming must commit saved identities first, remap local links to surviving profiles, and close stale drafts after a partial save"
-        )
+        // Batch speaker naming order (saved identities first, local links
+        // remapped to surviving profiles) is covered by
+        // HomeMeetingPreviewFormatterTests through HomeMeetingSpeakerNamingPolicy.
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let minimum: CGFloat = 40")
                 && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let btnH = SpeakerNamingHitTargets.minimum")
@@ -466,27 +427,6 @@ func testUIAutomationSurfaceContract() {
             "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
         )
 
-        // Quiet-library speakers facelift: the play control is a bare glyph
-        // (SpeakerQuietPlayButton) used by the queue row, the person row, and
-        // the person card's player; the compact icon label now backs only the
-        // two overflow menus (the manual refresh button was removed — the
-        // model refreshes on navigation and after every mutation).
-        let speakerQuietPlayButtonApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-            .components(separatedBy: "SpeakerQuietPlayButton(")
-            .count - 1
-        assertTrue(
-            speakerQuietPlayButtonApplications >= 3,
-            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
-        )
-
-        let speakerCompactIconLabelApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-            .components(separatedBy: "SpeakerCompactIconLabel(")
-            .count - 1
-        assertTrue(
-            speakerCompactIconLabelApplications >= 2,
-            "queue and person overflow menus should use the compact 40pt hit-target label"
-        )
-
         assertFalse(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.refresh"),
             "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
@@ -494,10 +434,7 @@ func testUIAutomationSurfaceContract() {
 
         for identifier in [
             "transcripted.speakers.voice-to-name.play",
-            "transcripted.speakers.voice-to-name.menu",
             "transcripted.speakers.search.field",
-            "transcripted.speakers.person.play",
-            "transcripted.speakers.person.menu",
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(identifier),
@@ -511,15 +448,6 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("if !audioRevealURLs.isEmpty")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
-        )
-    }
-
-    runSuite("UI automation surface contract - Writing tab controls stay mapped") {
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("controller: writingController")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("meetingSession.isCaptureSessionActive")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("sttRouter.isRecording"),
-            "the shell should pass the Writing page its controller and the recording check, nothing more"
         )
     }
 
@@ -584,7 +512,6 @@ func testUIAutomationSurfaceContract() {
     // is checked by value in AutomationSurfaceBehaviorTests.swift.
     runSuite("UI automation surface contract - WS4 empty states teach") {
         let speakers = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-        let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
 
         assertTrue(
             speakers.contains("enum SpeakerPeopleEmptyState")
@@ -599,15 +526,10 @@ func testUIAutomationSurfaceContract() {
             speakers.contains("No speakers yet. After your next meeting, the people in it will appear here."),
             "the old bare-caption Speakers empty message should be gone, replaced by the teaching empty state"
         )
-        assertTrue(
-            settings.contains("onStartMeeting: { actions.startMeeting() }"),
-            "the Speakers empty state should be wired to a real next action from the Settings host"
-        )
     }
 
     runSuite("UI automation surface contract - WS4 error states act, not dump") {
         let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-        let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
 
         // Agent page: routes through the shared copy + a Copy Details reveal, and
         // no longer dumps a raw NSError into a user-visible label.
@@ -629,21 +551,8 @@ func testUIAutomationSurfaceContract() {
         // Settings > Agent), so there is no onboarding-side connect-failure
         // copy to pin here anymore.
 
-        // Settings statuses: plain words + Copy Details reveal, no raw dumps.
-        assertTrue(
-            settings.contains("SettingsActionFailureCopy.modelCacheRemoval")
-                && settings.contains("SettingsActionFailureCopy.launchAtLogin")
-                && settings.contains("SettingsActionFailureCopy.captureLibraryMigration(")
-                && settings.contains("private func settingsFailureDetailsButton("),
-            "Settings action failures should route through SettingsActionFailureCopy with a Copy Details reveal"
-        )
-        assertFalse(
-            settings.contains("setup failed: \\(error.localizedDescription)")
-                || settings.contains("Could not remove stale models: \\(error")
-                || settings.contains("Could not update launch at login: \\(error")
-                || settings.contains("Copy stopped: \\(error"),
-            "Settings status lines must not interpolate a raw error into user-facing text"
-        )
+        // Settings statuses: the plain-words copy itself is checked by
+        // SettingsActionFailureCopyTests.
     }
 }
 

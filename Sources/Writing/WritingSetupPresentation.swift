@@ -1,3 +1,6 @@
+#if canImport(TranscriptedWritingCore)
+import TranscriptedWritingCore
+#endif
 import Foundation
 
 /// The Writing tab's words and small rules: the approved design's copy

@@ -11,6 +11,7 @@
     {
       "name": "WritingCore",
       "paths": ["Sources/TranscriptedWriting/Core"],
+      "appTarget": false,
       "mayDependOn": [],
       "agentsDoc": "Sources/TranscriptedWriting/AGENTS.md"
     },
@@ -79,7 +80,7 @@
       "name": "UIOverlay",
       "paths": ["Sources/UI/Overlay"],
       "mayDependOn": ["UIShared", "AppState", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
-      "agentsDoc": "Sources/UI/AGENTS.md"
+      "agentsDoc": "Sources/UI/Overlay/AGENTS.md"
     },
     {
       "name": "UIMenuBar",
@@ -101,7 +102,7 @@
     },
     {
       "name": "AppShell",
-      "paths": ["Sources/TranscriptedApp.swift", "Sources/TranscriptedMenuCommands.swift"],
+      "paths": ["Sources/TranscriptedApp.swift", "Sources/TranscriptedAppDelegate+LaunchReports.swift", "Sources/TranscriptedAppDelegate+Lifecycle.swift", "Sources/TranscriptedAppDelegate+MenuBar.swift", "Sources/TranscriptedAppDelegate+SettingsActions.swift", "Sources/TranscriptedMenuCommands.swift"],
       "mayDependOn": ["*"],
       "agentsDoc": "Sources/AGENTS.md"
     }

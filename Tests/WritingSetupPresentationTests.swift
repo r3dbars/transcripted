@@ -1,7 +1,7 @@
 import Foundation
 
 // Behavioral coverage for the Writing tab's copy and rules
-// (Sources/UI/Settings/Writing/WritingSetupPresentation.swift). The copy
+// (Sources/Writing/WritingSetupPresentation.swift). The copy
 // suites pin docs/writing-plan.md's approved design word for word.
 
 func testWritingSetupPresentation() {

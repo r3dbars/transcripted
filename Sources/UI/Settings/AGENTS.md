@@ -32,13 +32,19 @@ settings-side agent connection flow.
   state and runtime work stay behind injected bindings and actions. Home's
   extraction (`Pages/HomeSettingsPage.swift`) only moved pure view assembly —
   the shell still owns every Home side effect (delete/rename/copy/
-  retranscribe, the shared root alert, undo staging, analytics) both because
-  those are runtime work and because several pieces
-  (`handleCopyMeeting`/`handleRetranscribeMeeting`,
-  `toggleHomeMeetingExpansion`/`collapseHomeMeetingExpansion`, the
-  `RootAlert` enum and `rootAlertBinding`, `dictationRowMenuItems`/
-  `meetingRowMenuItems`, `revealOwnFile`/`openOwnFile`) are pinned in place
-  by literal-source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
+  retranscribe, the shared root alert, undo staging, analytics).
+  The shell file keeps the stored state, `init`, `body`, and the Home row
+  actions (copy, re-transcribe, expansion, row menus, delete with undo), which
+  `Tests/UIAutomationSurfaceContractTests.swift` still pins by source text.
+  The rest are extensions of the same view:
+  `TranscriptedSettingsView+Pages.swift` (sidebar, detail column, page
+  routing, Today/Meetings/Dictations and the other page hosts),
+  `+HomeMeetingActions.swift` (the shared `RootAlert`, rename, speaker
+  naming, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts),
+  `+GeneralEditors.swift` (the combined page and its injected editors),
+  `+Refresh.swift` (state refresh, analytics, model cache, launch at login),
+  and `+Preferences.swift` (corrections, capture library, Auto Enter,
+  update actions).
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Today/Meetings/Dictations/Writing/Speakers/Agent); the
   Writing row carries a quiet trailing "New" badge until
@@ -58,8 +64,8 @@ settings-side agent connection flow.
   and the default on open (⌘1); Meetings keeps the `home` raw value (⌘2) so
   automation ids, analytics `page_id`, and source pins stay stable. Then
   Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6. Also holds
-  `WritingSidebarNewBadge`, whose defaults key the Writing page sets when
-  setup finishes.
+  `WritingSidebarNewBadge.isShown(for:dismissed:)`; the badge's defaults key
+  lives in `Sources/Writing/WritingSidebarNewBadge.swift`.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
   `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
   rolling seven-day tape, and the sessions list all come from local capture
@@ -161,7 +167,10 @@ settings-side agent connection flow.
   recent) and that call's calendar invitees as one-tap names; "Skip this
   call" is saved (`SpeakerReviewSkippedCalls`) and moves its voices to
   Everyone. Then compact duplicate-merge suggestions and the searchable
-  all-speakers list with per-row play/rename/merge/delete.
+  all-speakers list with per-row play/rename/merge/delete. The voice and
+  person rows are in `SpeakerPeopleRows.swift`; the view model is
+  `SpeakerPeopleSettingsViewModel.swift`, with duplicate detection and clip
+  files in `SpeakerPeopleSettingsViewModel+Duplicates.swift`.
 - `SpeakerReviewStack.swift` - Foundation-pure card stack behind that page:
   call order (skipped calls out, Later ones last), which voices Everyone
   hides (only the open top card's, never during a search, so voices on
@@ -217,10 +226,8 @@ settings-side agent connection flow.
   it), `WritingEverydayView.swift` (after setup: summary, today's saved
   writing, autocomplete numbers), `WritingSettingsSection.swift` (the two
   features, personalized suggestions, model switch, storage meter, Delete
-  all writing), `WritingComponents.swift` (shared buttons), and
-  `WritingSetupPresentation.swift` (Foundation-pure copy and small rules from
-  the approved design in `docs/writing-plan.md`; covered by
-  `Tests/WritingSetupPresentationTests.swift`).
+  all writing), and `WritingComponents.swift` (shared buttons). The tab's
+  copy, `WritingSetupPresentation.swift`, lives in `Sources/Writing/`.
 
 ## Guardrails
 

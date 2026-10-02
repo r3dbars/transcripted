@@ -79,12 +79,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     }
 }
 
-/// The Writing row's quiet "New" badge in the sidebar. It shows until
-/// `dismissedDefaultsKey` is true in `UserDefaults.standard`; the Writing page
-/// sets it when the user finishes setup.
-enum WritingSidebarNewBadge {
-    static let dismissedDefaultsKey = "WritingSidebarNewBadgeDismissed"
-
+/// Whether the Writing row shows its "New" badge. The badge's defaults key
+/// lives with Writing (`Sources/Writing/WritingSidebarNewBadge.swift`).
+extension WritingSidebarNewBadge {
     static func isShown(for page: TranscriptedSettingsPage, dismissed: Bool) -> Bool {
         page == .writing && !dismissed
     }
