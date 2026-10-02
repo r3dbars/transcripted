@@ -168,7 +168,7 @@ extension Audio {
 
     /// Runs on the capture's queue. Anything that takes the audio graph lock
     /// is dispatched: Stop holds that lock while it drains this capture.
-    func handlePinnedMeetingMicrophoneEvent(
+    private func handlePinnedMeetingMicrophoneEvent(
         _ event: PinnedMicrophoneCaptureEvent,
         capture: PinnedMicrophoneCapture,
         sessionGeneration: UInt64
@@ -225,7 +225,7 @@ extension Audio {
         }
     }
 
-    enum PinnedMeetingMicrophoneReplacementCause: String {
+    private enum PinnedMeetingMicrophoneReplacementCause: String {
         case deviceLost = "device_lost"
         case silentInput = "silent_input"
     }
@@ -238,7 +238,7 @@ extension Audio {
     /// the meeting; a silent one stays put if nothing else can hear the user.
     /// If another recovery holds the slot, the watchdog re-dispatches this
     /// while the capture still waits for a device.
-    func replacePinnedMeetingMicrophone(
+    private func replacePinnedMeetingMicrophone(
         _ capture: PinnedMicrophoneCapture,
         sessionGeneration: UInt64,
         because cause: PinnedMeetingMicrophoneReplacementCause
@@ -351,7 +351,7 @@ extension Audio {
 
     /// Drops a pinned capture left from an earlier recording (for example a
     /// stop whose teardown was skipped because this start had begun).
-    func retirePinnedMeetingMicrophone(operation: String) {
+    private func retirePinnedMeetingMicrophone(operation: String) {
         let retired: PinnedMicrophoneCapture? = withAudioGraphLock {
             let current = pinnedMicrophoneCapture
             pinnedMicrophoneCapture = nil
