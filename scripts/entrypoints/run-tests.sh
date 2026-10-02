@@ -507,7 +507,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarPrimaryButtonTitle.swift"
     "Sources/UI/MenuBar/MenuBarShortcutLabel.swift"
     "Sources/UI/MenuBar/MenuBarGlyph.swift"
-    "Sources/UI/MenuBar/MenuTokens.swift"
+    "Sources/UI/Shared/MenuTokens.swift"
     "Sources/UI/MenuBar/MenuBarActionRowView.swift"
     "Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift"
     "Sources/UI/MenuBar/MenuBarUtilityActionsView.swift"

@@ -209,8 +209,8 @@ func testUIAutomationSurfaceContract() {
         )
 
         assertTrue(
-            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let minimumHitTargetSize: CGFloat = 40")
-                && contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let panelHeight: CGFloat = 480")
+            contractSource("Sources/UI/Shared/MenuTokens.swift").contains("static let minimumHitTargetSize: CGFloat = 40")
+                && contractSource("Sources/UI/Shared/MenuTokens.swift").contains("static let panelHeight: CGFloat = 480")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.utilityActionRowHeight")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.compactActionRowHeight"),
@@ -244,7 +244,7 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
         assertTrue(
-            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("minimumHitTargetSize: CGFloat = 40")
+            contractSource("Sources/UI/Shared/MenuTokens.swift").contains("minimumHitTargetSize: CGFloat = 40")
                 && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize"),
             "menubar rows should stay at or above the 40px minimum hit target"
         )
@@ -1094,7 +1094,7 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - WS4 design tokens are the single source") {
-        let tokens = contractSource("Sources/UI/MenuBar/MenuTokens.swift")
+        let tokens = contractSource("Sources/UI/Shared/MenuTokens.swift")
         let actionRow = contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift")
         let header = contractSource("Sources/UI/MenuBar/MenuBarHeaderView.swift")
         let doc = contractSource("docs/DESIGN_TOKENS.md")

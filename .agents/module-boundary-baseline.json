@@ -94,11 +94,6 @@
         "DisplayStatus"
       ]
     },
-    "Sources/UI/Settings/HotkeyRecorderAppKitView.swift": {
-      "UIMenuBar": [
-        "MenuTokens"
-      ]
-    },
     "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
       "Core": [
         "SpeakerIdentityOption"

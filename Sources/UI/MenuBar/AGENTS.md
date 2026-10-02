@@ -8,13 +8,11 @@ The status item and its popover: the glyph, the header status line, the Record a
 
 ## Public surface
 
-`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`, `MenuTokens`.
+`MenuBarPanelController`, `MenuBarContentView`, `MenuBarGlyph`, `MenuBarMeetingCapturePhase`, `PasteLastDictationFeedbackPresenter`.
 
 ## May depend on
 
 UIShared, UIOverlay, UISettings, AppState, Capture, Meeting, Dictation, Speech, Support, Observability, and Core's `core-vocab` tier. Nothing in the app may depend on UIMenuBar except AppShell. `.agents/modules.json` is the source of truth.
-
-Grandfathered crossing: `UI/Settings/HotkeyRecorderAppKitView.swift` names `MenuTokens`, which makes Settings reach up into the menu bar. Moving `MenuTokens.swift` to `UI/Shared/` fixes it; that move waits for #1946.
 
 ## Entry points
 
