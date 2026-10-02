@@ -55,7 +55,7 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
             }
         }
     }
-    let tailAdmission = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
+    private let tailAdmission = PCMBufferBackpressureGate(byteLimit: 8 * 1_024 * 1_024)
     var isDraining: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
         return draining
