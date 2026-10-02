@@ -13,23 +13,14 @@
 //
 // These are internal collaborator methods on ParakeetEngine — ParakeetEngine
 // remains the public-API owner and MainActor home for this state
-// (`pendingSystemInputRestore`, `pendingSystemInputReconciliations`,
-// `systemInputReconciliationTask`, `systemInputWorkCoordinator`); this file
-// just groups the system-input slice of its implementation.
+// (`pendingSystemInputRestore`, `systemInputReconciler`,
+// `systemInputWorkCoordinator`); this file just groups the system-input slice
+// of its implementation. The reconciliation queue itself is the compiled
+// `ParakeetSystemInputReconciler` in ParakeetAudioGraphOwnership.swift.
 
 import CoreAudio
 import Foundation
 import TranscriptedCore
-
-struct ParakeetSystemInputRestoreTarget: Equatable, Sendable {
-    let temporaryInput: AudioDeviceID
-    let previousInput: AudioDeviceID
-}
-
-struct ParakeetSystemInputReconciliationRequest: Equatable, Sendable {
-    let attemptedTarget: ParakeetSystemInputRestoreTarget
-    let clearMarkerWhenRestored: Bool
-}
 
 extension ParakeetEngine {
     nonisolated private static func restoreSystemInputDeviceIfStillTemporary(
@@ -135,172 +126,49 @@ extension ParakeetEngine {
     /// A timed-out CoreAudio write can finish after its queue has been retired.
     /// Re-apply the latest owner intent, or restore the attempted route when no
     /// successor exists, so late completion converges on current MainActor state.
+    /// `ParakeetSystemInputReconciler` owns the queue, the bounded passes, and
+    /// late-completion classification.
     func reconcileSystemInputAfterLateCompletion(
         attemptedTarget: ParakeetSystemInputRestoreTarget,
         clearMarkerWhenRestored: Bool
     ) async {
-        enqueueSystemInputReconciliation(
+        await systemInputReconciler.reconcile(
             ParakeetSystemInputReconciliationRequest(
                 attemptedTarget: attemptedTarget,
                 clearMarkerWhenRestored: clearMarkerWhenRestored
             )
         )
-        if let systemInputReconciliationTask {
-            await systemInputReconciliationTask.value
-            return
-        }
-
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.drainSystemInputReconciliations()
-        }
-        systemInputReconciliationTask = task
-        await task.value
     }
 
-    private func enqueueSystemInputReconciliation(
-        _ request: ParakeetSystemInputReconciliationRequest
-    ) {
-        if let existingIndex = pendingSystemInputReconciliations.firstIndex(where: {
-            $0.attemptedTarget == request.attemptedTarget
-        }) {
-            let existing = pendingSystemInputReconciliations[existingIndex]
-            pendingSystemInputReconciliations[existingIndex] = ParakeetSystemInputReconciliationRequest(
-                attemptedTarget: request.attemptedTarget,
-                clearMarkerWhenRestored: existing.clearMarkerWhenRestored || request.clearMarkerWhenRestored
-            )
-        } else {
-            pendingSystemInputReconciliations.append(request)
-        }
-    }
-
-    private func drainSystemInputReconciliations() async {
-        while !pendingSystemInputReconciliations.isEmpty {
-            let request = pendingSystemInputReconciliations.removeFirst()
-            await performSystemInputReconciliation(request)
-        }
-        systemInputReconciliationTask = nil
-    }
-
-    private func performSystemInputReconciliation(
-        _ request: ParakeetSystemInputReconciliationRequest
-    ) async {
-        for _ in 0..<TranscriptedConstants.systemInputReconciliationAttempts {
-            if let successorOwner = pendingSystemInputRestore.owner,
-               let successorTarget = pendingSystemInputRestore.value(ownedBy: successorOwner) {
-                let applyError: String?
-                do {
-                    applyError = try await Self.systemInputWorkCoordinator.run(
-                        operation: "late_completion_successor_reconcile",
-                        timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
-                        cleanupAfterLateCompletion: { [weak self] lateError in
-                            Task { @MainActor [weak self] in
-                                await self?.handleLateSystemInputReconciliationCompletion(
-                                    coreAudioError: lateError,
-                                    intendedOwner: successorOwner,
-                                    intendedTarget: successorTarget,
-                                    request: request
-                                )
-                            }
-                        }
-                    ) {
-                        Self.applySystemInputDevice(successorTarget.temporaryInput)
-                    }
-                } catch {
-                    reportSystemInputRestoreFailure(
-                        operation: "late_completion_successor_reconcile",
-                        failureKind: "timeout"
-                    )
-                    continue
-                }
-                guard applyError == nil else {
-                    reportSystemInputRestoreFailure(
-                        operation: "late_completion_successor_reconcile",
-                        failureKind: "core_audio_error"
-                    )
-                    continue
-                }
-                if pendingSystemInputRestore.owner == successorOwner,
-                   pendingSystemInputRestore.value(ownedBy: successorOwner) == successorTarget {
-                    return
-                }
-                continue
-            }
-
-            let restoreError: String?
-            do {
-                restoreError = try await Self.systemInputWorkCoordinator.run(
-                    operation: "late_completion_restore_reconcile",
+    func makeSystemInputReconciler() -> ParakeetSystemInputReconciler {
+        ParakeetSystemInputReconciler(
+            attempts: TranscriptedConstants.systemInputReconciliationAttempts,
+            pendingRestore: { [weak self] in
+                self?.pendingSystemInputRestore ?? ParakeetOwnerBoundPendingState()
+            },
+            runCoreAudio: { operation, cleanupAfterLateCompletion, work in
+                try await Self.systemInputWorkCoordinator.run(
+                    operation: operation,
                     timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
-                    cleanupAfterLateCompletion: { [weak self] lateError in
-                        Task { @MainActor [weak self] in
-                            await self?.handleLateSystemInputReconciliationCompletion(
-                                coreAudioError: lateError,
-                                intendedOwner: nil,
-                                intendedTarget: nil,
-                                request: request
-                            )
-                        }
-                    }
-                ) {
-                    Self.restoreSystemInputDeviceIfStillTemporary(
-                        temporaryInput: request.attemptedTarget.temporaryInput,
-                        previousInput: request.attemptedTarget.previousInput
-                    )
-                }
-            } catch {
-                reportSystemInputRestoreFailure(
-                    operation: "late_completion_restore_reconcile",
-                    failureKind: "timeout"
+                    cleanupAfterLateCompletion: cleanupAfterLateCompletion,
+                    work
                 )
-                continue
-            }
-            guard restoreError == nil else {
-                reportSystemInputRestoreFailure(
-                    operation: "late_completion_restore_reconcile",
-                    failureKind: "core_audio_error"
+            },
+            applyInput: { input in
+                Self.applySystemInputDevice(input)
+            },
+            restoreIfStillTemporary: { target in
+                Self.restoreSystemInputDeviceIfStillTemporary(
+                    temporaryInput: target.temporaryInput,
+                    previousInput: target.previousInput
                 )
-                continue
+            },
+            reportFailure: { [weak self] operation, failureKind in
+                self?.reportSystemInputRestoreFailure(
+                    operation: operation,
+                    failureKind: failureKind
+                )
             }
-            if !pendingSystemInputRestore.hasPendingValue {
-                return
-            }
-        }
-    }
-
-    /// Timed-out reconciliation work may complete after a replacement queue has
-    /// already converged the route. The late result needs more work only when
-    /// MainActor intent changed while that HAL call was blocked. An unchanged
-    /// successful intent is terminal, which prevents timeout callbacks from
-    /// recursively creating an unbounded queue/task chain.
-    private func handleLateSystemInputReconciliationCompletion(
-        coreAudioError: String?,
-        intendedOwner: ParakeetAudioGraphOwnerToken?,
-        intendedTarget: ParakeetSystemInputRestoreTarget?,
-        request: ParakeetSystemInputReconciliationRequest
-    ) async {
-        guard coreAudioError == nil else {
-            reportSystemInputRestoreFailure(
-                operation: intendedOwner == nil
-                    ? "late_completion_restore_reconcile"
-                    : "late_completion_successor_reconcile",
-                failureKind: "core_audio_error"
-            )
-            return
-        }
-
-        if let intendedOwner, let intendedTarget {
-            if pendingSystemInputRestore.owner == intendedOwner,
-               pendingSystemInputRestore.value(ownedBy: intendedOwner) == intendedTarget {
-                return
-            }
-        } else if !pendingSystemInputRestore.hasPendingValue {
-            return
-        }
-
-        await reconcileSystemInputAfterLateCompletion(
-            attemptedTarget: request.attemptedTarget,
-            clearMarkerWhenRestored: true
         )
     }
 

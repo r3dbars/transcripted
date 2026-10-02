@@ -35,8 +35,8 @@ class ParakeetEngine: ObservableObject {
     var audioGraphGeneration = 0
     private var audioStartAdmission = ParakeetAudioStartAdmissionState()
     var audioStartInProgress: Bool { audioStartAdmission.isInProgress }
-    var audioStopTask: Task<Void, Never>?
-    var audioStopInProgress: Bool { audioStopTask != nil }
+    let audioStopLifecycle = ParakeetSingleFlightLifecycle()
+    var audioStopInProgress: Bool { audioStopLifecycle.isInProgress }
     var inputTapInstalled = false
     /// Set while dictation records through the pinned-device recorder
     /// (ParakeetPinnedMicrophone.swift) instead of this engine.
@@ -151,8 +151,7 @@ class ParakeetEngine: ObservableObject {
     private var lastInputSelectionReportKey: String?
     var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
     var pendingSystemInputRestore = ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>()
-    var pendingSystemInputReconciliations: [ParakeetSystemInputReconciliationRequest] = []
-    var systemInputReconciliationTask: Task<Void, Never>?
+    lazy var systemInputReconciler = makeSystemInputReconciler()
 
     var isModelLoaded: Bool { asrManagerReady }
 
@@ -256,89 +255,16 @@ class ParakeetEngine: ObservableObject {
         cleanupAfterLateCompletion: ((AVAudioEngine) -> Void)? = nil,
         _ work: @escaping (AVAudioEngine) throws -> T
     ) async throws -> T {
-        let queue = audioEngineQueue
-        let engine = audioEngine
-        let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
-        guard let workerLease = Self.timedAudioEngineWorkLimiter.acquire() else {
-            throw ParakeetAudioEngineWorkError.circuitOpen(
-                operation: operation,
-                activeWorkers: Self.timedAudioEngineWorkLimiter.activeWorkerCount
-            )
-        }
-        let resumeLock = NSLock()
-        var didResume = false
-
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
-            func resumeOnce(_ result: Result<T, Error>) {
-                var shouldResume = false
-                resumeLock.withLock {
-                    if !didResume {
-                        didResume = true
-                        shouldResume = true
-                    }
-                }
-                guard shouldResume else { return }
-                continuation.resume(with: result)
-            }
-
-            queue.async { [workerLease] in
-                // A timed-out caller may have moved on to a replacement queue.
-                // Keep this lease until the old queue block itself returns; if
-                // CoreAudio is permanently wedged, the process-wide slot stays
-                // occupied and later work fails closed instead of spawning more
-                // blocked queues and native graphs.
-                defer { workerLease.release() }
-                let shouldRun = resumeLock.withLock { !didResume }
-                guard shouldRun else { return }
-                guard isWorkCurrent?() != false else {
-                    resumeOnce(.failure(CancellationError()))
-                    return
-                }
-
-                var result: Result<T, Error>
-                do {
-                    result = .success(try work(engine))
-                } catch {
-                    result = .failure(error)
-                }
-
-                let workStayedCurrent = isWorkCurrent?() != false
-                if !workStayedCurrent {
-                    cleanupAfterCancellation?(engine)
-                    result = .failure(CancellationError())
-                }
-
-                var completedBeforeTimeout = false
-                resumeLock.withLock {
-                    if !didResume {
-                        didResume = true
-                        completedBeforeTimeout = true
-                    }
-                }
-
-                if completedBeforeTimeout {
-                    continuation.resume(with: result)
-                } else if !workStayedCurrent {
-                    // Cancellation cleanup already ran synchronously on this
-                    // worker before any successor can use the replacement graph.
-                } else {
-                    cleanupAfterLateCompletion?(engine)
-                }
-            }
-
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(
-                deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
-            ) {
-                resumeOnce(
-                    .failure(
-                        ParakeetAudioEngineWorkError.timedOut(
-                            operation: operation,
-                            timeoutMs: timeoutMs
-                        )
-                    )
-                )
-            }
-        }
+        try await Self.timedAudioEngineWorkLimiter.run(
+            on: audioEngineQueue,
+            resource: audioEngine,
+            operation: operation,
+            timeoutNanoseconds: timeoutNanoseconds,
+            isWorkCurrent: isWorkCurrent,
+            cleanupAfterCancellation: cleanupAfterCancellation,
+            cleanupAfterLateCompletion: cleanupAfterLateCompletion,
+            work
+        )
     }
 
     private static func elapsedMilliseconds(since start: CFAbsoluteTime) -> Int {
@@ -2283,17 +2209,12 @@ class ParakeetEngine: ObservableObject {
     }
 
     func stopRecording() async {
-        if let audioStopTask {
-            await audioStopTask.value
-            return
-        }
-        let stopTask = Task { @MainActor [weak self] in
+        // A duplicate stop joins the stop already running, so every caller
+        // waits for the one tap removal and buffer drain.
+        await audioStopLifecycle.run { [weak self] in
             guard let self else { return }
             await self.performStopRecording()
         }
-        audioStopTask = stopTask
-        await stopTask.value
-        audioStopTask = nil
     }
 
     private func performStopRecording() async {
