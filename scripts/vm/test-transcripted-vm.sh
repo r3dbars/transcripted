@@ -254,6 +254,7 @@ run --vm upvm down || true
 # that screen access.
 python3 - "$ROOT/silentvnc" <<'PY' &
 import os, socket, sys
+parent = os.getppid()  # first, so a test that dies right away still ends this helper
 listener = socket.socket()
 listener.bind(("127.0.0.1", 0))
 listener.listen(4)
@@ -262,7 +263,6 @@ with open(sys.argv[1] + ".tmp", "w") as handle:
 os.replace(sys.argv[1] + ".tmp", sys.argv[1])
 held = []  # accepted connections stay open and never get an answer
 listener.settimeout(0.2)
-parent = os.getppid()
 while not os.path.exists(sys.argv[1] + ".stop") and os.getppid() == parent:
     try:
         held.append(listener.accept()[0])
@@ -284,6 +284,7 @@ run --vm upvm down || true
 
 python3 - "$(dirname "$SCRIPT")" "$ROOT/fakevnc" <<'PY' &
 import os, sys, time
+parent = os.getppid()  # first, so a test that dies right away still ends this helper
 sys.path.insert(0, sys.argv[1])
 import vnc
 events, conns = [], []
@@ -298,7 +299,6 @@ def save_events():
 # Live until the test says stop, or until the test shell is gone (it was
 # killed, or exited early). Never on a timer: a loaded machine can take
 # minutes to get through the cases that need this server.
-parent = os.getppid()
 while not os.path.exists(sys.argv[2] + ".stop") and os.getppid() == parent:
     save_events()
     time.sleep(0.1)
