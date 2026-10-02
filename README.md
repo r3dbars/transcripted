@@ -122,6 +122,33 @@ that lets AI apps use outside tools. Transcripted's tools can search and read
 your notes, but they can't change or delete anything. Setup details are in
 [docs/agent-connect.md](docs/agent-connect.md).
 
+### Live meetings in Claude Code
+
+The `transcripted-live` plugin brings the meeting you're recording into Claude
+Code while it happens. Claude gets the call as context with each message, a
+line above the prompt shows the meeting with **Notes**, a question aimed at you
+shows up with **Draft answer**, and when the call ends you get a wrap-up.
+
+In Claude Code:
+
+```text
+/plugin marketplace add r3dbars/transcripted
+/plugin install transcripted-live@transcripted
+/reload-plugins
+```
+
+Or from a terminal:
+
+```bash
+claude plugin marketplace add r3dbars/transcripted
+claude plugin install transcripted-live@transcripted
+```
+
+It needs Transcripted 1.1.69 or later (that version ships the live helper) and
+Claude Code 2.1.287 or later. Live transcription runs on your Mac; the lines it
+passes to Claude go to Claude like anything else you send it. Details are in
+[Tools/TranscriptedLive/README.md](Tools/TranscriptedLive/README.md).
+
 ## Requirements
 
 - A Mac with Apple silicon (M1 or later)
