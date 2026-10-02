@@ -204,7 +204,7 @@ func testMeetingSessionUIPolicy() {
             "Sources/Meeting/MeetingSessionController.swift",
             description: "MeetingSessionController.swift"
         )
-        guard let start = source.range(of: "private func handleUnexpectedCaptureStop"),
+        guard let start = source.range(of: "func handleUnexpectedCaptureStop("),
               let end = source.range(
                 of: "// preserveQueuedTranscriptionJobsForShutdown",
                 range: start.upperBound..<source.endIndex

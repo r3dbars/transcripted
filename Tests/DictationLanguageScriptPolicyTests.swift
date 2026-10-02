@@ -91,11 +91,7 @@ func testDictationLanguageScriptPolicy() {
     }
 
     runSuite("The stop path offers the held-back text instead of dropping it") {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let controller = (try? String(
-            contentsOf: root.appendingPathComponent("Sources/UI/Overlay/DictationSessionController.swift"),
-            encoding: .utf8
-        )) ?? ""
+        let controller = readDictationSessionControllerSource(part: "Stop")
         assertTrue(controller.contains("let heldText = appState.sttRouter.heldBackDictationText"))
         assertTrue(controller.contains("let outcome = self.pasteWithClipboardRestore(heldText)"))
         assertTrue(

@@ -148,10 +148,7 @@ func testFailedMeetingPresentation() {
     }
 
     runSuite("MeetingSessionController surfaces skipped no-speech outcomes visibly") {
-        let source = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
-            encoding: .utf8
-        )) ?? ""
+        let source = readMeetingSessionControllerSource(part: "TranscriptionOutcomes")
 
         // 2026-08 state-collapse audit: the direct `state = .error(...)`
         // assignment this guard originally checked for was replaced first by

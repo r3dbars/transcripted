@@ -92,7 +92,8 @@ func testDictationStartedTelemetryContract() async {
     // sites, and DictationSessionController can't be built in the fast
     // runner. The counting rules themselves are behavior tests above and in
     // DictationStartAdmissionTests / DictationQueuedStartPolicyTests.
-    let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+    // The core file comes first, then every +Area extension.
+    let source = readDictationSessionControllerSource()
 
     runSuite("The controller wires the real start events into admission") {
         let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
@@ -108,6 +109,8 @@ func testDictationStartedTelemetryContract() async {
     }
 
     runSuite("internal restart paths are marked as retries") {
+        // The Try Again actions sit in the DictationSessionController+*.swift
+        // extensions, so count across the core file and all of them.
         let internalCalls = Array(source.components(separatedBy: ".startDictation(").dropFirst())
 
         // Nine: the eight error-alert restart affordances, plus the start of a
@@ -116,7 +119,7 @@ func testDictationStartedTelemetryContract() async {
         assertEqual(
             internalCalls.count,
             9,
-            "the error-alert restart affordances in this file plus the remembered press; update this count deliberately, not to make the suite pass"
+            "the error-alert restart affordances in the controller plus the remembered press; update this count deliberately, not to make the suite pass"
         )
         for call in internalCalls {
             let arguments = call.components(separatedBy: ")").first ?? ""

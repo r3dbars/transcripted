@@ -144,13 +144,56 @@ func repoFixtureURL(_ relativePath: String) -> URL {
         .appendingPathComponent(relativePath)
 }
 
+/// ParakeetEngine is one @MainActor class split by area into a core file plus
+/// extension files. Its source contracts read the core and these extensions
+/// together. Each file ends with its closing brace at column zero, so a slice
+/// ending at "\n}\n" stops at the end of the file it started in.
+let parakeetEngineSourceFiles = [
+    "ParakeetEngine.swift",
+    "ParakeetInputReadiness.swift",
+    "ParakeetInputRoute.swift",
+    "ParakeetAudioTap.swift",
+    "ParakeetRecordingStart.swift",
+    "ParakeetRecordingTeardown.swift",
+    "ParakeetDictationTranscription.swift",
+    "ParakeetASRInference.swift",
+]
+
 func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
-    readSourceFixture(
-        "Sources/Speech/ParakeetEngine.swift",
-        description: "ParakeetEngine.swift",
-        file: file,
-        line: line
-    )
+    parakeetEngineSourceFiles.map { name in
+        readSourceFixture(
+            "Sources/Speech/\(name)",
+            description: name,
+            file: file,
+            line: line
+        )
+    }.joined(separator: "\n")
+}
+
+/// DictationSessionController and MeetingSessionController are each one
+/// @MainActor class split into a core file plus `Name+Area.swift` extension
+/// files. `part: "Stop"` reads only `Name+Stop.swift`, so an ordering pin stays
+/// inside the one file both of its anchors live in. With no part, it reads the
+/// core file and every extension joined, for presence checks and call counts.
+func readDictationSessionControllerSource(part: String? = nil, file: String = #file, line: Int = #line) -> String {
+    joinedSplitTypeText(directory: "Sources/UI/Overlay", type: "DictationSessionController", part: part, file: file, line: line)
+}
+
+func readMeetingSessionControllerSource(part: String? = nil, file: String = #file, line: Int = #line) -> String {
+    joinedSplitTypeText(directory: "Sources/Meeting", type: "MeetingSessionController", part: part, file: file, line: line)
+}
+
+private func joinedSplitTypeText(directory: String, type: String, part: String?, file: String, line: Int) -> String {
+    let names: [String]
+    if let part {
+        names = ["\(type)+\(part).swift"]
+    } else {
+        let listing = (try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(directory).path)) ?? []
+        names = ["\(type).swift"] + listing.filter { $0.hasPrefix("\(type)+") && $0.hasSuffix(".swift") }.sorted()
+    }
+    return names.map { name in
+        readSourceFixture("\(directory)/\(name)", description: name, file: file, line: line)
+    }.joined(separator: "\n")
 }
 
 func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {

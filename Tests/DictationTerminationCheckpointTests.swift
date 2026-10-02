@@ -186,10 +186,9 @@ func testDictationTerminationCheckpoint() async {
     }
 
     do {
-        let controller = try String(
-            contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
-            encoding: .utf8
-        )
+        // The core file comes first, then the +Area extensions; the stop
+        // path's anchors below all sit in DictationSessionController+Stop.swift.
+        let controller = readDictationSessionControllerSource()
         let app = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
         let appAdmission = app.range(of: "guard await self.sessionController.finishDictationForTermination() else")
         let appAdmissionEnd = appAdmission?.upperBound ?? app.startIndex
@@ -227,7 +226,7 @@ func testDictationTerminationCheckpoint() async {
             assertTrue(unsavedAudio != nil && unsavedAudioRetry != nil,
                        "an undecoded recording without WAV must offer retained-RAM saving retry instead of claiming only model-empty speech")
             // A failed WAV snapshot with audio still in memory stopping before
-            // inference is a behavior test now: "No snapshot while native audio
+            // inference is a behavior test: "No snapshot while native audio
             // is still in memory stops before transcribing" in
             // DictationStopCheckpointTests.swift. What's left to pin is the
             // controller's wiring of that outcome, until the rest of the stop
