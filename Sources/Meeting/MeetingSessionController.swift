@@ -623,9 +623,9 @@ final class MeetingSessionController: ObservableObject {
             audio: Audio(
                 paths: storagePaths,
                 sleepWakeNotifications: AudioSleepWakeNotifications(
-                    center: NSWorkspace.shared.notificationCenter,
-                    willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
-                    didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
+                    center: MeetingSleepWakeNotificationSource.center,
+                    willSleepName: MeetingSleepWakeNotificationSource.willSleepName,
+                    didWakeName: MeetingSleepWakeNotificationSource.didWakeName
                 )
             )
         )
@@ -865,7 +865,12 @@ final class MeetingSessionController: ObservableObject {
         suggestedTitle: String? = nil,
         promptTelemetryProperties: [String: String]? = nil
     ) async -> Bool {
-        guard !startRecordingCallInFlight else {
+        let admission = MeetingSessionStateMachine.startAdmission(
+            startCallInFlight: startRecordingCallInFlight,
+            state: state
+        )
+        switch admission {
+        case .ignoredStartInFlight:
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_start_ignored",
@@ -874,11 +879,8 @@ final class MeetingSessionController: ObservableObject {
             )
             // The caller did not start a recording. Returning false keeps a
             // prompt action from treating a competing start as accepted.
-            return false
-        }
-
-        switch state {
-        case .recording, .startingRecording, .stoppingRecording:
+            return admission.acceptsRecord
+        case .ignoredActiveCapture:
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_start_ignored",
@@ -888,8 +890,8 @@ final class MeetingSessionController: ObservableObject {
             // The caller did not start a recording. Returning false keeps a
             // prompt or menu action from treating an already-active capture
             // as an accepted Record.
-            return false
-        case .idle, .loadingModels, .ready, .transcribing, .error:
+            return admission.acceptsRecord
+        case .accepted:
             break
         }
 
