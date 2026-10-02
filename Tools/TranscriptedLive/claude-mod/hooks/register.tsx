@@ -108,6 +108,8 @@ type LiveState = {
   stopArmedUntil: number
   /** Transcripted said it takes meeting control over its companion socket. */
   canStop: boolean
+  /** `$.clock` time of the last check whether Transcripted takes stop requests. */
+  lastStopProbeMs: number
   /** The meeting whose "wrap-up ready" line the person closed. */
   dismissedWrapFor: string
   /** The session the person just confirmed stopping; lets exactly that one stop_meeting call through. */
@@ -149,6 +151,7 @@ const WRAP_MAX_CHARS = 60_000
 const SENT_REF = { plugin: 'transcripted-live', key: 'sentUpTo' } as const
 const NOTES_REF = { plugin: 'transcripted-live', key: 'notes' } as const
 const WRAPUPS_REF = { plugin: 'transcripted-live', key: 'wrapups' } as const
+const SENT_KEYS_REF = { plugin: 'transcripted-live', key: 'sentKeys' } as const
 /** The bundled transcripted MCP server's tools, as this plugin lists them. */
 const MCP_TOOL_PREFIX = 'mcp__plugin_transcripted-live_transcripted__'
 const PERSON_ONLY_TOOLS = new Set(['start_meeting', 'stop_meeting', 'set_live_context_sharing'])
@@ -159,6 +162,8 @@ const STORE_AUTOSTART = 'autostart'
 const MCP_SERVER = 'plugin_transcripted-live_transcripted'
 /** How long a first press of Stop waits for the second. */
 const STOP_CONFIRM_MS = 4_000
+/** How often to ask again whether Transcripted takes stop requests while a call is live. */
+const STOP_PROBE_MS = 10_000
 /** A helper that has not written its session file for this long is not running. */
 const HELPER_ALIVE_MS = 10_000
 /** After a helper exits, wait this long before starting another. */
@@ -240,6 +245,7 @@ export function register(on: On) {
     canStop: false,
     personStopFor: '',
     dismissedWrapFor: '',
+    lastStopProbeMs: -Infinity,
   }
 
   on('session.start', async ($, e, next) => {
@@ -260,6 +266,9 @@ export function register(on: On) {
     s.sentUpTo = (await $.state.get(SENT_REF).catch(() => null))?.value ?? {}
     s.notes = (await $.state.get(NOTES_REF).catch(() => null))?.value ?? null
     s.wrapups = (await $.state.get(WRAPUPS_REF).catch(() => null))?.value ?? {}
+    const sentKeys = (await $.state.get(SENT_KEYS_REF).catch(() => null))?.value
+    s.sentNotesKey = sentKeys?.notes ?? ''
+    s.sentWrapKey = sentKeys?.wrap ?? ''
 
     const registered = await $.tool
       .register({
@@ -398,6 +407,7 @@ export function register(on: On) {
       if (!('drop' in result && result.drop)) {
         block.commit()
         void $.state.set(SENT_REF, { ...s.sentUpTo }).catch(() => undefined)
+        void $.state.set(SENT_KEYS_REF, { notes: s.sentNotesKey, wrap: s.sentWrapKey }).catch(() => undefined)
       }
       return result
     })
@@ -596,7 +606,7 @@ function viewModel(s: LiveState, now: number, isOpen: boolean): ViewModel {
         : session.state === 'ended'
           ? wrap
             ? 'wrapped'
-            : s.lines.length >= WRAP_MIN_LINES && endedRecently(s, now)
+            : s.lines.length >= WRAP_MIN_LINES && endedRecently(s, now) && (s.wrapFailures[meetingId] ?? 0) < WRAP_MAX_FAILURES
               ? 'ending'
               : 'ended'
           : 'waiting'
@@ -703,6 +713,16 @@ async function pollOnce($: EngineInterface, s: LiveState) {
     const meetingId = s.session?.meetingId ?? ''
     const tick = await $.clock.now().catch(() => now)
     superviseHelper($, s, now, tick)
+    // Transcripted's MCP connection may come up after the session starts: keep asking while live.
+    if (!s.canStop && isLive(s, now) && tick - s.lastStopProbeMs >= STOP_PROBE_MS) {
+      s.lastStopProbeMs = tick
+      void probeMeetingControl($).then(canStop => {
+        if (canStop) {
+          s.canStop = true
+          $.ui.invalidate('ui.render')
+        }
+      })
+    }
     maybeRunHelper($, s, now)
     maybeWrapUp($, s, now, tick)
     if (isLive(s, now) && meetingId && s.autoOpenedFor !== meetingId && !s.isHidden) {
@@ -905,8 +925,8 @@ function superviseHelper($: EngineInterface, s: LiveState, now: number, tick: nu
         env: { TRANSCRIPTED_DISABLE_FILE_LOGGER: '1' },
       })
       for await (const { text } of child) {
+        // The helper prints transcript lines; never copy its output anywhere.
         if (text.includes('already running')) refused = true
-        $.ui.log(`transcripted-live: ${text.trim()}`, { to: 'debug' })
       }
     } catch {
       // Could not start it; try again after the back-off.

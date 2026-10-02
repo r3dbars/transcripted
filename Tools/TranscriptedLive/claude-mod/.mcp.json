@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "transcripted": {
-      "command": "${HOME}/Library/Application Support/Transcripted/mcp/transcripted-mcp",
-      "args": []
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "for p in \"$HOME/Library/Application Support/Transcripted/mcp/transcripted-mcp\" /Applications/Transcripted.app/Contents/Helpers/transcripted-mcp \"$HOME/Applications/Transcripted.app/Contents/Helpers/transcripted-mcp\"; do [ -x \"$p\" ] && exec \"$p\"; done; echo \"transcripted-mcp not found: install or update Transcripted\" >&2; exit 1"
+      ]
     }
   }
 }

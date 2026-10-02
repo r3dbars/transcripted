@@ -198,8 +198,7 @@ public final class LiveRunner {
         }
         try output.update(
             partials: ["you": youPartial, "them": themPartial],
-            audioSeconds: max(micPosition, systemPosition ?? 0),
-            levels: ["you": await you.levels(), "them": await them.levels()]
+            audioSeconds: max(micPosition, systemPosition ?? 0)
         )
         try output.heartbeat()
     }

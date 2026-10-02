@@ -21,8 +21,6 @@ public struct LiveSession: Codable, Equatable {
     public var lineCount: Int
     public var audioSeconds: Double
     public var partial: [String: String]
-    /// Per speaker, recent loudness (0...1, one step per 0.1 s of audio, newest last).
-    public var levels: [String: [Double]]?
     public var pid: Int32
 }
 
@@ -94,7 +92,6 @@ public final class LiveOutput {
         session.lineCount = 0
         session.audioSeconds = 0
         session.partial = [:]
-        session.levels = nil
         try writeSession(force: true)
     }
 
@@ -109,10 +106,9 @@ public final class LiveOutput {
     }
 
     /// Ghost lines and the audio clock; written at most four times a second.
-    public func update(partials: [String: String], audioSeconds: Double, levels: [String: [Double]] = [:]) throws {
+    public func update(partials: [String: String], audioSeconds: Double) throws {
         session.partial = partials.filter { !$0.value.isEmpty }
         session.audioSeconds = audioSeconds
-        session.levels = levels.isEmpty ? nil : levels
         try writeSession(force: false)
     }
 
@@ -127,7 +123,6 @@ public final class LiveOutput {
         session.state = .ended
         session.endedAt = Date()
         session.partial = [:]
-        session.levels = nil
         try writeSession(force: true)
     }
 

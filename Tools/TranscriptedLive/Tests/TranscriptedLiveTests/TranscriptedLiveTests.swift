@@ -113,30 +113,3 @@ import Testing
         #expect(filter.release(systemPosition: nil) == [line])
     }
 }
-
-@Suite struct LevelMeterTests {
-    @Test func silenceReadsZeroAndALoudToneReadsNearFull() {
-        var meter = LevelMeter(stepSeconds: 0.1, capacity: 10)
-        meter.add([Float](repeating: 0, count: 1_600), sampleRate: 16_000)
-        let tone = (0..<1_600).map { Float(0.9 * sin(Double($0) * 0.2)) }
-        meter.add(tone, sampleRate: 16_000)
-        #expect(meter.levels.count == 2)
-        #expect(meter.levels[0] == 0)
-        #expect(meter.levels[1] > 0.9)
-    }
-
-    @Test func oneStepPerTenthOfASecondAndOnlyTheNewestAreKept() {
-        var meter = LevelMeter(stepSeconds: 0.1, capacity: 4)
-        meter.add([Float](repeating: 0.1, count: 16_000), sampleRate: 16_000)
-        #expect(meter.levels.count == 4)
-        meter.add([Float](repeating: 0.1, count: 799), sampleRate: 16_000)
-        #expect(meter.levels.count == 4)
-    }
-
-    @Test func quietSpeechSitsBelowLoudSpeech() {
-        var meter = LevelMeter(stepSeconds: 0.1, capacity: 4)
-        meter.add([Float](repeating: 0.01, count: 4_800), sampleRate: 48_000)
-        meter.add([Float](repeating: 0.3, count: 4_800), sampleRate: 48_000)
-        #expect(meter.levels[0] < meter.levels[1])
-    }
-}

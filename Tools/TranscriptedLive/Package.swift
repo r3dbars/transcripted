@@ -11,7 +11,7 @@ let package = Package(
         .executable(name: "transcripted-live", targets: ["TranscriptedLive"])
     ],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.4")
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.0")
     ],
     targets: [
         .target(

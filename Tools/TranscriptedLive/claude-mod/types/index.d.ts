@@ -39,6 +39,8 @@ declare module 'claude-code' {
       sentUpTo: Record<string, number>
       notes: LiveNotes | null
       wrapups: Record<string, LiveWrapup>
+      /** Which notes and wrap-up Claude already got, so a reload doesn't send them again. */
+      sentKeys: { notes: string; wrap: string }
     }
   }
 }

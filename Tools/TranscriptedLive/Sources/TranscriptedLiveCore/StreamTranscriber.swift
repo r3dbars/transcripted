@@ -163,8 +163,6 @@ public actor StreamTranscriber {
     private let manager: StreamingEouAsrManager
     private let sink = TranscriptSink()
     private var resampler: MonoResampler?
-    /// Loudness of what this speaker's stream fed in, for the mod's meter.
-    private var meter = LevelMeter()
     private var utteranceStart: Double?
 
     /// `pauseMs` is how long a speaker must stop before their line is final.
@@ -184,7 +182,6 @@ public actor StreamTranscriber {
     /// Feeds mono samples at `sampleRate`. `startSeconds` is the audio position
     /// of the first sample, used to timestamp utterances.
     public func feed(_ samples: [Float], sampleRate: Double, startSeconds: Double) async throws -> [LiveUtterance] {
-        meter.add(samples, sampleRate: sampleRate)
         guard !samples.isEmpty else { return [] }
         if resampler?.inputRate != sampleRate {
             resampler = MonoResampler(inputRate: sampleRate)
@@ -218,11 +215,6 @@ public actor StreamTranscriber {
     }
 
     /// Text heard since the last finished utterance (the "ghost" line).
-    /// The newest loudness steps, 0...1, newest last.
-    public func levels() -> [Double] {
-        meter.levels
-    }
-
     public func partialText() -> String {
         sink.partial
     }
