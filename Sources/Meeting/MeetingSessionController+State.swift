@@ -100,13 +100,13 @@ final class MeetingSessionController: ObservableObject {
     }
 
     // Pass-throughs for UI convenience (updated via Combine subscriptions below).
-    @Published var audioLevel: Float = 0          // mic-only level
-    @Published var systemLevel: Float = 0         // system audio level
-    @Published var recordingDuration: TimeInterval = 0
+    @Published private(set) var audioLevel: Float = 0          // mic-only level
+    @Published private(set) var systemLevel: Float = 0         // system audio level
+    @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var displayStatus: DisplayStatus = .idle
-    @Published var lastSavedTranscriptURL: URL? = nil
-    @Published var lastSavedTitle: String? = nil
-    @Published var savedMeetingReplacementCommitCount: Int = 0
+    @Published private(set) var lastSavedTranscriptURL: URL? = nil
+    @Published private(set) var lastSavedTitle: String? = nil
+    @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published var audioInactivityWarning: MeetingAudioInactivityWarning?
     @Published var isMicBoostPromptVisible = false
     @Published var audioRouteWarning: CaptureRouteStabilizationOutcome?
@@ -754,5 +754,32 @@ final class MeetingSessionController: ObservableObject {
     /// the publish.
     func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
         failedMeetings = failedMeetingStore.refreshFailedMeetings(updatedFailedTranscriptions)
+    }
+}
+
+// Setters for the pass-through mirrors above. The properties are
+// `private(set)`, so the subscription and transcription-request extensions
+// write them only through these.
+extension MeetingSessionController {
+    func mirrorMicLevel(_ level: Float) {
+        audioLevel = level
+    }
+
+    func mirrorSystemLevel(_ level: Float) {
+        systemLevel = level
+    }
+
+    func mirrorRecordingDuration(_ duration: TimeInterval) {
+        recordingDuration = duration
+    }
+
+    /// Publishes the URL first, then the title, matching the old inline writes.
+    func mirrorSavedTranscript(url: URL?, title: String?) {
+        lastSavedTranscriptURL = url
+        lastSavedTitle = title
+    }
+
+    func noteSavedMeetingReplacementCommit() {
+        savedMeetingReplacementCommitCount &+= 1
     }
 }
