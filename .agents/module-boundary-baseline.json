@@ -124,17 +124,25 @@
         "TranscriptionTaskManager"
       ]
     },
-    "Sources/UI/Settings/SpeakerPeopleSettingsSection.swift": {
+    "Sources/UI/Settings/SpeakerPeopleRows.swift": {
+      "Core": [
+        "SpeakerIdentityOption"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Duplicates.swift": {
+      "Core": [
+        "SpeakerClipExtractor",
+        "SpeakerVectorMath"
+      ]
+    },
+    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
       "Core": [
         "CoreStoragePaths",
-        "SpeakerClipExtractor",
         "SpeakerDatabase",
         "SpeakerIdentityMutationService",
-        "SpeakerIdentityOption",
         "SpeakerMergeRecord",
         "SpeakerPeopleReviewPolicy",
         "SpeakerUserConfirmation",
-        "SpeakerVectorMath",
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
       ]
