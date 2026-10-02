@@ -40,6 +40,8 @@ final class LiveMeetingTranscriptService {
         // Captions that fail to load stop needing audio.
         captionsStatusWatch = LiveMeetingCaptions.shared.$status
             .removeDuplicates()
+            // @Published fires before the value lands; read it after.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateDelivery() }
             }

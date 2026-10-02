@@ -102,10 +102,10 @@ final class LiveMeetingCaptions: ObservableObject {
                 return
             }
             await tracks.microphone.start(shouldYield: yield) { [weak self] event, sequence in
-                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .microphone, generation: generation) }
+                await MainActor.run { self?.apply(event, sequence: sequence, track: .microphone, generation: generation) }
             }
             await tracks.system.start(shouldYield: yield) { [weak self] event, sequence in
-                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .system, generation: generation) }
+                await MainActor.run { self?.apply(event, sequence: sequence, track: .system, generation: generation) }
             }
             self.status = .listening
         }

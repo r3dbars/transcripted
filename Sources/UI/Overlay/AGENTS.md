@@ -28,7 +28,7 @@ Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
 - `NotchIslandController.swift` — builds the island panel at launch (`prewarm`), picks a display per show, runs the Core Animation grow/shrink, and owns hover and click-through.
 - `NotchIslandPresentation.swift` / `NotchIslandGeometry.swift` — Foundation-pure rules for what shows where, and the geometry and springs. Change behavior here, not in the view.
-- `NotchIslandLiveTranscriptView.swift` — the recording drop-down's scrolling live transcript. The controller keeps one alive across drop-down rebuilds and feeds it from `LiveMeetingCaptions`; it appends finished words and replaces only the faded tail, so long meetings stay cheap. Copy all (`meetingCopyTranscript`) is handled by the island itself.
+- `NotchIslandLiveTranscriptView.swift` — the recording drop-down's scrolling live transcript. The controller keeps one alive across drop-down rebuilds and feeds it from `LiveMeetingCaptions`; it appends finished words and replaces only the faded tail, so long meetings stay cheap. Copy all (`meetingCopyTranscript`) is handled by the island itself, in `NotchIslandController+LiveTranscript.swift`.
 - `DictationSessionController.swift` — `startDictation` / stop entry; the STT control flow it composes lives in `Sources/Speech/DictationSession.swift`.
 - `MeetingOverlayController.swift` / `CapturePillController.swift` — meeting pill state and the detected-meeting prompt (the record / dismiss / remind flow is a protected product surface).
 

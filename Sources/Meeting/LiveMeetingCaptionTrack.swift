@@ -39,7 +39,7 @@ actor LiveMeetingCaptionTrack {
     nonisolated let queue = LiveMeetingCaptionSampleQueue()
     private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize)
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)
-    private var onEvent: (@Sendable (Event, Int) -> Void)?
+    private var onEvent: (@Sendable (Event, Int) async -> Void)?
     private var eventSequence = 0
     private var shouldYield: (@Sendable () async -> Bool)?
     private var drainTask: Task<Void, Never>?
@@ -72,7 +72,7 @@ actor LiveMeetingCaptionTrack {
 
     func start(
         shouldYield: @escaping @Sendable () async -> Bool,
-        onEvent: @escaping @Sendable (Event, Int) -> Void
+        onEvent: @escaping @Sendable (Event, Int) async -> Void
     ) {
         self.onEvent = onEvent
         self.shouldYield = shouldYield
@@ -105,8 +105,9 @@ actor LiveMeetingCaptionTrack {
                 continue
             }
             if let shouldYield, await shouldYield() {
-                // A dictation or a saved meeting has the Neural Engine; audio
-                // waits in the queue and the transcript catches up after.
+                // A dictation has the Neural Engine; audio waits in the queue
+                // and the transcript catches up after. Saved-meeting jobs
+                // don't pause it: they can run for minutes, past the queue.
                 try? await Task.sleep(for: .milliseconds(250))
                 continue
             }
@@ -128,6 +129,8 @@ actor LiveMeetingCaptionTrack {
             await closeUtterance()
             return
         }
+        // The 20 s ceiling counts from the first words, not the silence before.
+        if lastPartial.isEmpty { utteranceSamples = 0 }
         utteranceSamples += samples.count
         let partial = await manager.getPartialTranscript().trimmingCharacters(in: .whitespacesAndNewlines)
         if await manager.eouDetected {
@@ -138,7 +141,7 @@ actor LiveMeetingCaptionTrack {
         if partial != lastPartial {
             lastPartial = partial
             lastPartialAt = CACurrentMediaTime()
-            if !partial.isEmpty { emit(.partial(partial)) }
+            if !partial.isEmpty { await emit(.partial(partial)) }
         }
         if !lastPartial.isEmpty, Double(utteranceSamples) / 16_000 > Self.longestUtteranceSeconds {
             await closeUtterance()
@@ -160,12 +163,13 @@ actor LiveMeetingCaptionTrack {
         lastPartialAt = nil
         utteranceSamples = 0
         await manager.reset()
-        if !text.isEmpty { emit(.utterance(text)) }
+        if !text.isEmpty { await emit(.utterance(text)) }
     }
 
-    private func emit(_ event: Event) {
+    /// Awaited, so events reach the log in the order they happened.
+    private func emit(_ event: Event) async {
         eventSequence += 1
-        onEvent?(event, eventSequence)
+        await onEvent?(event, eventSequence)
     }
 
     private func buffer(from samples: [Float]) -> AVAudioPCMBuffer? {

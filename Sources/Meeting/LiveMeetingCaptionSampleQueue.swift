@@ -14,8 +14,8 @@ final class LiveMeetingCaptionSampleQueue: @unchecked Sendable {
     private var overflowed = false
     let capacity: Int
 
-    /// 30 seconds rides out a dictation or a saved meeting being
-    /// transcribed (the tracks pause for both).
+    /// 30 seconds rides out a dictation (the tracks pause for it) and a
+    /// slow first model load.
     init(capacity: Int = 16_000 * 30) {
         self.capacity = max(1, capacity)
         ring = [Float](repeating: 0, count: self.capacity)
