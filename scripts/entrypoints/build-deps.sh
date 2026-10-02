@@ -565,7 +565,7 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "TranscriptedCore",
-            exclude: ["CLAUDE.md", "ObjCSupport"]
+            exclude: ["AGENTS.md", "ObjCSupport"]
         ),
         .target(
             name: "Shim",

@@ -141,7 +141,9 @@ final class PasteLastDictationFeedbackPresenter {
     }
 }
 
-private final class PasteLastDictationFeedbackPanel: NSPanel {
+/// Internal (not private) so the fast tests can build one and check it stays
+/// out of screen capture.
+final class PasteLastDictationFeedbackPanel: NSPanel {
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,

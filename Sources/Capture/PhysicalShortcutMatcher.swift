@@ -175,3 +175,179 @@ enum PhysicalShortcutMatcher {
         }
     }
 }
+
+extension PhysicalShortcutAction {
+    /// The repeat-guard bucket for this action's press, or nil when its press
+    /// is never debounced. Each toggle action has its own bucket, so a meeting
+    /// press right after a dictation press still goes through. Push-to-talk
+    /// has none: its release is paired to the physical key hold, and a
+    /// swallowed press would leave a release with nothing to stop.
+    var hotkeyDebounceID: String? {
+        switch self {
+        case .dictationPushToTalk: return nil
+        case .dictationHandsFree: return "dictation_hands_free"
+        case .meeting: return "meeting_physical_trigger"
+        case .pasteLastDictation: return "paste_last_dictation_physical_trigger"
+        }
+    }
+}
+
+/// Drops rapid repeat presses of the same shortcut so Carbon/CGEventTap
+/// double-fires can't race session start/stop. `now` is a monotonic uptime
+/// (`ProcessInfo.systemUptime`), so a wall-clock jump can't block presses.
+struct HotkeyActionDebouncer {
+    let interval: TimeInterval
+    private var lastAcceptedUptimeByID: [String: TimeInterval] = [:]
+
+    init(interval: TimeInterval = TranscriptedConstants.hotkeyActionDebounceInterval) {
+        self.interval = interval
+    }
+
+    /// True when the press should go through. Actions without a debounce ID
+    /// always go through and leave no trace.
+    mutating func shouldAccept(_ action: PhysicalShortcutAction, now: TimeInterval) -> Bool {
+        guard let id = action.hotkeyDebounceID else { return true }
+        let elapsed = now - (lastAcceptedUptimeByID[id] ?? 0)
+        guard elapsed >= interval else { return false }
+        lastAcceptedUptimeByID[id] = now
+        return true
+    }
+}
+
+extension PhysicalShortcutMatcher {
+    /// The binding snapshot the event tap matches against. Meeting and
+    /// paste-last-dictation are always there; the two dictation shortcuts
+    /// come first only while dictation shortcuts are on. Built once per
+    /// (re)configure, never per keystroke.
+    static func configuredBindings(userDefaults: UserDefaults = .standard) -> [PhysicalShortcutBinding] {
+        var bindings = [
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
+            ),
+            PhysicalShortcutBinding(
+                action: .pasteLastDictation,
+                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: userDefaults)
+            )
+        ]
+
+        guard HotkeyPreferences.dictationShortcutsEnabled(userDefaults: userDefaults) else {
+            return bindings
+        }
+
+        bindings.insert(
+            PhysicalShortcutBinding(
+                action: .dictationPushToTalk,
+                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
+            ),
+            at: 0
+        )
+        bindings.insert(
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: userDefaults)
+            ),
+            at: 1
+        )
+        return bindings
+    }
+
+    /// Whether a key is still held, for recovery after the tap was off. A
+    /// modifier key reads its modifier family flag (either Option key keeps
+    /// Option down); any other key reads its own key state.
+    static func isPhysicalKeyDown(
+        _ keyCode: UInt32,
+        modifierFlags: UInt32,
+        keyState: (UInt32) -> Bool
+    ) -> Bool {
+        if PhysicalDictationTriggerPreferences.isModifierKey(keyCode),
+           let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) {
+            return (modifierFlags & modifier) != 0
+        }
+        return keyState(keyCode)
+    }
+
+    /// Whether a delayed modifier press should start push-to-talk. It reads
+    /// the bound key itself, so Left Option held doesn't count as a held
+    /// Right Option binding.
+    static func shouldActivateDelayedModifierPress(
+        current: DelayedModifierShortcutPress?,
+        expected: DelayedModifierShortcutPress,
+        keyState: (UInt32) -> Bool
+    ) -> Bool {
+        shouldActivateDelayedModifierPress(
+            current: current,
+            expected: expected,
+            isPhysicallyDown: keyState(expected.keyCode)
+        )
+    }
+
+    struct TapDisabledReconciliation: Equatable {
+        let activePushToTalkKeyCode: UInt32?
+        let consumedKeyCodes: Set<UInt32>
+        /// The push-to-talk key was let go while the tap was off, so the
+        /// detector must send the release it missed.
+        let synthesizesPushToTalkRelease: Bool
+    }
+
+    /// Detector state after macOS turned the event tap off
+    /// (`tapDisabledByTimeout` / `tapDisabledByUserInput`). Any keyUp in that
+    /// window was missed: a push-to-talk key that's no longer down gets a
+    /// synthesized release, and consumed keys that are no longer down are
+    /// forgotten so their next press isn't swallowed.
+    static func reconcileAfterTapDisabled(
+        activePushToTalkKeyCode: UInt32?,
+        consumedKeyCodes: Set<UInt32>,
+        isPhysicallyDown: (UInt32) -> Bool
+    ) -> TapDisabledReconciliation {
+        var activeKeyCode = activePushToTalkKeyCode
+        var consumed = consumedKeyCodes
+        var synthesizesRelease = false
+
+        if shouldSynthesizePushToTalkRelease(
+            activeKeyCode: activeKeyCode,
+            isPhysicallyDown: isPhysicallyDown
+        ), let releasedKeyCode = activeKeyCode {
+            activeKeyCode = nil
+            consumed.remove(releasedKeyCode)
+            synthesizesRelease = true
+        }
+
+        return TapDisabledReconciliation(
+            activePushToTalkKeyCode: activeKeyCode,
+            consumedKeyCodes: consumed.filter { isPhysicallyDown($0) },
+            synthesizesPushToTalkRelease: synthesizesRelease
+        )
+    }
+}
+
+/// Status text for the physical shortcut event tap.
+enum PhysicalShortcutTriggerStatus {
+    /// Shown when the tap can't start because Accessibility isn't granted.
+    /// The menu bar matches on it to offer the Accessibility pane.
+    static let accessibilityPermissionErrorMessage = "Shortcut trigger needs Accessibility permission"
+    static let failedToStartMessage = "Shortcut trigger failed to start"
+
+    /// Why the tap couldn't be created.
+    static func tapCreateFailureMessage(accessibilityGranted: Bool) -> String {
+        accessibilityGranted ? failedToStartMessage : accessibilityPermissionErrorMessage
+    }
+
+    /// Only a missing Accessibility grant is worth polling for: once it's
+    /// granted the engine re-registers without waiting for wake or relaunch.
+    static func retriesAfterAccessibilityGrant(registrationError: String?) -> Bool {
+        registrationError == accessibilityPermissionErrorMessage
+    }
+
+    /// The one banner the menu bar shows. A registration failure wins; the
+    /// Fn conflict is advisory and only matters while dictation shortcuts are
+    /// on. It never counts as a registration failure, so wake recovery
+    /// (which reads the registration error) doesn't retry over it.
+    static func bannerMessage(
+        registrationError: String?,
+        dictationShortcutsEnabled: Bool,
+        functionKeyConflictWarning: String?
+    ) -> String? {
+        registrationError ?? (dictationShortcutsEnabled ? functionKeyConflictWarning : nil)
+    }
+}

@@ -2,7 +2,9 @@ import AppKit
 
 @MainActor
 final class MenuBarUtilityActionsView: NSView {
-    weak var appState: TranscriptedAppState?
+    /// Whether dictation's model is loaded, for the menu analytics event.
+    /// The content view wires this to the app state.
+    var isDictationModelLoaded: @MainActor () -> Bool = { false }
     var pasteAvailable: Bool?
 
     var onOpenTranscripted: (() -> Void)?
@@ -115,7 +117,7 @@ final class MenuBarUtilityActionsView: NSView {
             "menu_bar_action_clicked",
             properties: [
                 "action_id": actionID,
-                "dictation_ready": appState?.sttRouter.isModelLoaded == true ? "true" : "false",
+                "dictation_ready": isDictationModelLoaded() ? "true" : "false",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
                 "paste_available": pasteAvailable.map { $0 ? "true" : "false" } ?? "unknown",
             ]

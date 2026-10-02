@@ -154,84 +154,61 @@ func testDictationStartReadiness() async {
     }
 
     runSuite("The App Nap assertion is not labelled with a stale profile") {
-        // `isDictating` also flips true at the two stop-finalization
+        // `isDictating` also flips true at the stop-finalization
         // readmissions, which re-enter a retained recording rather than
-        // opening the microphone. They carry no readiness profile, so the
-        // assertion's reason string reads from a separate label that those
-        // sites set themselves.
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        assertTrue(
-            source.contains("reason: \"Transcripted dictation capture (\\(processActivityLabel))\""),
-            "the reason must come from the label, not from the last start's profile"
-        )
+        // opening the microphone. They carry no readiness profile.
+        var label = DictationProcessActivityLabel()
+        label.startingMicrophone(DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: false))
+        assertEqual(label.reason, "Transcripted dictation capture (background)", "a start names its own plan")
+        label.sessionEnded()
         assertEqual(
-            source.components(separatedBy: "self.processActivityLabel = \"stop finalization\"").count - 1,
-            2,
-            "both readmission sites must label themselves before flipping isDictating"
+            label.reason,
+            "Transcripted dictation capture (stop finalization)",
+            "a readmission after the session ended must not reuse the last start's plan"
         )
-        for readmission in source.components(separatedBy: "self.isDictating = true").dropLast() {
-            let precedingLine = readmission
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-            assertEqual(
-                precedingLine,
-                "self.processActivityLabel = \"stop finalization\"",
-                "every `self.isDictating = true` must be immediately preceded by its label"
-            )
-        }
+        label.startingMicrophone(.foreground)
+        assertEqual(label.reason, "Transcripted dictation capture (foreground)", "the next real start names itself again")
     }
 
-    runSuite("The cancel diagnostic names the stage instead of a constant boolean") {
-        // DictationSessionController cannot be instantiated in the fast-test
-        // runner, so pin the source-level shape of the one log line a #1743
-        // reporter is asked to paste back.
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+    runSuite("The cancel diagnostic names the stage the start was waiting on") {
+        var clock = DictationPendingStartStageClock(now: 0)
+        clock.enter(.startRequested, now: 10)
+        clock.enter(.waitingForAudioRoute, now: 10.25)
+        let ended = clock.end(now: 10.5)
+        assertEqual(ended.stage, .waitingForAudioRoute, "what the pending start was waiting on when the key ended it")
+        assertEqual(ended.msInStage, 250, "time in that stage, not since the request began")
+        assertEqual(clock.stage, .idle, "reading it also ends it, so nothing reads a stage after teardown")
 
-        assertFalse(
-            source.contains("app_nap_suppressed"),
-            "the assertion is taken by the `isDictating` didSet, so any such flag logs true every time"
+        let report = DictationEarlyReleaseCancelReport.context(
+            trigger: DictationTrigger.physicalKey.rawValue,
+            shortcutMode: .handsFree,
+            pendingForMs: 450,
+            pendingStage: ended.stage.rawValue,
+            stagePendingForMs: ended.msInStage,
+            startPlan: "background",
+            appActive: false
         )
+        assertEqual(report["pending_stage"], "waiting_for_audio_route", "the reporter needs to know what the start was waiting on")
+        assertEqual(report["stage_pending_for_ms"], "250", "time in that stage")
+        assertEqual(report["pending_for_ms"], "450", "time since the request began")
+        assertEqual(report["duration_ms"], "450", "duration_ms stays for anything already reading it")
+        assertEqual(
+            Set(report.keys),
+            ["trigger", "failure_kind", "shortcut_mode", "pending_for_ms", "duration_ms", "pending_stage",
+             "stage_pending_for_ms", "start_plan", "app_active"],
+            "no app-nap flag: the assertion is taken by every start, so such a flag would read true every time"
+        )
+    }
 
-        let cancelPath = sourceSlice(
-            source,
-            from: "private func cancelPendingDictationStartAfterEarlyRelease",
-            to: "private func overlayStateName"
+    runSuite("Each pending stage has the name a reporter pastes back") {
+        assertEqual(
+            DictationPendingStartStage.allCases.map(\.rawValue),
+            ["idle", "start_requested", "awaiting_microphone_permission", "awaiting_model_warmup",
+             "waiting_for_audio_route", "opening_microphone"],
+            "each name points at a different bug, so none can be renamed silently"
         )
-        assertTrue(
-            cancelPath.contains("\"pending_stage\": stage"),
-            "the reporter needs to know what the pending start was waiting on"
-        )
-        assertTrue(
-            cancelPath.contains("\"stage_pending_for_ms\""),
-            "time in that stage, alongside time since the request began"
-        )
-        assertTrue(
-            cancelPath.contains("\"pending_for_ms\"") && cancelPath.contains("\"duration_ms\""),
-            "duration_ms stays for anything already reading it; pending_for_ms says what it means"
-        )
-        assertTrue(
-            cancelPath.range(of: "let stage = pendingStartStage")
-                .map { stageRead in
-                    cancelPath.range(of: "isDictating = false").map { $0.lowerBound > stageRead.lowerBound } ?? false
-                } ?? false,
-            "the stage must be read before the session is torn down and the stage reset to idle"
-        )
-
-        // Every path a pending start can be sitting in has to name itself, or
-        // `pending_stage` silently reports a stale earlier stage.
-        for stage in [
-            "start_requested",
-            "awaiting_microphone_permission",
-            "awaiting_model_warmup",
-            "waiting_for_audio_route",
-            "opening_microphone",
-        ] {
-            assertTrue(
-                source.contains("enterPendingStartStage(\"\(stage)\")"),
-                "\(stage) must be marked where the start enters it"
-            )
-        }
+        assertEqual(DictationPendingStartStage(.openingMicrophone), .openingMicrophone, "the native open's own stage")
+        assertEqual(DictationPendingStartStage(.waitingForAudioRoute), .waitingForAudioRoute, "a failed open waits for the route")
     }
 
     runSuite("The assertion suppresses App Nap without changing sleep policy") {
@@ -350,22 +327,25 @@ func testDictationStartReadiness() async {
         assertEqual(stage, "start_requested", "identity guards protect a new session even without task cancellation")
     }
 
-    runSuite("Recovery-loop microphone stage reporting reaches the session-scoped controller") {
-        let speech = readSourceFixture("Sources/Speech/DictationSession.swift")
-        let nativeStart = sourceSlice(speech, from: "func startDictationAudioRecording(", to: "func recordingStartPlan(")
-        assertTrue(nativeStart.contains("await DictationMicrophoneStartReporting.run("),
-                   "the executable reporting seam wraps production native starts")
-        assertTrue(nativeStart.contains("startRecordingRecoveryAttempt()") && nativeStart.contains("startRecording()"),
-                   "both forced and ordinary recovery-loop attempts are covered")
-        let recoveryAttempt = sourceSlice(speech, from: "fileprivate func performStartAttempt(", to: "fileprivate func dictationContext(")
-        assertTrue(recoveryAttempt.contains("isCurrentSession: isDictating"), "the loop's captured session predicate reaches reporting")
-        assertTrue(recoveryAttempt.contains("onStartStageChanged: onStartStageChanged"), "the loop forwards the callback into the native open")
-        let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        let stageCallback = sourceSlice(controller, from: "onStartStageChanged: { [weak self] stage in", to: "onWaitUpdate:")
-        assertTrue(stageCallback.contains("self.currentDictationSessionID == sessionID") && stageCallback.contains("self.isDictating"),
-                   "a late callback is scoped to the active requesting session")
-        assertTrue(stageCallback.contains("self.enterPendingStartStage(stage.rawValue)"),
-                   "the early-cancel diagnostic and stage clock receive the native transition")
+    runSuite("Recovery-loop stage reports only move the session that asked") {
+        let session = UUID()
+        var clock = DictationPendingStartStageClock(now: 0)
+        clock.enter(.waitingForAudioRoute, now: 1)
+        clock.enterReported(.openingMicrophone, requestingSessionID: session, currentSessionID: session,
+                            isDictating: true, isCancelled: false, now: 2)
+        assertEqual(clock.stage, .openingMicrophone, "the live session's native open reaches the early-cancel diagnostic")
+        assertEqual(clock.enteredAt, 2, "and restarts the stage clock")
+
+        clock.enterReported(.waitingForAudioRoute, requestingSessionID: UUID(), currentSessionID: session,
+                            isDictating: true, isCancelled: false, now: 3)
+        assertEqual(clock.stage, .openingMicrophone, "a late report from a superseded session is dropped")
+        clock.enterReported(.waitingForAudioRoute, requestingSessionID: session, currentSessionID: session,
+                            isDictating: false, isCancelled: false, now: 3)
+        assertEqual(clock.stage, .openingMicrophone, "a report after the session ended is dropped")
+        clock.enterReported(.waitingForAudioRoute, requestingSessionID: session, currentSessionID: session,
+                            isDictating: true, isCancelled: true, now: 3)
+        assertEqual(clock.stage, .openingMicrophone, "a report from a cancelled start is dropped")
+        assertEqual(clock.enteredAt, 2, "none of them touched the clock")
     }
 }
 
@@ -387,12 +367,4 @@ private final class ActivityRecorder {
     func end(_ token: NSObjectProtocol) {
         ends += 1
     }
-}
-
-private func sourceSlice(_ source: String, from start: String, to end: String) -> String {
-    guard let startRange = source.range(of: start),
-          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
-        return ""
-    }
-    return String(source[startRange.lowerBound..<endRange.lowerBound])
 }

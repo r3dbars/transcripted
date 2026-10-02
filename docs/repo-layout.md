@@ -85,13 +85,15 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Speech/` — local STT engines, router, and audio recovery
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
+- `Sources/Writing/` — Writing's app bridge: `WritingController` hosts the runtime, Save my writing day files, the Writing tab's model, count-only analytics
 - `Sources/TranscriptedWriting/` — Writing's autocomplete library, ported from Tilde: `Core/` (pure policy) and `Runtime/` (model, `llama-server` host, socket, Screen Memory); see `docs/writing-plan.md`
 - `Sources/TranscriptedKeyboard/` — Writing's IMKit keyboard; built by `scripts/entrypoints/lib/bundle-input-method.sh` into `Contents/Library/Input Methods/`, never into the app binary
 - `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
-- `docs/` — live project docs
+- `docs/` — live project docs, indexed in `docs/README.md`
 - `docs/qa/` — manual QA checklists
+- `docs/archive/` — finished records (eval output and the like), listed in `docs/archive/README.md`
 - `docs/marketing/`, `docs/launch-assets/`, `docs/assets/`, `docs/screenshots/` — launch and marketing material, not engineering docs
 - `experiments/` — standalone probes (e.g. `audio-only-probe/`), not part of the app build
 - `config/` — app config artifacts including entitlements and nightly security manifests
@@ -100,68 +102,35 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `scripts/entrypoints/` — implementations behind the thin root command wrappers
 
 Dated audit and autoeval docs in `docs/` are point-in-time evidence. Use the
-current command map, local `CLAUDE.md`, and `.agents/test-matrix.yml` for live
+current command map, local `AGENTS.md`, and `.agents/test-matrix.yml` for live
 instructions unless a dated doc is explicitly the target of the task.
 
 ## Docs Map
 
 `scripts/dev/check-doc-paths.py` (in `linux-checks.sh`) fails when a doc names a
-path that doesn't exist, and keeps `AGENTS.md` and `CLAUDE.md` inside their
-line budgets. When you move or delete a file, fix the docs that name it.
+path that doesn't exist, and keeps the root `AGENTS.md` inside its
+line budget. When you move or delete a file, fix the docs that name it.
 
 Use these docs for these jobs:
 
 - `README.md` — public product overview and quick start
 - `CONTRIBUTING.md` — contributor setup and contribution norms
-- `AGENTS.md` — the one guide for every coding agent (Claude, Codex, or other): rules, commands, traps
+- `AGENTS.md` — the one guide for every coding agent (Claude, Codex, or other): rules, commands, traps. Claude Code reads it natively; there is no `CLAUDE.md`
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
 - `.github/` — GitHub issue templates, PR checklist, and workflow automation
-- `CLAUDE.md` — imports `AGENTS.md` so Claude Code loads the same rules
-- `docs/activation-lane.md` — saved Markdown, agent payoff, and return-use routing
-- `docs/agent-closeout.md` — compact coordinator and agent handoff format
-- `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
-- `docs/install-attribution-map.md` — anonymous website/download/install to first-value signal map
-- `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
-- `docs/retention-cohort-analytics.md` — privacy-safe PostHog habit and retention report for first/second artifact, next-day and 7-day return, repeat use, 3-days-this-week, and health-skill output
-- `docs/storage-paths.md` — canonical storage and fallback path map
-- `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
-- `docs/clean-vm-testing.md` — throwaway macOS VM (Tart) for new-user and upgrade tests
-- `docs/qa/manual-10-minute-checklist.md` — the 10-minute manual QA pass after a local build
-- `docs/qa-audio-route-notification-recovery.md` — manual USB/route-change recovery checks that automated tests can't prove
-- `docs/qa-meeting-cross-app-crossover.md` — manual same-build meeting audio crossover test
-- `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, UI, Sparkle update, packaged, corpus, corpus-compare, live, artifact, and synthetic audio passes
-- `docs/mutation-testing.md` — how to run `scripts/dev/mutation-probe.py` to find assertions that never catch a bug, with the first real results
-- `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
-- `docs/release-packaging.md` — release packaging flow
-- `docs/sparkle-updates.md` — Sparkle update contract
-- `docs/capture-format.md` — authoritative spec for the saved Markdown capture format
-- `docs/observability.md` — the five diagnostic sinks and which one owns what
-- `docs/privacy-first-observability.md` — the three observability lanes and their privacy contract
-- `docs/analytics-taxonomy-merge.md` — why the analytics registry uses union merge, and its trap
-- `docs/speaker-recognition-metrics.md` — how speaker-recognition accuracy is measured
-- `docs/speaker-eval-exemplar-delta-2026-07.md` — dated multi-exemplar / negative-exemplar accuracy eval
-- `docs/cross-meeting-tools.md` — MCP rollups across meeting summaries (`list_action_items`, `digest`)
-- `docs/mcp-ui-recent-meetings.md` — the MCP server's interactive recent-meetings UI surface
-- `docs/auto-call-detection-spec.md` — meeting auto-detection spec and phase status
-- `docs/transcription-language.md` — the meeting-language picker (Auto vs fixed) and how Auto detection samples audio
-- `docs/transcripted-lab.md` — Transcripted Lab architecture and experiment contract
-- `docs/ui-settings-menubar-spec.md` — settings and menubar product intent
-- `docs/DESIGN_TOKENS.md` — source of truth for type, spacing, and corner-radius tokens
-- `docs/release-guardrails.md` — what may ship without an explicit publish decision
-- `docs/release-notes-template.md` — template for drafting release notes from `main`
-- `docs/board-scorecard.md` — the agent-runnable repo health task list
-- `docs/posthog-100-wau-dashboard.md` — minimum PostHog setup for steering toward 100+ WAU
-- `docs/posthog-dashboard-query-helpers.md` — the shared query catalog behind `posthog-dashboard-queries.py`
+- `docs/README.md` — index of every live doc under `docs/`, grouped by job (product and formats, Writing, releases, testing and QA, labs, observability, operations)
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
-- `Sources/*/CLAUDE.md` (and nested ones such as `Sources/UI/Settings/CLAUDE.md`) — subsystem-local ownership and verification notes
-- `Tools/README.md` and `Tools/*/CLAUDE.md` — the standalone packages
+- `Sources/*/AGENTS.md` (and nested ones such as `Sources/UI/Settings/AGENTS.md`) — subsystem-local ownership and verification notes
+- `Tools/README.md` and `Tools/*/AGENTS.md` — the standalone packages
 - `scripts/README.md` — what each repo script does and how to run it
 
 Point-in-time docs (history, not instructions; don't route agents here for current behavior):
 
-- `docs/speaker-eval-exemplar-delta-2026-07.md` — dated speaker-eval result
+- `docs/speaker-eval-exemplar-delta-2026-07.md` — dated speaker-eval result; stays in `docs/` because code comments and `scripts/hillclimb/benches/speaker_autoeval.py` cite it
+- `docs/writing-plan.md` — Writing's design record (shipped in 1.1.67); code comments cite its sections
+- `docs/archive/` — everything else that's finished
 
 ## Build system
 
@@ -169,35 +138,67 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 - `Package.swift` exists for the `TranscriptedCore` package tests and smoke coverage. It links `deps-libs/libExternalDeps.a` plus the binary frameworks under `deps-frameworks/` through `#filePath`-relative flags, so it works under `swift test` and Xcode alike.
 - The app build keeps `libDraftDeps.a` (legacy name: FluidAudio, deps, and TranscriptedCore objects) separate from the package path's `libExternalDeps.a`.
 
+## Modules
+
+The app compiles as one Swift target, so folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Crossings that predate the check are in `.agents/module-boundary-baseline.json` and can only shrink. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
+
+| Module | Folders | May depend on |
+| --- | --- | --- |
+| Core | `Sources/TranscriptedCore/` (separate library) | nothing in the app |
+| WritingCore | `Sources/TranscriptedWriting/Core/` | nothing |
+| WritingRuntime | `Sources/TranscriptedWriting/Runtime/` | WritingCore |
+| Keyboard | `Sources/TranscriptedKeyboard/` (separate bundle) | WritingCore |
+| Support | `Sources/Support/`, `Sources/Accessibility/`, `Sources/Reliability/` | Core `core-vocab` |
+| Observability | `Sources/Observability/` | Support, Core `core-vocab` |
+| Speech | `Sources/Speech/` | Support, Observability, Core `core-vocab` + `mic-primitives` |
+| Dictation | `Sources/Dictation/` | Speech, Support, Observability, Core `core-vocab` |
+| Meeting | `Sources/Meeting/` | Dictation, Speech, Support, Observability, all of Core |
+| WritingBridge | `Sources/Writing/` | WritingCore, WritingRuntime, Support, Observability |
+| Capture | `Sources/Capture/` | UIOverlay, Dictation, Speech, Support, Observability |
+| UIShared | `Sources/UI/Shared/` | Meeting, Dictation, Speech, WritingBridge, Support, Observability, Core `core-vocab` |
+| UIOverlay | `Sources/UI/Overlay/` | UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
+| UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
+| UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
+| AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
+| AppShell | `Sources/TranscriptedApp.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
+
+Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.
+
 ## Hotspots
 
-Files over 1,500 lines. Read the whole file and its folder's `CLAUDE.md` before editing, and don't add another responsibility to any of them. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 45 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
-find Sources Tools/*/Sources -name '*.swift' -not -path '*/.build/*' | xargs wc -l | awk '$1>1500 && $2!="total"' | sort -rn
+python3 scripts/dev/check-file-size.py --hotspots
 ```
 
-As of 2026-09-24, largest first:
+Over 1,500 lines as of 2026-10-02, largest first:
 
-- `Sources/Meeting/MeetingSessionController.swift` — the meeting state machine. Failed-meeting and queue bookkeeping moved to `FailedMeetingStore.swift` and `TranscriptionQueueCoordinator.swift`; permission gating, capture start/stop, and transcript-save handoff are still here.
-- `Sources/UI/Settings/TranscriptedSettingsView.swift` — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
-- `Sources/Speech/ParakeetEngine.swift` — the dictation STT engine and `@MainActor` home for recording state. Device recovery and model lifecycle moved to `ParakeetDeviceRecovery.swift` and `ParakeetModelLifecycle.swift`.
-- `Sources/UI/Overlay/DictationSessionController.swift` — dictation session orchestration. The engine-facing half moved to `Sources/Speech/DictationSession.swift`; `stopDictationAndPaste` and `installSessionTimeout` stay, pinned by source-text tests.
-- `Sources/TranscriptedCore/Audio/Audio.swift` — the riskiest file: mic and system capture, CoreAudio real-time callbacks, tap lifecycle, and the recording-session generation token. A real-time rule violation is a crash or silent corruption, and no hosted CI job exercises this path (`hardware-smokes` needs a self-hosted Apple Silicon runner). Most open PRs touch it at once, so expect semantic merge conflicts.
-- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` — the single-flight transcription queue and failed-queue retention. A transcription failure must archive audio into the failed queue before deleting scratch. Exceptions: the sub-2s live-capture gate (pinned by `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry`), the imported-audio gates (scratch is a copy), and an accidental start (`isAccidentalStart` plus `tracksHaveSpeechLikeSignal`: a healthy live session under 10 s ending in `noSpeechDetected` with no speech-like track).
-- `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` — the packaged-app release smoke; a break here blocks shipping.
-- `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions to the speaker DB and transcript.
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` — the speakers settings surface.
-- `Sources/TranscriptedApp.swift` — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching.
-- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` — the MCP server's SQLite query and reconcile surface (schema in `TranscriptIndex+Schema.swift`).
-- `Sources/Support/ClipboardRestoringTextPaster.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits also need `bash run-slow-pasteback-smoke.sh`.
-- `Sources/Meeting/MeetingPromptDetector.swift` — decides when to offer "record this meeting?".
-- `Sources/UI/Settings/HomeView.swift` — the Home page; small helpers live in sibling files.
-- `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching, utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (3,897) — settings shell, navigation, state, and page routing. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings and every Home side effect. Partly pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (2,431) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live here.
+- `Sources/TranscriptedApp.swift` (1,927) — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching. The most source-pinned file.
+- `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
+
+Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
+
+- Meeting capture in Core: `Audio.swift` is the class shell. The riskiest code is the stop ordering in `Audio+CaptureLifecycle.swift` and the AirPods-sensitive engine touch in `Audio+MeetingInputGraph.swift`. `AudioFileManager.swift`, `Audio+MicBufferWrite.swift`, `Audio+SystemAudioWrite.swift`, `Audio+BufferUtilities.swift` and `SystemAudioCaptureStartAttempt.swift` run on or next to the CoreAudio real-time path. A real-time rule violation is a crash or silent corruption, and no hosted CI job exercises this path (`hardware-smokes` needs a self-hosted Apple Silicon runner).
+- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` plus `+Start`, `+FailedAudioRetention`, `+FailureClassification`, `+OrphanedRecordingRecovery`, `+Retry`, `+CleanupPaths` — the single-flight transcription queue and failed-queue retention. A transcription failure must archive audio into the failed queue before deleting scratch. Exceptions: the sub-2s live-capture gate (pinned by `testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry`), the imported-audio gates (scratch is a copy), and an accidental start (`isAccidentalStart` plus `tracksHaveSpeechLikeSignal`: a healthy live session under 10 s ending in `noSpeechDetected` with no speech-like track). The starts and the gate are in `+Start.swift`, the archiving in `+FailedAudioRetention.swift`.
+- `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` (orchestrator) plus `+MicrophoneOnly`, `+MicDiarization`, `+Stages`, `+LastChanceSweep` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching, utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
+- `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue`, `+Finish`, and the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions.
+- `Sources/Meeting/MeetingSessionController.swift` (the recording lifecycle) plus `+State.swift` (declares the class) and its other `+*.swift` extensions — the meeting state machine.
+- `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
+- `Sources/Speech/ParakeetEngine.swift` (core state, graph identity, rebuild/retire) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
+- `Sources/UI/Overlay/DictationSessionController.swift` plus `+RecordingStart`, `+Stop`, `+PasteBack`, `+Persistence`, `+Recovery`, `+Presses`, `+SessionCap`, `+Telemetry` and `DictationSessionDeliveryTypes.swift` — dictation session orchestration. `stopDictationAndPaste` is in `+Stop`, `installSessionTimeout` in `+SessionCap`.
+- `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
+- `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
+- `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
+- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 
 ## Historical Zones
 
 The old beta backend (`archive/`) was removed on 2026-09-25. It's still in git history (last on `main` at
 `73f4fa6`) if you need it.
 
-`.claude/` is live tooling, not a historical zone: it holds the `transcripted-qa` skill and the `humanize`/`tests`/`push` slash commands.
+`docs/archive/` holds finished records that no code, script, or test reads.
+
+`.claude/` is live tooling, not a historical zone: `skills/` holds the `transcripted-qa` skill, `commands/` the `humanize`/`tests`/`push` slash commands, and `agents/` subagent definitions (`test-writer` and the `writing-*` agents used for the Tilde port).
