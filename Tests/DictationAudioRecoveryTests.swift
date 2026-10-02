@@ -10,19 +10,20 @@
 //
 // IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final suite
 // ("preserves dictation audio across route recovery") reads
-// the ParakeetEngine source files (readParakeetEngineSource) and the DictationSessionController
-// files (readDictationSessionControllerSource)
+// the ParakeetEngine source files (readParakeetEngineSource)
 // as TEXT and asserts specific call sites, statement order in the terminal interruption
 // helper, and a single canonical `recordingInterrupted = true` assignment. (Checks that
 // only matched a declaration were dropped: the compiler already enforces those, and the
 // multi-rate timeline itself is covered by RecordedAudioTimelineTests. The call-site pin
 // on preserveCurrentRecordingBuffersForRecovery() lives in
-// ParakeetMicrophoneSharingSourceContractTests and ParakeetAudioOwnershipSourceContractTests.) Both sources are
-// CoreAudio/SwiftUI-wired and are NOT compiled into this Foundation-only runner, so these
+// ParakeetMicrophoneSharingSourceContractTests and ParakeetAudioOwnershipSourceContractTests.) The engine is
+// CoreAudio-wired and are NOT compiled into this Foundation-only runner, so these
 // greps pin source structure, not runtime behavior. They guard the REAL invariant that
 // audio buffered before a mid-recording route change is preserved across teardown (so a
 // device switch does not silently drop dictation audio), and that every interruption path
-// routes through the single cleanup helper. They are intentionally kept as source-text
+// routes through the single cleanup helper. The session controller's half (a stop
+// before capture started cancels the engine; a stale stop task touches nothing) is a
+// behavior test in DictationSessionPipelineTests.swift. They are intentionally kept as source-text
 // contracts rather than a runtime seam: extracting one would restructure real-time
 // CoreAudio recovery/teardown control flow, which is too risky to refactor for
 // testability. If you move/rename these declarations or change the interruption path,
@@ -112,7 +113,6 @@ func testDictationAudioRecovery() {
 
     runSuite("ParakeetEngine — preserves dictation audio across route recovery") {
         let engineSource = readParakeetEngineSource()
-        let sessionSource = readDictationSessionControllerSource()
 
         // Rate-preserving drains are behavior tests now: "Pending tap audio
         // joins the take one segment at a time, each at its own rate" and
@@ -139,38 +139,12 @@ func testDictationAudioRecovery() {
             1,
             "all recording interruption paths should go through the cleanup helper"
         )
-        assertTrue(
-            sessionSource.contains("appState.sttRouter.cancel()\n            let failureKind"),
-            "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
-        )
-        // "An admitted stop always reaches the engine" is a behavior test:
-        // "The mic stop runs first, whatever the session state" in
-        // DictationStopCheckpointTests.swift. The anchors below all sit in
-        // DictationSessionController+Stop.swift.
-        guard let stopTaskOwner = sessionSource.range(of: "let taskSessionID = currentDictationSessionID"),
-              let preStopGuard = sessionSource.range(
-                of: "guard !Task.isCancelled,",
-                range: stopTaskOwner.upperBound..<sessionSource.endIndex
-              ),
-              let stopDiagnostic = sessionSource.range(
-                of: "appState.runtimeDiagnostics.recordSession(kind: \"dictation\", stage: \"stop_requested\")",
-                range: preStopGuard.upperBound..<sessionSource.endIndex
-              ),
-              let stopCall = sessionSource.range(
-                of: "await appState.sttRouter.stopRecording()",
-                range: stopDiagnostic.upperBound..<sessionSource.endIndex
-              ) else {
-            assertTrue(false, "stop task should gate diagnostics and engine mutation on exact session ownership")
-            return
-        }
-        assertTrue(
-            preStopGuard.lowerBound < stopDiagnostic.lowerBound
-                && stopDiagnostic.lowerBound < stopCall.lowerBound,
-            "a cancelled stale stop task must not stop or relabel a successor dictation session"
-        )
-        assertFalse(
-            sessionSource.contains("if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {\n                await appState.sttRouter.stopRecording()"),
-            "the stop task must not re-check transient recording state before cancelling recovery"
-        )
+        // The controller's half moved to behavior tests in
+        // DictationSessionPipelineTests.swift: "A stop before capture started
+        // cancels the engine and offers a retried start" and "A stale stop
+        // task touches nothing". The stop stage reads no recording state
+        // before stopping the mic, so a brief recovery-idle state can't skip
+        // the stop ("The mic stop runs first, whatever the session state" in
+        // DictationStopCheckpointTests.swift).
     }
 }

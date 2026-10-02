@@ -594,6 +594,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift"
     "Sources/UI/Overlay/DictationStartCuePolicy.swift"
     "Sources/UI/Overlay/DictationStartActivation.swift"
+    "Sources/UI/Overlay/DictationSessionPipeline.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/HomeCaptureRefreshObserver.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
