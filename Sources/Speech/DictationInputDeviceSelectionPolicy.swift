@@ -608,3 +608,62 @@ enum DictationInputDeviceBindingPolicy {
         }
     }
 }
+
+/// What `audioInputSnapshot` reports about an input selection, in order.
+enum DictationInputBindingReport: Equatable {
+    /// The route command went out (or failed right away). Not proof of binding.
+    case issued
+    /// The selected mic was confirmed bound after settling.
+    case verified
+    /// Settling ended without the selected mic bound.
+    case settleFailed(DictationInputDeviceBindingError)
+}
+
+enum DictationInputBindingSequence {
+    /// A readable format never proves which mic AUHAL is bound to. A failed
+    /// route command throws before any format readiness is published. A
+    /// changed route is reported as verified only after `settle` confirms
+    /// the binding; a settle mismatch is reported as a failure.
+    ///
+    /// Returns the settled value, or nil when no route command was issued and
+    /// the first snapshot already stands.
+    @MainActor
+    static func settle<Settled>(
+        applicationErrorDescription: String?,
+        didApplyOverride: Bool,
+        checkCurrent: () throws -> Void,
+        report: (DictationInputBindingReport) -> Void,
+        settle: () async throws -> Settled
+    ) async throws -> Settled? {
+        report(.issued)
+        guard applicationErrorDescription == nil else {
+            throw DictationInputDeviceBindingError.applicationFailed
+        }
+        guard didApplyOverride else { return nil }
+        let settled: Settled
+        do {
+            settled = try await settle()
+        } catch let bindingError as DictationInputDeviceBindingError {
+            try checkCurrent()
+            report(.settleFailed(bindingError))
+            throw bindingError
+        }
+        try checkCurrent()
+        report(.verified)
+        return settled
+    }
+}
+
+enum DictationInputSelectionReportPolicy {
+    /// "Dictation moved off your Bluetooth mic" is reported once per route,
+    /// and only after the binding was verified. An issued command is not success.
+    static func shouldReportAutoSelection(
+        bindingVerified: Bool,
+        didApplyOverride: Bool,
+        reportKey: String?,
+        lastReportKey: String?
+    ) -> Bool {
+        guard bindingVerified, didApplyOverride, let reportKey else { return false }
+        return lastReportKey != reportKey
+    }
+}
