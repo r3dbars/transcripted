@@ -275,51 +275,6 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    /// Remove the input tap without tripping AVAudioEngine's
-    /// `required condition is false: isSink || tap != nullptr` assertion.
-    ///
-    /// Removing a tap while the engine is still running leaves the input node
-    /// with neither a tap nor a downstream sink; the next IO-thread
-    /// `InputAvailable` callback then crashes the process. Stop the engine and
-    /// let in-flight input callbacks drain BEFORE removing the tap, mirroring
-    /// the meeting/mic path's `Audio.tearDownInputTapSafely` via the shared
-    /// `AudioInputTapTeardownPolicy`.
-    ///
-    /// Must be called on `audioEngineQueue` (callers already hop there); the
-    /// drain step briefly blocks that queue, never the CoreAudio render thread.
-    @discardableResult
-    nonisolated static func safelyRemoveInputTap(on audioEngine: AVAudioEngine) -> Bool {
-        // Looking up inputNode would create it on a pristine idle engine.
-        // Cleanup may only release a node this graph already owns.
-        let inputNode = existingInputNode(on: audioEngine)
-        for step in AudioInputTapTeardownPolicy.steps(engineIsRunning: audioEngine.isRunning) {
-            switch step {
-            case .stopEngine:
-                audioEngine.stop()
-            case .waitForStoppedInputCallbacks:
-                Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
-            case .removeInputTap:
-                inputNode?.removeTap(onBus: 0)
-            }
-        }
-        return releaseStoppedVoiceProcessing(on: audioEngine)
-    }
-
-    nonisolated static func existingInputNode(on audioEngine: AVAudioEngine) -> AVAudioInputNode? {
-        audioEngine.attachedNodes.compactMap { $0 as? AVAudioInputNode }.first
-    }
-
-    nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
-        guard !audioEngine.isRunning else { return false }
-        guard let inputNode = existingInputNode(on: audioEngine) else { return true }
-        return applyDictationVoiceProcessingPreference(false, to: inputNode)
-    }
-
-    nonisolated static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
-        safelyRemoveInputTap(on: audioEngine)
-        audioEngine.reset()
-    }
-
     func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) -> T) async -> T {
         await audioGraph.run(work)
     }
@@ -328,14 +283,13 @@ class ParakeetEngine: ObservableObject {
         installAudioEngineConfigObserverIfNeeded()
 
         if microphoneSharingObserver == nil {
-            microphoneSharingObserver = CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning
-                .removeDuplicates()
-                .sink { [weak self] isCallAppRunning in
-                    guard isCallAppRunning else { return }
-                    Task { @MainActor [weak self] in
-                        await self?.shareMicrophoneWithCallAppIfNeeded()
-                    }
+            microphoneSharingObserver = ParakeetCallAppLaunchObservation.observe(
+                CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning
+            ) { [weak self] in
+                Task { @MainActor [weak self] in
+                    await self?.shareMicrophoneWithCallAppIfNeeded()
                 }
+            }
         }
 
         if wakeObserver == nil {
@@ -511,14 +465,11 @@ struct ParakeetAVAudioEngineGraphDriver: ParakeetAudioGraphDriver {
     }
 
     func removeInputTap(on engine: AVAudioEngine) -> Bool {
-        ParakeetEngine.safelyRemoveInputTap(on: engine)
+        ParakeetNativeInputGraphTeardown.removeInputTap(LiveParakeetInputGraph(engine: engine))
     }
 
     func stop(_ engine: AVAudioEngine) -> Bool {
-        if engine.isRunning {
-            engine.stop()
-        }
-        return ParakeetEngine.releaseStoppedVoiceProcessing(on: engine)
+        ParakeetNativeInputGraphTeardown.stop(LiveParakeetInputGraph(engine: engine))
     }
 
     func reset(_ engine: AVAudioEngine) {
@@ -526,13 +477,15 @@ struct ParakeetAVAudioEngineGraphDriver: ParakeetAudioGraphDriver {
     }
 
     func usesVoiceProcessing(_ engine: AVAudioEngine) -> Bool {
-        ParakeetEngine.existingInputNode(on: engine)?.isVoiceProcessingEnabled == true
+        ParakeetNativeInputGraphTeardown.usesVoiceProcessing(LiveParakeetInputGraph(engine: engine))
     }
 
     func retire(_ engine: AVAudioEngine, reason: String) -> Bool {
         ParakeetRetiredAudioEngineStore.shared.retire(engine, reason: reason)
     }
 }
+
+extension ParakeetEngine: ParakeetAudioStartLeaseHolder {}
 
 extension ParakeetEngine: ParakeetAudioGraphHost {
     func clearGraphSampleFlags() {

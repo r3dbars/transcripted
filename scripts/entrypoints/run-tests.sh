@@ -442,6 +442,9 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetAudioGraph.swift"
     "Sources/Speech/ParakeetAudioGraphSequences.swift"
     "Sources/Speech/ParakeetDeviceRecoverySequence.swift"
+    # AudioInputTapTeardownPolicy, the shared tap teardown order the
+    # sequences' native teardown follows.
+    "Sources/TranscriptedCore/Audio/AudioCaptureTypes.swift"
     "Sources/Speech/ParakeetTimedAudioEngineWorkLimiter.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
     "Sources/Speech/ParakeetConfigChangeAdmission.swift"

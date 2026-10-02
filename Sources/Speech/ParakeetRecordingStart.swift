@@ -242,32 +242,19 @@ extension ParakeetEngine {
             // The format reads below use the same serial engine queue as tap
             // installation. Lease them before the first suspension so stop can
             // retire a blocked snapshot instead of stranding the next start.
-            let snapshotCancellationState = ParakeetAudioStartCancellationState()
-            audioStartCancellationState?.cancel()
-            audioStartCancellationState = snapshotCancellationState
-            audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)
-            let snapshotWorkIsCurrent: () -> Bool = { [audioEngineWorkOwnership] in
-                snapshotCancellationState.canRunWork
-                    && audioEngineWorkOwnership.isActive(owner: attemptOwner, phase: .audioStart)
-            }
-            func finishSnapshotLease() {
-                snapshotCancellationState.cancel()
-                audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
-                if audioStartCancellationState === snapshotCancellationState {
-                    audioStartCancellationState = nil
-                }
-            }
-
             let snapshot: ParakeetAudioInputSnapshot
             do {
-                snapshot = try await audioInputSnapshot(
-                    operation: "start_recording",
-                    allowsBuiltInBluetoothFallback: !isRecoveryAttempt,
-                    isEngineWorkCurrent: snapshotWorkIsCurrent
-                )
-                finishSnapshotLease()
+                snapshot = try await audioGraph.withStartSnapshotLease(
+                    owner: attemptOwner,
+                    holder: self
+                ) { snapshotWorkIsCurrent in
+                    try await audioInputSnapshot(
+                        operation: "start_recording",
+                        allowsBuiltInBluetoothFallback: !isRecoveryAttempt,
+                        isEngineWorkCurrent: snapshotWorkIsCurrent
+                    )
+                }
             } catch {
-                finishSnapshotLease()
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
                 let systemInputWorkError = error as? ParakeetSystemInputWorkError
@@ -388,45 +375,24 @@ extension ParakeetEngine {
                 inputRate: snapshot.hwFormat.sampleRate,
                 outputRate: snapshot.outputFormat.sampleRate
             )
-            CallAppMicrophoneSharingMonitor.shared.refresh()
-            let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
-                requested: DictationVoiceProcessingRoutePolicy.isRequested(
-                    savedPreference: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
-                    callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
-                ),
-                selection: snapshot.selection
-            )
-            if voiceProcessingDecision == .deferredForSplitBluetoothOutput {
-                AppLogger.transcription.info(
-                    "PARAKEET | Apple voice processing deferred for split Bluetooth output route"
-                )
-            }
-
             if let generation = zombieRecoveryStartGeneration {
                 guard zombieRecoveryState.canContinue(generation: generation) else {
                     return await failAudioStart()
                 }
             }
-            let startCancellationState = ParakeetAudioStartCancellationState()
-            audioStartCancellationState?.cancel()
-            audioStartCancellationState = startCancellationState
-            audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)
 
             do {
-                let startSnapshot = try await installTapAndStartEngine(
+                let startOutcome = try await installTapAndStartEngine(
                     startLeaseOwner: attemptOwner,
-                    startCancellationState: startCancellationState,
-                    voiceProcessingEnabled: voiceProcessingDecision.shouldEnable
+                    attemptEngine: attemptEngine,
+                    attemptQueue: attemptQueue,
+                    selection: snapshot.selection
                 )
-                guard ownsAudioEngineQueue(attemptOwner) else {
-                    startCancellationState.cancel()
-                    audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
-                    if audioStartCancellationState === startCancellationState {
-                        audioStartCancellationState = nil
-                    }
-                    attemptQueue.async {
-                        Self.cleanUpLateAudioStart(on: attemptEngine)
-                    }
+                let startSnapshot: ParakeetAudioStartSnapshot
+                switch startOutcome {
+                case .started(let started):
+                    startSnapshot = started
+                case .graphChanged:
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -435,18 +401,9 @@ extension ParakeetEngine {
                         context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                     )
                     return await failAudioStart()
-                }
-                if !startCancellationState.commit() {
-                    audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
-                    if audioStartCancellationState === startCancellationState {
-                        audioStartCancellationState = nil
-                    }
-                    attemptQueue.async {
-                        Self.cleanUpLateAudioStart(on: attemptEngine)
-                    }
+                case .cancelled:
                     return await failAudioStart()
                 }
-                audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 inputTapInstalled = true
                 isEnginePrewarmed = true
 
@@ -480,11 +437,6 @@ extension ParakeetEngine {
                         ])
                 }
             } catch {
-                startCancellationState.cancel()
-                if audioStartCancellationState === startCancellationState {
-                    audioStartCancellationState = nil
-                }
-                audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
                 let operationTimedOut = audioEngineWorkError?.isTimedOut == true
@@ -635,14 +587,10 @@ extension ParakeetEngine {
             break
         }
 
+        // The committed start already queued its call-app recheck; it runs
+        // after this MainActor turn, once isRecording is set below.
         isRecording = true
         markFormatReadyAndPublish()
-        // A call app can launch while the worker is starting the graph. Recheck
-        // after start admission finishes; the launch observer cannot recover
-        // a graph still owned by an in-flight start.
-        Task { @MainActor [weak self] in
-            await self?.shareMicrophoneWithCallAppIfNeeded()
-        }
         AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
