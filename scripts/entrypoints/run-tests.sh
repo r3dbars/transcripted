@@ -340,6 +340,10 @@ cat >> "$GENERATED_RUNNER" <<'EOF'
             print("\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt")
         }
         if failedTests > 0 {
+            // Repeat the FAIL lines here so the summary names every failure
+            // it counts, even when its log is shared or cut short.
+            print("Failures:")
+            for line in failureLines { print(line) }
             print("FAILED")
             exit(1)
         } else {
