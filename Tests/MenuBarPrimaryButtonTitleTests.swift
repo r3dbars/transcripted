@@ -17,7 +17,7 @@ func testMenuBarPrimaryButtonTitle() {
         ]
         assertEqual(
             dictationTitles.map(MenuBarPrimaryButtonTitle.short(for:)),
-            ["Dictate", "Stop"],
+            ["Dictate", "Done"],
             "dictation button titles should be short enough to share a row"
         )
     }
@@ -27,6 +27,24 @@ func testMenuBarPrimaryButtonTitle() {
             MenuBarPrimaryButtonTitle.short(for: "Something New"),
             "Something New",
             "a title without a short form should show as-is rather than blank"
+        )
+    }
+
+    runSuite("MenuBarShortcutLabel falls back from a shortcut pair to its first key") {
+        assertEqual(
+            MenuBarShortcutLabel.candidates(for: "Fn / Right ⌥"),
+            ["Fn / Right ⌥", "Fn"],
+            "a two-trigger dictation shortcut should try the pair, then the push-to-talk key"
+        )
+        assertEqual(
+            MenuBarShortcutLabel.candidates(for: "⌥M"),
+            ["⌥M"],
+            "a single shortcut has no shorter form"
+        )
+        assertEqual(
+            MenuBarShortcutLabel.candidates(for: ""),
+            [],
+            "no shortcut means nothing to show"
         )
     }
 }

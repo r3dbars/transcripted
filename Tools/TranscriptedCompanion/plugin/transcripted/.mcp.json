@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "transcripted": {
+      "command": "/bin/bash",
+      "args": [
+        "./scripts/launch.sh"
+      ],
+      "cwd": "."
+    }
+  }
+}

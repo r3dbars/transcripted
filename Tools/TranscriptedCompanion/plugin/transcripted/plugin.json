@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "transcripted",
+  "version": "0.1.6",
+  "description": "A Mac companion for Transcripted: retrieve saved context, control meetings, and share on-device live meeting text with ChatGPT.",
+  "author": { "name": "Justin Betker" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Transcripted",
+        "shortDescription": "Your meetings, in context",
+        "longDescription": "Connect to Transcripted on this Mac. Find saved meetings, dictations, and writing; start and stop a meeting; and follow provisional text produced by the Mac's on-device speech model. Recording controls and live sharing require explicit access in Transcripted. Audio stays on the Mac. Text you choose to share is sent to ChatGPT. Requires the companion-enabled Transcripted app and a local-capable desktop host.",
+        "developerName": "Justin Betker",
+        "category": "Productivity",
+        "capabilities": ["Interactive"],
+        "logo": "./assets/icon.png",
+        "composerIcon": "./assets/icon.png",
+        "brandColor": "#EE7B35",
+        "defaultPrompt": [
+          "Open Transcripted and show my recent context.",
+          "Use Transcripted to find what I committed to this week, with sources.",
+          "Open the Transcripted companion so I can record a meeting and share live text."
+        ]
+      }
+    }
+  }
+}

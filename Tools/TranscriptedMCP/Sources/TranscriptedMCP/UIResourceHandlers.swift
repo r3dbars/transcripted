@@ -28,7 +28,7 @@ enum TranscriptedUIResources {
         serverVersion: String
     ) async {
         await server.withMethodHandler(ListResources.self) { _ in
-            .init(resources: [recentMeetingsResource])
+            .init(resources: CompanionTools.companionMode ? [CompanionTools.resource] : [recentMeetingsResource, CompanionTools.resource])
         }
 
         await server.withMethodHandler(ListResourceTemplates.self) { _ in
@@ -36,7 +36,10 @@ enum TranscriptedUIResources {
         }
 
         await server.withMethodHandler(ReadResource.self) { params in
-            guard params.uri == RecentMeetingsWidget.resourceURI else {
+            if params.uri == CompanionTools.resourceURI {
+                return .init(contents: [.text(CompanionUI.html, uri: CompanionTools.resourceURI, mimeType: "text/html;profile=mcp-app", _meta: CompanionTools.resourceMeta)])
+            }
+            guard !CompanionTools.companionMode, params.uri == RecentMeetingsWidget.resourceURI else {
                 throw MCPError.invalidParams("Unknown resource: \(params.uri)")
             }
             let html = try renderRecentMeetingsHTML(

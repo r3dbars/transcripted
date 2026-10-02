@@ -666,10 +666,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // `onRecordingComplete`, optional reads are unsynchronized: set the hook
     // once before `start()` and do not reassign during recording.
     //
-    // Mic buffers are the same processed copy that is written to the saved mic
-    // WAV: software AGC when VPIO is off, or Apple's VPIO output when VPIO is
-    // on. The callback receives that owned processed copy.
+    // Mic buffers are the processed copy written to the saved mic WAV (software
+    // AGC with VPIO off, Apple's VPIO output with it on), owned by the callback.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+    let livePCMDelivery = LiveMeetingPCMDelivery() // live preview side channel; see Audio+LivePCM.swift
 
     /// Filesystem layout used for writing raw mic/system WAV captures.
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.

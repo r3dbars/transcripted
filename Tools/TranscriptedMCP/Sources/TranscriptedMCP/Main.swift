@@ -97,7 +97,7 @@ struct TranscriptedMCP {
         )
 
         // Start stdio transport
-        let transport = StdioTransport()
+        let transport = CompanionTransport()
         try await server.start(transport: transport)
         log(MCPStartupDiagnostics.message(
             phase: .transportReady,
@@ -123,7 +123,7 @@ struct TranscriptedMCP {
     }
 
     private static let helpText = """
-    OVERVIEW: Read-only MCP server for Transcripted meetings, dictations, and writing.
+    OVERVIEW: Local MCP server for Transcripted context and its opt-in ChatGPT companion.
 
     USAGE: transcripted-mcp [--self-test] [--version] [--help]
 

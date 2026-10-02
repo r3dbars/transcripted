@@ -329,7 +329,7 @@ def print_human(context: dict[str, Any]) -> None:
     for area in context["areas"]:
         print(f"- {area['id']}: {area['owns']}")
     if not context["areas"]:
-        print("- no matching area; use AGENTS.md and inspect the nearest owner")
+        print("- no matching area; check docs/repo-layout.md, then the nearest folder AGENTS.md")
     print()
     if context.get("modules"):
         print("Modules (.agents/modules.json; check with scripts/dev/check-module-boundaries.py):")
@@ -346,7 +346,7 @@ def print_human(context: dict[str, Any]) -> None:
         print(f"- {invariant}")
     print()
     print("Mapped checks:")
-    for check in context["checks"]:
+    for check in sorted(context["checks"], key=lambda check: not check.startswith("bash build-deps.sh")):
         print(f"- {check}")
     if not context["checks"]:
         print("- scripts/dev/agent-preflight.sh")

@@ -459,6 +459,8 @@ echo "🔨 Building Transcripted Beta for $USER_NAME (token: $(mask_secret "$BET
 echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
 
 # Clean app bundle only (preserve previously built DMGs)
+source "$ENTRYPOINT_DIR/lib/running-bundle-guard.sh"
+refuse_if_bundle_running "$APP_BUNDLE"
 rm -rf "$APP_BUNDLE" "$APP_DSYM" "$SWIFTC_TEMP_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"

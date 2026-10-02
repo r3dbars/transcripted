@@ -117,6 +117,10 @@ extension Audio {
             }
         }
 
+        if let liveHandler = onLivePCMBuffer {
+            livePCMDelivery.enqueue(bufferForAsyncUse, source: .microphone, captureGeneration: sessionGeneration, handler: liveHandler)
+        }
+
         enqueueMicFileWrite(
             bufferForAsyncUse,
             retainedBytes: retainedBytes,

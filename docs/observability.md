@@ -14,6 +14,17 @@ never reach Sentry/PostHog), see `docs/privacy-first-observability.md`.
 | `EventReporter` | `Sources/Observability/EventReporter.swift` | `~/Library/Application Support/Transcripted/logs/events.jsonl` + optional Sentry forwarding (errors only, allowlisted) | Rename-based: `ObservabilityLogRotation` renames the active file to `events.jsonl.1` once past the shared JSONL threshold (`TranscriptedConstants.jsonlLogRotationThreshold`) |
 | `ReliabilityPacketRecorder` | `Sources/Observability/ReliabilityPacketRecorder.swift` | `~/Library/Application Support/Transcripted/logs/reliability.jsonl` | Same rename-based `ObservabilityLogRotation` strategy as `EventReporter`, same threshold |
 
+## Reading the logs
+
+Field names differ per file, so check them before you parse:
+
+- `app.jsonl`: short keys. `t` timestamp, `l` level, `s` subsystem, `m` message, `d` metadata object. Meeting pipeline lines (transcription, diarization, save) are here.
+- `events.jsonl`: `timestamp`, `level`, `event`, `message`, `context` (object), `appVersion`, `osVersion`, `engine`. Older lines are in `events.jsonl.1`.
+- `reliability.jsonl`: `timestamp`, `event`, `feature`, `stage`, `outcome`, `context`, `appVersion`, `osMajor`.
+- `debug.log`: plain text, not JSON.
+
+For timings, use `python3 scripts/dev/latency-percentiles.py --since <ISO date> [--event <name>]`; it reads `events.jsonl` and prints p50 to p99 for every latency key. Write a one-off parser only when that doesn't cover it.
+
 ## Why there are two `AppLogger`-shaped types
 
 `TranscriptedCore.AppLogger` and (the former) `Observability.AppLogger` were

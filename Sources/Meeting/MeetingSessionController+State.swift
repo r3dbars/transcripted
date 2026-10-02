@@ -227,17 +227,11 @@ final class MeetingSessionController: ObservableObject {
     /// remembered, so every meeting asks again about call audio.
     var systemAudioAccessAsksWhileRecording: @MainActor () -> Bool = { false }
     var activeRecordingStartedAt: Date?
-    /// System-audio status and degradation warning as they stood the moment
-    /// capture stopped underneath the controller (state still `.recording`).
-    /// That same moment resets capture's status to `.unknown` and clears the
-    /// warning, so the unexpected-stop snapshot reads these instead.
-    var unexpectedCaptureStopEvidence: (
-        systemAudioStatus: SystemAudioStatus,
-        degradationWarning: MeetingSystemAudioDegradationWarning?
-    )?
-    /// How long "can't hear the call" had been open at that same moment. A
-    /// later warning refresh can clear the live timer before the snapshot.
-    var unheardSecondsAtCaptureStop: TimeInterval?
+    /// What the controller saw the moment capture stopped underneath it
+    /// (state still `.recording`); see `MeetingCaptureStopEvidence`. A later
+    /// warning refresh can also clear the live unheard timer before the
+    /// snapshot, so that is stashed too.
+    var unexpectedCaptureStopEvidence: MeetingCaptureStopEvidence<SystemAudioStatus>?
     var activeTranscriptionTrigger: StartTrigger = .unknown
     // Whole-function reentrancy guard for startRecording() — deliberately
     // NOT derived from `state` (see the comment at its use site). Everything
@@ -376,6 +370,7 @@ final class MeetingSessionController: ObservableObject {
         }
         #endif
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
+        if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
         switch newState {
         case .startingRecording, .recording:
@@ -650,6 +645,9 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func clearActiveRecordingIdentity() {
+        if let identity = activeRecordingIdentity {
+            LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
+        }
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil

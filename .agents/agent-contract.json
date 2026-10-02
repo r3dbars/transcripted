@@ -83,7 +83,7 @@
       "path_prefixes": ["Sources/TranscriptedCore/", "Tests/TranscriptedCoreTests/"],
       "exact_paths": ["Package.swift"],
       "docs": ["Sources/TranscriptedCore/AGENTS.md"],
-      "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio"],
+      "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio", "fluidaudio", "nemotron"],
       "owns": "Reusable meeting transcription, audio processing, speaker logic, and queueing.",
       "invariants": [
         "The app consumes this library through Sources/Meeting.",
@@ -95,9 +95,9 @@
     {
       "id": "support",
       "path_prefixes": ["Sources/Support/"],
-      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md"],
-      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install"],
-      "owns": "Shared preferences, permissions, paths, paste helpers, and launch behavior.",
+      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md", "docs/capture-format.md", "docs/lab-control-channel.md"],
+      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install", "capture library", "saved transcript", "capture format", "frontmatter", "lab control", "start meeting", "stop meeting", "transcript format", "markdown format", "another process"],
+      "owns": "Shared preferences, permissions, paths, paste helpers, launch behavior, the capture library and its file format, and the lab control channel.",
       "invariants": [
         "Keep app-owned state under Transcripted Application Support.",
         "Preserve legacy migration fallbacks without writing new data to legacy paths."
@@ -108,7 +108,7 @@
       "id": "ui",
       "path_prefixes": ["Sources/UI/"],
       "docs": ["Sources/UI/AGENTS.md"],
-      "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect"],
+      "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect", "notch island", "island", "status item"],
       "owns": "Menu bar, Home, Settings, onboarding, overlay presentation, and agent-connect UI.",
       "invariants": [
         "Keep UI state backed by the owning runtime state.",
@@ -120,8 +120,8 @@
       "id": "observability",
       "path_prefixes": ["Sources/Observability/"],
       "exact_paths": ["Info.plist"],
-      "docs": ["Sources/Observability/AGENTS.md", "docs/privacy-first-observability.md"],
-      "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update"],
+      "docs": ["Sources/Observability/AGENTS.md", "docs/privacy-first-observability.md", "docs/observability.md"],
+      "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update", "log", "logs", "latency", "slow", "debug log"],
       "owns": "Local diagnostics, bounded Sentry/PostHog forwarding, and app updates.",
       "invariants": [
         "Only allowlisted, sanitized events may leave the device.",
@@ -150,7 +150,7 @@
         "docs/sparkle-updates.md"
       ],
       "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
-      "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast"],
+      "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast", "website", "download page", "transcripted.app", "notarize", "release candidate", "dmg"],
       "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
       "invariants": [
         "A DMG alone is not a complete release.",
@@ -213,6 +213,18 @@
       "manual_proof": []
     },
     {
+      "id": "writing",
+      "path_prefixes": ["Sources/Writing/", "Sources/TranscriptedWriting/", "Sources/TranscriptedKeyboard/", "Tests/TranscriptedWritingTests/"],
+      "docs": ["Sources/Writing/AGENTS.md", "Sources/TranscriptedWriting/AGENTS.md", "Sources/TranscriptedKeyboard/AGENTS.md"],
+      "keywords": ["writing", "autocomplete", "ghost text", "suggestion", "input method", "screen memory", "llama", "personal history", "save my writing", "scrubber", "tilde"],
+      "owns": "Writing: the app bridge, the autocomplete and Save my writing library, the llama-server helper, Screen Memory, and the keyboard input method.",
+      "invariants": [
+        "Writing never sends or logs typed text; analytics are counts only.",
+        "A TranscriptedWriting Core change ships in two binaries: the app and the keyboard bundle."
+      ],
+      "manual_proof": ["Ghost-text suggestions and accept keys in a real text field with the input method installed."]
+    },
+    {
       "id": "app-shell",
       "path_prefixes": ["Sources/"],
       "fallback": true,
@@ -239,8 +251,8 @@
         "run-live-capture-smoke.sh",
         "run-daily-audio-reliability.sh"
       ],
-      "docs": ["scripts/README.md"],
-      "keywords": ["build", "dependency", "entrypoint", "test runner"],
+      "docs": ["scripts/README.md", "docs/repo-layout.md"],
+      "keywords": ["build", "dependency", "entrypoint", "test runner", "deps", "build-deps", "fluidaudio", "check.sh", "deterministic proof", "source list", "cannot find type", "helper", "bundle", "wrapper"],
       "owns": "Root build and test wrappers plus their canonical entrypoints.",
       "invariants": [
         "Keep root wrappers thin and preserve non-interactive agent entrypoints.",
@@ -256,7 +268,7 @@
       "keywords": ["script", "automation"],
       "owns": "Repository automation not owned by a narrower build, development, operations, or release area.",
       "invariants": [
-        "Do not add an unconsumed script.",
+        "Every new script needs a caller: another script, a test-matrix rule, a workflow, or an entry in scripts/README.md.",
         "Keep automation non-interactive when it is part of an agent proof path."
       ],
       "manual_proof": []

@@ -352,7 +352,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self, self.refreshGeneration.finishIfCurrent(generation) else { return }
                 self.applySnapshot(snapshot)
             }
@@ -412,9 +412,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == speakerId }
         let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
         let speakerDatabase = self.speakerDatabase
-        let preferredClipsDirectory = self.preferredClipsDirectory
-        let legacyClipsDirectory = self.legacyClipsDirectory
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        runEditInBackground(completion: completion) {
             let allTranscriptUpdatesSucceeded: Bool
             do {
                 allTranscriptUpdatesSucceeded = try TranscriptSaver.updateDeferredSpeakerNames(
@@ -456,16 +454,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 ])
                 allTranscriptUpdatesSucceeded = false
             }
-            let didSave = allTranscriptUpdatesSucceeded
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
-                completion?(didSave)
-            }
+            return allTranscriptUpdatesSucceeded
         }
     }
 
@@ -506,7 +495,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        runEditInBackground(completion: completion) {
             var didMerge = false
             do {
                 let outcome = try SpeakerIdentityMutationService.apply(
@@ -544,16 +533,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             } catch {
                 Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
             }
-            let merged = didMerge
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async { [weak self] in
-                self?.applySnapshot(snapshot)
-                completion?(merged)
-            }
+            return didMerge
         }
     }
 
@@ -648,9 +628,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
         let transcriptDirectory = self.transcriptDirectory
-        let preferredClipsDirectory = self.preferredClipsDirectory
-        let legacyClipsDirectory = self.legacyClipsDirectory
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        runEditInBackground(completion: completion) {
             var didRename = false
             // Routed through the canonical mutation service (audit 2026-08-04): this used
             // to write the DB first and best-effort-scan transcripts second with no
@@ -671,15 +649,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             } catch {
                 Self.reportMutationFailure(error, engine: "speakers", profileId: profileId)
             }
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
-                completion?(didRename)
-            }
+            return didRename
         }
     }
 
@@ -735,7 +705,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        runEditInBackground(completion: completion) {
             // Routed through the canonical mutation service (audit 2026-08-04), replacing
             // SpeakerProfileMergeSideEffectCoordinator (DB + clips only, no transcript
             // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
@@ -776,15 +746,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             } catch {
                 Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
             }
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
-                completion?(didMerge)
-            }
+            return didMerge
         }
     }
 
@@ -804,7 +766,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        runEditInBackground(completion: completion) {
             speakerDatabase.deleteSpeaker(id: profileId)
             Self.deleteClips(
                 for: profileId,
@@ -813,16 +775,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             // Confirm the row is actually gone before reporting success so a
             // failed delete surfaces an error instead of silently no-opping.
-            let didDelete = speakerDatabase.getSpeaker(id: profileId) == nil
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
-                completion?(didDelete)
-            }
+            return speakerDatabase.getSpeaker(id: profileId) == nil
         }
     }
 
@@ -848,20 +801,39 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }) { return }
         let targetId = profile.id
         let speakerDatabase = self.speakerDatabase
+
+        runEditInBackground(completion: completion) {
+            speakerDatabase.unmergeMostRecent(forTargetId: targetId)
+        }
+    }
+
+    /// Runs one speaker edit on a background queue, then applies a fresh
+    /// snapshot and calls `completion` with the edit's result on the main
+    /// actor, even if this model is gone by then. `completion` stays on the
+    /// main actor the whole way, so callers can pass any main-thread closure.
+    /// `Task.immediate` hands the edit to the queue before this returns, so it
+    /// starts right after the caller's voiceprint-migration check, not a turn later.
+    private func runEditInBackground(
+        completion: (@MainActor (Bool) -> Void)?,
+        _ edit: @escaping @Sendable () -> Bool
+    ) {
+        let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let didUnmerge = speakerDatabase.unmergeMostRecent(forTargetId: targetId)
-            let snapshot = Self.snapshot(
-                from: speakerDatabase,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
-            DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
-                completion?(didUnmerge)
+        Task.immediate { @MainActor [weak self] in
+            let (didSucceed, snapshot) = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let didSucceed = edit()
+                    let snapshot = Self.snapshot(
+                        from: speakerDatabase,
+                        preferredClipsDirectory: preferredClipsDirectory,
+                        legacyClipsDirectory: legacyClipsDirectory
+                    )
+                    continuation.resume(returning: (didSucceed, snapshot))
+                }
             }
+            self?.applySnapshot(snapshot)
+            completion?(didSucceed)
         }
     }
 
@@ -1900,7 +1872,7 @@ private struct SpeakerClipProgressBar: View {
     /// Used when a clip's real duration could not be read (see
     /// `probeClipDuration(_:)` below) so the sweep still looks intentional
     /// instead of snapping instantly to full.
-    static let fallbackDuration: TimeInterval = 6
+    nonisolated static let fallbackDuration: TimeInterval = 6
 
     @State private var isFilled = false
 

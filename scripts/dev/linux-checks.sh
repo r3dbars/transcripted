@@ -190,6 +190,7 @@ if [ "$quick" = true ] && git rev-parse --verify -q origin/main >/dev/null 2>&1;
 else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
+check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
 check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"

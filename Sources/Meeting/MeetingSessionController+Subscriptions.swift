@@ -59,21 +59,29 @@ extension MeetingSessionController {
                 if captureIsRecording {
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
-                    if self.state == .recording {
-                        // Capture stopped underneath us. Core flips
-                        // isRecording before it resets systemAudioStatus,
-                        // so the bridge mirror still holds the live value.
-                        self.unexpectedCaptureStopEvidence = (
-                            systemAudioStatus: self.capture.systemAudioStatus,
-                            degradationWarning: self.systemAudioDegradationWarning
-                        )
-                        self.unheardSecondsAtCaptureStop = self.unheardPlaybackWarningStartedAt
-                            .map { max(0, Date().timeIntervalSince($0)) }
-                    }
-                    event = self.audioInactivityDetector.stopRecording()
-                    self.isMicBoostPromptVisible = false
-                    self.audioRouteWarning = nil
-                    self.systemAudioDegradationWarning = nil
+                    // Still .recording means capture stopped underneath us.
+                    // Core flips isRecording before it resets
+                    // systemAudioStatus, so the bridge mirror still holds the
+                    // live value.
+                    event = MeetingCaptureHealthTelemetry.captureStopped(
+                        whileRecording: self.state == .recording,
+                        readEvidence: {
+                            MeetingCaptureStopEvidence(
+                                systemAudioStatus: self.capture.systemAudioStatus,
+                                degradationWarning: self.systemAudioDegradationWarning,
+                                unheardWarningStartedAt: self.unheardPlaybackWarningStartedAt,
+                                now: Date()
+                            )
+                        },
+                        stashEvidence: { self.unexpectedCaptureStopEvidence = $0 },
+                        tearDown: {
+                            let stopEvent = self.audioInactivityDetector.stopRecording()
+                            self.isMicBoostPromptVisible = false
+                            self.audioRouteWarning = nil
+                            self.systemAudioDegradationWarning = nil
+                            return stopEvent
+                        }
+                    )
                 }
                 self.applyAudioInactivityEvent(event)
             }

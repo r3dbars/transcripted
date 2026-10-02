@@ -26,15 +26,9 @@ extension ParakeetEngine {
     }
 
     func shareMicrophoneWithCallAppIfNeeded() async {
-        guard microphoneSharingDowngradeIsAllowed() else { return }
-        let owner = currentAudioEngineQueueOwnerToken()
-        let usesVoiceProcessing = await runAudioEngineWork { audioEngine in
-            Self.existingInputNode(on: audioEngine)?.isVoiceProcessingEnabled == true
-        }
-        // Checked again: the graph-queue hop can outlive the recording.
-        guard usesVoiceProcessing,
-              ownsAudioEngineQueue(owner),
-              microphoneSharingDowngradeIsAllowed() else { return }
+        guard await audioGraph.callAppMayDowngradeVoiceProcessing(
+            isAllowed: { microphoneSharingDowngradeIsAllowed() }
+        ) else { return }
         // Reuse the owned recovery path so already-spoken audio survives the
         // VPIO -> regular-input transition when a call app opens during dictation.
         await recoverForMicrophoneSharing()
@@ -64,32 +58,14 @@ extension ParakeetEngine {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
 
-        // Reset/rebuild can block in CoreAudio too. Keep the admitted start's
-        // exact resources claimable so a user stop can replace this queue
-        // immediately instead of making the successor wait on stale cleanup.
-        let resetWorkOwner = currentAudioEngineQueueOwnerToken()
-        audioEngineWorkOwnership.begin(owner: resetWorkOwner, phase: .audioStart)
-        defer {
-            audioEngineWorkOwnership.finish(owner: resetWorkOwner, phase: .audioStart)
-        }
-
-        if rebuildEngine {
-            return await rebuildAudioEngine(reason: reason)
-        }
-        audioGraphGeneration += 1
-        let resetOwner = currentAudioGraphOwnerToken()
-        let releasedVoiceProcessing = await runAudioEngineWork { audioEngine in
-            let released = Self.safelyRemoveInputTap(on: audioEngine)
-            audioEngine.reset()
-            return released
-        }
-        guard ownsAudioGraph(resetOwner) else { return nil }
-        inputTapInstalled = false
-        isEnginePrewarmed = false
-        if !releasedVoiceProcessing {
-            return discardStoppedVoiceProcessingGraph(ownedBy: currentAudioEngineQueueOwnerToken())?.graphOwner
-        }
-        return resetOwner
+        // Reset/rebuild can block in CoreAudio too. The graph keeps the
+        // admitted start's exact resources claimable so a user stop can replace
+        // this queue immediately instead of making the successor wait on stale
+        // cleanup.
+        return await audioGraph.resetAfterStartFailure(
+            reason: reason,
+            rebuildEngine: rebuildEngine
+        )
     }
 
     private func audioStartContext(
@@ -695,28 +671,10 @@ extension ParakeetEngine {
         zombieRecoveryTask?.cancel()
         audioStartCancellationState?.cancel()
         audioStartCancellationState = nil
-        var didReplaceBlockedGraph = false
-        if let blockedLease = audioEngineWorkOwnership.claimPendingWorkForSuccessor(
-            currentEngine: audioEngine,
-            currentQueue: audioEngineQueue
-        ) {
-            // Cancellation may advance logical ownership before this method
-            // runs. If reset or start work still owns these exact resources,
-            // replace both before successor cleanup can enqueue.
-            let reason: String
-            switch blockedLease.phase {
-            case .zombieReset:
-                reason = "zombie_engine_reset_cancelled"
-            case .audioStart:
-                reason = "audio_engine_start_cancelled"
-            case .deviceRecoverySnapshot:
-                reason = "device_recovery_snapshot_cancelled"
-            }
-            if blockedLease.phase == .audioStart {
-                audioStartAdmission.finish(owner: blockedLease.owner)
-            }
-            didReplaceBlockedGraph = abandonBlockedAudioEngine(reason: reason)
-        }
+        // Cancellation may advance logical ownership before this method runs.
+        // If reset or start work still owns these exact resources, replace
+        // both before successor cleanup can enqueue.
+        let didReplaceBlockedGraph = audioGraph.replaceGraphHoldingPendingWork()
         zombieRecoveryTask = nil
         zombieRecoveryStartGeneration = nil
         if let terminal = zombieRecoveryState.cancelActiveAttempt() {

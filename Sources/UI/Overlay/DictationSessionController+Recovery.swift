@@ -46,62 +46,13 @@ extension DictationSessionController {
         })
     }
 
-    func finishDictationForTermination() async -> Bool {
-        await DictationTerminationFinisher.run(
-            DictationTerminationFinisher.Steps(
-                setTerminating: { self.queuedStartGate.setTerminating($0) },
-                dropQueuedStart: { self.dropQueuedDictationStart(showMessage: false) },
-                isDictating: { self.isDictating },
-                admitInactiveQuit: { self.admitInactiveDictationQuit() },
-                stop: { self.stopDictationAndPaste(trigger: .unknown) },
-                gracePolls: 100,
-                sleepOnePoll: {
-                    do {
-                        try await Task.sleep(nanoseconds: 100_000_000)
-                        return true
-                    } catch {
-                        return false
-                    }
-                },
-                preserveStoppedAudio: { [self] in
-                    stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
-                },
-                waitForCheckpoint: {
-                    guard let stoppedAudioCheckpointSignal = self.stoppedAudioCheckpointSignal else { return false }
-                    return await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000)
-                },
-                canTerminateActive: {
-                    DictationTerminationAdmissionPolicy.canTerminate(
-                        isDictating: self.isDictating,
-                        checkpointSettled: true,
-                        hasRecoverableRecording: self.appState?.sttRouter.hasRecoverableRecording ?? false,
-                        recoveryWAVExists: self.currentStoppedAudioRecoveryWAVExists
-                    )
-                },
-                showError: { self.overlayController?.showError($0) },
-                cancelPreservingStoppedAudio: { self.cancelDictation(preserveStoppedAudio: true) }
-            )
-        )
-    }
+    // finishDictationForTermination (Quit) lives in
+    // DictationSessionPipeline.swift, where tests run it on a fake controller.
 
     var currentStoppedAudioRecoveryWAVExists: Bool {
         guard let stoppedAudioRecovery,
               stoppedAudioRecovery.sessionID == currentDictationSessionID else { return false }
         return FileManager.default.fileExists(atPath: stoppedAudioRecovery.url.path)
-    }
-
-    private func admitInactiveDictationQuit() -> Bool {
-        let canTerminate = DictationTerminationAdmissionPolicy.canTerminate(
-            isDictating: false,
-            checkpointSettled: false,
-            hasRecoverableRecording: appState?.sttRouter.hasRecoverableRecording ?? false,
-            recoveryWAVExists: currentStoppedAudioRecoveryWAVExists
-        )
-        if !canTerminate {
-            queuedStartGate.setTerminating(false)
-            showFailedCheckpointRecoveryError()
-        }
-        return canTerminate
     }
 
     func showFailedCheckpointRecoveryError() {
@@ -234,11 +185,9 @@ extension DictationSessionController {
                                         actionTitle: "Try Again",
                                         action: { [weak self] in
                                             guard let self else { return }
-                                            self.startDictation(
+                                            self.retryDictation(
                                                 sourceApp: self.sessionSourceApp,
-                                                trigger: self.currentDictationTrigger,
-                                                anchorRect: self.sessionAnchorRect,
-                                                isRetry: true
+                                                anchorRect: self.sessionAnchorRect
                                             )
                                         }
                                     )
@@ -256,12 +205,7 @@ extension DictationSessionController {
                         ))
                     }
                 case .retryDictation:
-                    self.startDictation(
-                        sourceApp: self.sessionSourceApp,
-                        trigger: self.currentDictationTrigger,
-                        anchorRect: self.sessionAnchorRect,
-                        isRetry: true
-                    )
+                    self.retryDictation(sourceApp: self.sessionSourceApp, anchorRect: self.sessionAnchorRect)
                 }
             }
         )

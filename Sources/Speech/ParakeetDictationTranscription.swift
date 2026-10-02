@@ -18,7 +18,7 @@ extension ParakeetEngine {
     func drainPendingSamplesIntoTimeline() {
         let segments = pendingSamplesLock.withLock { pendingSamples.drain() }
         for segment in segments {
-            recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
+            recoveredRecordingTimeline.append(segment)
         }
     }
 
@@ -36,11 +36,6 @@ extension ParakeetEngine {
     func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true) {
         recoveredRecordingTimeline.removeAll(keepingCapacity: keepingCapacity)
         preservingRecordingAcrossRecovery = false
-    }
-
-    func interruptRecordingAndClearRecoveredTimeline() {
-        clearRecoveredRecordingTimeline(keepingCapacity: true)
-        markRecordingInterrupted()
     }
 
     func interruptRecordingPreservingRecoveredTimeline() {
