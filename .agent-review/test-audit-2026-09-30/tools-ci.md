@@ -197,9 +197,9 @@ No Swift package build/test, fast suite, full/release/QA run, live capture, nati
 - `scripts/test_score_speaker_lab.py` — 29 test methods
 - `scripts/test_speaker_autoresearch.py` — 9 test methods
 - `scripts/test_stt_fluidaudio_ab.py` — 31 test methods
-- `scripts/voiceprint/test_naming_sim.py` — 10 test methods
-- `scripts/voiceprint/test_score_lineup.py` — 4 test methods
-- `scripts/voiceprint/test_score_verify.py` — 19 test methods
+- scripts/voiceprint/test_naming_sim.py (removed since) — 10 test methods
+- scripts/voiceprint/test_score_lineup.py (removed since) — 4 test methods
+- scripts/voiceprint/test_score_verify.py (removed since) — 19 test methods
 
 ### BuildDependencies, E2E and Integration
 - `Tests/BuildDependencies/ArchiveInputsTests.sh`

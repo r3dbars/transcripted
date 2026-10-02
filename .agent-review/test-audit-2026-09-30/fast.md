@@ -158,7 +158,7 @@ The table below names every root fast-test file at the supplied main snapshot. `
 | `Tests/DictationMicrophoneLoadingPresentationPolicyTests.swift` | 71 | 5 | 13 | 0 | 0 |
 | `Tests/DictationNoSpeechPresentationPolicyTests.swift` | 83 | 6 | 14 | 0 | 0 |
 | `Tests/DictationOverlayPlacementPolicyTests.swift` | 59 | 4 | 7 | 0 | 0 |
-| `Tests/DictationOverlayPresentationPreferencesTests.swift` | 163 | 8 | 23 | 0 | 0 |
+| Tests/DictationOverlayPresentationPreferencesTests.swift (removed since) | 163 | 8 | 23 | 0 | 0 |
 | `Tests/DictationPostStopModelWaitTests.swift` | 173 | 11 | 27 | 0 | 0 |
 | `Tests/DictationQueuedStartPolicyTests.swift` | 101 | 5 | 19 | 6 | 0 |
 | `Tests/DictationReadinessWaitPolicyTests.swift` | 402 | 30 | 38 | 0 | 0 |
