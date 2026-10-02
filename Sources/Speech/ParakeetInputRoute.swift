@@ -391,17 +391,12 @@ extension ParakeetEngine {
                 selection: selection,
                 currentDeviceID: { inputNode.auAudioUnit.deviceID },
                 setDeviceID: { selectedID in
-                    let token = bindingIntent.begin(
+                    try ParakeetInputBindingWrite.perform(
+                        intent: bindingIntent,
                         engine: audioEngine,
-                        route: ParakeetAudioRouteIdentity(selection: selection),
-                        at: CFAbsoluteTimeGetCurrent()
-                    )
-                    do {
+                        route: ParakeetAudioRouteIdentity(selection: selection)
+                    ) {
                         try inputNode.auAudioUnit.setDeviceID(selectedID)
-                        token.finish(succeeded: true)
-                    } catch {
-                        token.finish(succeeded: false)
-                        throw error
                     }
                 }
             )

@@ -9,7 +9,7 @@
     "Sources/Meeting/MeetingSessionController.swift": 844,
     "Sources/Observability/AnalyticsReporter.swift": 889,
     "Sources/Observability/SparkleUpdaterController.swift": 1177,
-    "Sources/Speech/ParakeetDeviceRecovery.swift": 870,
+    "Sources/Speech/ParakeetDeviceRecovery.swift": 868,
     "Sources/Support/TranscriptedPermissionAccess.swift": 975,
     "Sources/TranscriptedApp.swift": 1924,
     "Sources/TranscriptedCore/Audio/Audio.swift": 813,

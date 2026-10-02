@@ -443,6 +443,7 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetAudioGraphSequences.swift"
     "Sources/Speech/ParakeetTimedAudioEngineWorkLimiter.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
+    "Sources/Speech/ParakeetConfigChangeAdmission.swift"
     "Sources/Speech/ParakeetRecordingContinuityPolicy.swift"
     "Sources/Speech/ParakeetZombieEngineRecoverySequence.swift"
     "Sources/Speech/ParakeetStartRecordingFailurePolicy.swift"

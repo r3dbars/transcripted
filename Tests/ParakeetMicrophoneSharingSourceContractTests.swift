@@ -1,17 +1,17 @@
 import Foundation
 
 // AVAudioEngine capture lives in the app target. These contracts pin the
-// start wiring, the route-change arguments, and the native AVAudioEngine call
-// order that the fast tests can't construct; live Zoom speech still needs a
+// start wiring and the native AVAudioEngine call order that the fast tests
+// can't construct; live Zoom speech still needs a
 // remote listener. The decisions (when VPIO is asked for, when a call app
 // downgrade may run, and how it skips suppression and rebuilds) are
 // behavior-tested in ParakeetMicrophoneSharingTests.swift. The owned-graph
 // downgrade probe, the stop-in-progress guard, buffer preservation, and
 // failed-VPIO graph disposal are behavior tests in ParakeetAudioGraphTests.swift.
+// Forced call-app recovery and arrival-time suppression are behavior tests in
+// ParakeetRecoveryStateTests.swift (ParakeetConfigChangeAdmission).
 func testParakeetMicrophoneSharingSourceContract() {
-    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     let engine = readParakeetEngineSource()
-    let recovery = (try? String(contentsOf: root.appendingPathComponent("Sources/Speech/ParakeetDeviceRecovery.swift"), encoding: .utf8)) ?? ""
 
     runSuite("Dictation rechecks call apps around every start") {
         assertTrue(engine.contains("CallAppMicrophoneSharingMonitor.shared.refresh()\n            let voiceProcessingDecision"), "explicit start must refresh process presence before choosing VPIO")
@@ -21,16 +21,6 @@ func testParakeetMicrophoneSharingSourceContract() {
             committedStart.contains("Task { @MainActor [weak self] in\n            await self?.shareMicrophoneWithCallAppIfNeeded()"),
             "a call app launching during suspended engine start must be rechecked after start commits"
         )
-    }
-
-    runSuite("Call app launch recovery forces the recording-preserving route recovery") {
-        let handler = sharingSourceBlock(engine, from: "    func shareMicrophoneWithCallAppIfNeeded()", to: "    private func microphoneSharingDowngradeIsAllowed()")
-        assertTrue(handler.contains("await recoverForMicrophoneSharing()"), "downgrade must use the recording-preserving recovery path")
-        let forcedRecovery = sharingSourceBlock(recovery, from: "    func recoverForMicrophoneSharing()", to: "    private func handleAudioConfigChange(")
-        assertTrue(forcedRecovery.contains("forceForMicrophoneSharing: true"), "sharing downgrade must bypass local continuity success")
-        let config = sharingSourceBlock(recovery, from: "    private func handleAudioConfigChange(", to: "    private func invalidateAudioGraphForIdleRouteChange()")
-        assertTrue(config.contains("observedAt: configChangeObservedAt,"), "notification suppression must classify callback arrival, not delayed handler time")
-        assertTrue(config.contains("ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,"), "notification suppression must retain the bounded restore window")
     }
 
     runSuite("Stopped and cancelled dictation graphs disarm VPIO without opening an idle microphone") {
