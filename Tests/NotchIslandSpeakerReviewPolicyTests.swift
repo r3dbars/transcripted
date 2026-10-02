@@ -61,10 +61,32 @@ func testNotchIslandSpeakerReviewPolicy() {
 
         let capped = NotchIslandSpeakerReviewPolicy.suggestions(
             query: "a",
-            people: [("Ana", 1), ("Anna", 1), ("Aaron", 1), ("Alex", 1)],
+            people: [("Ana", 1), ("Anna", 1), ("Aaron", 1), ("Alex", 1), ("Abe", 1), ("Ada", 1)],
             invitees: []
         )
-        assertEqual(capped.count, NotchIslandSpeakerReviewPolicy.suggestionLimit, "at most three rows under the box")
+        assertEqual(capped.count, 5, "at most five rows under the box")
+    }
+
+    runSuite("NotchIslandSpeakerReviewPolicy swaps the invitee chips for the list once you type") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.showsInviteeChips(typed: ""), "an empty box shows the invitee chips")
+        assertTrue(Policy.showsInviteeChips(typed: "  "), "spaces alone still count as empty")
+        assertFalse(Policy.showsInviteeChips(typed: "J"), "one letter hides the chips so the list can take over")
+        assertEqual(Policy.NameBoxRow.newPerson("Jo").displayTitle, "Add \u{201C}Jo\u{201D}", "the typed name reads as adding someone new")
+        assertEqual(Policy.NameBoxRow.newPerson("Jo").label, "Jo", "but it saves just the typed name")
+        assertEqual(Policy.NameBoxRow.saved("Jordan Lee").displayTitle, "Jordan Lee")
+    }
+
+    runSuite("NotchIslandSpeakerReviewPolicy offers Me on a local mic voice while typing") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let people: [(label: String, callCount: Int)] = [("Megan Fox", 2), ("Jordan Lee", 4)]
+        let mic = Policy.suggestions(query: "me", people: people, invitees: [], includeOwner: true)
+        assertEqual(mic.map(\.label), ["You", "Megan Fox"], "Me leads on your own mic, then the saved match")
+        assertEqual(Policy.NameBoxRow.saved(mic[0].label).displayTitle, "Me", "your own voice reads as Me")
+        assertEqual(Policy.nameBoxRows(typed: "Me", suggestions: mic), [.saved("You"), .saved("Megan Fox")], "typing Me is an exact match, not a new person")
+        let remote = Policy.suggestions(query: "me", people: people, invitees: [], includeOwner: false)
+        assertEqual(remote.map(\.label), ["Megan Fox"], "a remote voice is never offered as Me")
+        assertEqual(Policy.suggestions(query: "jo", people: people, invitees: [], includeOwner: true).map(\.label), ["Jordan Lee"], "Me only shows when the typing could be me")
     }
 
     runSuite("NotchIslandSpeakerReviewPolicy says what happened after Done") {
