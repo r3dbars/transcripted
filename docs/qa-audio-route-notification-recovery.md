@@ -8,8 +8,13 @@ On a Mac with built-in input and a representative USB microphone (including a
 Logitech C920 where available), exercise these states separately: idle, active
 dictation, dictation starting, and dictation stopping. Change the Mac default
 input to USB; unplug and reconnect the device during speech; then return to
-built-in input. Repeat with the Mac mic recorder on (Settings › Microphone),
-and with Faster Bluetooth dictation on where it's still shown.
+built-in input. The Mac mic recorder is on by default and has no Settings
+switch, so that pass covers it. Then repeat with the recorder off
+(`defaults write com.justinbetker.draft pinned-microphone-capture -bool false`,
+or launch with `TRANSCRIPTED_PINNED_MIC_CAPTURE=0`), once with Faster Bluetooth
+dictation off and once on; that toggle only shows while the recorder is off.
+Restore the default afterward with
+`defaults delete com.justinbetker.draft pinned-microphone-capture`.
 
 For each route transition, confirm that the UI stays responsive, recovery
 either resumes accurate capture from the selected microphone or fails clearly,

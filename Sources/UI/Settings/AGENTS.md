@@ -182,8 +182,9 @@ settings-side agent connection flow.
   the settings redesign phase 1 pass: the two Support rows (email support,
   send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"
   section, and the Beta page's Nemotron toggle was later removed. Nemotron
-  diarization is now Core's default with no Settings toggle (see
-  `Sources/TranscriptedCore/AGENTS.md`).
+  is now the app's default with no Settings toggle
+  (`Sources/Support/DiarizationBackendPreferences.swift`); Core itself still
+  defaults to pyannote (see `Sources/TranscriptedCore/AGENTS.md`).
 - `Writing/` - the Writing tab's views, all driven by `WritingSettingsModel`
   in `Sources/Writing/` (runtime changes go through `WritingController`,
   never from a view): `WritingIntroView.swift` (two intro pages until setup

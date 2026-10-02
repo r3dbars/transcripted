@@ -252,6 +252,7 @@ Optional supporting text can explain local-first behavior in one short paragraph
 ### Transcribe Audio File
 
 - appears on `Settings` (Transcription card)
+- appears as the second action on the Meetings page's empty state
 - does not appear in the menubar popover in this version
 
 ### Update Status
