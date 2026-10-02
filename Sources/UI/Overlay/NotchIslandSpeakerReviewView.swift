@@ -907,16 +907,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             views.append(pill("Change", style: .subtle) { [weak self] in self?.change() })
         default:
             if NotchIslandSpeakerReviewPolicy.offersDiscard(isRecognized: isRecognized, nameBoxOpen: isEditing, keptAsYou: isKeptAsYou) {
-                let discard = pill(
-                    NotchIslandSpeakerReviewPolicy.discardTitle(discarded: false),
-                    style: .link,
-                    height: 26,
-                    fontSize: 12
-                ) { [weak self] in
-                    self?.toggleDiscard()
-                }
-                discard.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.discardHelp)
-                views.append(discard)
+                views.append(NotchIslandDiscardControl { [weak self] in self?.toggleDiscard() })
             }
         }
         let line = NSStackView(views: views)
@@ -953,6 +944,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     }
 
     private func inviteeLine() -> NSView? {
+        guard NotchIslandSpeakerReviewPolicy.showsInviteeChips(typed: nameField.stringValue) else { return nil }
         var names = NotchIslandSpeakerReviewPolicy.inviteeChips(
             invitees: invitees,
             alreadyUsed: usedNames,
@@ -1013,7 +1005,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
             case .saved(let label): detail = details[label] ?? ""
             case .newPerson: detail = "new person"
             }
-            list.addArrangedSubview(suggestionRow(row.label, detail: detail, highlighted: index == highlighted, width: width - 8))
+            list.addArrangedSubview(suggestionRow(row, detail: detail, highlighted: index == highlighted, width: width - 8))
         }
         list.translatesAutoresizingMaskIntoConstraints = false
         list.widthAnchor.constraint(equalToConstant: width).isActive = true
@@ -1026,10 +1018,10 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return line
     }
 
-    private func suggestionRow(_ label: String, detail: String, highlighted: Bool, width: CGFloat) -> NSView {
-        let button = NotchIslandSuggestionButton(title: label, detail: detail, width: width)
+    private func suggestionRow(_ row: NotchIslandSpeakerReviewPolicy.NameBoxRow, detail: String, highlighted: Bool, width: CGFloat) -> NSView {
+        let button = NotchIslandSuggestionButton(title: row.displayTitle, detail: detail, width: width)
         button.isHighlightedRow = highlighted
-        button.onPress = { [weak self] in self?.pick(label) }
+        button.onPress = { [weak self] in self?.pick(row.label) }
         return button
     }
 
@@ -1037,7 +1029,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         NotchIslandSpeakerReviewPolicy.suggestions(
             query: nameField.stringValue,
             people: knownPeople,
-            invitees: invitees
+            invitees: invitees,
+            includeOwner: entry.channel == .mic
         )
     }
 

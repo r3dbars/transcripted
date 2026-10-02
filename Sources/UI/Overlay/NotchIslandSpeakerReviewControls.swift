@@ -211,7 +211,7 @@ final class NotchIslandSuggestionButton: NSButton {
     }
 
     init(title: String, detail: String, width: CGFloat) {
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 28))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 34))
         isBordered = false
         wantsLayer = true
         layer?.cornerRadius = 7
@@ -220,12 +220,12 @@ final class NotchIslandSuggestionButton: NSButton {
         action = #selector(pressed)
         translatesAutoresizingMaskIntoConstraints = false
         widthAnchor.constraint(equalToConstant: width).isActive = true
-        heightAnchor.constraint(equalToConstant: 28).isActive = true
-        let name = NotchIslandPalette.label(title, font: .systemFont(ofSize: 13, weight: .semibold), color: NotchIslandPalette.primaryText)
-        let note = NotchIslandPalette.label(detail, font: .systemFont(ofSize: 11), color: NotchIslandPalette.secondaryText)
+        heightAnchor.constraint(equalToConstant: 34).isActive = true
+        let name = NotchIslandPalette.label(title, font: .systemFont(ofSize: 14, weight: .semibold), color: NotchIslandPalette.primaryText)
+        let note = NotchIslandPalette.label(detail, font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
         let row = NSStackView(views: [name, NSView(), note])
         row.orientation = .horizontal
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
@@ -240,6 +240,117 @@ final class NotchIslandSuggestionButton: NSButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    @objc private func pressed() { onPress?() }
+}
+
+/// The small × on a voice that isn't a person. It stays faint until the
+/// pointer rests on it; then a short label to its left says what it does.
+/// The label is drawn by the island itself because system tooltips don't
+/// show reliably over a non-activating panel.
+@MainActor
+final class NotchIslandDiscardControl: NSStackView {
+    private let tip = NSView()
+    private let x = NotchIslandHoverButton()
+    private var showTask: Task<Void, Never>?
+
+    init(onPress: @escaping () -> Void) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 6
+        let label = NotchIslandPalette.label(
+            NotchIslandSpeakerReviewPolicy.discardTooltip,
+            font: .systemFont(ofSize: 11, weight: .medium),
+            color: NotchIslandPalette.primaryText
+        )
+        label.translatesAutoresizingMaskIntoConstraints = false
+        // The label never clips; the quote beside it truncates instead.
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        tip.wantsLayer = true
+        tip.layer?.backgroundColor = NotchIslandPalette.buttonPlain.cgColor
+        tip.layer?.cornerRadius = 6
+        tip.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: tip.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: tip.trailingAnchor, constant: -8),
+            label.topAnchor.constraint(equalTo: tip.topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: tip.bottomAnchor, constant: -4),
+        ])
+        tip.isHidden = true
+
+        if let image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .bold)) {
+            x.image = image
+        }
+        x.imagePosition = .imageOnly
+        x.isBordered = false
+        x.wantsLayer = true
+        x.layer?.cornerRadius = 12
+        x.contentTintColor = NotchIslandPalette.secondaryText
+        x.translatesAutoresizingMaskIntoConstraints = false
+        x.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        x.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        x.onPress = onPress
+        x.onHover = { [weak self] inside in self?.setHovered(inside) }
+        x.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.discardTitle(discarded: false))
+        x.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.discardHelp)
+        addArrangedSubview(tip)
+        addArrangedSubview(x)
+        setContentHuggingPriority(.required, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private func setHovered(_ inside: Bool) {
+        x.layer?.backgroundColor = inside ? NotchIslandPalette.buttonPlain.cgColor : NSColor.clear.cgColor
+        x.contentTintColor = inside ? NotchIslandPalette.primaryText : NotchIslandPalette.secondaryText
+        showTask?.cancel()
+        guard inside else {
+            tip.isHidden = true
+            return
+        }
+        // A short rest first, like a system tooltip, so passing over it is quiet.
+        showTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            self?.tip.isHidden = false
+        }
+    }
+}
+
+/// A borderless button that reports the pointer entering and leaving it.
+@MainActor
+final class NotchIslandHoverButton: NSButton {
+    var onPress: (() -> Void)?
+    var onHover: ((Bool) -> Void)?
+    private var area: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        target = self
+        action = #selector(pressed)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area { removeTrackingArea(area) }
+        let next = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(next)
+        area = next
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
 
     @objc private func pressed() { onPress?() }
 }

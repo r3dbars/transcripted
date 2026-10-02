@@ -17,8 +17,9 @@ enum NotchIslandSpeakerReviewPolicy {
     static let doneLingerSeconds: Double = 6
     /// Invitee names shown before the little arrow that reveals the rest.
     static let inviteeChipLimit = 3
-    /// Autocomplete rows under the name box.
-    static let suggestionLimit = 3
+    /// Autocomplete rows under the name box. Typing hides the invitee chips,
+    /// so the list has room for more.
+    static let suggestionLimit = 5
 
     enum Question: Equatable {
         /// A likely match: "Is this Maya?" with Yes and No.
@@ -64,14 +65,35 @@ enum NotchIslandSpeakerReviewPolicy {
         var detail: String
     }
 
+    /// The invitee chips cover the empty box. Once something is typed they
+    /// step aside and the list under the box takes their place.
+    static func showsInviteeChips(typed: String) -> Bool {
+        typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// What the name box offers for `query`: saved people and invitees that
     /// match, invitees first, then by how often you've met them. Empty until
-    /// something is typed; the invitee chips cover the empty box.
+    /// something is typed. On a local mic voice (`includeOwner`), "Me" leads
+    /// when the typing could be "me", since its chip is hidden by then.
     static func suggestions(
         query: String,
         people: [(label: String, callCount: Int)],
         invitees: [String],
+        includeOwner: Bool = false,
         limit: Int = suggestionLimit
+    ) -> [Suggestion] {
+        let matches = savedSuggestions(query: query, people: people, invitees: invitees, limit: limit)
+        let key = SpeakerNameSelectionPolicy.normalizedSearchText(query)
+        guard includeOwner, !key.isEmpty, "me".hasPrefix(key) else { return matches }
+        let owner = Suggestion(label: SpeakerNameSelectionPolicy.ownerLabel, detail: "your own voice")
+        return Array(([owner] + matches.filter { $0.label != owner.label }).prefix(limit))
+    }
+
+    private static func savedSuggestions(
+        query: String,
+        people: [(label: String, callCount: Int)],
+        invitees: [String],
+        limit: Int
     ) -> [Suggestion] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -119,6 +141,15 @@ enum NotchIslandSpeakerReviewPolicy {
         var label: String {
             switch self {
             case .saved(let label), .newPerson(let label): return label
+            }
+        }
+
+        /// What the row reads: "Me" for your own voice, and "Add “Jo”" for a
+        /// typed name that would become someone new.
+        var displayTitle: String {
+            switch self {
+            case .saved(let label): return label == SpeakerNameSelectionPolicy.ownerLabel ? "Me" : label
+            case .newPerson(let label): return "Add \u{201C}\(label)\u{201D}"
             }
         }
     }
@@ -259,6 +290,9 @@ enum NotchIslandSpeakerReviewPolicy {
 
     static let discardHelp = "Do not save this voice to People. The transcript stays saved."
 
+    /// What the small × says when the pointer rests on it.
+    static let discardTooltip = "Don\u{2019}t save this voice"
+
     /// The line a locked voice shows in place of its question.
     static func lockNote(_ lock: Lock) -> String {
         switch lock {
@@ -277,7 +311,10 @@ enum NotchIslandSpeakerReviewPolicy {
 
     private static func exactMatchIndex(typed: String, suggestions: [Suggestion]) -> Int? {
         let key = SpeakerNameSelectionPolicy.normalizedSearchText(typed)
-        return suggestions.firstIndex { SpeakerNameSelectionPolicy.normalizedSearchText($0.label) == key }
+        return suggestions.firstIndex {
+            SpeakerNameSelectionPolicy.normalizedSearchText($0.label) == key
+                || ($0.label == SpeakerNameSelectionPolicy.ownerLabel && key == "me")
+        }
     }
 
     // MARK: Timing
