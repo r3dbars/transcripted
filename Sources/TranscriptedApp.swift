@@ -242,14 +242,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // island asks about call audio while it records, every meeting:
             // recording both sides is the point, so mic only is never
             // remembered as a choice.
-            meetingSession.systemAudioAccessAsksWhileRecording = { NotchIslandController.isSelected }
+            meetingSession.systemAudioAccessAsksWhileRecording = { true }
             // The session raises the island's ask from the start's outcome
             // (so a first-time macOS Don't Allow asks too); the prompter only
             // answers the question.
             meetingSession.systemAudioAccessPrompter = { copy in
-                guard NotchIslandController.isSelected else {
-                    return await MeetingSystemAudioAccessAlert.ask(copy)
-                }
                 if copy == .notYetAllowed { return .turnOn }
                 return .askWhileRecording
             }
@@ -569,9 +566,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // Only the island lists voices named on their own ("who was on
             // the call"), so only then does a meeting with nobody to ask get
             // a review; the window has nothing to show for it.
-            meetingSession.taskManager.reviewListsRecognizedVoicesProvider = {
-                NotchIslandController.isSelected
-            }
+            meetingSession.taskManager.reviewListsRecognizedVoicesProvider = { true }
             SpeakerNamingSheet.shared.onOpenTranscript = { [weak self] transcriptURL in
                 self?.settingsWindowController.revealMeeting(
                     transcriptURL: transcriptURL,

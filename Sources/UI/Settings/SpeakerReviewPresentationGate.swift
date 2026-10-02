@@ -65,14 +65,3 @@ struct SpeakerReviewPresentationGate: Equatable {
     }
 }
 
-/// Header copy for the speaker review window.
-enum SpeakerReviewPresentationCopy {
-    static let subtitle = "Transcript saved. Name unknown voices, confirm suggested matches, or review later on the Speakers page."
-
-    /// "Review speakers · Weekly sync", or the generic title when the
-    /// meeting's name can't be read.
-    static func title(meetingTitle: String?) -> String {
-        let trimmed = meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? "Review meeting speakers" : "Review speakers · \(trimmed)"
-    }
-}

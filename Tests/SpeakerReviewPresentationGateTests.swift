@@ -56,18 +56,4 @@ func testSpeakerReviewPresentationGate() {
         assertEqual(gate.presentedRequestID, second, "the old window closing must not forget its replacement")
         assertEqual(gate.currentRequestID, second)
     }
-
-    runSuite("SpeakerReviewPresentationCopy names the meeting") {
-        assertEqual(SpeakerReviewPresentationCopy.title(meetingTitle: "Weekly sync"), "Review speakers · Weekly sync")
-        assertEqual(SpeakerReviewPresentationCopy.title(meetingTitle: " "), "Review meeting speakers")
-        assertEqual(SpeakerReviewPresentationCopy.title(meetingTitle: nil), "Review meeting speakers")
-        assertTrue(
-            SpeakerReviewPresentationCopy.subtitle.contains("Speakers page"),
-            "the subtitle should name the real page"
-        )
-        assertFalse(
-            SpeakerReviewPresentationCopy.subtitle.contains("Settings > People"),
-            "there is no People page"
-        )
-    }
 }
