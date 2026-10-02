@@ -12,7 +12,11 @@
 
 Important entry points:
 
-- `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, detected-meeting prompt wiring, and activation-policy switching so active recordings stay visible in the macOS force-quit dialog
+- `TranscriptedApp.swift` — app entry point and `TranscriptedAppDelegate` core: builds the controllers, overlay setup, and detected-meeting prompt wiring
+- `TranscriptedAppDelegate+MenuBar.swift` — status item badge, popover, onboarding and Settings window, and activation-policy switching so active recordings stay visible in the macOS force-quit dialog
+- `TranscriptedAppDelegate+SettingsActions.swift` — Settings actions, the audio-import queue, and the auto call detection preference
+- `TranscriptedAppDelegate+Lifecycle.swift` — login-item launch detection and the Quit confirmation dialogs
+- `TranscriptedAppDelegate+LaunchReports.swift` — launch UI smoke and first-run reliability reports for automated launches
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, quiet launch-time warmup of the dictation and meeting models (re-run on model switch and wake), wake-recovery coordination, and lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — app-active macOS command menus for capture, import, navigation, and speaker search; these are additive window-scoped shortcuts and do not replace global physical triggers
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
@@ -57,7 +61,7 @@ point-in-time reviews.
 
 Every Swift file here belongs to a module in `.agents/modules.json`, and `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. The table is in `docs/repo-layout.md` ("Modules"); `--explain <file>` answers for one file. Each module's own `AGENTS.md` has its card (owns, public surface, may depend on, entry points, tests, rules). The cards below live here because these modules have no single folder of their own (AppShell, AppState) or their folder docs are file guides (Support, Observability). UIOverlay's card is `UI/Overlay/AGENTS.md`.
 
-**AppShell** (`TranscriptedApp.swift`, `TranscriptedMenuCommands.swift`). The composition root: `TranscriptedApp` and `TranscriptedAppDelegate` build every controller and wire the status item, popover, overlays and meeting prompts. It may depend on anything and nothing may depend on it (the manifest check enforces that). Grandfathered crossing: `Support/LabControlChannel.swift` names `TranscriptedAppDelegate`; moving the lab-control files next to the shell fixes it. Most source-pinned file in the repo, so run `check-source-pins.py --changed-only` first. Tests: `bash run-tests.sh --filter StatusItem`, `bash run-e2e-smoke.sh`.
+**AppShell** (`TranscriptedApp.swift`, its `TranscriptedAppDelegate+*.swift` extensions, `TranscriptedMenuCommands.swift`). The composition root: `TranscriptedApp` and `TranscriptedAppDelegate` build every controller and wire the status item, popover, overlays and meeting prompts. It may depend on anything and nothing may depend on it (the manifest check enforces that). Grandfathered crossing: `Support/LabControlChannel.swift` names `TranscriptedAppDelegate`; moving the lab-control files next to the shell fixes it. Most source-pinned file in the repo, so run `check-source-pins.py --changed-only` first. Tests: `bash run-tests.sh --filter StatusItem`, `bash run-e2e-smoke.sh`.
 
 **AppState** (`TranscriptedAppState.swift`). The service container: owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, the lazy `MeetingSessionController`, model warmup and wake recovery. Public surface: `TranscriptedAppState`. May depend on Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability and Core `core-vocab`. The UI modules (Overlay, MenuBar, Settings) may take the container; nothing below the UI may. Grandfathered: `Speech/DictationSession.swift` and `UI/Shared/TranscriptedSupportActions.swift` take it today; the fix is injecting the narrow dependencies they use.
 
