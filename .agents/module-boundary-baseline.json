@@ -6,16 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Meeting/MeetingSessionController+CancelAndTermination.swift": {
-      "UIShared": [
-        "AppSoundPlayer"
-      ]
-    },
-    "Sources/Meeting/MeetingSessionController+TranscriptionOutcomes.swift": {
-      "UIShared": [
-        "AppSoundPlayer"
-      ]
-    },
     "Sources/Observability/ActivationTelemetry.swift": {
       "Dictation": [
         "SavedDictationTranscript"

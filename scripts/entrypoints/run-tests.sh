@@ -569,7 +569,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
     "Sources/UI/Shared/SupportEmailDispatcher.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
-    "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/Support/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/Writing/WritingSidebarNewBadge.swift"
