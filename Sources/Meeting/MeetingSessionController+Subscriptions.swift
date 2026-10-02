@@ -90,7 +90,7 @@ extension MeetingSessionController {
         capture.$audioLevel
             .sink { [weak self] level in
                 guard let self else { return }
-                self.audioLevel = level
+                self.mirrorMicLevel(level)
                 self.latestMicLevel = level
                 self.observeAudioActivity()
             }
@@ -99,7 +99,7 @@ extension MeetingSessionController {
         capture.$systemLevel
             .sink { [weak self] level in
                 guard let self else { return }
-                self.systemLevel = level
+                self.mirrorSystemLevel(level)
                 self.latestSystemLevel = level
                 self.observeAudioActivity()
             }
@@ -116,7 +116,7 @@ extension MeetingSessionController {
                 // sub-second staleness. The inactivity tick below stays on
                 // the raw 0.2s cadence.
                 if Int(duration) != Int(self.recordingDuration) || duration < self.recordingDuration {
-                    self.recordingDuration = duration
+                    self.mirrorRecordingDuration(duration)
                 }
                 guard self.isRecording else { return }
                 self.refreshSystemAudioSignalVerification(shouldWarn: duration >= 10)
@@ -200,8 +200,7 @@ extension MeetingSessionController {
                 guard let self else { return }
                 guard let url else {
                     self.savedTranscriptRestyleTask = nil
-                    self.lastSavedTranscriptURL = nil
-                    self.lastSavedTitle = nil
+                    self.mirrorSavedTranscript(url: nil, title: nil)
                     return
                 }
 
@@ -286,8 +285,7 @@ extension MeetingSessionController {
                 }
             }
             guard let self, self.savedTranscriptRestyleTask == restyle else { return }
-            self.lastSavedTranscriptURL = styled.url
-            self.lastSavedTitle = styled.title
+            self.mirrorSavedTranscript(url: styled.url, title: styled.title)
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_transcript_artifact_ready",
