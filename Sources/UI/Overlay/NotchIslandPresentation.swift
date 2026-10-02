@@ -463,6 +463,10 @@ enum NotchIslandPresentation {
         meeting: NotchIslandMeetingContent?,
         recentInsert: NotchIslandRecentInsert?
     ) -> NotchIslandDrop? {
+        // A recording meeting owns the hover except while a dictation is
+        // live: once the key is up, hovering shows the meeting again rather
+        // than the dictation's writing beat or its Paste again linger.
+        let meetingRecords = meeting?.isRecording == true
         if let dictation {
             switch dictation.phase {
             case .starting, .listening:
@@ -470,10 +474,10 @@ enum NotchIslandPresentation {
             case .loading(let title, let detail, _):
                 return .dictationLoading(title: title, detail: detail)
             case .writing, .success, .message:
-                return nil
+                if !meetingRecords { return nil }
             }
         }
-        if let recentInsert, let text = recentInsert.text, !text.isEmpty {
+        if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {
             return .justInserted(text: text, words: recentInsert.words)
         }
         guard let meeting else { return nil }
