@@ -1,44 +1,37 @@
-// Source-text pins: this test reads Sources/UI/Settings/Pages/{GeneralSettingsPage,HomeSettingsPage}.swift
-// as text rather than rendering them, because each is a SwiftUI View wired to the live app object graph
-// this Foundation-only runner can't build — GeneralSettingsPage alone carries eight generic ViewBuilder
-// type parameters. What's pinned: the "Transcribe a file" row and its help text, and Home's empty-state
-// secondary action. The HomeCaptureListCopy.emptyMeetings check near the bottom is
-// different — that's a plain Foundation enum compiled into the runner, so it calls real code, not a pin.
-// If you rename these views or that copy, keep this test's literal strings in sync.
+// Promise: Settings has a "Transcribe a file" row, and Home's empty meetings
+// list offers the same picker, so imported audio is never more than one click
+// away. The rows read their copy and identifiers from HomeCaptureListCopy,
+// which this runner compiles, so this checks real values, plus the identifier
+// the QA import smoke presses. No Swift source is read as text.
 
 import Foundation
 
 func testHomeImportAudioAction() {
     runSuite("General settings exposes imported-audio transcription") {
-        let generalSettingsSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
-            encoding: .utf8
-        )) ?? ""
-        // HomeSettingsPage.swift is the extracted Home page view (pure
-        // rendering only); the Settings shell injects its onImportAudioFile action.
-        let homeSettingsPageSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
-            encoding: .utf8
-        )) ?? ""
+        let row = HomeCaptureListCopy.ImportFileRow.self
+        assertEqual(row.title, "Transcribe a file", "the Settings row should say what it does in plain words")
+        assertEqual(row.value, "Choose", "the row should show a visible choose-file control")
+        assertTrue(
+            row.help.contains("audio or video file") && row.help.contains("meetings"),
+            "the help should say what files work and where the transcript lands"
+        )
 
+        // The QA import smoke presses the row by this identifier.
+        let smoke = (try? String(
+            contentsOf: repoFixtureURL("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/ImportedAudioNativeSmoke.swift"),
+            encoding: .utf8
+        )) ?? ""
+        let smokeIdentifiers = automationIdentifierLiterals(in: smoke)
         assertTrue(
-            generalSettingsSource.contains("title: \"Transcribe a file\""),
-            "general settings should include an audio-file row"
+            smokeIdentifiers.contains(row.automationIdentifier),
+            "the import smoke should press the identifier the Settings row exposes"
         )
-        assertTrue(
-            generalSettingsSource.contains("title: \"Transcribe a file\"")
-                && generalSettingsSource.contains("value: \"Choose\""),
-            "general settings should expose a visible choose-file control"
-        )
-        assertTrue(
-            generalSettingsSource.contains("help: \"Pick an audio or video file. The transcript lands with your meetings.\""),
-            "general settings should keep imported-audio help simple"
-        )
-        assertTrue(
-            homeSettingsPageSource.contains("secondaryActionTitle: \"Transcribe audio file\"")
-                && homeSettingsPageSource.contains("secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\""),
-            "Home meetings empty state should expose a visible imported-audio route"
-        )
+    }
+
+    runSuite("Home's empty meetings list routes to the same import") {
+        let action = HomeCaptureListCopy.EmptyMeetingsImportAction.self
+        assertEqual(action.title, "Transcribe audio file", "the empty state should offer import as its second button")
+        assertTrue(action.automationIdentifier.hasPrefix("transcripted.home."), "the empty-state button should be scriptable")
         assertTrue(
             HomeCaptureListCopy.emptyMeetings.contains("transcribe an existing audio file"),
             "Home meeting empty copy should name imported-audio transcription directly"

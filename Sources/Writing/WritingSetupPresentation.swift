@@ -12,6 +12,29 @@ import Foundation
 /// Foundation plus `TildeModelChoice` and `WritingKeyboardSetupState` only, so
 /// the root fast tests compile it.
 enum WritingSetupPresentation {
+    // MARK: - Screen Recording
+
+    /// What asking for Screen Recording does right now. Granting it can make
+    /// macOS ask Transcripted to quit and reopen, so the ask never happens
+    /// while a meeting or dictation records. After the one system prompt,
+    /// System Settings is the only way to grant it.
+    enum ScreenRecordingAsk: Equatable {
+        case waitForCapture
+        case request
+        case openSettings
+    }
+
+    static func screenRecordingAsk(captureBusy: Bool, alreadyRequested: Bool) -> ScreenRecordingAsk {
+        if captureBusy { return .waitForCapture }
+        return alreadyRequested ? .openSettings : .request
+    }
+
+    /// Finishing setup with Autocomplete on asks for Screen Recording once,
+    /// unless it's granted already or something is recording.
+    static func asksForScreenRecordingAfterSetup(autocomplete: Bool, granted: Bool, captureBusy: Bool) -> Bool {
+        autocomplete && !granted && !captureBusy
+    }
+
     // MARK: - Intro, page 1 of 2
 
     struct ContextItem: Equatable {

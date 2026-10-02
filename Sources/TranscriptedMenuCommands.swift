@@ -19,75 +19,55 @@ struct TranscriptedMenuCommands: Commands {
         // one-shot AppKit menu mutation could miss menu construction and leave
         // the empty fallback scene on screen when the user pressed Command-,.
         CommandGroup(replacing: .appSettings) {
-            Button("Settings…") {
-                appDelegate.menuOpenSettings()
-            }
-            .keyboardShortcut(",", modifiers: .command)
+            button(for: TranscriptedMenuCommandCatalog.settings)
         }
 
         // Capture — the two recording actions plus file import.
         CommandMenu("Capture") {
-            Button("Start Dictation") {
-                appDelegate.menuStartDictation()
-            }
-            .keyboardShortcut("d", modifiers: .command)
-
-            Button("Start / Stop Meeting Recording") {
-                appDelegate.menuToggleMeetingRecording()
-            }
-            .keyboardShortcut("r", modifiers: .command)
-
-            Divider()
-
-            Button("Transcribe Audio File…") {
-                appDelegate.menuImportAudio()
-            }
-            .keyboardShortcut("o", modifiers: .command)
+            items(TranscriptedMenuCommandCatalog.capture)
         }
 
         // Go — jump straight to a sidebar section (opening the window if needed).
         CommandMenu("Go") {
-            Button("Today") {
-                appDelegate.menuOpenPage(.today)
-            }
-            .keyboardShortcut("1", modifiers: .command)
+            items(TranscriptedMenuCommandCatalog.go)
+        }
+    }
 
-            Button("Meetings") {
-                appDelegate.menuOpenPage(.home)
+    private func items(_ items: [TranscriptedMenuCommandCatalog.Item]) -> some View {
+        ForEach(items) { item in
+            if item.startsGroup {
+                Divider()
             }
-            .keyboardShortcut("2", modifiers: .command)
+            button(for: item)
+        }
+    }
 
-            Button("Dictations") {
-                appDelegate.menuOpenPage(.dictations)
-            }
-            .keyboardShortcut("3", modifiers: .command)
+    private func button(for item: TranscriptedMenuCommandCatalog.Item) -> some View {
+        Button(item.title) {
+            perform(item.action)
+        }
+        .keyboardShortcut(
+            KeyEquivalent(item.key),
+            modifiers: item.usesShift ? [.command, .shift] : .command
+        )
+    }
 
-            Button("Writing") {
-                appDelegate.menuOpenPage(.writing)
-            }
-            .keyboardShortcut("4", modifiers: .command)
-
-            Button("Speakers") {
-                appDelegate.menuOpenPage(.people)
-            }
-            .keyboardShortcut("5", modifiers: .command)
-
-            Button("Agent") {
-                appDelegate.menuOpenPage(.connectAgent)
-            }
-            .keyboardShortcut("6", modifiers: .command)
-
-            Divider()
-
-            Button("Find Meetings…") {
-                appDelegate.menuFindCaptures()
-            }
-            .keyboardShortcut("f", modifiers: .command)
-
-            Button("Find Speaker…") {
-                appDelegate.menuFindSpeaker()
-            }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
+    private func perform(_ action: TranscriptedMenuCommandCatalog.Action) {
+        switch action {
+        case .openSettings:
+            appDelegate.menuOpenSettings()
+        case .startDictation:
+            appDelegate.menuStartDictation()
+        case .toggleMeetingRecording:
+            appDelegate.menuToggleMeetingRecording()
+        case .importAudio:
+            appDelegate.menuImportAudio()
+        case let .openPage(page):
+            appDelegate.menuOpenPage(page)
+        case .findCaptures:
+            appDelegate.menuFindCaptures()
+        case .findSpeaker:
+            appDelegate.menuFindSpeaker()
         }
     }
 }

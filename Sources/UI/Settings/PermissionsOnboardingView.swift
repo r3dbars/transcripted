@@ -55,48 +55,37 @@ struct PermissionsOnboardingView: View {
         _currentStepIndex = State(initialValue: PermissionsOnboardingPreferences.resumeStepIndex())
     }
 
-    private static let steps: [OnboardingStepKind] = [.welcome, .permissions, .done]
+    private var navigation: OnboardingNavigation {
+        OnboardingNavigation(
+            step: OnboardingNavigation.step(at: currentStepIndex),
+            microphoneGranted: micGranted,
+            microphoneBlocked: micBlocked,
+            skippedMicrophone: skippedMicrophone
+        )
+    }
 
     private var currentStep: OnboardingStepKind {
-        Self.steps[min(currentStepIndex, Self.steps.count - 1)]
+        navigation.step
     }
 
     private var hasRequiredPermissions: Bool {
-        FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)
+        navigation.hasRequiredPermissions
     }
 
     private var primaryButtonTitle: String {
-        switch currentStep {
-        case .welcome:
-            return "Set Up"
-        case .permissions:
-            return "Continue"
-        case .done:
-            // "Open Transcripted" read like a second app launch; this just
-            // closes setup and shows the menu bar.
-            return "Done"
-        }
+        navigation.primaryTitle
     }
 
     private var canFinishSetup: Bool {
-        hasRequiredPermissions || skippedMicrophone
+        navigation.canFinishSetup
     }
 
     private var primaryButtonDisabled: Bool {
-        switch currentStep {
-        case .welcome:
-            return false
-        case .permissions:
-            return !hasRequiredPermissions
-        case .done:
-            return !canFinishSetup
-        }
+        navigation.primaryDisabled
     }
 
-    /// Offered only once macOS won't ask for the microphone again.
     private var secondaryButtonTitle: String? {
-        guard currentStep == .permissions, micBlocked, !micGranted else { return nil }
-        return "Skip for now"
+        navigation.secondaryTitle
     }
 
     var body: some View {
@@ -231,7 +220,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func goNext() {
-        guard currentStepIndex < Self.steps.count - 1 else { return }
+        guard currentStepIndex < OnboardingNavigation.steps.count - 1 else { return }
         stopPermissionRevalidation()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             currentStepIndex += 1
@@ -239,7 +228,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func skipMicrophone() {
-        guard currentStep == .permissions, !micGranted else { return }
+        guard navigation.canSkipMicrophone else { return }
         AnalyticsReporter.track(
             "onboarding_primary_cta_clicked",
             properties: [
@@ -257,7 +246,7 @@ struct PermissionsOnboardingView: View {
     private func goNextOrComplete() {
         guard !primaryButtonDisabled else { return }
         trackPrimaryCTAClicked()
-        if currentStepIndex == Self.steps.count - 1 {
+        if currentStepIndex == OnboardingNavigation.steps.count - 1 {
             completeOnboarding()
         } else {
             goNext()
@@ -449,23 +438,6 @@ struct PermissionsOnboardingView: View {
 
     private func permissionStatus(for kind: TranscriptedPermissionKind) -> String {
         currentPermissionStatuses()[kind] ?? "unknown"
-    }
-}
-
-private enum OnboardingStepKind: Hashable {
-    case welcome
-    case permissions
-    case done
-
-    var analyticsID: String {
-        switch self {
-        case .welcome:
-            return "welcome"
-        case .permissions:
-            return "permissions"
-        case .done:
-            return "done"
-        }
     }
 }
 

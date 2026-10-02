@@ -224,3 +224,31 @@ func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.s
         fatalError("Missing required fixture \(relativePath)")
     }
 }
+
+/// Every quoted `"transcripted.<area>.<name>"` accessibility identifier in
+/// `text`. For reading what an outside tool (the QA smokes, the launch smoke
+/// in build.sh) drives, as data, so a test can check the app produces them.
+func automationIdentifierLiterals(in text: String) -> Set<String> {
+    guard let regex = try? NSRegularExpression(pattern: "\"(transcripted\\.[a-z0-9-]+(?:\\.[a-z0-9-]+)+)\"") else {
+        return []
+    }
+    let range = NSRange(text.startIndex..., in: text)
+    return Set(regex.matches(in: text, range: range).compactMap { match in
+        Range(match.range(at: 1), in: text).map { String(text[$0]) }
+    })
+}
+
+/// The identifiers the QA smokes and build.sh's launch smoke press, read from
+/// those tools as data.
+func qaSmokePressedIdentifiers() -> Set<String> {
+    var pressed = Set<String>()
+    for path in [
+        "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift",
+        "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/ImportedAudioNativeSmoke.swift",
+        "scripts/entrypoints/build.sh",
+    ] {
+        let text = (try? String(contentsOf: repoFixtureURL(path), encoding: .utf8)) ?? ""
+        pressed.formUnion(automationIdentifierLiterals(in: text))
+    }
+    return pressed
+}

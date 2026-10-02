@@ -199,7 +199,7 @@ func testDictationTerminationCheckpoint() async {
         let meetingPrep = app.range(of: "await self.appState.meetingSession.prepareForTermination()", range: appDeferralEnd..<app.endIndex)
 
         // Still read as text until the app's Quit handler has a seam:
-        // TranscriptedApp.swift is in open PR #1946.
+        // TranscriptedApp.swift was being split while the other pins moved.
         runSuite("Production Quit wiring defers shutdown before an unsafe checkpoint") {
             assertTrue(app.contains("self.terminationCleanupStarted = false"), "deferred Quit must reset cleanup admission for a later request")
             assertTrue(appAdmission != nil && appDeferral != nil && meetingPrep != nil,

@@ -306,12 +306,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     ) -> (choice: MeetingAudioPlaybackChoice, sounds: [NSSound])? {
         for choice in MeetingAudioPlaybackLoadingPolicy.choices(for: attachment, preferredChoice: preferredChoice) {
             let loadedSounds = choice.urls.compactMap { url -> NSSound? in
-                // Retained audio can be recompressed (WAV→M4A) or moved after the
-                // row was scanned. Resolve to the on-disk file (stem-rematch) so
-                // playback follows the drift instead of going silently
-                // "Unavailable" on a stale path.
-                let resolved = OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
-                return NSSound(contentsOf: resolved, byReference: true)
+                NSSound(contentsOf: MeetingAudioPlaybackLoadingPolicy.playableURL(for: url), byReference: true)
             }
             if loadedSounds.count == choice.urls.count, !loadedSounds.isEmpty {
                 return (choice, loadedSounds)
@@ -367,6 +362,13 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 }
 
 enum MeetingAudioPlaybackLoadingPolicy {
+    /// Retained audio can be recompressed (WAV→M4A) or moved after the row was
+    /// scanned. Resolve to the on-disk file (stem-rematch) so playback follows
+    /// the drift instead of going silently "Unavailable" on a stale path.
+    static func playableURL(for url: URL) -> URL {
+        OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
+    }
+
     /// Choice ids are "<file stem>:<path>"; the stem names the source.
     static func sourceStem(ofChoiceID id: String) -> String {
         String(id.prefix { $0 != ":" })
@@ -452,7 +454,7 @@ struct MeetingAudioSourceMenu: View {
             }
             .buttonStyle(.plain)
             .fixedSize()
-            .frame(minHeight: 40)
+            .frame(minHeight: LibraryTokens.minimumHitTarget)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .help("Choose retained meeting audio source")
         }
