@@ -108,9 +108,6 @@ final class MeetingOverlayController: NSObject {
     private var systemAudioAutoHideTask: Task<Void, Never>?
     private var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
     private var isShowingCancelConfirmation = false
-    private var isRestingCondensed = false
-    private var isPanelHovered = false
-    private var restTask: Task<Void, Never>?
 
     // The precedence lattice for these kinds lives in the pure
     // `MeetingPromptPriority.resolve` — kept in its own Foundation-pure file
@@ -128,7 +125,6 @@ final class MeetingOverlayController: NSObject {
     deinit {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
-        restTask?.cancel()
     }
 
     // MARK: - Dependencies
@@ -149,7 +145,6 @@ final class MeetingOverlayController: NSObject {
     weak var island: NotchIslandController? {
         didSet {
             island?.meetingActionHandler = { [weak self] action in self?.handleIslandAction(action) }
-            island?.meetingHoverHandler = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
             island?.meetingMenuProvider = { [weak self] in self?.makeStripMenu() }
         }
     }
@@ -469,7 +464,6 @@ final class MeetingOverlayController: NSObject {
         if resolvedKind == .audioInactivity {
             lastAppliedAudioInactivityWarning = inactivity
         }
-        bloomFromRest()
         state = presentationState(session: meetingSession?.state ?? .idle, prompt: promptKind)
         showPanel()
         pushToView()
@@ -565,7 +559,6 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: .recording, prompt: nil)
             showPanel()
             pushToView()
-            scheduleRestIfNeeded()
         } else {
             state = .idle
             hidePanel()
@@ -625,7 +618,6 @@ final class MeetingOverlayController: NSObject {
         }
         switch sessionState {
         case .idle:
-            cancelRest()
             if state == .prompt {
                 pushToView()
                 break
@@ -634,7 +626,6 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: sessionState, prompt: promptKind)
             hidePanel()
         case .loadingModels, .startingRecording:
-            cancelRest()
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -643,7 +634,6 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .ready:
-            cancelRest()
             if state == .prompt {
                 pushToView()
                 break
@@ -668,20 +658,13 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: sessionState, prompt: promptKind)
             hidePanel()
         case .recording, .stoppingRecording:
-            if state != .recording {
-                // Start from a clean hover state — enter events re-arm it.
-                isPanelHovered = false
-            }
-            isRestingCondensed = false
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
-            scheduleRestIfNeeded()
         case .transcribing:
-            cancelRest()
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -692,7 +675,6 @@ final class MeetingOverlayController: NSObject {
             state = presentationState(session: sessionState, prompt: promptKind)
             showPanel()
         case .error:
-            cancelRest()
             currentPrompt = nil
             promptKind = nil
             promptCountdownTask?.cancel()
@@ -713,9 +695,6 @@ final class MeetingOverlayController: NSObject {
     private func hidePanel() {
         guard islandShown else { return }
         islandShown = false
-        // Hidden under the cursor, the island never reports hover-out; a
-        // stale hover flag would silently block resting next recording.
-        isPanelHovered = false
         island?.updateMeeting(nil)
     }
 
@@ -885,23 +864,13 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    /// The note is a quiet label, not a prompt: it never blocks resting. It
-    /// only wakes the pill when it changes to say call audio is now on, so
-    /// the user sees the fix worked.
     private func applyMicOnlyNotice(_ notice: MeetingMicOnlyNotice?) {
         // Stop clears the session's note while the pill still shows through
         // teardown. Keep it until the pill leaves recording, so the pill
         // doesn't shrink and slide Stop under the cursor mid-stop.
         // `applySessionState` resyncs once the session moves on.
         if notice == nil, meetingSession?.state == .stoppingRecording { return }
-        let previous = micOnlyNotice
         micOnlyNotice = notice
-        if state == .recording,
-           previous == .callAudioOff,
-           notice == .callAudioOnForNextMeeting {
-            bloomFromRest()
-            scheduleRestIfNeeded()
-        }
         pushToView()
     }
 
@@ -910,77 +879,10 @@ final class MeetingOverlayController: NSObject {
         micOnlyNotice != nil && systemAudioDegradationWarning?.cause != .unverified
     }
 
-    // MARK: - Rest / wake
-
-    private func scheduleRestIfNeeded() {
-        restTask?.cancel()
-        guard !isRestingCondensed,
-              MeetingPillRestPolicy.canRest(
-                isRecording: state == .recording,
-                keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: isPanelHovered,
-                hasSystemAudioWarning: systemAudioDegradationWarning != nil
-              ) else { return }
-
-        restTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(
-                nanoseconds: UInt64(MeetingPillRestPolicy.restDelaySeconds * 1_000_000_000)
-            )
-            guard !Task.isCancelled, let self else { return }
-            guard MeetingPillRestPolicy.canRest(
-                isRecording: self.state == .recording,
-                keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
-                isHovered: self.isPanelHovered,
-                hasSystemAudioWarning: self.systemAudioDegradationWarning != nil
-            ) else { return }
-            // Belt and braces against a lost exit/enter pair: never rest
-            // while the pointer is physically over the island, even if the
-            // hover flag went stale.
-            guard !self.pointerIsOverPanel() else {
-                self.scheduleRestIfNeeded()
-                return
-            }
-            self.isRestingCondensed = true
-            self.pushToView()
-        }
-    }
-
+    /// The saved pill's auto-hide checks the pointer itself rather than
+    /// trusting hover events.
     private func pointerIsOverPanel() -> Bool {
         islandShown && island?.isPointerOverIsland == true
-    }
-
-    /// Leaving the recording flow entirely: stop the countdown and forget
-    /// the resting state.
-    private func cancelRest() {
-        restTask?.cancel()
-        restTask = nil
-        isRestingCondensed = false
-    }
-
-    /// Wake the pill back to its full strip (prompts, hover, pin).
-    private func bloomFromRest() {
-        restTask?.cancel()
-        restTask = nil
-        isRestingCondensed = false
-    }
-
-    private func handlePanelHoverChanged(_ hovered: Bool) {
-        guard hovered != isPanelHovered else { return }
-        isPanelHovered = hovered
-        // The saved pill has no rest/bloom; its auto-hide checks the
-        // pointer itself.
-        if case .saved = state { return }
-        if hovered {
-            restTask?.cancel()
-            if isRestingCondensed {
-                // Wake: hovering restores the full pill, which then stays
-                // until the next quiet stretch passes — no peek-and-snap.
-                isRestingCondensed = false
-                pushToView()
-            }
-        } else {
-            scheduleRestIfNeeded()
-        }
     }
 
     // MARK: - Pill context menu
@@ -988,27 +890,12 @@ final class MeetingOverlayController: NSObject {
     private func makeStripMenu() -> NSMenu? {
         guard state == .recording else { return nil }
 
-        // An open menu is attention: pause the rest countdown so the pill
-        // cannot shrink underneath it. The next hover-out reschedules.
-        restTask?.cancel()
-
-        let menu = NSMenu()
-
-        let pinItem = NSMenuItem(
-            title: "Keep Controls Visible",
-            action: #selector(handleMenuTogglePin),
-            keyEquivalent: ""
-        )
-        pinItem.target = self
-        pinItem.state = MeetingOverlayPillPreferences.keepControlsVisible() ? .on : .off
-        menu.addItem(pinItem)
-
         // Overlay `.recording` also covers `.stoppingRecording` (keep the pill
         // up through teardown). Discard must require the session itself to
         // still be `.recording`, or the item no-ops after a stop starts.
+        // With nothing to offer, there's no menu.
+        let menu = NSMenu()
         if case .recording = meetingSession?.state {
-            menu.addItem(.separator())
-
             let discardItem = NSMenuItem(
                 title: "Discard Recording…",
                 action: #selector(handleMenuDiscard),
@@ -1017,19 +904,7 @@ final class MeetingOverlayController: NSObject {
             discardItem.target = self
             menu.addItem(discardItem)
         }
-
-        return menu
-    }
-
-    @objc private func handleMenuTogglePin() {
-        let pinned = !MeetingOverlayPillPreferences.keepControlsVisible()
-        MeetingOverlayPillPreferences.setKeepControlsVisible(pinned)
-        if pinned {
-            bloomFromRest()
-        } else {
-            scheduleRestIfNeeded()
-        }
-        pushToView()
+        return menu.items.isEmpty ? nil : menu
     }
 
     @objc private func handleMenuDiscard() {

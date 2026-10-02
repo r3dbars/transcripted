@@ -33,7 +33,6 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationWarmupPresentationPolicy.swift` — user-facing copy and progress for the voice-model warmup overlay, phrased differently before recording starts (waiting on the mic) vs after it stops (audio captured, waiting to transcribe); `DictationPostStopModelWaitPolicy` in the same file decides the model-unavailable copy after that post-stop wait and keeps paste-back on the original app after a long wait instead of following focus
 - `Overlay/FloatingOverlayController.swift` — the dictation state machine (starting, loading, listening, writing, message, success), its timers, the global Esc monitor and confirm, and the not-pasted notice; it has no window of its own and pushes each state to the Notch island as a `NotchIslandDictationContent` snapshot
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/MeetingPromptPriority.swift` — pure precedence lattice for the meeting overlay's four warning-driven prompts (audio inactivity, system-audio degradation, audio route instability, mic boost), extracted out of `MeetingOverlayController` so the rule is defined once
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — the meeting overlay's state machine with no window of its own: session subscriptions, warning prompts and countdowns, the missed-call nudge, rest/wake behavior, and recording-pill actions (Stop, Discard Recording… behind the island's context menu, and the saved and error pills' Open, which reveals the meeting on the Meetings page); it pushes each state to the Notch island as a `NotchIslandMeetingContent` snapshot. Detected-meeting Record/Not now/Remind actions live only in `CapturePillController`
@@ -249,7 +248,6 @@ Relevant direct coverage:
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/MeetingPillFinishPresentationTests.swift`
-- `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/NotchIslandPresentationTests.swift`
 - `Tests/NotchIslandGeometryTests.swift`
 - `Tests/OwnFileResolverTests.swift`

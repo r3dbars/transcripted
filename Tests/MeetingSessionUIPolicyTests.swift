@@ -256,7 +256,7 @@ func testMeetingSessionUIPolicy() {
         )
         guard let start = source.range(of: "private func makeStripMenu()"),
               let end = source.range(
-                of: "@objc private func handleMenuTogglePin()",
+                of: "@objc private func handleMenuDiscard()",
                 range: start.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "pill strip menu should remain present")

@@ -34,7 +34,6 @@
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed), the needs-approval check, and opening Login Items
 - `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy, plus `LaunchAtLoginNoticePolicy` for the inline failure/needs-approval line in Settings
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
-- `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MeetingMicrophonePreferences.swift` — explicit use of the macOS-selected meeting input, default off to retain Bluetooth call isolation; read before each recording, not during capture. `recordsMacOSInput` ignores it while the Mac mic recorder is on, where the Microphone choice decides
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation. The in-meeting Boost Mic never writes it, and the Home row's "Boost mic next meeting" sets a one-shot request that the next successful meeting start uses up (meetings only). `migrateBoostedVoiceProcessingIfNeeded` runs once at launch to undo Boosts saved by older builds; it and the Home request also set `micBoostHintsHiddenThrough` so answered Home hints don't come back on older rows
 - `CallAppMicrophoneSharingMonitor.swift` — watches for desktop call apps (Zoom, Teams, Webex, FaceTime) by app presence only, never opening audio. While one is open at a recording's start, meetings and dictation stay on software autogain instead of Apple voice processing. Mid-meeting, the Boost Mic prompt checks real mic use instead (`MicrophoneSharingPolicy.isCallAppUsingMicrophone`, fed by `MicActivityMonitor.currentMicInputBundleIDs()`), so Teams left open during a browser call doesn't block it
@@ -104,7 +103,6 @@ Relevant direct coverage includes:
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LabControlCommandTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
-- `Tests/MeetingOverlayPillPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`
 - `Tests/PhysicalDictationTriggerPreferencesTests.swift`

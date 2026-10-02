@@ -665,9 +665,8 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Keep Controls Visible")
-                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
-            "pill context-menu actions should keep stable titles for automation"
+            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
+            "pill context-menu action should keep a stable title for automation"
         )
 
         assertTrue(
