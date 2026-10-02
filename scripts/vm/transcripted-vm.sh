@@ -497,8 +497,10 @@ start_vnc_session() {
   TVM_VNC_URL="$url" python3 "$SUPERVISE_PY" --name "VNC session" --log "$(vnc_log_file "$vm")" \
     --pidfile "$(vnc_pid_file "$vm")" -- python3 "$VNC_PY" --socket "$sock" serve >/dev/null \
     || die "the VNC session did not start; see $(vnc_log_file "$vm")"
+  # serve binds the socket before it connects, so the socket alone isn't
+  # ready; its "connected" line is. The deadline only bounds a hang.
   local deadline=$((SECONDS + 30))
-  until [[ -S "$sock" ]]; do
+  until [[ -S "$sock" ]] && grep -q "^vnc.py serve: connected " "$(vnc_log_file "$vm")" 2>/dev/null; do
     if (( SECONDS >= deadline )) || grep -q "VNC session exited\|VNC session was stopped" "$(vnc_log_file "$vm")" 2>/dev/null; then
       tail -n 5 "$(vnc_log_file "$vm")" 2>/dev/null | sed 's/^/[tvm]   /' >&2 || true
       die "the VNC session did not connect; see $(vnc_log_file "$vm")"
