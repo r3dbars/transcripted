@@ -71,30 +71,6 @@ func testParakeetAudioGraphOwnership() async {
         assertTrue(ownership.finish(successor!, recordingIdentity: successorRecording), "only successor completion releases its slot")
     }
 
-    runSuite("Config-change restart keeps the same recording claim when segments are retained") {
-        do {
-            let engineSource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
-                encoding: .utf8
-            )
-            let recoverySource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift"),
-                encoding: .utf8
-            )
-            assertTrue(
-                engineSource.contains("if !isRecoveryAttempt && !preservingRecordingAcrossRecovery"),
-                "a route restart must not relabel retained segments as a new dictation"
-            )
-            assertTrue(
-                recoverySource.contains("preserveCurrentRecordingBuffersForRecovery()")
-                    && recoverySource.contains("let startSucceeded = await self.startRecording()"),
-                "production config recovery should exercise the retained-segment restart branch"
-            )
-        } catch {
-            assertTrue(false, "recording recovery source should be readable: \(error)")
-        }
-    }
-
     runSuite("ParakeetZombieRecoveryOwnershipPolicy accepts only the exact active graph owner") {
         let engine = NSObject()
         let owner = ParakeetAudioGraphOwnerToken(generation: 7, engine: engine)

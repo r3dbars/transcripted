@@ -39,3 +39,28 @@ enum MenuBarMeetingCapturePhase: Equatable {
         self != .saving
     }
 }
+
+/// What the menu's meeting button does for a given session state. Starting,
+/// recording, and saving all mean Stop (steady-state `isRecording` would
+/// double-start during the starting and saving windows), and a Stop while
+/// the mic is still engaging joins the pending start.
+enum MenuBarMeetingMenuAction: Equatable {
+    case start
+    case stop
+    case stopJoiningPendingStart
+
+    static func resolve(_ state: MeetingSessionState) -> MenuBarMeetingMenuAction {
+        switch state {
+        case .startingRecording:
+            return .stopJoiningPendingStart
+        case .recording, .stoppingRecording:
+            return .stop
+        case .idle, .loadingModels, .ready, .transcribing, .error:
+            return .start
+        }
+    }
+
+    var analyticsActionID: String {
+        self == .start ? "start_meeting" : "stop_meeting"
+    }
+}

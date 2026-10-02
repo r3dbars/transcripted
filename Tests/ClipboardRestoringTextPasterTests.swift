@@ -1,17 +1,12 @@
 // ClipboardRestoringTextPasterTests.swift
 // Tests for safe clipboard restore behavior.
 //
-// Source-text pins: most suites below run the real ClipboardRestoringTextPaster against real or
-// fake NSPasteboards — genuine behavioral coverage. A few instead grep
-// Sources/Support/ClipboardRestoringTextPaster.swift as text: the AX messaging-timeout bound and
-// the CFGetTypeID cast guard inside FocusedTextPasteConfirmation.capture(). capture() calls
-// AXUIElementCreateSystemWide for the live focused
-// UI element, which a headless unit test cannot construct, so there is no way to drive it and
-// observe the guard firing. One more suite ("ambiguous paste delivery...") greps
-// Sources/UI/Overlay/DictationSessionController.swift's stopDictationAndPaste instead — a
-// @MainActor method wired to TranscriptedAppState/FloatingOverlayController that this runner also
-// can't instantiate. If you refactor either function, update the matched strings; they are the
-// only coverage those code paths have.
+// Most suites run the real ClipboardRestoringTextPaster against real or fake
+// NSPasteboards. The AX bounds and the focused-element type check run through
+// FocusedTextPasteConfirmationPolicy.boundedFocusedElement with a fake AX reader.
+// The delivery notice after a dictation is DictationDeliveryPresentation. One
+// suite still reads FloatingOverlayController.swift as text (the Not pasted
+// notice preview), because that file is in open PR #1946.
 
 import AppKit
 import Foundation
@@ -169,16 +164,24 @@ func testClipboardRestoringTextPaster() async {
 
     await MainActor.run {
         runSuite("ClipboardRestoringTextPaster confirmation bounds synchronous AX reads") {
-            let source = try! String(
-                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
-                encoding: .utf8
+            // Promise: a busy editor can't stall delivery, because every AX read
+            // on the system-wide and focused elements has a short timeout.
+            let systemWide = AXUIElementCreateSystemWide()
+            let focused = AXUIElementCreateApplication(getpid())
+            var bounded: [(element: AXUIElement, timeout: Float)] = []
+            let element = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+                systemWide: systemWide,
+                setMessagingTimeout: { bounded.append(($0, $1)) },
+                copyFocusedElement: { _ in focused }
+            )
+            assertTrue(element.map { CFEqual($0, focused) } == true, "the focused element comes back for confirmation")
+            assertEqual(bounded.count, 2, "both the system-wide and the focused element are bounded")
+            assertTrue(
+                bounded.count == 2 && CFEqual(bounded[0].element, systemWide) && CFEqual(bounded[1].element, focused),
+                "the system-wide element is bounded before the read, the focused one before its reads"
             )
             assertTrue(
-                source.contains("AXUIElementSetMessagingTimeout(element, messagingTimeout)") && source.contains("AXUIElementSetMessagingTimeout(systemWideElement, messagingTimeout)"),
-                "paste confirmation must bound synchronous AX reads so busy editors cannot stall delivery"
-            )
-            assertTrue(
-                source.contains("private static let messagingTimeout: Float = 0.05"),
+                bounded.allSatisfy { $0.timeout > 0 && $0.timeout <= 0.1 },
                 "paste confirmation should fail fast when a target editor is temporarily unresponsive"
             )
         }
@@ -312,58 +315,140 @@ func testClipboardRestoringTextPaster() async {
 
         runSuite("ClipboardRestoringTextPaster.capture — focused element cast is crash-proof") {
             // Regression: kAXFocusedUIElementAttribute's CFTypeRef was force-cast
-            // straight to AXUIElement with no type check. AXUIElement is a toll-free
-            // CF opaque type, so Swift can't verify `as?`/`as!` against it at runtime
-            // (the compiler treats the downcast as unconditionally successful) — the
-            // real guard has to be an explicit CFGetTypeID comparison before the cast,
-            // matching the existing AXValue-cast pattern in this file. A live
-            // AXUIElement isn't constructible in a unit test, so this asserts on
-            // source shape like the sibling test above.
-            let source = try! String(
-                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
-                encoding: .utf8
+            // straight to AXUIElement with no type check. Swift can't verify that
+            // cast at runtime, so a value of the wrong CF type must be refused
+            // before any AX API sees it.
+            let systemWide = AXUIElementCreateSystemWide()
+            var bounded: [AXUIElement] = []
+            let wrongType = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+                systemWide: systemWide,
+                setMessagingTimeout: { element, _ in bounded.append(element) },
+                copyFocusedElement: { _ in "not an AXUIElement" as CFString }
             )
-            assertTrue(
-                source.contains("CFGetTypeID(focusedElement) == AXUIElementGetTypeID()"),
-                "the focused UI element must be type-checked before use, since AXUIElement casts can't fail at runtime on their own"
+            assertNil(wrongType, "a mismatched CF type degrades to no confirmation")
+            assertEqual(bounded.count, 1, "the wrong object is never handed to an AX API")
+
+            let missing = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+                systemWide: systemWide,
+                setMessagingTimeout: { _, _ in },
+                copyFocusedElement: { _ in nil }
             )
-            assertTrue(
-                source.contains("focused UI element attribute returned an unexpected CF type"),
-                "a mismatched CF type should log and degrade to no confirmation instead of misusing the wrong object with AX APIs"
+            assertNil(missing, "no focused element means no confirmation")
+        }
+
+        runSuite("An ambiguous paste reads as pasted and never offers a duplicate paste") {
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .likelyPasted, saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: true
+                ),
+                .clipboardNotice("Pasted. Press Return to send it."),
+                "a likely paste tells Auto Enter users to press Return themselves"
             )
-            assertTrue(
-                source.contains("#if canImport(TranscriptedCore)\nimport TranscriptedCore\n#endif"),
-                "the TranscriptedCore import must stay behind canImport — this file is compiled directly into the fast-test binary without the TranscriptedCore module search path"
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .likelyPasted, saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false
+                ),
+                .success(title: "Pasted"),
+                "without Auto Enter a likely paste is just Pasted"
             )
-            assertTrue(
-                source.components(separatedBy: "import TranscriptedCore").count == 2,
-                "exactly one TranscriptedCore import is allowed, and it must be the canImport-guarded one"
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .likelyPasted, saveFailureMessage: "Couldn't save.", autoSend: .disabled, autoSendExpected: true
+                ),
+                .error("Couldn't save."),
+                "a save failure still surfaces after a likely paste"
             )
         }
 
-        runSuite("DictationSessionController — ambiguous paste delivery cannot offer a duplicate paste") {
-            let source = try! String(
-                contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
-                encoding: .utf8
+        runSuite("A clipboard fallback is a calm Not pasted notice, and an unconfirmed paste says so") {
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .copied("Press ⌘V.", reason: .pasteNotConfirmed),
+                    saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false
+                ),
+                .notPasted(message: "Press ⌘V.", unconfirmed: true),
+                "an unconfirmed paste uses the Not pasted notice and says it couldn't confirm"
             )
-            assertFalse(
-                source.contains("actionTitle: \"Paste Again\"")
-                    || source.contains("retryPasteWithoutAutoEnter"),
-                "an ambiguous delivery may already have landed, so the overlay must not offer a duplicate paste"
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .copied("Press ⌘V.", reason: .focusChanged),
+                    saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false
+                ),
+                .notPasted(message: "Press ⌘V.", unconfirmed: false),
+                "a focus change is a plain Not pasted notice"
+            )
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .copied("Press ⌘V.", reason: .focusChanged),
+                    saveFailureMessage: "Couldn't save.", autoSend: .disabled, autoSendExpected: false
+                ),
+                .error("Press ⌘V. Couldn't save."),
+                "a simultaneous save failure keeps the clipboard-recovery message"
+            )
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .failed("Clipboard too big.", reason: .clipboardSnapshotIncomplete),
+                    saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false
+                ),
+                .clipboardBusy(message: "Clipboard too big."),
+                "words that never reached the clipboard are offered back"
+            )
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .failed("Paste failed.", reason: .unknown),
+                    saveFailureMessage: "Couldn't save.", autoSend: .disabled, autoSendExpected: false
+                ),
+                .error("Paste failed. Couldn't save."),
+                "a failed paste and a failed save are both reported"
+            )
+        }
+
+        runSuite("A confirmed paste shows the Auto Enter result") {
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .pasted, saveFailureMessage: nil, autoSend: .sent(.enter), autoSendExpected: true
+                ),
+                .success(title: DictationAutoSendOutcome.sent(.enter).confirmationTitle ?? ""),
+                "a sent paste names the key it pressed"
+            )
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .pasted, saveFailureMessage: nil, autoSend: .failed(.targetChanged), autoSendExpected: true
+                ),
+                .error(DictationAutoSendFailure.targetChanged.message),
+                "a paste whose send failed says why"
+            )
+            assertEqual(
+                DictationDeliveryPresentation.resolve(
+                    outcome: .pasted, saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false
+                ),
+                .success(title: "Pasted")
+            )
+        }
+
+        runSuite("Diagnostics and analytics report the delivery value dictation history saves") {
+            assertEqual(
+                TextPasteOutcome.likelyPasted.deliveryProperties,
+                ["delivery": DictationDelivery.pasted.rawValue],
+                "a likely paste is recorded as pasted, not by its diagnostic name"
             )
             assertTrue(
-                source.contains("case .likelyPasted:")
-                    && source.contains("overlayController.showClipboardNotice(\"Pasted. Press Return to send it.\")"),
-                "a likely paste should read as pasted, and tell Auto Enter users to press Return themselves"
+                TextPasteOutcome.likelyPasted.diagnosticName != DictationDelivery.pasted.rawValue,
+                "the diagnostic name differs, which is why events must not use it for delivery"
             )
-            assertTrue(
-                source.contains("case .copied(let message, reason: let reason):")
-                    && source.contains("unconfirmed: reason == .pasteNotConfirmed,")
-                    && source.contains("overlayController.showNotPastedNotice("),
-                "copied fallbacks should use a calm clipboard notice instead of a warning, and an unconfirmed paste says so"
+            assertEqual(
+                TextPasteOutcome.copied("Press ⌘V.", reason: .focusChanged).deliveryProperties,
+                ["delivery": "copied"]
             )
-            // The island's Paste is offered only next to the words themselves,
-            // so a user can see whether an ambiguous paste already landed.
+            assertEqual(
+                TextPasteOutcome.failed("Paste failed.", reason: .temporaryClipboardWriteFailed).deliveryProperties,
+                ["delivery": "failed", "failure_kind": "temporary_clipboard_write_failed"],
+                "a failed paste carries its coarse failure kind"
+            )
+        }
+
+        runSuite("The Not pasted notice previews the dictation it would paste") {
+            // Source text until open PR #1946 settles FloatingOverlayController.
             let overlaySource = try! String(
                 contentsOfFile: "Sources/UI/Overlay/FloatingOverlayController.swift",
                 encoding: .utf8
@@ -371,23 +456,6 @@ func testClipboardRestoringTextPaster() async {
             assertTrue(
                 overlaySource.contains("preview: notPastedText,"),
                 "the Not pasted notice shows the dictation it would paste"
-            )
-            assertFalse(
-                source.contains("pasteConfirmationUnavailable"),
-                "the old catch-all reason mixed real misses with likely pastes and must not come back"
-            )
-            assertTrue(
-                source.contains("overlayController.showError(\"\\(message) \\(saveFailureMessage)\")"),
-                "a simultaneous save failure must preserve the clipboard-recovery message"
-            )
-            assertFalse(
-                source.contains("pasteConfirmationUnavailableAutoSendEligible"),
-                "an unattributed clipboard-provider read must not create an Auto Enter success path"
-            )
-            assertTrue(
-                source.contains("\"delivery\": pasteOutcome.delivery.rawValue")
-                    && !source.contains("\"delivery\": pasteOutcome.diagnosticName"),
-                "diagnostics events must report the same delivery value that analytics and dictation history record"
             )
         }
 

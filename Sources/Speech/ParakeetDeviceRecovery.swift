@@ -219,10 +219,7 @@ extension ParakeetEngine {
 
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
-        guard !isSharedMeetingMicClaimCurrent,
-              pinnedDictationRecording == nil,
-              !audioStartInProgress,
-              !audioStopInProgress,
+        guard admitsConfigChangeRecovery,
               generationAtAdmission == audioConfigObservationGeneration else {
             return
         }
@@ -241,8 +238,7 @@ extension ParakeetEngine {
                   !audioStartInProgress, !audioStopInProgress,
                   generationAtAdmission == audioConfigObservationGeneration else { return }
         }
-        if !forceForMicrophoneSharing,
-           ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
+        if ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
                source: source,
                observedAt: configChangeObservedAt,
                ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
@@ -250,7 +246,8 @@ extension ParakeetEngine {
                stableRoute: stableAudioRouteIdentity,
                observedRoute: observedRouteIdentity,
                bindingToken: bindingToken,
-               currentEngine: audioEngine
+               currentEngine: audioEngine,
+               forceForMicrophoneSharing: forceForMicrophoneSharing
            ) {
             return
         }
@@ -303,11 +300,12 @@ extension ParakeetEngine {
 
         // Healthy local samples do not prove a call app can still read its mic.
         // A confirmed VPIO downgrade must run even when our stream is healthy.
-        if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe(
+        if ParakeetConfigChangeContinuityPolicy.shouldProbe(
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
-            graphEndpointsMatch: graphEndpointsMatch
+            graphEndpointsMatch: graphEndpointsMatch,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
         ) {
             try? await Task.sleep(
                 nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay
@@ -339,13 +337,14 @@ extension ParakeetEngine {
             }
         }
 
-        let graphStrategy = forceForMicrophoneSharing ? .rebuildGraph : ParakeetConfigChangeGraphPolicy.strategy(
+        let graphStrategy = ParakeetConfigChangeGraphPolicy.strategy(
             source: source,
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
             stableRouteIdentity: stableAudioRouteIdentity,
-            observedRouteIdentity: observedRouteIdentity
+            observedRouteIdentity: observedRouteIdentity,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
         )
         audioGraphGeneration += 1
 
@@ -393,17 +392,21 @@ extension ParakeetEngine {
         }
         isEnginePrewarmed = false
 
-        switch releasedVoiceProcessing ? graphStrategy : .rebuildGraph {
+        switch ParakeetConfigChangeGraphPolicy.action(
+            strategy: graphStrategy,
+            releasedVoiceProcessing: releasedVoiceProcessing,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
+        ) {
         case .reuseCurrentGraph:
             // CoreAudio already stopped this graph. Leave it in place so the
             // normal recovery snapshot + recording restart can rebind the tap
             // without retiring another AVAudioEngine and scheduling another
             // late configuration echo.
             AppLogger.transcription.info("PARAKEET | stable configuration change → reusing current audio graph")
-        case .rebuildGraph:
+        case .rebuildGraph(let requiresFreshGraph):
             guard let rebuiltOwner = await rebuildAudioEngine(
                 reason: "configuration_change",
-                requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing
+                requiresFreshGraph: requiresFreshGraph
             ) else {
                 cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
                 return
@@ -424,23 +427,41 @@ extension ParakeetEngine {
         configChangeDebounceTask = Task { @MainActor [weak self] in
             // 250ms debounce — long enough to coalesce rapid BT notifications,
             // short enough that dictation recovery feels responsive.
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
-            guard !Task.isCancelled, let self = self else { return }
-            let wasRecordingForAnalytics = self.configChangeWasRecording
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let selection = await self.boundedRouteNotificationSelection()
-                guard !Task.isCancelled, !self.isShuttingDown else { return }
-                self.recordStableRouteChangeAnalytics(
-                    selection: selection,
-                    wasRecording: wasRecordingForAnalytics,
-                    recoveryGeneration: recoveryGeneration
-                )
-            }
             // Telemetry coalescing must never suppress the real recovery state
             // transition, including an A -> B -> A notification burst.
-            self.attemptDeviceRecovery()
+            await ParakeetConfigChangeDebounce.settle(
+                sleep: {
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
+                },
+                isCancelled: { Task.isCancelled || self == nil },
+                scheduleStableRouteReport: {
+                    guard let self else { return }
+                    let wasRecordingForAnalytics = self.configChangeWasRecording
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let selection = await self.boundedRouteNotificationSelection()
+                        guard !Task.isCancelled, !self.isShuttingDown else { return }
+                        self.recordStableRouteChangeAnalytics(
+                            selection: selection,
+                            wasRecording: wasRecordingForAnalytics,
+                            recoveryGeneration: recoveryGeneration
+                        )
+                    }
+                },
+                attemptRecovery: { self?.attemptDeviceRecovery() }
+            )
         }
+    }
+
+    /// Startup, a suspended stop, a borrowed meeting mic, and the pinned
+    /// recorder each own the graph; config-change recovery waits its turn.
+    private var admitsConfigChangeRecovery: Bool {
+        ParakeetConfigChangeAdmissionPolicy.admits(
+            sharedMeetingMicClaimCurrent: isSharedMeetingMicClaimCurrent,
+            audioStartInProgress: audioStartInProgress,
+            audioStopInProgress: audioStopInProgress,
+            pinnedRecordingActive: pinnedDictationRecording != nil
+        )
     }
 
     private func invalidateAudioGraphForIdleRouteChange() {
@@ -713,10 +734,8 @@ extension ParakeetEngine {
                 // is wedged behind a CoreAudio call that never returned (the AirPods
                 // / Bluetooth route-switch hang). Rebuilding on that same queue would
                 // never run, so fail safe by abandoning the blocked graph instead.
-                let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
-                let audioEngineQueueBlocked =
-                    audioEngineWorkError?.requiresGraphAbandonment == true
-                if audioEngineQueueBlocked {
+                let graphRepair = ParakeetDeviceRecoveryFailurePolicy.graphRepair(after: error)
+                if graphRepair == .abandonBlockedAudioGraph {
                     guard let lastSnapshotOwner,
                           self.ownsAudioEngineQueue(lastSnapshotOwner) else { return }
                 }
@@ -785,11 +804,11 @@ extension ParakeetEngine {
                 // Circuit-open means this attempt never entered the current
                 // queue. The already-counted blocked workers keep their leases;
                 // fail closed without retiring another healthy graph.
-                if audioEngineWorkError?.isCircuitOpen == true {
+                if graphRepair == .keepCurrentGraph {
                     return
                 }
                 switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
-                    audioEngineQueueBlocked: audioEngineQueueBlocked
+                    audioEngineQueueBlocked: graphRepair == .abandonBlockedAudioGraph
                 ) {
                 case .queuedOnAudioEngineQueue:
                     guard await self.rebuildAudioEngine(reason: "device_change_rewarm_failed") != nil else { return }

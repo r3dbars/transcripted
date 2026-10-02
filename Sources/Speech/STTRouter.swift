@@ -319,11 +319,12 @@ class STTRouter: ObservableObject {
         guard !isRecordingModelLoaded, !Task.isCancelled,
               ProcessInfo.processInfo.systemUptime < deadline else { return }
         let changes: AnyPublisher<Void, Never>
-        if recordingModel.parakeetVariant != nil {
+        switch recordingModel.runtime {
+        case .parakeet:
             changes = parakeetEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
-        } else if recordingModel.isAppleSpeech {
+        case .appleSpeech:
             changes = appleSpeechEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
-        } else {
+        case .whisper:
             changes = whisperEngine.$modelDownloadState.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
         await ModelLoadProgressWaiter.wait(for: changes, until: deadline)
@@ -387,13 +388,12 @@ class STTRouter: ObservableObject {
         defer {
             parakeetEngine.scorePendingPinnedSpeedPathTake(text: text, emptyReason: lastEmptyTranscriptionReason)
         }
-        // Read the person's languages (a Carbon keyboard lookup) only when the
-        // text is nearly all one non-Latin script.
+        // The policy reads the person's languages (a Carbon keyboard lookup)
+        // only when the text is nearly all one non-Latin script.
         guard let text, !Task.isCancelled,
-              let script = DictationLanguageScriptPolicy.dominantNonLatinScript(in: text),
-              !DictationLanguageScriptPolicy.isExpected(
-                  script,
-                  userLanguageCodes: DictationUserLanguages.current()
+              let script = DictationLanguageScriptPolicy.unexpectedScript(
+                  in: text,
+                  userLanguageCodes: { DictationUserLanguages.current() }
               ) else { return text }
         // A multilingual model probably guessed a language this person doesn't
         // use (Russian for an English speaker). Don't paste it unasked; the
@@ -509,25 +509,24 @@ class STTRouter: ObservableObject {
                 transcriptionOwner,
                 expectedRevision: consumedRevision
             ) else { return nil }
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                let analysis = DictationAudioRecovery.analyze(
-                    samples: recording.samples16k,
-                    sampleRate: TranscriptedConstants.parakeetSampleRate
-                )
-                lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reason(
-                    hasUsableSpeechSignal: analysis.hasUsableSpeechSignal
-                )
+            if let emptyReason = DictationEmptyInferencePolicy.externalEngineEmptyReason(
+                text: text,
+                samples16k: recording.samples16k
+            ) {
+                lastEmptyTranscriptionReason = emptyReason
                 return nil
             }
             return text
         } catch {
-            if Task.isCancelled || error is CancellationError { return nil }
+            guard let failureReason = DictationEmptyInferencePolicy.externalEngineFailureReason(
+                for: error,
+                taskCancelled: Task.isCancelled
+            ) else { return nil }
             guard parakeetEngine.ownsRecordedTranscription(
                 transcriptionOwner,
                 expectedRevision: consumedRevision
             ) else { return nil }
-            lastEmptyTranscriptionReason = .modelFailure
+            lastEmptyTranscriptionReason = failureReason
             EventReporter.shared.capture(
                 level: .error,
                 engine: model.engineName,
@@ -560,7 +559,7 @@ class STTRouter: ObservableObject {
         switch resolvedModel {
         case .parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental:
             if let language, case .explicit = language.selection {
-                throw Self.unsupportedLanguageError()
+                throw TranscriptionLanguageModelErrors.savedLanguageNeedsLanguageModel()
             }
             guard isModelLoaded(for: resolvedModel) else {
                 throw NSError(domain: "STTRouter", code: 1, userInfo: [
@@ -626,18 +625,18 @@ class STTRouter: ObservableObject {
             do {
                 return try await appleSpeechEngine.resolveLanguage(selection: selection)
             } catch AppleSpeechEngineError.unsupportedLanguage(let languageName) {
-                // Retries keep the capture's saved language, so the fix is a
-                // model that can transcribe it. The "select a whisper model"
-                // wording routes to that guidance instead of generic
-                // pipeline-failed copy. Auto saved no language (it failed on
-                // the Mac's), so it rethrows the engine error, which gets the
-                // pipeline's generic copy; setup usually fails first there.
-                guard case .explicit = selection else { throw AppleSpeechEngineError.unsupportedLanguage(languageName) }
-                throw Self.appleSpeechUnsupportedLanguageError(languageName: languageName)
+                // Auto saved no language (it failed on the Mac's), so it
+                // rethrows the engine error, which gets the pipeline's generic
+                // copy; setup usually fails first there.
+                guard let settingsFix = TranscriptionLanguageModelErrors.appleSpeechUnsupportedLanguage(
+                    languageName: languageName,
+                    isExplicitSelection: selection != .automatic
+                ) else { throw AppleSpeechEngineError.unsupportedLanguage(languageName) }
+                throw settingsFix
             }
         }
         guard resolvedModel.isWhisper else {
-            if case .explicit = selection { throw Self.unsupportedLanguageError() }
+            if case .explicit = selection { throw TranscriptionLanguageModelErrors.savedLanguageNeedsLanguageModel() }
             // Parakeet's native multilingual decoder remains automatic. Its
             // optional Language API only filters scripts, not spoken languages.
             return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .unsupported)
@@ -647,18 +646,6 @@ class STTRouter: ObservableObject {
             selection: selection,
             model: resolvedModel
         )
-    }
-
-    private static func appleSpeechUnsupportedLanguageError(languageName: String) -> NSError {
-        NSError(domain: "STTRouter", code: 4, userInfo: [
-            NSLocalizedDescriptionKey: "Apple Speech can't transcribe \(languageName). Select a Whisper model in Settings to transcribe this recording in that language."
-        ])
-    }
-
-    private static func unsupportedLanguageError() -> NSError {
-        NSError(domain: "STTRouter", code: 3, userInfo: [
-            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model or Apple Speech in Settings to transcribe it in that language."
-        ])
     }
 
     func cancel() {

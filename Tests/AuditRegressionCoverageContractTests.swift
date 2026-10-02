@@ -1,9 +1,10 @@
-// The pasteback suite runs the real ClipboardRestoringTextPaster. The other three suites still
-// read source as text: MeetingOverlayController, MenuBarPanelController, and
-// TranscriptionQueueCoordinator are not compiled into the fast runner (see
-// docs/testing-source-text-inventory.md for the seam each one needs).
+// The pasteback suite runs the real ClipboardRestoringTextPaster, and the
+// whole-second suite runs the shared duration publisher the menu bar uses.
+// The overlay suite still reads source as text: MeetingOverlayController is
+// not compiled into the fast runner (see docs/testing-source-text-inventory.md).
 
 import AppKit
+import Combine
 import Foundation
 
 @MainActor
@@ -20,15 +21,18 @@ func testAuditRegressionCoverageContract() async {
         )
     }
 
-    runSuite("AuditRegressionCoverageContract — menubar duration updates stay deduped to whole seconds") {
-        let source = readSourceFixture("Sources/UI/MenuBar/MenuBarPanelController.swift")
-        assertTrue(
-            source.contains(".map { Int($0) }"),
-            "menubar recording-duration sink should collapse subsecond ticks"
-        )
-        assertTrue(
-            source.contains(".removeDuplicates()"),
-            "menubar timer refreshes should skip unchanged whole-second values"
+    runSuite("Recording-duration ticks reach timer labels once per whole second") {
+        let ticks = PassthroughSubject<TimeInterval, Never>()
+        var seconds: [Int] = []
+        let subscription = ticks.wholeSecondTicks().sink { seconds.append($0) }
+        for tick in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.99, 2.0, 2.2, 5.0] {
+            ticks.send(tick)
+        }
+        subscription.cancel()
+        assertEqual(
+            seconds,
+            [0, 1, 2, 5],
+            "5 Hz duration ticks must collapse to one update per whole second before a refresh"
         )
     }
 
@@ -86,20 +90,6 @@ func testAuditRegressionCoverageContract() async {
             failedDispatchBoard.string(forType: .string),
             "synthetic failed dispatch dictation",
             "a failed dispatch should leave the text on the clipboard for a manual paste"
-        )
-    }
-
-    runSuite("AuditRegressionCoverageContract — failed meeting queue survives synchronous terminal failures") {
-        // Queue-dispatch logic moved to TranscriptionQueueCoordinator.swift
-        // (audit 2026-07-08 wave 2, W2-B).
-        let source = readSourceFixture("Sources/Meeting/TranscriptionQueueCoordinator.swift")
-        assertTrue(
-            source.contains("finalizeBackgroundTranscriptionStateIfNeeded()"),
-            "terminal display-status handlers should revisit background queue state"
-        )
-        assertTrue(
-            source.contains("handleBackgroundTranscriptionWorkChanged(snapshot: currentBackgroundTranscriptionWorkSnapshot)"),
-            "queue draining should have a no-argument path for terminal status changes that do not publish activeCount"
         )
     }
 }

@@ -118,10 +118,8 @@ final class WhisperEngine: ObservableObject {
             )
             try Task.checkCancellation()
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            let trimmed = results
-                .map(\.text)
-                .joined(separator: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let transcript = SegmentedEngineTranscript(segmentTexts: results.map(\.text))
+            let trimmed = transcript.uncorrected
             let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
 
@@ -141,10 +139,9 @@ final class WhisperEngine: ObservableObject {
                 ]
             )
 
-            // Apply the user's custom dictionary, mirroring ParakeetEngine.
-            // Without this, proper-noun corrections silently fail on the Whisper
-            // path. The processor is a no-op when the dictionary is empty.
-            return CustomDictionaryTextProcessor.apply(to: trimmed)
+            // The user's custom dictionary, mirroring ParakeetEngine. Without it,
+            // proper-noun corrections silently fail on the Whisper path.
+            return transcript.text
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime

@@ -68,9 +68,12 @@ extension DictationSession {
     func startDictationAudioRecording(
         appState: TranscriptedAppState,
         isRecoveryAttempt: Bool = false,
-        isCurrentSession: () -> Bool = { true },
-        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)? = nil,
-        onStartFailed: (() async -> Void)? = nil
+        // No defaults: every native start says which session its stage
+        // reports belong to and what happens after a failed open, so the
+        // recovery loop can't silently drop either one.
+        isCurrentSession: () -> Bool,
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
+        onStartFailed: (() async -> Void)?
     ) async -> Bool {
         if canUseActiveMeetingMicForDictation(appState: appState) {
             if appState.meetingSession.startDictationFromActiveMeetingMic() {
@@ -83,19 +86,13 @@ extension DictationSession {
                 return false
             }
         }
-        return await DictationRecordingStartAttempt.run(
-            start: {
-                await DictationMicrophoneStartReporting.run(
-                    isCurrentSession: isCurrentSession,
-                    onStageChanged: onStartStageChanged
-                ) {
-                    if isRecoveryAttempt {
-                        return await appState.sttRouter.startRecordingRecoveryAttempt()
-                    }
-                    return await appState.sttRouter.startRecording()
-                }
-            },
-            onFailure: onStartFailed
+        return await DictationNativeMicrophoneStart.run(
+            isRecoveryAttempt: isRecoveryAttempt,
+            isCurrentSession: isCurrentSession,
+            onStartStageChanged: onStartStageChanged,
+            onStartFailed: onStartFailed,
+            startRecording: { await appState.sttRouter.startRecording() },
+            startRecordingRecoveryAttempt: { await appState.sttRouter.startRecordingRecoveryAttempt() }
         )
     }
 
@@ -205,8 +202,8 @@ extension DictationSession {
         appState: TranscriptedAppState,
         sessionStartTime: CFAbsoluteTime,
         isDictating: @escaping () -> Bool,
-        onStartFailed: (() async -> Void)? = nil,
-        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)? = nil,
+        onStartFailed: (() async -> Void)?,
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
         onWaitUpdate: @escaping (WaitStatus) -> Void,
         onRecordingStarted: @escaping () -> Void
     ) async -> StartOutcome {

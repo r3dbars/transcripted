@@ -1057,7 +1057,7 @@ struct HomeFailedMeetingInlineRow: View {
             if inlinePresentation.canShowRetryAction {
                 HomeAttentionActionButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
-                    isDisabled: retryDisabled,
+                    isDisabled: rowActions.retryDisabled,
                     automationIdentifier: "transcripted.home.failed-meeting.retry",
                     action: onRetry
                 )
@@ -1083,7 +1083,7 @@ struct HomeFailedMeetingInlineRow: View {
                 .accessibilityIdentifier("transcripted.home.failed-meeting.play-audio")
             }
 
-            if hasRetainedAudioFiles {
+            if rowActions.showsRevealAudio {
                 Button {
                     onRevealAudio()
                 } label: {
@@ -1097,9 +1097,9 @@ struct HomeFailedMeetingInlineRow: View {
 
             HomeRowMoreMenuButton(items: [
                 HomeRowMenuItem(
-                    title: "Delete failed meeting",
+                    title: rowActions.deleteTitle,
                     symbolName: "trash",
-                    isDestructive: true,
+                    isDestructive: rowActions.deleteIsDestructive,
                     action: onClear
                 )
             ], automationIdentifier: "transcripted.home.failed-meeting.more")
@@ -1150,14 +1150,8 @@ struct HomeFailedMeetingInlineRow: View {
         }
     }
 
-    private var retryDisabled: Bool {
-        FailedMeetingRecoveryPresentation.retryDisabled(
-            canRetry: canRetry,
-            isRetryable: item.isRetryable,
-            isRetrying: item.isRetrying,
-            hasAudioFiles: item.hasAudioFiles,
-            usableAudio: item.usableAudio
-        )
+    private var rowActions: HomeFailedMeetingRowActions {
+        HomeFailedMeetingRowActions.make(item: item, canRetry: canRetry)
     }
 
     private var retryHelp: String {
@@ -1169,10 +1163,6 @@ struct HomeFailedMeetingInlineRow: View {
             hasAudioFiles: item.hasAudioFiles,
             usableAudio: item.usableAudio
         )
-    }
-
-    private var hasRetainedAudioFiles: Bool {
-        !item.audioURLs.isEmpty
     }
 }
 

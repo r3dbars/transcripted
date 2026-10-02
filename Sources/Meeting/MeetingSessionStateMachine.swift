@@ -106,6 +106,19 @@ enum MeetingSessionStateMachine {
         }
     }
 
+    /// Whether a new Record request may go ahead. A start that is already in
+    /// flight, or a capture that is starting, recording, or stopping, turns
+    /// the request away so a prompt or menu action never counts it as an
+    /// accepted Record.
+    static func startAdmission(
+        startCallInFlight: Bool,
+        state: MeetingSessionState
+    ) -> MeetingStartAdmission {
+        if startCallInFlight { return .ignoredStartInFlight }
+        if isCaptureSessionActive(state) { return .ignoredActiveCapture }
+        return .accepted
+    }
+
     /// Narrow "is a recording actually in progress right now" question —
     /// steady state only, excluding the starting/stopping windows. This is
     /// what `MeetingSessionController.isRecording` (Stop/Start button labels,
@@ -131,4 +144,14 @@ enum MeetingSessionStateMachine {
     static func mayReportUnrelatedFailureAsError(while state: MeetingSessionState) -> Bool {
         !isCaptureSessionActive(state)
     }
+}
+
+/// Answer to a Record request, from `MeetingSessionStateMachine.startAdmission`.
+enum MeetingStartAdmission: Equatable {
+    case accepted
+    case ignoredStartInFlight
+    case ignoredActiveCapture
+
+    /// What `startRecording` returns for a request it turns away here.
+    var acceptsRecord: Bool { self == .accepted }
 }

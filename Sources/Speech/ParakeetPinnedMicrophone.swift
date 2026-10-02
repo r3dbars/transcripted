@@ -73,8 +73,10 @@ extension ParakeetEngine {
     func usesPinnedDictationMicrophone() -> Bool {
         guard PinnedMicrophoneCapturePreferences.isEnabled() else { return false }
         // Apple voice processing only exists on the AVAudioEngine path.
-        let voiceProcessingRequested = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-            && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+        let voiceProcessingRequested = DictationVoiceProcessingRoutePolicy.isRequested(
+            savedPreference: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+            callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+        )
         return !voiceProcessingRequested
     }
 
@@ -499,26 +501,19 @@ extension ParakeetEngine {
         let lidClosed = MacLidState.isClosed()
         // The excluded mic (the one that just died or went silent) is left
         // out before ranking, so a Studio Display mic beats the AirPods default.
-        let automatic = try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-            prefersBuiltInBluetoothInput: microphoneChoice != .macOSInput,
+        return try PinnedDictationInputPolicy.pinnedSelection(
+            followsMacOSInput: microphoneChoice == .macOSInput,
+            chosenUID: microphoneChoice.deviceUID,
             lidClosed: lidClosed,
-            excludingDeviceID: excludingDeviceID
-        )
-        let chosenUID = microphoneChoice.deviceUID
-        guard microphoneChoice != .macOSInput,
-              PinnedDictationInputPolicy.mayReplace(automatic) || chosenUID != nil,
-              var availableInputs = try? CoreAudioInputDeviceLookup.availableInputDevices() else {
-            return automatic
-        }
-        if let excludingDeviceID {
-            availableInputs.removeAll { $0.id == excludingDeviceID }
-        }
-        return PinnedDictationInputPolicy.selection(
-            automatic: automatic,
-            availableInputs: availableInputs,
-            preferredUID: chosenUID,
-            chosenInputAlwaysWins: true,
-            lidClosed: lidClosed
+            excludingDeviceID: excludingDeviceID,
+            automaticSelection: { prefersBuiltInBluetoothInput in
+                try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                    prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput,
+                    lidClosed: lidClosed,
+                    excludingDeviceID: excludingDeviceID
+                )
+            },
+            availableInputs: { try CoreAudioInputDeviceLookup.availableInputDevices() }
         )
     }
 

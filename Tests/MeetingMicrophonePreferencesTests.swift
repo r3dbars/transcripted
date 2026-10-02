@@ -38,19 +38,46 @@ func testMeetingMicrophonePreferences() {
             MeetingMicrophonePreferences.recordsMacOSInput(pinnedRecorderOn: true, microphoneChoice: .macOSInput, userDefaults: defaults),
             "with the recorder on, only \"Same as macOS Sound settings\" records the macOS input as-is"
         )
+    }
 
-        let bridge = readSourceFixture("Sources/Meeting/MeetingCaptureBridge.swift")
+    runSuite("Meeting start picks the mic through the recorder-aware check") {
+        let suiteName = "MeetingMicrophonePreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        MeetingMicrophonePreferences.setUsesSystemInput(true, userDefaults: defaults)
+
+        func plan(recorderOn: Bool, choice: MicrophoneChoice) -> MeetingMicStartPlan {
+            MeetingMicStartPlan.make(
+                processingMode: .softwareAGC,
+                boostRequestedForThisMeeting: false,
+                pinnedRecorderOn: recorderOn,
+                microphoneChoice: choice,
+                userDefaults: defaults
+            )
+        }
+
         assertTrue(
-            bridge.contains("audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.recordsMacOSInput("),
-            "meeting start must choose the mic mode through the recorder-aware check"
+            plan(recorderOn: false, choice: .automatic).recordsMacOSInput,
+            "without the recorder, the saved system-mic setting still applies at start"
         )
         assertFalse(
-            bridge.contains("audio.meetingInputDeviceSelectionMode = MeetingMicrophonePreferences.usesSystemInput()"),
-            "reading the raw setting put meetings back on the AirPods mic"
+            plan(recorderOn: true, choice: .automatic).recordsMacOSInput,
+            "with the recorder on, the raw setting must not put meetings back on the AirPods mic"
         )
         assertTrue(
-            bridge.contains("audio.meetingPreferredInputDeviceUID = pinnedRecorderOn ? microphoneChoice.deviceUID : nil"),
-            "a mic picked in Settings applies to meetings only while the recorder shows that picker"
+            plan(recorderOn: true, choice: .macOSInput).recordsMacOSInput,
+            "with the recorder on, \"Same as macOS Sound settings\" records the macOS input"
         )
+        assertEqual(
+            plan(recorderOn: true, choice: .device(uid: "usb-mic")).preferredInputDeviceUID,
+            "usb-mic",
+            "a mic picked in Settings applies to meetings while the recorder shows that picker"
+        )
+        assertNil(
+            plan(recorderOn: false, choice: .device(uid: "usb-mic")).preferredInputDeviceUID,
+            "a mic left picked after the recorder went off must not steer meetings"
+        )
+        assertTrue(plan(recorderOn: true, choice: .automatic).usesPinnedMicrophoneCapture, "the recorder setting reaches capture")
+        assertFalse(plan(recorderOn: false, choice: .automatic).usesPinnedMicrophoneCapture, "the recorder stays off when its setting is off")
     }
 }

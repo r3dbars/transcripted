@@ -149,3 +149,150 @@ enum DictationMicrophoneStartReporting {
         return started
     }
 }
+
+extension DictationStartReadinessPolicy {
+    /// The context for `dictation_start_readiness_prepared`, one line per
+    /// start saying how the process was prepared.
+    ///
+    /// `shortcut_mode` comes from the press itself, so it's only set when a
+    /// shortcut started this take. The legacy shortcut preference can't say
+    /// which physical key was pressed.
+    ///
+    /// Deliberately no "app nap suppressed" flag: the assertion is taken by
+    /// the `isDictating` flip before this is logged, so it would read true
+    /// on every line. `app_nap_holders` is the refcount, which does vary.
+    static func preparedDiagnostics(
+        triggerRawValue: String,
+        isAppActive: Bool,
+        profile: DictationStartReadinessProfile,
+        appNapHolders: Int,
+        shortcutMode: DictationShortcutMode?
+    ) -> [String: String] {
+        var extra = [
+            "trigger": triggerRawValue,
+            "app_active": "\(isAppActive)",
+            "start_plan": profile.name,
+            "app_nap_holders": "\(appNapHolders)",
+            "activation_escalation_allowed": "\(profile.allowsForegroundActivationEscalation)"
+        ]
+        if let shortcutMode {
+            extra["shortcut_mode"] = shortcutMode.rawValue
+        }
+        return extra
+    }
+}
+
+/// The native microphone open, shared by the ready-engine fast start and
+/// every attempt of the recovery wait loop. It reports the open as a pending
+/// stage, picks the forced recovery start or the ordinary one, and offers
+/// focus recovery only after a real native failure.
+@MainActor
+enum DictationNativeMicrophoneStart {
+    static func run(
+        isRecoveryAttempt: Bool,
+        isCurrentSession: () -> Bool,
+        onStartStageChanged: ((DictationMicrophoneStartStage) -> Void)?,
+        onStartFailed: (() async -> Void)?,
+        startRecording: () async -> Bool,
+        startRecordingRecoveryAttempt: () async -> Bool
+    ) async -> Bool {
+        await DictationRecordingStartAttempt.run(
+            start: {
+                await DictationMicrophoneStartReporting.run(
+                    isCurrentSession: isCurrentSession,
+                    onStageChanged: onStartStageChanged
+                ) {
+                    if isRecoveryAttempt {
+                        return await startRecordingRecoveryAttempt()
+                    }
+                    return await startRecording()
+                }
+            },
+            onFailure: onStartFailed
+        )
+    }
+}
+
+/// What a pending dictation start is waiting on. The raw values are the
+/// `pending_stage` a #1743-style reporter pastes back from the debug log,
+/// so they name a bug each: the permission prompt, the model warmup, the
+/// audio-route recovery wait, or the CoreAudio open itself.
+enum DictationPendingStartStage: String, CaseIterable {
+    case idle = "idle"
+    case startRequested = "start_requested"
+    case awaitingMicrophonePermission = "awaiting_microphone_permission"
+    case awaitingModelWarmup = "awaiting_model_warmup"
+    case waitingForAudioRoute = "waiting_for_audio_route"
+    case openingMicrophone = "opening_microphone"
+
+    init(_ stage: DictationMicrophoneStartStage) {
+        switch stage {
+        case .openingMicrophone: self = .openingMicrophone
+        case .waitingForAudioRoute: self = .waitingForAudioRoute
+        }
+    }
+}
+
+/// The pending start's current stage and when it entered it.
+///
+/// `end(now:)` reads the stage and resets it to idle in one step, so a
+/// cancel diagnostic can't read the stage after teardown already reset it.
+struct DictationPendingStartStageClock {
+    private(set) var stage: DictationPendingStartStage = .idle
+    private(set) var enteredAt: CFAbsoluteTime
+
+    init(now: CFAbsoluteTime) {
+        enteredAt = now
+    }
+
+    mutating func enter(_ stage: DictationPendingStartStage, now: CFAbsoluteTime) {
+        self.stage = stage
+        enteredAt = now
+    }
+
+    /// A stage reported by the native open. A late report from a cancelled
+    /// or superseded start must not move the stage of the session now
+    /// running.
+    mutating func enterReported(
+        _ stage: DictationMicrophoneStartStage,
+        requestingSessionID: UUID,
+        currentSessionID: UUID,
+        isDictating: Bool,
+        isCancelled: Bool,
+        now: CFAbsoluteTime
+    ) {
+        guard isDictating, currentSessionID == requestingSessionID, !isCancelled else { return }
+        enter(DictationPendingStartStage(stage), now: now)
+    }
+
+    /// The stage the start ended in and how long it sat there, then idle.
+    mutating func end(now: CFAbsoluteTime) -> (stage: DictationPendingStartStage, msInStage: Int) {
+        let ended = (stage: stage, msInStage: Int((now - enteredAt) * 1000))
+        enter(.idle, now: now)
+        return ended
+    }
+}
+
+/// The reason string the App Nap assertion is held under, which is what
+/// shows up in Activity Monitor and `powermetrics`.
+///
+/// A start names its readiness plan. `isDictating` also flips true at the
+/// stop-finalization readmissions, which re-enter a retained recording
+/// rather than opening the microphone. Those carry no plan, so once a
+/// session ends the label goes back to "stop finalization" instead of
+/// keeping the last start's name.
+struct DictationProcessActivityLabel {
+    static let stopFinalization = "stop finalization"
+
+    private(set) var name = DictationStartReadinessProfile.foreground.name
+
+    var reason: String { "Transcripted dictation capture (\(name))" }
+
+    mutating func startingMicrophone(_ profile: DictationStartReadinessProfile) {
+        name = profile.name
+    }
+
+    mutating func sessionEnded() {
+        name = Self.stopFinalization
+    }
+}

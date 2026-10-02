@@ -192,3 +192,25 @@ struct AppleSpeechLanguageDownload: Equatable {
         }
     }
 }
+
+/// The errors that send a saved-language retry to the settings fix. Their
+/// "Select a Whisper model" wording is what `MeetingFailureKind` matches to show
+/// that guidance instead of generic pipeline-failed copy.
+enum TranscriptionLanguageModelErrors {
+    /// A recording with a saved language reached a model that can't honor it.
+    static func savedLanguageNeedsLanguageModel() -> NSError {
+        NSError(domain: "STTRouter", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "This recording has a saved language choice. Select a Whisper model or Apple Speech in Settings to transcribe it in that language."
+        ])
+    }
+
+    /// Apple Speech has no model for the language. Retries keep the capture's
+    /// saved language, so the fix is a model that can transcribe it. Automatic
+    /// selection saved no language, so it gets nil and keeps the engine error.
+    static func appleSpeechUnsupportedLanguage(languageName: String, isExplicitSelection: Bool) -> NSError? {
+        guard isExplicitSelection else { return nil }
+        return NSError(domain: "STTRouter", code: 4, userInfo: [
+            NSLocalizedDescriptionKey: "Apple Speech can't transcribe \(languageName). Select a Whisper model in Settings to transcribe this recording in that language."
+        ])
+    }
+}

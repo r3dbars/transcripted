@@ -352,7 +352,8 @@ func testDeviceRecoveryPolicy() {
                 hadSampleFlow: true,
                 inputWasReady: true,
                 stableRouteIdentity: stableIdentity,
-                observedRouteIdentity: stableIdentity
+                observedRouteIdentity: stableIdentity,
+                forceForMicrophoneSharing: false
             ),
             .reuseCurrentGraph,
             "a late same-route engine echo must not retire another audio engine"
@@ -371,7 +372,8 @@ func testDeviceRecoveryPolicy() {
                 hadSampleFlow: true,
                 inputWasReady: true,
                 stableRouteIdentity: stableIdentity,
-                observedRouteIdentity: defaultInputChurnIdentity
+                observedRouteIdentity: defaultInputChurnIdentity,
+                forceForMicrophoneSharing: false
             ),
             .reuseCurrentGraph,
             "default-input churn must not replace a graph whose exact selected mic and output are unchanged"
@@ -397,7 +399,8 @@ func testDeviceRecoveryPolicy() {
                     hadSampleFlow: testCase.samples,
                     inputWasReady: testCase.ready,
                     stableRouteIdentity: stableIdentity,
-                    observedRouteIdentity: testCase.observed
+                    observedRouteIdentity: testCase.observed,
+                    forceForMicrophoneSharing: false
                 ),
                 .rebuildGraph,
                 "changed endpoints, idle graphs, or unproven routes must retain the full recovery path"
@@ -411,7 +414,8 @@ func testDeviceRecoveryPolicy() {
                 wasRecording: true,
                 hadSampleFlow: true,
                 inputWasReady: true,
-                graphEndpointsMatch: true
+                graphEndpointsMatch: true,
+                forceForMicrophoneSharing: false
             ),
             "an active proven graph should get a short continuity probe before teardown"
         )

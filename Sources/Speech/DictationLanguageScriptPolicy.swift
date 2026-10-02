@@ -60,8 +60,15 @@ enum DictationLanguageScriptPolicy {
     /// The unexpected script that dominates `text`, or nil when the text is
     /// fine to paste.
     static func unexpectedScript(in text: String, userLanguageCodes: [String]) -> Script? {
+        unexpectedScript(in: text, userLanguageCodes: { userLanguageCodes })
+    }
+
+    /// Same check, but the person's languages are read only when the text is
+    /// nearly all one non-Latin script. Reading them is a Carbon keyboard
+    /// lookup, so ordinary dictation never pays for it.
+    static func unexpectedScript(in text: String, userLanguageCodes: () -> [String]) -> Script? {
         guard let dominant = dominantNonLatinScript(in: text) else { return nil }
-        return isExpected(dominant, userLanguageCodes: userLanguageCodes) ? nil : dominant
+        return isExpected(dominant, userLanguageCodes: userLanguageCodes()) ? nil : dominant
     }
 
     static func isExpected(_ script: Script, userLanguageCodes: [String]) -> Bool {

@@ -222,8 +222,7 @@ final class MenuBarPanelController: NSViewController {
         // `refresh()` runs on every open, so the timer is current by the time
         // the user sees it.
         appState.meetingSession.$recordingDuration
-            .map { Int($0) }
-            .removeDuplicates()
+            .wholeSecondTicks()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, self.isViewLoaded, self.view.window != nil else { return }
@@ -355,19 +354,17 @@ final class MenuBarPanelController: NSViewController {
 
     private func startMeetingFromMenu() {
         let meetingSession = appState.meetingSession
-        let captureActive = meetingSession.isCaptureSessionActive
-        trackMenuAction(captureActive ? "stop_meeting" : "start_meeting")
+        trackMenuAction(MenuBarMeetingMenuAction.resolve(meetingSession.state).analyticsActionID)
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
         Task { [meetingSession] in
-            if meetingSession.isCaptureSessionActive {
-                if case .startingRecording = meetingSession.state {
-                    await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton)
-                } else {
-                    await meetingSession.stopRecording(reason: .menuBarStopButton)
-                }
-            } else {
+            switch MenuBarMeetingMenuAction.resolve(meetingSession.state) {
+            case .stopJoiningPendingStart:
+                await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton)
+            case .stop:
+                await meetingSession.stopRecording(reason: .menuBarStopButton)
+            case .start:
                 await meetingSession.startRecording(trigger: .menu)
             }
         }

@@ -11,8 +11,12 @@
 // IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final suite
 // ("preserves dictation audio across route recovery") reads
 // Sources/Speech/ParakeetEngine.swift and Sources/UI/Overlay/DictationSessionController.swift
-// as TEXT and asserts presence of specific declarations / call sites and a single
-// canonical `recordingInterrupted = true` assignment. Both sources are
+// as TEXT and asserts specific call sites, statement order in the terminal interruption
+// helper, and a single canonical `recordingInterrupted = true` assignment. (Checks that
+// only matched a declaration were dropped: the compiler already enforces those, and the
+// multi-rate timeline itself is covered by RecordedAudioTimelineTests. The call-site pin
+// on preserveCurrentRecordingBuffersForRecovery() lives in
+// ParakeetMicrophoneSharingSourceContractTests and ParakeetAudioOwnershipSourceContractTests.) Both sources are
 // CoreAudio/SwiftUI-wired and are NOT compiled into this Foundation-only runner, so these
 // greps pin source structure, not runtime behavior. They guard the REAL invariant that
 // audio buffered before a mid-recording route change is preserved across teardown (so a
@@ -116,24 +120,8 @@ func testDictationAudioRecovery() {
         )) ?? ""
 
         assertTrue(
-            engineSource.contains("var recoveredRecordingTimeline = RecordedAudioTimeline()"),
-            "engine should keep a multi-segment audio timeline for route-change recovery"
-        )
-        assertTrue(
-            engineSource.contains("preserveCurrentRecordingBuffersForRecovery()"),
-            "config changes during recording should preserve buffered audio before tearing down the tap"
-        )
-        assertTrue(
             engineSource.contains("recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)"),
             "current-device audio should be retained with its native sample rate"
-        )
-        assertTrue(
-            engineSource.contains("func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true)"),
-            "recovery preservation should have a single cleanup path"
-        )
-        assertTrue(
-            engineSource.contains("func interruptRecordingAndClearRecoveredTimeline()"),
-            "interrupted recovery should clear preserved audio before publishing interruption"
         )
         if let start = engineSource.range(of: "private func markRecordingInterrupted()"),
            let end = engineSource.range(of: "private func cancelPendingRecordingRecovery", range: start.upperBound..<engineSource.endIndex) {
@@ -189,7 +177,7 @@ func testDictationAudioRecovery() {
             "the stop task must not re-check transient recording state before cancelling recovery"
         )
         assertTrue(
-            engineSource.contains("drainRecordedSamplesForInference()"),
+            engineSource.contains("return await drainRecordedSamplesForInference()"),
             "transcription should drain preserved segments instead of resampling all audio as one rate"
         )
     }
