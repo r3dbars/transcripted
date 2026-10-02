@@ -132,7 +132,7 @@ dependency_input_listing() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md" ! -name "AGENTS.md"
     } | while IFS= read -r path; do
         [ -e "$path" ] || continue
         printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"

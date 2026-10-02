@@ -114,7 +114,7 @@ let package = Package(
             name: "TranscriptedCore",
             dependencies: ["TranscriptedObjCSupport"],
             path: "Sources/TranscriptedCore",
-            exclude: ["CLAUDE.md", "ObjCSupport"],
+            exclude: ["AGENTS.md", "ObjCSupport"],
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "\(repoRoot)/deps-frameworks",

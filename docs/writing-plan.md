@@ -423,7 +423,7 @@ Writing isn't useful to agents until the tools read it:
   - `FocusOrderContractTests.swift` (asserts 5 pages)
   - `SettingsRecentCaptureRefreshPolicyTests.swift` (pins Agent on ⌘5)
   - `Tools/TranscriptedQA/.../UISmoke.swift`
-  - `Sources/UI/CLAUDE.md` and `Sources/UI/Settings/CLAUDE.md`
+  - `Sources/UI/AGENTS.md` and `Sources/UI/Settings/AGENTS.md`
 - **Screen-share privacy test.** `OverlayScreenSharePrivacyTests` scans every window under `Sources/UI`, so the intro and setup views must follow its rules.
 
 ## Permissions changes
@@ -431,7 +431,7 @@ Writing isn't useful to agents until the tools read it:
 - **Keep Screen Recording out of the global permissions list.** Adding a case to `TranscriptedPermissionKind` would add a Screen Recording row to the settings rows, onboarding and `PermissionSnapshot` for every user, including people who never touch Writing. Writing owns its own permission state (Screen Recording plus keyboard enabled and selected) and shows it only in the Writing tab.
 - **Fix copy that's no longer true.** Today the app promises it never needs full Screen Recording:
   - `TranscriptedPermissionKind.swift:82` and `:113-115`, which tell users to turn the broader permission off
-  - `Sources/Support/CLAUDE.md:65`
+  - `Sources/Support/AGENTS.md:65`
 
   The new rule: meetings don't need screen access; Writing's autocomplete does. Update the two tests that pin the old copy, `TranscriptedPermissionAccessTests.swift:193` and `MeetingRecordingStartGateTests.swift:147`.
 - **The main app holds Screen Recording**, not the keyboard, because Screen Memory runs in the app, as in Tilde.

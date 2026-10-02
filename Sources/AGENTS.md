@@ -53,17 +53,17 @@ point-in-time reviews.
 
 ## Read before editing
 
-- touching dictation persistence: `Sources/Dictation/CLAUDE.md`
-- touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
-- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
-- touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
-- touching app-wide support utilities: `Sources/Support/CLAUDE.md`
-- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
-- touching the Settings window, Home, onboarding, or speaker settings files: also `Sources/UI/Settings/CLAUDE.md`
-- touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
-- touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`
-- touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/CLAUDE.md`
-- touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/CLAUDE.md`
+- touching dictation persistence: `Sources/Dictation/AGENTS.md`
+- touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/AGENTS.md`
+- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/AGENTS.md`
+- touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/AGENTS.md`
+- touching app-wide support utilities: `Sources/Support/AGENTS.md`
+- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/AGENTS.md`
+- touching the Settings window, Home, onboarding, or speaker settings files: also `Sources/UI/Settings/AGENTS.md`
+- touching hotkeys or physical dictation trigger routing: `Sources/Capture/AGENTS.md`
+- touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/AGENTS.md`
+- touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/AGENTS.md`
+- touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/AGENTS.md`
 - touching tests or package boundaries: `Tests/README.md`
 
 Prefer the local doc plus the actual Swift file list before assuming an older

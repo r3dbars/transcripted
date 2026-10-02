@@ -1,6 +1,6 @@
 # Speaker eval: multi-exemplar + negative-exemplar accuracy delta (2026-07)
 
-> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `AGENTS.md`.
 
 > **Update (2026-07, retune shipped):** Recommendation #2 below is now implemented — the auto-accept
 > **margin** is computed against each profile's blended *average* representative instead of its best

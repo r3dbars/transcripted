@@ -157,7 +157,7 @@ results below are the provenance for the production monitor design.
 ### New file `Sources/Meeting/MicActivityMonitor.swift`
 - Registers `AudioObjectAddPropertyListenerBlock` for
   `kAudioHardwarePropertyProcessObjectList` on a dedicated utility queue.
-  **CoreAudio threading rule (see root `CLAUDE.md`):** do no heavy work, locks,
+  **CoreAudio threading rule (see root `AGENTS.md`):** do no heavy work, locks,
   or allocations in the callback beyond collecting; hop to `@MainActor` to emit.
 - On change: enumerate process objects, keep those with
   `kAudioProcessPropertyIsRunningInput == true`, read `kAudioProcessPropertyBundleID`,
@@ -278,7 +278,7 @@ calls, so Phase 1 alone is likely enough.
   use the mic" is privacy-adjacent even though everything stays on-device.
 - Observability: anything logged stays local; if we log a detected provider via
   `EventReporter`, log the provider only — never titles, never raw device names
-  (per the observability rules in root `CLAUDE.md`).
+  (per the observability rules in root `AGENTS.md`).
 
 ## Files touched
 
@@ -293,7 +293,7 @@ calls, so Phase 1 alone is likely enough.
 
 ## Testing & verification
 
-Per root `CLAUDE.md` (touching `Sources/Meeting/**`):
+Per root `AGENTS.md` (touching `Sources/Meeting/**`):
 
 ```bash
 bash build-deps.sh --force && bash build.sh --no-open && bash run-tests.sh && bash run-integration-smoke.sh

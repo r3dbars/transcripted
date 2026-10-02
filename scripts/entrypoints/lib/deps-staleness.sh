@@ -36,7 +36,7 @@ dependency_input_paths() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
-        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md" ! -name "AGENTS.md"
     } | sort
 }
 
