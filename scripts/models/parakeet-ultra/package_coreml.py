@@ -62,8 +62,8 @@ This build:
   Encoder quantization:     {encoder_quantization}
 """
 
-# Human-readable encoder quantization, recorded in the marker, ATTRIBUTION.txt
-# and the comparison report so a quantization difference isn't read as a
+# Human-readable encoder quantization, recorded in the marker and
+# ATTRIBUTION.txt so a quantization difference isn't read as a
 # weights difference.
 ENCODER_QUANTIZATION = {
     "palettize8": "8-bit k-means palettization (coremltools OpPalettizerConfig mode=kmeans nbits=8)",
