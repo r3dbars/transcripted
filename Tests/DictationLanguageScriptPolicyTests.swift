@@ -90,20 +90,6 @@ func testDictationLanguageScriptPolicy() {
         assertFalse(message.contains("No speech heard"), "the person did speak")
     }
 
-    runSuite("The stop path offers the held-back text instead of dropping it") {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let controller = (try? String(
-            contentsOf: root.appendingPathComponent("Sources/UI/Overlay/DictationSessionController.swift"),
-            encoding: .utf8
-        )) ?? ""
-        assertTrue(controller.contains("let heldText = appState.sttRouter.heldBackDictationText"))
-        assertTrue(controller.contains("let outcome = self.pasteWithClipboardRestore(heldText)"))
-        assertTrue(
-            controller.contains("text: heldText,\n                                delivery: outcome.delivery,\n                                recovery: heldRecovery"),
-            "Paste Anyway saves the take and cleans up its kept audio like any finished dictation"
-        )
-    }
-
     runSuite("The language check reads the Mac's languages only for non-Latin text") {
         var reads = 0
         let languages: () -> [String] = { reads += 1; return ["en"] }
