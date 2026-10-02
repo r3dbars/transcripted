@@ -210,19 +210,21 @@ func testTranscriptedConstants() async {
     }
 
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns even when work ignores cancellation") {
-        // The work ignores cancellation and runs about 10 s. If the timeout
-        // waited for it, the work would have finished by the time we return.
+        // The work ignores cancellation: it waits on a gate only this test
+        // opens, after checking. If the timeout waited for the work, it would
+        // never return. (A cancelled Task.sleep returns at once, so a sleep loop
+        // isn't really non-cooperative and raced the assertion under load.)
         let workFinished = DetachedTimeoutWorkFlag()
+        let gate = DetachedTimeoutGate()
         let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 0.01) {
-            for _ in 0..<1_000 {
-                try? await Task.sleep(nanoseconds: 10_000_000)
-            }
+            await gate.wait()
             workFinished.set()
             return "late"
         }
 
         assertNil(result, "detached timeout should throw on deadline")
         assertFalse(workFinished.isSet, "detached timeout should not wait for non-cooperative model work to unwind")
+        gate.open()
     }
 }
 
@@ -234,4 +236,32 @@ private final class DetachedTimeoutWorkFlag: @unchecked Sendable {
     var isSet: Bool { lock.withLock { value } }
 
     func set() { lock.withLock { value = true } }
+}
+
+/// A one-shot gate that ignores task cancellation, standing in for model work
+/// that won't unwind when cancelled.
+private final class DetachedTimeoutGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let resumeNow = lock.withLock { () -> Bool in
+                if isOpen { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            isOpen = true
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        pending.forEach { $0.resume() }
+    }
 }

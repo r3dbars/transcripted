@@ -347,7 +347,10 @@ func testRecentCaptureScanners() async {
             return
         }
 
-        let startedAt = Date()
+        // Speed is CI's job (scripts/ops/performance-budget.rb
+        // --check-home-recent-captures, whose benchmark uses this same
+        // 64-named-speaker meeting shape), not this test's: a wall-clock limit
+        // fails on a busy machine. This checks what the load returns.
         let snapshot = await RecentCaptureLoader.load(
             dictationLimit: 5,
             meetingLimit: 5,
@@ -356,8 +359,6 @@ func testRecentCaptureScanners() async {
             dictationDirectory: dictationDir,
             today: today
         )
-        let elapsed = Date().timeIntervalSince(startedAt)
-        let m1FriendlyBudgetSeconds = 2.5
 
         assertEqual(snapshot.meetings.count, 5, "Home should only prepare the visible recent meetings")
         assertEqual(snapshot.dictations.count, 5, "Home should only prepare the visible recent dictations")
@@ -367,10 +368,6 @@ func testRecentCaptureScanners() async {
         assertTrue(
             snapshot.meetings.allSatisfy { $0.speakerStatus == .ready },
             "Home should not treat large sets of real named speakers as review work"
-        )
-        assertTrue(
-            elapsed < m1FriendlyBudgetSeconds,
-            String(format: "Home recent-capture load took %.3fs, expected under %.1fs on an M1-friendly fixture", elapsed, m1FriendlyBudgetSeconds)
         )
     }
 

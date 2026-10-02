@@ -90,6 +90,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
     - `TranscriptionPipeline+MicDiarization.swift` — split-mode mic diarization plus the ghost / remap / `embeddingWeight` helpers
     - `TranscriptionPipeline+Stages.swift` — shared stage helpers: durations, diarization, batch STT, merge, mic segment prep, silence segmentation
     - `TranscriptionPipeline+LastChanceSweep.swift` — the last-chance speech sweep
+    - `TranscriptionPipeline+SystemSpeakerIdentity.swift` — system-speaker identity: embedding filters, ghost recovery, speaker-DB matching, cross-cluster fusion, voiceprint write-back
   - `TranscriptionLanguageSampling.swift` — picks bounded voiced samples for language detection
   - `MeetingPipelineTimings.swift` — task-local per-job stage timer (models ready, resample, diarize, speech-to-text, sleep); the task manager binds one per job and hands the snapshot to the host with the save
   - `PipelineFailureDisplayCopy.swift` — per-flow failure copy table
