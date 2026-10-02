@@ -42,7 +42,6 @@ struct AgentConnectionSettingsPage: View {
                 title: "Agent",
                 summary: "Give your AI tools access to your meetings and dictations."
             )
-
             CompanionSettingsCard()
             statusLine
             agentListSection

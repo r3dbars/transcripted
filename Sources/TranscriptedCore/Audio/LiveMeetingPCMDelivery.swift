@@ -21,6 +21,8 @@ final class LiveMeetingPCMDelivery: @unchecked Sendable {
     private let pendingBytes = Atomic<Int>(0)
     private let droppedBuffers = Atomic<Int>(0)
     private let byteLimit: Int
+    /// The host's consumer; set once before capture, read on the enqueue path.
+    var handler: Handler?
 
     init(byteLimit: Int = 2 * 1_024 * 1_024) {
         precondition(byteLimit > 0)

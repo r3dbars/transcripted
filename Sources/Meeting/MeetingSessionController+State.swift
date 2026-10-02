@@ -376,6 +376,7 @@ final class MeetingSessionController: ObservableObject {
         }
         #endif
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
+        if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
         switch newState {
         case .startingRecording, .recording:

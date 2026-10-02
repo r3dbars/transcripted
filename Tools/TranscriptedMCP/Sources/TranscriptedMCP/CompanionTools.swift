@@ -50,6 +50,15 @@ enum CompanionTools {
         Resource(name: "transcripted_companion", uri: resourceURI, title: "Transcripted", description: "Meeting companion and selected saved context.", mimeType: "text/html;profile=mcp-app", _meta: resourceMeta)
     }
 
+    /// Companion tools, and the audio widget companion mode withholds; nil for every other tool.
+    static func intercept(_ params: CallTool.Parameters, index: TranscriptIndex, directories: TranscriptedDataDirectories) async -> CallTool.Result? {
+        if companionMode && params.name == "show_recent_meetings" {
+            return textResult("Audio export is unavailable in the ChatGPT companion. Use show_companion for selected text context.", isError: true)
+        }
+        guard names.contains(params.name) else { return nil }
+        return await call(params: params, index: index, directories: directories)
+    }
+
     static func call(params: CallTool.Parameters, index: TranscriptIndex, directories: TranscriptedDataDirectories, client: CompanionClient = CompanionClient()) async -> CallTool.Result {
         do {
             let args = params.arguments ?? [:]

@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -23,6 +24,7 @@ final class CompanionConnectionService: ObservableObject {
     private var controlInFlight = false
     private var configured = false
     private var connectionEpoch = CompanionConnectionEpoch()
+    private var terminationObserver: NSObjectProtocol?
 
     func configure(meetingSession: MeetingSessionController) {
         guard !AutomatedLaunchEnvironment.isActive() else { return }
@@ -35,6 +37,9 @@ final class CompanionConnectionService: ObservableObject {
         }
         refreshCaptureState()
         reconcileConnection()
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in MainActor.assumeIsolated { CompanionConnectionService.shared.shutdown() } }
     }
 
     func setEnabled(_ enabled: Bool) {

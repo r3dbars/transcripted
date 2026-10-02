@@ -788,14 +788,8 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
         ].filter { !CompanionTools.companionMode || $0.name != "show_recent_meetings" } + CompanionTools.tools)
     }
-
     await server.withMethodHandler(CallTool.self) { params in
-        if CompanionTools.companionMode && params.name == "show_recent_meetings" {
-            return textResult("Audio export is unavailable in the ChatGPT companion. Use show_companion for selected text context.", isError: true)
-        }
-        if CompanionTools.names.contains(params.name) {
-            return await CompanionTools.call(params: params, index: index, directories: directories)
-        }
+        if let reply = await CompanionTools.intercept(params, index: index, directories: directories) { return reply }
         do {
             return try withAgentCaptureQueryTelemetry(params: params) {
                 switch params.name {
