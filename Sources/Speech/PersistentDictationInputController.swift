@@ -16,14 +16,26 @@ final class PersistentDictationInputController {
     private var preferenceObserver: NSObjectProtocol?
     private var defaultInputObserverToken: DefaultInputDeviceMonitor.ObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
-    private var topologyRefreshTask: Task<Void, Never>?
     private var externalInputActivityTask: Task<Bool?, Never>?
-    private var pendingDefaultInputChange = false
-    private var pendingDeviceListChange = false
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
     private let isDictationActive: () -> Bool
     private let isMeetingCaptureActive: () -> Bool
+    private lazy var refreshScheduler = DictationPersistentInputRefreshScheduler(
+        isMonitoring: { [weak self] in self?.preferenceObserver != nil },
+        preferenceEnabled: { DictationPersistentInputPreferences.isEnabled() },
+        hasRecoveryMarker: { DictationPersistentInputPreferences.recoveryMarker() != nil },
+        isDictationActive: { [weak self] in self?.isDictationActive() ?? false },
+        isMeetingCaptureActive: { [weak self] in self?.isMeetingCaptureActive() ?? false },
+        readExternalInputActivity: { [weak self] in await self?.readExternalInputActivity() },
+        delay: { try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay) },
+        reconcile: { [weak self] defaultInputChanged, deviceListChanged in
+            self?.reconcileCurrentPreference(
+                defaultInputChanged: defaultInputChanged,
+                deviceListChanged: deviceListChanged
+            )
+        }
+    )
 
     init(
         isDictationActive: @escaping () -> Bool = { false },
@@ -60,7 +72,9 @@ final class PersistentDictationInputController {
         }
         // Do not perturb another app's call just because Transcripted quits.
         // Keep the durable marker so a later idle launch can restore ownership.
-        guard externalInputActive == false else {
+        guard DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit(
+            externalInputActive: externalInputActive
+        ) else {
             activeOverride = nil
             return
         }
@@ -76,10 +90,7 @@ final class PersistentDictationInputController {
         }
         removeDefaultInputListener()
         removeDeviceListListener()
-        topologyRefreshTask?.cancel()
-        topologyRefreshTask = nil
-        pendingDefaultInputChange = false
-        pendingDeviceListChange = false
+        refreshScheduler.cancel()
     }
 
     // MARK: - Default input device monitoring
@@ -170,43 +181,11 @@ final class PersistentDictationInputController {
         deviceListChanged: Bool = false,
         preferenceChanged: Bool = false
     ) {
-        guard preferenceObserver != nil else { return }
-        guard DictationPersistentInputRefreshPolicy.shouldSchedule(
-            preferenceChanged: preferenceChanged,
-            preferenceEnabled: DictationPersistentInputPreferences.isEnabled(),
-            hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil
-        ) else { return }
-        pendingDefaultInputChange = pendingDefaultInputChange || defaultInputChanged
-        pendingDeviceListChange = pendingDeviceListChange || deviceListChanged
-        topologyRefreshTask?.cancel()
-        topologyRefreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard !Task.isCancelled, let self else { return }
-            while true {
-                // The preference changes the Mac-wide input, so another app's
-                // capture deserves the same protection as our own recordings.
-                // Read only process metadata, off the UI thread. Unknown activity
-                // defers this optional optimization rather than risking a call.
-                let externalInputActive = await self.readExternalInputActivity()
-                guard !Task.isCancelled else { return }
-                // Recheck our own capture after the asynchronous HAL read.
-                guard DictationPersistentInputRefreshPolicy.shouldDefer(
-                    isDictationActive: self.isDictationActive(),
-                    isMeetingCaptureActive: self.isMeetingCaptureActive(),
-                    externalInputActive: externalInputActive
-                ) else { break }
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                guard !Task.isCancelled else { return }
-            }
-            let defaultInputChanged = self.pendingDefaultInputChange
-            let deviceListChanged = self.pendingDeviceListChange
-            self.pendingDefaultInputChange = false
-            self.pendingDeviceListChange = false
-            self.reconcileCurrentPreference(
-                defaultInputChanged: defaultInputChanged,
-                deviceListChanged: deviceListChanged
-            )
-        }
+        refreshScheduler.schedule(
+            defaultInputChanged: defaultInputChanged,
+            deviceListChanged: deviceListChanged,
+            preferenceChanged: preferenceChanged
+        )
     }
 
     private func readExternalInputActivity() async -> Bool? {
@@ -373,7 +352,10 @@ final class PersistentDictationInputController {
         self.activeOverride = nil
         do {
             let currentInput = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
-            guard currentInput == activeOverride.selectedInput else {
+            guard DictationPersistentInputRestorePolicy.shouldRestorePrevious(
+                currentInput: currentInput,
+                ownedSelectedInput: activeOverride.selectedInput
+            ) else {
                 DictationPersistentInputPreferences.setRecoveryMarker(nil)
                 EventReporter.shared.capture(
                     level: .info,

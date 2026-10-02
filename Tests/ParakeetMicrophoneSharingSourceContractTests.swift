@@ -64,14 +64,8 @@ func testParakeetMicrophoneSharingSourceContract() {
     }
 
     runSuite("A failed VPIO disable never becomes shared capture or a retained idle graph") {
-        let start = sharingSourceBlock(engine, from: "    private func installTapAndStartEngine(", to: "    func removeRecordingTap(")
-        guard let disabledFailure = start.range(of: "guard voiceProcessingEnabled || appliedVoiceProcessing else {"),
-              let throwFailure = start.range(of: "throw NSError", range: disabledFailure.upperBound..<start.endIndex),
-              let tapInstall = start.range(of: "inputNode.installTap", range: throwFailure.upperBound..<start.endIndex) else {
-            assertTrue(false, "failure to disable VPIO must throw before installing a shared capture tap")
-            return
-        }
-        assertTrue(disabledFailure.lowerBound < throwFailure.lowerBound && throwFailure.lowerBound < tapInstall.lowerBound, "shared startup cannot continue with a failed VPIO disable")
+        // "A failed VPIO disable throws before the tap" is now a behavior test:
+        // BluetoothRouteContractTests, "a failed voice-processing release stops the start before any tap".
         let disposal = sharingSourceBlock(engine, from: "    func discardStoppedVoiceProcessingGraph(", to: "    private func shareMicrophoneWithCallAppIfNeeded()")
         assertTrue(disposal.contains("guard ownsAudioEngineQueue(owner), !isRecording else { return nil }"), "failure disposal must own the exact stopped graph")
         assertTrue(disposal.contains("audioEngine = AVAudioEngine()"), "failure disposal must drop the VPIO graph")
@@ -91,7 +85,8 @@ func testParakeetMicrophoneSharingSourceContract() {
         assertTrue(rebuild.contains("if !releasedVoiceProcessing {\n            return discardStoppedVoiceProcessingGraph"), "recovery must discard a graph whose native disable failed")
         assertTrue(rebuild.contains("if requiresFreshGraph {\n                interruptRecordingPreservingRecoveredTimeline()\n                return nil"), "fresh-graph recovery must fail closed at the retirement limit")
         assertTrue(recovery.contains("let graphStrategy = forceForMicrophoneSharing ? .rebuildGraph"), "call app downgrade must rebuild even when route endpoints stay the same")
-        assertTrue(recovery.contains("requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing"), "failed disarm must never fall back to reusing the same graph")
+        // "A failed disarm never reuses the graph" is a behavior test now:
+        // BluetoothRouteContractTests, "a stable route echo keeps the current graph".
     }
 }
 

@@ -219,10 +219,7 @@ extension ParakeetEngine {
 
         // The route lookup above suspends outside the audio graph. Recheck all
         // lifecycle owners before this handler mutates recovery state.
-        guard !isSharedMeetingMicClaimCurrent,
-              pinnedDictationRecording == nil,
-              !audioStartInProgress,
-              !audioStopInProgress,
+        guard admitsConfigChangeRecovery,
               generationAtAdmission == audioConfigObservationGeneration else {
             return
         }
@@ -393,17 +390,21 @@ extension ParakeetEngine {
         }
         isEnginePrewarmed = false
 
-        switch releasedVoiceProcessing ? graphStrategy : .rebuildGraph {
+        switch ParakeetConfigChangeGraphPolicy.action(
+            strategy: graphStrategy,
+            releasedVoiceProcessing: releasedVoiceProcessing,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
+        ) {
         case .reuseCurrentGraph:
             // CoreAudio already stopped this graph. Leave it in place so the
             // normal recovery snapshot + recording restart can rebind the tap
             // without retiring another AVAudioEngine and scheduling another
             // late configuration echo.
             AppLogger.transcription.info("PARAKEET | stable configuration change → reusing current audio graph")
-        case .rebuildGraph:
+        case .rebuildGraph(let requiresFreshGraph):
             guard let rebuiltOwner = await rebuildAudioEngine(
                 reason: "configuration_change",
-                requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing
+                requiresFreshGraph: requiresFreshGraph
             ) else {
                 cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
                 return
@@ -424,23 +425,41 @@ extension ParakeetEngine {
         configChangeDebounceTask = Task { @MainActor [weak self] in
             // 250ms debounce — long enough to coalesce rapid BT notifications,
             // short enough that dictation recovery feels responsive.
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
-            guard !Task.isCancelled, let self = self else { return }
-            let wasRecordingForAnalytics = self.configChangeWasRecording
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let selection = await self.boundedRouteNotificationSelection()
-                guard !Task.isCancelled, !self.isShuttingDown else { return }
-                self.recordStableRouteChangeAnalytics(
-                    selection: selection,
-                    wasRecording: wasRecordingForAnalytics,
-                    recoveryGeneration: recoveryGeneration
-                )
-            }
             // Telemetry coalescing must never suppress the real recovery state
             // transition, including an A -> B -> A notification burst.
-            self.attemptDeviceRecovery()
+            await ParakeetConfigChangeDebounce.settle(
+                sleep: {
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
+                },
+                isCancelled: { Task.isCancelled || self == nil },
+                scheduleStableRouteReport: {
+                    guard let self else { return }
+                    let wasRecordingForAnalytics = self.configChangeWasRecording
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let selection = await self.boundedRouteNotificationSelection()
+                        guard !Task.isCancelled, !self.isShuttingDown else { return }
+                        self.recordStableRouteChangeAnalytics(
+                            selection: selection,
+                            wasRecording: wasRecordingForAnalytics,
+                            recoveryGeneration: recoveryGeneration
+                        )
+                    }
+                },
+                attemptRecovery: { self?.attemptDeviceRecovery() }
+            )
         }
+    }
+
+    /// Startup, a suspended stop, a borrowed meeting mic, and the pinned
+    /// recorder each own the graph; config-change recovery waits its turn.
+    private var admitsConfigChangeRecovery: Bool {
+        ParakeetConfigChangeAdmissionPolicy.admits(
+            sharedMeetingMicClaimCurrent: isSharedMeetingMicClaimCurrent,
+            audioStartInProgress: audioStartInProgress,
+            audioStopInProgress: audioStopInProgress,
+            pinnedRecordingActive: pinnedDictationRecording != nil
+        )
     }
 
     private func invalidateAudioGraphForIdleRouteChange() {

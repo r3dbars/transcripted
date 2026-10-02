@@ -487,3 +487,159 @@ struct ParakeetAudioFormatSummary: Equatable {
     let sampleRate: Double
     let channelCount: UInt32
 }
+
+// MARK: - Dictation input node steps
+
+/// The live input-node operations the dictation start path runs before it
+/// installs its tap. The engine adapts `AVAudioInputNode`; tests use a fake.
+/// Nothing here can write the Mac-wide default input: dictation only binds the
+/// app's own AUHAL input.
+protocol ParakeetDictationTapInputNode {
+    func removeInputTap()
+    /// Applies the dictation voice-processing preference and reports whether
+    /// the node now matches it.
+    func applyVoiceProcessingPreference(_ enabled: Bool) -> Bool
+    var liveInputFormat: AVAudioFormat { get }
+    var liveOutputFormat: AVAudioFormat { get }
+    var isVoiceProcessingActive: Bool { get }
+}
+
+enum ParakeetDictationTapPreparation {
+    /// Clears any old tap, applies voice processing, then resolves the tap
+    /// format from the live node. Voice processing can swap the graph's
+    /// formats, so the format is read only after it is applied, and the
+    /// choice follows the node's actual VPIO state rather than the request.
+    static func prepare<Node: ParakeetDictationTapInputNode>(
+        _ node: Node,
+        voiceProcessingEnabled: Bool,
+        isCurrent: () -> Bool,
+        stageTimings: inout [String: Int]
+    ) throws -> AVAudioFormat {
+        let tapRemoveStartedAt = CFAbsoluteTimeGetCurrent()
+        node.removeInputTap()
+        stageTimings["audio_tap_remove_ms"] = elapsedMilliseconds(since: tapRemoveStartedAt)
+        let voiceProcessingStartedAt = CFAbsoluteTimeGetCurrent()
+        let appliedVoiceProcessing = node.applyVoiceProcessingPreference(voiceProcessingEnabled)
+        guard voiceProcessingEnabled || appliedVoiceProcessing else {
+            throw NSError(domain: "ParakeetEngine", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Could not release Apple voice processing for shared microphone capture."
+            ])
+        }
+        stageTimings["audio_voice_processing_apply_ms"] = elapsedMilliseconds(since: voiceProcessingStartedAt)
+        guard isCurrent() else { throw CancellationError() }
+        let tapFormat = try ParakeetInputTapFormatPolicy.format(
+            inputFormat: node.liveInputFormat,
+            outputFormat: node.liveOutputFormat,
+            voiceProcessingEnabled: node.isVoiceProcessingActive
+        )
+        guard isCurrent() else { throw CancellationError() }
+        return tapFormat
+    }
+
+    private static func elapsedMilliseconds(since start: CFAbsoluteTime) -> Int {
+        max(0, Int((CFAbsoluteTimeGetCurrent() - start) * 1000))
+    }
+}
+
+/// The reads `audioInputSnapshot` takes on the audio-engine queue.
+protocol ParakeetDictationInputSnapshotGraph {
+    associatedtype Application
+    var isGraphRunning: Bool { get }
+    /// Unwraps a voice-processing aggregate so the next bind sees the physical mic.
+    func releaseVoiceProcessing()
+    /// Binds the app's own AUHAL input to the chosen microphone.
+    func applySelectedInputDevice() -> Application
+    var outputFormatSummary: ParakeetAudioFormatSummary { get }
+    var inputFormatSummary: ParakeetAudioFormatSummary { get }
+}
+
+struct ParakeetDictationInputSnapshotReading<Application> {
+    let outputFormat: ParakeetAudioFormatSummary
+    let hwFormat: ParakeetAudioFormatSummary
+    let selectionApplication: Application
+    let engineWasRunning: Bool
+}
+
+enum ParakeetDictationInputSnapshotRead {
+    /// Moves the input off the default device before reading any format. On an
+    /// AirPods default, a format read before the override can pull the headset
+    /// into call mode and sample the wrong route.
+    static func read<Graph: ParakeetDictationInputSnapshotGraph>(
+        _ graph: Graph
+    ) -> ParakeetDictationInputSnapshotReading<Graph.Application> {
+        if !graph.isGraphRunning {
+            graph.releaseVoiceProcessing()
+        }
+        let selectionApplication = graph.applySelectedInputDevice()
+        return ParakeetDictationInputSnapshotReading(
+            outputFormat: graph.outputFormatSummary,
+            hwFormat: graph.inputFormatSummary,
+            selectionApplication: selectionApplication,
+            engineWasRunning: graph.isGraphRunning
+        )
+    }
+}
+
+// MARK: - Config-change handling
+
+/// Who owns the audio graph when a route notification lands. Recording
+/// startup, a suspended stop, a borrowed meeting mic, and the pinned recorder
+/// each own route validation; config-change recovery must stay out of the way.
+enum ParakeetConfigChangeAdmissionPolicy {
+    static func admits(
+        sharedMeetingMicClaimCurrent: Bool,
+        audioStartInProgress: Bool,
+        audioStopInProgress: Bool,
+        pinnedRecordingActive: Bool
+    ) -> Bool {
+        !sharedMeetingMicClaimCurrent
+            && !audioStartInProgress
+            && !audioStopInProgress
+            && !pinnedRecordingActive
+    }
+}
+
+enum ParakeetConfigChangeGraphAction: Equatable {
+    case reuseCurrentGraph
+    case rebuildGraph(requiresFreshGraph: Bool)
+}
+
+extension ParakeetConfigChangeGraphPolicy {
+    /// A stable same-route echo keeps the current graph so recovery does not
+    /// retire another engine (and schedule another late echo). If voice
+    /// processing failed to disarm, or a call app needs the mic shared, the
+    /// graph is replaced with a fresh one.
+    static func action(
+        strategy: ParakeetConfigChangeGraphStrategy,
+        releasedVoiceProcessing: Bool,
+        forceForMicrophoneSharing: Bool
+    ) -> ParakeetConfigChangeGraphAction {
+        switch releasedVoiceProcessing ? strategy : .rebuildGraph {
+        case .reuseCurrentGraph:
+            return .reuseCurrentGraph
+        case .rebuildGraph:
+            return .rebuildGraph(
+                requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing
+            )
+        }
+    }
+}
+
+enum ParakeetConfigChangeDebounce {
+    /// Runs once a config-change burst has been quiet for the debounce delay.
+    /// Route telemetry is only scheduled, never awaited, so a slow or
+    /// unchanged route lookup can't hold back recovery. A newer change
+    /// cancels this one before either step runs.
+    @MainActor
+    static func settle(
+        sleep: () async -> Void,
+        isCancelled: () -> Bool,
+        scheduleStableRouteReport: () -> Void,
+        attemptRecovery: () -> Void
+    ) async {
+        await sleep()
+        guard !isCancelled() else { return }
+        scheduleStableRouteReport()
+        attemptRecovery()
+    }
+}
