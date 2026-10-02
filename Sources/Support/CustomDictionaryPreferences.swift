@@ -211,3 +211,23 @@ enum CustomDictionaryTextProcessor {
         scalar == "_" || CharacterSet.alphanumerics.contains(scalar)
     }
 }
+
+/// What a segment-based engine (Whisper) returns for one transcription: its
+/// segment texts joined and trimmed, then run through the user's custom
+/// dictionary. The dictionary is a no-op when it's empty.
+struct SegmentedEngineTranscript: Equatable {
+    /// Joined and trimmed, before dictionary corrections.
+    let uncorrected: String
+    /// What the engine hands back.
+    let text: String
+
+    init(
+        segmentTexts: [String],
+        entries: [CustomDictionaryEntry] = CustomDictionaryPreferences.entries()
+    ) {
+        uncorrected = segmentTexts
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        text = CustomDictionaryTextProcessor.apply(to: uncorrected, entries: entries)
+    }
+}

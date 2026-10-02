@@ -363,52 +363,6 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
     }
 }
 
-/// Pending route state is consumed by the graph owner that captured it. A new
-/// recording replaces the entry with a new owner, making delayed cleanup a
-/// no-op instead of restoring the replacement recording's system input.
-struct ParakeetOwnerBoundPendingState<Value: Equatable>: Equatable {
-    private struct Entry: Equatable {
-        let owner: ParakeetAudioGraphOwnerToken
-        let value: Value
-    }
-
-    private var entry: Entry?
-
-    var owner: ParakeetAudioGraphOwnerToken? {
-        entry?.owner
-    }
-
-    var hasPendingValue: Bool {
-        entry != nil
-    }
-
-    mutating func replace(_ value: Value, ownedBy owner: ParakeetAudioGraphOwnerToken) {
-        entry = Entry(owner: owner, value: value)
-    }
-
-    mutating func clear() {
-        entry = nil
-    }
-
-    @discardableResult
-    mutating func clear(ownedBy owner: ParakeetAudioGraphOwnerToken) -> Bool {
-        guard entry?.owner == owner else { return false }
-        entry = nil
-        return true
-    }
-
-    mutating func take(ownedBy owner: ParakeetAudioGraphOwnerToken) -> Value? {
-        guard entry?.owner == owner else { return nil }
-        defer { entry = nil }
-        return entry?.value
-    }
-
-    func value(ownedBy owner: ParakeetAudioGraphOwnerToken) -> Value? {
-        guard entry?.owner == owner else { return nil }
-        return entry?.value
-    }
-}
-
 enum ParakeetZombieRecoveryOwnershipPolicy {
     static func canContinue(
         taskIsCancelled: Bool,
@@ -467,5 +421,32 @@ struct ParakeetRecordedTranscriptionOwnership {
 
     mutating func revoke() {
         activeLease = nil
+    }
+}
+
+/// One run at a time. A second caller joins the run already in flight instead
+/// of starting its own, and the run counts as in progress until its work
+/// returns. `ParakeetEngine.stopRecording` uses this so duplicate stops await
+/// one tap removal and buffer drain, and config recovery can see a stop for
+/// its whole lifetime (`audioStopInProgress`).
+@MainActor
+final class ParakeetSingleFlightLifecycle {
+    private var task: Task<Void, Never>?
+
+    var isInProgress: Bool {
+        task != nil
+    }
+
+    func run(_ work: @escaping @MainActor () async -> Void) async {
+        if let task {
+            await task.value
+            return
+        }
+        let task = Task { @MainActor in
+            await work()
+        }
+        self.task = task
+        await task.value
+        self.task = nil
     }
 }

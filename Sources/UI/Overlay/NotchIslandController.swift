@@ -1,6 +1,6 @@
 // NotchIslandController.swift
 // The one notch island shared by dictation, meetings and the call-detected
-// prompt (Settings › Dictation window › Notch island). Each controller keeps
+// prompt. Each controller keeps
 // its own state machine, timers and actions and pushes a plain snapshot here
 // (NotchIsland*Content). This composes them with NotchIslandPresentation,
 // sizes the panel with NotchIslandGeometry for the display it picks (the one
@@ -84,9 +84,10 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// the pointer instead of tracking areas on a window that may ignore it.
     private var pointerMonitors: [Any] = []
 
-    static var isSelected: Bool {
-        DictationOverlayPresentationPreferences.mode() == .notchIsland
-    }
+    /// Always on: the Notch island is the only dictation, meeting and call
+    /// prompt window. The old near-text, mini cursor and meeting pill panels
+    /// are still in the tree until they're deleted, but nothing picks them.
+    static var isSelected: Bool { true }
 
     init() {
         screenObserver = NotificationCenter.default.addObserver(

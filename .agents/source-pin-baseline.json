@@ -1,0 +1,33 @@
+{
+  "resolved-pins": {
+    "Tests/AnalyticsEventPolicyTests.swift": 3,
+    "Tests/AudioAutomationCoverageContractTests.swift": 20,
+    "Tests/AuditRegressionCoverageContractTests.swift": 3,
+    "Tests/BluetoothRouteContractTests.swift": 3,
+    "Tests/CIWorkflowContractTests.swift": 14,
+    "Tests/ClipboardRestoringTextPasterTests.swift": 1,
+    "Tests/DeviceRecoveryPolicyTests.swift": 26,
+    "Tests/DictationInputDeviceSelectionPolicyTests.swift": 3,
+    "Tests/DictationQueuedStartPolicyTests.swift": 2,
+    "Tests/DictationRecordingStartOverlayPolicyTests.swift": 7,
+    "Tests/DictationSoundsTests.swift": 2,
+    "Tests/DictationStoppedAudioRecoveryTests.swift": 13,
+    "Tests/DictationTerminationCheckpointTests.swift": 1,
+    "Tests/HomeFirstArtifactVisibilityTests.swift": 20,
+    "Tests/HomeImportAudioActionTests.swift": 6,
+    "Tests/MeetingSessionUIPolicyTests.swift": 13,
+    "Tests/NightlySecurityContractTests.swift": 34,
+    "Tests/ObservabilityLogWriterTests.swift": 2,
+    "Tests/OverlayScreenSharePrivacyTests.swift": 14,
+    "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 3,
+    "Tests/ParakeetRecoveryStateTests.swift": 9,
+    "Tests/PermissionStateHarnessContractTests.swift": 20,
+    "Tests/ReleaseMetadataContractTests.swift": 6,
+    "Tests/RetainedDataSourceComboBoxTests.swift": 1,
+    "Tests/RetranscribeLocalSpeakerPreferenceContractTests.swift": 2,
+    "Tests/SingleInstanceGuardTests.swift": 3,
+    "Tests/StatusItemPresentationTests.swift": 8,
+    "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
+    "Tests/UIAutomationSurfaceContractTests.swift": 310
+  }
+}

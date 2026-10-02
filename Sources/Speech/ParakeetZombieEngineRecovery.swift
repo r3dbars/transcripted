@@ -10,15 +10,15 @@
 // separate generation-gated recovery task that replaces the stale
 // AVAudioEngine through a bounded reset and retries once. Do not fold the
 // recovery task back into the watchdog or reuse a detected zombie graph —
-// see Sources/Speech/CLAUDE.md.
+// see Sources/Speech/AGENTS.md.
 //
 // These are internal collaborator methods on ParakeetEngine — ParakeetEngine
 // remains the public-API owner and MainActor home for this state
 // (`audioWatchdogTask`, `zombieRecoveryTask`, `zombieRecoveryState`,
 // `zombieRecoveryStartGeneration`); this file just groups the zombie-recovery
-// slice of its implementation. The audio-graph/queue owner-token helpers it
-// guards with stay in ParakeetEngine.swift because every start/stop path
-// uses them, not just recovery.
+// slice of its implementation. The graph replacement itself, and the
+// owner tokens it guards with, live in ParakeetAudioGraph.swift because every
+// start/stop path uses them, not just recovery.
 
 @preconcurrency import AVFoundation
 import Foundation
@@ -71,75 +71,60 @@ extension ParakeetEngine {
     }
 
     private func startZombieEngineRecovery(failureKind: String) {
-        guard !zombieRecoveryState.isActive else { return }
-        let generation = zombieRecoveryState.begin(failureKind: failureKind)
+        guard let generation = ParakeetZombieEngineRecoverySequence.admit(
+            &zombieRecoveryState,
+            failureKind: failureKind
+        ) else { return }
         zombieRecoveryTask = Task { @MainActor [weak self] in
             await self?.runZombieEngineRecovery(generation: generation)
         }
     }
 
+    /// The order lives in `ParakeetZombieEngineRecoverySequence`; this supplies
+    /// the engine's real steps.
     private func runZombieEngineRecovery(generation: UInt64) async {
-        defer {
-            clearZombieRecoveryStartGeneration(ifMatching: generation)
-            if zombieRecoveryState.canContinue(generation: generation) {
-                finishZombieEngineRecovery(
-                    generation: generation,
-                    result: Task.isCancelled ? .cancelled : .failed
-                )
-            }
-        }
-
-        guard zombieRecoveryState.advance(to: .reset, generation: generation) else { return }
-        let recoveryGraphOwner = currentAudioGraphOwnerToken()
-        pendingSamplesLock.withLock {
-            pendingSamples.removeAll(keepingCapacity: true)
-            didReportPendingSampleTruncation = false
-        }
-        isRecording = false
-        audioLevel = 0
-        configChangeWasRecording = false
-        ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
-            + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-
-        // Stop/config-change cancellation takes ownership of graph cleanup. The
-        // superseded zombie task must not enter recreation after this suspension.
-        guard canContinueZombieEngineRecovery(
+        await ParakeetZombieEngineRecoverySequence.run(
             generation: generation,
-            expectedOwner: recoveryGraphOwner
-        ) else { return }
-        guard await recreateAudioEngineForZombieRecovery(
-            generation: generation,
-            expectedOwner: recoveryGraphOwner
-        ) else { return }
-        guard !Task.isCancelled, zombieRecoveryState.canContinue(generation: generation) else { return }
-
-        guard zombieRecoveryState.advance(to: .settle, generation: generation) else { return }
-        do {
-            try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-        } catch {
-            return
-        }
-        guard !Task.isCancelled, zombieRecoveryState.canContinue(generation: generation) else { return }
-
-        guard zombieRecoveryState.advance(to: .restart, generation: generation) else { return }
-        zombieRecoveryStartGeneration = generation
-        let started = await startRecording(isRecoveryAttempt: true)
-        clearZombieRecoveryStartGeneration(ifMatching: generation)
-        guard zombieRecoveryState.canContinue(generation: generation) else { return }
-
-        if started {
-            AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
-            finishZombieEngineRecovery(generation: generation, result: .succeeded)
-        } else {
-            AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
-            interruptRecordingPreservingRecoveredTimeline()
-            finishZombieEngineRecovery(generation: generation, result: .failed)
-        }
+            steps: ParakeetZombieEngineRecoverySteps(
+                isCurrent: { self.zombieRecoveryState.canContinue(generation: $0) },
+                advance: { self.zombieRecoveryState.advance(to: $0, generation: $1) },
+                captureGraphOwner: { self.currentAudioGraphOwnerToken() },
+                publishIdle: {
+                    self.pendingSamplesLock.withLock {
+                        self.pendingSamples.removeAll(keepingCapacity: true)
+                        self.didReportPendingSampleTruncation = false
+                    }
+                    self.isRecording = false
+                    self.audioLevel = 0
+                    self.configChangeWasRecording = false
+                    self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+                        + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+                },
+                canContinue: { self.canContinueZombieEngineRecovery(generation: $0, expectedOwner: $1) },
+                recreateGraph: { await self.recreateAudioEngineForZombieRecovery(generation: $0, expectedOwner: $1) },
+                settle: { try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay) },
+                restartRecording: { generation in
+                    self.zombieRecoveryStartGeneration = generation
+                    return await self.startRecording(isRecoveryAttempt: true)
+                },
+                clearStartGeneration: { self.clearZombieRecoveryStartGeneration(ifMatching: $0) },
+                reportRestartOutcome: { started in
+                    if started {
+                        AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
+                    } else {
+                        AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
+                    }
+                },
+                interruptPreservingRecoveredTimeline: { self.interruptRecordingPreservingRecoveredTimeline() },
+                finish: { self.finishZombieEngineRecovery(generation: $0, result: $1) }
+            )
+        )
     }
 
     /// A detected zombie is evidence that the current AVAudioEngine graph is stale.
     /// Replace that instance rather than stopping and starting it again. Queue work
-    /// is bounded; if CoreAudio does not return, abandon the old graph and queue.
+    /// is bounded; if CoreAudio does not return, abandon the old graph and queue
+    /// (`ParakeetAudioGraph.replaceZombieGraph`).
     private func recreateAudioEngineForZombieRecovery(
         generation: UInt64,
         expectedOwner: ParakeetAudioGraphOwnerToken
@@ -149,89 +134,11 @@ extension ParakeetEngine {
             expectedOwner: expectedOwner
         ) else { return false }
 
-        trackAudioEngineRebuildChurn(reason: "zombie_engine_recovery")
-        audioGraphGeneration += 1
-        let resetOwner = currentAudioGraphOwnerToken()
-        let resetQueueOwner = currentAudioEngineQueueOwnerToken()
-        removeAudioEngineConfigObserver()
-        defer {
-            restoreAudioEngineConfigObserverIfCurrent(resetOwner)
+        return await audioGraph.replaceZombieGraph(
+            timeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
+        ) { resetOwner in
+            canContinueZombieEngineRecovery(generation: generation, expectedOwner: resetOwner)
         }
-        let retiredEngine = audioEngine
-        audioEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)
-
-        do {
-            try await runTimedAudioEngineWork(operation: "zombie_engine_reset") { [audioEngineWorkOwnership] audioEngine in
-                defer {
-                    audioEngineWorkOwnership.finish(
-                        owner: resetQueueOwner,
-                        phase: .zombieReset
-                    )
-                }
-                Self.safelyRemoveInputTap(on: audioEngine)
-                audioEngine.reset()
-            }
-        } catch {
-            audioEngineWorkOwnership.finish(owner: resetQueueOwner, phase: .zombieReset)
-            guard let workError = error as? ParakeetAudioEngineWorkError else { return false }
-            guard workError.requiresGraphAbandonment else {
-                // No work entered this graph when the process-wide circuit was
-                // already full. Keep the current graph and fail this recovery.
-                return false
-            }
-            guard canContinueZombieEngineRecovery(
-                generation: generation,
-                expectedOwner: resetOwner
-            ) else { return false }
-
-            // Only the exact generation+engine owner may abandon a timed-out
-            // queue; a newer graph may reuse the same engine instance.
-            return abandonBlockedAudioEngine(
-                reason: "zombie_engine_reset_timeout",
-                expectedOwner: resetQueueOwner
-            )
-        }
-
-        guard canContinueZombieEngineRecovery(
-            generation: generation,
-            expectedOwner: resetOwner
-        ) else { return false }
-
-        inputTapInstalled = false
-        isEnginePrewarmed = false
-        didReceiveAudioSamples = false
-        didReceiveNonZeroAudioSamples = false
-        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-        removeAudioEngineConfigObserver()
-        let didReserveRetiredEngine = reserveRetiredAudioEngine(
-            retiredEngine,
-            reason: "zombie_engine_recovery"
-        )
-        guard didReserveRetiredEngine else {
-            // A watchdog-confirmed zombie is never safe to reuse, even after
-            // reset. Once the bounded retirement store is full, fail this
-            // attempt and let its delayed releases make room for a later one.
-            AppLogger.transcription.error(
-                "PARAKEET | zombie audio graph replacement refused because retirement limit is full"
-            )
-            // Recovery already transitioned the engine to non-recording. Tell
-            // the owning dictation session immediately so its listening UI
-            // cannot remain active while no microphone samples are arriving.
-            interruptRecordingPreservingRecoveredTimeline()
-            return false
-        }
-        audioEngine = AVAudioEngine()
-        if !isShuttingDown {
-            installAudioEngineConfigObserverIfNeeded()
-        }
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "parakeet",
-            event: "audio_engine_rebuilt",
-            message: "Audio engine replaced after zombie-state detection",
-            context: ["reason": "zombie_engine_recovery"]
-        )
-        return true
     }
 
     private func canContinueZombieEngineRecovery(

@@ -11,7 +11,8 @@
   "global_invariants": [
     "Keep Transcripted local-first.",
     "Never send or print private transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute paths, raw URLs, or raw device names.",
-    "Keep Sources/TranscriptedCore as a library boundary consumed through Sources/Meeting.",
+    "Keep Sources/TranscriptedCore a linked library: only Sources/Meeting uses all of it; other modules name only the Core types their tier in .agents/modules.json grants.",
+    "Every Sources/ file belongs to a module in .agents/modules.json; name only types from modules yours may depend on (scripts/dev/check-module-boundaries.py).",
     "Run mapped checks sequentially because build.sh and run-tests.sh share build output.",
     "Keep deterministic, hosted, and manual proof separate.",
     "Do not claim real microphone, system-audio, Bluetooth, pasteback, or UI proof from synthetic tests."
@@ -20,7 +21,7 @@
     {
       "id": "accessibility",
       "path_prefixes": ["Sources/Accessibility/"],
-      "docs": ["Sources/Accessibility/CLAUDE.md"],
+      "docs": ["Sources/Accessibility/AGENTS.md"],
       "keywords": ["accessibility", "ax", "focus", "focused editor", "overlay placement", "paste target"],
       "owns": "Focused-editor metadata, AX reads, and overlay placement context.",
       "invariants": [
@@ -32,7 +33,7 @@
     {
       "id": "capture",
       "path_prefixes": ["Sources/Capture/"],
-      "docs": ["Sources/Capture/CLAUDE.md"],
+      "docs": ["Sources/Capture/AGENTS.md"],
       "keywords": ["hotkey", "shortcut", "keyboard", "physical trigger"],
       "owns": "Global hotkeys and physical dictation trigger routing.",
       "invariants": ["Preserve key-up/key-down ordering and wake recovery."],
@@ -41,7 +42,7 @@
     {
       "id": "dictation",
       "path_prefixes": ["Sources/Dictation/", "Sources/UI/Overlay/"],
-      "docs": ["Sources/Dictation/CLAUDE.md", "Sources/UI/CLAUDE.md"],
+      "docs": ["Sources/Dictation/AGENTS.md", "Sources/UI/AGENTS.md"],
       "keywords": ["dictation", "pasteback", "clipboard", "auto enter", "overlay", "no speech"],
       "owns": "Dictation lifecycle, persistence, overlay state, pasteback orchestration, and timeout helpers.",
       "invariants": [
@@ -54,7 +55,7 @@
     {
       "id": "speech",
       "path_prefixes": ["Sources/Speech/"],
-      "docs": ["Sources/Speech/CLAUDE.md", "docs/audio-reliability-daily-check.md"],
+      "docs": ["Sources/Speech/AGENTS.md", "docs/audio-reliability-daily-check.md"],
       "keywords": ["speech", "stt", "model download", "model readiness", "parakeet", "bluetooth", "airpods", "audio route", "microphone"],
       "owns": "Local STT, model provisioning, microphone capture, device routing, and audio recovery.",
       "invariants": [
@@ -67,7 +68,7 @@
     {
       "id": "meeting-app",
       "path_prefixes": ["Sources/Meeting/"],
-      "docs": ["Sources/Meeting/CLAUDE.md", "docs/qa-issue-500-meeting-audio.md"],
+      "docs": ["Sources/Meeting/AGENTS.md", "docs/qa-issue-500-meeting-audio.md"],
       "keywords": ["meeting", "zoom", "google meet", "system audio", "quiet mic", "meeting prompt", "retained audio"],
       "owns": "App-side meeting state, meeting prompts, capture bridge, retries, and saved-meeting UI.",
       "invariants": [
@@ -81,8 +82,8 @@
       "id": "meeting-core",
       "path_prefixes": ["Sources/TranscriptedCore/", "Tests/TranscriptedCoreTests/"],
       "exact_paths": ["Package.swift"],
-      "docs": ["Sources/TranscriptedCore/CLAUDE.md"],
-      "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio"],
+      "docs": ["Sources/TranscriptedCore/AGENTS.md"],
+      "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio", "fluidaudio", "nemotron"],
       "owns": "Reusable meeting transcription, audio processing, speaker logic, and queueing.",
       "invariants": [
         "The app consumes this library through Sources/Meeting.",
@@ -94,9 +95,9 @@
     {
       "id": "support",
       "path_prefixes": ["Sources/Support/"],
-      "docs": ["Sources/Support/CLAUDE.md", "docs/storage-paths.md"],
-      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install"],
-      "owns": "Shared preferences, permissions, paths, paste helpers, and launch behavior.",
+      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md", "docs/capture-format.md", "docs/lab-control-channel.md"],
+      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install", "capture library", "saved transcript", "capture format", "frontmatter", "lab control", "start meeting", "stop meeting", "transcript format", "markdown format", "another process"],
+      "owns": "Shared preferences, permissions, paths, paste helpers, launch behavior, the capture library and its file format, and the lab control channel.",
       "invariants": [
         "Keep app-owned state under Transcripted Application Support.",
         "Preserve legacy migration fallbacks without writing new data to legacy paths."
@@ -106,8 +107,8 @@
     {
       "id": "ui",
       "path_prefixes": ["Sources/UI/"],
-      "docs": ["Sources/UI/CLAUDE.md"],
-      "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect"],
+      "docs": ["Sources/UI/AGENTS.md"],
+      "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect", "notch island", "island", "status item"],
       "owns": "Menu bar, Home, Settings, onboarding, overlay presentation, and agent-connect UI.",
       "invariants": [
         "Keep UI state backed by the owning runtime state.",
@@ -119,8 +120,8 @@
       "id": "observability",
       "path_prefixes": ["Sources/Observability/"],
       "exact_paths": ["Info.plist"],
-      "docs": ["Sources/Observability/CLAUDE.md", "docs/privacy-first-observability.md"],
-      "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update"],
+      "docs": ["Sources/Observability/AGENTS.md", "docs/privacy-first-observability.md", "docs/observability.md"],
+      "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update", "log", "logs", "latency", "slow", "debug log"],
       "owns": "Local diagnostics, bounded Sentry/PostHog forwarding, and app updates.",
       "invariants": [
         "Only allowlisted, sanitized events may leave the device.",
@@ -132,7 +133,7 @@
     {
       "id": "reliability",
       "path_prefixes": ["Sources/Reliability/"],
-      "docs": ["Sources/Reliability/CLAUDE.md"],
+      "docs": ["Sources/Reliability/AGENTS.md"],
       "keywords": ["wake", "sleep", "recovery", "resume", "hotkey recovery"],
       "owns": "Wake, sleep, hotkey, and active-capture recovery.",
       "invariants": ["Recovery must be idempotent and must not duplicate active capture state."],
@@ -149,7 +150,7 @@
         "docs/sparkle-updates.md"
       ],
       "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
-      "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast"],
+      "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast", "website", "download page", "transcripted.app", "notarize", "release candidate", "dmg"],
       "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
       "invariants": [
         "A DMG alone is not a complete release.",
@@ -212,10 +213,24 @@
       "manual_proof": []
     },
     {
+      "id": "writing",
+      "path_prefixes": ["Sources/Writing/", "Sources/TranscriptedWriting/", "Sources/TranscriptedKeyboard/", "Tests/TranscriptedWritingTests/"],
+      "docs": ["Sources/Writing/AGENTS.md", "Sources/TranscriptedWriting/AGENTS.md", "Sources/TranscriptedKeyboard/AGENTS.md", "docs/writing-plan.md"],
+      "keywords": ["writing", "autocomplete", "ghost text", "suggestion", "input method", "screen memory", "llama", "personal history", "save my writing", "scrubber", "tilde", "llama-server"],
+      "owns": "Writing: the app bridge, the autocomplete and Save my writing library, the llama-server helper, Screen Memory, and the keyboard input method.",
+      "invariants": [
+        "Writing never sends or logs typed text; analytics are counts only.",
+        "A TranscriptedWriting Core change ships in two binaries: the app and the keyboard bundle.",
+        "Saved writing reaches disk only as day files after the secret scrubber.",
+        "The app reaches the Writing runtime only through Sources/Writing/."
+      ],
+      "manual_proof": ["Ghost-text suggestions and accept keys in a real text field with the input method installed."]
+    },
+    {
       "id": "app-shell",
       "path_prefixes": ["Sources/"],
       "fallback": true,
-      "docs": ["Sources/CLAUDE.md"],
+      "docs": ["Sources/AGENTS.md"],
       "keywords": ["app shell", "app delegate", "bootstrap", "application state"],
       "owns": "Top-level application bootstrap, shared app state, and subsystem wiring.",
       "invariants": [
@@ -238,8 +253,8 @@
         "run-live-capture-smoke.sh",
         "run-daily-audio-reliability.sh"
       ],
-      "docs": ["scripts/README.md"],
-      "keywords": ["build", "dependency", "entrypoint", "test runner"],
+      "docs": ["scripts/README.md", "docs/repo-layout.md"],
+      "keywords": ["build", "dependency", "entrypoint", "test runner", "deps", "build-deps", "fluidaudio", "check.sh", "deterministic proof", "source list", "cannot find type", "helper", "bundle", "wrapper"],
       "owns": "Root build and test wrappers plus their canonical entrypoints.",
       "invariants": [
         "Keep root wrappers thin and preserve non-interactive agent entrypoints.",
@@ -255,7 +270,7 @@
       "keywords": ["script", "automation"],
       "owns": "Repository automation not owned by a narrower build, development, operations, or release area.",
       "invariants": [
-        "Do not add an unconsumed script.",
+        "Every new script needs a caller: another script, a test-matrix rule, a workflow, or an entry in scripts/README.md.",
         "Keep automation non-interactive when it is part of an agent proof path."
       ],
       "manual_proof": []

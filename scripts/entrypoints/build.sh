@@ -27,6 +27,9 @@ SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || pri
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
+LIVE_PACKAGE_DIR="Tools/TranscriptedLive"
+LIVE_BINARY="$LIVE_PACKAGE_DIR/.build/release/transcripted-live"
+BUNDLED_LIVE_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-live"
 # Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
 LLAMA_SERVER_BINARY="deps-tools/llama-server"
 BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
@@ -69,6 +72,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
+source "$ENTRYPOINT_DIR/lib/running-bundle-guard.sh"
 
 ensure_build_prerequisites() {
     if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then
@@ -418,6 +422,21 @@ bundle_mcp_server() {
     chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
+# The live meeting helper the Claude Code mod starts (Tools/TranscriptedLive/claude-mod).
+# It only reads the in-progress recording; the Helpers signing loop signs it.
+bundle_live_helper() {
+    echo "Building Transcripted live meeting helper..."
+    swift build -c release --package-path "$LIVE_PACKAGE_DIR"
+
+    if [ ! -x "$LIVE_BINARY" ]; then
+        echo "Live helper build finished without a runnable binary: $LIVE_BINARY"
+        exit 1
+    fi
+
+    cp "$LIVE_BINARY" "$BUNDLED_LIVE_BINARY"
+    chmod 755 "$BUNDLED_LIVE_BINARY"
+}
+
 # Writing's inference helper. sign_embedded_code's Helpers loop signs it.
 bundle_llama_server() {
     cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
@@ -426,6 +445,7 @@ bundle_llama_server() {
 
 echo "Building Transcripted..."
 
+refuse_if_bundle_running "$APP_BUNDLE"
 ensure_build_prerequisites
 ensure_deps_ready
 ORIGINAL_SENTRY_RELEASE_WAS_SET=0
@@ -547,6 +567,7 @@ source "$ENTRYPOINT_DIR/lib/compile-app-icon.sh"
 compile_app_icon "$APP_BUNDLE"
 
 bundle_mcp_server
+bundle_live_helper
 bundle_llama_server
 
 # Unified dependencies (FluidAudio + WhisperKit)

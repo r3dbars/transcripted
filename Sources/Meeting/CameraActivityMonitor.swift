@@ -21,7 +21,7 @@
 // provider using the concurrent mic signal and the frontmost app, and gates the
 // camera-only case behind a known call app so a Photo Booth selfie stays quiet.
 //
-// Threading (root CLAUDE.md CoreAudio/CMIO rules): all CMIO reads, listeners, and
+// Threading (root AGENTS.md CoreAudio/CMIO rules): all CMIO reads, listeners, and
 // mutable state are confined to one serial utility queue; listener callbacks only
 // schedule a debounced re-scan; results hop to the main actor. `@unchecked
 // Sendable` because mutable state is touched only on `queue`; assign `onChange`

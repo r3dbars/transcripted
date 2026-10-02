@@ -34,6 +34,12 @@ struct RecordedAudioTimeline {
         }
     }
 
+    /// Appends a drained segment at its own captured rate. Pending tap audio
+    /// joins the take this way, so a route change mid-take keeps both rates.
+    mutating func append(_ segment: RecordedAudioSegment) {
+        append(segment.samples, sampleRate: segment.sampleRate)
+    }
+
     /// Retain the newest audio by duration, even when Bluetooth changes rates.
     /// A sample-count limit based on the latest rate would trim the wrong amount.
     @discardableResult
@@ -66,5 +72,21 @@ struct RecordedAudioTimeline {
         } else {
             segments.removeAll()
         }
+    }
+}
+
+extension RecordedAudioTimeline {
+    /// Converts each segment from its own captured rate and joins them in
+    /// order. A route change mid-take (AirPods dropping to 24 kHz, say) leaves
+    /// segments at different rates; treating them as one rate would warp the audio.
+    static func speechSamples(
+        from segments: [RecordedAudioSegment],
+        resample: (_ samples: [Float], _ sampleRate: Double) throws -> [Float]
+    ) rethrows -> [Float] {
+        var combined: [Float] = []
+        for segment in segments {
+            combined.append(contentsOf: try resample(segment.samples, segment.sampleRate))
+        }
+        return combined
     }
 }

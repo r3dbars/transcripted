@@ -21,6 +21,7 @@ swiftc -parse-as-library -I "$OUT_DIR" -L "$OUT_DIR" -lFluidAudio \
     Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift \
     Sources/Speech/DictationInputDeviceSelectionPolicy.swift \
     Sources/Speech/ParakeetShortAudioGate.swift \
+    Sources/Speech/DictationAudioRecovery.swift \
     Sources/Speech/PinnedDictationSpeedPath.swift \
     Sources/Speech/ParakeetModelState.swift \
     Sources/Speech/ParakeetModelInitDiagnostics.swift \

@@ -128,6 +128,36 @@ enum DictationEmptyInferencePolicy {
         // audio remains the ordinary no-speech path.
         return hasUsableSpeechSignal ? .audioNeedsRecovery : .noSpeech
     }
+
+    /// Why an external engine (Whisper, Apple Speech) produced no dictation,
+    /// or nil when it returned words. Empty text over usable captured audio
+    /// keeps the recording; only quiet audio counts as no speech.
+    static func externalEngineEmptyReason(text: String, samples16k: [Float]) -> DictationEmptyTranscriptionReason? {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let analysis = DictationAudioRecovery.analyze(
+            samples: samples16k,
+            sampleRate: TranscriptedConstants.parakeetSampleRate
+        )
+        return reason(hasUsableSpeechSignal: analysis.hasUsableSpeechSignal)
+    }
+
+    /// A thrown external-engine error is a model failure, which keeps the
+    /// stopped audio. Cancellation is not a failure and reports nothing.
+    static func externalEngineFailureReason(for error: Error, taskCancelled: Bool) -> DictationEmptyTranscriptionReason? {
+        if taskCancelled || error is CancellationError { return nil }
+        return .modelFailure
+    }
+
+    /// The reason after audio conversion handed back nothing. Native audio
+    /// still on hand with no reason yet means the take needs recovery, not
+    /// the destructive no-speech cleanup.
+    static func reasonAfterEmptyConversion(
+        current: DictationEmptyTranscriptionReason?,
+        retainsNativeAudio: Bool
+    ) -> DictationEmptyTranscriptionReason? {
+        if current == nil && retainsNativeAudio { return .audioNeedsRecovery }
+        return current
+    }
 }
 
 enum ParakeetShortAudioGate {

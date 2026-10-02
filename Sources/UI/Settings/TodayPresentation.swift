@@ -185,7 +185,7 @@ enum TodayTapeBuilder {
     static let dayCount = 7
 
     /// Seven days, oldest first, the last one is today. Captures are the same
-    /// rows the Recent list uses; a meeting's end comes from its duration.
+    /// rows the sessions list uses; a meeting's end comes from its duration.
     static func days(
         captures: [TodayRecentItem],
         now: Date,
@@ -287,6 +287,108 @@ enum TodayTapeBuilder {
     }
 }
 
+// MARK: - Sessions
+
+/// A stretch of one day with no long pause in it: a meeting and the
+/// dictations around it, or a run of writing in one app. Items oldest first.
+struct TodaySession: Identifiable, Equatable, Sendable {
+    let items: [TodayRecentItem]
+    let start: Date
+    let end: Date
+    let title: String
+
+    var id: String { items.first?.id ?? "" }
+    /// Which streams it holds, in lane order, for the row's dots.
+    var kinds: [TodayRecentItem.Kind] {
+        [.meeting, .dictation, .writing].filter { kind in items.contains { $0.kind == kind } }
+    }
+}
+
+/// Groups a day's captures into sessions and names each one by rule, no
+/// model: the first meeting's title, else the first dictation's opening
+/// words, else "Writing in <app>" when the writing all came from one app.
+enum TodaySessionBuilder {
+    /// A pause longer than this starts a new session.
+    static let gap: TimeInterval = 30 * 60
+    static let titleLength = 60
+
+    static func sessions(_ items: [TodayRecentItem]) -> [TodaySession] {
+        let sorted = items.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id < $1.id }
+        var groups: [[TodayRecentItem]] = []
+        var groupEnd = Date.distantPast
+        for item in sorted {
+            if groups.isEmpty || item.date.timeIntervalSince(groupEnd) > gap {
+                groups.append([item])
+                groupEnd = end(of: item)
+            } else {
+                groups[groups.count - 1].append(item)
+                groupEnd = max(groupEnd, end(of: item))
+            }
+        }
+        return groups.map { group in
+            TodaySession(
+                items: group,
+                start: group[0].date,
+                end: group.map(end(of:)).max() ?? group[0].date,
+                title: title(for: group)
+            )
+        }
+    }
+
+    /// A meeting runs for its length; a writing entry for its estimate.
+    static func end(of item: TodayRecentItem) -> Date {
+        guard item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 else { return item.date }
+        return item.date.addingTimeInterval(TimeInterval(seconds))
+    }
+
+    /// A meeting shorter than this doesn't name a session that has other
+    /// captures in it: a 1-minute "Quick notes" isn't what a morning of
+    /// dictation was about.
+    static let titleMeetingMinimumSeconds = 5 * 60
+
+    static func title(for items: [TodayRecentItem]) -> String {
+        let meetings = items.filter { $0.kind == .meeting }
+        if let meeting = meetings.first(where: { ($0.durationSeconds ?? 0) >= titleMeetingMinimumSeconds }) {
+            return wordTrimmed(meeting.title, maxLength: titleLength)
+        }
+        if let dictation = items.first(where: { $0.kind == .dictation }) {
+            return wordTrimmed(line(for: dictation), maxLength: titleLength)
+        }
+        let writing = items.filter { $0.kind == .writing }
+        let apps = Set(writing.compactMap(\.appName))
+        if apps.count == 1, let app = apps.first, app != "Unknown app", writing.allSatisfy({ $0.appName == app }) {
+            return "Writing in \(app)"
+        }
+        // Only short meetings left, or writing across several apps.
+        let first = writing.first ?? meetings.first
+        return wordTrimmed(first.map(line(for:)) ?? "", maxLength: titleLength)
+    }
+
+    /// One capture as plain text: a meeting's title, else what was said or
+    /// written, without the quotes a dictation title carries.
+    static func line(for item: TodayRecentItem) -> String {
+        if item.kind != .meeting, let preview = item.preview {
+            let collapsed = preview.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            if !collapsed.isEmpty { return collapsed }
+        }
+        return item.title.trimmingCharacters(in: CharacterSet(charactersIn: "\u{201C}\u{201D}\u{2026} "))
+    }
+
+    /// At most `maxLength` characters, cut at a word boundary with an
+    /// ellipsis, so a title never ends in half a word.
+    /// A word boundary in the first half would throw most of the room
+    /// away, so a run with no early space is cut hard instead.
+    static func wordTrimmed(_ text: String, maxLength: Int) -> String {
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard collapsed.count > maxLength else { return collapsed }
+        let head = collapsed.prefix(maxLength + 1)
+        var cut = head.lastIndex(of: " ").map { head[..<$0] } ?? head.prefix(maxLength)
+        while let last = cut.last, ",;:-\u{2013}\u{2014}".contains(last) { cut = cut.dropLast() }
+        if cut.count < maxLength / 2 { cut = collapsed.prefix(maxLength) }
+        return cut.trimmingCharacters(in: .whitespaces) + "\u{2026}"
+    }
+}
+
 // MARK: - Recent activity
 
 struct TodayRecentItem: Equatable, Identifiable, Sendable {
@@ -376,7 +478,7 @@ enum TodayWritingParser {
 }
 
 enum TodayRecentActivity {
-    /// Rows per page of the Recent context list.
+    /// How many latest captures the snapshot keeps.
     static let pageSize = 10
 
     /// Newest first across every kind.
@@ -454,6 +556,20 @@ enum TodayCopy {
         "\(calendar.component(.day, from: date))"
     }
 
+    /// A session's clock time on its own day: "5:15 – 6:31 AM", or just the
+    /// start when it lasted under five minutes.
+    static func sessionTime(
+        start: Date,
+        end: Date,
+        locale: Locale = .current,
+        calendar: Calendar = .current
+    ) -> String {
+        guard end.timeIntervalSince(start) >= 5 * 60 else {
+            return TodayFormatterCache.string(from: start, template: "jmm", locale: locale, calendar: calendar)
+        }
+        return TodayFormatterCache.timeRange(from: start, to: end, locale: locale, calendar: calendar)
+    }
+
     /// Time of day for today's rows, "Yesterday", or a short weekday/date.
     static func rowWhen(
         for date: Date,
@@ -477,7 +593,7 @@ enum TodayCopy {
     }
 }
 
-/// Today's copy runs per Recent row and twice per tape mark on every render
+/// Today's copy runs per session row and twice per tape mark on every render
 /// (hover re-renders the tape), so building a DateFormatter per call adds up
 /// on a busy day. Formatters are reused per template, locale, calendar and
 /// time zone. Foundation formatters are safe to share for reads; the lock
@@ -504,6 +620,29 @@ enum TodayFormatterCache {
         }
         lock.unlock()
         return formatter.string(from: date)
+    }
+
+    nonisolated(unsafe) private static var intervalFormatters: [String: DateIntervalFormatter] = [:]
+
+    static func timeRange(from start: Date, to end: Date, locale: Locale, calendar: Calendar) -> String {
+        let key = [locale.identifier, "\(calendar.identifier)", calendar.timeZone.identifier].joined(separator: "|")
+        lock.lock()
+        let formatter: DateIntervalFormatter
+        if let cached = intervalFormatters[key] {
+            formatter = cached
+        } else {
+            formatter = DateIntervalFormatter()
+            formatter.locale = locale
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.dateTemplate = "jmm"
+            intervalFormatters[key] = formatter
+        }
+        // Unlike DateFormatter, DateIntervalFormatter isn't documented as
+        // safe to share, so it formats under the lock.
+        let text = formatter.string(from: start, to: end)
+        lock.unlock()
+        return text
     }
 
     static func decimalString(_ value: Int, locale: Locale = .current) -> String {

@@ -1,0 +1,237 @@
+import Foundation
+@preconcurrency import AVFoundation
+import QuartzCore
+import TranscriptedCore
+
+/// Local provisional text while the existing meeting recorder owns both tracks.
+/// Only explicit per-session sharing starts inference. The final meeting pipeline
+/// still independently diarizes, transcribes and saves its authoritative Markdown.
+@MainActor
+final class LiveMeetingTranscriptService {
+    static let shared = LiveMeetingTranscriptService()
+    private(set) var sessionID: UUID?
+    private(set) var sharingEnabled = false
+    private var state = "idle"
+    private var liveStatus = "disabled"
+    private var transcript = LiveMeetingTranscriptState()
+    nonisolated let inbox = LiveMeetingAudioInbox()
+    private var worker: Task<Void, Never>?
+    private var workerGeneration = UUID()
+    private weak var router: STTRouter?
+    private var model: TranscriptionModelChoice?
+    private var language: TranscriptionLanguageContext?
+    private var origin: TimeInterval = 0
+    private var sessionStartedAt: Date?
+    private var finishedElapsed: TimeInterval?
+    private var latestTextAt: Date?
+    private var deliveryEnabled: ((Bool, UInt64) -> Void)?
+    private var previewEpoch: UInt64 = 0
+    private var deliveryDrops: (() -> Int)?
+    private var mayInfer: (() -> Bool)?
+    private var lastErrorCode: String?
+
+    func beginCapture(sessionID: UUID, router: STTRouter, model: TranscriptionModelChoice,
+                      languageSelection: TranscriptionLanguageSelection,
+                      deliveryEnabled: @escaping (Bool, UInt64) -> Void, deliveryDrops: @escaping () -> Int,
+                      mayInfer: @escaping () -> Bool) {
+        self.deliveryEnabled?(false, previewEpoch)
+        previewEpoch &+= 1
+        worker?.cancel()
+        workerGeneration = UUID()
+        inbox.cancel()
+        self.sessionID = sessionID
+        self.router = router
+        self.model = model
+        if case .explicit(let code) = languageSelection {
+            language = TranscriptionLanguageContext(selection: languageSelection, languageCode: code, resolution: .explicit)
+        } else {
+            language = nil
+        }
+        self.deliveryEnabled = deliveryEnabled
+        self.deliveryDrops = deliveryDrops
+        self.mayInfer = mayInfer
+        origin = CACurrentMediaTime()
+        sessionStartedAt = Date()
+        finishedElapsed = nil
+        latestTextAt = nil
+        state = "recording"
+        sharingEnabled = false
+        liveStatus = "disabled"
+        lastErrorCode = nil
+        transcript = LiveMeetingTranscriptState()
+    }
+
+    @discardableResult
+    func setSharingEnabled(_ enabled: Bool, sessionID: UUID) -> Bool {
+        guard self.sessionID == sessionID else { return false }
+        guard !enabled || state == "recording" else { return false }
+        guard enabled != sharingEnabled else { return true }
+        deliveryEnabled?(false, previewEpoch)
+        previewEpoch &+= 1
+        sharingEnabled = enabled
+        if !enabled {
+            worker?.cancel()
+            workerGeneration = UUID()
+            inbox.cancel()
+            transcript.clear()
+            latestTextAt = nil
+            liveStatus = "disabled"
+            lastErrorCode = nil
+        } else if state == "recording" {
+            inbox.begin(sessionID: sessionID, origin: origin, previewEpoch: previewEpoch)
+            deliveryEnabled?(true, previewEpoch)
+            startWorker(sessionID: sessionID)
+        } else {
+            liveStatus = "finished"
+        }
+        return true
+    }
+
+    func finishCapture(sessionID: UUID) {
+        guard self.sessionID == sessionID else { return }
+        deliveryEnabled?(false, previewEpoch)
+        state = "finished"
+        finishedElapsed = max(0, CACurrentMediaTime() - origin)
+        inbox.finish()
+        if !sharingEnabled { liveStatus = "disabled" }
+    }
+
+    /// Invoked on Core's bounded live-delivery worker, not an audio callback.
+    nonisolated func receive(_ buffer: AVAudioPCMBuffer, source: LiveMeetingAudioSource, capturedAt: TimeInterval, previewEpoch: UInt64) {
+        guard let samples = Self.monoSamples(buffer), !samples.isEmpty else { return }
+        let rate = buffer.format.sampleRate
+        guard rate.isFinite, rate >= 8_000, rate <= 192_000 else { return }
+        let resampled = AudioResampler.resample(samples, from: rate, to: 16_000)
+        inbox.append(samples: resampled, source: source == .microphone ? .microphone : .system,
+            capturedAt: capturedAt, expectedEpoch: previewEpoch)
+    }
+
+    func statusSnapshot() -> [String: Any] {
+        let observedAt = Date()
+        let elapsed = sessionID == nil ? 0 : finishedElapsed ?? max(0, CACurrentMediaTime() - origin)
+        let latestAudioEnd = transcript.segments.map(\.endSeconds).max()
+        var result: [String: Any] = [
+            "session_id": sessionID.map { $0.uuidString as Any } ?? NSNull(), "state": state,
+            "live_status": liveStatus, "sharing_enabled": sharingEnabled,
+            "segment_count": transcript.segments.count,
+            "first_sequence": transcript.segments.first?.sequence ?? transcript.latestSequence + 1,
+            "latest_sequence": transcript.latestSequence, "provisional": true,
+            "dropped_windows": inbox.dropCount, "dropped_audio_buffers": deliveryDrops?() ?? 0,
+            "pending_windows": inbox.pendingWindowCount,
+            "snapshot_at_unix_seconds": observedAt.timeIntervalSince1970,
+            "session_started_at_unix_seconds": sessionStartedAt.map { $0.timeIntervalSince1970 as Any } ?? NSNull(),
+            "latest_text_at_unix_seconds": latestTextAt.map { $0.timeIntervalSince1970 as Any } ?? NSNull(),
+            "capture_elapsed_seconds": elapsed,
+            "latest_text_audio_end_seconds": latestAudioEnd.map { $0 as Any } ?? NSNull(),
+            // This is distance from the most recently recognized speech to the
+            // capture position. Silence can also increase it; queue/status tell
+            // the host whether inference is actually paused or falling behind.
+            "preview_lag_seconds": latestAudioEnd.map { max(0, elapsed - $0) as Any } ?? NSNull(),
+            "update_interval_seconds": 4,
+            "audio_overlap_seconds": 0.5,
+            "speaker_labels": "capture_track_only"
+        ]
+        if let model { result["model"] = model.rawValue }
+        result["language_selection"] = language?.selection.rawValue ?? "auto"
+        if let lastErrorCode { result["error_code"] = lastErrorCode }
+        return result
+    }
+
+    /// Sharing is enforced here as well as in the native bridge. Disabling it
+    /// clears retained text and audio; a stale caller can never read a new call.
+    func readLive(sessionID: UUID, afterSequence: Int = 0, limit: Int = 30) -> [String: Any]? {
+        guard self.sessionID == sessionID, sharingEnabled else { return nil }
+        let segments = transcript.window(afterSequence: afterSequence, limit: limit)
+        var result = statusSnapshot()
+        result["segments"] = segments.map(\.payload)
+        let next = segments.last?.sequence ?? max(0, afterSequence)
+        result["next_sequence"] = next
+        result["truncated"] = next < transcript.latestSequence
+        result["context_gap"] = (afterSequence > 0 && (transcript.segments.first?.sequence ?? 1) > afterSequence + 1) || inbox.dropCount > 0 || (deliveryDrops?() ?? 0) > 0
+        return result
+    }
+
+    private func startWorker(sessionID: UUID) {
+        guard let router, let requestedModel = model else {
+            liveStatus = "unavailable"
+            lastErrorCode = "model_unavailable"
+            return
+        }
+        worker?.cancel()
+        let generation = UUID()
+        workerGeneration = generation
+        let retainedModel = router.retainModelForForegroundUse(requestedModel)
+        let captureLanguage = language
+        model = retainedModel
+        liveStatus = "waiting_for_model"
+        worker = Task { @MainActor [weak self, router] in
+            defer { router.releaseModelFromForegroundUse(retainedModel) }
+            await router.initializeRetainedModel(retainedModel)
+            guard let self, self.isCurrent(sessionID, generation), !Task.isCancelled else { return }
+            guard router.isModelLoaded(for: retainedModel) else {
+                self.liveStatus = "unavailable"
+                self.lastErrorCode = "model_unavailable"
+                self.deliveryEnabled?(false, self.previewEpoch)
+                self.inbox.cancel()
+                return
+            }
+            while self.isCurrent(sessionID, generation), !Task.isCancelled {
+                // Dictation and the authoritative saved-meeting job have priority.
+                // Parakeet also serializes inference, including pure-sample callers.
+                if router.isRecording || router.isTranscribing || router.parakeetEngine.hasActiveASRWork || self.mayInfer?() == false {
+                    self.liveStatus = "paused_for_other_transcription"
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
+                }
+                guard let window = self.inbox.take() else {
+                    if self.state == "finished" { self.liveStatus = "finished"; return }
+                    self.liveStatus = "listening"
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
+                }
+                guard window.sessionID == sessionID else { continue }
+                // Avoid sending exact silence through the model. No speech or
+                // language is inferred from capture readiness/recording bytes.
+                let energy = window.samples.reduce(Double(0)) { $0 + Double($1 * $1) } / Double(window.samples.count)
+                guard energy > 0.000_000_09 else { continue }
+                self.liveStatus = "transcribing"
+                do {
+                    let text = try await router.transcribeSegment(samples: window.samples,
+                        source: window.source == .microphone ? .microphone : .system, model: retainedModel,
+                        language: captureLanguage)
+                    guard self.isCurrent(sessionID, generation), !Task.isCancelled else { return }
+                    let previousSequence = self.transcript.latestSequence
+                    self.transcript.append(text: text, startSeconds: window.startSeconds,
+                        endSeconds: window.endSeconds, source: window.source)
+                    if self.transcript.latestSequence != previousSequence { self.latestTextAt = Date() }
+                    self.lastErrorCode = nil
+                } catch {
+                    guard self.isCurrent(sessionID, generation), !Task.isCancelled else { return }
+                    self.lastErrorCode = "live_inference_failed"
+                    self.liveStatus = "retrying"
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        }
+    }
+
+    private func isCurrent(_ sessionID: UUID, _ generation: UUID) -> Bool {
+        self.sessionID == sessionID && workerGeneration == generation && sharingEnabled
+    }
+
+    nonisolated private static func monoSamples(_ buffer: AVAudioPCMBuffer) -> [Float]? {
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        guard frames > 0, frames <= 192_000, channels > 0, channels <= 32, let data = buffer.floatChannelData else { return nil }
+        if channels == 1 { return Array(UnsafeBufferPointer(start: data[0], count: frames)) }
+        var mono = [Float](repeating: 0, count: frames)
+        for frame in 0..<frames {
+            var sample: Float = 0
+            for channel in 0..<channels {
+                sample += buffer.format.isInterleaved ? data[0][frame * channels + channel] : data[channel][frame]
+            }
+            mono[frame] = sample / Float(channels)
+        }
+        return mono
+    }
+}

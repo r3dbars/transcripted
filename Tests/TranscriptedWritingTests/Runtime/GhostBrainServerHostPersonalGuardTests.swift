@@ -192,6 +192,9 @@ struct GhostBrainServerHostPersonalLookupTimingTests {
             now: { Date(timeIntervalSince1970: 1_000) },
             diagnostics: sink
         )
+        // Nothing waited for the slow provider: had it, the answer would be
+        // "late" with outcome=resolved. No elapsed-time bound, which a loaded
+        // CI runner broke (3.06 s against a 2.5 s limit).
         #expect(prediction == nil)
         #expect(events.values.count == 1)
         #expect(events.values.first?.0 == "personal-lookup-timing")

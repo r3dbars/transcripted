@@ -107,6 +107,60 @@ func testTodayPresentation() {
         assertEqual(long, "\u{201C}aaaaaaaaaa\u{2026}\u{201D}", "long text is trimmed with an ellipsis")
     }
 
+    runSuite("TodaySessionBuilder - a pause over 30 minutes starts a new session") {
+        func item(_ kind: TodayRecentItem.Kind, _ id: String, _ at: Date, seconds: Int? = nil, app: String? = nil, text: String? = nil) -> TodayRecentItem {
+            TodayRecentItem(kind: kind, id: id, title: id, date: at, durationSeconds: seconds, transcriptURL: nil, preview: text, appName: app)
+        }
+        let sessions = TodaySessionBuilder.sessions([
+            item(.dictation, "d3", date(24, 14, 10), text: "Summarize the review"),
+            item(.meeting, "Design review", date(24, 13, 0), seconds: 60 * 60),
+            item(.dictation, "d1", date(24, 9, 0), text: "Morning"),
+            item(.dictation, "d2", date(24, 9, 25), text: "Still morning"),
+            item(.writing, "w1", date(24, 16, 0), seconds: 120, app: "Slack"),
+            item(.writing, "w2", date(24, 16, 20), seconds: 60, app: "Slack"),
+        ])
+        assertEqual(sessions.map { $0.items.map(\.id) }, [["d1", "d2"], ["Design review", "d3"], ["w1", "w2"]],
+                    "grouped oldest first; a meeting's length keeps the dictation after it in its session")
+        assertEqual(sessions.map(\.title), ["Morning", "Design review", "Writing in Slack"], "titles follow the rules")
+        assertEqual(sessions[1].kinds, [.meeting, .dictation], "kinds in lane order")
+        assertTrue(TodaySessionBuilder.sessions([]).isEmpty, "an empty day has no sessions")
+    }
+
+    runSuite("TodaySessionBuilder - titles never end in half a word") {
+        let long = "Can you use a workflow for this and then standardize across every agent file in the repo"
+        let trimmed = TodaySessionBuilder.wordTrimmed(long, maxLength: 30)
+        assertEqual(trimmed, "Can you use a workflow for\u{2026}", "cut at the last whole word")
+        assertEqual(TodaySessionBuilder.wordTrimmed("Reply to Sam, then the rest of it", maxLength: 13), "Reply to Sam\u{2026}", "trailing comma dropped")
+        assertEqual(TodaySessionBuilder.wordTrimmed("short  text", maxLength: 30), "short text", "short text untouched")
+        let early = TodaySessionBuilder.wordTrimmed("a " + String(repeating: "x", count: 100), maxLength: 20)
+        assertEqual(early, "a " + String(repeating: "x", count: 18) + "\u{2026}", "no late word break cuts hard instead of leaving just \"a\"")
+        let quoted = TodayRecentItem(kind: .dictation, id: "d", title: "\u{201C}Hi there\u{201D}", date: now, durationSeconds: nil, transcriptURL: nil)
+        assertEqual(TodaySessionBuilder.line(for: quoted), "Hi there", "dictation quotes are dropped without a preview")
+        let mixed = [
+            TodayRecentItem(kind: .writing, id: "w1", title: "Notes", date: now, durationSeconds: 60, transcriptURL: nil, appName: "Notes"),
+            TodayRecentItem(kind: .writing, id: "w2", title: "Reply", date: now, durationSeconds: 60, transcriptURL: nil, appName: "Mail"),
+        ]
+        assertEqual(TodaySessionBuilder.title(for: mixed), "Notes", "writing in several apps uses the first entry")
+    }
+
+    runSuite("TodaySessionBuilder - a short meeting doesn't name a busy session") {
+        let quick = TodayRecentItem(kind: .meeting, id: "Quick notes", title: "Quick notes", date: date(24, 5, 15), durationSeconds: 60, transcriptURL: nil)
+        let said = TodayRecentItem(kind: .dictation, id: "d", title: "x", date: date(24, 5, 20), durationSeconds: nil, transcriptURL: nil, preview: "Plan the release notes")
+        let sync = TodayRecentItem(kind: .meeting, id: "Sync", title: "Sync", date: date(24, 5, 30), durationSeconds: 20 * 60, transcriptURL: nil)
+        assertEqual(TodaySessionBuilder.title(for: [quick, said]), "Plan the release notes", "a 1-minute meeting gives way to the dictation")
+        assertEqual(TodaySessionBuilder.title(for: [quick, said, sync]), "Sync", "a real meeting still names it")
+        assertEqual(TodaySessionBuilder.title(for: [quick]), "Quick notes", "a short meeting alone keeps its title")
+        let slack = TodayRecentItem(kind: .writing, id: "w", title: "Reply", date: date(24, 5, 18), durationSeconds: 60, transcriptURL: nil, appName: "Slack")
+        assertEqual(TodaySessionBuilder.title(for: [quick, slack]), "Writing in Slack", "a short meeting doesn't beat one-app writing")
+    }
+
+    runSuite("TodayCopy - session times") {
+        let range = TodayCopy.sessionTime(start: date(24, 5, 15), end: date(24, 6, 31), locale: locale, calendar: calendar)
+        assertTrue(range.contains("5:15") && range.contains("6:31"), "a long session shows its range: \(range)")
+        let short = TodayCopy.sessionTime(start: date(24, 5, 15), end: date(24, 5, 17), locale: locale, calendar: calendar)
+        assertTrue(short.contains("5:15") && !short.contains("5:17"), "a short one shows its start: \(short)")
+    }
+
     runSuite("TodayCopy - durations and counts") {
         assertEqual(TodayCopy.duration(minutes: 0), "0m", "zero")
         assertEqual(TodayCopy.duration(minutes: 42), "42m", "minutes only")

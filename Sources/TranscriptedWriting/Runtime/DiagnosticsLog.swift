@@ -28,7 +28,7 @@ final class DiagnosticsLog: @unchecked Sendable {
             .homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Transcripted/logs")
             .appendingPathComponent("writing-diagnostics.log")
-        // Transcripted rule (CLAUDE.md, "Harnesses must not touch real user
+        // Transcripted rule (AGENTS.md, "Harnesses must not touch real user
         // state"): test and smoke runs never write the real log. Same checks
         // as TranscriptedCore's FileLogger, plus Swift Testing's helper.
         self.enabled = !Self.shouldDisableFileWrites(

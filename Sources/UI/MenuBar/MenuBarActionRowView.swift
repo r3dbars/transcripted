@@ -54,6 +54,7 @@ final class MenuBarActionRowView: NSControl {
     private var rowSize: Size = .utility
     private var currentHeight: CGFloat = 26
     private var rowTitle = ""
+    private var fullTrailingText = ""
 
     override var isEnabled: Bool {
         didSet {
@@ -103,8 +104,9 @@ final class MenuBarActionRowView: NSControl {
         // A button has no room for a second line; its detail is the tooltip.
         detailLabel.stringValue = size == .button ? "" : detail
         detailLabel.isHidden = detailLabel.stringValue.isEmpty
-        trailingLabel.stringValue = trailingText ?? ""
-        trailingLabel.isHidden = trailingText?.isEmpty ?? true
+        fullTrailingText = trailingText ?? ""
+        trailingLabel.stringValue = fullTrailingText
+        trailingLabel.isHidden = fullTrailingText.isEmpty
         currentHeight = resolvedHeight()
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
@@ -137,6 +139,8 @@ final class MenuBarActionRowView: NSControl {
         symbolWellView.addSubview(symbolView)
 
         titleLabel.textColor = MenuTokens.textPrimaryNS
+        // Truncate with an ellipsis, never clip mid-glyph.
+        titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
 
         detailLabel.textColor = MenuTokens.textSecondaryNS
@@ -145,6 +149,7 @@ final class MenuBarActionRowView: NSControl {
 
         trailingLabel.textColor = MenuTokens.textMutedNS
         trailingLabel.alignment = .right
+        trailingLabel.lineBreakMode = .byTruncatingTail
         addSubview(trailingLabel)
 
         updateAppearance()
@@ -160,8 +165,9 @@ final class MenuBarActionRowView: NSControl {
         if !isEnabled {
             // A disabled row often says what it is waiting on ("Restart to
             // Update / After this recording finishes"), so it stays readable:
-            // secondary text, no extra fade on top.
-            backgroundColor = MenuTokens.flatRowDisabledNS
+            // secondary text, no extra fade on top. Only a button keeps a
+            // faint fill; a flat row stays flat so it doesn't read as a box.
+            backgroundColor = isFilledButton ? MenuTokens.flatRowDisabledNS : .clear
             iconTint = MenuTokens.textMutedNS
             titleColor = MenuTokens.textSecondaryNS
             detailColor = MenuTokens.textSecondaryNS
@@ -219,25 +225,28 @@ final class MenuBarActionRowView: NSControl {
         }
 
         let hasDetail = !detailLabel.isHidden
-        let padX: CGFloat = 6
-        let iconWidth: CGFloat = rowSize == .primary ? 17 : 16
+        // Icon and text columns line up with the Record and Dictate buttons
+        // above: the icon well is the button's 14 pt glyph slot, and text
+        // starts where the button titles do.
+        let padX = Self.buttonPadX
+        let iconWidth = Self.buttonSymbolSize
         let symbolSize: CGFloat = rowSize == .primary ? 14 : 12
         let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 76 : 64)
         let trailingSpacing: CGFloat = trailingWidth > 0 ? 8 : 0
-        let contentWidth = bounds.width - (padX * 2) - iconWidth - 8 - trailingWidth - trailingSpacing
+        let contentWidth = bounds.width - (padX * 2) - iconWidth - Self.buttonIconGap - trailingWidth - trailingSpacing
         let textWidth = max(CGFloat(0), contentWidth)
 
         updateTypography()
 
-        symbolWellView.frame = NSRect(x: padX, y: floor((bounds.height - symbolSize) / 2), width: iconWidth, height: symbolSize)
+        symbolWellView.frame = NSRect(x: padX, y: floor((bounds.height - iconWidth) / 2), width: iconWidth, height: iconWidth)
         symbolView.frame = NSRect(
-            x: max(0, floor((iconWidth - symbolSize) / 2)),
-            y: 0,
+            x: floor((iconWidth - symbolSize) / 2),
+            y: floor((iconWidth - symbolSize) / 2),
             width: symbolSize,
             height: symbolSize
         )
 
-        let textX = symbolWellView.frame.maxX + 8
+        let textX = symbolWellView.frame.maxX + Self.buttonIconGap
         if !hasDetail {
             let centeredY = (bounds.height - 16) / 2
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
@@ -256,24 +265,35 @@ final class MenuBarActionRowView: NSControl {
         }
     }
 
+    private static let buttonPadX: CGFloat = 10
+    private static let buttonSymbolSize: CGFloat = 14
+    private static let buttonIconGap: CGFloat = 6
+
     private func layoutButton() {
         updateTypography()
         detailLabel.frame = .zero
 
-        let padX: CGFloat = 10
-        let symbolSize: CGFloat = 14
-        let gap: CGFloat = 6
+        let padX = Self.buttonPadX
+        let symbolSize = Self.buttonSymbolSize
+        let gap = Self.buttonIconGap
         symbolWellView.frame = NSRect(x: padX, y: floor((bounds.height - symbolSize) / 2), width: symbolSize, height: symbolSize)
         symbolView.frame = NSRect(x: 0, y: 0, width: symbolSize, height: symbolSize)
 
         let textX = symbolWellView.frame.maxX + gap
         let available = max(0, bounds.width - textX - padX)
-        let titleWidth = ceil(titleLabel.intrinsicContentSize.width)
-        let trailingWidth = ceil(trailingLabel.intrinsicContentSize.width)
-        // The shortcut shows only when it fits beside the title; a long one
-        // ("Fn / Right ⌥") stays in the Settings shortcut editor instead.
-        let showsTrailing = !(trailingLabel.stringValue.isEmpty)
-            && titleWidth + gap + trailingWidth <= available
+        let titleWidth = Self.drawnWidth(of: titleLabel)
+        // The shortcut shows when it fits beside the title. A pair like
+        // "Fn / Right ⌥" falls back to its first key ("Fn"); if even that
+        // doesn't fit, the full shortcut stays in the Settings editor.
+        trailingLabel.stringValue = ""
+        var trailingWidth: CGFloat = 0
+        for candidate in MenuBarShortcutLabel.candidates(for: fullTrailingText) {
+            trailingLabel.stringValue = candidate
+            trailingWidth = Self.drawnWidth(of: trailingLabel)
+            if titleWidth + gap + trailingWidth <= available { break }
+            trailingLabel.stringValue = ""
+        }
+        let showsTrailing = !trailingLabel.stringValue.isEmpty
         trailingLabel.isHidden = !showsTrailing
 
         let titleY = floor((bounds.height - 16) / 2)
@@ -288,6 +308,15 @@ final class MenuBarActionRowView: NSControl {
         } else {
             trailingLabel.frame = .zero
         }
+    }
+
+    /// The width a label's cell actually draws. On macOS 26 a label's
+    /// `intrinsicContentSize` leaves out the cell's 2 pt side insets, so a
+    /// frame sized to it clips the last glyph ("Recor", "⌥" cut in half).
+    private static func drawnWidth(of label: NSTextField) -> CGFloat {
+        guard !label.stringValue.isEmpty else { return 0 }
+        let cellWidth = label.cell?.cellSize.width ?? 0
+        return ceil(max(cellWidth, label.intrinsicContentSize.width))
     }
 
     private func updateTypography() {
@@ -429,7 +458,7 @@ final class MenuBarActionRowView: NSControl {
             displayTitle: titleLabel.stringValue,
             detail: detailLabel.stringValue,
             toolTip: toolTip ?? "",
-            trailingText: trailingLabel.stringValue,
+            trailingText: fullTrailingText,
             automationIdentifier: accessibilityIdentifier(),
             isVisible: !isHidden,
             isEnabled: isEnabled

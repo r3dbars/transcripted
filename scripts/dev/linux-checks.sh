@@ -190,14 +190,19 @@ if [ "$quick" = true ] && git rev-parse --verify -q origin/main >/dev/null 2>&1;
 else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
+check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
+check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"
+check "module boundaries (.agents/modules.json; baseline only shrinks)" "python3 scripts/dev/check-module-boundaries.py"
+check "file size self-test" "python3 scripts/dev/check-file-size.py --self-test"
+check "file size (no new Swift file over 800 lines)" "python3 scripts/dev/check-file-size.py"
 check "missing-source explainer self-test" "python3 scripts/dev/explain-missing-sources.py --self-test"
 check "concurrency census self-test" "python3 scripts/dev/concurrency-census.py --self-test"
 check "doc paths self-test" "python3 scripts/dev/check-doc-paths.py --self-test"
 check "doc paths (every path a doc names exists; entry files in budget)" "python3 scripts/dev/check-doc-paths.py"
 check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-test"
-check "known traps (Tools CI wiring, root commands documented)" "python3 scripts/dev/check-known-traps.py"
+check "known traps (Tools CI wiring, root commands documented, AGENTS.md-only agent docs)" "python3 scripts/dev/check-known-traps.py"
 
 # ---------------------------------------------------------------- telemetry/privacy
 check "analytics emitters" "python3 scripts/dev/check-analytics-emitters.py"

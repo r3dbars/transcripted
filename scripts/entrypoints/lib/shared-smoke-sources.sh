@@ -66,11 +66,11 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift"
     "Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift"
-    "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
+    "Sources/Observability/SupportDiagnosticsBundle.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/CaptureUndo.swift"
     "Sources/UI/Shared/LibraryTokens.swift"
-    "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
+    "Sources/UI/Shared/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Shared/RecentMeetingMetadataCache.swift"
@@ -78,6 +78,11 @@ SHARED_TEST_STORAGE_SOURCES=(
 
 SHARED_PASTEBACK_SUPPORT_SOURCES=(
     "Sources/Support/ClipboardRestoringTextPaster.swift"
+    "Sources/Support/ClipboardRestoringTextPaster+Pasteboard.swift"
+    "Sources/Support/ClipboardRestoringTextPaster+SavedClipboard.swift"
+    "Sources/Support/ClipboardPasteOutcome.swift"
+    "Sources/Support/ClipboardPasteTarget.swift"
+    "Sources/Support/FocusedTextPasteConfirmation.swift"
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift"
 )

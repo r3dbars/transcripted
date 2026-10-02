@@ -1,6 +1,7 @@
 import Foundation
 
-func testMicrophoneProcessingPreferences() {
+@MainActor
+func testMicrophoneProcessingPreferences() async {
     runSuite("MicrophoneProcessingPreferences defaults to software autogain") {
         let (defaults, suiteName) = makeMicrophoneProcessingDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -190,29 +191,82 @@ func testMicrophoneProcessingPreferences() {
         )
     }
 
-    runSuite("Accepting Boost Mic in a meeting never saves the mode") {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let bridge = (try? String(contentsOf: root.appendingPathComponent("Sources/Meeting/MeetingCaptureBridge.swift"), encoding: .utf8)) ?? ""
-        guard let start = bridge.range(of: "    func armVoiceProcessingForActiveRecording(") else {
-            assertTrue(false, "the Boost Mic arm entry point must exist")
-            return
-        }
-        let end = bridge.range(of: "\n    }\n", range: start.upperBound..<bridge.endIndex)?.upperBound ?? bridge.endIndex
-        let body = String(bridge[start.lowerBound..<end])
-        assertTrue(body.contains("audio.restartCaptureForProcessingChange()"), "Boost must still arm VPIO for the live meeting")
-        assertFalse(body.contains("MicrophoneProcessingPreferences"), "Boost must not save the mode for later meetings")
-        assertTrue(
-            body.contains("callAppIsUsingMicrophone()"),
-            "A call app that is open but off the mic must not block Boost; one on the mic must"
-        )
-        assertTrue(
-            body.contains("try? await Task.sleep(nanoseconds: retryDelayNanoseconds)"),
-            "A Boost accepted during mic recovery waits for it instead of being dropped"
-        )
-        assertTrue(
-            body.contains("guard !callAppLaunchedDuringRecording else { return .callAppUsingMicrophone }"),
-            "A call app launched during the meeting is probably joining; Boost must not undo its latch"
-        )
+    await runSuite("Accepting Boost Mic arms voice processing for the live meeting") {
+        let capture = FakeBoostCapture()
+        assertEqual(await capture.arm(), .armed, "a plain boost applies")
+        assertEqual(capture.restartCount, 1, "Boost must restart the live capture so voice processing applies now")
+        assertTrue(capture.sleeps.isEmpty, "nothing to wait for")
+        assertTrue(capture.watchedGenerations.isEmpty, "no call app to watch")
+
+        let pinned = FakeBoostCapture()
+        pinned.recordsThroughPinnedMicrophone = true
+        assertEqual(await pinned.arm(), .notApplied, "the pinned Mac-mic recorder can't host voice processing")
+        assertEqual(pinned.restartCount, 0, "the pinned recorder is left alone")
+    }
+
+    await runSuite("A call app on the mic blocks Boost; one open but off the mic doesn't") {
+        let onMic = FakeBoostCapture()
+        onMic.suppressedForSharing = true
+        onMic.callAppOnMicrophone = true
+        assertEqual(await onMic.arm(), .callAppUsingMicrophone, "a call app on the mic keeps the mic shared")
+        assertEqual(onMic.restartCount, 0, "the call app's mic is not touched")
+        assertTrue(onMic.suppressedForSharing, "sharing stays on")
+
+        let helperOnMic = FakeBoostCapture()
+        helperOnMic.callAppOnMicrophone = true
+        assertEqual(await helperOnMic.arm(), .callAppUsingMicrophone, "the mic is scanned even with nothing latched")
+
+        let openOffMic = FakeBoostCapture()
+        openOffMic.generation = 7
+        openOffMic.suppressedForSharing = true
+        assertEqual(await openOffMic.arm(), .armed, "a call app left open but off the mic must not block Boost")
+        assertFalse(openOffMic.suppressedForSharing, "the boost looks past the open call app")
+        assertEqual(openOffMic.watchedGenerations, [7], "a watch hands the mic back if that app joins a call")
+    }
+
+    await runSuite("A call app launched during the meeting blocks Boost") {
+        let launched = FakeBoostCapture()
+        launched.callAppLaunched = true
+        assertEqual(await launched.arm(), .callAppUsingMicrophone, "a call app launched mid-meeting is probably joining")
+        assertEqual(launched.scanCount, 0, "no scan can talk the boost past that latch")
+        assertEqual(launched.restartCount, 0, "Boost must not undo the latch")
+
+        let launchedDuringScan = FakeBoostCapture()
+        launchedDuringScan.onScan = { launchedDuringScan.callAppLaunched = true }
+        assertEqual(await launchedDuringScan.arm(), .callAppUsingMicrophone, "a launch during the scan keeps the latch")
+        assertEqual(launchedDuringScan.restartCount, 0, "Boost must not undo a latch set during its scan")
+
+        let latchedDuringScan = FakeBoostCapture()
+        latchedDuringScan.onScan = { latchedDuringScan.suppressedForSharing = true }
+        assertEqual(await latchedDuringScan.arm(), .callAppUsingMicrophone, "sharing turned on during the scan wins")
+    }
+
+    await runSuite("A Boost accepted during mic recovery waits for it instead of being dropped") {
+        let recovering = FakeBoostCapture()
+        recovering.restartResults = [false, false, true]
+        assertEqual(await recovering.arm(retries: 5, delay: 42), .armed, "the boost lands once recovery ends")
+        assertEqual(recovering.sleeps, [42, 42], "it waits between tries")
+
+        let neverRecovers = FakeBoostCapture()
+        neverRecovers.suppressedForSharing = true
+        neverRecovers.restartResults = [false, false, false]
+        assertEqual(await neverRecovers.arm(retries: 2, delay: 1), .notApplied, "it gives up after the retries")
+        assertEqual(neverRecovers.restartCount, 3, "one try plus the retries")
+        assertEqual(neverRecovers.sleeps.count, 2, "no wait after the last try")
+        assertTrue(neverRecovers.suppressedForSharing, "a boost that never applied hands the mic back to the open call app")
+        assertTrue(neverRecovers.watchedGenerations.isEmpty, "no watch for a boost that never applied")
+
+        let stopped = FakeBoostCapture()
+        stopped.restartResults = [false, true]
+        stopped.onSleep = { stopped.recording = false }
+        assertEqual(await stopped.arm(), .notApplied, "a recording that ended while waiting gets no boost")
+        assertEqual(stopped.restartCount, 1, "no restart after the recording ended")
+
+        let callJoinedWhileWaiting = FakeBoostCapture()
+        callJoinedWhileWaiting.restartResults = [false, true]
+        callJoinedWhileWaiting.onSleep = { callJoinedWhileWaiting.suppressedForSharing = true }
+        assertEqual(await callJoinedWhileWaiting.arm(), .callAppUsingMicrophone, "a call app that latched while waiting wins")
+        assertEqual(callJoinedWhileWaiting.restartCount, 1, "no restart once a call app latched")
     }
 
     runSuite("Boost mic next meeting lasts one meeting and quiets older hints") {
@@ -265,26 +319,79 @@ func testMicrophoneProcessingPreferences() {
         )
     }
 
+    runSuite("A requested boost arms voice processing for the meeting that starts") {
+        func plan(_ mode: MicrophoneProcessingMode, boost: Bool) -> MeetingMicStartPlan {
+            MeetingMicStartPlan.make(
+                processingMode: mode,
+                boostRequestedForThisMeeting: boost,
+                pinnedRecorderOn: false,
+                microphoneChoice: .automatic
+            )
+        }
+        assertTrue(plan(.softwareAGC, boost: true).enableVoiceProcessing, "the Home request adds voice processing to this meeting")
+        assertTrue(plan(.none, boost: true).enableVoiceProcessing, "even on raw input")
+        assertFalse(plan(.softwareAGC, boost: false).enableVoiceProcessing, "no request, no voice processing")
+        assertTrue(plan(.appleVoiceProcessing, boost: false).enableVoiceProcessing, "the saved Apple mode still applies")
+        assertEqual(
+            plan(.softwareAGC, boost: true).enableSoftwareAGC,
+            plan(.softwareAGC, boost: false).enableSoftwareAGC,
+            "a boost doesn't change the saved autogain fallback"
+        )
+        assertFalse(plan(.none, boost: false).enableSoftwareAGC, "raw input never runs Transcripted autogain")
+    }
+
     runSuite("Only a successful meeting start uses up Boost mic next meeting") {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let bridge = (try? String(contentsOf: root.appendingPathComponent("Sources/Meeting/MeetingCaptureBridge.swift"), encoding: .utf8)) ?? ""
         assertTrue(
-            bridge.contains("audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing || boostRequestedForThisMeeting"),
-            "A requested boost arms voice processing for the meeting that starts"
+            MeetingNextMeetingBoostPolicy.usesUpRequest(
+                started: true, boostRequestedForThisMeeting: true, voiceProcessingSuppressedForMicrophoneSharing: false
+            ),
+            "a start that ran with the boost uses it up"
         )
-        assertTrue(
-            bridge.contains("if started, boostRequestedForThisMeeting, !audio.voiceProcessingSuppressedForMicrophoneSharing {\n            MicrophoneProcessingPreferences.clearNextMeetingBoostRequest()"),
-            "A failed start, or one where a call app kept the boost off, keeps the request for the next try"
-        )
-        assertTrue(
-            bridge.contains("if shareMicrophoneAtStart, boostRequestedForThisMeeting, !(await callAppIsUsingMicrophone()),"),
-            "The explicit Home request looks past an open call app that isn't on the mic"
-        )
-        let settings = (try? String(contentsOf: root.appendingPathComponent("Sources/UI/Settings/TranscriptedSettingsView.swift"), encoding: .utf8)) ?? ""
         assertFalse(
-            settings.contains("MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)"),
-            "The Home row must not save Apple voice processing for every meeting"
+            MeetingNextMeetingBoostPolicy.usesUpRequest(
+                started: false, boostRequestedForThisMeeting: true, voiceProcessingSuppressedForMicrophoneSharing: false
+            ),
+            "a failed start keeps the request for the next try"
         )
+        assertFalse(
+            MeetingNextMeetingBoostPolicy.usesUpRequest(
+                started: true, boostRequestedForThisMeeting: true, voiceProcessingSuppressedForMicrophoneSharing: true
+            ),
+            "a start where a call app kept the boost off keeps the request"
+        )
+        assertFalse(
+            MeetingNextMeetingBoostPolicy.usesUpRequest(
+                started: true, boostRequestedForThisMeeting: false, voiceProcessingSuppressedForMicrophoneSharing: false
+            ),
+            "nothing to use up without a request"
+        )
+    }
+
+    await runSuite("The explicit Home request looks past an open call app that isn't on the mic") {
+        var scans = 0
+        func looksPast(running: Bool, boost: Bool, onMic: Bool, launchedDuringScan: Bool = false) async -> Bool {
+            var launched = false
+            return await MeetingNextMeetingBoostPolicy.looksPastOpenCallApp(
+                callAppRunning: running,
+                boostRequestedForThisMeeting: boost,
+                callAppIsUsingMicrophone: {
+                    scans += 1
+                    if launchedDuringScan { launched = true }
+                    return onMic
+                },
+                callAppLaunchedDuringRecording: { launched }
+            )
+        }
+        assertTrue(await looksPast(running: true, boost: true, onMic: false), "an open call app off the mic doesn't block the request")
+        assertFalse(await looksPast(running: true, boost: true, onMic: true), "a call app on the mic wins")
+        assertFalse(
+            await looksPast(running: true, boost: true, onMic: false, launchedDuringScan: true),
+            "a call app launched during the scan keeps the latch"
+        )
+        scans = 0
+        assertFalse(await looksPast(running: true, boost: false, onMic: false), "without a request an open call app wins")
+        assertFalse(await looksPast(running: false, boost: true, onMic: false), "nothing to look past")
+        assertEqual(scans, 0, "the mic is only scanned when it could change the answer")
     }
 
     runSuite("MicrophoneProcessingPreferences uses stable storage keys") {
@@ -318,4 +425,49 @@ private func makeMicrophoneProcessingDefaults() -> (UserDefaults, String) {
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
+}
+
+/// Stands in for the live meeting capture behind `MeetingMicBoostArming`.
+@MainActor
+private final class FakeBoostCapture {
+    var recordsThroughPinnedMicrophone = false
+    var generation: UInt64 = 1
+    var recording = true
+    var callAppLaunched = false
+    var callAppOnMicrophone = false
+    var suppressedForSharing = false
+    /// Restart outcomes in order; true once the queue runs out.
+    var restartResults: [Bool] = []
+    var onScan: () -> Void = {}
+    var onSleep: () -> Void = {}
+    private(set) var scanCount = 0
+    private(set) var restartCount = 0
+    private(set) var sleeps: [UInt64] = []
+    private(set) var watchedGenerations: [UInt64] = []
+
+    func arm(retries: Int = 15, delay: UInt64 = 1) async -> MeetingMicBoostArmResult {
+        let arming = MeetingMicBoostArming(
+            isRecordingThroughPinnedMicrophone: { self.recordsThroughPinnedMicrophone },
+            currentRecordingSessionGeneration: { self.generation },
+            isStillRecording: { self.recording && self.generation == $0 },
+            callAppLaunchedDuringRecording: { self.callAppLaunched },
+            callAppIsUsingMicrophone: {
+                self.scanCount += 1
+                self.onScan()
+                return self.callAppOnMicrophone
+            },
+            voiceProcessingSuppressedForMicrophoneSharing: { self.suppressedForSharing },
+            setVoiceProcessingSuppressedForMicrophoneSharing: { self.suppressedForSharing = $0 },
+            restartCaptureForProcessingChange: {
+                self.restartCount += 1
+                return self.restartResults.isEmpty ? true : self.restartResults.removeFirst()
+            },
+            watchCallAppsWhileBoosted: { self.watchedGenerations.append($0) },
+            sleep: {
+                self.sleeps.append($0)
+                self.onSleep()
+            }
+        )
+        return await arming.arm(micRecoveryRetries: retries, retryDelayNanoseconds: delay)
+    }
 }

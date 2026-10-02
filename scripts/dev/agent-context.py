@@ -205,11 +205,34 @@ def normalize_repo_path(raw_path: str) -> str:
 def nearest_local_doc(path: str) -> str | None:
     current = (REPO_ROOT / path).parent
     while current != REPO_ROOT and REPO_ROOT in current.parents:
-        guide = current / "CLAUDE.md"
+        guide = current / "AGENTS.md"
         if guide.is_file():
             return guide.relative_to(REPO_ROOT).as_posix()
         current = current.parent
     return None
+
+
+MODULES_MANIFEST = REPO_ROOT / ".agents/modules.json"
+
+
+def module_for_path(path: str) -> dict[str, Any] | None:
+    """The module in .agents/modules.json that owns a Sources/ path (longest prefix wins)."""
+    if not path.startswith("Sources/") or not MODULES_MANIFEST.is_file():
+        return None
+    best: tuple[int, dict[str, Any]] | None = None
+    for module in json.loads(MODULES_MANIFEST.read_text(encoding="utf-8")).get("modules", []):
+        for prefix in module.get("paths", []):
+            if path == prefix or path.startswith(prefix.rstrip("/") + "/"):
+                if best is None or len(prefix) > best[0]:
+                    best = (len(prefix), module)
+    if best is None:
+        return None
+    module = best[1]
+    return {
+        "name": module["name"],
+        "may_depend_on": list(module.get("mayDependOn", [])),
+        "agents_doc": module.get("agentsDoc"),
+    }
 
 
 def select_areas(
@@ -267,6 +290,13 @@ def build_context(
     areas = select_areas(contract, paths, symptom)
     docs = [contract["start_doc"]]
     docs.extend(guide for path in paths if (guide := nearest_local_doc(path)))
+    modules: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        module = module_for_path(path)
+        if module:
+            modules.setdefault(module["name"], module)
+            if module["agents_doc"]:
+                docs.append(module["agents_doc"])
     invariants = list(contract["global_invariants"])
     manual_proof: list[str] = []
     for area in areas:
@@ -277,6 +307,7 @@ def build_context(
         "schema_version": contract["schema_version"],
         "paths": paths,
         "areas": [{"id": area["id"], "owns": area["owns"]} for area in areas],
+        "modules": [modules[name] for name in sorted(modules)],
         "docs": list(dict.fromkeys(docs)),
         "invariants": list(dict.fromkeys(invariants)),
         "checks": select_checks(contract, paths),
@@ -298,8 +329,14 @@ def print_human(context: dict[str, Any]) -> None:
     for area in context["areas"]:
         print(f"- {area['id']}: {area['owns']}")
     if not context["areas"]:
-        print("- no matching area; use AGENTS.md and inspect the nearest owner")
+        print("- no matching area; check docs/repo-layout.md, then the nearest folder AGENTS.md")
     print()
+    if context.get("modules"):
+        print("Modules (.agents/modules.json; check with scripts/dev/check-module-boundaries.py):")
+        for module in context["modules"]:
+            deps = ", ".join(module["may_depend_on"]) or "nothing"
+            print(f"- {module['name']}: may depend on {deps}")
+        print()
     print("Read:")
     for doc in context["docs"]:
         print(f"- {doc}")
@@ -309,7 +346,7 @@ def print_human(context: dict[str, Any]) -> None:
         print(f"- {invariant}")
     print()
     print("Mapped checks:")
-    for check in context["checks"]:
+    for check in sorted(context["checks"], key=lambda check: not check.startswith("bash build-deps.sh")):
         print(f"- {check}")
     if not context["checks"]:
         print("- scripts/dev/agent-preflight.sh")
@@ -384,7 +421,7 @@ def self_test(contract_path: Path) -> None:
     nested_context = build_context(
         contract, ["Tools/TranscriptedMCP/Sources/TranscriptedMCP/Server.swift"], None
     )
-    if "Tools/TranscriptedMCP/CLAUDE.md" not in nested_context["docs"]:
+    if "Tools/TranscriptedMCP/AGENTS.md" not in nested_context["docs"]:
         raise ContractError("nested paths must include their nearest local guide")
     tracked_paths = _git_lines("ls-files")
     unmapped_paths = [

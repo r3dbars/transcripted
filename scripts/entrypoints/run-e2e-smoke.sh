@@ -58,6 +58,10 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+Schema.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+Writing.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+MeetingQueries.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+DictationQueries.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+Context.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+SummaryRollups.swift"
 )
 
 for source in "${SWIFT_SOURCES[@]}"; do

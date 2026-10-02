@@ -106,6 +106,19 @@ enum MeetingSessionStateMachine {
         }
     }
 
+    /// Whether a new Record request may go ahead. A start that is already in
+    /// flight, or a capture that is starting, recording, or stopping, turns
+    /// the request away so a prompt or menu action never counts it as an
+    /// accepted Record.
+    static func startAdmission(
+        startCallInFlight: Bool,
+        state: MeetingSessionState
+    ) -> MeetingStartAdmission {
+        if startCallInFlight { return .ignoredStartInFlight }
+        if isCaptureSessionActive(state) { return .ignoredActiveCapture }
+        return .accepted
+    }
+
     /// Narrow "is a recording actually in progress right now" question —
     /// steady state only, excluding the starting/stopping windows. This is
     /// what `MeetingSessionController.isRecording` (Stop/Start button labels,
@@ -130,5 +143,63 @@ enum MeetingSessionStateMachine {
     /// check this instead of transitioning unconditionally.
     static func mayReportUnrelatedFailureAsError(while state: MeetingSessionState) -> Bool {
         !isCaptureSessionActive(state)
+    }
+}
+
+/// Answer to a Record request, from `MeetingSessionStateMachine.startAdmission`.
+enum MeetingStartAdmission: Equatable {
+    case accepted
+    case ignoredStartInFlight
+    case ignoredActiveCapture
+
+    /// What `startRecording` returns for a request it turns away here.
+    var acceptsRecord: Bool { self == .accepted }
+}
+
+/// How the last finished transcription job ended. The queue settles the
+/// session onto this once nothing is left running.
+enum MeetingTerminalTranscriptionOutcome: Equatable {
+    case transcriptSaved
+    case failed(String)
+    /// A very short recording with no speech was thrown away as an
+    /// accidental start. Nothing was saved and nothing failed.
+    case discarded
+}
+
+extension MeetingSessionStateMachine {
+    /// A transcript skipped for having no speech (too short, empty audio, no
+    /// speech detected) still ends as a failure the user can see. It shows as
+    /// an error right away unless a different meeting is capturing live; then
+    /// it waits, and the queue settles onto it once that capture ends.
+    static func skippedTranscript(
+        diagnosticMessage: String,
+        while state: MeetingSessionState
+    ) -> (terminalOutcome: MeetingTerminalTranscriptionOutcome, visibleState: MeetingSessionState?) {
+        (
+            .failed(diagnosticMessage),
+            mayReportUnrelatedFailureAsError(while: state) ? .error(diagnosticMessage) : nil
+        )
+    }
+
+    /// Where the session lands once the transcription queue has nothing left.
+    /// nil means stay put: capture is live, or nothing finished while idle.
+    static func settledTransition(
+        after outcome: MeetingTerminalTranscriptionOutcome?,
+        current state: MeetingSessionState
+    ) -> (state: MeetingSessionState, reason: StaticString)? {
+        guard !isCaptureSessionActive(state) else { return nil }
+        switch outcome {
+        case .failed(let message):
+            return (.error(message), "transcription_queue_settled_failed")
+        case .transcriptSaved:
+            return (.ready, "transcription_queue_settled_saved")
+        case .discarded:
+            return (.ready, "transcription_queue_settled_discarded")
+        case .none:
+            if case .transcribing = state {
+                return (.ready, "transcription_queue_settled_idle")
+            }
+            return nil
+        }
     }
 }

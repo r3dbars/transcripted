@@ -1,18 +1,19 @@
-// Source-text pins: EventFileWritePolicy, LockedFileAppender, ReliabilityPacketRecorder,
-// ObservabilityLogFilePreparation, and ObservabilityTextRedactor are compiled into run-tests.sh's
-// APP_SOURCES/shared source lists, so most suites call them for real. A few assertions instead
-// grep source as text because the file
-// under test isn't compiled here at all: Sources/Observability/EventReporter.swift and
-// AppLogSink.swift have no seam in this runner, and Sources/TranscriptedApp.swift is
-// @MainActor/AppKit on top of that. The "avoid legacy FileHandle APIs" suite also greps
-// Sources/TranscriptedCore/Logging/FileLogger.swift and
-// .../Speaker/RetroactiveSpeakerUpdater.swift, which live in the separate `swift test`
-// TranscriptedCore package — an absence-of-API sweep has to work the same way across both build
-// boundaries. If you touch any pinned file, keep the grepped strings/counts in sync with the source.
+// EventFileWritePolicy, EventFileWriter, ObservabilityEventCapturePlan, AppLogSink,
+// LockedFileAppender, ReliabilityPacketRecorder, ObservabilityLogFilePreparation, and
+// ObservabilityTextRedactor are compiled into run-tests.sh's source lists, so most suites call
+// them for real, against temp files.
+//
+// Two suites still read source as text (grandfathered):
+// - "termination flush wiring" greps EventReporter.swift and Sources/TranscriptedApp.swift, because
+//   EventReporter drags in CrashReporter/Sentry and the app delegate is @MainActor AppKit that this
+//   runner never builds.
+// - "avoid legacy FileHandle APIs" is an absence-of-API sweep across both the app and the
+//   TranscriptedCore package (FileLogger, RetroactiveSpeakerUpdater), which has no runtime signal.
 
 import Foundation
 
-func testObservabilityLogWriter() {
+@MainActor
+func testObservabilityLogWriter() async {
     runSuite("EventFileWritePolicy buffers only info events") {
         assertTrue(
             EventFileWritePolicy.shouldBuffer(level: "info"),
@@ -43,19 +44,33 @@ func testObservabilityLogWriter() {
         )
     }
 
-    runSuite("EventReporter exposes shutdown flushing for buffered info events") {
-        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        let reliabilityRecorderSource = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
-        let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
+    await runSuite("EventFileWriter writes buffered info events when flushed for shutdown") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("EventFileWriterTests-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("events.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: root) }
 
+        let writer = EventFileWriter(fileURL: logURL)
+        await writer.append(observabilityTestEvent(level: "info", event: "buffered_info_event"))
+        await writer.flushForShutdown()
+
+        let contents = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         assertTrue(
-            reporterSource.contains("func flushLocalEventsForShutdown() async"),
-            "buffered local info events should have an explicit shutdown flush path"
+            contents.contains("\"buffered_info_event\""),
+            "a buffered info event must reach events.jsonl once shutdown flushes, not die with the process"
         )
-        assertTrue(
-            reliabilityRecorderSource.contains("static func flushForShutdown() async"),
-            "reliability packet writes should also have an explicit shutdown flush path"
+        assertEqual(
+            contents.split(separator: "\n").count,
+            1,
+            "the flushed info event should be one JSONL record"
         )
+    }
+
+    runSuite("EventReporter termination flush wiring") {
+        // Grandfathered source pins: EventReporter (CrashReporter/Sentry) and the
+        // app delegate are not compiled in this runner.
+        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+        let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
         assertTrue(
             reporterSource.contains("await ReliabilityPacketRecorder.flushForShutdown()"),
             "the shared local-event shutdown flush should drain reliability packet writes too"
@@ -66,29 +81,79 @@ func testObservabilityLogWriter() {
         )
     }
 
-    runSuite("EventReporter stamps local diagnostics with exact build identity") {
-        let source = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-
-        for key in ["build_version", "build_channel", "build_revision"] {
-            assertTrue(source.contains("mergedContext[\"\(key)\"]"), "every local event should carry \(key)")
-        }
-        assertTrue(
-            source.contains("AnalyticsRuntimeConfiguration.buildRevision"),
-            "local build revision should use the same validated metadata source as PostHog"
+    runSuite("Local events carry the exact build identity") {
+        let plan = ObservabilityEventCapturePlan.make(
+            level: .info,
+            engine: "capture",
+            event: "dictation_toggle_requested",
+            message: "toggle",
+            context: ["trigger": "physical_key"],
+            engineState: nil,
+            infoDictionary: [
+                "CFBundleVersion": "4321",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "beta",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc1234",
+            ],
+            timestamp: "2026-05-26T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
         )
+        let environment = ProcessInfo.processInfo.environment
+        assertEqual(plan.localEntry.context?["build_version"], "4321", "every local event should carry build_version")
+        if environment[AnalyticsRuntimeConfiguration.buildChannelEnvironmentKey] == nil {
+            assertEqual(plan.localEntry.context?["build_channel"], "beta", "every local event should carry build_channel")
+        }
+        if environment[AnalyticsRuntimeConfiguration.buildRevisionEnvironmentKey] == nil {
+            assertEqual(
+                plan.localEntry.context?["build_revision"],
+                "abc1234",
+                "local build revision should come from the same validated metadata as PostHog"
+            )
+        }
+
+        let unstamped = ObservabilityEventCapturePlan.make(
+            level: .info,
+            engine: "capture",
+            event: "dictation_toggle_requested",
+            message: "toggle",
+            context: [:],
+            engineState: nil,
+            infoDictionary: nil,
+            timestamp: "2026-05-26T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
+        )
+        assertEqual(unstamped.localEntry.context?["build_version"], "unknown", "a missing build number reads unknown, not blank")
+        if environment[AnalyticsRuntimeConfiguration.buildRevisionEnvironmentKey] == nil {
+            assertEqual(unstamped.localEntry.context?["build_revision"], "unknown", "a missing revision reads unknown")
+        }
     }
 
-    runSuite("EventReporter feeds the reliability recorder the raw event, not the locally-blanked copy") {
-        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-
-        assertTrue(
-            reporterSource.contains("ReliabilityPacketRecorder.record(event: entry)"),
-            "the recorder positive-allowlists and redacts every value itself; it must see the raw entry"
+    runSuite("The reliability recorder gets the raw event, not the locally-blanked copy") {
+        let plan = ObservabilityEventCapturePlan.make(
+            level: .warning,
+            engine: "parakeet",
+            event: "recording_interrupted",
+            message: "saved /Users/jane/Private/meeting.md",
+            context: ["default_input_name": "Studio Mic", "trigger": "stall"],
+            engineState: nil,
+            infoDictionary: nil,
+            timestamp: "2026-05-26T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
         )
-        assertFalse(
-            reporterSource.contains("ReliabilityPacketRecorder.record(event: localEntry)"),
-            "passing the substring-blanked copy ships \"[redacted-sensitive-value]\" in support bundles and makes the recovered outcome unreachable"
+        assertEqual(
+            plan.localEntry.context?["default_input_name"],
+            "[redacted-sensitive-value]",
+            "the disk copy blanks sensitive keys"
         )
+        assertEqual(
+            plan.entry.context?["default_input_name"],
+            "Studio Mic",
+            "the recorder positive-allowlists and redacts itself; it must see the raw value, not \"[redacted-sensitive-value]\""
+        )
+        assertEqual(plan.entry.message, "saved /Users/jane/Private/meeting.md", "the recorder gets the raw message")
+        assertFalse(plan.localEntry.message.contains("/Users/jane"), "the disk copy redacts paths in the message")
     }
 
     runSuite("Observability file writers tighten pre-existing logs before appending") {
@@ -128,14 +193,6 @@ func testObservabilityLogWriter() {
             "tightening permissions must not drop records already in the log"
         )
 
-        // EventReporter.swift is not compiled into the fast runner, so its use
-        // of the shared helper is still a source-read assertion.
-        let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        assertTrue(
-            eventReporter.contains("ObservabilityLogFilePreparation.openPreparedHandle("),
-            "events.jsonl prepare should route through the shared restrict-before-open helper"
-        )
-
         // ReliabilityPacketRecorder is compiled into the fast runner, so exercise the
         // real append path: pre-create the JSONL world-readable (0o644), append a packet
         // through the shared test seam, then confirm the file is tightened to owner-only.
@@ -168,6 +225,26 @@ func testObservabilityLogWriter() {
             NSNumber(value: 0o600),
             "reliability packets should be chmodded to owner-only even when the JSONL already exists"
         )
+    }
+
+    await runSuite("EventFileWriter tightens a pre-existing events.jsonl before appending") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("EventFileWriterPermissions-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("events.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: root) }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        fm.createFile(atPath: logURL.path, contents: Data("{\"earlier\":\"record\"}\n".utf8))
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: logURL.path)
+
+        let writer = EventFileWriter(fileURL: logURL)
+        await writer.append(observabilityTestEvent(level: "warning", event: "warning_event"))
+        await writer.flushForShutdown()
+
+        let permissions = (try? fm.attributesOfItem(atPath: logURL.path))?[.posixPermissions] as? NSNumber
+        assertEqual(permissions, NSNumber(value: 0o600), "events.jsonl should be owner-only even when it already existed")
+        let lines = ((try? String(contentsOf: logURL, encoding: .utf8)) ?? "").split(separator: "\n")
+        assertEqual(lines.first.map(String.init), "{\"earlier\":\"record\"}", "earlier records stay")
+        assertTrue(lines.count == 2 && lines[1].contains("\"warning_event\""), "the warning is appended right away")
     }
 
     runSuite("LocalObservabilityPayloadSanitizer redacts local-only sensitive context before disk write") {
@@ -222,16 +299,16 @@ func testObservabilityLogWriter() {
         assertEqual(sanitized.context?["trigger"], "physical_key", "coarse diagnostics should stay useful")
     }
 
-    runSuite("AppLogSink routes direct debug-log messages through the shared redactor") {
-        let appLoggerSource = readObservabilityTestRepoTextFile("Sources/Observability/AppLogSink.swift")
-        assertTrue(
-            appLoggerSource.contains("ObservabilityTextRedactor.redact(message)"),
-            "AppLogSink.log should scrub direct debug messages before storing or writing"
-        )
-
-        let sanitized = ObservabilityTextRedactor.redact(
+    runSuite("AppLogSink redacts direct debug-log messages before storing them") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AppLogSinkTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let sink = AppLogSink(logFileURL: root.appendingPathComponent("debug.log", isDirectory: false))
+        sink.log(
             "DICTATION | started (parakeet, Jane's AirPods Pro) then saved /Users/jane/Private/meeting.md for person@example.com with token sk-private"
         )
+        let sanitized = sink.entries.last ?? ""
+        assertFalse(sanitized.isEmpty, "the message should be stored for the debug panel")
 
         assertFalse(sanitized.contains("Jane's AirPods Pro"), "raw device names should not enter debug logs")
         assertFalse(sanitized.contains("/Users/jane/Private/meeting.md"), "absolute paths should not enter debug logs")
@@ -242,26 +319,31 @@ func testObservabilityLogWriter() {
         assertTrue(sanitized.contains("[redacted-email]"), "email redaction marker should remain")
     }
 
-    runSuite("Observability file writer console diagnostics avoid absolute paths") {
-        let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        let reliabilityRecorder = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
+    runSuite("Log-file prepare failures hand the console a message with no absolute path") {
+        // EventReporter and ReliabilityPacketRecorder print what these callbacks receive.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityPrepareFailure-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        // A regular file where the log directory should be makes directory creation fail.
+        let blocker = root.appendingPathComponent("not-a-directory", isDirectory: false)
+        fm.createFile(atPath: blocker.path, contents: Data("x".utf8))
+        let logURL = blocker.appendingPathComponent("logs", isDirectory: true)
+            .appendingPathComponent("events.jsonl", isDirectory: false)
 
-        assertFalse(
-            eventReporter.contains("\\(storageDir.path)"),
-            "EventReporter stderr diagnostics should not print absolute storage paths"
+        var messages: [String] = []
+        let handle = ObservabilityLogFilePreparation.openPreparedHandle(
+            at: logURL,
+            onDirectoryError: { messages.append($0) },
+            onOpenError: { messages.append($0) }
         )
-        assertFalse(
-            eventReporter.contains("\\(fileURL.path)"),
-            "EventReporter stdout/stderr diagnostics should not print absolute log paths"
-        )
-        assertFalse(
-            reliabilityRecorder.contains("\\(storageDir.path)"),
-            "Reliability recorder stderr diagnostics should not print absolute storage paths"
-        )
-        assertFalse(
-            reliabilityRecorder.contains("\\(fileURL.path)"),
-            "Reliability recorder stderr diagnostics should not print absolute log paths"
-        )
+        try? handle?.close()
+        assertNil(handle, "a log under a regular file cannot be opened")
+        assertFalse(messages.isEmpty, "the failure should be reported to the caller's console callback")
+        for message in messages {
+            assertFalse(message.contains(root.path), "console diagnostics must not print the absolute log path: \(message)")
+            assertFalse(message.contains(fm.temporaryDirectory.path), "console diagnostics must not print the storage directory: \(message)")
+        }
     }
 
     runSuite("LockedFileAppender swallows write failures instead of crashing the app") {
@@ -368,6 +450,19 @@ func testObservabilityLogWriter() {
         }
         assertEqual(validLines.count, expectedCount, "concurrent appends should not concatenate or split JSONL records")
     }
+}
+
+private func observabilityTestEvent(level: String, event: String) -> ObservabilityEvent {
+    ObservabilityEvent(
+        timestamp: "2026-05-26T12:00:00.000Z",
+        level: level,
+        engine: "capture",
+        event: event,
+        message: "test",
+        context: ["trigger": "physical_key"],
+        appVersion: "1.2.3",
+        osVersion: "Version 26.0"
+    )
 }
 
 private func readObservabilityTestRepoTextFile(_ relativePath: String) -> String {

@@ -25,7 +25,8 @@ func testParakeetRecoveryState() async {
             source: source, observedAt: observedAt,
             ignoreWindowUntil: until, windowDuration: 2.5,
             stableRoute: stable, observedRoute: observed,
-            bindingToken: token, currentEngine: engine
+            bindingToken: token, currentEngine: engine,
+            forceForMicrophoneSharing: false
         )
     }
     runSuite("ParakeetRecoveryState — initial state is ready and not recovering") {
@@ -329,7 +330,7 @@ func testParakeetRecoveryState() async {
 
     runSuite("Production AUHAL and notification callbacks carry event-time binding ownership") {
         let recovery = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        let engine = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        let engine = readSourceFixture("Sources/Speech/ParakeetInputRoute.swift")
         assertTrue(recovery.contains("let observedAt = CFAbsoluteTimeGetCurrent()"),
                    "audio-engine callback must timestamp before asynchronous HAL lookup")
         assertTrue(recovery.contains("queue: nil"),

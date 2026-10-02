@@ -110,8 +110,8 @@ final class CapturePillController {
     var onRemind: ((MeetingPromptDetector.Candidate) -> Void)?
     var onExpired: ((MeetingPromptDetector.Candidate) -> Void)?
 
-    /// Asks from the notch island instead of the pill when Settings ›
-    /// Dictation window is Notch island. Timing and callbacks are unchanged.
+    /// Asks from the notch island instead of the pill whenever one is set
+    /// (always, in the app). Timing and callbacks are unchanged.
     weak var island: NotchIslandCallPromptPresenting? {
         didSet {
             island?.callActionHandler = { [weak self] action in
@@ -178,7 +178,7 @@ final class CapturePillController {
 
         representedCandidate = candidate
         let timeoutSeconds = max(1, Int(ceil(timeout)))
-        if let island, DictationOverlayPresentationPreferences.mode() == .notchIsland {
+        if let island {
             // Start the clock first: showing the prompt reports whether it
             // is on screen, which may hold it straight away.
             apply(timeoutClock.start(timeout: timeout, now: Date()))

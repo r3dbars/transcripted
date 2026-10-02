@@ -32,7 +32,9 @@ final class MenuBarContentView: NSView {
 
     weak var appState: TranscriptedAppState? {
         didSet {
-            utilityActionsView.appState = appState
+            utilityActionsView.isDictationModelLoaded = { [weak appState] in
+                appState?.sttRouter.isModelLoaded == true
+            }
         }
     }
 
@@ -135,18 +137,12 @@ final class MenuBarContentView: NSView {
     /// `FocusOrderContract.menuBarPopoverOrder`. AppKit's inferred loop is
     /// unreliable for these manually laid-out flipped rows, so we set it.
     private func configureKeyViewLoop() {
-        var chain: [MenuBarActionRowView] = []
-        if !updateCalloutRow.isHidden {
-            chain.append(updateCalloutRow)
-        }
-        chain.append(contentsOf: primaryActionsView.keyboardFocusableRows)
-        chain.append(contentsOf: utilityActionsView.keyboardFocusableRows)
-
-        for (index, row) in chain.enumerated() {
-            row.nextKeyView = index + 1 < chain.count ? chain[index + 1] : chain.first
-        }
-
-        window?.initialFirstResponder = chain.first
+        let chain = MenuBarKeyViewLoop.orderedRows(
+            updateCallout: updateCalloutRow,
+            primary: primaryActionsView.keyboardFocusableRows,
+            utility: utilityActionsView.keyboardFocusableRows
+        )
+        window?.initialFirstResponder = MenuBarKeyViewLoop.link(chain)
     }
 
     /// A pointer already resting on a button when the menu opens shouldn't tick.

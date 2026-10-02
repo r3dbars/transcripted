@@ -1,0 +1,9 @@
+{
+  "name": "transcripted-live",
+  "version": "0.2.0",
+  "description": "The meeting Transcripted is recording, inside Claude Code: Claude gets the call as context, a live dashboard (now, asked of you, action items), prompt suggestions for questions aimed at you, and an after-call wrap-up that gains speaker names once Transcripted saves the meeting. Needs the transcripted-live helper running.",
+  "author": {
+    "name": "Transcripted"
+  },
+  "types": "./types/index.d.ts"
+}

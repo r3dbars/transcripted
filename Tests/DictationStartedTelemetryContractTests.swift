@@ -1,148 +1,121 @@
-// DictationSessionController cannot be instantiated in the fast-test runner,
-// so pin the source-level placement of the successful-start telemetry here.
+// The start-funnel telemetry promises: `dictation_started` only after the
+// microphone open succeeds, `dictation_start_requested` before the session
+// exists, and terminal warmup outcomes kept in the attempt denominator.
+// Tested through the start-path seams the controller runs.
 
 import Foundation
 
-func testDictationStartedTelemetryContract() {
-    let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
+@MainActor
+func testDictationStartedTelemetryContract() async {
+    await runSuite("dictation_started is counted only after the microphone open succeeds") {
+        var events: [String] = []
+        let outcome = await DictationFastStart.run(fastStartSteps(opens: false, into: { events.append($0) }))
+        assertEqual(outcome, .fellBackToWait, "a failed open falls back to the recovery wait")
+        assertEqual(events, ["open", "fall back"], "nothing counts a start the open didn't make")
 
-    runSuite("dictation_started is emitted only after microphone capture succeeds") {
-        let call = "recordDictationStarted(appState: appState, trigger:"
-        let callCount = source.components(separatedBy: call).count - 1
+        events = []
+        let started = await DictationFastStart.run(fastStartSteps(opens: true, into: { events.append($0) }))
+        assertEqual(started, .started, "a successful open starts recording")
+        assertEqual(events, ["open", "started"], "the success tail runs once, after the open")
+    }
 
+    await runSuite("A late open after the user let go is stopped, not counted") {
+        var events: [String] = []
+        var steps = fastStartSteps(opens: true, into: { events.append($0) })
+        steps.isStillWanted = { false }
+        let outcome = await DictationFastStart.run(steps)
+        assertEqual(outcome, .abandoned, "the session ended while the open was in flight")
+        assertEqual(events, ["open", "stop late recording"], "the mic doesn't stay open and no start is counted")
+
+        events = []
+        var failed = fastStartSteps(opens: false, into: { events.append($0) })
+        failed.isStillWanted = { false }
+        _ = await DictationFastStart.run(failed)
+        assertEqual(events, ["open"], "a late failure doesn't start a wait nobody asked for")
+    }
+
+    runSuite("Every successful start counts dictation_started and drops its start handle") {
+        var events: [String] = []
+        DictationRecordingStarted.finish(DictationRecordingStarted.Steps(
+            clearStartHandle: { events.append("clear handle") },
+            recordStarted: { events.append("dictation_started") },
+            playStartCue: { events.append("cue") },
+            installSessionTimeout: { events.append("timeout") }
+        ))
         assertEqual(
-            callCount,
-            2,
-            "the success event should be emitted once from the fast path and once from the recovery path"
-        )
-
-        let permissionGate = sourceSlice(
-            source,
-            from: "switch TranscriptedPermissionAccess.microphoneAuthorizationStatus()",
-            to: "private func recordDictationStarted"
-        )
-        assertFalse(
-            permissionGate.contains("recordDictationStarted"),
-            "microphone permission alone must not count as a successful dictation start"
-        )
-
-        let fastPath = sourceSlice(
-            source,
-            from: "if started {",
-            to: "} else {"
-        )
-        assertTrue(
-            fastPath.contains("recordDictationStarted"),
-            "the ready-engine path should emit success after the audio engine reports that recording started"
-        )
-
-        let recoveryPath = sourceSlice(
-            source,
-            from: "case .started:",
-            to: "case .timedOut"
-        )
-        assertTrue(
-            recoveryPath.contains("recordDictationStarted"),
-            "the recovery path should emit success only after a start attempt returns started"
+            events,
+            ["clear handle", "dictation_started", "cue", "timeout"],
+            "a stale handle would make a Push to Talk release during a device recovery read as cancel-pending-start and discard kept audio"
         )
     }
 
-    // Counting a press before any guard can refuse it, not counting a press
-    // while already dictating or queued behind a finishing take, and each guard
-    // reporting its own reason are behavior tests now in
-    // DictationStartAdmissionTests.swift. What stays here is the controller's
-    // wiring: admission runs before the session id is minted.
-    runSuite("dictation_start_requested is emitted before the session id exists") {
-        let start = sourceSlice(source, from: "func startDictation(", to: "private func recordDictationStarted")
-
-        let admission = start.range(of: "DictationStartAdmission.decide(")
-        let requested = start.range(of: "trackDictationStartRequested(")
-        let newSession = start.range(of: "currentDictationSessionID = UUID()")
-
-        assertTrue(admission != nil && requested != nil && newSession != nil,
-                   "startDictation should decide admission, count the request, and mint a session")
-        if let admission, let requested, let newSession {
-            assertTrue(
-                admission.lowerBound < newSession.lowerBound && requested.lowerBound < newSession.lowerBound,
-                "the attempt event must fire before the session UUID is minted, or it borrows the previous session's id"
-            )
-        }
-        let countRequest = sourceSlice(start, from: "countRequest:", to: "blocksNewCapture:")
-        assertTrue(countRequest.contains("trackDictationStartRequested("),
-                   "admission's request count must be the real dictation_start_requested event")
-        let countRefusal = sourceSlice(start, from: "countRefusal:", to: "switch admission")
-        assertTrue(countRefusal.contains("trackDictationStartRefused(") && countRefusal.contains("failureKind: refusal.rawValue"),
-                   "each refusal must be reported with its own failure kind")
-
-        // One definition, the startDictation call, and the one in
-        // dropQueuedDictationStart. A press remembered while the last take
-        // finishes returns before the startDictation call, so it is counted
-        // either when it starts (through startDictation) or when it is dropped,
-        // never both.
+    runSuite("dictation_start_requested is counted before the session id exists") {
+        var events: [String] = []
+        let admitted = DictationStartAdmission.decide(admissionSteps(into: { events.append($0) }))
+        assertEqual(admitted, .admitted, "an ordinary press is admitted")
         assertEqual(
-            source.components(separatedBy: "trackDictationStartRequested(").count - 1,
-            3,
-            "one definition and exactly two call sites — another emission would double-count attempts"
+            events,
+            ["count request", "begin session"],
+            "counted first, or the attempt event borrows the previous session's id"
         )
-        let drop = sourceSlice(source, from: "private func dropQueuedDictationStart(", to: "private func clearQueuedStartNotice")
-        assertTrue(
-            drop.contains("trackDictationStartRequested(") && drop.contains("failureKind: \"previous_dictation_transcribing\""),
-            "a remembered press that never starts is still a refused request, as it was before it was remembered"
-        )
-    }
 
-    // "guard-refused start requests report their own failure kind" is a
-    // behavior test now: "Each guard that refuses reports its own reason" in
-    // DictationStartAdmissionTests.swift.
-
-    runSuite("internal restart paths are marked as retries") {
-        let internalCalls = Array(source.components(separatedBy: ".startDictation(").dropFirst())
-
-        // Nine: the eight error-alert restart affordances, plus the start of a
-        // press remembered while the last take finished. That one is the
-        // user's own press, so it passes the press's own flag through.
+        events = []
+        var refused = admissionSteps(into: { events.append($0) })
+        refused.previousTakeIsTranscribing = { true }
+        _ = DictationStartAdmission.decide(refused)
         assertEqual(
-            internalCalls.count,
-            9,
-            "the error-alert restart affordances in this file plus the remembered press; update this count deliberately, not to make the suite pass"
+            events,
+            ["count request", "count refusal previous_dictation_transcribing"],
+            "a refused press is counted but never gets a session of its own"
         )
-        for call in internalCalls {
-            let arguments = call.components(separatedBy: ")").first ?? ""
-            if arguments.contains("isRetry: request.isRetry") { continue }
-            assertTrue(
-                arguments.contains("isRetry: true"),
-                "a restart from a Try Again action must be marked, or four taps read as five independent attempts"
-            )
-        }
     }
 
     runSuite("dictation_start_failed includes terminal model warmup outcomes") {
-        let failedWarmup = sourceSlice(
-            source,
-            from: "case .failed(let message):",
-            to: "case .timedOut:"
-        )
-        assertTrue(
-            failedWarmup.contains("trackDictationStartFailed(\"model_load_failed\")"),
+        assertEqual(
+            DictationSession.ModelWarmupOutcome.failed("disk full").startFailureKind,
+            "model_load_failed",
             "a failed foreground model load must remain in the dictation attempt denominator"
         )
-
-        let timedOutWarmup = sourceSlice(
-            source,
-            from: "case .timedOut:",
-            to: "case .aborted:"
-        )
-        assertTrue(
-            timedOutWarmup.contains("trackDictationStartFailed(\"model_load_timeout\")"),
+        assertEqual(
+            DictationSession.ModelWarmupOutcome.timedOut.startFailureKind,
+            "model_load_timeout",
             "a timed-out foreground model load must remain in the dictation attempt denominator"
         )
+        assertNil(DictationSession.ModelWarmupOutcome.ready.startFailureKind, "a ready model goes on to open the mic")
+        assertNil(
+            DictationSession.ModelWarmupOutcome.aborted.startFailureKind,
+            "an aborted wait was ended elsewhere, which already reported it"
+        )
     }
+
+    // The controller's wiring of these rules (the real request and refusal
+    // events, the session id minted after the count, and every Try Again
+    // restart marked as a retry) runs through DictationSessionPipeline.swift
+    // and is a behavior test in DictationSessionPipelineTests.swift.
 }
 
-private func sourceSlice(_ source: String, from start: String, to end: String) -> String {
-    guard let startRange = source.range(of: start),
-          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
-        return ""
-    }
-    return String(source[startRange.lowerBound..<endRange.lowerBound])
+@MainActor
+private func fastStartSteps(opens: Bool, into record: @escaping @MainActor (String) -> Void) -> DictationFastStart.Steps {
+    DictationFastStart.Steps(
+        openMicrophone: { record("open"); return opens },
+        isStillWanted: { true },
+        stopLateRecording: { record("stop late recording") },
+        started: { record("started") },
+        fallBackToWait: { record("fall back") }
+    )
+}
+
+@MainActor
+private func admissionSteps(into record: @escaping @MainActor (String) -> Void) -> DictationStartAdmission.Steps {
+    DictationStartAdmission.Steps(
+        isDictating: { false },
+        rememberPressIfFinishing: { false },
+        showStartingIsland: {},
+        countRequest: { record("count request") },
+        blocksNewCapture: { false },
+        previousTakeIsTranscribing: { false },
+        unavailableReason: { nil },
+        countRefusal: { record("count refusal \($0.rawValue)") },
+        beginSession: { record("begin session") }
+    )
 }

@@ -110,6 +110,13 @@ fi
 TRANSCRIPTED_CONTAINER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-test-container.XXXXXX")"
 export TRANSCRIPTED_CONTAINER_DIR
 
+# UserDefaults.standard is keyed by the executable's file name. Every worktree's
+# binary is `build/tests`, so overlapping runs shared one preferences domain and
+# clobbered each other's keys (RecentCaptureScannersTests points the capture
+# library key at its fixtures). Each run executes a copy with its own name, so
+# it gets its own domain, which cleanup deletes.
+TEST_DEFAULTS_DOMAIN="transcripted-fast-tests.${TRANSCRIPTED_CONTAINER_DIR##*.}"
+
 # The shared app-object cache is mutated and compiled into in place, so two
 # overlapping run-tests.sh invocations in one worktree must not interleave.
 # mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
@@ -192,6 +199,10 @@ cleanup_generated_runner() {
         rm -rf "$TEST_OBJECT_DIR"
     fi
     rm -rf "$TRANSCRIPTED_CONTAINER_DIR"
+    if command -v defaults >/dev/null 2>&1; then
+        defaults delete "$TEST_DEFAULTS_DOMAIN" >/dev/null 2>&1 || true
+    fi
+    rm -f "$HOME/Library/Preferences/$TEST_DEFAULTS_DOMAIN.plist"
 }
 trap cleanup_generated_runner EXIT
 
@@ -365,6 +376,8 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
+    "Sources/Support/CompanionProtocol.swift"
+    "Sources/Support/CompanionSocketServer.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
     "Sources/Support/PermissionsOnboardingPreferences.swift"
     "Sources/Support/AutomatedLaunchEnvironment.swift"
@@ -373,7 +386,7 @@ APP_SOURCES=(
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/SpeakerEmbedderPreferences.swift"
-    "Sources/Support/SpeakerEmbedderLoadFailureMemory.swift"
+    "Sources/Meeting/SpeakerEmbedderLoadFailureMemory.swift"
     "Sources/Support/DiarizationBackendPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
@@ -400,7 +413,7 @@ APP_SOURCES=(
     "Sources/Support/DictationPersistentInputPreferences.swift"
     "Sources/Support/MicrophoneChoicePreferences.swift"
     "Sources/Support/DictationCleanupPreferences.swift"
-    "Sources/Support/DictationOverlayPresentationPreferences.swift"
+    "Sources/Support/NotchIslandPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
@@ -423,10 +436,15 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetModelState.swift"
     "Sources/Speech/ModelLoadProgressWaiter.swift"
     "Sources/Speech/ASRInferenceWaiterQueue.swift"
+    "Sources/Speech/ParakeetASRInferenceGate.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
     "Sources/Speech/ParakeetAudioGraphOwnership.swift"
+    "Sources/Speech/ParakeetAudioGraph.swift"
+    "Sources/Speech/ParakeetAudioGraphSequences.swift"
     "Sources/Speech/ParakeetTimedAudioEngineWorkLimiter.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
+    "Sources/Speech/ParakeetRecordingContinuityPolicy.swift"
+    "Sources/Speech/ParakeetZombieEngineRecoverySequence.swift"
     "Sources/Speech/ParakeetStartRecordingFailurePolicy.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
     "Sources/Speech/DictationLanguageScriptPolicy.swift"
@@ -440,6 +458,7 @@ APP_SOURCES=(
     # SupersessionEpoch.swift now arrives via SHARED_PASTEBACK_SUPPORT_SOURCES
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
+    "Sources/Speech/PersistentDictationInputController.swift"
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/Support/LabControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
@@ -455,6 +474,11 @@ APP_SOURCES=(
     "Sources/Meeting/FailedMeetingItem.swift"
     "Sources/Meeting/FailedMeetingPresentation.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
+    "Sources/Meeting/MeetingPromptDetector+Backoff.swift"
+    "Sources/Meeting/MeetingPromptDetector+CalendarRuntime.swift"
+    "Sources/Meeting/MeetingPromptDetector+AdHocCalls.swift"
+    "Sources/Meeting/MeetingPromptDetector+BrowserEvidence.swift"
+    "Sources/Meeting/MeetingPromptCalendarReader.swift"
     "Sources/Meeting/MeetingPromptRecordAction.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingPromptTelemetry.swift"
@@ -471,7 +495,9 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingMicBoostPromptPolicy.swift"
+    "Sources/Meeting/MeetingMicCapturePlan.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
+    "Sources/Meeting/LiveMeetingTranscriptState.swift"
     "Sources/Meeting/MeetingQuickSummaryExtractor.swift"
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
@@ -479,7 +505,15 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/MenuBarShortcutWarningPresentation.swift"
     "Sources/UI/MenuBar/MenuBarPrimaryButtonTitle.swift"
+    "Sources/UI/MenuBar/MenuBarShortcutLabel.swift"
     "Sources/UI/MenuBar/MenuBarGlyph.swift"
+    "Sources/UI/MenuBar/MenuTokens.swift"
+    "Sources/UI/MenuBar/MenuBarActionRowView.swift"
+    "Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift"
+    "Sources/UI/MenuBar/MenuBarUtilityActionsView.swift"
+    "Sources/UI/MenuBar/MenuBarKeyViewLoop.swift"
+    "Sources/UI/Shared/AccessibilityDisplayPolicy.swift"
+    "Sources/UI/Settings/TranscriptedSettingsSidebar.swift"
     "Sources/UI/Shared/MeetingPillFinishPresentation.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
     "Sources/Observability/UsageHealthStore.swift"
@@ -503,7 +537,13 @@ APP_SOURCES=(
     "Sources/Observability/LocalObservabilityPayloadSanitizer.swift"
     "Sources/Observability/ObservabilityEvent.swift"
     "Sources/Observability/ReliabilityPacketRecorder.swift"
+    "Sources/Observability/ObservabilityEventCapturePlan.swift"
+    "Sources/Observability/EventFileWriter.swift"
+    "Sources/Observability/AppLogSink.swift"
+    "Sources/TranscriptedCore/Logging/LogTailTrimmer.swift"
+    "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/Observability/RuntimeDiagnosticsStore.swift"
+    "Sources/Observability/RuntimeDiagnosticsContextWriter.swift"
     "Sources/Observability/UpdateFailureKind.swift"
     "Sources/Observability/UpdateInstallDetection.swift"
     "Sources/Observability/SentryRuntimeConfiguration.swift"
@@ -523,7 +563,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFormatOptions.swift"
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
-    "Sources/Support/MeetingInviteeSuggestionPolicy.swift"
+    "Sources/Meeting/MeetingInviteeSuggestionPolicy.swift"
     "Sources/Meeting/MeetingSpeakerSeparationProvider.swift"
     "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
@@ -532,9 +572,11 @@ APP_SOURCES=(
     "Sources/UI/Shared/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
+    "Sources/Writing/WritingSidebarNewBadge.swift"
     "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
+    "Sources/UI/Settings/SettingsActionFailureCopy.swift"
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
     "Sources/UI/Settings/HomeScanWarningPolicy.swift"
@@ -570,6 +612,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift"
     "Sources/UI/Overlay/DictationStartCuePolicy.swift"
     "Sources/UI/Overlay/DictationStartActivation.swift"
+    "Sources/UI/Overlay/DictationSessionPipeline.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/HomeCaptureRefreshObserver.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
@@ -590,7 +633,7 @@ APP_SOURCES=(
     "Sources/Writing/WritingSetupState.swift"
     "Sources/Writing/WritingDayFileReader.swift"
     "Sources/Writing/WritingStorageUsage.swift"
-    "Sources/UI/Settings/Writing/WritingSetupPresentation.swift"
+    "Sources/Writing/WritingSetupPresentation.swift"
     "Sources/UI/Settings/Writing/WritingDemoScript.swift"
 )
 
@@ -773,6 +816,10 @@ fi
 if [ "$cache_enabled" = true ] && [ "$cache_status" = "miss" ]; then
     touch "$cache_complete"
 fi
+# A copy, not a link: an overlapping run may relink build/tests while this one
+# runs. Copy before releasing the lock so that relink can't start mid-copy.
+RUN_BINARY="$TRANSCRIPTED_CONTAINER_DIR/$TEST_DEFAULTS_DOMAIN"
+cp "$TEST_BINARY" "$RUN_BINARY"
 release_cache_lock
 
 echo "Running tests..."
@@ -785,7 +832,7 @@ print_failure_rerun_hint() {
 
 if [ "$coverage_requested" = true ]; then
     run_status=0
-    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$RUN_BINARY" || run_status=$?
     if [ "$run_status" -ne 0 ]; then
         print_failure_rerun_hint
         exit "$run_status"
@@ -810,11 +857,11 @@ if [ "$coverage_requested" = true ]; then
     echo ""
     echo "Writing coverage artifacts..."
     "$llvm_profdata" merge -sparse "${profraw_files[@]}" -o "$COVERAGE_PROFDATA"
-    "$llvm_cov" report "$TEST_BINARY" \
+    "$llvm_cov" report "$RUN_BINARY" \
         -instr-profile="$COVERAGE_PROFDATA" \
         -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \
         > "$COVERAGE_SUMMARY"
-    "$llvm_cov" export "$TEST_BINARY" \
+    "$llvm_cov" export "$RUN_BINARY" \
         -instr-profile="$COVERAGE_PROFDATA" \
         -format=lcov \
         -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \
@@ -824,7 +871,7 @@ if [ "$coverage_requested" = true ]; then
     echo "Coverage LCOV: $COVERAGE_LCOV"
 else
     run_status=0
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$RUN_BINARY" || run_status=$?
     if [ "$run_status" -ne 0 ]; then
         print_failure_rerun_hint
         exit "$run_status"

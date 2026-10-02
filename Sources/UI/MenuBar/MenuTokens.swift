@@ -80,8 +80,9 @@ enum MenuTokens {
         static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
         static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
         static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
-        static let rowTrailingPrimary = NSFont.systemFont(ofSize: 10.5, weight: .medium)
-        static let rowTrailingUtility = NSFont.systemFont(ofSize: 10, weight: .medium)
+        // Monospaced digits so the live recording timer doesn't jitter.
+        static let rowTrailingPrimary = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        static let rowTrailingUtility = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
     }

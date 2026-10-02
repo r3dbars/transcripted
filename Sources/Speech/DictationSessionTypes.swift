@@ -85,6 +85,18 @@ final class DictationSession: ObservableObject {
         case failed(String)
         case timedOut
         case aborted
+
+        /// The `dictation_start_failed` kind for a warmup that ended the
+        /// start, so a failed or timed-out foreground model load stays in the
+        /// start-attempt denominator. Nil when the start goes on or was
+        /// already ended elsewhere.
+        var startFailureKind: String? {
+            switch self {
+            case .failed: return "model_load_failed"
+            case .timedOut: return "model_load_timeout"
+            case .ready, .aborted: return nil
+            }
+        }
     }
 
     /// Which path `continueDictationStart` should take, classified purely

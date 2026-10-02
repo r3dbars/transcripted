@@ -199,3 +199,111 @@ enum DictationPersistentInputRefreshPolicy {
         isDictationActive || isMeetingCaptureActive || externalInputActive != false
     }
 }
+
+enum DictationPersistentInputShutdownPolicy {
+    /// Quitting restores the user's previous mic only when no other app is
+    /// known to be capturing. A busy or unreadable reading (nil, e.g. a
+    /// blocked driver read that timed out) leaves the system input alone and
+    /// keeps the durable marker so a later idle launch can restore it.
+    static func shouldRestoreOnQuit(externalInputActive: Bool?) -> Bool {
+        externalInputActive == false
+    }
+}
+
+enum DictationPersistentInputRestorePolicy {
+    /// Put the previous mic back only if the system input is still the one
+    /// Transcripted chose. A mic the user picked elsewhere is left alone.
+    static func shouldRestorePrevious<ID: Equatable>(currentInput: ID, ownedSelectedInput: ID) -> Bool {
+        currentInput == ownedSelectedInput
+    }
+}
+
+/// Defers persistent-input maintenance (a Mac-wide default-input write) until
+/// no capture could be disturbed by it, and coalesces bursts of default-input,
+/// device-list, and preference changes into one reconcile.
+@MainActor
+final class DictationPersistentInputRefreshScheduler {
+    private var pendingDefaultInputChange = false
+    private var pendingDeviceListChange = false
+    private(set) var refreshTask: Task<Void, Never>?
+
+    private let isMonitoring: () -> Bool
+    private let preferenceEnabled: () -> Bool
+    private let hasRecoveryMarker: () -> Bool
+    private let isDictationActive: () -> Bool
+    private let isMeetingCaptureActive: () -> Bool
+    private let readExternalInputActivity: () async -> Bool?
+    private let delay: () async -> Void
+    private let reconcile: (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) -> Void
+
+    init(
+        isMonitoring: @escaping () -> Bool,
+        preferenceEnabled: @escaping () -> Bool,
+        hasRecoveryMarker: @escaping () -> Bool,
+        isDictationActive: @escaping () -> Bool,
+        isMeetingCaptureActive: @escaping () -> Bool,
+        readExternalInputActivity: @escaping () async -> Bool?,
+        delay: @escaping () async -> Void,
+        reconcile: @escaping (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) -> Void
+    ) {
+        self.isMonitoring = isMonitoring
+        self.preferenceEnabled = preferenceEnabled
+        self.hasRecoveryMarker = hasRecoveryMarker
+        self.isDictationActive = isDictationActive
+        self.isMeetingCaptureActive = isMeetingCaptureActive
+        self.readExternalInputActivity = readExternalInputActivity
+        self.delay = delay
+        self.reconcile = reconcile
+    }
+
+    func schedule(
+        defaultInputChanged: Bool = false,
+        deviceListChanged: Bool = false,
+        preferenceChanged: Bool = false
+    ) {
+        // A late listener callback after shutdown must not restart maintenance.
+        guard isMonitoring() else { return }
+        guard DictationPersistentInputRefreshPolicy.shouldSchedule(
+            preferenceChanged: preferenceChanged,
+            preferenceEnabled: preferenceEnabled(),
+            hasRecoveryMarker: hasRecoveryMarker()
+        ) else { return }
+        pendingDefaultInputChange = pendingDefaultInputChange || defaultInputChanged
+        pendingDeviceListChange = pendingDeviceListChange || deviceListChanged
+        refreshTask?.cancel()
+        let delay = self.delay
+        refreshTask = Task { @MainActor [weak self] in
+            await delay()
+            guard !Task.isCancelled, let self else { return }
+            while true {
+                // The preference changes the Mac-wide input, so another app's
+                // capture deserves the same protection as our own recordings.
+                // Unknown activity defers this optional optimization rather
+                // than risking a call.
+                let externalInputActive = await self.readExternalInputActivity()
+                guard !Task.isCancelled else { return }
+                // Recheck our own capture after the asynchronous HAL read.
+                guard DictationPersistentInputRefreshPolicy.shouldDefer(
+                    isDictationActive: self.isDictationActive(),
+                    isMeetingCaptureActive: self.isMeetingCaptureActive(),
+                    externalInputActive: externalInputActive
+                ) else { break }
+                await self.delay()
+                // Stopped monitoring (or a released owner) ends the wait.
+                guard !Task.isCancelled, self.isMonitoring() else { return }
+            }
+            let defaultInputChanged = self.pendingDefaultInputChange
+            let deviceListChanged = self.pendingDeviceListChange
+            self.pendingDefaultInputChange = false
+            self.pendingDeviceListChange = false
+            self.reconcile(defaultInputChanged, deviceListChanged)
+        }
+    }
+
+    func cancel() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        pendingDefaultInputChange = false
+        pendingDeviceListChange = false
+    }
+}

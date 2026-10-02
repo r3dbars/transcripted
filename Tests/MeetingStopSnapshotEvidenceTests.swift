@@ -65,36 +65,98 @@ func testMeetingStopSnapshotEvidence() {
         )
     }
 
-    runSuite("MeetingSessionController — unexpected stop evidence is captured before the warning clears") {
-        let source = readSourceFixture(
-            "Sources/Meeting/MeetingSessionController.swift",
-            description: "MeetingSessionController.swift"
+    runSuite("Capture stop — evidence is stashed before the live warnings are torn down") {
+        // A fake capture that resets its status and clears the warning when
+        // torn down, the way the real stop does.
+        let interruption = MeetingSystemAudioDegradationWarning(
+            cause: .interruption, phase: .degraded, isPromptDismissed: false
         )
-        guard let stash = source.range(of: "self.unexpectedCaptureStopEvidence = ("),
-              let clear = source.range(
-                of: "self.systemAudioDegradationWarning = nil",
-                range: stash.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "the capture-stop sink must stash evidence and then clear the warning")
-            return
-        }
-        assertTrue(stash.lowerBound < clear.lowerBound, "evidence must be stashed before the warning is cleared")
-        assertTrue(
-            source.contains("atCaptureStop: atCaptureStop?.systemAudioStatus")
-                && source.contains("atCaptureStop: atCaptureStop?.degradationWarning"),
-            "the stop snapshot must read the stashed evidence"
+        var liveStatus = Status.failed
+        var liveWarning: MeetingSystemAudioDegradationWarning? = interruption
+        var unheardStartedAt: Date? = Date(timeIntervalSince1970: 1_000)
+        let stopAt = Date(timeIntervalSince1970: 1_045)
+        var events: [String] = []
+        var stashed: MeetingCaptureStopEvidence<Status>?
+
+        let tornDown = MeetingCaptureHealthTelemetry.captureStopped(
+            whileRecording: true,
+            readEvidence: { () -> MeetingCaptureStopEvidence<Status> in
+                events.append("read")
+                return MeetingCaptureStopEvidence(
+                    systemAudioStatus: liveStatus,
+                    degradationWarning: liveWarning,
+                    unheardWarningStartedAt: unheardStartedAt,
+                    now: stopAt
+                )
+            },
+            stashEvidence: { evidence in
+                events.append("stash")
+                stashed = evidence
+            },
+            tearDown: { () -> String in
+                events.append("tear_down")
+                liveStatus = .unknown
+                liveWarning = nil
+                unheardStartedAt = nil
+                return "inactivity_stopped"
+            }
         )
-        if let unheard = source.range(
-            of: "self.unheardSecondsAtCaptureStop = self.unheardPlaybackWarningStartedAt",
-            range: stash.upperBound..<source.endIndex
-        ) {
-            assertTrue(unheard.lowerBound < clear.lowerBound, "how long call audio went unheard is stashed with the rest")
-        } else {
-            assertTrue(false, "the capture-stop sink must stash how long call audio went unheard")
-        }
-        assertTrue(
-            source.contains("unheardSeconds: unheardSecondsAtCaptureStop"),
-            "the stop snapshot must prefer the stashed unheard time"
+
+        assertEqual(events, ["read", "stash", "tear_down"], "evidence must be read and stashed before the warning clears")
+        assertEqual(tornDown, "inactivity_stopped", "the teardown result still comes back to the caller")
+        assertEqual(stashed?.systemAudioStatus, .failed, "the stash keeps the status seen before the reset")
+        assertEqual(stashed?.degradationWarning, interruption, "the stash keeps the warning seen before it cleared")
+        assertEqual(stashed?.unheardSeconds, 45, "how long call audio went unheard is stashed with the rest")
+
+        // The snapshot taken after the reset reads the stash.
+        let snapshot = MeetingCaptureHealthTelemetry.stopSnapshotEvidence(
+            liveStatus: liveStatus,
+            unknown: .unknown,
+            liveWarning: liveWarning,
+            liveUnheardWarningStartedAt: unheardStartedAt,
+            atCaptureStop: stashed,
+            now: Date(timeIntervalSince1970: 1_100)
         )
+        assertEqual(snapshot.systemAudioStatus, .failed, "the stop snapshot reads the stashed status")
+        assertEqual(snapshot.degradationWarning, interruption, "the stop snapshot reads the stashed warning")
+        assertEqual(snapshot.unheardSeconds, 45, "the stop snapshot prefers the stashed unheard time")
+    }
+
+    runSuite("Capture stop — an expected stop stashes nothing and the snapshot reads live values") {
+        var events: [String] = []
+        _ = MeetingCaptureHealthTelemetry.captureStopped(
+            whileRecording: false,
+            readEvidence: { () -> MeetingCaptureStopEvidence<Status> in
+                events.append("read")
+                return MeetingCaptureStopEvidence(
+                    systemAudioStatus: .healthy, degradationWarning: nil, unheardWarningStartedAt: nil, now: Date()
+                )
+            },
+            stashEvidence: { _ in events.append("stash") },
+            tearDown: { events.append("tear_down") }
+        )
+        assertEqual(events, ["tear_down"], "a stop the controller asked for has no evidence to keep")
+
+        let snapshot = MeetingCaptureHealthTelemetry.stopSnapshotEvidence(
+            liveStatus: Status.healthy,
+            unknown: .unknown,
+            liveWarning: nil,
+            liveUnheardWarningStartedAt: Date(timeIntervalSince1970: 2_000),
+            atCaptureStop: nil,
+            now: Date(timeIntervalSince1970: 2_030)
+        )
+        assertEqual(snapshot.systemAudioStatus, .healthy)
+        assertNil(snapshot.degradationWarning)
+        assertEqual(snapshot.unheardSeconds, 30, "with no stash the live unheard timer counts")
+
+        let nothingOpen = MeetingCaptureHealthTelemetry.stopSnapshotEvidence(
+            liveStatus: Status.healthy,
+            unknown: .unknown,
+            liveWarning: nil,
+            liveUnheardWarningStartedAt: nil,
+            atCaptureStop: nil,
+            now: Date()
+        )
+        assertEqual(nothingOpen.unheardSeconds, 0, "no unheard warning means zero unheard time")
     }
 }

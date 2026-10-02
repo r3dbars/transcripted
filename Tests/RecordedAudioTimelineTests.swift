@@ -1,17 +1,12 @@
 // RecordedAudioTimelineTests.swift
 // Tests for multi-segment dictation audio buffering across microphone handoffs.
 //
-// Most suites here call real code directly: RecordedAudioTimeline, SharedMeetingMicRecorder,
+// Every suite here calls real code directly: RecordedAudioTimeline, SharedMeetingMicRecorder,
 // MeetingMicPCMRelay, and SharedMeetingMicTransitionState are plain Foundation/AVFoundation types
 // with no @MainActor or engine dependency, so they compile and run in this fast-test runner as-is.
 //
-// Source-text pins: the "Shared meeting mic path always records borrowed PCM" suite is the one
-// exception — it reads Sources/Speech/ParakeetSharedMeetingMicBridge.swift as text instead of
-// calling appendSharedMeetingMicBuffer(), because that method is a `nonisolated func` on an
-// `extension ParakeetEngine`, and ParakeetEngine is @MainActor, CoreAudio-wired, and not
-// constructible here. What is pinned: that the method's body still forwards every buffer to
-// `sharedMeetingMicRecorder.append(buffer)` unconditionally, with no `liveDisplayEnabled` gate. If
-// you touch that method, update the pinned strings to match its new body.
+// The borrowed-PCM suite drives SharedMeetingMicRecorder.recordBorrowedBuffer(_:meter:),
+// the whole body of ParakeetEngine.appendSharedMeetingMicBuffer().
 
 import AVFoundation
 import Foundation
@@ -71,6 +66,22 @@ func testRecordedAudioTimeline() {
         assertEqual(drained.count, 2, "drain should hand back every buffered segment")
         assertTrue(timeline.isEmpty, "drain should clear the in-memory timeline")
         assertEqual(timeline.totalSourceSampleCount, 0, "cleared timelines should report zero samples")
+    }
+
+    runSuite("Pending tap audio joins the take one segment at a time, each at its own rate") {
+        var take = RecordedAudioTimeline()
+        take.append([0.1, 0.2], sampleRate: 48_000)
+        var pending = RecordedAudioTimeline()
+        pending.append([0.3], sampleRate: 24_000)
+        pending.append([0.4, 0.5], sampleRate: 48_000)
+
+        for segment in pending.drain() {
+            take.append(segment)
+        }
+
+        assertEqual(take.segments.map(\.sampleRate), [48_000, 24_000, 48_000], "each drained segment keeps the rate it was captured at")
+        assertEqual(take.totalSourceSampleCount, 5, "no captured samples are lost")
+        assertTrue(pending.isEmpty, "the pending buffer is empty after the drain")
     }
 
     runSuite("RecordedAudioTimeline.append — drops invalid and non-finite sample rates") {
@@ -145,24 +156,31 @@ func testRecordedAudioTimeline() {
     }
 
     runSuite("Shared meeting mic path always records borrowed PCM") {
-        let source = (try? String(
-            contentsOfFile: "Sources/Speech/ParakeetSharedMeetingMicBridge.swift",
-            encoding: .utf8
-        )) ?? ""
-        guard let start = source.range(of: "nonisolated func appendSharedMeetingMicBuffer"),
-              let end = source.range(of: "func updateSharedMeetingMicAudioLevel", range: start.upperBound..<source.endIndex) else {
-            assertTrue(false, "shared meeting mic append method should remain present")
-            return
-        }
-        let appendBody = String(source[start.lowerBound..<end.lowerBound])
-        assertTrue(
-            appendBody.contains("sharedMeetingMicRecorder.append(buffer)"),
-            "borrowed meeting PCM should always reach the recorder"
+        let recorder = SharedMeetingMicRecorder()
+        let idleMeter = SharedMeetingMicLevelMeter(interval: 0.05, now: { 100 })
+        recorder.begin()
+
+        let readings = recorder.recordBorrowedBuffer(
+            makeSharedMicTestBuffer(channels: [[0.1, 0.2]]),
+            meter: idleMeter
         )
-        assertFalse(
-            appendBody.contains("liveDisplayEnabled"),
-            "recording borrowed meeting PCM must not depend on a provisional-text feature gate"
+
+        assertTrue(readings.isEmpty, "an idle level meter shows nothing")
+        assertEqual(
+            recorder.finish().segments.first?.samples ?? [],
+            [0.1, 0.2],
+            "borrowed meeting PCM reaches the recording even when nothing else is listening"
         )
+
+        let liveMeter = SharedMeetingMicLevelMeter(interval: 0.05, now: { 100 })
+        liveMeter.begin()
+        recorder.begin()
+        let liveReadings = recorder.recordBorrowedBuffer(
+            makeSharedMicTestBuffer(channels: [[0.5, 0.5]]),
+            meter: liveMeter
+        )
+        assertFalse(liveReadings.isEmpty, "a live meter reads the same buffer it was given")
+        assertEqual(recorder.finish().segments.first?.samples ?? [], [0.5, 0.5], "metering never consumes the samples")
     }
 
     runSuite("SharedMeetingMicRecorder downmixes stereo and preserves route sample-rate changes") {

@@ -60,8 +60,11 @@ extension ParakeetEngine {
     /// metered from these same buffers at dictation's own cadence and scale,
     /// not taken from the meeting's slower published mic level.
     nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
-        sharedMeetingMicRecorder.append(buffer)
-        for reading in sharedMeetingMicLevelMeter.levels(for: buffer) {
+        let readings = sharedMeetingMicRecorder.recordBorrowedBuffer(
+            buffer,
+            meter: sharedMeetingMicLevelMeter
+        )
+        for reading in readings {
             Task { @MainActor [weak self] in
                 if reading.delay > 0 {
                     try? await Task.sleep(for: .seconds(reading.delay))
@@ -94,7 +97,6 @@ extension ParakeetEngine {
         let started = await startRecording(isRecoveryAttempt: true)
         guard sharedMeetingMicTransition.finishResume(token: transitionToken) else {
             if started {
-                let pendingRestoreOwner = pendingSystemInputRestore.owner
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
                 let staleResumeOwner = currentAudioEngineQueueOwnerToken()
@@ -107,10 +109,6 @@ extension ParakeetEngine {
                 if !releasedVoiceProcessing {
                     discardStoppedVoiceProcessingGraph(ownedBy: staleResumeOwner)
                 }
-                await restorePendingSystemInputAfterRecording(
-                    ownedBy: pendingRestoreOwner,
-                    operation: "stale_shared_meeting_mic_resume"
-                )
             }
             return
         }

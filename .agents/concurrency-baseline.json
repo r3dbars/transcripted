@@ -3,8 +3,8 @@
   "Sources/Dictation": 1,
   "Sources/Meeting": 7,
   "Sources/Observability": 13,
-  "Sources/Speech": 24,
+  "Sources/Speech": 19,
   "Sources/Support": 11,
   "Sources/TranscriptedWriting": 4,
-  "Sources/UI": 51
+  "Sources/UI": 37
 }

@@ -248,8 +248,43 @@ run --vm upvm down || true
 # Reconnecting to Apple's VNC server crashed tart on a real Mac, so every
 # screen command must reuse the session `up --vnc` opened.
 
+# serve binds its socket before it connects, so a socket alone isn't a session.
+# A VNC port that accepts but never says hello holds serve right there, socket
+# up and not connected, until its connect times out: up --vnc must not call
+# that screen access.
+python3 - "$ROOT/silentvnc" <<'PY' &
+import os, socket, sys
+parent = os.getppid()  # first, so a test that dies right away still ends this helper
+listener = socket.socket()
+listener.bind(("127.0.0.1", 0))
+listener.listen(4)
+with open(sys.argv[1] + ".tmp", "w") as handle:
+    handle.write(str(listener.getsockname()[1]))
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+held = []  # accepted connections stay open and never get an answer
+listener.settimeout(0.2)
+while not os.path.exists(sys.argv[1] + ".stop") and os.getppid() == parent:
+    try:
+        held.append(listener.accept()[0])
+    except socket.timeout:
+        pass
+PY
+SILENT_PID=$!
+until [[ -s "$ROOT/silentvnc" ]]; do
+  kill -0 "$SILENT_PID" 2>/dev/null || { echo "FAIL the silent VNC server died before it listened"; exit 1; }
+  sleep 0.1
+done
+FAKE_VNC_PORT="$(cat "$ROOT/silentvnc")" expect_refused "up --vnc with a VNC port that never answers" bash "$SCRIPT" --vm upvm up --vnc
+grep -q "did not connect" "$ROOT/out" && ! grep -q "screen access on" "$ROOT/out" \
+  && ok "up --vnc waits for the session to connect, not just its socket" \
+  || { bad "up --vnc said screen access was on without a connection"; sed 's/^/     /' "$ROOT/out"; }
+: >"$ROOT/silentvnc.stop"
+wait "$SILENT_PID" 2>/dev/null || true
+run --vm upvm down || true
+
 python3 - "$(dirname "$SCRIPT")" "$ROOT/fakevnc" <<'PY' &
 import os, sys, time
+parent = os.getppid()  # first, so a test that dies right away still ends this helper
 sys.path.insert(0, sys.argv[1])
 import vnc
 events, conns = [], []
@@ -261,8 +296,10 @@ def save_events():
     with open(sys.argv[2] + ".events.tmp", "w") as handle:
         handle.write("\n".join(events) + "\n")
     os.replace(sys.argv[2] + ".events.tmp", sys.argv[2] + ".events")
-deadline = time.time() + 60
-while time.time() < deadline and not os.path.exists(sys.argv[2] + ".stop"):
+# Live until the test says stop, or until the test shell is gone (it was
+# killed, or exited early). Never on a timer: a loaded machine can take
+# minutes to get through the cases that need this server.
+while not os.path.exists(sys.argv[2] + ".stop") and os.getppid() == parent:
     save_events()
     time.sleep(0.1)
 save_events()
@@ -273,7 +310,10 @@ for conn in conns:
         pass
 PY
 FAKE_VNC_PID=$!
-for _ in $(seq 50); do [[ -s "$ROOT/fakevnc.port" ]] && break; sleep 0.1; done
+until [[ -s "$ROOT/fakevnc.port" ]]; do
+  kill -0 "$FAKE_VNC_PID" 2>/dev/null || { echo "FAIL the fake VNC server died before it listened"; exit 1; }
+  sleep 0.1
+done
 export FAKE_VNC_PORT
 FAKE_VNC_PORT="$(cat "$ROOT/fakevnc.port")"
 

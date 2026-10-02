@@ -71,30 +71,6 @@ func testParakeetAudioGraphOwnership() async {
         assertTrue(ownership.finish(successor!, recordingIdentity: successorRecording), "only successor completion releases its slot")
     }
 
-    runSuite("Config-change restart keeps the same recording claim when segments are retained") {
-        do {
-            let engineSource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
-                encoding: .utf8
-            )
-            let recoverySource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift"),
-                encoding: .utf8
-            )
-            assertTrue(
-                engineSource.contains("if !isRecoveryAttempt && !preservingRecordingAcrossRecovery"),
-                "a route restart must not relabel retained segments as a new dictation"
-            )
-            assertTrue(
-                recoverySource.contains("preserveCurrentRecordingBuffersForRecovery()")
-                    && recoverySource.contains("let startSucceeded = await self.startRecording()"),
-                "production config recovery should exercise the retained-segment restart branch"
-            )
-        } catch {
-            assertTrue(false, "recording recovery source should be readable: \(error)")
-        }
-    }
-
     runSuite("ParakeetZombieRecoveryOwnershipPolicy accepts only the exact active graph owner") {
         let engine = NSObject()
         let owner = ParakeetAudioGraphOwnerToken(generation: 7, engine: engine)
@@ -591,106 +567,6 @@ func testParakeetAudioGraphOwnership() async {
         assertEqual(startAdmission.owner, nextOwner, "successor should remain admitted")
     }
 
-    await runSuite("ParakeetOwnerBoundPendingState rejects a truly delayed stale restore") {
-        let engine = NSObject()
-        let staleOwner = ParakeetAudioGraphOwnerToken(generation: 40, engine: engine)
-        let replacementOwner = ParakeetAudioGraphOwnerToken(generation: 41, engine: engine)
-        let state = ParakeetPendingRestoreInterleavingHarness()
-        let cleanupCapturedOwner = ParakeetAsyncInterleavingGate()
-        let allowCleanupCompletion = ParakeetAsyncInterleavingGate()
-
-        await state.replace("old-route", ownedBy: staleOwner)
-        let delayedCleanup = Task {
-            let capturedOwner = await state.owner()
-            await cleanupCapturedOwner.open()
-            await allowCleanupCompletion.wait()
-            guard let capturedOwner else { return nil as String? }
-            return await state.take(ownedBy: capturedOwner)
-        }
-
-        await cleanupCapturedOwner.wait()
-        await state.replace("replacement-route", ownedBy: replacementOwner)
-        await allowCleanupCompletion.open()
-
-        let staleRestore = await delayedCleanup.value
-        let replacementValue = await state.value(ownedBy: replacementOwner)
-        let replacementRestore = await state.take(ownedBy: replacementOwner)
-        assertNil(
-            staleRestore,
-            "cleanup delayed across an await must not consume a replacement start's restore target"
-        )
-        assertEqual(
-            replacementValue,
-            "replacement-route",
-            "the replacement target must remain installed after stale cleanup resumes"
-        )
-        assertEqual(
-            replacementRestore,
-            "replacement-route",
-            "only the exact newer generation+engine owner may consume its route restore"
-        )
-    }
-
-    await runSuite("Parakeet matching restore survives unrelated graph ownership loss") {
-        let retiredEngine = NSObject()
-        let replacementEngine = NSObject()
-        let cleanupOwner = ParakeetAudioGraphOwnerToken(generation: 43, engine: retiredEngine)
-        let replacementOwner = ParakeetAudioGraphOwnerToken(generation: 44, engine: replacementEngine)
-        let pendingState = ParakeetPendingRestoreInterleavingHarness()
-
-        await pendingState.replace("previous-route", ownedBy: cleanupOwner)
-        assertFalse(
-            cleanupOwner.matches(generation: 44, engine: replacementEngine),
-            "the cleanup should observe that audio graph ownership changed"
-        )
-        assertNil(
-            await pendingState.value(ownedBy: replacementOwner),
-            "unrelated graph replacement should not silently re-own the old restore target"
-        )
-        assertEqual(
-            await pendingState.take(ownedBy: cleanupOwner),
-            "previous-route",
-            "cleanup should still consume its exact owner-bound restore after graph loss"
-        )
-    }
-
-    await runSuite("Parakeet stale cleanup cannot restore after a same-input successor takes ownership") {
-        let engine = NSObject()
-        let oldOwner = ParakeetAudioGraphOwnerToken(generation: 45, engine: engine)
-        let replacementOwner = ParakeetAudioGraphOwnerToken(generation: 46, engine: engine)
-        let pendingState = ParakeetPendingRestoreInterleavingHarness()
-        let temporaryInput = "built-in-input"
-        let previousInput = "bluetooth-input"
-        let route = ParakeetSystemInputRouteTestState(
-            route: temporaryInput,
-            recoveryMarkerIsSet: true
-        )
-
-        await pendingState.replace(previousInput, ownedBy: oldOwner)
-        await pendingState.replace(previousInput, ownedBy: replacementOwner)
-        if let staleRestore = await pendingState.take(ownedBy: oldOwner) {
-            route.restoreIfStillTemporary(
-                temporaryInput: temporaryInput,
-                previousInput: staleRestore
-            )
-        }
-
-        assertEqual(
-            route.currentRoute(),
-            temporaryInput,
-            "stale cleanup must not undo a successor that selected the same temporary input"
-        )
-        assertTrue(
-            route.recoveryMarkerIsSet(),
-            "stale cleanup must not clear the replacement owner's recovery marker"
-        )
-        assertEqual(
-            await pendingState.value(ownedBy: replacementOwner),
-            previousInput,
-            "only the matching successor owner may consume its restore target"
-        )
-    }
-
     await runSuite("Parakeet system-input timeout replaces the blocked queue and reconciles late writes") {
         let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
             label: "test.parakeet.replaceable-system-input"
@@ -811,88 +687,6 @@ func testParakeetAudioGraphOwnership() async {
         }
         await allWorkersCompleted.wait()
         assertEqual(countLock.withLock { workersCompleted }, 2, "bounded test workers should shut down after release")
-    }
-
-    await runSuite("Successful system-input fallback restores after cancel wake or graph replacement") {
-        enum OwnershipLoss: String, CaseIterable {
-            case cancel
-            case wake
-            case graphRebuild
-        }
-
-        enum SuspensionPoint: String, CaseIterable {
-            case systemOverride
-            case snapshotFailure
-            case snapshotSuccess
-        }
-
-        for ownershipLoss in OwnershipLoss.allCases {
-            for suspensionPoint in SuspensionPoint.allCases {
-                let oldEngine = NSObject()
-                let oldQueue = DispatchQueue(label: "test.parakeet.stale-system-input.old.\(ownershipLoss.rawValue)")
-                let oldOwner = ParakeetAudioEngineQueueOwnerToken(
-                    generation: 60,
-                    engine: oldEngine,
-                    queue: oldQueue
-                )
-                let successorEngine: NSObject = ownershipLoss == .graphRebuild ? NSObject() : oldEngine
-                let successorQueue = ownershipLoss == .graphRebuild
-                    ? DispatchQueue(label: "test.parakeet.stale-system-input.new.graph")
-                    : oldQueue
-                let successorOwner = ParakeetAudioEngineQueueOwnerToken(
-                    generation: 61,
-                    engine: successorEngine,
-                    queue: successorQueue
-                )
-                let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
-                    label: "test.parakeet.stale-system-input.\(ownershipLoss.rawValue).\(suspensionPoint.rawValue)"
-                )
-                let route = ParakeetSystemInputRouteTestState(
-                    route: "airpods-input",
-                    recoveryMarkerIsSet: true
-                )
-                let overrideEntered = ParakeetAsyncInterleavingGate()
-                let releaseOverride = DispatchSemaphore(value: 0)
-
-                let staleSnapshot = Task {
-                    try? await coordinator.run(
-                        operation: "test_override",
-                        timeoutNanoseconds: 3_000_000_000
-                    ) {
-                        route.applyReplacementInput("built-in-input")
-                        Task { await overrideEntered.open() }
-                        _ = releaseOverride.wait(timeout: .now() + 2)
-                    }
-                    guard oldOwner == successorOwner else {
-                        try? await coordinator.run(
-                            operation: "test_restore",
-                            timeoutNanoseconds: 3_000_000_000
-                        ) {
-                            route.restoreIfStillTemporary(
-                                temporaryInput: "built-in-input",
-                                previousInput: "airpods-input"
-                            )
-                        }
-                        return true
-                    }
-                    return false
-                }
-
-                await overrideEntered.wait()
-                releaseOverride.signal()
-                let didRestoreBeforeCancellation = await staleSnapshot.value
-
-                assertTrue(
-                    didRestoreBeforeCancellation,
-                    "\(ownershipLoss.rawValue) should make the awaited fallback owner stale"
-                )
-                assertEqual(
-                    route.currentRoute(),
-                    "airpods-input",
-                    "\(ownershipLoss.rawValue) at \(suspensionPoint.rawValue) must restore the prior system input before stale work cancels"
-                )
-            }
-        }
     }
 
     runSuite("Parakeet queued recovery start cancellation skips retired work") {
@@ -1036,30 +830,6 @@ func testParakeetAudioGraphOwnership() async {
     }
 
 }
-private actor ParakeetPendingRestoreInterleavingHarness {
-    private var state = ParakeetOwnerBoundPendingState<String>()
-
-    func replace(_ value: String, ownedBy owner: ParakeetAudioGraphOwnerToken) {
-        state.replace(value, ownedBy: owner)
-    }
-
-    func owner() -> ParakeetAudioGraphOwnerToken? {
-        state.owner
-    }
-
-    func take(ownedBy owner: ParakeetAudioGraphOwnerToken) -> String? {
-        state.take(ownedBy: owner)
-    }
-
-    func value(ownedBy owner: ParakeetAudioGraphOwnerToken) -> String? {
-        state.value(ownedBy: owner)
-    }
-
-    func hasPendingValue() -> Bool {
-        state.hasPendingValue
-    }
-}
-
 private final class ParakeetEngineQueueTestResources: @unchecked Sendable {
     private let lock = NSLock()
     private let originalEngine: AnyObject

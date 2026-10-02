@@ -4,7 +4,7 @@ import SwiftUI
 // Quiet-library Dictations components (2026-08 redesign).
 //
 // The daily `Dictations_YYYY-MM-DD.md` file stays the storage shape (see
-// `Sources/Dictation/CLAUDE.md`), but the list is presented and interacted
+// `Sources/Dictation/AGENTS.md`), but the list is presented and interacted
 // with per entry, not per file: one row per dictation, title-first, with the
 // time right-aligned. Hover reveals Copy + an overflow menu; clicking a row
 // opens a raised inline expansion with the full text — mirrors

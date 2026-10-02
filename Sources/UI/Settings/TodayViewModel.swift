@@ -6,11 +6,11 @@ struct TodaySnapshot: Sendable {
     let stats: TodayContextStats
     /// Last seven days for the tape, oldest first.
     let tapeDays: [TodayTapeDay]
+    /// Latest captures across kinds; the shell's return signal reads them.
     let recent: [TodayRecentItem]
-    let canLoadMoreRecent: Bool
     let builtAt: Date
 
-    static let empty = TodaySnapshot(stats: .empty, tapeDays: [], recent: [], canLoadMoreRecent: false, builtAt: .distantPast)
+    static let empty = TodaySnapshot(stats: .empty, tapeDays: [], recent: [], builtAt: .distantPast)
 }
 
 /// Loads the Today snapshot off the main thread. Sources are the same local
@@ -36,10 +36,8 @@ final class TodayViewModel: ObservableObject {
     /// instead of decoding the whole metadata cache (see `loadSearchIndex`).
     private var previousMeetingIndex: [String: RecentMeetingIndexEntry] = [:]
 
-    /// How many Recent context rows to show; Load more adds a page.
-    private(set) var recentLimit = TodayRecentActivity.pageSize
-    /// Upper bound on the Recent context list, however often Load more is pressed.
-    nonisolated static let maxRecentLimit = 500
+    /// How many latest captures the snapshot keeps for the return signal.
+    nonisolated static let recentLimit = TodayRecentActivity.pageSize
     /// Upper bound on dictations read to fill the week's tape.
     nonisolated static let maxTapeDictations = 1_000
     /// App activation, saves and window opens can each ask for a refresh; a
@@ -74,13 +72,7 @@ final class TodayViewModel: ObservableObject {
         isShown = shown
     }
 
-    func loadMoreRecent() {
-        guard snapshot.canLoadMoreRecent else { return }
-        recentLimit = min(Self.maxRecentLimit, recentLimit + TodayRecentActivity.pageSize)
-        refresh(force: true)
-    }
-
-    /// `force` skips the throttle, for an explicit action like Load more.
+    /// `force` skips the throttle.
     func refresh(force: Bool = false) {
         let now = Date()
         if !force, let delay = passiveRefreshDelay(now: now) {
@@ -97,8 +89,6 @@ final class TodayViewModel: ObservableObject {
         trailingRefreshTask = nil
         refreshGeneration.invalidate()
         isShown = false
-        // Like Meetings, a fresh visit starts from the first page again.
-        recentLimit = TodayRecentActivity.pageSize
     }
 
     private func passiveRefreshDelay(now: Date) -> TimeInterval? {
@@ -124,7 +114,7 @@ final class TodayViewModel: ObservableObject {
         refreshTask?.cancel()
         lastRefreshStartedAt = now
         let generation = refreshGeneration.begin()
-        let limit = recentLimit
+        let limit = Self.recentLimit
         let previous = previousMeetingIndex
         refreshTask = Task { @MainActor in
             let work = Task.detached(priority: .utility) {
@@ -196,12 +186,12 @@ final class TodayViewModel: ObservableObject {
         }
         // Meetings are sorted newest first, so the week is a prefix.
         let weekMeetings = meetings.prefix { $0.date >= tapeStart }.map(meetingItem)
-        let recentMeetings = meetings.prefix(recentLimit + 1).map(meetingItem)
+        let recentMeetings = meetings.prefix(recentLimit).map(meetingItem)
 
         // Enough dictation entries to place every one from the last seven days.
         let weekDictationCount = dictationDays.filter { $0.day >= tapeStart }.reduce(0) { $0 + $1.entries }
         let savedDictations = DictationTranscriptStore.recentSavedDictations(
-            limit: min(maxTapeDictations, max(recentLimit + 1, weekDictationCount))
+            limit: min(maxTapeDictations, max(recentLimit, weekDictationCount))
         )
         let dictationItems = savedDictations.map { entry in
             TodayRecentItem(
@@ -235,23 +225,20 @@ final class TodayViewModel: ObservableObject {
             now: now,
             calendar: calendar
         )
-        let recentDictations = dictationItems.prefix(recentLimit + 1)
+        let recentDictations = dictationItems.prefix(recentLimit)
         if Task.isCancelled { return nil }
 
-        // One extra row tells us whether Load more has anything to add.
         let merged = TodayRecentActivity.merge(
             meetings: Array(recentMeetings),
             dictations: Array(recentDictations),
-            writing: Array(writingItems.prefix(recentLimit + 1)),
-            limit: recentLimit + 1
+            writing: Array(writingItems.prefix(recentLimit)),
+            limit: recentLimit
         )
 
         let snapshot = TodaySnapshot(
             stats: stats,
             tapeDays: tapeDays,
-            recent: Array(merged.prefix(recentLimit)),
-            // At the cap there's nothing more Load more may add.
-            canLoadMoreRecent: merged.count > recentLimit && recentLimit < maxRecentLimit,
+            recent: merged,
             builtAt: now
         )
         return (snapshot, meetingIndexByPath)

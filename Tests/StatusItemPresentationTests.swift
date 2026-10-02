@@ -1,13 +1,13 @@
 // Source-text pins: the first suite reads Sources/TranscriptedApp.swift as text instead of calling
-// refreshStatusItemPresentation(), because that method is private on TranscriptedAppDelegate (@MainActor
+// refreshStatusItemPresentation(), because that method lives on TranscriptedAppDelegate (@MainActor
 // NSApplicationDelegate) and only does anything once statusItem?.button exists — a real NSStatusItem this
 // runner never creates, since it never runs applicationDidFinishLaunching. It greps the sliced method body
 // for the glyph states and accessibility labels, and guards against a red or stock-symbol treatment that
 // would make the always-visible capture icon alarming instead of quiet; its MenuBarGlyph checks render the
 // real images (template flag, neutral ink) instead of reading MenuBarGlyph.swift. The second suite is real behavioral
 // coverage: it renders every MenuBarGlyph into a bitmap and checks the silhouettes actually differ where
-// they are meant to. The third keeps MenuBarGlyphGeometry in step with the generator that draws the
-// committed SVGs in docs/assets/menu-bar-icon/. If you rename refreshStatusItemPresentation or the
+// they are meant to. The third keeps MenuBarGlyphGeometry (numbers and the drawn tail curves) in step with
+// the generator that draws the committed SVGs in docs/assets/menu-bar-icon/. If you rename refreshStatusItemPresentation or the
 // method after it, update statusItemPresentationSlice below to match.
 
 import AppKit
@@ -139,15 +139,72 @@ func testStatusItemPresentation() {
         }
         assertEqual(g.box.width, g.box.height, "the glyph box should be square")
 
-        let glyphSource = readSourceFixture("Sources/UI/MenuBar/MenuBarGlyph.swift")
-        assertTrue(
-            generator.contains("L 404 {BOT} Q 396 748 350 804 Q 446 770 504 {BOT}")
-                && glyphSource.contains("CGPoint(x: 404, y: bottom)")
-                && glyphSource.contains("addQuadCurve(to: CGPoint(x: 350, y: 804), control: CGPoint(x: 396, y: 748))")
-                && glyphSource.contains("addQuadCurve(to: CGPoint(x: 504, y: bottom), control: CGPoint(x: 446, y: 770))"),
-            "the bubble's tail should match between the generator and the Swift drawing"
-        )
+        // The tail: walk the path the glyph really draws and compare its two
+        // quadratic curves with the generator's `Q` commands.
+        let tailCommand = generator.split(separator: "\n")
+            .first { $0.contains("d += f'L 404 {BOT} Q ") }
+            .map(String.init) ?? ""
+        let generatorQuads = svgQuadCurves(tailCommand, bottom: g.bottom)
+        assertEqual(generatorQuads.count, 2, "the generator should draw the tail as two Q curves")
+        for (name, path) in [("outline", g.outlinePath()), ("body", g.bodyPath())] {
+            assertEqual(
+                quadCurves(in: path),
+                generatorQuads,
+                "the \(name) path's tail should match the generator's curves"
+            )
+        }
     }
+}
+
+/// Quadratic curves in a CGPath as [start.x, start.y, control.x, control.y, end.x, end.y].
+private func quadCurves(in path: CGPath) -> [[CGFloat]] {
+    var curves: [[CGFloat]] = []
+    var current = CGPoint.zero
+    path.applyWithBlock { element in
+        let e = element.pointee
+        switch e.type {
+        case .moveToPoint, .addLineToPoint:
+            current = e.points[0]
+        case .addQuadCurveToPoint:
+            curves.append([current.x, current.y, e.points[0].x, e.points[0].y, e.points[1].x, e.points[1].y])
+            current = e.points[1]
+        case .addCurveToPoint:
+            current = e.points[2]
+        default:
+            break
+        }
+    }
+    return curves
+}
+
+/// `Q cx cy x y` commands in an SVG path f-string, each with the point it
+/// starts from, and `{BOT}` filled in.
+private func svgQuadCurves(_ command: String, bottom: CGFloat) -> [[CGFloat]] {
+    let tokens = command
+        .replacingOccurrences(of: "{BOT}", with: "\(Int(bottom))")
+        .split(whereSeparator: { $0 == " " || $0 == "'" })
+        .map(String.init)
+    func number(_ index: Int) -> CGFloat? {
+        index < tokens.count ? Double(tokens[index]).map { CGFloat($0) } : nil
+    }
+    var curves: [[CGFloat]] = []
+    var current: [CGFloat] = []
+    var index = 0
+    while index < tokens.count {
+        if tokens[index] == "L", let x = number(index + 1), let y = number(index + 2) {
+            current = [x, y]
+            index += 3
+        } else if tokens[index] == "Q",
+                  let cx = number(index + 1), let cy = number(index + 2),
+                  let x = number(index + 3), let y = number(index + 4) {
+            curves.append(current + [cx, cy, x, y])
+            current = [x, y]
+            index += 5
+        } else {
+            index += 1
+        }
+    }
+    return curves
 }
 
 /// Numbers on the right of a line like `DOT_C, DOT_R, DOT_RING = (744, 757), 84, 44`, ignoring any
@@ -230,11 +287,11 @@ private func inkedPixelsThroughNSImage(_ glyph: MenuBarGlyph) -> Int {
 }
 
 private func statusItemPresentationSlice(_ source: String) -> String {
-    guard let start = source.range(of: "private func refreshStatusItemPresentation()") else {
+    guard let start = source.range(of: "func refreshStatusItemPresentation()") else {
         return ""
     }
     let tail = source[start.lowerBound...]
-    guard let end = tail.range(of: "private func closePopover()") else {
+    guard let end = tail.range(of: "func closePopover()") else {
         return String(tail)
     }
     return String(tail[..<end.lowerBound])

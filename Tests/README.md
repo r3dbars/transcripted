@@ -21,7 +21,10 @@ green when behavior breaks, and cost agents a CI run each time.
 4. **No wall-clock limits.** Don't assert that real elapsed time stayed under a
    number. Assert the outcome instead (it timed out, it didn't wait for the
    slow part), give slow fakes a wide margin, or inject a clock. The same guard
-   blocks new ones.
+   blocks new ones. Example clock seam:
+   `Sources/TranscriptedCore/Pipeline/OrphanedRecordingRecoveryClock.swift`
+   (now / date / sleep) with a virtual clock in its tests; assert on the
+   virtual time that passed, never on real elapsed time.
 5. **Write it from the promise, not from the code.** Write the test before the
    fix, or from a one-line spec. A test written by reading the implementation
    tends to copy its bugs. For bigger features, have a second agent write the
@@ -53,6 +56,15 @@ everyone to ignore red. The same day, either fix it or bench it: add
 its summary, and the test-shape guard warns once an entry is two weeks old. For
 Swift Testing use `.disabled("why")`, for XCTest `XCTSkip("why")`, under the
 same same-day rule. Never add retries until it passes.
+
+To reproduce a flake that only shows up on a busy Mac: start about 64
+`yes > /dev/null` loops and a from-scratch
+`swift build --build-tests --build-path <scratch dir>` in parallel, then run
+the one test on its own over and over with
+`swift test --skip-build --filter <Suite>/<test>`. Run it alone, not in the
+suite: earlier tests warm the process, which hides cold-start timing bugs. If
+you add a watchdog `(sleep N; kill ...) &`, send its output to `/dev/null`, or
+`| tail` waits for it.
 
 ### One command
 
@@ -122,7 +134,7 @@ temporary runner at build time.
 Important implications:
 
 - `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry
-- moving a source file compiled by `run-tests.sh` also requires updating the script
+- the hand-kept lists are `FAST_TEST_SOURCES` and `APP_SOURCES` in `scripts/entrypoints/run-tests.sh` (the root `run-tests.sh` is a wrapper) plus `scripts/entrypoints/lib/shared-smoke-sources.sh`; moving or adding a source file a test compiles means updating them
 - missing or duplicated convention entry functions fail before compilation
 
 The current compiled fast test set is the sorted root `Tests/*Tests.swift` set.

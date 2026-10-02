@@ -1,0 +1,11 @@
+{
+  "name": "transcripted-local",
+  "interface": { "displayName": "Transcripted Local" },
+  "plugins": [
+    {
+      "name": "transcripted",
+      "source": { "source": "local", "path": "./build/companion/local/transcripted" },
+      "interface": { "displayName": "Transcripted" }
+    }
+  ]
+}

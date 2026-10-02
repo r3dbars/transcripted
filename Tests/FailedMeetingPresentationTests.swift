@@ -147,29 +147,48 @@ func testFailedMeetingPresentation() {
         )
     }
 
-    runSuite("MeetingSessionController surfaces skipped no-speech outcomes visibly") {
-        let source = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
-            encoding: .utf8
-        )) ?? ""
+    runSuite("A skipped no-speech transcript surfaces as a visible error") {
+        let message = "No speech detected"
+        assertTrue(
+            MeetingFailureKind.noSpeechDetected.shouldReportAsSkippedTranscript,
+            "no-speech failures take the skipped-transcript path"
+        )
 
-        // 2026-08 state-collapse audit: the direct `state = .error(...)`
-        // assignment this guard originally checked for was replaced first by
-        // the single-writer `transition(to:reason:)` call, then by
-        // `reportUnrelatedFailure(_:reason:)` (transitions to `.error`
-        // unless a different meeting is actively capturing live, in which
-        // case it must not stomp that capture — see that function's doc
-        // comment) — same effective transition in the common case (skipped
-        // outcomes still surface as a visible .error), just routed through
-        // one function instead of a raw assignment.
-        assertTrue(
-            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)"),
-            "skipped no-speech transcripts should still record a terminal failure outcome"
+        let whileTranscribing = MeetingSessionStateMachine.skippedTranscript(
+            diagnosticMessage: message,
+            while: .transcribing
         )
-        assertTrue(
-            source.contains("reportUnrelatedFailure(diagnosticMessage, reason: \"transcript_skipped\")"),
-            "skipped no-speech transcripts should still publish a visible recovery notice (unless a different meeting is actively capturing live)"
+        assertEqual(whileTranscribing.terminalOutcome, .failed(message), "a skipped transcript ends as a failure, not a save or a discard")
+        assertEqual(whileTranscribing.visibleState, .error(message), "with no live capture the error shows right away")
+        assertEqual(
+            MeetingSessionStateMachine.settledTransition(after: whileTranscribing.terminalOutcome, current: .error(message))?.state,
+            .error(message),
+            "settling the queue keeps the error visible"
         )
+
+        let duringAnotherMeeting = MeetingSessionStateMachine.skippedTranscript(
+            diagnosticMessage: message,
+            while: .recording
+        )
+        assertEqual(duringAnotherMeeting.terminalOutcome, .failed(message))
+        assertNil(duringAnotherMeeting.visibleState, "a queued job's skip must not stomp a different meeting that is recording live")
+        assertNil(
+            MeetingSessionStateMachine.settledTransition(after: duringAnotherMeeting.terminalOutcome, current: .recording),
+            "the queue does not settle while capture is live"
+        )
+        assertEqual(
+            MeetingSessionStateMachine.settledTransition(after: duringAnotherMeeting.terminalOutcome, current: .transcribing)?.state,
+            .error(message),
+            "once that capture ends the skip still surfaces as an error"
+        )
+    }
+
+    runSuite("The transcription queue settles onto how the last job ended") {
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: .transcriptSaved, current: .transcribing)?.state, .ready)
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: .discarded, current: .transcribing)?.state, .ready)
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: nil, current: .transcribing)?.state, .ready)
+        assertNil(MeetingSessionStateMachine.settledTransition(after: nil, current: .ready), "nothing finished and nothing running: stay put")
+        assertNil(MeetingSessionStateMachine.settledTransition(after: .transcriptSaved, current: .stoppingRecording), "never settles over a capture still stopping")
     }
 
     runSuite("HomeFailedMeetingInlinePresentation shows details for non-retryable failures") {
@@ -495,61 +514,49 @@ func testFailedMeetingPresentation() {
     }
 
     runSuite("Home failed meeting row reveals partial audio separately from retry readiness") {
-        let homeSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
-            encoding: .utf8
-        )) ?? ""
-
-        assertTrue(
-            homeSource.contains("if hasRetainedAudioFiles {\n                Button {\n                    onRevealAudio()"),
-            "failed rows should keep Show Audio visible when any retained audio URL exists"
-        )
-        assertTrue(
-            homeSource.contains("private var retryDisabled: Bool {\n        FailedMeetingRecoveryPresentation.retryDisabled(\n            canRetry: canRetry,\n            isRetryable: item.isRetryable,\n            isRetrying: item.isRetrying,\n            hasAudioFiles: item.hasAudioFiles,\n            usableAudio: item.usableAudio\n        )"),
-            "failed rows should keep retry readiness tied to complete retryable audio, not mere visibility"
-        )
-
-        // The shared retry-readiness helper Home delegates to is compiled into
-        // this runner, so call it instead of reading its body. (Busy-queue and
-        // active-retry cases live in FailedMeetingRecoveryPresentationTests.)
-        let retryReady = { (isRetryable: Bool, hasAudioFiles: Bool, usableAudio: FailedMeetingUsableAudio) in
-            !FailedMeetingRecoveryPresentation.retryDisabled(
-                canRetry: true,
-                isRetryable: isRetryable,
-                isRetrying: false,
-                hasAudioFiles: hasAudioFiles,
-                usableAudio: usableAudio
+        func row(
+            isRetryable: Bool = true,
+            hasAudioFiles: Bool = true,
+            audioURLs: [URL] = [URL(fileURLWithPath: "/tmp/synthetic-meeting_mic.wav")],
+            usableAudio: FailedMeetingUsableAudio = .unknown,
+            canRetry: Bool = true
+        ) -> HomeFailedMeetingRowActions {
+            HomeFailedMeetingRowActions.make(
+                item: FailedMeetingPresentation.FailedMeetingItem(
+                    id: UUID(),
+                    timestamp: Date(timeIntervalSince1970: 0),
+                    title: "Synthetic meeting",
+                    detail: "synthetic detail",
+                    meta: "",
+                    failureKind: .saveFailed,
+                    isRetryable: isRetryable,
+                    isRetrying: false,
+                    hasAudioFiles: hasAudioFiles,
+                    audioURLs: audioURLs,
+                    usableAudio: usableAudio
+                ),
+                canRetry: canRetry
             )
         }
-        assertTrue(retryReady(true, true, .unknown), "complete retryable audio should keep retry available")
-        assertFalse(
-            retryReady(true, false, .unknown) || retryReady(false, true, .unknown) || retryReady(true, true, .absent),
-            "the shared retry-readiness helper Home delegates to should still require complete retryable audio, and must not offer retry for audio probed as silent"
-        )
-        assertTrue(
-            homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),
-            "failed rows should use available retained audio URLs for the reveal affordance"
-        )
-        assertTrue(
-            homeSource.contains("title: \"Delete failed meeting\"")
-                && homeSource.contains("isDestructive: true"),
-            "failed rows should label cleanup as destructive without exposing an unusable reveal action"
-        )
 
-        let settingsSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
-            encoding: .utf8
-        )) ?? ""
-        assertTrue(
-            settingsSource.contains("requestClearFailedMeeting")
-                && settingsSource.contains("HomeDeleteConfirmationPolicy.failedMeeting")
-                && settingsSource.contains("reasonKind: .deleted"),
-            "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
-        )
-        assertFalse(
-            settingsSource.contains("dismissFailedMeeting"),
-            "failed-row cleanup should have one canonical destructive seam"
-        )
+        let complete = row()
+        assertTrue(complete.showsRevealAudio, "kept audio can be shown in Finder")
+        assertFalse(complete.retryDisabled, "complete retryable audio keeps Try again available")
+
+        let partial = row(hasAudioFiles: false)
+        assertTrue(partial.showsRevealAudio, "a partial set of kept audio stays revealable")
+        assertTrue(partial.retryDisabled, "partial audio is not enough to retry")
+
+        assertTrue(row(isRetryable: false).showsRevealAudio, "a non-retryable row still shows its kept audio")
+        assertTrue(row(isRetryable: false).retryDisabled, "a non-retryable row can't retry")
+        assertTrue(row(usableAudio: .absent).retryDisabled, "audio probed as silent must not offer retry")
+        assertTrue(row(canRetry: false).retryDisabled, "a busy queue blocks retry")
+
+        let noAudio = row(hasAudioFiles: false, audioURLs: [])
+        assertFalse(noAudio.showsRevealAudio, "with no kept audio there is nothing to show")
+
+        assertEqual(complete.deleteTitle, "Delete failed meeting", "cleanup is labeled as a delete")
+        assertTrue(complete.deleteIsDestructive, "cleanup is marked destructive")
     }
 
     runSuite("Failed-meeting metadata calls retained WAVs raw audio and counts only files still on disk") {

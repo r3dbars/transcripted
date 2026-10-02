@@ -284,8 +284,12 @@ enum ParakeetSelfInducedConfigChangePolicy {
         stableRoute: ParakeetAudioRouteIdentity?,
         observedRoute: ParakeetAudioRouteIdentity?,
         bindingToken: ParakeetAUHALBindingToken?,
-        currentEngine: AnyObject
+        currentEngine: AnyObject,
+        forceForMicrophoneSharing: Bool
     ) -> Bool {
+        // A call app needs the mic back from Apple voice processing. A route
+        // change we caused ourselves must not postpone that downgrade.
+        if forceForMicrophoneSharing { return false }
         if let bindingToken, source == .audioEngine {
             // A captured native setter command owns classification exclusively.
             // A failed command must not fall through to an optimistic cache

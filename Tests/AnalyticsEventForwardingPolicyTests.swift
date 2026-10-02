@@ -2,10 +2,9 @@
 // forwarded to PostHog, with which bounded values, and which meeting
 // snapshot fields reach the meeting analytics events.
 //
-// `AnalyticsEventForwardingPolicy` and `AnalyticsPayloadSanitizer` are in
-// run-tests.sh's APP_SOURCES, so these are behavioral checks. EventReporter.swift
-// is not (it drags in the file writer and CrashReporter), so its one call into
-// the policy is pinned as source text at the end.
+// `AnalyticsEventForwardingPolicy`, `AnalyticsPayloadSanitizer`, and
+// `ObservabilityEventCapturePlan` (what EventReporter.capture sends where) are
+// in run-tests.sh's APP_SOURCES, so these are all behavioral checks.
 
 import Foundation
 
@@ -292,14 +291,55 @@ func testAnalyticsEventForwardingPolicy() {
     }
 
     runSuite("EventReporter forwards the caller's context, not the merged engine state") {
-        let source = readSourceFixture("Sources/Observability/EventReporter.swift")
-        assertTrue(
-            source.contains("AnalyticsEventForwardingPolicy.forwardedEvent("),
-            "EventReporter.capture must consult the forwarding policy or the pinned-mic counts never leave the device"
+        // Engine state carries a pinned backend and input class; the caller's
+        // context does not. The forwarded event must not pick them up.
+        let plan = ObservabilityEventCapturePlan.make(
+            level: .info,
+            engine: "parakeet",
+            event: "pinned_microphone_recording_started",
+            message: "pinned mic started",
+            context: ["reason": DictationInputDeviceSelectionReason.defaultIsSafe.rawValue],
+            engineState: [
+                "backend": "pinned_ioproc",
+                "selected_input_class": "built_in",
+                "default_input_overridden": "true",
+                "start_ms": "180",
+            ],
+            infoDictionary: nil,
+            timestamp: "2026-05-26T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
         )
-        assertTrue(
-            source.contains("context: context ?? [:]"),
+        assertEqual(
+            plan.mergedContext["backend"],
+            "pinned_ioproc",
+            "engine state still enriches the local and Sentry context"
+        )
+        assertEqual(
+            plan.forwarded,
+            AnalyticsEventForwardingPolicy.ForwardedEvent(
+                name: "dictation_pinned_microphone_recording_started",
+                properties: [
+                    "mic_backend": "unknown",
+                    "selection_reason": "defaultIsSafe",
+                    "selected_input_class": "unknown",
+                ]
+            ),
             "the policy gets the caller's context; mergedContext carries engine state it has no business reading"
         )
+
+        let notForwarded = ObservabilityEventCapturePlan.make(
+            level: .error,
+            engine: "parakeet",
+            event: "recording_interrupted",
+            message: "interrupted",
+            context: ["trigger": "stall"],
+            engineState: nil,
+            infoDictionary: nil,
+            timestamp: "2026-05-26T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
+        )
+        assertNil(notForwarded.forwarded, "events outside the pinned-mic lifecycle stay off PostHog's forwarding path")
     }
 }
