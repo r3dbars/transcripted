@@ -100,7 +100,6 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
 - `Settings/HomeMeetingSearchIndex.swift` — in-memory index behind the Home meetings search; covers every saved meeting (title, date, named speakers), not just the loaded slice
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
-- `Settings/HomeMeetingPreviewFormatter.swift` — builds transcript preview content and staged speaker-correction/naming plans for the Home meeting expansion
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
 - `Settings/HomeView.swift` — `HomeViewModel` plus Home building blocks: day-grouped capture lists with hover-reveal row actions and load-more, search field, scan-warning card, inline failed-meeting recovery rows, the feedback sheet, and preview/attention models
@@ -155,10 +154,10 @@ This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full p
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume/seek-from-timestamp `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page, and builds the full-library rows for the Home meetings search (`loadSearchIndex`)
+- `Shared/HomeMeetingPreviewFormatter.swift` — builds transcript preview content and staged speaker-correction/naming plans for the Home meeting expansion
 - `Shared/RecentMeetingMetadataCache.swift` — SQLite-backed cache of derived Home meeting-row metadata keyed by transcript path and validated by mtime/size, so a warm refresh skips re-parsing every transcript
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
-- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
 - `Shared/SystemAudioPermissionRevalidator.swift` — single owner for revalidating System Audio Recording permission from the Settings shell and onboarding, with an in-flight-task guard so both call sites can't run overlapping checks
 - `Shared/SupportEmailDispatcher.swift` — native mail handoff and explicit failure fallback; callers retain feedback drafts when handoff fails, and the public support address is copied only on request
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback and manually queued diagnostic events
@@ -263,7 +262,6 @@ Relevant direct coverage:
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SpeakerReviewPresentationGateTests.swift`
 - `Tests/SpeakerVoiceRowPresentationTests.swift`
-- `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/TodayPresentationTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation

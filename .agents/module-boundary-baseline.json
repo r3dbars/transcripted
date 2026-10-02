@@ -26,11 +26,6 @@
         "DictationInputDeviceSelectionReason"
       ]
     },
-    "Sources/Observability/CrashReporter.swift": {
-      "UIShared": [
-        "SupportDiagnosticsBundle"
-      ]
-    },
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
@@ -73,22 +68,6 @@
     "Sources/Support/LabControlCommand.swift": {
       "Meeting": [
         "MeetingSessionState"
-      ]
-    },
-    "Sources/Support/MeetingInviteeSuggestionPolicy.swift": {
-      "Meeting": [
-        "MeetingPromptHeuristics"
-      ]
-    },
-    "Sources/Support/SpeakerEmbedderFactory.swift": {
-      "Core": [
-        "BackgroundLoadedSpeakerSegmentEmbedder",
-        "CoreMLSpeakerEmbedderConfiguration",
-        "DiarizationBackend",
-        "ERes2NetEmbedder",
-        "FluidWeSpeakerSegmentEmbedder",
-        "ReDimNet2Embedder",
-        "SpeakerSegmentEmbedder"
       ]
     },
     "Sources/Support/TranscriptedPermissionAccess.swift": {
@@ -176,13 +155,6 @@
         "SpeakerDatabase"
       ]
     },
-    "Sources/UI/Shared/HomeMeetingRename.swift": {
-      "UISettings": [
-        "HomeMeetingSpeakerAssignment",
-        "HomeMeetingSpeakerChannel",
-        "HomeMeetingSpeakerIdentity"
-      ]
-    },
     "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
       "Core": [
         "SQLiteHandle"
@@ -191,10 +163,6 @@
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
       "Core": [
         "UtteranceChannel"
-      ],
-      "UISettings": [
-        "HomeMeetingPreviewContent",
-        "HomeMeetingTranscriptLine"
       ]
     },
     "Sources/UI/Shared/TranscriptedSupportActions.swift": {

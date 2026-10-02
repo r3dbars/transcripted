@@ -127,8 +127,6 @@ settings-side agent connection flow.
   expansion.
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color
   palette shared by the Home expansion.
-- `HomeMeetingPreviewFormatter.swift` - transcript preview content and staged
-  speaker-correction/naming plans.
 - Foundation-pure Home policy/copy helpers (fast-testable, no SwiftUI):
   `HomeSearchMatching.swift` (list filter + in-transcript find),
   `HomeRootAlertPolicy.swift` (single alert presenter routing +
