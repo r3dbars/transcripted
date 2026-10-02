@@ -71,7 +71,7 @@ enum SettingsDashboardRefreshPolicy {
     }
 }
 
-/// Opening a meeting from Today (or the pill) expands it on Meetings once it
+/// Opening a meeting from Today (or the Notch island) expands it on Meetings once it
 /// is in the loaded list. An older meeting isn't in the first page, so the
 /// list pages until it shows up, while that reveal is still wanted.
 enum HomeMeetingRevealPagingPolicy {

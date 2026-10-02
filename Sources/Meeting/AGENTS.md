@@ -81,7 +81,7 @@
   - `MeetingSessionController+FailedMeetings.swift` — failed-meeting retry and delete
 - `MeetingSpeakerSeparation.swift` — picks each meeting's call-channel speaker separation (`SpeakerSeparationOptions.tuned`) from the backend, the voiceprint model's bars and the calendar invite size; also the lineup for lineup naming
 - `MeetingSpeakerSeparationProvider.swift` — builds the task manager's separation provider so every meeting reads the diarizer's `activeBackend` when it runs (pyannote after a Nemotron load failure), never the backend asked for at launch
-- `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
+- `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting in the Notch island in its transcribing/saving state
 - `MeetingStartFailureClassifier.swift` — stable analytics classifier for meeting-recording start failures
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingSystemAudioStatusCopy.swift` — Foundation-pure system-audio status copy mapping for fast tests
@@ -95,8 +95,8 @@
 
 ## End-to-end flow
 
-1. `Sources/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, the `⌥M` hotkey, and the detected-meeting `CapturePillController` prompt flow.
-2. `MeetingPromptDetector` polls upcoming Calendar events, observes supported runtime apps, scores candidate prompts, and asks `CapturePillController` to present a short-lived prompt when the app is idle. `MeetingOverlayController` takes over only after Record is dispatched, and for prompts tied to an active or completed recording.
+1. `Sources/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController` (which draws the meeting in the Notch island), the menubar, the `⌥M` hotkey, and the detected-meeting `CapturePillController` prompt flow (the island's call prompt).
+2. `MeetingPromptDetector` polls upcoming Calendar events, observes supported runtime apps, scores candidate prompts, and asks `CapturePillController` to show a short-lived call prompt in the Notch island when the app is idle. `MeetingOverlayController` takes over only after Record is dispatched, and for prompts tied to an active or completed recording.
 3. Dismissed prompts feed back into `MeetingPromptDetector.snooze(...)`, which uses `MeetingPromptHeuristics` to choose shorter runtime reminders, calendar-aware resume windows, and longer Teams-specific suppression when appropriate.
 4. `Sources/TranscriptedAppState.swift` warms dictation at launch; heavier meeting diarization stays lazy until meeting start or audio import.
 5. `MeetingWarmupStatusPolicy` turns dictation + meeting warmup state into shared progress/copy consumed by the meeting overlay, menubar header, and settings home activity surfaces.

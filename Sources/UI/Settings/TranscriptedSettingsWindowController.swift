@@ -90,7 +90,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     }
 
     /// Opens the Meetings page and, when a transcript is given, expands that
-    /// meeting. Backs the meeting pill's Open button.
+    /// meeting. Backs the Open button on a meeting in the Notch island.
     func revealMeeting(transcriptURL: URL?, source: String) {
         present(page: .home, source: source)
         if let transcriptURL {
