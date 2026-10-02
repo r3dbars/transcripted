@@ -4,7 +4,7 @@ import Foundation
 // types (registry retain/remove, WAV persistence/cleanup, the commit policy) against real temp
 // directories — genuine behavioral coverage. The last suite in testDictationStoppedAudioRecovery
 // ("Dictation controller checkpoints audio before waiting for the model") instead greps five
-// source files — DictationSessionController.swift, ParakeetEngine.swift, STTRouter.swift,
+// source files — DictationSessionController.swift, ParakeetDictationTranscription.swift, STTRouter.swift,
 // MeetingSessionController.swift, and TranscriptedApp.swift — because each is a @MainActor type
 // (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
 // TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
@@ -254,7 +254,7 @@ func testDictationStoppedAudioRecovery() {
                 "transcription should reuse the already-resampled stopped recording snapshot"
             )
             let speechSource = try String(
-                contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
+                contentsOf: repoFixtureURL("Sources/Speech/ParakeetDictationTranscription.swift"),
                 encoding: .utf8
             )
             assertTrue(

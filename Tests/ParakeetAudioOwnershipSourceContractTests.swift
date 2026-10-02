@@ -15,17 +15,17 @@ func testParakeetAudioOwnershipSourceContract() {
         let source = readParakeetEngineSource()
         let zombieSource = readParakeetZombieRecoverySource()
         guard let removeTapStart = source.range(of: "func removeRecordingTap(force: Bool = false) async"),
-              let removeTapEnd = source.range(of: "/// Share the user-consented", range: removeTapStart.upperBound..<source.endIndex),
+              let removeTapEnd = source.range(of: "func stopAudioEngine() async", range: removeTapStart.upperBound..<source.endIndex),
               let startFailureStart = source.range(of: "private func resetAudioGraphAfterStartFailure("),
-              let startFailureEnd = source.range(of: "/// Tracks rebuild frequency", range: startFailureStart.upperBound..<source.endIndex),
+              let startFailureEnd = source.range(of: "private func audioStartContext(", range: startFailureStart.upperBound..<source.endIndex),
               let rebuildStart = source.range(of: "func rebuildAudioEngine("),
               let rebuildEnd = source.range(of: "func abandonBlockedAudioEngine", range: rebuildStart.upperBound..<source.endIndex),
               let zombieResetStart = zombieSource.range(of: "private func recreateAudioEngineForZombieRecovery("),
               let zombieResetEnd = zombieSource.range(of: "private func canContinueZombieEngineRecovery(", range: zombieResetStart.upperBound..<zombieSource.endIndex),
               let failedStartCleanupStart = source.range(of: "func resetAfterFailedRecordingStart() async"),
               let failedStartCleanupEnd = source.range(of: "func abandonBlockedRecordingStart", range: failedStartCleanupStart.upperBound..<source.endIndex),
-              let idleCleanupStart = source.range(of: "private func releaseIdleAudioHardware("),
-              let idleCleanupEnd = source.range(of: "private func cancelAudioWatchdogForRecordingStart()", range: idleCleanupStart.upperBound..<source.endIndex) else {
+              let idleCleanupStart = source.range(of: "func releaseIdleAudioHardware("),
+              let idleCleanupEnd = source.range(of: "\n}\n", range: idleCleanupStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the delayed audio cleanup helpers")
             return
         }
@@ -140,7 +140,7 @@ func testParakeetAudioOwnershipSourceContract() {
 
         guard let stopRecordingStart = source.range(of: "func stopRecording() async"),
               let stopRecordingEnd = source.range(
-                of: "// MARK: - Recorded Audio Buffering",
+                of: "private func cancelPendingRecordingRecovery()",
                 range: stopRecordingStart.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "test should find stopRecording")
@@ -183,10 +183,10 @@ func testParakeetAudioOwnershipSourceContract() {
 
     runSuite("ParakeetEngine cancelled starts are gated and cleaned on the retired worker") {
         let source = readParakeetEngineSource()
-        guard let installStart = source.range(of: "private func installTapAndStartEngine("),
-              let installEnd = source.range(of: "func removeRecordingTap", range: installStart.upperBound..<source.endIndex),
+        guard let installStart = source.range(of: "func installTapAndStartEngine("),
+              let installEnd = source.range(of: "/// Share the user-consented", range: installStart.upperBound..<source.endIndex),
               let abandonStart = source.range(of: "func abandonBlockedAudioEngine("),
-              let abandonEnd = source.range(of: "private func handleSystemWake() async", range: abandonStart.upperBound..<source.endIndex) else {
+              let abandonEnd = source.range(of: "func reserveRetiredAudioEngine(", range: abandonStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find start and blocked-graph cleanup helpers")
             return
         }
@@ -214,7 +214,7 @@ func testParakeetAudioOwnershipSourceContract() {
         )
         guard let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
               let recordingEnd = source.range(
-                of: "private func extractMonoSamples",
+                of: "private func cancelAudioWatchdogForRecordingStart()",
                 range: recordingStart.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "test should find the recording start body")
@@ -275,7 +275,7 @@ func testParakeetAudioOwnershipSourceContract() {
         let recoverySource = readParakeetDeviceRecoverySource()
         guard let stopStart = engineSource.range(of: "func stopRecording() async"),
               let stopEnd = engineSource.range(
-                of: "// MARK: - Recorded Audio Buffering",
+                of: "private func cancelPendingRecordingRecovery()",
                 range: stopStart.upperBound..<engineSource.endIndex
               ),
               let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange("),
