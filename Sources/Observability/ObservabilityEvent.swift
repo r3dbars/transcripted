@@ -1,7 +1,8 @@
 import Foundation
 
-/// Only `.error` events leave the machine: `EventReporter` forwards an
-/// allowlisted event to Sentry and the reliability counter at this level alone.
+/// Only `.error` events reach Sentry and `reliability_failure_observed`. The
+/// allowlisted pinned-microphone lifecycle events also go to PostHog at any
+/// level (see `ObservabilityEventCapturePlan` and `AnalyticsEventForwardingPolicy`).
 enum EventLevel: String, Codable {
     case error
     case warning

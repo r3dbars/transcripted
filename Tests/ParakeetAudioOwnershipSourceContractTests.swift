@@ -34,6 +34,15 @@ func testParakeetAudioOwnershipSourceContract() {
         let startFailure = String(source[startFailureStart.lowerBound..<startFailureEnd.lowerBound])
         let rebuild = String(source[rebuildStart.lowerBound..<rebuildEnd.lowerBound])
         let zombieReset = String(zombieSource[zombieResetStart.lowerBound..<zombieResetEnd.lowerBound])
+        // Timed zombie reset publishes its lease before it can suspend and
+        // retires only that exact lease (moved here from the old watchdog suite).
+        if let beginLease = zombieReset.range(of: "audioEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)"),
+           let timedReset = zombieReset.range(of: "runTimedAudioEngineWork(operation: \"zombie_engine_reset\")", range: beginLease.upperBound..<zombieReset.endIndex),
+           let finishLease = zombieReset.range(of: "audioEngineWorkOwnership.finish(", range: timedReset.upperBound..<zombieReset.endIndex) {
+            assertTrue(beginLease.upperBound <= timedReset.lowerBound && timedReset.upperBound <= finishLease.lowerBound, "zombie reset should begin, run, then finish its exact lease")
+        } else {
+            assertTrue(false, "zombie reset should begin its .zombieReset lease before the timed reset and finish it after")
+        }
         let failedStartCleanup = String(source[failedStartCleanupStart.lowerBound..<failedStartCleanupEnd.lowerBound])
         let idleCleanup = String(source[idleCleanupStart.lowerBound..<idleCleanupEnd.lowerBound])
 
@@ -310,6 +319,51 @@ func testParakeetAudioOwnershipSourceContract() {
             handlerBody.components(separatedBy: "cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)").count - 1,
             4,
             "all four stale config-cleanup exits should consume only their matching recovery generation"
+        )
+
+        // Zombie-cancellation ordering (moved here from the old
+        // ParakeetStartRecordingFailurePolicyTests suites). A stale zombie task
+        // must not resume between graph invalidation and cancellation, or it can
+        // recreate the graph or restart the mic against a superseded owner.
+        if let stopWatchdog = stopBody.range(of: "cancelAudioWatchdog()", range: graphInvalidation.upperBound..<stopBody.endIndex) {
+            let window = String(stopBody[graphInvalidation.lowerBound..<stopWatchdog.upperBound])
+            assertFalse(window.contains("await "), "stop should invalidate the graph and cancel zombie recovery in one actor turn")
+        } else {
+            assertTrue(false, "stop should cancel the watchdog after invalidating the graph")
+        }
+
+        if let configGraphBump = handlerBody.range(of: "audioGraphGeneration += 1"),
+           let configCancel = handlerBody.range(of: "cancelAudioWatchdog()", range: configGraphBump.upperBound..<handlerBody.endIndex) {
+            let window = String(handlerBody[configGraphBump.lowerBound..<configCancel.upperBound])
+            assertFalse(window.contains("await "), "config change must invalidate the graph owner and cancel zombie recovery without suspending")
+        } else {
+            assertTrue(false, "config change should invalidate the graph before cancelling zombie recovery")
+        }
+
+        if let cancelStart = engineSource.range(of: "private func cancelZombieEngineRecovery()"),
+           let cancelEnd = engineSource.range(of: "func cancelAudioWatchdog() -> Bool", range: cancelStart.upperBound..<engineSource.endIndex) {
+            let cancelBody = String(engineSource[cancelStart.lowerBound..<cancelEnd.lowerBound])
+            if let claim = cancelBody.range(of: "audioEngineWorkOwnership.claimPendingWorkForSuccessor("),
+               let replace = cancelBody.range(of: "abandonBlockedAudioEngine(reason: reason)", range: claim.upperBound..<cancelBody.endIndex),
+               let terminal = cancelBody.range(of: "zombieRecoveryState.cancelActiveAttempt()", range: replace.upperBound..<cancelBody.endIndex) {
+                let window = String(cancelBody[claim.lowerBound..<terminal.lowerBound])
+                assertFalse(window.contains("await "), "a still-blocked engine queue must be claimed and replaced in one MainActor turn")
+            } else {
+                assertTrue(false, "zombie cancellation should claim and replace a blocked queue before publishing its terminal result")
+            }
+        } else {
+            assertTrue(false, "test should find cancelZombieEngineRecovery")
+        }
+
+        // Route recovery keeps buffered audio, then restarts through the normal
+        // start path (moved here from ParakeetAudioGraphOwnershipTests).
+        assertTrue(
+            handlerBody.contains("preserveCurrentRecordingBuffersForRecovery()"),
+            "config change during recording should preserve buffered audio before tearing down the tap"
+        )
+        assertTrue(
+            recoverySource.contains("let startSucceeded = await self.startRecording()"),
+            "device recovery should restart through startRecording so retained segments keep the same recording claim"
         )
     }
 

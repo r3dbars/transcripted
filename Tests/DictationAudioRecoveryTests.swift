@@ -14,7 +14,9 @@
 // as TEXT and asserts specific call sites, statement order in the terminal interruption
 // helper, and a single canonical `recordingInterrupted = true` assignment. (Checks that
 // only matched a declaration were dropped: the compiler already enforces those, and the
-// multi-rate timeline itself is covered by RecordedAudioTimelineTests.) Both sources are
+// multi-rate timeline itself is covered by RecordedAudioTimelineTests. The call-site pin
+// on preserveCurrentRecordingBuffersForRecovery() lives in
+// ParakeetMicrophoneSharingSourceContractTests and ParakeetAudioOwnershipSourceContractTests.) Both sources are
 // CoreAudio/SwiftUI-wired and are NOT compiled into this Foundation-only runner, so these
 // greps pin source structure, not runtime behavior. They guard the REAL invariant that
 // audio buffered before a mid-recording route change is preserved across teardown (so a
@@ -173,6 +175,10 @@ func testDictationAudioRecovery() {
         assertFalse(
             sessionSource.contains("if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {\n                await appState.sttRouter.stopRecording()"),
             "the stop task must not re-check transient recording state before cancelling recovery"
+        )
+        assertTrue(
+            engineSource.contains("return await drainRecordedSamplesForInference()"),
+            "transcription should drain preserved segments instead of resampling all audio as one rate"
         )
     }
 }
