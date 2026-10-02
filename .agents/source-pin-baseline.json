@@ -11,7 +11,7 @@
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationRecordingStartOverlayPolicyTests.swift": 7,
     "Tests/DictationSoundsTests.swift": 2,
-    "Tests/DictationStoppedAudioRecoveryTests.swift": 13,
+    "Tests/DictationStoppedAudioRecoveryTests.swift": 12,
     "Tests/DictationTerminationCheckpointTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 20,
     "Tests/HomeImportAudioActionTests.swift": 6,
@@ -25,8 +25,6 @@
     "Tests/ReleaseMetadataContractTests.swift": 6,
     "Tests/RetainedDataSourceComboBoxTests.swift": 1,
     "Tests/RetranscribeLocalSpeakerPreferenceContractTests.swift": 2,
-    "Tests/SingleInstanceGuardTests.swift": 3,
-    "Tests/StatusItemPresentationTests.swift": 8,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
     "Tests/UIAutomationSurfaceContractTests.swift": 286
   }

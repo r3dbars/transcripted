@@ -266,4 +266,109 @@ func testMeetingPromptTelemetry() async {
             assertEqual(terminal["elapsed_bucket"], "lt_10s", "prompt terminal latency should stay bucketed")
         }
     }
+
+    runSuite("MeetingPromptTelemetry.events — each prompt action sends its events exactly once") {
+        let candidate = makeTelemetryPromptCandidate()
+        let readiness = MeetingPromptTelemetryReadiness(
+            microphoneGranted: true,
+            systemAudioRecordingGranted: true,
+            meetingRecordingActive: false,
+            dictationRecordingActive: false
+        )
+        let signals = MeetingPromptSignalSnapshot(micActive: true, speakerActive: false, cameraActive: true)
+        let suppression = MeetingPromptSuppression(
+            candidate: candidate,
+            reason: .ownCaptureActive,
+            cooldownReason: "pending",
+            captureActivity: .dictation
+        )
+        let actions: [(String, MeetingPromptTelemetry.PromptAction, [String])] = [
+            ("shown", .shown(candidate, signals: signals), ["meeting_prompt_shown"]),
+            (
+                "record",
+                .record(candidate, elapsedSeconds: 4, signals: signals),
+                ["meeting_prompt_choice_made", "meeting_prompt_record_selected"]
+            ),
+            (
+                "dismiss",
+                .dismiss(
+                    candidate,
+                    elapsedSeconds: 4,
+                    backoffKind: .runtimeUntilNextCalendar,
+                    signals: signals,
+                    dismissStreak: 2
+                ),
+                ["meeting_prompt_choice_made", "meeting_prompt_outcome_recorded", "meeting_prompt_dismissed", "workflow_abandoned"]
+            ),
+            (
+                "remind",
+                .remindLater(candidate, elapsedSeconds: 4),
+                ["meeting_prompt_choice_made", "meeting_prompt_outcome_recorded"]
+            ),
+            ("expire", .expire(candidate, elapsedSeconds: 4), ["meeting_prompt_outcome_recorded"]),
+            ("suppress", .suppress(suppression, signals: signals), ["meeting_prompt_suppressed"]),
+        ]
+
+        for (label, action, expectedNames) in actions {
+            var sent: [(name: String, properties: [String: String])] = []
+            MeetingPromptTelemetry.emit(
+                action,
+                readiness: readiness,
+                track: { sent.append(($0, $1)) },
+                trackPromptAbandoned: { sent.append(("workflow_abandoned", ["prior_ready_state": $0])) }
+            )
+            assertEqual(sent.map(\.name), expectedNames, "\(label) should send exactly these events, in order")
+
+            for event in sent where event.name.hasPrefix("meeting_prompt_") {
+                assertTrue(
+                    AnalyticsEventPolicy.policy(forEvent: event.name) != nil,
+                    "\(event.name) must be registered or AnalyticsReporter drops it"
+                )
+                assertEqual(event.properties["provider"], "zoom", "\(label) \(event.name) should carry the prompt context")
+            }
+
+            let choice = sent.first { $0.name == "meeting_prompt_choice_made" }?.properties["choice_kind"]
+            let outcome = sent.first { $0.name == "meeting_prompt_outcome_recorded" }?.properties["outcome_kind"]
+            switch label {
+            case "record":
+                assertEqual(choice, "record", "Record is a record choice")
+                assertNil(outcome, "Record's outcome comes later from the meeting session")
+            case "dismiss":
+                assertEqual(choice, "dismiss", "Not now is a dismiss choice")
+                assertEqual(outcome, "dismissed", "Not now ends the prompt as dismissed")
+                assertEqual(
+                    sent.first { $0.name == "meeting_prompt_dismissed" }?.properties["backoff_kind"],
+                    "runtime_until_next_calendar",
+                    "the dismissal should carry the backoff the detector applied"
+                )
+                assertEqual(
+                    sent.last?.properties["prior_ready_state"],
+                    "ready",
+                    "abandonment should report whether the capture route was ready"
+                )
+            case "remind":
+                assertEqual(choice, "remind_later", "Remind me is a remind-later choice")
+                assertEqual(outcome, "reminded_later", "Remind me ends the prompt as reminded later")
+            case "expire":
+                assertNil(choice, "an expiry is an outcome, not a user choice")
+                assertEqual(outcome, "expired", "a timed-out prompt ends as expired")
+            case "suppress":
+                assertEqual(
+                    sent.first?.properties["suppression_reason"],
+                    "own_capture_active",
+                    "suppression should say why the prompt was held back"
+                )
+            default:
+                break
+            }
+        }
+
+        let abandoningActions = actions.filter { _, action, _ in
+            MeetingPromptTelemetry.events(for: action, readiness: readiness).contains {
+                if case .promptAbandoned = $0 { return true }
+                return false
+            }
+        }.map(\.0)
+        assertEqual(abandoningActions, ["dismiss"], "only an explicit dismissal counts as abandoning the prompt")
+    }
 }

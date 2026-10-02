@@ -30,6 +30,9 @@ SOURCE_DIRS = ("Sources", "Tools")
 # elsewhere; those are collected separately so they can be reported, not guessed at.
 TRACK_LITERAL = re.compile(r'AnalyticsReporter\.track\(\s*"([a-z0-9_]+)"')
 TRACK_DYNAMIC = re.compile(r'AnalyticsReporter\.track\(\s*([a-z][A-Za-z0-9_]*)\s*,')
+# MeetingPromptTelemetry.events(for:) builds .analytics(name: "...") events that
+# MeetingPromptTelemetry.emit hands to AnalyticsReporter.track.
+TRACK_EVENT_CASE = re.compile(r'\.analytics\(\s*name:\s*"([a-z0-9_]+)"')
 
 
 def registry_events() -> set[str]:
@@ -51,7 +54,7 @@ def scan_sources() -> tuple[dict[str, list[str]], list[str]]:
                 continue
             text = path.read_text(encoding="utf-8")
             rel = path.relative_to(REPO_ROOT).as_posix()
-            for name in TRACK_LITERAL.findall(text):
+            for name in TRACK_LITERAL.findall(text) + TRACK_EVENT_CASE.findall(text):
                 emitted.setdefault(name, []).append(rel)
             for symbol in TRACK_DYNAMIC.findall(text):
                 dynamic.append(f"{rel}: track({symbol}, ...)")

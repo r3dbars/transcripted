@@ -220,7 +220,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             self?.pasteLastDictationFromSettings()
         }
         notchIsland.prewarm()
-        sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
+        AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
         if #available(macOS 14.0, *) {
@@ -300,124 +300,55 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 // load / .startingRecording, and would otherwise close the
                 // detected-call session as unrecorded.
                 self.meetingPromptDetector.markAccepted(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_choice_made",
-                    properties: MeetingPromptTelemetry.choiceProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        choiceKind: .record,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
-                AnalyticsReporter.track(
-                    "meeting_prompt_record_selected",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: readiness,
+                MeetingPromptTelemetry.emit(
+                    .record(
+                        candidate,
+                        elapsedSeconds: elapsedSeconds,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    )
+                    ),
+                    readiness: readiness
                 )
             }
             let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
-                AnalyticsReporter.track(
-                    "meeting_prompt_choice_made",
-                    properties: MeetingPromptTelemetry.choiceProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        choiceKind: .dismiss,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
-                AnalyticsReporter.track(
-                    "meeting_prompt_outcome_recorded",
-                    properties: MeetingPromptTelemetry.outcomeProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        outcomeKind: .dismissed,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_dismissed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: readiness,
+                MeetingPromptTelemetry.emit(
+                    .dismiss(
+                        candidate,
+                        elapsedSeconds: elapsedSeconds,
                         backoffKind: backoffDecision.kind,
                         signals: self.meetingPromptDetector.currentSignalSnapshot(),
                         dismissStreak: self.meetingPromptDetector.dismissStreak(for: candidate.provider)
-                    )
-                )
-                ActivationTelemetry.trackWorkflowAbandoned(
-                    workflowKind: .meetingPrompt,
-                    stage: "prompt_shown",
-                    reasonKind: .dismissed,
-                    surface: .meetingOverlay,
-                    priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: readiness
-                    )
+                    ),
+                    readiness: readiness
                 )
             }
             let expirePrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
-                AnalyticsReporter.track(
-                    "meeting_prompt_outcome_recorded",
-                    properties: MeetingPromptTelemetry.outcomeProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        outcomeKind: .expired,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
+                MeetingPromptTelemetry.emit(.expire(candidate, elapsedSeconds: elapsedSeconds), readiness: readiness)
                 _ = self.meetingPromptDetector.expire(candidate: candidate)
             }
             let remindPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
-                AnalyticsReporter.track(
-                    "meeting_prompt_choice_made",
-                    properties: MeetingPromptTelemetry.choiceProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        choiceKind: .remindLater,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
-                AnalyticsReporter.track(
-                    "meeting_prompt_outcome_recorded",
-                    properties: MeetingPromptTelemetry.outcomeProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        outcomeKind: .remindedLater,
-                        elapsedSeconds: elapsedSeconds
-                    )
-                )
+                MeetingPromptTelemetry.emit(.remindLater(candidate, elapsedSeconds: elapsedSeconds), readiness: readiness)
                 _ = self.meetingPromptDetector.remindSoon(candidate: candidate)
             }
             capturePillController.onRecord = recordPrompt
             capturePillController.onDismiss = dismissPrompt
             capturePillController.onExpired = expirePrompt
             capturePillController.onRemind = remindPrompt
-            // One event per suppression. It also used to send a matching
-            // meeting_prompt_outcome_recorded(outcome_kind=suppressed), which
-            // doubled about 33k events a month and carried nothing the
-            // suppressed event lacks.
+            // One event per suppression (see MeetingPromptTelemetry.PromptAction).
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
-                let readiness = self.meetingPromptTelemetryReadiness()
-                AnalyticsReporter.track(
-                    "meeting_prompt_suppressed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: suppression,
-                        readiness: readiness,
-                        signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    )
+                MeetingPromptTelemetry.emit(
+                    .suppress(suppression, signals: self.meetingPromptDetector.currentSignalSnapshot()),
+                    readiness: self.meetingPromptTelemetryReadiness()
                 )
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
@@ -440,13 +371,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
                 if presented {
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
-                    AnalyticsReporter.track(
-                        "meeting_prompt_shown",
-                        properties: MeetingPromptTelemetry.properties(
-                            for: candidate,
-                            readiness: self.meetingPromptTelemetryReadiness(),
-                            signals: self.meetingPromptDetector.currentSignalSnapshot()
-                        )
+                    MeetingPromptTelemetry.emit(
+                        .shown(candidate, signals: self.meetingPromptDetector.currentSignalSnapshot()),
+                        readiness: self.meetingPromptTelemetryReadiness()
                     )
                 }
                 return presented
@@ -787,20 +714,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         closePopover()
         NSApp.activate(ignoringOtherApps: true)
 
-        if !PermissionsOnboardingPreferences.hasCompleted() {
-            // Mid-onboarding there's no menu-bar home to fall back to yet, so put
-            // the user straight back where they left off.
+        // Reopening must not start an app-modal event loop (see
+        // SingleInstanceReopenPolicy); the instance lock still keeps the newly
+        // launched copy from touching shared recording state.
+        let button = statusItem?.button
+        switch SingleInstanceReopenPolicy.surface(
+            onboardingComplete: PermissionsOnboardingPreferences.hasCompleted(),
+            hasStatusItem: button != nil && popover != nil
+        ) {
+        case .onboarding:
             onboardingWindowController.present(entrypoint: "single_instance_reopen")
-            return
-        }
-
-        // Reopening must not start an app-modal event loop: a hidden duplicate-
-        // launch alert can otherwise block the Stop command during capture.
-        // Present the existing controls directly; the instance lock still keeps
-        // the newly launched copy from touching shared recording state.
-        if let button = statusItem?.button, let popover = popover {
-            showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
-        } else {
+        case .popover:
+            if let button, let popover {
+                showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
+            }
+        case .settingsFallback:
             showSettingsWindow(page: .today, source: "single_instance_reopen")
         }
     }
@@ -821,12 +749,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func configureStatusItemButton(_ button: NSStatusBarButton) {
-        button.image = MenuBarGlyph.idle.image(accessibilityDescription: "Transcripted")
+        StatusItemPresentation.apply(to: button, meetingRecording: false, dictating: false, updateTooltip: nil)
         button.imagePosition = .imageOnly
-        button.toolTip = "Transcripted"
         button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
         button.setAccessibilityIdentifier("transcripted.status-item.button")
-        button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
         // Right-click opens the same popover as a left-click; there is no
@@ -836,39 +762,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         installStatusItemUpdateBadge(on: button)
     }
 
-    /// Single writer for the status-item button's image, tint, tooltip, and
-    /// accessibility label so the recording indicator and the update badge
-    /// cannot fight over shared button state.
+    /// The status item's glyph, tint, tooltip, and label for the current
+    /// capture state; `StatusItemPresentation.apply` is the single writer.
     func refreshStatusItemPresentation() {
         guard let button = statusItem?.button else { return }
-
-        let glyph: MenuBarGlyph
-        let label: String
-        if statusItemMeetingRecording {
-            glyph = .meetingRecording
-            label = "Transcripted — recording meeting"
-        } else if statusItemDictationRecording {
-            glyph = .dictating
-            label = "Transcripted — dictating"
-        } else {
-            glyph = .idle
-            label = "Transcripted"
-        }
-
-        // Keep the always-visible status item quiet during screen sharing.
-        // The app icon's bubble is a template image in every state: distinct
-        // silhouettes (outline, filled, filled + dot) and accessibility labels
-        // preserve capture state; destructive Stop controls inside the open
-        // menus retain their red tone.
-        button.image = glyph.image(accessibilityDescription: label)
-        button.contentTintColor = nil
-        button.setAccessibilityLabel(label)
-
-        if let statusItemUpdateTooltip {
-            button.toolTip = "\(label) - \(statusItemUpdateTooltip)"
-        } else {
-            button.toolTip = label
-        }
+        StatusItemPresentation.apply(
+            to: button,
+            meetingRecording: statusItemMeetingRecording,
+            dictating: statusItemDictationRecording,
+            updateTooltip: statusItemUpdateTooltip
+        )
     }
 
     func closePopover() {
@@ -930,3 +833,5 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 }
+
+extension DictationSessionController: AppLaunchDictationHost {}

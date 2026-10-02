@@ -5,10 +5,9 @@ import Foundation
 // directories — genuine behavioral coverage. The last suites in testDictationStoppedAudioRecovery
 // ("A restart checkpoint imported as a meeting is retired once its transcript is saved" and
 // "Stopped audio is reused, retired and found again at launch") instead grep the
-// MeetingSessionController files, ParakeetDictationTranscription.swift and TranscriptedApp.swift,
-// because each is a @MainActor type
-// (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
-// TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
+// MeetingSessionController files and ParakeetDictationTranscription.swift, because each is a
+// @MainActor type wired to CoreAudio/AppKit/TranscriptedCore that this Foundation-only runner
+// cannot instantiate. (The launch scan for pending stopped audio is tested in AppLaunchStepsTests.) What's pinned is the
 // *ordering* of statements inside their real methods (ownership re-check before the prepared
 // snapshot clears native samples): the assertions compare string-range offsets, not just
 // presence, so reordering those statements without moving the matched substrings will break the
@@ -294,11 +293,6 @@ func testDictationStoppedAudioRecovery() {
             assertTrue(
                 preparedClaim.lowerBound < preparedClear.lowerBound,
                 "an old Stop snapshot cannot clear a successor recording's native samples"
-            )
-            let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
-            assertTrue(
-                appSource.contains("sessionController.presentPendingStoppedAudioRecoveryIfNeeded()"),
-                "launch should scan for pending stopped audio"
             )
         } catch {
             assertTrue(false, "stopped-audio sources should be readable: \(error)")
