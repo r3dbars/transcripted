@@ -454,14 +454,8 @@ extension Audio {
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         //
-        // A mic-only recording never builds the tap. Building one would ask
-        // macOS for System Audio Recording and record silence the user
-        // already said they don't want.
-        if !currentRecordingCapturesSystemAudio {
-            AppLogger.audioSystem.info("System audio capture skipped for a mic-only recording", [
-                "event": "system_audio_capture_skipped_mic_only"
-            ])
-        } else if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+        // Returns nil for a mic-only recording, so it never builds the tap.
+        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures

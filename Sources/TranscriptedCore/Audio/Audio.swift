@@ -1198,12 +1198,31 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // Test seam: runs on the advancing thread right after the generation
+    // moves, outside the lock. Lets a test deliver a buffer at the exact
+    // instant a stale one would arrive. Always nil in the app.
+    private var _afterRecordingSessionGenerationAdvance: ((UInt64) -> Void)?
+    var afterRecordingSessionGenerationAdvanceForTesting: ((UInt64) -> Void)? {
+        get {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            return _afterRecordingSessionGenerationAdvance
+        }
+        set {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            _afterRecordingSessionGenerationAdvance = newValue
+        }
+    }
+
     @discardableResult
     private func beginRecordingSessionGeneration() -> UInt64 {
         recordingSessionGenerationLock.lock()
-        defer { recordingSessionGenerationLock.unlock() }
         let generation = recordingSessionGenerationEpoch.begin().rawValue
         recordingSessionGenerationMirror.store(generation, ordering: .releasing)
+        let afterAdvance = _afterRecordingSessionGenerationAdvance
+        recordingSessionGenerationLock.unlock()
+        afterAdvance?(generation)
         return generation
     }
 
@@ -1769,8 +1788,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
         installWorkspaceSleepWakeObservers()
     }
 
+    /// Builds this recording's system-audio tap. A mic-only recording never
+    /// builds one: that would ask macOS for System Audio Recording and record
+    /// silence the user already said they don't want.
     func makeSystemAudioCaptureForRecordingAttempt()
         -> (any SystemAudioCaptureEngine & Sendable)? {
+        guard currentRecordingCapturesSystemAudio else {
+            AppLogger.audioSystem.info("System audio capture skipped for a mic-only recording", [
+                "event": "system_audio_capture_skipped_mic_only"
+            ])
+            return nil
+        }
         guard let capture = systemAudioCaptureFactory() else { return nil }
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
