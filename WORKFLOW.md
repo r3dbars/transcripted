@@ -64,7 +64,7 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 7. Create or reuse a branch named like `codex/issue-{{ issue.number }}-short-slug`.
 8. If a draft PR already exists for this issue or branch, update that PR instead of opening a duplicate.
 9. Make the smallest change that satisfies the issue.
-10. Run `scripts/dev/agent-preflight.sh`, then run the union of checks required by `.agents/test-matrix.yml` for the files you changed.
+10. Run `scripts/dev/agent-preflight.sh`, then `bash check.sh`, which runs the union of checks `.agents/test-matrix.yml` maps to the files you changed.
 11. Stage only your own changes, commit, and push.
 12. If the change touches UI, visual design, app copy, or user-facing flows, add sanitized visual evidence under `.agent-review/visuals/` before opening or updating the PR. Prefer a PNG screenshot; use a GIF only when motion or interaction matters. Never include private transcripts, customer data, tokens, absolute personal paths, or real user content in visuals.
 13. Open a draft PR against `main` with `gh pr create --draft`, unless you are updating an existing PR.

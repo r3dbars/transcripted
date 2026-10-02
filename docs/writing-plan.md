@@ -1,6 +1,11 @@
 # Writing: bringing Tilde into Transcripted
 
-Status: plan, not started. Written 2026-09-25 with Justin.
+Status: shipped in 1.1.67 (the Writing tab, off until turned on). Written
+2026-09-25 with Justin. This is now the design record; code comments cite its
+sections. For what the code does today, read `Sources/Writing/AGENTS.md`,
+`Sources/TranscriptedWriting/AGENTS.md`, `Sources/TranscriptedKeyboard/AGENTS.md`
+and `docs/storage-paths.md` (the state folder names below changed during the
+port).
 
 ## Summary
 
