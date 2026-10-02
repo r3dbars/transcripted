@@ -92,9 +92,13 @@ enum ParakeetConfigChangeGraphPolicy {
         hadSampleFlow: Bool,
         inputWasReady: Bool,
         stableRouteIdentity: ParakeetAudioRouteIdentity?,
-        observedRouteIdentity: ParakeetAudioRouteIdentity?
+        observedRouteIdentity: ParakeetAudioRouteIdentity?,
+        forceForMicrophoneSharing: Bool
     ) -> ParakeetConfigChangeGraphStrategy {
-        guard wasRecording,
+        // A call app downgrade swaps the VPIO graph for a regular one, so it
+        // rebuilds even when the route endpoints stayed the same.
+        guard !forceForMicrophoneSharing,
+              wasRecording,
               hadSampleFlow,
               inputWasReady,
               let stableRouteIdentity,
@@ -106,14 +110,40 @@ enum ParakeetConfigChangeGraphPolicy {
     }
 }
 
+/// A call app opened while dictation records through Apple voice processing.
+/// Only a live recording on dictation's own graph is downgraded: a dictation
+/// borrowing the meeting mic has no graph of its own, and a start, stop, or
+/// shutdown already owns the graph.
+enum ParakeetMicrophoneSharingPolicy {
+    static func mayDowngrade(
+        callAppRunning: Bool,
+        isRecording: Bool,
+        borrowsMeetingMic: Bool,
+        audioStartInProgress: Bool,
+        audioStopInProgress: Bool,
+        isShuttingDown: Bool
+    ) -> Bool {
+        callAppRunning
+            && isRecording
+            && !borrowsMeetingMic
+            && !audioStartInProgress
+            && !audioStopInProgress
+            && !isShuttingDown
+    }
+}
+
 enum ParakeetConfigChangeContinuityPolicy {
     static func shouldProbe(
         wasRecording: Bool,
         hadSampleFlow: Bool,
         inputWasReady: Bool,
-        graphEndpointsMatch: Bool
+        graphEndpointsMatch: Bool,
+        forceForMicrophoneSharing: Bool
     ) -> Bool {
-        wasRecording && hadSampleFlow && inputWasReady && graphEndpointsMatch
+        // Healthy local samples do not prove a call app can still read its
+        // mic, so a call app downgrade is never parked behind a probe.
+        !forceForMicrophoneSharing
+            && wasRecording && hadSampleFlow && inputWasReady && graphEndpointsMatch
     }
 
     static func shouldIgnoreAfterProbe(

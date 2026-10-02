@@ -238,8 +238,7 @@ extension ParakeetEngine {
                   !audioStartInProgress, !audioStopInProgress,
                   generationAtAdmission == audioConfigObservationGeneration else { return }
         }
-        if !forceForMicrophoneSharing,
-           ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
+        if ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
                source: source,
                observedAt: configChangeObservedAt,
                ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
@@ -247,7 +246,8 @@ extension ParakeetEngine {
                stableRoute: stableAudioRouteIdentity,
                observedRoute: observedRouteIdentity,
                bindingToken: bindingToken,
-               currentEngine: audioEngine
+               currentEngine: audioEngine,
+               forceForMicrophoneSharing: forceForMicrophoneSharing
            ) {
             return
         }
@@ -300,11 +300,12 @@ extension ParakeetEngine {
 
         // Healthy local samples do not prove a call app can still read its mic.
         // A confirmed VPIO downgrade must run even when our stream is healthy.
-        if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe(
+        if ParakeetConfigChangeContinuityPolicy.shouldProbe(
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
-            graphEndpointsMatch: graphEndpointsMatch
+            graphEndpointsMatch: graphEndpointsMatch,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
         ) {
             try? await Task.sleep(
                 nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay
@@ -336,13 +337,14 @@ extension ParakeetEngine {
             }
         }
 
-        let graphStrategy = forceForMicrophoneSharing ? .rebuildGraph : ParakeetConfigChangeGraphPolicy.strategy(
+        let graphStrategy = ParakeetConfigChangeGraphPolicy.strategy(
             source: source,
             wasRecording: isRecording,
             hadSampleFlow: hasReceivedAudioSamples,
             inputWasReady: recoveryState.canStartRecording,
             stableRouteIdentity: stableAudioRouteIdentity,
-            observedRouteIdentity: observedRouteIdentity
+            observedRouteIdentity: observedRouteIdentity,
+            forceForMicrophoneSharing: forceForMicrophoneSharing
         )
         audioGraphGeneration += 1
 

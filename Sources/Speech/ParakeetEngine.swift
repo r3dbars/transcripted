@@ -1155,27 +1155,29 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func shareMicrophoneWithCallAppIfNeeded() async {
-        guard !isShuttingDown,
-              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
-              sharedMeetingMicClaim == nil,
-              isRecording,
-              !audioStartInProgress,
-              !audioStopInProgress else { return }
+        guard microphoneSharingDowngradeIsAllowed() else { return }
         let owner = currentAudioEngineQueueOwnerToken()
         let usesVoiceProcessing = await runAudioEngineWork { audioEngine in
             Self.existingInputNode(on: audioEngine)?.isVoiceProcessingEnabled == true
         }
+        // Checked again: the graph-queue hop can outlive the recording.
         guard usesVoiceProcessing,
               ownsAudioEngineQueue(owner),
-              !isShuttingDown,
-              CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
-              sharedMeetingMicClaim == nil,
-              isRecording,
-              !audioStartInProgress,
-              !audioStopInProgress else { return }
+              microphoneSharingDowngradeIsAllowed() else { return }
         // Reuse the owned recovery path so already-spoken audio survives the
         // VPIO -> regular-input transition when a call app opens during dictation.
         await recoverForMicrophoneSharing()
+    }
+
+    private func microphoneSharingDowngradeIsAllowed() -> Bool {
+        ParakeetMicrophoneSharingPolicy.mayDowngrade(
+            callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
+            isRecording: isRecording,
+            borrowsMeetingMic: sharedMeetingMicClaim != nil,
+            audioStartInProgress: audioStartInProgress,
+            audioStopInProgress: audioStopInProgress,
+            isShuttingDown: isShuttingDown
+        )
     }
 
     private func resetAudioGraphAfterStartFailure(
@@ -1913,8 +1915,10 @@ class ParakeetEngine: ObservableObject {
             )
             CallAppMicrophoneSharingMonitor.shared.refresh()
             let voiceProcessingDecision = DictationVoiceProcessingRoutePolicy.decision(
-                requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
-                    && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
+                requested: DictationVoiceProcessingRoutePolicy.isRequested(
+                    savedPreference: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+                    callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+                ),
                 selection: snapshot.selection
             )
             if voiceProcessingDecision == .deferredForSplitBluetoothOutput {

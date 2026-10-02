@@ -2,17 +2,17 @@ import Foundation
 
 // AVAudioEngine capture lives in the app target. These contracts pin its
 // ownership and ordering seams; live Zoom speech still needs a remote listener.
+// The decisions (when VPIO is asked for, when a call app downgrade may run,
+// and how it skips suppression and rebuilds) are behavior-tested in
+// ParakeetMicrophoneSharingTests.swift. What is left here is wiring and
+// AVAudioEngine call order inside ParakeetEngine, which the fast tests can't
+// construct.
 func testParakeetMicrophoneSharingSourceContract() {
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     let engine = (try? String(contentsOf: root.appendingPathComponent("Sources/Speech/ParakeetEngine.swift"), encoding: .utf8)) ?? ""
     let recovery = (try? String(contentsOf: root.appendingPathComponent("Sources/Speech/ParakeetDeviceRecovery.swift"), encoding: .utf8)) ?? ""
 
-    runSuite("Dictation keeps call apps on a shared microphone without changing the saved mode") {
-        assertTrue(
-            engine.contains("requested: MicrophoneProcessingPreferences.isVoiceProcessingEnabled()\n                    && !CallAppMicrophoneSharingMonitor.shared.isCallAppRunning"),
-            "every normal or recovery start must suppress VPIO while a call app is open"
-        )
-        assertFalse(engine.contains("MicrophoneProcessingPreferences.set"), "sharing must not rewrite the user's saved mode")
+    runSuite("Dictation rechecks call apps around every start") {
         assertTrue(engine.contains("CallAppMicrophoneSharingMonitor.shared.refresh()\n            let voiceProcessingDecision"), "explicit start must refresh process presence before choosing VPIO")
         assertTrue(engine.contains("CallAppMicrophoneSharingMonitor.shared.$isCallAppRunning"), "a call app launching must be observed during dictation")
         let committedStart = sharingSourceBlock(engine, from: "        isRecording = true\n        markFormatReadyAndPublish()", to: "        // Watchdog:")
@@ -23,20 +23,16 @@ func testParakeetMicrophoneSharingSourceContract() {
     }
 
     runSuite("Call app launch recovery only downgrades an owned active VPIO graph") {
-        let handler = sharingSourceBlock(engine, from: "    private func shareMicrophoneWithCallAppIfNeeded()", to: "    private func resetAudioGraphAfterStartFailure(")
+        let handler = sharingSourceBlock(engine, from: "    private func shareMicrophoneWithCallAppIfNeeded()", to: "    private func microphoneSharingDowngradeIsAllowed()")
         assertTrue(handler.contains("let usesVoiceProcessing = await runAudioEngineWork"), "VPIO state must be read on the graph queue")
         assertTrue(handler.contains("Self.existingInputNode(on: audioEngine)?.isVoiceProcessingEnabled == true"), "probe must not create an idle input node")
-        for gate in ["sharedMeetingMicClaim == nil", "isRecording,", "!audioStartInProgress", "!audioStopInProgress", "!isShuttingDown"] {
-            assertEqual(handler.components(separatedBy: gate).count - 1, 2, "\(gate) must gate both sides of the queue suspension")
-        }
+        assertEqual(handler.components(separatedBy: "microphoneSharingDowngradeIsAllowed()").count - 1, 2, "the downgrade gate must run on both sides of the queue suspension")
         let afterProbe = sharingSourceBlock(handler, from: "        guard usesVoiceProcessing,", to: "        // Reuse the owned recovery path")
         assertTrue(afterProbe.contains("ownsAudioEngineQueue(owner)"), "a stale graph probe must not restart the successor")
         assertTrue(handler.contains("await recoverForMicrophoneSharing()"), "downgrade must use the recording-preserving recovery path")
         let forcedRecovery = sharingSourceBlock(recovery, from: "    func recoverForMicrophoneSharing()", to: "    private func handleAudioConfigChange(")
         assertTrue(forcedRecovery.contains("forceForMicrophoneSharing: true"), "sharing downgrade must bypass local continuity success")
         let config = sharingSourceBlock(recovery, from: "    private func handleAudioConfigChange(", to: "    private func invalidateAudioGraphForIdleRouteChange()")
-        assertTrue(config.contains("if !forceForMicrophoneSharing, ParakeetConfigChangeContinuityPolicy.shouldProbe("), "our healthy samples cannot suppress a call app sharing downgrade")
-        assertTrue(config.contains("if !forceForMicrophoneSharing,\n           ParakeetSelfInducedConfigChangePolicy.shouldIgnore("), "self-generated route suppression cannot postpone call app sharing")
         assertTrue(config.contains("observedAt: configChangeObservedAt,"), "notification suppression must classify callback arrival, not delayed handler time")
         assertTrue(config.contains("ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,"), "notification suppression must retain the bounded restore window")
         assertTrue(config.contains("preserveCurrentRecordingBuffersForRecovery()"), "speech already captured must survive the downgrade")
@@ -84,9 +80,9 @@ func testParakeetMicrophoneSharingSourceContract() {
         let rebuild = sharingSourceBlock(engine, from: "    func rebuildAudioEngine(", to: "    func abandonBlockedAudioEngine(")
         assertTrue(rebuild.contains("if !releasedVoiceProcessing {\n            return discardStoppedVoiceProcessingGraph"), "recovery must discard a graph whose native disable failed")
         assertTrue(rebuild.contains("if requiresFreshGraph {\n                interruptRecordingPreservingRecoveredTimeline()\n                return nil"), "fresh-graph recovery must fail closed at the retirement limit")
-        assertTrue(recovery.contains("let graphStrategy = forceForMicrophoneSharing ? .rebuildGraph"), "call app downgrade must rebuild even when route endpoints stay the same")
-        // "A failed disarm never reuses the graph" is a behavior test now:
-        // BluetoothRouteContractTests, "a stable route echo keeps the current graph".
+        // "A call app downgrade always rebuilds" and "a failed disarm never
+        // reuses the graph" are behavior tests now: ParakeetMicrophoneSharingTests
+        // and BluetoothRouteContractTests ("a stable route echo keeps the current graph").
     }
 }
 

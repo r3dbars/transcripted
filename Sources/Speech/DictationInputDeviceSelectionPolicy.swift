@@ -134,6 +134,41 @@ enum PinnedDictationInputPolicy {
         return availableInputs.filter { $0.id != excluded }
     }
 
+    /// The pinned recorder's pick for one start, from the Settings
+    /// "Microphone" choice. A Bluetooth headset that is the macOS input is
+    /// skipped unless the user follows the macOS input on purpose; a mic
+    /// picked in Settings wins over a safe macOS input. The meetings-only
+    /// "use the macOS input" setting is not an input here: following it put
+    /// dictation back on the headset mic, in call mode.
+    ///
+    /// `automaticSelection` gets whether to steer away from a Bluetooth
+    /// headset; `availableInputs` is read only when the pick can change.
+    static func pinnedSelection(
+        followsMacOSInput: Bool,
+        chosenUID: String?,
+        lidClosed: Bool,
+        excludingDeviceID: UInt32?,
+        automaticSelection: (_ prefersBuiltInBluetoothInput: Bool) throws -> DictationInputDeviceSelection,
+        availableInputs: () throws -> [DictationAudioDevice]
+    ) throws -> DictationInputDeviceSelection {
+        let automatic = try automaticSelection(!followsMacOSInput)
+        guard !followsMacOSInput,
+              mayReplace(automatic) || chosenUID != nil,
+              var inputs = try? availableInputs() else {
+            return automatic
+        }
+        if let excludingDeviceID {
+            inputs.removeAll { $0.id == excludingDeviceID }
+        }
+        return selection(
+            automatic: automatic,
+            availableInputs: inputs,
+            preferredUID: chosenUID,
+            chosenInputAlwaysWins: true,
+            lidClosed: lidClosed
+        )
+    }
+
     static func mayReplace(_ automatic: DictationInputDeviceSelection) -> Bool {
         automatic.reason == .preferredBuiltInForBluetoothHeadset
             || automatic.reason == .noBuiltInFallbackAvailable
@@ -255,6 +290,13 @@ enum DictationVoiceProcessingRouteDecision: Equatable {
 /// renegotiate the live mic format. Keep the user's preference for matched
 /// routes, but use the stable regular input graph for split Bluetooth output.
 enum DictationVoiceProcessingRoutePolicy {
+    /// Apple voice processing takes the mic away from a call app, so it is
+    /// asked for only while no call app is open. This reads the saved
+    /// setting and never changes it: closing the call app brings VPIO back.
+    static func isRequested(savedPreference: Bool, callAppRunning: Bool) -> Bool {
+        savedPreference && !callAppRunning
+    }
+
     static func decision(
         requested: Bool,
         selection: DictationInputDeviceSelection?
