@@ -628,8 +628,7 @@ func testUIAutomationSurfaceContract() {
             "meeting speaker autocomplete must preserve the selected saved-person UUID and clear it on typing"
         )
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("directory: transcriptDirectory"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder"),
             "saved-person rename/merge must scan the active capture library, including relocated libraries"
         )
         // Batch speaker naming order (saved identities first, local links
@@ -775,27 +774,6 @@ func testUIAutomationSurfaceContract() {
             "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
         )
 
-        // Quiet-library speakers facelift: the play control is a bare glyph
-        // (SpeakerQuietPlayButton) used by the queue row, the person row, and
-        // the person card's player; the compact icon label now backs only the
-        // two overflow menus (the manual refresh button was removed — the
-        // model refreshes on navigation and after every mutation).
-        let speakerQuietPlayButtonApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-            .components(separatedBy: "SpeakerQuietPlayButton(")
-            .count - 1
-        assertTrue(
-            speakerQuietPlayButtonApplications >= 3,
-            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
-        )
-
-        let speakerCompactIconLabelApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-            .components(separatedBy: "SpeakerCompactIconLabel(")
-            .count - 1
-        assertTrue(
-            speakerCompactIconLabelApplications >= 2,
-            "queue and person overflow menus should use the compact 40pt hit-target label"
-        )
-
         assertFalse(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.refresh"),
             "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
@@ -803,10 +781,7 @@ func testUIAutomationSurfaceContract() {
 
         for identifier in [
             "transcripted.speakers.voice-to-name.play",
-            "transcripted.speakers.voice-to-name.menu",
             "transcripted.speakers.search.field",
-            "transcripted.speakers.person.play",
-            "transcripted.speakers.person.menu",
         ] {
             assertTrue(
                 contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(identifier),

@@ -167,7 +167,10 @@ settings-side agent connection flow.
   recent) and that call's calendar invitees as one-tap names; "Skip this
   call" is saved (`SpeakerReviewSkippedCalls`) and moves its voices to
   Everyone. Then compact duplicate-merge suggestions and the searchable
-  all-speakers list with per-row play/rename/merge/delete.
+  all-speakers list with per-row play/rename/merge/delete. The voice and
+  person rows are in `SpeakerPeopleRows.swift`; the view model is
+  `SpeakerPeopleSettingsViewModel.swift`, with duplicate detection and clip
+  files in `SpeakerPeopleSettingsViewModel+Duplicates.swift`.
 - `SpeakerReviewStack.swift` - Foundation-pure card stack behind that page:
   call order (skipped calls out, Later ones last), which voices Everyone
   hides (only the open top card's, never during a search, so voices on
