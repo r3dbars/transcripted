@@ -239,7 +239,7 @@ struct SettingsInlineActionButton: View {
             normalFill: normalFill,
             normalStroke: normalStroke
         ))
-        .frame(minHeight: 40)
+        .frame(minHeight: LibraryTokens.minimumHitTarget)
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .settingsAutomationIdentifier(automationIdentifier)
     }

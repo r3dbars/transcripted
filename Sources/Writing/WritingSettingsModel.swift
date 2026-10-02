@@ -374,7 +374,11 @@ final class WritingSettingsModel: ObservableObject {
 
         let keyboardSelected = controller.turnOnKeyboard(openSettingsOnFailure: false)
         controller.applyRunState()
-        if choices.autocomplete, !controller.screenRecordingGranted, !isCaptureBusy() {
+        if Presentation.asksForScreenRecordingAfterSetup(
+            autocomplete: choices.autocomplete,
+            granted: controller.screenRecordingGranted,
+            captureBusy: isCaptureBusy()
+        ) {
             controller.requestScreenRecording()
         }
 
@@ -455,13 +459,16 @@ final class WritingSettingsModel: ObservableObject {
     /// Never while anything records (see `turnOnWriting`). After the one
     /// system prompt, System Settings is the only way to grant it.
     func allowScreenRecording() {
-        guard !isCaptureBusy() else {
+        switch Presentation.screenRecordingAsk(
+            captureBusy: isCaptureBusy(),
+            alreadyRequested: controller.screenRecordingRequested
+        ) {
+        case .waitForCapture:
             update(\.captureBusy, true)
             return
-        }
-        if controller.screenRecordingRequested {
+        case .openSettings:
             controller.openScreenRecordingSettings()
-        } else {
+        case .request:
             controller.requestScreenRecording()
         }
         refreshLive()

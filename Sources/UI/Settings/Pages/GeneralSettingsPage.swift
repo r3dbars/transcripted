@@ -149,11 +149,11 @@ struct GeneralSettingsPage<
                 }
 
                 GeneralActionRow(
-                    title: "Transcribe a file",
-                    value: "Choose",
+                    title: HomeCaptureListCopy.ImportFileRow.title,
+                    value: HomeCaptureListCopy.ImportFileRow.value,
                     systemImage: "waveform",
-                    help: "Pick an audio or video file. The transcript lands with your meetings.",
-                    automationIdentifier: "transcripted.settings.general.transcribe-audio-file",
+                    help: HomeCaptureListCopy.ImportFileRow.help,
+                    automationIdentifier: HomeCaptureListCopy.ImportFileRow.automationIdentifier,
                     showsDivider: false
                 ) {
                     onImportAudioFile()

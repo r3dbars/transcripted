@@ -49,6 +49,13 @@ final class NotchIslandPanel: NSPanel {
     override var canBecomeKey: Bool { acceptsKeyForTyping }
     override var canBecomeMain: Bool { false }
 
+    /// Hidden from screen sharing and screenshots unless the person turned on
+    /// Show island in screen sharing. The controller calls this before each
+    /// show, so the switch applies at once.
+    func applyScreenSharingPreference(userDefaults: UserDefaults = .standard) {
+        sharingType = NotchIslandPreferences.visibleInScreenSharing(userDefaults: userDefaults) ? .readOnly : .none
+    }
+
     /// AppKit keeps windows out of the menu bar; the island belongs there.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect

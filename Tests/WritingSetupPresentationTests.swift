@@ -307,4 +307,29 @@ func testWritingSetupPresentation() {
         let date = calendar.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 15, minute: 45))!
         assertEqual(Copy.pausedLine(until: date, timeFormatter: formatter), "Paused until 3:45 PM")
     }
+
+    // Granting Screen Recording can make macOS ask Transcripted to quit and
+    // reopen, so the ask never happens while a meeting or dictation records.
+    runSuite("Screen Recording is never asked for while anything records") {
+        assertEqual(Copy.screenRecordingAsk(captureBusy: true, alreadyRequested: false), .waitForCapture, "Allow waits while a capture records")
+        assertEqual(Copy.screenRecordingAsk(captureBusy: true, alreadyRequested: true), .waitForCapture, "Settings waits too while a capture records")
+        assertEqual(Copy.screenRecordingAsk(captureBusy: false, alreadyRequested: false), .request, "the first ask is the system prompt")
+        assertEqual(Copy.screenRecordingAsk(captureBusy: false, alreadyRequested: true), .openSettings, "after the one prompt, System Settings is the only way")
+        assertTrue(
+            Copy.asksForScreenRecordingAfterSetup(autocomplete: true, granted: false, captureBusy: false),
+            "finishing setup with Autocomplete on asks once"
+        )
+        assertFalse(
+            Copy.asksForScreenRecordingAfterSetup(autocomplete: true, granted: false, captureBusy: true),
+            "finishing setup while a capture records doesn't ask"
+        )
+        assertFalse(
+            Copy.asksForScreenRecordingAfterSetup(autocomplete: true, granted: true, captureBusy: false),
+            "a granted permission isn't asked for again"
+        )
+        assertFalse(
+            Copy.asksForScreenRecordingAfterSetup(autocomplete: false, granted: false, captureBusy: false),
+            "Save my writing alone doesn't need Screen Recording"
+        )
+    }
 }

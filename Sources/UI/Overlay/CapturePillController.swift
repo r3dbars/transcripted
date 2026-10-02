@@ -288,18 +288,20 @@ final class CapturePillController {
     private func installEventMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let panel = self.panel, panel.isVisible else { return event }
-            // Only handle Return/Escape once the pill itself owns the key event.
-            // Keystrokes aimed at Home, Settings, or a speaker-review field must pass through.
-            guard event.window === panel || panel.isKeyWindow else { return event }
-            switch event.keyCode {
-            case 36:
+            guard let self, let panel = self.panel else { return event }
+            switch CapturePillKeyRouting.action(
+                keyCode: event.keyCode,
+                pillVisible: panel.isVisible,
+                eventInPill: event.window === panel,
+                pillIsKey: panel.isKeyWindow
+            ) {
+            case .record:
                 self.record()
                 return nil
-            case 53:
+            case .dismiss:
                 self.dismiss(notify: true)
                 return nil
-            default:
+            case .passThrough:
                 return event
             }
         }
@@ -319,6 +321,30 @@ final class CapturePillController {
         let size = panel.frame.size
         let origin = CapturePillPlacementPolicy.origin(panelSize: size, visibleFrame: visibleFrame)
         panel.setFrameOrigin(origin)
+    }
+}
+
+/// What a key press does while the call prompt pill is up: Return records
+/// and Escape dismisses, but only once the pill itself owns the key event.
+/// Keystrokes aimed at Home, Settings, or a speaker-review field pass through.
+enum CapturePillKeyRouting: Equatable {
+    case record
+    case dismiss
+    case passThrough
+
+    static let returnKeyCode: UInt16 = 36
+    static let escapeKeyCode: UInt16 = 53
+
+    static func action(keyCode: UInt16, pillVisible: Bool, eventInPill: Bool, pillIsKey: Bool) -> CapturePillKeyRouting {
+        guard pillVisible, eventInPill || pillIsKey else { return .passThrough }
+        switch keyCode {
+        case returnKeyCode:
+            return .record
+        case escapeKeyCode:
+            return .dismiss
+        default:
+            return .passThrough
+        }
     }
 }
 

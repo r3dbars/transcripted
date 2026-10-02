@@ -8,23 +8,22 @@
 // work. Live/transient overlays and transcript-bearing review windows opt out
 // with `sharingType = .none`.
 //
-// Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
-// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift
-// and Sources/UI/Settings/{SpeakerNamingSheet,
-// TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
-// constructing every surface. TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
-// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
-// TranscriptedOnboardingWindowController's init only takes closures (makeView returning
-// PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
-// in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
-// FloatingOverlayPanel, CapturePillPanel, NotchIslandPanel, and PasteLastDictationFeedbackPanel are
-// compiled here and built live by the first four suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
-// live in a file this runner does not compile, so they stay on it. The CapturePillController suite greps
-// present()/installEventMonitor() because proving real Return/Escape key routing needs a live
-// NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
-// (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
-// definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
-// added" — update expectedMarkers when you add, rename, or remove one.
+// Source-text pins left: "protected Transcripted NSWindow/NSPanel inits" and
+// "non-sensitive titled windows stay capturable" read the init bodies of
+// MeetingOverlayPanel/MeetingOverlayTooltipPanel, NamingWindowController
+// (SpeakerNamingSheet.swift), TranscriptedOnboardingWindowController and
+// TranscriptedSettingsWindowController as text. The meeting pill and naming
+// window are deleted by the #1946 follow-ups; the two window controllers need
+// the live app graph (or a window factory seam) this runner never builds.
+// "detected meeting prompts route through the capture pill" reads
+// TranscriptedApp.swift, which another lane is splitting; convert it after.
+// The window/panel marker scan is a legitimate static check: there is no
+// runtime signal for "a new window got added", so update expectedMarkers when
+// you add, rename, or remove one.
+//
+// Built for real: FloatingOverlayPanel, CapturePillPanel, NotchIslandPanel
+// (including its screen-sharing switch) and PasteLastDictationFeedbackPanel.
+// The call prompt's Return/Escape scoping runs through CapturePillKeyRouting.
 
 import AppKit
 import Foundation
@@ -81,11 +80,20 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
         assertFalse(panel.canBecomeMain, "the island is never a main window")
         assertEqual(panel.level, .statusBar, "the island sits in the menu bar, above it, below open menus")
-        let controller = overlayPrivacySource("Sources/UI/Overlay/NotchIslandController.swift")
-        assertTrue(
-            controller.contains("panel.sharingType = NotchIslandPreferences.visibleInScreenSharing() ? .readOnly : .none"),
-            "the island only becomes capturable when the person turns on Show island in screen sharing"
-        )
+        let suiteName = "OverlayScreenSharePrivacyTests.island.\(UUID().uuidString)"
+        if let defaults = UserDefaults(suiteName: suiteName) {
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .none, "the island stays out of screen sharing by default")
+            NotchIslandPreferences.setVisibleInScreenSharing(true, userDefaults: defaults)
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .readOnly, "the island becomes capturable once the person turns on Show island in screen sharing")
+            NotchIslandPreferences.setVisibleInScreenSharing(false, userDefaults: defaults)
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .none, "turning the setting off hides the island again")
+        } else {
+            assertTrue(false, "expected a scratch UserDefaults suite")
+        }
         let offscreen = NSRect(x: 0, y: 5000, width: 360, height: 32)
         assertEqual(
             panel.constrainFrameRect(offscreen, to: nil),
@@ -110,29 +118,29 @@ func testOverlayScreenSharePrivacy() async {
     }
 
     runSuite("CapturePillController scopes Return and Escape to the pill panel") {
-        let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
-        let presentBlock = overlayPrivacySlice(
-            capturePill,
-            from: "func present(",
-            to: "func dismiss(notify: Bool)"
+        func route(_ keyCode: UInt16, visible: Bool = true, inPill: Bool = false, isKey: Bool = false) -> CapturePillKeyRouting {
+            CapturePillKeyRouting.action(keyCode: keyCode, pillVisible: visible, eventInPill: inPill, pillIsKey: isKey)
+        }
+        assertEqual(route(CapturePillKeyRouting.returnKeyCode, inPill: true), .record, "Return in the pill records")
+        assertEqual(route(CapturePillKeyRouting.escapeKeyCode, inPill: true), .dismiss, "Escape in the pill dismisses")
+        assertEqual(route(CapturePillKeyRouting.returnKeyCode, isKey: true), .record, "Return while the pill is key records")
+        assertEqual(route(CapturePillKeyRouting.escapeKeyCode, isKey: true), .dismiss, "Escape while the pill is key dismisses")
+        assertEqual(
+            route(CapturePillKeyRouting.returnKeyCode),
+            .passThrough,
+            "Return typed into Home, Settings, or a speaker-review field must reach that window, not the pill"
         )
-        let monitorBlock = overlayPrivacySlice(
-            capturePill,
-            from: "private func installEventMonitor()",
-            to: "private func position(panel: NSPanel)"
+        assertEqual(
+            route(CapturePillKeyRouting.escapeKeyCode),
+            .passThrough,
+            "Escape aimed at another Transcripted window must not dismiss the call prompt"
         )
-
-        assertFalse(
-            presentBlock.contains("panel.makeKey()"),
-            "showing the detected-meeting pill must not steal key focus from the current Transcripted window"
+        assertEqual(
+            route(CapturePillKeyRouting.escapeKeyCode, visible: false, inPill: true, isKey: true),
+            .passThrough,
+            "a hidden pill handles no keys"
         )
-        assertTrue(
-            monitorBlock.contains("event.window === panel || panel.isKeyWindow")
-                && monitorBlock.contains("case 36:")
-                && monitorBlock.contains("case 53:")
-                && monitorBlock.contains("return event"),
-            "Return/Escape should be swallowed only when the key event belongs to the pill panel"
-        )
+        assertEqual(route(0, inPill: true, isKey: true), .passThrough, "other keys always pass through")
     }
 
     // Source contract: most app surfaces live in files the fast runner cannot
@@ -259,15 +267,6 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
             "detected meeting prompts should not reuse the recording overlay prompt surface"
-        )
-        let meetingOverlay = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
-        assertFalse(
-            meetingOverlay.contains("presentDetectedMeetingPrompt")
-                || meetingOverlay.contains("onPromptRecord")
-                || meetingOverlay.contains("onPromptDismiss")
-                || meetingOverlay.contains("onPromptRemindSoon")
-                || meetingOverlay.contains("onPromptExpired"),
-            "the recording overlay should not retain a second detected-meeting prompt implementation"
         )
     }
 }

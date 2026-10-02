@@ -9,6 +9,21 @@ enum HomeCaptureListCopy {
     static let emptyDictations = "No recent dictations."
     static let noMeetingMatches = "No meetings match your search."
     static let searchingMeetings = "Searching all meetings…"
+
+    /// The Settings row that opens the picker for an audio or video file to
+    /// transcribe. The QA import smoke presses it by this identifier.
+    enum ImportFileRow {
+        static let title = "Transcribe a file"
+        static let value = "Choose"
+        static let help = "Pick an audio or video file. The transcript lands with your meetings."
+        static let automationIdentifier = "transcripted.settings.general.transcribe-audio-file"
+    }
+
+    /// The empty Meetings list's second button, which opens the same picker.
+    enum EmptyMeetingsImportAction {
+        static let title = "Transcribe audio file"
+        static let automationIdentifier = "transcripted.home.meetings.empty.import-audio"
+    }
 }
 
 // MARK: - Meeting rename affordance
