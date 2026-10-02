@@ -100,23 +100,22 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `scripts/entrypoints/` — implementations behind the thin root command wrappers
 
 Dated audit and autoeval docs in `docs/` are point-in-time evidence. Use the
-current command map, local `CLAUDE.md`, and `.agents/test-matrix.yml` for live
+current command map, local `AGENTS.md`, and `.agents/test-matrix.yml` for live
 instructions unless a dated doc is explicitly the target of the task.
 
 ## Docs Map
 
 `scripts/dev/check-doc-paths.py` (in `linux-checks.sh`) fails when a doc names a
-path that doesn't exist, and keeps `AGENTS.md` and `CLAUDE.md` inside their
-line budgets. When you move or delete a file, fix the docs that name it.
+path that doesn't exist, and keeps the root `AGENTS.md` inside its
+line budget. When you move or delete a file, fix the docs that name it.
 
 Use these docs for these jobs:
 
 - `README.md` — public product overview and quick start
 - `CONTRIBUTING.md` — contributor setup and contribution norms
-- `AGENTS.md` — the one guide for every coding agent (Claude, Codex, or other): rules, commands, traps
+- `AGENTS.md` — the one guide for every coding agent (Claude, Codex, or other): rules, commands, traps. Claude Code reads it natively; there is no `CLAUDE.md`
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
 - `.github/` — GitHub issue templates, PR checklist, and workflow automation
-- `CLAUDE.md` — imports `AGENTS.md` so Claude Code loads the same rules
 - `docs/activation-lane.md` — saved Markdown, agent payoff, and return-use routing
 - `docs/agent-closeout.md` — compact coordinator and agent handoff format
 - `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
@@ -155,8 +154,8 @@ Use these docs for these jobs:
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
-- `Sources/*/CLAUDE.md` (and nested ones such as `Sources/UI/Settings/CLAUDE.md`) — subsystem-local ownership and verification notes
-- `Tools/README.md` and `Tools/*/CLAUDE.md` — the standalone packages
+- `Sources/*/AGENTS.md` (and nested ones such as `Sources/UI/Settings/AGENTS.md`) — subsystem-local ownership and verification notes
+- `Tools/README.md` and `Tools/*/AGENTS.md` — the standalone packages
 - `scripts/README.md` — what each repo script does and how to run it
 
 Point-in-time docs (history, not instructions; don't route agents here for current behavior):
@@ -171,7 +170,7 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 
 ## Hotspots
 
-Files over 1,500 lines. Read the whole file and its folder's `CLAUDE.md` before editing, and don't add another responsibility to any of them. Regenerate the list instead of trusting it:
+Files over 1,500 lines. Read the whole file and its folder's `AGENTS.md` before editing, and don't add another responsibility to any of them. Regenerate the list instead of trusting it:
 
 ```bash
 find Sources Tools/*/Sources -name '*.swift' -not -path '*/.build/*' | xargs wc -l | awk '$1>1500 && $2!="total"' | sort -rn

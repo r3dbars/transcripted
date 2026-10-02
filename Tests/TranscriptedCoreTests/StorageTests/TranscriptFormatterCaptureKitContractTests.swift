@@ -5,8 +5,8 @@ import XCTest
 ///
 /// `TranscriptedCaptureKit.CaptureMarkdownParser` parses the Markdown that
 /// `TranscriptSaver.formatTranscriptMarkdown` writes, but the kit intentionally
-/// does not link Core (see `Sources/TranscriptedCore/CLAUDE.md` and
-/// `Tools/TranscriptedCaptureKit/CLAUDE.md`), so the two can drift silently.
+/// does not link Core (see `Sources/TranscriptedCore/AGENTS.md` and
+/// `Tools/TranscriptedCaptureKit/AGENTS.md`), so the two can drift silently.
 ///
 /// This test pins the exact structural tokens the kit keys on. Its sibling,
 /// `CaptureMarkdownParserTests.testRoundTripParsesWriterDocument`, parses a

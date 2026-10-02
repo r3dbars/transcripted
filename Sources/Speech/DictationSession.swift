@@ -12,7 +12,7 @@
 // and owns panel geometry/tooltips/accessibility.
 //
 // Lives in Sources/Speech/ (not Sources/Dictation/) because Sources/Dictation
-// is scoped to persistence helpers only — its own CLAUDE.md says recording
+// is scoped to persistence helpers only — its own AGENTS.md says recording
 // lifecycle changes belong in DictationSessionController and Sources/Speech/.
 // Sources/Speech/ already owns STTRouter/ParakeetEngine and the readiness
 // policies (DictationReadinessWaitPolicy, ParakeetRecoveryState) this type

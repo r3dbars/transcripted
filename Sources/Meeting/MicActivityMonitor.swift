@@ -7,7 +7,7 @@
 // NSAudioCaptureUsageDescription TCC permission is required (confirmed by the
 // Phase 0 spike). The detector turns that set into a prompt.
 //
-// Threading (root CLAUDE.md CoreAudio rules): all CoreAudio reads, listeners,
+// Threading (root AGENTS.md CoreAudio rules): all CoreAudio reads, listeners,
 // and mutable state are confined to a single serial utility queue. We never do
 // heavy work in a property-listener callback beyond scheduling a scan, and we
 // hop to the main actor to deliver results. The class is `@unchecked Sendable`

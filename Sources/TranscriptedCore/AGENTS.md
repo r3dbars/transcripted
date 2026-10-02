@@ -171,7 +171,7 @@ Also run when the package seam changes:
 
 Current direct core coverage includes (paths reflect the five per-subsystem
 SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`,
-`StorageTests`, `UtilitiesTests` — see root `CLAUDE.md` "Scoped test loops"):
+`StorageTests`, `UtilitiesTests` — `Tests/README.md` shows how to scope a loop):
 
 - `Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/AudioTests/AudioDiagnosticsSnapshotTests.swift`

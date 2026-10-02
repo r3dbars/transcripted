@@ -20,7 +20,7 @@
     {
       "id": "accessibility",
       "path_prefixes": ["Sources/Accessibility/"],
-      "docs": ["Sources/Accessibility/CLAUDE.md"],
+      "docs": ["Sources/Accessibility/AGENTS.md"],
       "keywords": ["accessibility", "ax", "focus", "focused editor", "overlay placement", "paste target"],
       "owns": "Focused-editor metadata, AX reads, and overlay placement context.",
       "invariants": [
@@ -32,7 +32,7 @@
     {
       "id": "capture",
       "path_prefixes": ["Sources/Capture/"],
-      "docs": ["Sources/Capture/CLAUDE.md"],
+      "docs": ["Sources/Capture/AGENTS.md"],
       "keywords": ["hotkey", "shortcut", "keyboard", "physical trigger"],
       "owns": "Global hotkeys and physical dictation trigger routing.",
       "invariants": ["Preserve key-up/key-down ordering and wake recovery."],
@@ -41,7 +41,7 @@
     {
       "id": "dictation",
       "path_prefixes": ["Sources/Dictation/", "Sources/UI/Overlay/"],
-      "docs": ["Sources/Dictation/CLAUDE.md", "Sources/UI/CLAUDE.md"],
+      "docs": ["Sources/Dictation/AGENTS.md", "Sources/UI/AGENTS.md"],
       "keywords": ["dictation", "pasteback", "clipboard", "auto enter", "overlay", "no speech"],
       "owns": "Dictation lifecycle, persistence, overlay state, pasteback orchestration, and timeout helpers.",
       "invariants": [
@@ -54,7 +54,7 @@
     {
       "id": "speech",
       "path_prefixes": ["Sources/Speech/"],
-      "docs": ["Sources/Speech/CLAUDE.md", "docs/audio-reliability-daily-check.md"],
+      "docs": ["Sources/Speech/AGENTS.md", "docs/audio-reliability-daily-check.md"],
       "keywords": ["speech", "stt", "model download", "model readiness", "parakeet", "bluetooth", "airpods", "audio route", "microphone"],
       "owns": "Local STT, model provisioning, microphone capture, device routing, and audio recovery.",
       "invariants": [
@@ -67,7 +67,7 @@
     {
       "id": "meeting-app",
       "path_prefixes": ["Sources/Meeting/"],
-      "docs": ["Sources/Meeting/CLAUDE.md", "docs/qa-issue-500-meeting-audio.md"],
+      "docs": ["Sources/Meeting/AGENTS.md", "docs/qa-issue-500-meeting-audio.md"],
       "keywords": ["meeting", "zoom", "google meet", "system audio", "quiet mic", "meeting prompt", "retained audio"],
       "owns": "App-side meeting state, meeting prompts, capture bridge, retries, and saved-meeting UI.",
       "invariants": [
@@ -81,7 +81,7 @@
       "id": "meeting-core",
       "path_prefixes": ["Sources/TranscriptedCore/", "Tests/TranscriptedCoreTests/"],
       "exact_paths": ["Package.swift"],
-      "docs": ["Sources/TranscriptedCore/CLAUDE.md"],
+      "docs": ["Sources/TranscriptedCore/AGENTS.md"],
       "keywords": ["transcriptedcore", "pipeline", "transcription queue", "speaker", "diarization", "imported audio"],
       "owns": "Reusable meeting transcription, audio processing, speaker logic, and queueing.",
       "invariants": [
@@ -94,7 +94,7 @@
     {
       "id": "support",
       "path_prefixes": ["Sources/Support/"],
-      "docs": ["Sources/Support/CLAUDE.md", "docs/storage-paths.md"],
+      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md"],
       "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install"],
       "owns": "Shared preferences, permissions, paths, paste helpers, and launch behavior.",
       "invariants": [
@@ -106,7 +106,7 @@
     {
       "id": "ui",
       "path_prefixes": ["Sources/UI/"],
-      "docs": ["Sources/UI/CLAUDE.md"],
+      "docs": ["Sources/UI/AGENTS.md"],
       "keywords": ["ui", "menu bar", "home", "settings", "onboarding", "agent connect"],
       "owns": "Menu bar, Home, Settings, onboarding, overlay presentation, and agent-connect UI.",
       "invariants": [
@@ -119,7 +119,7 @@
       "id": "observability",
       "path_prefixes": ["Sources/Observability/"],
       "exact_paths": ["Info.plist"],
-      "docs": ["Sources/Observability/CLAUDE.md", "docs/privacy-first-observability.md"],
+      "docs": ["Sources/Observability/AGENTS.md", "docs/privacy-first-observability.md"],
       "keywords": ["sentry", "posthog", "analytics", "telemetry", "crash", "sparkle", "update"],
       "owns": "Local diagnostics, bounded Sentry/PostHog forwarding, and app updates.",
       "invariants": [
@@ -132,7 +132,7 @@
     {
       "id": "reliability",
       "path_prefixes": ["Sources/Reliability/"],
-      "docs": ["Sources/Reliability/CLAUDE.md"],
+      "docs": ["Sources/Reliability/AGENTS.md"],
       "keywords": ["wake", "sleep", "recovery", "resume", "hotkey recovery"],
       "owns": "Wake, sleep, hotkey, and active-capture recovery.",
       "invariants": ["Recovery must be idempotent and must not duplicate active capture state."],
@@ -215,7 +215,7 @@
       "id": "app-shell",
       "path_prefixes": ["Sources/"],
       "fallback": true,
-      "docs": ["Sources/CLAUDE.md"],
+      "docs": ["Sources/AGENTS.md"],
       "keywords": ["app shell", "app delegate", "bootstrap", "application state"],
       "owns": "Top-level application bootstrap, shared app state, and subsystem wiring.",
       "invariants": [

@@ -25,11 +25,11 @@ Good activation work should improve at least one of these moments:
 
 - `README.md` for the product promise
 - `docs/agent-connect.md` for the saved-folder and MCP handoff
-- `Sources/UI/CLAUDE.md` for Home, onboarding, settings, and agent-connect UI
-- `Sources/Support/CLAUDE.md` for Claude Desktop install, paths, paste, and preferences
-- `Sources/Dictation/CLAUDE.md` for dictation Markdown persistence
-- `Sources/Meeting/CLAUDE.md` for meeting save, retry, and retained-audio behavior
-- `Sources/Observability/CLAUDE.md` for activation telemetry guardrails
+- `Sources/UI/AGENTS.md` for Home, onboarding, settings, and agent-connect UI
+- `Sources/Support/AGENTS.md` for Claude Desktop install, paths, paste, and preferences
+- `Sources/Dictation/AGENTS.md` for dictation Markdown persistence
+- `Sources/Meeting/AGENTS.md` for meeting save, retry, and retained-audio behavior
+- `Sources/Observability/AGENTS.md` for activation telemetry guardrails
 
 ## Route The Work
 
@@ -37,9 +37,9 @@ Good activation work should improve at least one of these moments:
 | --- | --- |
 | first saved dictation or meeting is missing, hidden, or hard to open | `Sources/UI/Settings/HomeView.swift`, `Sources/UI/Shared/RecentCaptureScanners.swift`, `Sources/Dictation/`, `Sources/Meeting/` |
 | agent setup, first prompt, agent connect rows, or folder handoff | `Sources/UI/Shared/AgentConnectionGuide.swift`, `Sources/UI/Settings/AgentConnectionSettingsPage.swift`, `Sources/Support/ClaudeDesktopIntegrationInstaller.swift`, `Sources/Support/AgentMCPConnector.swift`, `docs/agent-connect.md` |
-| pasteback, copied text, Auto Enter, or clipboard restore | `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Accessibility/CLAUDE.md` |
-| Bluetooth or AirPods dictation reliability | `Sources/Speech/CLAUDE.md`, `docs/audio-reliability-daily-check.md` |
-| Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/CLAUDE.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
+| pasteback, copied text, Auto Enter, or clipboard restore | `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Accessibility/AGENTS.md` |
+| Bluetooth or AirPods dictation reliability | `Sources/Speech/AGENTS.md`, `docs/audio-reliability-daily-check.md` |
+| Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/AGENTS.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
 | activation analytics or health probes | `Sources/Observability/ActivationTelemetry.swift`, `Sources/Observability/AnalyticsEventPolicy.swift`, `docs/privacy-first-observability.md`, `docs/ops-credentials.md` |
 
 ## PostHog Funnel Report
