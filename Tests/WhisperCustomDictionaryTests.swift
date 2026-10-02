@@ -5,8 +5,8 @@
 // Whisper used to return transcribed text verbatim, so a user who taught the
 // app their proper nouns got those corrections on Parakeet but silently not on
 // Whisper. WhisperEngine can't be instantiated in the fast runner (it pulls in
-// WhisperKit), so this pairs a behavioral check of the processor with a
-// source-level contract that the Whisper return value routes through it.
+// WhisperKit), so it builds its return value with SegmentedEngineTranscript,
+// which these tests drive directly.
 
 import Foundation
 
@@ -37,24 +37,16 @@ func testWhisperCustomDictionary() {
         )
     }
 
-    // Source contract: the Whisper engine's success return must pass through the
-    // custom-dictionary processor, not return the raw transcript.
-    runSuite("WhisperEngine routes its transcript through CustomDictionaryTextProcessor") {
-        let source = whisperEngineSource()
+    runSuite("Whisper's joined segments come back with dictionary corrections") {
+        let entries = [CustomDictionaryEntry(spoken: "post hog", replacement: "PostHog")]
+        let transcript = SegmentedEngineTranscript(
+            segmentTexts: ["  we shipped post", "hog events  "],
+            entries: entries
+        )
+        assertEqual(transcript.uncorrected, "we shipped post hog events", "segments join with one space and lose outer whitespace")
+        assertEqual(transcript.text, "we shipped PostHog events", "a correction can span a segment boundary")
 
-        assertTrue(
-            source.contains("CustomDictionaryTextProcessor.apply(to: trimmed)"),
-            "WhisperEngine should return CustomDictionaryTextProcessor.apply(to: trimmed)"
-        )
-        assertFalse(
-            source.contains("return trimmed\n"),
-            "WhisperEngine should not return the un-corrected transcript directly"
-        )
+        let plain = SegmentedEngineTranscript(segmentTexts: [" hello ", " "], entries: [])
+        assertEqual(plain.text, "hello", "an empty dictionary returns the trimmed text unchanged")
     }
-}
-
-private func whisperEngineSource() -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/Speech/WhisperEngine.swift")
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
