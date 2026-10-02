@@ -1,0 +1,140 @@
+name: Concurrency Census
+
+# Swift 6 migration ratchet (scripts/dev/concurrency-census.sh): a typecheck-only
+# pass with -strict-concurrency=complete that counts concurrency warnings per
+# Sources/ folder and fails when a folder goes above .agents/concurrency-baseline.json.
+# Nothing is built or shipped; the app still compiles in Swift 5 mode.
+#
+# Not flaky by design. The baseline is counted on a dev Mac, and a hosted
+# runner's compiler can report a different number for the same code. So when a
+# PR's head is over the baseline, this job counts the PR's base with the same
+# compiler and only fails if a folder is above both (--allow-up-to). A PR that
+# adds a warning still fails; a toolchain difference alone doesn't.
+#
+# Kept out of swift-ci.yml so it has its own status and doesn't hold up
+# build-and-test. Runs only when Swift sources or the census itself change.
+
+on:
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "scripts/dev/concurrency-census.sh"
+      - "scripts/dev/concurrency-census.py"
+      - "scripts/entrypoints/lib/swiftc-app-args.sh"
+      - ".agents/concurrency-baseline.json"
+      - ".github/workflows/concurrency-census.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "scripts/dev/concurrency-census.sh"
+      - "scripts/dev/concurrency-census.py"
+      - "scripts/entrypoints/lib/swiftc-app-args.sh"
+      - ".agents/concurrency-baseline.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: concurrency-census-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+
+jobs:
+  census:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Fingerprint Swift toolchain
+        id: swift-toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint="$(swiftc --version | shasum -a 256 | awk '{print $1}')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      # Same key as swift-ci.yml's app-build, so the two share the deps cache.
+      - name: Cache prebuilt dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
+
+      - name: Build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+            touch deps-libs/.build-deps-stamp
+          fi
+          bash build-deps.sh
+
+      - name: Concurrency census
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Report mode only fails on a typecheck or deps error. That is a real
+          # failure, never "over baseline", so it never reaches the base count.
+          if ! bash scripts/dev/concurrency-census.sh; then
+            echo "The head didn't typecheck, so the census can't count it."
+            exit 1
+          fi
+          if python3 scripts/dev/concurrency-census.py --log build/concurrency-census.log --mode check; then
+            exit 0
+          fi
+          # Over the baseline. Count the parent commit with this same compiler
+          # before deciding: the PR's base (the merge commit's first parent) on
+          # a pull request, the previous main commit on a push.
+          set -e
+          cp build/concurrency-census.log build/concurrency-census-head.log
+          base="$(git rev-parse HEAD^1)"
+          git worktree add -q build/census-base "$base"
+          # The deps here were built from the head's TranscriptedCore. If the
+          # base's Core or deps recipe differs, it needs its own deps, or its
+          # app sources can fail to typecheck against the head's module.
+          if git diff --quiet "$base" HEAD -- Sources/TranscriptedCore Package.swift scripts/entrypoints/build-deps.sh; then
+            for dir in deps-libs deps-modules deps-frameworks deps-tools; do
+              [ -e "$dir" ] && ln -s "$PWD/$dir" "build/census-base/$dir"
+            done
+          else
+            echo "Core or the deps recipe changed since the base; building the base's own deps."
+            (cd build/census-base && bash build-deps.sh --force)
+          fi
+          set +e
+          (cd build/census-base && bash scripts/dev/concurrency-census.sh)
+          base_status=$?
+          set -e
+          if [ "$base_status" -ne 0 ]; then
+            echo "Couldn't count the base commit (its census failed), so the baseline check stands."
+            exit 1
+          fi
+          python3 scripts/dev/concurrency-census.py --log build/census-base/build/concurrency-census.log \
+            --counts-out build/concurrency-census-base-counts.json
+          python3 scripts/dev/concurrency-census.py --log build/concurrency-census-head.log --mode check \
+            --allow-up-to build/concurrency-census-base-counts.json
+
+      - name: Upload census log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-census-log
+          path: |
+            build/concurrency-census*.log
+            build/concurrency-census-base-counts.json
+          if-no-files-found: ignore

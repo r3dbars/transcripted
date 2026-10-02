@@ -7,6 +7,13 @@ Sendable, actor isolation, global actors, or data races. Each (file, line,
 message) is counted once even if the compiler repeats it.
 
     python3 scripts/dev/concurrency-census.py --log build/concurrency-census.log [--mode report|check|shrink]
+    python3 scripts/dev/concurrency-census.py --log LOG --counts-out counts.json   # write this log's counts
+    python3 scripts/dev/concurrency-census.py --log LOG --mode check --allow-up-to base-counts.json
+
+--allow-up-to is for CI: a folder above the baseline still passes when it is no
+higher than the same census run on the PR's base with the same compiler. That
+keeps a runner toolchain that reports more warnings than the dev Mac from
+failing every PR, while a PR that adds a warning still fails.
     python3 scripts/dev/concurrency-census.py --self-test
 """
 
@@ -68,9 +75,10 @@ def save(path: Path, counts: dict[str, int]) -> None:
     path.write_text(json.dumps(dict(sorted(counts.items())), indent=2) + "\n", encoding="utf-8")
 
 
-def run(log_text: str, mode: str, baseline_path: Path) -> int:
+def run(log_text: str, mode: str, baseline_path: Path, allow_up_to: dict[str, int] | None = None) -> int:
     current = count(log_text)
     baseline = load(baseline_path)
+    allow_up_to = allow_up_to or {}
     folders = sorted(set(current) | set(baseline))
     print(f"{'folder':40} {'now':>6} {'baseline':>9}")
     grew = []
@@ -78,8 +86,11 @@ def run(log_text: str, mode: str, baseline_path: Path) -> int:
         now, was = current.get(folder, 0), baseline.get(folder)
         mark = ""
         if was is not None and now > was:
-            mark = "  UP"
-            grew.append(folder)
+            if now <= allow_up_to.get(folder, -1):
+                mark = f"  UP, but base has {allow_up_to[folder]}"
+            else:
+                mark = "  UP"
+                grew.append(folder)
         elif was is not None and now < was:
             mark = "  down"
         print(f"{folder:40} {now:>6} {('-' if was is None else was):>9}{mark}")
@@ -94,7 +105,9 @@ def run(log_text: str, mode: str, baseline_path: Path) -> int:
         print(f"Baseline updated: {baseline_path.relative_to(REPO_ROOT) if baseline_path.is_relative_to(REPO_ROOT) else baseline_path}")
         return 0
     if mode == "check":
-        new_folders = [f for f in current if f not in baseline and baseline]
+        new_folders = [
+            f for f in current if f not in baseline and baseline and current[f] > allow_up_to.get(f, 0)
+        ]
         if grew or new_folders:
             print("More concurrency warnings than the baseline in: " + ", ".join(grew + new_folders))
             print("Fix the new ones (see build/concurrency-census.log), don't add to the backlog.")
@@ -120,6 +133,8 @@ def self_test() -> None:
         save(base, {"Sources/Speech": 1, "Sources/UI": 1})
         assert run(log, "check", base) == 1
         assert run(log, "shrink", base) == 1
+        assert run(log, "check", base, allow_up_to={"Sources/Speech": 2}) == 0
+        assert run(log, "check", base, allow_up_to={"Sources/Speech": 1}) == 1
         save(base, {"Sources/Speech": 5, "Sources/UI": 1})
         assert run(log, "shrink", base) == 0
         assert load(base) == {"Sources/Speech": 2, "Sources/UI": 1}
@@ -131,6 +146,8 @@ def main() -> int:
     parser.add_argument("--log", type=Path)
     parser.add_argument("--mode", default="report", choices=["report", "check", "shrink"])
     parser.add_argument("--baseline", type=Path, default=BASELINE)
+    parser.add_argument("--counts-out", type=Path, help="write this log's per-folder counts as JSON and exit")
+    parser.add_argument("--allow-up-to", type=Path, help="counts JSON from the base commit (CI); see above")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -142,7 +159,13 @@ def main() -> int:
     if not args.log or not args.log.exists():
         print("--log is required and must exist", file=sys.stderr)
         return 2
-    return run(args.log.read_text(encoding="utf-8", errors="replace"), args.mode, args.baseline)
+    log_text = args.log.read_text(encoding="utf-8", errors="replace")
+    if args.counts_out:
+        save(args.counts_out, count(log_text))
+        print(f"Counts written: {args.counts_out}")
+        return 0
+    allow = load(args.allow_up_to) if args.allow_up_to else None
+    return run(log_text, args.mode, args.baseline, allow)
 
 
 if __name__ == "__main__":

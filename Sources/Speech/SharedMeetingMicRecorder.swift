@@ -57,6 +57,17 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
         }
     }
 
+    /// Borrowed meeting PCM always goes into the dictation recording. No
+    /// feature gate (live text, the level meter) decides that; the meter only
+    /// reads the same buffer afterwards. Returns the levels to show.
+    func recordBorrowedBuffer(
+        _ buffer: AVAudioPCMBuffer,
+        meter: SharedMeetingMicLevelMeter
+    ) -> [SharedMeetingMicLevelMeter.Reading] {
+        append(buffer)
+        return meter.levels(for: buffer)
+    }
+
     private static func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
         let frameCount = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)

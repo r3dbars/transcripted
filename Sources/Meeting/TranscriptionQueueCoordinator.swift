@@ -723,10 +723,6 @@ final class TranscriptionQueueCoordinator {
         }
     }
 
-    private func finalizeBackgroundTranscriptionStateIfNeeded() {
-        finalizeBackgroundTranscriptionStateIfNeeded(snapshot: currentBackgroundTranscriptionWorkSnapshot)
-    }
-
     private func finalizeBackgroundTranscriptionStateIfNeeded(
         snapshot: BackgroundTranscriptionWorkSnapshot
     ) {

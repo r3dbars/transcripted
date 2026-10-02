@@ -8,7 +8,7 @@ out the `backticked` things that look like repo paths, and fails when one
 doesn't exist. It also keeps the always-loaded entry files small.
 
 A path counts as existing when it resolves from the repo root, from the doc's
-own folder or any folder above it (so `Tools/<package>/CLAUDE.md` can name
+own folder or any folder above it (so `Tools/<package>/AGENTS.md` can name
 package-relative paths), or, for a bare file name like `build.sh`, when any
 tracked file has that name. Globs and placeholders (`*`, `<name>`, `{a,b}`,
 `$VAR`, `...`) are skipped.
@@ -36,13 +36,14 @@ SKIP_DOCS = {
     "THIRD_PARTY_LICENSES.md": "license texts",
     "docs/writing-port-ledger.md": "names files in the Tilde repo being ported",
     "docs/writing-plan.md": "names files in the Tilde repo being ported",
+    "Tools/SpeakerEvalHarness/VOICEPRINT_BAKEOFF.md": "finished bake-off record; its scripts were removed",
+    "Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md": "finished bake-off record; its scripts were removed",
 }
 
 # Always-loaded entry files and their line budgets. Every agent session reads
 # these before doing anything, so growth here costs every session.
 LINE_BUDGETS = {
     "AGENTS.md": 110,
-    "CLAUDE.md": 12,
 }
 
 PATH_PREFIXES = ("Sources/", "Tests/", "Tools/", "scripts/", "docs/", ".agents/", ".github/", "Resources/", "config/", "Casks/")
@@ -107,7 +108,7 @@ def run(root: Path, docs: list[str], basenames: set[str]) -> int:
             if lines > budget:
                 problems.append(
                     f"{doc}: {lines} lines, over its {budget}-line budget. Every agent session reads it first; "
-                    "move detail to the folder CLAUDE.md or the reference doc that owns it."
+                    "move detail to the folder AGENTS.md or the reference doc that owns it."
                 )
     if problems:
         print("Docs name things that aren't there:")
@@ -130,11 +131,11 @@ def self_test() -> None:
         basenames = {"Engine.swift", "Thing.swift", "build.sh"}
 
         (root / "AGENTS.md").write_text(
-            "See `Sources/Speech/Engine.swift:42`, `build.sh`, `Sources/<area>/CLAUDE.md`, and `bash check.sh quick`.\n",
+            "See `Sources/Speech/Engine.swift:42`, `build.sh`, `Sources/<area>/AGENTS.md`, and `bash check.sh quick`.\n",
             encoding="utf-8",
         )
-        (root / "Tools/Pkg/CLAUDE.md").write_text("Owns `Sources/Pkg/Thing.swift`.\n", encoding="utf-8")
-        assert run(root, ["AGENTS.md", "Tools/Pkg/CLAUDE.md"], basenames) == 0
+        (root / "Tools/Pkg/AGENTS.md").write_text("Owns `Sources/Pkg/Thing.swift`.\n", encoding="utf-8")
+        assert run(root, ["AGENTS.md", "Tools/Pkg/AGENTS.md"], basenames) == 0
 
         (root / "docs").mkdir()
         (root / "docs/old.md").write_text("Moved: `Sources/Text/Style.swift` and `gone.sh`.\n", encoding="utf-8")
@@ -142,10 +143,10 @@ def self_test() -> None:
         assert run(root, ["docs/out.md"], basenames) == 0
         assert run(root, ["docs/old.md"], basenames) == 1
 
-        (root / "CLAUDE.md").write_text("line\n" * 40, encoding="utf-8")
-        assert run(root, ["CLAUDE.md"], basenames) == 1
+        (root / "AGENTS.md").write_text("line\n" * 200, encoding="utf-8")
+        assert run(root, ["AGENTS.md"], basenames) == 1
 
-        assert candidate_paths("`Sources/*/CLAUDE.md` `$HOME/x.sh` `a b.sh` `docs/x.md#part`") == ["docs/x.md"]
+        assert candidate_paths("`Sources/*/AGENTS.md` `$HOME/x.sh` `a b.sh` `docs/x.md#part`") == ["docs/x.md"]
         assert candidate_paths("`Old.swift` was dissolved into pages.\n`scripts/x.sh` is not in the repo.\n") == []
     print("check-doc-paths self-test passed")
 

@@ -68,3 +68,19 @@ struct RecordedAudioTimeline {
         }
     }
 }
+
+extension RecordedAudioTimeline {
+    /// Converts each segment from its own captured rate and joins them in
+    /// order. A route change mid-take (AirPods dropping to 24 kHz, say) leaves
+    /// segments at different rates; treating them as one rate would warp the audio.
+    static func speechSamples(
+        from segments: [RecordedAudioSegment],
+        resample: (_ samples: [Float], _ sampleRate: Double) throws -> [Float]
+    ) rethrows -> [Float] {
+        var combined: [Float] = []
+        for segment in segments {
+            combined.append(contentsOf: try resample(segment.samples, segment.sampleRate))
+        }
+        return combined
+    }
+}

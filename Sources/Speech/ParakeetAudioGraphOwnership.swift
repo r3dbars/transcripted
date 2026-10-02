@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 struct ParakeetAudioGraphOwnerToken: Equatable, Sendable {
@@ -467,5 +468,238 @@ struct ParakeetRecordedTranscriptionOwnership {
 
     mutating func revoke() {
         activeLease = nil
+    }
+}
+
+/// One run at a time. A second caller joins the run already in flight instead
+/// of starting its own, and the run counts as in progress until its work
+/// returns. `ParakeetEngine.stopRecording` uses this so duplicate stops await
+/// one tap removal and buffer drain, and config recovery can see a stop for
+/// its whole lifetime (`audioStopInProgress`).
+@MainActor
+final class ParakeetSingleFlightLifecycle {
+    private var task: Task<Void, Never>?
+
+    var isInProgress: Bool {
+        task != nil
+    }
+
+    func run(_ work: @escaping @MainActor () async -> Void) async {
+        if let task {
+            await task.value
+            return
+        }
+        let task = Task { @MainActor in
+            await work()
+        }
+        self.task = task
+        await task.value
+        self.task = nil
+    }
+}
+
+struct ParakeetSystemInputRestoreTarget: Equatable, Sendable {
+    let temporaryInput: AudioDeviceID
+    let previousInput: AudioDeviceID
+}
+
+struct ParakeetSystemInputReconciliationRequest: Equatable, Sendable {
+    let attemptedTarget: ParakeetSystemInputRestoreTarget
+    let clearMarkerWhenRestored: Bool
+}
+
+/// Converges timed-out CoreAudio default-input writes back onto current
+/// MainActor intent. A timed-out write can still land after its queue was
+/// retired, so each request re-applies the pending successor's route, or
+/// restores the attempted route when no successor exists, for a bounded number
+/// of attempts. Requests drain through one task, and a late completion asks
+/// for another pass only when intent changed while that HAL call was blocked.
+///
+/// The CoreAudio calls, the pending-restore state, and failure reporting are
+/// injected; `ParakeetEngine.makeSystemInputReconciler()` wires the real ones.
+@MainActor
+final class ParakeetSystemInputReconciler {
+    typealias CoreAudioRun = @MainActor (
+        _ operation: String,
+        _ cleanupAfterLateCompletion: @escaping (String?) -> Void,
+        _ work: @escaping () -> String?
+    ) async throws -> String?
+
+    static let successorOperation = "late_completion_successor_reconcile"
+    static let restoreOperation = "late_completion_restore_reconcile"
+
+    private let attempts: Int
+    private let pendingRestore: @MainActor () -> ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>
+    private let runCoreAudio: CoreAudioRun
+    private let applyInput: (AudioDeviceID) -> String?
+    private let restoreIfStillTemporary: (ParakeetSystemInputRestoreTarget) -> String?
+    private let reportFailure: @MainActor (_ operation: String, _ failureKind: String) -> Void
+    private let spawn: (@escaping @MainActor () async -> Void) -> Void
+    private var pendingRequests: [ParakeetSystemInputReconciliationRequest] = []
+    private var drainTask: Task<Void, Never>?
+
+    init(
+        attempts: Int,
+        pendingRestore: @escaping @MainActor () -> ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>,
+        runCoreAudio: @escaping CoreAudioRun,
+        applyInput: @escaping (AudioDeviceID) -> String?,
+        restoreIfStillTemporary: @escaping (ParakeetSystemInputRestoreTarget) -> String?,
+        reportFailure: @escaping @MainActor (_ operation: String, _ failureKind: String) -> Void,
+        spawn: @escaping (@escaping @MainActor () async -> Void) -> Void = { work in
+            Task { @MainActor in await work() }
+        }
+    ) {
+        self.attempts = attempts
+        self.pendingRestore = pendingRestore
+        self.runCoreAudio = runCoreAudio
+        self.applyInput = applyInput
+        self.restoreIfStillTemporary = restoreIfStillTemporary
+        self.reportFailure = reportFailure
+        self.spawn = spawn
+    }
+
+    /// Queue `request` and return once every queued request has been worked.
+    func reconcile(_ request: ParakeetSystemInputReconciliationRequest) async {
+        enqueue(request)
+        if let drainTask {
+            await drainTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.drain()
+        }
+        drainTask = task
+        await task.value
+    }
+
+    private func enqueue(_ request: ParakeetSystemInputReconciliationRequest) {
+        if let existingIndex = pendingRequests.firstIndex(where: {
+            $0.attemptedTarget == request.attemptedTarget
+        }) {
+            let existing = pendingRequests[existingIndex]
+            pendingRequests[existingIndex] = ParakeetSystemInputReconciliationRequest(
+                attemptedTarget: request.attemptedTarget,
+                clearMarkerWhenRestored: existing.clearMarkerWhenRestored || request.clearMarkerWhenRestored
+            )
+        } else {
+            pendingRequests.append(request)
+        }
+    }
+
+    private func drain() async {
+        while !pendingRequests.isEmpty {
+            let request = pendingRequests.removeFirst()
+            await perform(request)
+        }
+        drainTask = nil
+    }
+
+    private func perform(_ request: ParakeetSystemInputReconciliationRequest) async {
+        let applyInput = applyInput
+        let restoreIfStillTemporary = restoreIfStillTemporary
+        let spawn = spawn
+        for _ in 0..<attempts {
+            let pending = pendingRestore()
+            if let successorOwner = pending.owner,
+               let successorTarget = pending.value(ownedBy: successorOwner) {
+                let applyError: String?
+                do {
+                    applyError = try await runCoreAudio(
+                        Self.successorOperation,
+                        { [weak self] lateError in
+                            spawn { [weak self] in
+                                await self?.handleLateCompletion(
+                                    coreAudioError: lateError,
+                                    intendedOwner: successorOwner,
+                                    intendedTarget: successorTarget,
+                                    request: request
+                                )
+                            }
+                        },
+                        { applyInput(successorTarget.temporaryInput) }
+                    )
+                } catch {
+                    reportFailure(Self.successorOperation, "timeout")
+                    continue
+                }
+                guard applyError == nil else {
+                    reportFailure(Self.successorOperation, "core_audio_error")
+                    continue
+                }
+                let current = pendingRestore()
+                if current.owner == successorOwner,
+                   current.value(ownedBy: successorOwner) == successorTarget {
+                    return
+                }
+                continue
+            }
+
+            let restoreError: String?
+            do {
+                restoreError = try await runCoreAudio(
+                    Self.restoreOperation,
+                    { [weak self] lateError in
+                        spawn { [weak self] in
+                            await self?.handleLateCompletion(
+                                coreAudioError: lateError,
+                                intendedOwner: nil,
+                                intendedTarget: nil,
+                                request: request
+                            )
+                        }
+                    },
+                    { restoreIfStillTemporary(request.attemptedTarget) }
+                )
+            } catch {
+                reportFailure(Self.restoreOperation, "timeout")
+                continue
+            }
+            guard restoreError == nil else {
+                reportFailure(Self.restoreOperation, "core_audio_error")
+                continue
+            }
+            if !pendingRestore().hasPendingValue {
+                return
+            }
+        }
+    }
+
+    /// Timed-out reconciliation work may complete after a replacement queue has
+    /// already converged the route. The late result needs more work only when
+    /// MainActor intent changed while that HAL call was blocked. An unchanged
+    /// successful intent is terminal, which prevents timeout callbacks from
+    /// recursively creating an unbounded queue/task chain.
+    private func handleLateCompletion(
+        coreAudioError: String?,
+        intendedOwner: ParakeetAudioGraphOwnerToken?,
+        intendedTarget: ParakeetSystemInputRestoreTarget?,
+        request: ParakeetSystemInputReconciliationRequest
+    ) async {
+        guard coreAudioError == nil else {
+            reportFailure(
+                intendedOwner == nil ? Self.restoreOperation : Self.successorOperation,
+                "core_audio_error"
+            )
+            return
+        }
+
+        let pending = pendingRestore()
+        if let intendedOwner, let intendedTarget {
+            if pending.owner == intendedOwner,
+               pending.value(ownedBy: intendedOwner) == intendedTarget {
+                return
+            }
+        } else if !pending.hasPendingValue {
+            return
+        }
+
+        await reconcile(
+            ParakeetSystemInputReconciliationRequest(
+                attemptedTarget: request.attemptedTarget,
+                clearMarkerWhenRestored: true
+            )
+        )
     }
 }

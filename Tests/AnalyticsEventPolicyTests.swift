@@ -3,8 +3,8 @@
 // those types are in run-tests.sh's APP_SOURCES. A few suites instead grep source as text:
 // Sources/Observability/WorkflowRecoveryTelemetry.swift is NOT in APP_SOURCES (and its only
 // effect, AnalyticsReporter.track, silently no-ops without a configured PostHog key, so there is
-// nothing to observe even if it were compiled); Sources/TranscriptedApp.swift and
-// Sources/Meeting/MeetingSessionController.swift are @MainActor/AppKit and also excluded from
+// nothing to observe even if it were compiled); Sources/TranscriptedApp.swift and the
+// MeetingSessionController files are @MainActor/AppKit and also excluded from
 // APP_SOURCES, so the meeting-prompt telemetry call-site counts are counted as text instead of
 // exercised; Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift lives
 // in a separate SPM package never linked into this runner, so its allowedProperties literal is
@@ -1751,7 +1751,7 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
         let appSource = readSourceFixture("Sources/TranscriptedApp.swift")
-        let meetingSessionSource = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
+        let meetingSessionSource = readMeetingSessionControllerSource()
 
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),

@@ -13,14 +13,14 @@
 
 ## Read first
 
-Each package has its own local `CLAUDE.md` and `Package.swift`.
+Each package has its own local `AGENTS.md` and `Package.swift`.
 
-- `Tools/SpeakerEvalHarness/CLAUDE.md`
-- `Tools/TranscriptedCaptureKit/CLAUDE.md`
-- `Tools/TranscriptedCLI/CLAUDE.md`
-- `Tools/TranscriptedLab/CLAUDE.md`
-- `Tools/TranscriptedMCP/CLAUDE.md`
-- `Tools/TranscriptedQA/CLAUDE.md`
+- `Tools/SpeakerEvalHarness/AGENTS.md`
+- `Tools/TranscriptedCaptureKit/AGENTS.md`
+- `Tools/TranscriptedCLI/AGENTS.md`
+- `Tools/TranscriptedLab/AGENTS.md`
+- `Tools/TranscriptedMCP/AGENTS.md`
+- `Tools/TranscriptedQA/AGENTS.md`
 
 ## Why this exists
 

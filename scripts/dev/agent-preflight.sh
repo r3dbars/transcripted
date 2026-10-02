@@ -142,7 +142,7 @@ echo ""
 echo "Docs to trust first:"
 echo "- AGENTS.md"
 echo "- docs/repo-layout.md"
-echo "- nearest live CLAUDE.md for touched code"
+echo "- nearest live AGENTS.md for touched code"
 echo ""
 
 echo "Matrix: .agents/test-matrix.yml"

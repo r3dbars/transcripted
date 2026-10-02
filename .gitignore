@@ -41,8 +41,10 @@ debug.log
 
 # Claude Code: team files (.claude/commands, .claude/skills, .claude/settings.json,
 # agents, hooks) are tracked. Only personal/local state is ignored: local
-# settings overrides, personal CLAUDE.local.md memory, agent worktrees, and
-# per-machine session state (todos, lock files, local agent memory).
+# settings overrides, agent worktrees, and per-machine session state (todos,
+# lock files, local agent memory). CLAUDE.local.md stays ignored so it never
+# gets committed, but don't create one: Claude Code then skips AGENTS.md
+# (check-known-traps.py fails on it).
 .claude/settings.local.json
 .claude/*.local.json
 .claude/worktrees/

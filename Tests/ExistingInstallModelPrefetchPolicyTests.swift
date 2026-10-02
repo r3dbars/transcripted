@@ -1,10 +1,5 @@
-// Source-text pin: one suite reads the literal text of Sources/TranscriptedAppState.swift,
-// an @MainActor SwiftUI ObservableObject that owns ContextCaptureEngine/STTRouter and is not
-// compiled into this runner, so its launch-model-warmup gate can't be called directly. What's
-// pinned: models warm at launch by default so dictation and meetings are ready the moment the
-// app opens, and only the strict `TRANSCRIPTED_LAZY_MODEL_WARMUP == "1"` developer opt-out
-// returns to first-use loading. The rest of this file calls
-// ExistingInstallModelPrefetchPolicy directly — real behavioral coverage, not a pin.
+// Decides which installs get background speech-model work at startup, and
+// whether models warm at launch at all.
 
 import Foundation
 
@@ -24,27 +19,24 @@ func testExistingInstallModelPrefetchPolicy() {
         ))
     }
 
-    runSuite("TranscriptedAppState — models warm at launch unless a developer opts out") {
-        let source = readSourceFixture("Sources/TranscriptedAppState.swift")
+    runSuite("Launch warmup — models warm at launch unless a developer opts out") {
         assertTrue(
-            source.contains("environment[\"TRANSCRIPTED_LAZY_MODEL_WARMUP\"] != \"1\""),
-            "launch warmup should be the default so the first dictation and meeting never wait on a cold load"
+            ExistingInstallModelPrefetchPolicy.launchWarmupEnabled(environment: [:]),
+            "launch warmup is the default so the first dictation and meeting never wait on a cold load"
         )
         assertFalse(
-            source.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
-            "the old opt-in flag must not come back and turn launch warmup off by default"
+            ExistingInstallModelPrefetchPolicy.launchWarmupEnabled(environment: ["TRANSCRIPTED_LAZY_MODEL_WARMUP": "1"]),
+            "TRANSCRIPTED_LAZY_MODEL_WARMUP=1 goes back to first-use loading for idle-memory measurements"
         )
+        for value in ["0", "", "true", "yes"] {
+            assertTrue(
+                ExistingInstallModelPrefetchPolicy.launchWarmupEnabled(environment: ["TRANSCRIPTED_LAZY_MODEL_WARMUP": value]),
+                "only the exact value 1 opts out, not \"\(value)\""
+            )
+        }
         assertTrue(
-            source.contains("await self.meetingSession.prepareModels(showLoadingUI: false)"),
-            "launch warmup should also load the meeting models quietly, not just dictation"
-        )
-        assertTrue(
-            source.contains("let dictationWarmup = Task(priority: .userInitiated)"),
-            "the dictation model warms at user priority so Core ML isn't compiled on efficiency cores"
-        )
-        assertTrue(
-            source.contains("runtimeReadinessTask = Task(priority: .utility)"),
-            "the pass (and so the meeting models) warms at utility so launch-at-login doesn't spend full CPU"
+            ExistingInstallModelPrefetchPolicy.launchWarmupEnabled(environment: ["TRANSCRIPTED_EAGER_MODEL_WARMUP": "0"]),
+            "the old opt-in flag has no say: it can't turn launch warmup off"
         )
     }
 

@@ -40,8 +40,9 @@ class TranscriptedAppState: ObservableObject {
     // selected speech model and the meeting speaker models load quietly in the
     // background at launch instead of on first use. Developers can opt back
     // into first-use loading for idle-memory measurements.
-    private let eagerModelWarmupEnabled =
-        ProcessInfo.processInfo.environment["TRANSCRIPTED_LAZY_MODEL_WARMUP"] != "1"
+    private let eagerModelWarmupEnabled = ExistingInstallModelPrefetchPolicy.launchWarmupEnabled(
+        environment: ProcessInfo.processInfo.environment
+    )
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
