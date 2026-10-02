@@ -680,9 +680,9 @@ func testBluetoothRouteContract() async {
         // Still source text: these steps run on the main actor inside
         // ParakeetEngine, which the fast runner can't compile. The graph reads
         // themselves are behavior-tested above.
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+        let source = readSourceFixture("Sources/Speech/ParakeetInputRoute.swift")
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
+              let snapshotEnd = source.range(of: "private nonisolated static func applyPreferredDictationInputDevice", range: snapshotStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation audioInputSnapshot")
             return
         }

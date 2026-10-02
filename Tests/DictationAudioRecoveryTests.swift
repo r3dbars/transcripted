@@ -10,7 +10,7 @@
 //
 // IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final suite
 // ("preserves dictation audio across route recovery") reads
-// Sources/Speech/ParakeetEngine.swift and Sources/UI/Overlay/DictationSessionController.swift
+// the ParakeetEngine source files (readParakeetEngineSource) and Sources/UI/Overlay/DictationSessionController.swift
 // as TEXT and asserts specific call sites, statement order in the terminal interruption
 // helper, and a single canonical `recordingInterrupted = true` assignment. (Checks that
 // only matched a declaration were dropped: the compiler already enforces those, and the
@@ -110,10 +110,7 @@ func testDictationAudioRecovery() {
     }
 
     runSuite("ParakeetEngine — preserves dictation audio across route recovery") {
-        let engineSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
-            encoding: .utf8
-        )) ?? ""
+        let engineSource = readParakeetEngineSource()
         let sessionSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
             encoding: .utf8
@@ -124,7 +121,7 @@ func testDictationAudioRecovery() {
             "current-device audio should be retained with its native sample rate"
         )
         if let start = engineSource.range(of: "private func markRecordingInterrupted()"),
-           let end = engineSource.range(of: "private func cancelPendingRecordingRecovery", range: start.upperBound..<engineSource.endIndex) {
+           let end = engineSource.range(of: "func loadRecordedSamplesForDictationBenchmark", range: start.upperBound..<engineSource.endIndex) {
             let terminal = String(engineSource[start.lowerBound..<end.lowerBound])
             let publication = terminal.range(of: "recordingInterrupted = true")
             for reset in ["preservingRecordingAcrossRecovery = false", "configChangeWasRecording = false"] {

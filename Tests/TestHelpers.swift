@@ -144,13 +144,30 @@ func repoFixtureURL(_ relativePath: String) -> URL {
         .appendingPathComponent(relativePath)
 }
 
+/// ParakeetEngine is one @MainActor class split by area into a core file plus
+/// extension files. Its source contracts read the core and these extensions
+/// together. Each file ends with its closing brace at column zero, so a slice
+/// ending at "\n}\n" stops at the end of the file it started in.
+let parakeetEngineSourceFiles = [
+    "ParakeetEngine.swift",
+    "ParakeetInputReadiness.swift",
+    "ParakeetInputRoute.swift",
+    "ParakeetAudioTap.swift",
+    "ParakeetRecordingStart.swift",
+    "ParakeetRecordingTeardown.swift",
+    "ParakeetDictationTranscription.swift",
+    "ParakeetASRInference.swift",
+]
+
 func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
-    readSourceFixture(
-        "Sources/Speech/ParakeetEngine.swift",
-        description: "ParakeetEngine.swift",
-        file: file,
-        line: line
-    )
+    parakeetEngineSourceFiles.map { name in
+        readSourceFixture(
+            "Sources/Speech/\(name)",
+            description: name,
+            file: file,
+            line: line
+        )
+    }.joined(separator: "\n")
 }
 
 func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
