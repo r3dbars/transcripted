@@ -291,7 +291,7 @@ enum NotchIslandSpeakerReviewPolicy {
     static let discardHelp = "Do not save this voice to People. The transcript stays saved."
 
     /// What the small × says when the pointer rests on it.
-    static let discardTooltip = "Not a person \u{00B7} don\u{2019}t save this voice"
+    static let discardTooltip = "Don\u{2019}t save this voice"
 
     /// The line a locked voice shows in place of its question.
     static func lockNote(_ lock: Lock) -> String {

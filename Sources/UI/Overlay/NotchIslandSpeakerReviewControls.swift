@@ -265,6 +265,8 @@ final class NotchIslandDiscardControl: NSStackView {
             color: NotchIslandPalette.primaryText
         )
         label.translatesAutoresizingMaskIntoConstraints = false
+        // The label never clips; the quote beside it truncates instead.
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
         tip.wantsLayer = true
         tip.layer?.backgroundColor = NotchIslandPalette.buttonPlain.cgColor
         tip.layer?.cornerRadius = 6
