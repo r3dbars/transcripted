@@ -568,19 +568,77 @@ func testDictationInputDeviceSelectionPolicy() {
     }
 
     runSuite("Pinned dictation skips a Bluetooth headset unless the Microphone choice keeps the macOS input") {
-        let pinned = readSourceFixture("Sources/Speech/ParakeetPinnedMicrophone.swift")
-        assertFalse(
-            pinned.contains("MeetingMicrophonePreferences.usesSystemInput()"),
-            "the meetings-only macOS-input setting must not put dictation back on an AirPods mic"
+        let airPodsInput = DictationAudioDevice(id: 1, name: "AirPods Pro", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 3, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 4, name: "Shure MV7", transport: .usb, inputChannelCount: 1, uid: "mv7")
+
+        // Stands in for the Core Audio lookup: the real ranking over a fixed device list.
+        func pick(
+            defaultInput: DictationAudioDevice,
+            defaultOutput: DictationAudioDevice?,
+            inputs: [DictationAudioDevice],
+            followsMacOSInput: Bool,
+            chosenUID: String? = nil,
+            excluding: UInt32? = nil
+        ) -> (selection: DictationInputDeviceSelection?, steeredAway: Bool?, listedInputs: Bool) {
+            var steeredAway: Bool?
+            var listedInputs = false
+            let selection = try? PinnedDictationInputPolicy.pinnedSelection(
+                followsMacOSInput: followsMacOSInput,
+                chosenUID: chosenUID,
+                lidClosed: false,
+                excludingDeviceID: excluding,
+                automaticSelection: { prefersBuiltInBluetoothInput in
+                    steeredAway = prefersBuiltInBluetoothInput
+                    return DictationInputDeviceSelectionPolicy.selection(
+                        defaultInput: defaultInput,
+                        defaultOutput: defaultOutput,
+                        availableInputs: inputs.filter { $0.id != excluding || $0.id == defaultInput.id },
+                        prefersBuiltInBluetoothInput: prefersBuiltInBluetoothInput
+                    )
+                },
+                availableInputs: {
+                    listedInputs = true
+                    return inputs
+                }
+            )
+            return (selection, steeredAway, listedInputs)
+        }
+
+        let automatic = pick(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            inputs: [airPodsInput, macMic], followsMacOSInput: false
         )
-        assertTrue(
-            pinned.contains("prefersBuiltInBluetoothInput: microphoneChoice != .macOSInput,"),
-            "the pinned selection steers away from a Bluetooth headset input unless the user chose the macOS input"
+        assertEqual(automatic.steeredAway, true, "the automatic choice steers away from a Bluetooth headset input")
+        assertEqual(automatic.selection?.selectedInput, macMic, "AirPods as the macOS input are skipped for the Mac mic")
+
+        let followsMac = pick(
+            defaultInput: airPodsInput, defaultOutput: airPodsInput,
+            inputs: [airPodsInput, macMic], followsMacOSInput: true, chosenUID: "mac"
         )
-        assertTrue(
-            pinned.contains("chosenInputAlwaysWins: true,"),
-            "a mic picked in Settings is recorded whatever the macOS input is"
+        assertEqual(followsMac.steeredAway, false, "\"Same as macOS Sound settings\" keeps the headset on purpose")
+        assertEqual(followsMac.selection?.selectedInput, airPodsInput, "following the macOS input records the AirPods mic")
+        assertFalse(followsMac.listedInputs, "following the macOS input never re-ranks the device list")
+
+        let picked = pick(
+            defaultInput: macMic, defaultOutput: nil,
+            inputs: [airPodsInput, macMic, usbMic], followsMacOSInput: false, chosenUID: "mv7"
         )
+        assertEqual(picked.selection?.selectedInput, usbMic, "a mic picked in Settings is recorded whatever the macOS input is")
+        assertEqual(picked.selection?.reason, .userChosenInput)
+
+        let pickedButDead = pick(
+            defaultInput: macMic, defaultOutput: nil,
+            inputs: [airPodsInput, macMic, usbMic], followsMacOSInput: false, chosenUID: "mv7", excluding: 4
+        )
+        assertEqual(pickedButDead.selection?.selectedInput, macMic, "a picked mic that just died is left out of the re-pick")
+
+        let safeDefault = pick(
+            defaultInput: macMic, defaultOutput: nil,
+            inputs: [airPodsInput, macMic], followsMacOSInput: false
+        )
+        assertEqual(safeDefault.selection?.selectedInput, macMic, "a safe macOS input with no pick stays as it is")
+        assertFalse(safeDefault.listedInputs, "nothing can change the pick, so the device list isn't read")
     }
 
     runSuite("A mic picked in Settings wins over a safe macOS input, through the recorder") {

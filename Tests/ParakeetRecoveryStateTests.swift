@@ -25,7 +25,8 @@ func testParakeetRecoveryState() async {
             source: source, observedAt: observedAt,
             ignoreWindowUntil: until, windowDuration: 2.5,
             stableRoute: stable, observedRoute: observed,
-            bindingToken: token, currentEngine: engine
+            bindingToken: token, currentEngine: engine,
+            forceForMicrophoneSharing: false
         )
     }
     runSuite("ParakeetRecoveryState — initial state is ready and not recovering") {

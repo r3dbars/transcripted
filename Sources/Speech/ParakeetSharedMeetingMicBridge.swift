@@ -60,8 +60,11 @@ extension ParakeetEngine {
     /// metered from these same buffers at dictation's own cadence and scale,
     /// not taken from the meeting's slower published mic level.
     nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
-        sharedMeetingMicRecorder.append(buffer)
-        for reading in sharedMeetingMicLevelMeter.levels(for: buffer) {
+        let readings = sharedMeetingMicRecorder.recordBorrowedBuffer(
+            buffer,
+            meter: sharedMeetingMicLevelMeter
+        )
+        for reading in readings {
             Task { @MainActor [weak self] in
                 if reading.delay > 0 {
                     try? await Task.sleep(for: .seconds(reading.delay))
