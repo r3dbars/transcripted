@@ -186,11 +186,15 @@ extension ParakeetEngine {
         return context
     }
 
+    /// `isEngineWorkCurrent` has no default on purpose: a caller holding a
+    /// lease a stop can claim must pass it, or graph work queued behind a
+    /// stuck CoreAudio call still reads `inputNode` (and binds the default
+    /// input) after the stop. Only an unleased caller passes nil.
     func audioInputSnapshot(
         operation: String,
         recoveryGeneration: UInt64? = nil,
         allowsBuiltInBluetoothFallback: Bool = true,
-        isEngineWorkCurrent: (() -> Bool)? = nil
+        isEngineWorkCurrent: (() -> Bool)?
     ) async throws -> ParakeetAudioInputSnapshot {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()

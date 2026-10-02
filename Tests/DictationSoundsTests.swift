@@ -150,9 +150,11 @@ func testDictationSounds() {
 
     // When the stop click plays (after the mic stops, before the snapshot) is a
     // behavior test: "Stop click plays once, after the mic stops and before
-    // the snapshot" in DictationStopCheckpointTests.swift. One stop click from
-    // stop to text, and the start click queued before the mic start and played
-    // once per session, are behavior tests in DictationSessionPipelineTests.swift.
+    // the snapshot" in DictationStopCheckpointTests.swift. DictationSessionPipelineTests.swift
+    // covers one stop click from stop through transcription, and the start
+    // click going through playStartCueOnce (queued before the mic start, once
+    // per session). Not covered: a direct AppSoundPlayer call added to the
+    // paste or finalize tail, or a start path that skips playStartCueOnce.
 
     runSuite("Feedback submit paths stay silent") {
         let supportActions = readRepoTextFile("Sources/UI/Shared/TranscriptedSupportActions.swift")
