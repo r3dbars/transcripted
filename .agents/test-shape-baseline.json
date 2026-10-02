@@ -1,6 +1,6 @@
 {
   "source-text": {
-    "Tests/AnalyticsEventPolicyTests.swift": 9,
+    "Tests/AnalyticsEventPolicyTests.swift": 7,
     "Tests/AudioAutomationCoverageContractTests.swift": 8,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 8,
@@ -12,7 +12,7 @@
     "Tests/DictationQueuedStartPolicyTests.swift": 4,
     "Tests/DictationRecordingStartOverlayPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
-    "Tests/DictationStoppedAudioRecoveryTests.swift": 4,
+    "Tests/DictationStoppedAudioRecoveryTests.swift": 3,
     "Tests/DictationTerminationCheckpointTests.swift": 1,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
     "Tests/HomeImportAudioActionTests.swift": 2,
@@ -25,8 +25,7 @@
     "Tests/PermissionStateHarnessContractTests.swift": 5,
     "Tests/RetranscribeLocalSpeakerPreferenceContractTests.swift": 4,
     "Tests/SentryEventPolicyTests.swift": 4,
-    "Tests/SingleInstanceGuardTests.swift": 1,
-    "Tests/StatusItemPresentationTests.swift": 3,
+    "Tests/StatusItemPresentationTests.swift": 1,
     "Tests/TestHelpers.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,

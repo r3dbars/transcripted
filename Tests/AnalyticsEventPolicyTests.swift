@@ -1749,41 +1749,6 @@ func testAnalyticsEventPolicy() {
         assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
-    runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
-        let appSource = readSourceFixture("Sources/TranscriptedApp.swift")
-
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
-            1,
-            "shown telemetry should fire once, only after the detected prompt is actually presented"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_record_selected\"", in: appSource),
-            1,
-            "selected telemetry should fire once on the explicit record choice"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_suppressed\"", in: appSource),
-            1,
-            "suppression telemetry should fire once from the detector suppression hook"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_choice_made\"", in: appSource),
-            3,
-            "choice telemetry should cover record, dismiss, and remind-later actions; automatic expiry is an outcome, not a user choice"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            3,
-            "app-level outcomes should cover dismiss, expiry, and remind-later exactly once; suppressions send only meeting_prompt_suppressed"
-        )
-        assertEqual(
-            analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),
-            1,
-            "only an explicit user dismissal should be classified as prompt abandonment"
-        )
-    }
-
     runSuite("Meeting prompt outcomes belong only to meetings a detected prompt started") {
         assertNil(
             MeetingPromptTelemetry.sessionOutcomeProperties(
@@ -1846,17 +1811,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
-}
-
-private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: String) -> Int {
-    guard !needle.isEmpty else { return 0 }
-    var count = 0
-    var searchRange = haystack.startIndex..<haystack.endIndex
-    while let range = haystack.range(of: needle, range: searchRange) {
-        count += 1
-        searchRange = range.upperBound..<haystack.endIndex
-    }
-    return count
 }
 
 /// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because

@@ -1,14 +1,11 @@
 import Foundation
 
-// Most suites here run the real DictationStoppedAudioRecovery types (registry retain/remove,
-// WAV persistence/cleanup, the commit policy) against real temp directories. The prepared
-// Stop snapshot and the external-engine lease run through their compiled seams
-// (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes, and imported restart
-// checkpoints retire through MeetingStoppedAudioCheckpointPolicy.
-//
-// One source-text pin is left, because the type it reads can't be built in this
-// Foundation-only runner: "Stopped audio is found again at launch" greps TranscriptedApp.swift
-// (the @main app delegate).
+// Every suite here runs real code: the DictationStoppedAudioRecovery types (registry
+// retain/remove, WAV persistence/cleanup, the commit policy) against real temp directories,
+// and the prepared Stop snapshot and external-engine lease through their compiled seams
+// (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes. Imported restart
+// checkpoints retire through MeetingStoppedAudioCheckpointPolicy. The launch scan for pending
+// stopped audio is tested in AppLaunchStepsTests.
 
 func testDictationStoppedAudioRecoveryRetryRegistry() {
     runSuite("stopped dictation recovery survives a failed retry until success") {
@@ -310,18 +307,6 @@ func testDictationStoppedAudioRecovery() async {
         // Dropped: the pin on `consumeRecordedSamples(preparedRecording: preparedRecording)`.
         // It named a call site that skips a second resample, which is a speed choice with
         // no observable result here; the safety half of it is checked above.
-    }
-
-    runSuite("Stopped audio is found again at launch") {
-        do {
-            let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
-            assertTrue(
-                appSource.contains("sessionController.presentPendingStoppedAudioRecoveryIfNeeded()"),
-                "launch should scan for pending stopped audio"
-            )
-        } catch {
-            assertTrue(false, "stopped-audio sources should be readable: \(error)")
-        }
     }
 
     await runSuite("External dictation classifies a model error before releasing its lease") {
