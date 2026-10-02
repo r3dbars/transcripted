@@ -79,6 +79,7 @@ into a taller loading or error state.
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (Paste Last Dictation keeps its shortcut but has no row)
 - `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate"); the full title stays the accessibility label
+- `MenuBar/MenuBarShortcutLabel.swift` — Foundation-pure shortcut text for those buttons: the full shortcut, then the first key of a pair ("Fn / Right ⌥" → "Fn") when the pair doesn't fit
 - `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 - `MenuBar/PasteLastDictationFeedback.swift` — presentation model (title, detail, tone, dismiss delay) for the toast shown after Paste Last Dictation, covering pasted/copied-fallback/failed/no-saved-dictation outcomes
