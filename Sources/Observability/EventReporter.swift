@@ -6,14 +6,6 @@
 
 import Foundation
 
-// MARK: - Event Schema
-
-enum EventLevel: String, Codable {
-    case error
-    case warning
-    case info
-}
-
 // MARK: - File Writer (Actor)
 
 private actor EventFileWriter {

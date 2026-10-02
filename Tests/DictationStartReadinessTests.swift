@@ -198,16 +198,25 @@ func testDictationStartReadiness() async {
             from: "private func cancelPendingDictationStartAfterEarlyRelease",
             to: "private func overlayStateName"
         )
-        assertTrue(
-            cancelPath.contains("\"pending_stage\": stage"),
+        let report = DictationEarlyReleaseCancelReport.context(
+            trigger: "physical_key",
+            shortcutMode: .pushToTalk,
+            pendingForMs: 2870,
+            pendingStage: "opening_microphone",
+            stagePendingForMs: 2705,
+            startPlan: "background",
+            appActive: true
+        )
+        assertEqual(
+            report["pending_stage"], "opening_microphone",
             "the reporter needs to know what the pending start was waiting on"
         )
-        assertTrue(
-            cancelPath.contains("\"stage_pending_for_ms\""),
+        assertEqual(
+            report["stage_pending_for_ms"], "2705",
             "time in that stage, alongside time since the request began"
         )
         assertTrue(
-            cancelPath.contains("\"pending_for_ms\"") && cancelPath.contains("\"duration_ms\""),
+            report["pending_for_ms"] == "2870" && report["duration_ms"] == "2870",
             "duration_ms stays for anything already reading it; pending_for_ms says what it means"
         )
         assertTrue(

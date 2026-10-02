@@ -40,6 +40,42 @@ struct DictationRecordingStartLifecyclePolicy {
     }
 }
 
+/// Where a Stop request for an active take goes, once repeat stops are fenced.
+enum DictationStopRoute: Equatable {
+    /// A hotkey ended a start still warming up: say why nothing was recorded.
+    case cancelPendingStartAfterEarlyRelease
+    case cancelPendingStart
+    /// Nothing is recording. `showStillFinishing` answers a press that lands
+    /// while the last take is still transcribing, so the hotkey isn't silent.
+    case ignore(showStillFinishing: Bool)
+    /// Stop arrived before the mic captured anything and no audio was kept.
+    case captureNotStarted
+    /// Stop the take, including one whose audio survived a device recovery.
+    case stopRecording
+
+    static let stillFinishingMessage = "Still finishing the last dictation. Try again in a moment."
+
+    static func route(
+        stopDecision: DictationRecordingStartLifecyclePolicy.StopDecision,
+        trigger: DictationTrigger,
+        isFinishingPreviousTake: @autoclosure () -> Bool,
+        isRecording: @autoclosure () -> Bool,
+        hasRecoverableRecording: @autoclosure () -> Bool
+    ) -> DictationStopRoute {
+        switch stopDecision {
+        case .cancelPendingStart:
+            return trigger == .physicalKey ? .cancelPendingStartAfterEarlyRelease : .cancelPendingStart
+        case .ignoreInactive:
+            return .ignore(showStillFinishing: isFinishingPreviousTake())
+        case .stopRecording:
+            // Audio kept through a device recovery still goes to transcription
+            // instead of the mic-start failure path.
+            guard isRecording() || hasRecoverableRecording() else { return .captureNotStarted }
+            return .stopRecording
+        }
+    }
+}
+
 /// Admission fence for the one stop/checkpoint/transcribe/deliver chain that
 /// owns a dictation session. Repeated Stop calls cannot cancel or overwrite
 /// the first chain while its durable WAV write is still in flight.
@@ -165,6 +201,48 @@ struct DictationEarlyReleasePresentationPolicy {
             return microphoneNotReadyMessage
         }
         return shortTapMessage
+    }
+}
+
+/// The diagnostics event for a hotkey that ended a start before the mic was
+/// ready. It is the line behind the error the user sees.
+struct DictationEarlyReleaseCancelReport: Equatable {
+    static let engine = "dictation"
+    static let event = "dictation_cancelled_before_microphone_ready"
+    // Deliberately not "push-to-talk release": hands-free is the default
+    // mode, and its stop press reaches here too.
+    static let message = "Dictation hotkey ended the session before the microphone finished opening"
+    /// `.error`, not `.info`: only `.error` events reach Sentry and the
+    /// reliability counter. The user asked to dictate, saw an error, and lost
+    /// the attempt, the same as `microphone_start_timeout`.
+    static let level: EventLevel = .error
+
+    /// `pending_for_ms` is how long the start had been running when the
+    /// hotkey ended it (seconds means a stalled mic open, ~100 ms means a quick
+    /// tap beat a normal start, see #1743). `pending_stage` says what that
+    /// time went to. `duration_ms` repeats `pending_for_ms` for older readers.
+    static func context(
+        trigger: String,
+        shortcutMode: DictationShortcutMode?,
+        pendingForMs: Int,
+        pendingStage: String,
+        stagePendingForMs: Int,
+        startPlan: String,
+        appActive: Bool
+    ) -> [String: String] {
+        [
+            "trigger": trigger,
+            // Matches the session outcome, and is a key the analytics registry
+            // allows for `reliability_failure_observed`.
+            "failure_kind": "microphone_not_ready",
+            "shortcut_mode": shortcutMode?.rawValue ?? "unknown",
+            "pending_for_ms": "\(pendingForMs)",
+            "duration_ms": "\(pendingForMs)",
+            "pending_stage": pendingStage,
+            "stage_pending_for_ms": "\(stagePendingForMs)",
+            "start_plan": startPlan,
+            "app_active": "\(appActive)",
+        ]
     }
 }
 

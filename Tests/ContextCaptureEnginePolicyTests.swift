@@ -257,14 +257,17 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("DictationSessionController finishing hotkey — shows visible feedback instead of silent swallow") {
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-
-        assertTrue(
-            source.contains("if overlayController.state == .drafting"),
-            "ignored stop/start intent during the drafting/transcribing window should be surfaced to the user"
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .ignoreInactive, trigger: .physicalKey,
+                isFinishingPreviousTake: true, isRecording: false, hasRecoverableRecording: false
+            ),
+            .ignore(showStillFinishing: true),
+            "ignored stop intent during the drafting/transcribing window should be surfaced to the user"
         )
-        assertTrue(
-            source.contains("overlayController.showError(\"Still finishing the last dictation. Try again in a moment.\")"),
+        assertEqual(
+            DictationStopRoute.stillFinishingMessage,
+            "Still finishing the last dictation. Try again in a moment.",
             "finishing-window hotkey press should reuse the existing visible finishing message"
         )
     }
