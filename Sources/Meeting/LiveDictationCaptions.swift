@@ -7,8 +7,9 @@ import TranscriptedCore
 /// can show the words as they're spoken.
 ///
 /// It never sits on the dictation's own path:
-/// - The model loads once, after the dictation model is ready and nothing is
-///   being dictated, and stays loaded. Until it's ready the hover has no words.
+/// - The model load starts once the dictation model is ready and nothing is
+///   being dictated (a dictation begun mid-load can overlap it), the warmup
+///   inference re-checks, and then it stays loaded. Until it's ready the hover has no words.
 /// - Audio is a copy the capture queue already makes (`STTRouter
 ///   .setDictationPreviewSink`); nothing new runs on the mic's thread and no
 ///   audio engine is built or touched, so a Bluetooth headset sees nothing
@@ -77,6 +78,8 @@ final class LiveDictationCaptions: ObservableObject {
     /// The take the words belong to. A device recovery restarts recording
     /// inside one take; its words stay.
     private var previewTake: UUID?
+    /// `alternate` skipped this take; a recovery restart inside it stays off.
+    private var previewTakeSkipped = false
     /// This take's "don't feed" switch, read by the track's drain and the
     /// pump on their own tasks. One per take, so a take that ended can never
     /// feed again.
@@ -146,9 +149,9 @@ final class LiveDictationCaptions: ObservableObject {
             previewTake = take
             preview = LiveDictationPreview()
             takeCount += 1
+            previewTakeSkipped = mode == .alternate && takeCount.isMultiple(of: 2)
         }
-        let skip = isNewTake && mode == .alternate && takeCount.isMultiple(of: 2)
-        let state = begin(skipping: skip)
+        let state = begin(skipping: previewTakeSkipped)
         if isNewTake {
             AppLogger.pipeline.info("Dictation live preview", ["state": state])
         }
@@ -175,8 +178,10 @@ final class LiveDictationCaptions: ObservableObject {
         pump = Task.detached(priority: .utility) {
             while !Task.isCancelled {
                 let samples = sink.take()
-                // A take that ended mustn't leak its tail into the next one.
-                if !samples.isEmpty, !stopped.value { queue.append(samples) }
+                // A take that ended mustn't leak its tail into the next one:
+                // the append happens under the flag's lock, and `end()` sets
+                // the flag before it clears the queue.
+                if !samples.isEmpty { stopped.unlessSet { queue.append(samples) } }
                 try? await Task.sleep(for: Self.pumpInterval)
             }
         }
@@ -253,4 +258,10 @@ private final class Flag: @unchecked Sendable {
     var value: Bool { lock.withLock { current } }
 
     func set(_ value: Bool) { lock.withLock { current = value } }
+
+    /// Runs `work` only while unset, holding the lock so `set(true)` can't
+    /// land halfway through it.
+    func unlessSet(_ work: () -> Void) {
+        lock.withLock { if !current { work() } }
+    }
 }

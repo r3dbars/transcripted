@@ -42,7 +42,11 @@ actor LiveMeetingCaptionTrack {
     private static let minimumFeedSamples = LiveMeetingCaptionTrack.chunkSize.shiftSamples
 
     nonisolated let queue = LiveMeetingCaptionSampleQueue()
-    private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize)
+    /// `eouDebounceMs: 0` closes at the end-of-utterance token itself.
+    /// FluidAudio's default waits ~1.3 s to confirm it, and its decoder skips
+    /// every chunk in that window, so speech resuming after a short pause was
+    /// never decoded.
+    private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize, eouDebounceMs: 0)
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)
     private var onEvent: (@Sendable (Event, Int) async -> Void)?
     private var eventSequence = 0
@@ -61,11 +65,6 @@ actor LiveMeetingCaptionTrack {
     func load(beforeWarmup: (@Sendable () async -> Void)? = nil) async -> LoadResult {
         do {
             try await manager.loadModels()
-            // Close at the end-of-utterance token itself. FluidAudio's default
-            // waits ~1.3 s to confirm it, and its decoder skips every chunk in
-            // that window, so speech resuming after a short pause was never
-            // decoded.
-            await manager.setEouDebounce(0)
             // Stopped while loading: don't keep the models until next time.
             if Task.isCancelled {
                 await manager.cleanup()
@@ -131,6 +130,12 @@ actor LiveMeetingCaptionTrack {
     private func drain() async {
         while !Task.isCancelled {
             guard queue.count >= Self.minimumFeedSamples else {
+                // Closing runs the recognizer too (the flush), so it waits
+                // out a yield like feeding does.
+                if let shouldYield, await shouldYield() {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
+                }
                 await closeIfQuiet()
                 try? await Task.sleep(for: .milliseconds(120))
                 continue
@@ -222,12 +227,5 @@ actor LiveMeetingCaptionTrack {
         pcm.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
         return pcm
-    }
-}
-
-extension StreamingEouAsrManager {
-    /// `eouDebounceMs` is actor state; set it from inside the actor.
-    func setEouDebounce(_ milliseconds: Int) {
-        eouDebounceMs = milliseconds
     }
 }
