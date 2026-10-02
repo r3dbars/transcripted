@@ -110,6 +110,13 @@ fi
 TRANSCRIPTED_CONTAINER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-test-container.XXXXXX")"
 export TRANSCRIPTED_CONTAINER_DIR
 
+# UserDefaults.standard is keyed by the executable's file name. Every worktree's
+# binary is `build/tests`, so overlapping runs shared one preferences domain and
+# clobbered each other's keys (RecentCaptureScannersTests points the capture
+# library key at its fixtures). Each run executes a copy with its own name, so
+# it gets its own domain, which cleanup deletes.
+TEST_DEFAULTS_DOMAIN="transcripted-fast-tests.${TRANSCRIPTED_CONTAINER_DIR##*.}"
+
 # The shared app-object cache is mutated and compiled into in place, so two
 # overlapping run-tests.sh invocations in one worktree must not interleave.
 # mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
@@ -192,6 +199,10 @@ cleanup_generated_runner() {
         rm -rf "$TEST_OBJECT_DIR"
     fi
     rm -rf "$TRANSCRIPTED_CONTAINER_DIR"
+    if command -v defaults >/dev/null 2>&1; then
+        defaults delete "$TEST_DEFAULTS_DOMAIN" >/dev/null 2>&1 || true
+    fi
+    rm -f "$HOME/Library/Preferences/$TEST_DEFAULTS_DOMAIN.plist"
 }
 trap cleanup_generated_runner EXIT
 
@@ -799,6 +810,10 @@ release_cache_lock
 echo "Running tests..."
 echo ""
 
+# A copy, not a link: an overlapping run may relink build/tests while this one runs.
+RUN_BINARY="$TRANSCRIPTED_CONTAINER_DIR/$TEST_DEFAULTS_DOMAIN"
+cp "$TEST_BINARY" "$RUN_BINARY"
+
 print_failure_rerun_hint() {
     echo ""
     echo "Re-run one suite with: bash run-tests.sh --filter <entryFn>"
@@ -806,7 +821,7 @@ print_failure_rerun_hint() {
 
 if [ "$coverage_requested" = true ]; then
     run_status=0
-    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$RUN_BINARY" || run_status=$?
     if [ "$run_status" -ne 0 ]; then
         print_failure_rerun_hint
         exit "$run_status"
@@ -845,7 +860,7 @@ if [ "$coverage_requested" = true ]; then
     echo "Coverage LCOV: $COVERAGE_LCOV"
 else
     run_status=0
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$RUN_BINARY" || run_status=$?
     if [ "$run_status" -ne 0 ]; then
         print_failure_rerun_hint
         exit "$run_status"
