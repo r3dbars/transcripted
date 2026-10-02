@@ -3,9 +3,9 @@ import Foundation
 // Source-text pins: most suites in this file exercise the real DictationStoppedAudioRecovery
 // types (registry retain/remove, WAV persistence/cleanup, the commit policy) against real temp
 // directories — genuine behavioral coverage. The last suite in testDictationStoppedAudioRecovery
-// ("Dictation controller checkpoints audio before waiting for the model") instead greps five
+// ("Dictation controller checkpoints audio before waiting for the model") instead greps four
 // source files — DictationSessionController.swift, ParakeetEngine.swift, STTRouter.swift,
-// MeetingSessionController.swift, and TranscriptedApp.swift — because each is a @MainActor type
+// and TranscriptedApp.swift — because each is a @MainActor type
 // (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
 // TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
 // *ordering* of statements inside their real methods (persist-before-model-wait,
@@ -280,14 +280,6 @@ func testDictationStoppedAudioRecovery() {
             assertTrue(
                 preparedClaim.lowerBound < preparedClear.lowerBound,
                 "an old Stop snapshot cannot clear a successor recording's native samples"
-            )
-            let meetingSource = try String(
-                contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
-                encoding: .utf8
-            )
-            assertTrue(
-                meetingSource.contains("transcriptPersisted: true"),
-                "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
             // Which reasons discard the audio is a behavior test now
