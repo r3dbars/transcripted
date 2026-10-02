@@ -133,9 +133,7 @@ class ParakeetEngine: ObservableObject {
     private var audioStartCancellationState: ParakeetAudioStartCancellationState?
     var zombieRecoveryStartGeneration: UInt64?
     private var zombieRecoveryRestartPending: Bool { zombieRecoveryState.isActive }
-    private var asrInferenceActivity = ParakeetASRInferenceActivityState()
-    private var asrInferenceHandoffCount = 0
-    private let asrInferenceWaiters = ASRInferenceWaiterQueue()
+    private let asrInferenceGate = ParakeetASRInferenceGate()
     private var pureSampleTranscriptionActivityCount = 0
     var asrManagerReady = false
     nonisolated(unsafe) var didReceiveAudioSamples = false
@@ -1677,7 +1675,10 @@ class ParakeetEngine: ObservableObject {
         guard audioStartAdmission.begin(owner: startOwner) else { return false }
         // Device-change recovery uses the ordinary start/watchdog path but
         // continues the same dictation while its earlier segments are held.
-        if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+        if ParakeetRecordingContinuityPolicy.startsFreshRecording(
+            isRecoveryAttempt: isRecoveryAttempt,
+            preservingAcrossRecovery: preservingRecordingAcrossRecovery
+        ) {
             beginFreshRecordingSession()
         }
         var startEngine = audioEngine
@@ -1724,14 +1725,20 @@ class ParakeetEngine: ObservableObject {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         cancelAudioWatchdogForRecordingStart()
-        if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+        if ParakeetRecordingContinuityPolicy.startsFreshRecording(
+            isRecoveryAttempt: isRecoveryAttempt,
+            preservingAcrossRecovery: preservingRecordingAcrossRecovery
+        ) {
             recoveredRecordingTimeline.removeAll(keepingCapacity: true)
         }
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
             lastAudioSampleAt = 0
             didReportPendingSampleTruncation = false
-            if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+            if ParakeetRecordingContinuityPolicy.startsFreshRecording(
+                isRecoveryAttempt: isRecoveryAttempt,
+                preservingAcrossRecovery: preservingRecordingAcrossRecovery
+            ) {
                 firstAudioSampleAt = nil
             }
         }
@@ -2238,9 +2245,14 @@ class ParakeetEngine: ObservableObject {
         guard isRecording else {
             // Genuinely preserved/recovered audio (e.g. real pre-sleep audio held
             // across a wake-recovery gap) must win over a merely-pending zombie
-            // restart — checking this first ensures a stop during an in-flight
-            // zombie retry drains real audio instead of discarding it.
-            if preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty {
+            // restart, so a stop during an in-flight zombie retry drains real
+            // audio instead of discarding it.
+            let idleStop = ParakeetRecordingContinuityPolicy.idleStopAction(
+                preservingAcrossRecovery: preservingRecordingAcrossRecovery,
+                hasRecoveredAudio: !recoveredRecordingTimeline.isEmpty,
+                zombieRestartPending: zombieRecoveryRestartPending
+            )
+            if idleStop == .drainRecoveredAudio {
                 cancelPendingRecordingRecovery()
                 await restorePendingSystemInputAfterRecording(
                     ownedBy: pendingRestoreOwner,
@@ -2251,7 +2263,7 @@ class ParakeetEngine: ObservableObject {
             // A zombie reset marks recording idle while it waits to retry, with
             // nothing preserved worth keeping. Treat a user stop in that window
             // as cancellation of the pending restart.
-            if zombieRecoveryRestartPending {
+            if idleStop == .cancelPendingZombieRestart {
                 let stopGraphGeneration = audioGraphGeneration
                 audioStartAdmission.cancel()
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
@@ -2561,9 +2573,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     var hasActiveASRWork: Bool {
-        asrInferenceActivity.isActive
-            || asrInferenceHandoffCount > 0
-            || !asrInferenceWaiters.isEmpty
+        asrInferenceGate.hasActiveWork
             || pureSampleTranscriptionActivityCount > 0
     }
 
@@ -2577,35 +2587,25 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func beginASRInference() async throws {
-        try Task.checkCancellation()
-        if asrInferenceActivity.canStartImmediately(reservedHandoffCount: asrInferenceHandoffCount) {
-            asrInferenceActivity.begin()
-            return
+        let gate = asrInferenceGate
+        try await gate.begin {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "asr_inference_deferred",
+                message: "ASR inference request queued behind active decoder work",
+                context: [
+                    "active_count": "\(gate.activeCount)",
+                    "handoff_count": "\(gate.handoffCount)",
+                    "waiter_count": "\(gate.waiterCount)"
+                ]
+            )
         }
-
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "parakeet",
-            event: "asr_inference_deferred",
-            message: "ASR inference request queued behind active decoder work",
-            context: [
-                "active_count": "\(asrInferenceActivity.activeCount)",
-                "handoff_count": "\(asrInferenceHandoffCount)",
-                "waiter_count": "\(asrInferenceWaiters.count)"
-            ]
-        )
-        try await asrInferenceWaiters.wait()
-        asrInferenceHandoffCount = max(0, asrInferenceHandoffCount - 1)
-        asrInferenceActivity.begin()
     }
 
     private func finishASRInference() {
-        asrInferenceActivity.finish()
-        if !asrInferenceWaiters.isEmpty {
-            asrInferenceHandoffCount += 1
-            asrInferenceWaiters.resumeFirst()
-            return
-        }
+        // A handoff keeps the decoder spoken for; teardown waits for the next finish.
+        if asrInferenceGate.finish() { return }
         finishDeferredModelTeardownIfIdle()
     }
 
@@ -3168,8 +3168,10 @@ class ParakeetEngine: ObservableObject {
     private func cancelAudioWatchdogForRecordingStart() {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
-        guard let zombieRecoveryStartGeneration,
-              zombieRecoveryState.canContinue(generation: zombieRecoveryStartGeneration) else {
+        guard ParakeetZombieEngineRecoverySequence.recordingStartKeepsRecovery(
+            startGeneration: zombieRecoveryStartGeneration,
+            state: zombieRecoveryState
+        ) else {
             cancelZombieEngineRecovery()
             return
         }

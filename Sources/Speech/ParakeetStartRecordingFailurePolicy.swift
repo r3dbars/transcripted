@@ -185,6 +185,30 @@ enum ParakeetDeviceRecoveryFailurePolicy {
     static func rebuildStrategy(audioEngineQueueBlocked: Bool) -> ParakeetAudioEngineRebuildStrategy {
         audioEngineQueueBlocked ? .abandonBlockedAudioGraph : .queuedOnAudioEngineQueue
     }
+
+    /// The graph repair a failed rewarm gets, from the error it failed with.
+    /// Circuit-open work never entered the current queue, so the graph is kept
+    /// and the recovery fails closed. A timeout means the queue is wedged, so
+    /// the graph is abandoned instead of queuing a rebuild behind it. Anything
+    /// else rebuilds in place.
+    static func graphRepair(after error: Error) -> ParakeetDeviceRecoveryGraphRepair {
+        let workError = error as? ParakeetAudioEngineWorkError
+        if workError?.isCircuitOpen == true {
+            return .keepCurrentGraph
+        }
+        switch rebuildStrategy(audioEngineQueueBlocked: workError?.requiresGraphAbandonment == true) {
+        case .queuedOnAudioEngineQueue:
+            return .rebuildOnAudioEngineQueue
+        case .abandonBlockedAudioGraph:
+            return .abandonBlockedAudioGraph
+        }
+    }
+}
+
+enum ParakeetDeviceRecoveryGraphRepair: Equatable {
+    case keepCurrentGraph
+    case rebuildOnAudioEngineQueue
+    case abandonBlockedAudioGraph
 }
 
 enum ParakeetDeviceRecoveryReadinessPolicy {
