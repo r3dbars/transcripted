@@ -18,11 +18,6 @@ struct ParakeetAudioInputSnapshot {
     let stageTimings: [String: Int]
 }
 
-struct ParakeetAudioStartSnapshot {
-    let engineWasRunning: Bool
-    let stageTimings: [String: Int]
-}
-
 struct ParakeetInputDeviceApplication {
     let selection: DictationInputDeviceSelection
     let didApplyOverride: Bool
@@ -56,5 +51,41 @@ final class ParakeetRetiredAudioEngineStore {
             }
         }
         return true
+    }
+}
+
+/// The live `AVAudioEngine` behind `ParakeetNativeInputGraphTeardown`. It
+/// finds the input node only among nodes the engine already has; reading
+/// `AVAudioEngine.inputNode` here would create one on an idle engine and bind
+/// the macOS default input.
+struct LiveParakeetInputGraph: ParakeetNativeInputGraph {
+    let engine: AVAudioEngine
+
+    var isRunning: Bool { engine.isRunning }
+
+    var existingInputNode: AVAudioInputNode? {
+        engine.attachedNodes.compactMap { $0 as? AVAudioInputNode }.first
+    }
+
+    func stop() {
+        engine.stop()
+    }
+
+    func waitForStoppedInputCallbacks() {
+        // Runs on the graph queue; blocks that queue briefly, never the
+        // CoreAudio render thread.
+        Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
+    }
+
+    func removeTap(from node: AVAudioInputNode) {
+        node.removeTap(onBus: 0)
+    }
+
+    func releaseVoiceProcessing(on node: AVAudioInputNode) -> Bool {
+        ParakeetEngine.applyDictationVoiceProcessingPreference(false, to: node)
+    }
+
+    func isVoiceProcessingEnabled(on node: AVAudioInputNode) -> Bool {
+        node.isVoiceProcessingEnabled
     }
 }

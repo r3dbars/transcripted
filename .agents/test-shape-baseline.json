@@ -24,7 +24,6 @@
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 8,
     "Tests/OverlayScreenSharePrivacyTests.swift": 19,
-    "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 1,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 4,
     "Tests/PermissionStateHarnessContractTests.swift": 5,
