@@ -28,6 +28,18 @@ jobs:
         shell: bash
         run: bash scripts/dev/linux-checks.sh --strict-tools
 
+      # Ratchets that can only shrink: module boundaries (.agents/modules.json),
+      # Swift file size, and the test-shape and source-pin guards. linux-checks.sh
+      # runs them too; named steps here make a failure easy to spot.
+      - name: Ratchets (module boundaries, file size, test shape, source pins)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dev/check-module-boundaries.py
+          python3 scripts/dev/check-file-size.py
+          python3 scripts/dev/check-test-shape.py
+          python3 scripts/dev/check-source-pins.py
+
       - name: Agent preflight
         shell: bash
         run: bash scripts/dev/agent-preflight.sh origin/main
