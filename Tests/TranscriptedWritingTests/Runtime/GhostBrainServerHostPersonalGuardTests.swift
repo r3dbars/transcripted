@@ -181,29 +181,60 @@ struct GhostBrainServerHostPersonalLookupTimingTests {
         #expect(logged?.1["outcome"] == "resolved")
     }
 
-    @Test("A task slower than the 250ms deadline reports outcome=timeout")
-    func slowTaskReportsTimeout() async {
+    @Test("An unresolved lookup reports timeout without waiting for a provider answer")
+    func unresolvedLookupReportsTimeout() async {
         let (sink, events) = recordingDiagnostics()
         let race = GhostBrainServerHost.PersonalLookupRace()
-        // Far past the 250ms deadline, so a loaded CI runner can't close the
-        // gap between "timed out" and "waited for the provider".
-        let slowProviderSeconds: TimeInterval = 5
-        let slow = Task {
-            try? await Task.sleep(nanoseconds: UInt64(slowProviderSeconds * 1_000_000_000))
-            race.resolve(PersonalNextWordPrediction(word: "late", support: 4, total: 4))
-        }
+        // No provider resolves this race. Returning the timeout therefore
+        // proves the host can finish independently of the provider.
         let prediction = await GhostBrainServerHost.awaitPersonalPrediction(
             race,
-            now: { Date() },
+            now: { Date(timeIntervalSince1970: 1_000) },
             diagnostics: sink
         )
         // Nothing waited for the slow provider: had it, the answer would be
         // "late" with outcome=resolved. No elapsed-time bound, which a loaded
         // CI runner broke (3.06 s against a 2.5 s limit).
         #expect(prediction == nil)
-        let logged = events.values.first { $0.0 == "personal-lookup-timing" }
-        #expect(logged?.1["outcome"] == "timeout")
-        slow.cancel()
+        #expect(events.values.count == 1)
+        #expect(events.values.first?.0 == "personal-lookup-timing")
+        #expect(events.values.first?.1 == ["waitedMilliseconds": "0", "outcome": "timeout"])
+    }
+
+    @Test("A waiter's timeout leaves the late provider answer available to another waiter")
+    func timeoutDoesNotDiscardTheProviderAnswer() async {
+        let race = GhostBrainServerHost.PersonalLookupRace()
+
+        if case .timedOut = await race.value(deadlineNanoseconds: 0) {
+            // This waiter left before the provider answered.
+        } else {
+            Issue.record("An unresolved lookup must time out")
+        }
+
+        race.resolve(PersonalNextWordPrediction(word: "tomorrow", support: 4, total: 5))
+
+        if case let .predicted(prediction) = await race.value(deadlineNanoseconds: 0) {
+            #expect(prediction == PersonalNextWordPrediction(word: "tomorrow", support: 4, total: 5))
+        } else {
+            Issue.record("One waiter's timeout must not discard the provider's answer")
+        }
+    }
+
+    @Test("The first provider answer wins even when it is nil", arguments: [true, false])
+    func firstProviderAnswerWins(firstHasValue: Bool) async {
+        let race = GhostBrainServerHost.PersonalLookupRace()
+        let first: PersonalNextWordPrediction? = firstHasValue
+            ? PersonalNextWordPrediction(word: "tomorrow", support: 4, total: 5)
+            : nil
+
+        race.resolve(first)
+        race.resolve(PersonalNextWordPrediction(word: "replacement", support: 5, total: 5))
+
+        if case let .predicted(prediction) = await race.value(deadlineNanoseconds: 0) {
+            #expect(prediction == first)
+        } else {
+            Issue.record("A resolved lookup must keep its first answer")
+        }
     }
 
     @Test("milliseconds rounds to the nearest whole millisecond, matching ScreenCaptureService's rounding")

@@ -17,10 +17,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var meetingActionHandler: ((NotchIslandAction) -> Void)?
     var callActionHandler: ((NotchIslandAction) -> Void)?
     var callHoverHandler: ((Bool) -> Void)?
-    /// The meeting pill's own hover rules (the saved dwell) still apply.
-    var meetingHoverHandler: ((Bool) -> Void)?
-    /// Right-click menu while a meeting records (Keep Controls Visible,
-    /// Discard Recording…), the same one the meeting pill offers.
+    /// Right-click menu while a meeting records (Discard Recording…).
     var meetingMenuProvider: (() -> NSMenu?)?
     /// "Paste again" on the dictation that just landed.
     var onPasteLastDictation: (() -> Void)?
@@ -86,11 +83,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private var pointerMonitors: [Any] = []
     var liveTranscriptWatch: AnyCancellable?
     var dictationPreviewWatch: AnyCancellable?
-
-    /// Always on: the Notch island is the only dictation, meeting and call
-    /// prompt window. The old near-text, mini cursor and meeting pill panels
-    /// are still in the tree until they're deleted, but nothing picks them.
-    static var isSelected: Bool { true }
 
     init() {
         watchLiveTranscript()
@@ -539,10 +531,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         tickTask?.cancel()
         tickTask = nil
         expanded = false
-        if isHovered {
-            isHovered = false
-            meetingHoverHandler?(false)
-        }
+        isHovered = false
         guard isShown, let panel, let islandView else { return }
         isShown = false
         targetFrame = nil
@@ -689,7 +678,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private func handleHover(_ hovered: Bool) {
         guard hovered != isHovered else { return }
         isHovered = hovered
-        meetingHoverHandler?(hovered)
         if callPrompt != nil { callHoverHandler?(hovered) }
         if speakerReview != nil { speakerReviewHoverHandler?(hovered) }
         islandView?.setCountdownPaused(hovered)
@@ -748,11 +736,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private func handleOwnAction(_ action: NotchIslandAction) {
         switch action {
         case .meetingCopyTranscript:
-            let text = LiveMeetingCaptions.shared.log.plainText()
-            guard !text.isEmpty else { return }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            copyLiveTranscript()
         case .copyLastDictation:
             guard let text = recentInsert?.text, !text.isEmpty else { return }
             let pasteboard = NSPasteboard.general

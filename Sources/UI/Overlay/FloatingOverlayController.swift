@@ -1,6 +1,6 @@
 // FloatingOverlayController.swift
-// State machine, animations, panel lifecycle, and global Escape monitor for the floating overlay
-// Pure AppKit — no SwiftUI, no NSHostingView, no AttributeGraph
+// Dictation state machine, timers, and global Escape monitor. The Notch
+// island draws every dictation; this controller pushes it plain snapshots.
 
 import AppKit
 import Combine
@@ -54,32 +54,10 @@ class FloatingOverlayController {
         case saved
     }
 
-    /// Human-readable shortcut hints (reads live from UserDefaults)
-    var dictationShortcutHint: String {
-        DictationCancelHintPolicy.shortcutHint(
-            dictationShortcutsEnabled: HotkeyPreferences.dictationShortcutsEnabled(),
-            pushToTalkDisplay: PhysicalDictationTriggerPreferences.displayString(
-                for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-            ),
-            handsFreeDisplay: PhysicalDictationTriggerPreferences.displayString(
-                for: PhysicalDictationTriggerPreferences.handsFreeBinding()
-            )
-        )
-    }
     var listeningNotice = "" {
         didSet {
             guard listeningNotice != oldValue else { return }
-            pushStateToViews()
-            // The mini pill is too narrow for the Esc prompt, so it widens
-            // while the prompt shows and shrinks back after.
-            // Keep it on screen: while transcribing the pill doesn't follow
-            // the cursor, so widening near an edge could clip the prompt.
-            if isVisible, isCursorMiniPanelMode, state == .listening || state == .drafting {
-                resizePanelInstant(to: preferredPanelSize(for: state), keepingVisible: true)
-                if isCursorMiniTrackingMode {
-                    updateCursorFollowPosition(snap: true)
-                }
-            }
+            pushStateToIsland()
         }
     }
 
@@ -93,11 +71,7 @@ class FloatingOverlayController {
             if state.isActiveDictationState {
                 cancelPendingHideForActiveDictation()
             }
-            if state != .loading {
-                cancelMiniLoadingReveal()
-            }
-            pushStateToViews()
-            updateCursorFollowTracking()
+            pushStateToIsland()
         }
     }
     var isVisible = false
@@ -119,10 +93,10 @@ class FloatingOverlayController {
     private var notPastedKeyMonitor: Any?
     static let notPastedDismissSeconds: Double = 15
     var loadingElapsedSeconds: Int = 0 {
-        didSet { pushStateToViews() }
+        didSet { pushStateToIsland() }
     }
     var loadingPresentation: LoadingPresentation = .initial {
-        didSet { pushStateToViews() }
+        didSet { pushStateToIsland() }
     }
     private var successTitle: String = "Pasted"
     /// Closure for Escape during active dictation overlay states.
@@ -135,25 +109,14 @@ class FloatingOverlayController {
     /// Every Esc during an active session, before the discard decision.
     var onEscapeKeyDuringSession: (() -> Void)?
 
-    // MARK: - Panel & Views
+    // MARK: - Monitors
 
-    private var panel: FloatingOverlayPanel?
-    private var rootView: OverlayRootView?
-    private var blurView: NSVisualEffectView?
-    private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
-    private var cursorFollowTask: Task<Void, Never>?
-
-    private static let cursorFollowIntervalNanoseconds: UInt64 = 33_000_000
-    private static let cursorFollowOffset = NSSize(width: 22, height: 20)
-    private static let cursorFollowScreenInset: CGFloat = 10
-    private static let cursorFollowSmoothing: CGFloat = 0.32
-    private static let miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000
 
     /// Epoch — invalidated on every showPanel(), checked in async _performHide()
     private var hideGeneration = SupersessionEpoch()
 
-    /// Combine subscriptions for engine state → view updates
+    /// Combine subscriptions for engine state → island updates
     private var subscriptions = Set<AnyCancellable>()
 
     deinit {
@@ -162,17 +125,14 @@ class FloatingOverlayController {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
-        miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
-        cursorFollowTask?.cancel()
         escapeConfirmResetTask?.cancel()
     }
 
     var sttRouter: STTRouter?
 
-    /// Draws the session instead of the panel when Settings › Dictation
-    /// window is Notch island. The state machine, timers and Esc handling
-    /// below stay the same; only where it shows changes.
+    /// Draws the session. The app always sets it; when it is nil (tests),
+    /// the state machine still runs and nothing shows.
     weak var island: NotchIslandController? {
         didSet {
             island?.dictationActionHandler = { [weak self] action in
@@ -184,79 +144,21 @@ class FloatingOverlayController {
     private var islandSourceApp: NSRunningApplication?
 
     private var isIslandMode: Bool {
-        island != nil && NotchIslandController.isSelected
+        island != nil
     }
 
     // MARK: - Setup
 
     func setup(sttRouter: STTRouter) {
-        guard panel == nil else {
+        guard self.sttRouter == nil else {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "setup_called_twice",
-                message: "setup() called but panel already exists — ignoring")
+                message: "setup() called twice — ignoring")
             return
         }
         self.sttRouter = sttRouter
         LiveDictationCaptions.shared.attach(router: sttRouter)
-        let panel = FloatingOverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight),
-            styleMask: [],
-            backing: .buffered,
-            defer: true
-        )
 
-        // Glassmorphism: NSVisualEffectView behind content. Under Reduce
-        // Transparency we drop the live blur and fall back to a solid backdrop.
-        let reduceTransparency = AccessibilityDisplayPolicy.reduceTransparency
-        let blurView = NSVisualEffectView()
-        blurView.appearance = NSAppearance(named: .darkAqua)
-        blurView.material = .underWindowBackground
-        blurView.blendingMode = .behindWindow
-        blurView.state = reduceTransparency ? .inactive : .active
-        blurView.wantsLayer = true
-        blurView.layer?.cornerRadius = OverlayTokens.cornerRadius
-        blurView.layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(OverlayTokens.panelBg).cgColor
-        blurView.layer?.borderWidth = 1
-        blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
-        blurView.frame = panel.contentView?.bounds ?? .zero
-        blurView.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(blurView)
-        self.blurView = blurView
-
-        // Pure AppKit root view (replaces NSHostingView — no AttributeGraph, no AG corruption)
-        let rootView = OverlayRootView(frame: panel.contentView?.bounds ?? .zero)
-        rootView.autoresizingMask = [.width, .height]
-        rootView.headerView.onStopRequested = { [weak self] in
-            self?.onStopListening?()
-        }
-        panel.contentView?.addSubview(rootView, positioned: .above, relativeTo: blurView)
-        self.rootView = rootView
-
-        // Drag handle at the top — pure AppKit, above the root view
-        let headerHeight: CGFloat = OverlayTokens.headerHeight
-        let contentBounds = panel.contentView?.bounds ?? .zero
-        let dragView = PanelDragView()
-        dragView.panel = panel
-        dragView.frame = NSRect(
-            x: 0,
-            y: contentBounds.height - headerHeight,
-            width: contentBounds.width,
-            height: headerHeight
-        )
-        dragView.autoresizingMask = [.width, .minYMargin]
-        panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: rootView)
-        self.dragHandleView = dragView
-
-        // Round corners on the panel's content view
-        panel.contentView?.wantsLayer = true
-        panel.contentView?.layer?.cornerRadius = OverlayTokens.cornerRadius
-        panel.contentView?.layer?.masksToBounds = true
-        panel.contentView?.layer?.borderWidth = 1
-        panel.contentView?.layer?.borderColor = OverlayTokens.panelStroke.cgColor
-
-        self.panel = panel
-        updatePanelCornerRadius()
-
-        // Combine subscriptions: push live engine data to views
+        // Combine subscriptions: push live engine data to the island
         sttRouter.$audioLevel
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
@@ -266,7 +168,6 @@ class FloatingOverlayController {
                     sttIsRecording: sttRouter.isRecording,
                     rawLevel: level
                 )
-                self.rootView?.headerView.updateWaveformLevel(presentation.level)
                 if self.isIslandMode {
                     self.island?.updateDictationLevel(presentation.level)
                 }
@@ -276,41 +177,13 @@ class FloatingOverlayController {
         sttRouter.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.pushStateToViews()
+                self?.pushStateToIsland()
             }
             .store(in: &subscriptions)
 
     }
 
-    // MARK: - State → View Push
-
-    /// Push current state to the AppKit view hierarchy. Called on state changes.
-    private func pushStateToViews() {
-        rootView?.updateForState(
-            state,
-            dictationShortcutHint: dictationShortcutHint,
-            listeningNotice: listeningNotice,
-            errorMessage: errorMessage,
-            errorActionTitle: errorActionTitle,
-            onErrorAction: { [weak self] in
-                guard let self else { return }
-                let handler = self.errorActionHandler
-                self.clearActionableErrorWithoutHiding()
-                handler?()
-            },
-            messageTone: messageTone,
-            onErrorDismiss: { [weak self] in self?.dismissErrorClosedByUser() },
-            loadingPresentation: loadingPresentation,
-            loadingElapsedSeconds: loadingElapsedSeconds,
-            successTitle: successTitle,
-            isRecording: sttRouter?.isRecording ?? false,
-            isMiniCursorMode: isCursorMiniPanelMode,
-            audioLevel: sttRouter?.audioLevel ?? 0
-        )
-        updatePanelMouseBehavior()
-        updatePanelCornerRadius()
-        pushStateToIsland()
-    }
+    // MARK: - State → Island Push
 
     private func pushStateToIsland() {
         guard let island else { return }
@@ -395,11 +268,11 @@ class FloatingOverlayController {
         }
     }
 
-    // MARK: - Panel Show/Hide
+    // MARK: - Show/Hide
 
+    /// Shows the session in the island. `anchorRect` is kept for callers;
+    /// the island picks its own place.
     func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
-        guard let panel = panel else { return }
-
         // Invalidate any pending async _performHide() from a previous session's animation
         hideGeneration.invalidate()
 
@@ -411,125 +284,15 @@ class FloatingOverlayController {
         successDismissTask?.cancel()
         successDismissTask = nil
 
-        if isIslandMode {
-            // The island draws the session; the panel stays hidden.
-            islandSourceApp = sourceApp
-            isVisible = true
-            pushStateToViews()
-            installEscapeMonitor()
-            return
-        }
-
-        let shouldOpenAtCursor = isCursorMiniPanelMode
-        let rawTargetRect = shouldOpenAtCursor
-            ? nil
-            : sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        let anchorTargetRect: NSRect?
-        if let anchorRect, anchorRect.width > 0, anchorRect.height > 0 {
-            anchorTargetRect = anchorRect
-        } else {
-            anchorTargetRect = nil
-        }
-        let panelSize = preferredPanelSize(for: state)
-
-        // Validate the accessibility rect — terminal emulators report oversized text areas
-        let mousePos = NSEvent.mouseLocation
-        let screenFrames = NSScreen.screens.map(\.frame)
-        let primaryScreenFrame = NSScreen.screens.first?.frame ?? NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        let convertedTargetRect = rawTargetRect.flatMap {
-            DictationOverlayPlacementPolicy.cocoaRect(fromAccessibilityRect: $0, primaryScreenFrame: primaryScreenFrame)
-        }
-        let resolvedScreenFrame = DictationOverlayPlacementPolicy.screenFrame(
-            containing: anchorTargetRect ?? convertedTargetRect,
-            mouseLocation: mousePos,
-            screenFrames: screenFrames,
-            fallbackScreenFrame: NSScreen.main?.frame
-        )
-        let currentScreen = resolvedScreenFrame.flatMap { frame in
-            NSScreen.screens.first { $0.frame == frame }
-        } ?? NSScreen.main
-        let targetRect = DictationOverlayPlacementPolicy.validatedTargetRect(
-            convertedTargetRect,
-            on: resolvedScreenFrame
-        )
-
-        var origin: NSPoint
-        if shouldOpenAtCursor {
-            origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)
-        } else if let rect = anchorTargetRect {
-            origin = NSPoint(
-                x: rect.midX - panelSize.width / 2,
-                y: rect.midY - panelSize.height / 2
-            )
-        } else if let rect = targetRect {
-            origin = DictationOverlayPlacementPolicy.originAboveTarget(targetRect: rect, panelSize: panelSize)
-        } else {
-            origin = NSPoint(
-                x: mousePos.x - panelSize.width / 2,
-                y: mousePos.y + 20
-            )
-        }
-
-        // Clamp to current screen
-        if let visibleFrame = currentScreen?.visibleFrame {
-            origin.x = max(visibleFrame.minX + 10,
-                           min(origin.x, visibleFrame.maxX - panelSize.width - 10))
-            if origin.y + panelSize.height > visibleFrame.maxY {
-                if anchorTargetRect != nil {
-                    origin.y = visibleFrame.maxY - panelSize.height - 10
-                } else {
-                    origin.y = targetRect != nil
-                        ? origin.y - panelSize.height - 24
-                        : mousePos.y - panelSize.height - 10
-                }
-            }
-            origin.y = max(
-                visibleFrame.minY + 10,
-                min(origin.y, visibleFrame.maxY - panelSize.height - 10)
-            )
-        }
-
-        panel.setFrameOrigin(origin)
-        panel.setContentSize(panelSize)
-        panel.ignoresMouseEvents = isCursorMiniPanelMode
-        updatePanelCornerRadius()
-
-        // Spring entrance
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-
-        if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer {
-            // Skip the entrance spring entirely under Reduce Motion.
-            if !AccessibilityDisplayPolicy.reduceMotion {
-                let spring = CASpringAnimation(keyPath: "transform.scale")
-                spring.fromValue = 0.88
-                spring.toValue = 1.0
-                spring.damping = 18
-                spring.stiffness = 280
-                spring.initialVelocity = 3
-                spring.duration = spring.settlingDuration
-                contentLayer.add(spring, forKey: "entranceScale")
-            }
-        }
-
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.2)
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1.0
-        })
-
+        islandSourceApp = sourceApp
         isVisible = true
-        pushStateToViews()
-        updateCursorFollowTracking()
+        pushStateToIsland()
         installEscapeMonitor()
     }
 
-    func resizePanelToCompact() {
-        resizePanelInstant(to: preferredPanelSize(for: state))
-        if isCursorMiniTrackingMode {
-            updateCursorFollowPosition(snap: true)
-        }
-    }
+    /// The island sizes itself; kept so callers that used to shrink the old
+    /// panel after loading don't need to change.
+    func resizePanelToCompact() {}
 
     func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
         errorDismissTask?.cancel()
@@ -538,13 +301,11 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         successDismissTask?.cancel()
         successDismissTask = nil
-        cancelMiniLoadingReveal()
         errorMessage = ""
         messageTone = .error
         discardActionableMessageIfNeeded()
         listeningNotice = ""
         state = .starting
-        resizePanelToCompact()
         if !isVisible {
             showPanel(near: sourceApp, anchorRect: anchorRect)
         }
@@ -554,120 +315,29 @@ class FloatingOverlayController {
         hideGeneration.invalidate()
         successDismissTask?.cancel()
         successDismissTask = nil
-
-        guard let panel, isVisible, !isIslandMode else { return }
-        cancelPanelHideAnimations(panel)
-        panel.ignoresMouseEvents = isCursorMiniPanelMode
-        if !panel.isVisible {
-            panel.orderFrontRegardless()
-            isVisible = true
-        }
-    }
-
-    private func cancelPanelHideAnimations(_ panel: NSPanel) {
-        panel.animations = [:]
-        panel.contentView?.layer?.removeAllAnimations()
-        panel.contentView?.subviews.forEach { subview in
-            subview.layer?.removeAllAnimations()
-        }
-        panel.alphaValue = 1
     }
 
     /// The earliest show on a key press, before the start's checks run.
-    /// Only in Notch island mode; the other windows need the target field.
     func showIslandStartingStateIfSelected(near sourceApp: NSRunningApplication?) {
         guard isIslandMode, !state.isActiveDictationState else { return }
         showStartingState(near: sourceApp)
     }
 
-    @discardableResult
-    func showMiniCursorStartingStateIfNeeded(
-        near sourceApp: NSRunningApplication?,
-        anchorRect: NSRect? = nil
-    ) -> Bool {
-        guard isCursorMiniPresentationMode else { return false }
-        showStartingState(near: sourceApp, anchorRect: anchorRect)
-        return true
-    }
-
-    // MARK: - Hide Animations
+    // MARK: - Hide
 
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
-        guard let panel = panel, !isIslandMode else { completion?(); _performHide(); return }
-        let gen = hideGeneration.snapshot()
-        panel.ignoresMouseEvents = true
-
-        // Make sure the overlay cannot intercept the follow-up paste.
-        panel.resignKey()
-        panel.orderOut(nil)
-
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.22)
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            completion?()
-            Task { @MainActor [weak self] in
-                guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
-                self._performHide()
-            }
-        })
-
-        if !AccessibilityDisplayPolicy.reduceMotion, let contentLayer = panel.contentView?.layer {
-            let shrink = CABasicAnimation(keyPath: "transform.scale")
-            shrink.fromValue = 1.0
-            shrink.toValue = 0.96
-            shrink.duration = 0.22
-            shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            contentLayer.add(shrink, forKey: "confirmShrink")
-        }
+        completion?()
+        _performHide()
     }
 
     func hideWithCancelAnimation() {
-        guard let panel = panel, !isIslandMode else { _performHide(); return }
-        let gen = hideGeneration.snapshot()
-        panel.ignoresMouseEvents = true
-
-        let baseX = panel.frame.origin.x
-        // Skip the horizontal shake under Reduce Motion; the fade below still runs.
-        let offsets: [CGFloat] = AccessibilityDisplayPolicy.reduceMotion ? [] : [7, -5, 3, -1, 0]
-        let stepDuration = 0.068
-
-        for (i, offset) in offsets.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) { [weak panel] in
-                guard let panel = panel else { return }
-                var frame = panel.frame
-                frame.origin.x = baseX + offset
-                panel.setFrame(frame, display: false)
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
-            guard let panel = panel else {
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
-                    self._performHide()
-                }
-                return
-            }
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.14)
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                panel.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.hideGeneration.isCurrent(gen) else { return }
-                    self._performHide()
-                }
-            })
-        }
+        _performHide()
     }
 
     // MARK: - Error & Loading
 
     private var errorDismissTask: Task<Void, Never>?
     private var loadingTimerTask: Task<Void, Never>?
-    private var miniLoadingRevealTask: Task<Void, Never>?
     private var successDismissTask: Task<Void, Never>?
 
     func showLoadingState(
@@ -682,10 +352,6 @@ class FloatingOverlayController {
         if let presentation {
             loadingPresentation = presentation
         }
-        if isCursorMiniPresentationMode, state == .starting || state == .listening {
-            scheduleMiniLoadingReveal()
-            return
-        }
         let enteringLoading = state != .loading
         if enteringLoading {
             loadingElapsedSeconds = 0
@@ -693,12 +359,6 @@ class FloatingOverlayController {
         state = .loading
         if !isVisible {
             showPanel(near: sourceApp, anchorRect: anchorRect)
-        }
-        let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
-        if enteringLoading {
-            resizePanel(to: loadingSize)
-        } else {
-            resizePanelInstant(to: loadingSize)
         }
         if enteringLoading || loadingTimerTask == nil {
             loadingTimerTask?.cancel()
@@ -708,43 +368,6 @@ class FloatingOverlayController {
                     guard let self = self, !Task.isCancelled, self.state == .loading else { break }
                     self.loadingElapsedSeconds += 1
                 }
-            }
-        }
-    }
-
-    private func scheduleMiniLoadingReveal() {
-        guard miniLoadingRevealTask == nil else { return }
-        miniLoadingRevealTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: Self.miniLoadingRevealDelayNanoseconds)
-            } catch { return }
-            guard let self,
-                  !Task.isCancelled,
-                  self.isVisible,
-                  self.isCursorMiniTrackingMode else { return }
-            self.miniLoadingRevealTask = nil
-            self.state = .loading
-            self.loadingElapsedSeconds = 0
-            self.stopCursorFollowTracking()
-            let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
-            self.resizePanel(to: loadingSize, keepingVisible: true)
-            self.pushStateToViews()
-            self.startLoadingTimerIfNeeded()
-        }
-    }
-
-    private func cancelMiniLoadingReveal() {
-        miniLoadingRevealTask?.cancel()
-        miniLoadingRevealTask = nil
-    }
-
-    private func startLoadingTimerIfNeeded() {
-        guard loadingTimerTask == nil else { return }
-        loadingTimerTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self, !Task.isCancelled, self.state == .loading else { break }
-                self.loadingElapsedSeconds += 1
             }
         }
     }
@@ -766,8 +389,8 @@ class FloatingOverlayController {
 
     /// A dictation that didn't paste (no text box, or focus moved). The
     /// island shows the words, a Paste button, and a ring that runs down to
-    /// the close; pressing ⌘V elsewhere turns it into "Pasted". Other
-    /// overlay modes keep the plain clipboard notice.
+    /// the close; pressing ⌘V elsewhere steps it aside. Without an island
+    /// (tests) it falls back to the plain clipboard notice.
     /// `unconfirmed` is for a paste that may well have landed (the target
     /// read the clipboard too late to prove it): the island says "Maybe
     /// pasted" so the Paste button doesn't read as the fix and double it.
@@ -793,7 +416,7 @@ class FloatingOverlayController {
     /// Paste-back didn't run because the clipboard held something it couldn't
     /// set aside, so the words were never put on it. The island shows them
     /// with a Copy button (the one step that replaces what's on the
-    /// clipboard, only when asked). Other overlay modes keep the error.
+    /// clipboard, only when asked). Without an island it shows the error.
     func showClipboardBusyNotice(_ text: String, fallbackMessage: String, copy: @escaping () -> Void) {
         guard isIslandMode else {
             showError(fallbackMessage)
@@ -879,11 +502,10 @@ class FloatingOverlayController {
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
-        resizePanel(to: errorPanelSize())
         if !isVisible {
             showPanel(near: nil)
         }
-        pushStateToViews()  // Force update for error message
+        pushStateToIsland()  // Force update for error message
         if notPasted != nil {
             // Runs down with the island's ring, and holds while hovered.
             errorDismissTask = Task { @MainActor [weak self] in
@@ -908,8 +530,8 @@ class FloatingOverlayController {
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: dismissDelay)
-                // Hovering the pill holds the message so it can be read, up to
-                // a cap: in near-text mode the pointer often just sits there.
+                // Hovering the island holds the message so it can be read, up
+                // to a cap, in case the pointer just sits there.
                 var heldNanoseconds: UInt64 = 0
                 while self?.isMouseOverPanel == true, heldNanoseconds < Self.messageHoverHoldLimit {
                     try await Task.sleep(nanoseconds: 300_000_000)
@@ -924,11 +546,7 @@ class FloatingOverlayController {
     private static let messageHoverHoldLimit: UInt64 = 30_000_000_000  // 30 s
 
     private var isMouseOverPanel: Bool {
-        if isIslandMode {
-            return isVisible && island?.isPointerOverIsland == true
-        }
-        guard let panel, isVisible, panel.isVisible else { return false }
-        return panel.frame.contains(NSEvent.mouseLocation)
+        isVisible && island?.isPointerOverIsland == true
     }
 
     /// `dismissError()` for an explicit user close (X or Esc), as opposed to
@@ -973,7 +591,7 @@ class FloatingOverlayController {
         errorMessage = ""
         errorActionTitle = nil
         errorActionHandler = nil
-        pushStateToViews()
+        pushStateToIsland()
     }
 
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
@@ -995,11 +613,10 @@ class FloatingOverlayController {
         messageCanGiveWayToNextStart = true
         discardActionableMessageIfNeeded()
         state = .drafting
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
             showPanel(near: nil)
         }
-        pushStateToViews()
+        pushStateToIsland()
         // A muted mic needs reading and acting on, so it stays up as long
         // as other messages of its length; plain "no speech" is a flash.
         let dismissDelay = silentMicName == nil
@@ -1031,11 +648,10 @@ class FloatingOverlayController {
             island?.noteDictationInserted(title: title)
         }
         state = .success
-        resizePanelToCompact()
         if !isVisible {
             showPanel(near: nil)
         }
-        pushStateToViews()
+        pushStateToIsland()
         successDismissTask = Task { @MainActor [weak self] in
             do {
                 // Let the "Pasted" confirmation stay readable before it eases out
@@ -1052,18 +668,12 @@ class FloatingOverlayController {
     private func _performHide() {
         guard isVisible else { return }
         removeEscapeMonitor()
-        panel?.ignoresMouseEvents = true
-        panel?.orderOut(nil)
-        panel?.alphaValue = 1.0
-        panel?.contentView?.layer?.removeAllAnimations()
 
         isVisible = false
-        stopCursorFollowTracking()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
-        cancelMiniLoadingReveal()
         successDismissTask?.cancel()
         successDismissTask = nil
         state = .idle
@@ -1186,187 +796,5 @@ class FloatingOverlayController {
             NSEvent.removeMonitor(monitor)
             escapeMonitor = nil
         }
-    }
-
-    // MARK: - Panel Resize
-
-    private func resizePanelInstant(to size: NSSize, keepingVisible: Bool = false) {
-        resizePanel(to: size, keepingVisible: keepingVisible, animated: false)
-    }
-
-    private func resizePanel(to size: NSSize, keepingVisible: Bool = false, animated: Bool = true) {
-        guard let panel = panel, !isIslandMode else { return }
-        var frame = panel.frame
-        let widthDelta = size.width - frame.size.width
-        let heightDelta = size.height - frame.size.height
-        frame.size = size
-        frame.origin.x -= widthDelta / 2
-        frame.origin.y -= heightDelta
-        if keepingVisible {
-            frame = clampedVisiblePanelFrame(frame)
-        }
-        panel.setFrame(frame, display: true, animate: animated)
-    }
-
-    private func clampedVisiblePanelFrame(_ frame: NSRect) -> NSRect {
-        let center = NSPoint(x: frame.midX, y: frame.midY)
-        let screen = NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
-            ?? NSScreen.screens.first { frame.intersects($0.frame) }
-            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
-            ?? NSScreen.main
-        guard let visibleFrame = screen?.visibleFrame else { return frame }
-
-        let inset = Self.cursorFollowScreenInset
-        var clamped = frame
-        let minX = visibleFrame.minX + inset
-        let maxX = visibleFrame.maxX - frame.width - inset
-        let minY = visibleFrame.minY + inset
-        let maxY = visibleFrame.maxY - frame.height - inset
-
-        clamped.origin.x = maxX < minX ? minX : max(minX, min(clamped.origin.x, maxX))
-        clamped.origin.y = maxY < minY ? minY : max(minY, min(clamped.origin.y, maxY))
-        return clamped
-    }
-
-    private func preferredPanelSize(for state: OverlayState) -> NSSize {
-        switch state {
-        case .loading:
-            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
-        case .drafting where !errorMessage.isEmpty:
-            return errorPanelSize()
-        case .listening where isCursorMiniPresentationMode && !listeningNotice.isEmpty:
-            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode && !listeningNotice.isEmpty:
-            return NSSize(width: OverlayTokens.panelCursorMiniNoticeWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .starting where isCursorMiniPresentationMode:
-            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .listening where isCursorMiniPresentationMode:
-            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:
-            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .success where isCursorMiniPresentationMode:
-            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
-        case .idle, .starting, .listening, .drafting, .success:
-            return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
-        }
-    }
-
-    private func errorPanelSize() -> NSSize {
-        let base = errorActionTitle == nil
-            ? OverlayTokens.panelMinHeight
-            : OverlayTokens.panelActionErrorHeight
-        // Messages past roughly one rendered line wrap in the drafting view;
-        // give the panel enough height that the second line stays visible.
-        let height = errorMessage.count > 64 ? base + 18 : base
-        return NSSize(width: OverlayTokens.panelWidth, height: height)
-    }
-
-    // MARK: - Cursor Following
-
-    /// The mini cursor window was retired with the dictation window picker;
-    /// the Notch island is the only dictation window now.
-    private var isCursorMiniPresentationMode: Bool { false }
-
-    private var isCursorMiniPanelMode: Bool {
-        guard isCursorMiniPresentationMode else { return false }
-        switch state {
-        case .starting, .listening, .success:
-            return true
-        case .drafting:
-            return errorMessage.isEmpty
-        case .idle, .loading:
-            return false
-        }
-    }
-
-    private var isCursorMiniListeningMode: Bool {
-        state == .listening && isCursorMiniPresentationMode
-    }
-
-    private var isCursorMiniTrackingMode: Bool {
-        (state == .starting || state == .listening) && isCursorMiniPresentationMode
-    }
-
-    private func updateCursorFollowTracking() {
-        updatePanelMouseBehavior()
-        guard isVisible, isCursorMiniTrackingMode else {
-            stopCursorFollowTracking()
-            return
-        }
-        startCursorFollowTracking()
-    }
-
-    private func startCursorFollowTracking() {
-        guard cursorFollowTask == nil else { return }
-        updateCursorFollowPosition(snap: true)
-        cursorFollowTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self, self.isVisible, self.isCursorMiniTrackingMode else { break }
-                self.updateCursorFollowPosition(snap: false)
-                try? await Task.sleep(nanoseconds: Self.cursorFollowIntervalNanoseconds)
-            }
-        }
-    }
-
-    private func stopCursorFollowTracking() {
-        cursorFollowTask?.cancel()
-        cursorFollowTask = nil
-    }
-
-    private func updateCursorFollowPosition(snap: Bool) {
-        guard let panel, isVisible, isCursorMiniTrackingMode else { return }
-
-        let target = cursorFollowOrigin(
-            for: NSEvent.mouseLocation,
-            panelSize: panel.frame.size
-        )
-        var frame = panel.frame
-        if snap || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            frame.origin = target
-        } else {
-            frame.origin.x += (target.x - frame.origin.x) * Self.cursorFollowSmoothing
-            frame.origin.y += (target.y - frame.origin.y) * Self.cursorFollowSmoothing
-        }
-        panel.setFrameOrigin(frame.origin)
-    }
-
-    private func updatePanelCornerRadius() {
-        let radius = isCursorMiniPanelMode
-            ? OverlayTokens.panelCursorMiniCornerRadius
-            : OverlayTokens.cornerRadius
-        blurView?.layer?.cornerRadius = radius
-        panel?.contentView?.layer?.cornerRadius = radius
-    }
-
-    private func updatePanelMouseBehavior() {
-        guard isVisible else { return }
-        panel?.ignoresMouseEvents = isCursorMiniPanelMode
-    }
-
-    private func cursorFollowOrigin(for mouseLocation: NSPoint, panelSize: NSSize) -> NSPoint {
-        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
-            ?? NSScreen.main
-        guard let visibleFrame = screen?.visibleFrame else {
-            return NSPoint(
-                x: mouseLocation.x + Self.cursorFollowOffset.width,
-                y: mouseLocation.y + Self.cursorFollowOffset.height
-            )
-        }
-
-        let inset = Self.cursorFollowScreenInset
-        var x = mouseLocation.x + Self.cursorFollowOffset.width
-        if x + panelSize.width > visibleFrame.maxX - inset {
-            x = mouseLocation.x - panelSize.width - Self.cursorFollowOffset.width
-        }
-
-        var y = mouseLocation.y + Self.cursorFollowOffset.height
-        if y + panelSize.height > visibleFrame.maxY - inset {
-            y = mouseLocation.y - panelSize.height - Self.cursorFollowOffset.height
-        }
-
-        return NSPoint(
-            x: max(visibleFrame.minX + inset, min(x, visibleFrame.maxX - panelSize.width - inset)),
-            y: max(visibleFrame.minY + inset, min(y, visibleFrame.maxY - panelSize.height - inset))
-        )
     }
 }

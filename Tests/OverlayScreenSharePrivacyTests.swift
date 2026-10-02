@@ -8,20 +8,16 @@
 // work. Live/transient overlays and transcript-bearing review windows opt out
 // with `sharingType = .none`.
 //
-// Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
-// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift
-// and Sources/UI/Settings/{SpeakerNamingSheet,
-// TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
-// constructing every surface. TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
+// Source-text pin: "non-sensitive titled windows stay capturable" below reads
+// Sources/UI/Settings/{TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift
+// as text instead of constructing every surface. TranscriptedSettingsWindowController needs a live
+// TranscriptedAppState/TranscriptedSettingsActions object
 // graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
 // TranscriptedOnboardingWindowController's init only takes closures (makeView returning
 // PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
-// in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
-// FloatingOverlayPanel, CapturePillPanel, NotchIslandPanel, and PasteLastDictationFeedbackPanel are
-// compiled here and built live by the first four suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
-// live in a file this runner does not compile, so they stay on it. The CapturePillController suite greps
-// present()/installEventMonitor() because proving real Return/Escape key routing needs a live
-// NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
+// in the same table rather than special-cased.
+// NotchIslandPanel and PasteLastDictationFeedbackPanel are compiled here and built live by the
+// first two suites, so no protected surface is left on a source table. The last suite
 // (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
 // definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
 // added" — update expectedMarkers when you add, rename, or remove one.
@@ -34,37 +30,6 @@ func testOverlayScreenSharePrivacy() async {
     // Behavioral: these panels are dependency-free, so the fast runner can
     // instantiate them and assert the real runtime property instead of only
     // inspecting source.
-    runSuite("FloatingOverlayPanel is excluded from screen capture") {
-        _ = NSApplication.shared
-        let panel = FloatingOverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: true
-        )
-        assertEqual(
-            panel.sharingType,
-            .none,
-            "the dictation overlay must not be visible to screen sharing / capture"
-        )
-    }
-
-    runSuite("CapturePillPanel is excluded from screen capture") {
-        _ = NSApplication.shared
-        let panel = CapturePillPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 74),
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: true
-        )
-        assertEqual(
-            panel.sharingType,
-            .none,
-            "the capture pill must not be visible to screen sharing / capture"
-        )
-        assertTrue(panel.canBecomeKey, "the capture pill must be keyboard-dismissable")
-    }
-
     runSuite("NotchIslandPanel is excluded from screen capture and never takes focus") {
         _ = NSApplication.shared
         let panel = NotchIslandPanel(
@@ -109,75 +74,6 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
-    runSuite("CapturePillController scopes Return and Escape to the pill panel") {
-        let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
-        let presentBlock = overlayPrivacySlice(
-            capturePill,
-            from: "func present(",
-            to: "func dismiss(notify: Bool)"
-        )
-        let monitorBlock = overlayPrivacySlice(
-            capturePill,
-            from: "private func installEventMonitor()",
-            to: "private func position(panel: NSPanel)"
-        )
-
-        assertFalse(
-            presentBlock.contains("panel.makeKey()"),
-            "showing the detected-meeting pill must not steal key focus from the current Transcripted window"
-        )
-        assertTrue(
-            monitorBlock.contains("event.window === panel || panel.isKeyWindow")
-                && monitorBlock.contains("case 36:")
-                && monitorBlock.contains("case 53:")
-                && monitorBlock.contains("return event"),
-            "Return/Escape should be swallowed only when the key event belongs to the pill panel"
-        )
-    }
-
-    // Source contract: most app surfaces live in files the fast runner cannot
-    // compile in isolation, so guard their init bodies at the source level.
-    runSuite("protected Transcripted NSWindow/NSPanel inits set sharingType = .none") {
-        // FloatingOverlayPanel, CapturePillPanel, and NotchIslandPanel are
-        // compiled here and built for real by the suites above; only the
-        // surfaces this runner cannot construct stay on this source table.
-        let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
-        let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
-        let inits: [(name: String, body: String)] = [
-            (
-                "MeetingOverlayPanel",
-                overlayPrivacySlice(
-                    panelSource,
-                    from: "final class MeetingOverlayPanel: NSPanel {",
-                    to: "final class MeetingOverlayTooltipPanel"
-                )
-            ),
-            (
-                "MeetingOverlayTooltipPanel",
-                overlayPrivacySlice(
-                    panelSource,
-                    from: "final class MeetingOverlayTooltipPanel: NSPanel {",
-                    to: "final class MeetingOverlayTooltipView"
-                )
-            ),
-            (
-                "NamingWindowController",
-                overlayPrivacySlice(
-                    speakerNaming,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-        ]
-
-        for entry in inits {
-            assertTrue(
-                entry.body.contains("sharingType = .none"),
-                "\(entry.name) init must set sharingType = .none so the surface stays out of screen capture"
-            )
-        }
-    }
-
     runSuite("non-sensitive titled Transcripted windows stay capturable") {
         let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
         let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
@@ -216,12 +112,7 @@ func testOverlayScreenSharePrivacy() async {
     runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
         let expectedMarkers: [String] = [
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
-            "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
-            "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",
-            "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
             "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
-            "Sources/UI/Settings/SpeakerNamingSheet.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
         ]
@@ -233,7 +124,7 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
-    runSuite("detected meeting prompts route through the capture pill") {
+    runSuite("detected meeting prompts route through the call prompt controller") {
         let app = overlayPrivacySource("Sources/TranscriptedApp.swift")
         let promptRequest = overlayPrivacySlice(
             app,
@@ -242,7 +133,7 @@ func testOverlayScreenSharePrivacy() async {
         )
         assertTrue(
             promptRequest.contains("capturePillController.present("),
-            "detected meeting prompts should use the floating capture pill"
+            "detected meeting prompts should use the call prompt controller"
         )
         assertTrue(
             promptRequest.contains("MeetingPromptHeuristics.promptTimeoutSeconds"),
@@ -250,11 +141,11 @@ func testOverlayScreenSharePrivacy() async {
         )
         assertTrue(
             app.contains("capturePillController.onRemind = remindPrompt"),
-            "the capture pill should expose the short remind-soon path"
+            "the call prompt should expose the short remind-soon path"
         )
         assertTrue(
             app.contains("capturePillController.onExpired = expirePrompt"),
-            "the capture pill timeout should use the expiry path, not an explicit dismissal"
+            "the call prompt timeout should use the expiry path, not an explicit dismissal"
         )
         assertFalse(
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),

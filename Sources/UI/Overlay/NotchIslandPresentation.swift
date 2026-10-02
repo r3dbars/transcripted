@@ -469,8 +469,10 @@ enum NotchIslandPresentation {
         meeting: NotchIslandMeetingContent?,
         recentInsert: NotchIslandRecentInsert?
     ) -> NotchIslandDrop? {
-        // A dictation inside a meeting: the hover stays the meeting's.
-        if let dictation, !(meeting?.isRecording ?? false) {
+        // A recording meeting owns the hover: a dictation inside it, and the
+        // dictation that just landed, never take it over.
+        let meetingRecords = meeting?.isRecording == true
+        if let dictation, !meetingRecords {
             switch dictation.phase {
             case .starting, .listening:
                 return .dictationTarget(appName: dictation.targetAppName, showsPreview: dictation.showsLivePreview)
@@ -486,7 +488,7 @@ enum NotchIslandPresentation {
                 return nil
             }
         }
-        if let recentInsert, let text = recentInsert.text, !text.isEmpty {
+        if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {
             return .justInserted(text: text, words: recentInsert.words)
         }
         guard let meeting else { return nil }

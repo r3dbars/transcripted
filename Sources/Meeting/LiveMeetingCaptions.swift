@@ -23,15 +23,10 @@ final class LiveMeetingCaptions: ObservableObject {
     @Published private(set) var log = LiveMeetingCaptionLog()
     @Published private(set) var status: Status = .off
 
-    /// This meeting's two recognizers, read on the live-PCM queue. A fresh
-    /// pair per meeting, so a stop's cleanup can never reach the next
-    /// meeting's models; nil when nothing runs, so an idle app holds no
-    /// buffers or models.
-    private struct Tracks: Sendable {
-        let microphone = LiveMeetingCaptionTrack()
-        let system = LiveMeetingCaptionTrack()
-    }
-    nonisolated private let current = Mutex<Tracks?>(nil)
+    /// Where Core's live-PCM queue hands audio in, without touching the
+    /// main actor.
+    nonisolated static let inlet = LiveMeetingCaptionInlet()
+    private var current: LiveMeetingCaptionInlet { Self.inlet }
     private var sessionID: UUID?
     private var lastLogSessionID: UUID?
     /// Per track, the newest event applied, so a partial that lands late
@@ -43,12 +38,38 @@ final class LiveMeetingCaptions: ObservableObject {
     /// models are never loaded at once.
     private var teardown: Task<Void, Never>?
 
+    private var prewarmTask: Task<Void, Never>?
+    private var prewarmed = false
+
+    /// Downloads and compiles the model in the background, once per launch,
+    /// so a meeting never waits on it. The first Neural Engine compile takes
+    /// ~20 s on an M5 and can take a minute on an M1, longer than the 30 s
+    /// the tracks can queue. Loads one copy and frees it straight away.
+    func prewarm() {
+        guard !prewarmed, prewarmTask == nil, status == .off else { return }
+        prewarmTask = Task(priority: .background) { [weak self] in
+            // Out of the way of launch and the dictation model's warmup.
+            try? await Task.sleep(for: .seconds(20))
+            guard let self, !Task.isCancelled, self.status == .off else {
+                self?.prewarmTask = nil
+                return
+            }
+            let track = LiveMeetingCaptionTrack()
+            let result = await track.load()
+            await track.stop()
+            self.prewarmed = result == .ready
+            self.prewarmTask = nil
+        }
+    }
+
     /// Loading or listening: it wants audio.
     var isActive: Bool { status == .preparing || status == .listening }
 
     /// Starts transcribing this recording. Clears the last meeting's text.
-    func start(sessionID: UUID, shouldYield: @escaping @MainActor () -> Bool) {
+    func start(sessionID: UUID, shouldYield: @escaping @MainActor @Sendable () -> Bool) {
         guard self.sessionID != sessionID || status == .off else { return }
+        prewarmTask?.cancel()
+        prewarmTask = nil
         stopTracks()
         self.sessionID = sessionID
         generation += 1
@@ -59,10 +80,10 @@ final class LiveMeetingCaptions: ObservableObject {
             lastLogSessionID = sessionID
         }
         status = .preparing
-        let tracks = Tracks()
+        let tracks = LiveMeetingCaptionTracks()
         lastSequence = [:]
         // Audio queues while the models load, up to the tracks' bound.
-        current.withLock { $0 = tracks }
+        current.tracks.withLock { $0 = tracks }
         let yield: @Sendable () async -> Bool = { await MainActor.run { shouldYield() } }
         startTask = Task(priority: .utility) { [weak self, teardown = self.teardown] in
             await teardown?.value
@@ -76,10 +97,10 @@ final class LiveMeetingCaptions: ObservableObject {
                 return
             }
             await tracks.microphone.start(shouldYield: yield) { [weak self] event, sequence in
-                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .microphone, generation: generation) }
+                await self?.apply(event, sequence: sequence, track: .microphone, generation: generation)
             }
             await tracks.system.start(shouldYield: yield) { [weak self] event, sequence in
-                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .system, generation: generation) }
+                await self?.apply(event, sequence: sequence, track: .system, generation: generation)
             }
             self.status = .listening
         }
@@ -95,22 +116,12 @@ final class LiveMeetingCaptions: ObservableObject {
         status = .off
     }
 
-    /// Called on Core's live-PCM delivery queue, never a CoreAudio callback.
-    /// `samples` are 16 kHz mono.
-    nonisolated func offer(_ samples: [Float], track: LiveMeetingTrack) {
-        guard !samples.isEmpty, let tracks = current.withLock({ $0 }) else { return }
-        switch track {
-        case .microphone: tracks.microphone.queue.append(samples)
-        case .system: tracks.system.queue.append(samples)
-        }
-    }
-
     /// Stops this meeting's tracks and frees their models and buffers. Waits
     /// for an in-flight load to finish first, so a load can't put the
     /// models back after they were freed.
     private func stopTracks() {
         generation += 1
-        let tracks = current.withLock { tracks in
+        let tracks = current.tracks.withLock { tracks in
             defer { tracks = nil }
             return tracks
         }
@@ -132,6 +143,30 @@ final class LiveMeetingCaptions: ObservableObject {
         switch event {
         case .partial(let text): log.setTentative(text, track: track)
         case .utterance(let text): log.commit(text, track: track)
+        }
+    }
+}
+
+/// This meeting's two recognizers. A fresh pair per meeting, so a stop's
+/// cleanup can never reach the next meeting's models.
+struct LiveMeetingCaptionTracks: Sendable {
+    let microphone = LiveMeetingCaptionTrack()
+    let system = LiveMeetingCaptionTrack()
+}
+
+/// The audio side of the live transcript, read on Core's live-PCM delivery
+/// queue. Holds the current meeting's tracks, or nil when nothing runs, so
+/// an idle app holds no buffers or models.
+final class LiveMeetingCaptionInlet: Sendable {
+    let tracks = Mutex<LiveMeetingCaptionTracks?>(nil)
+
+    /// Called on Core's live-PCM delivery queue, never a CoreAudio callback.
+    /// `samples` are 16 kHz mono.
+    func offer(_ samples: [Float], track: LiveMeetingTrack) {
+        guard !samples.isEmpty, let current = tracks.withLock({ $0 }) else { return }
+        switch track {
+        case .microphone: current.microphone.queue.append(samples)
+        case .system: current.system.queue.append(samples)
         }
     }
 }

@@ -124,7 +124,15 @@ final class CrashReporter {
         previousUncaughtHandler?(exception)
     }
 
+    private static let runtimeContextWriter = RuntimeDiagnosticsContextWriter {
+        applyRuntimeDiagnosticsContext($0)
+    }
+
     static func setRuntimeDiagnosticsContext(_ context: [String: String]) {
+        runtimeContextWriter.submit(context)
+    }
+
+    private static func applyRuntimeDiagnosticsContext(_ context: [String: String]) {
         guard Self.isAvailable, CrashReportingPreferences.isEnabled() else { return }
 
         let sanitizedContext = SentryPayloadSanitizer.sanitizeContext(context)

@@ -193,12 +193,23 @@ func testTranscriptedConstants() async {
     }
 
     await runSuite("TranscriptedConstants.withTimeout — cancels work after deadline") {
-        let result = try? await TranscriptedConstants.withTimeout(seconds: 0.01) {
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            return "late"
+        let cancellationObserved = DetachedTimeoutWorkFlag()
+        do {
+            _ = try await TranscriptedConstants.withTimeout(seconds: 0.01) {
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    if error is CancellationError { cancellationObserved.set() }
+                    throw error
+                }
+                return "late"
+            }
+            assertTrue(false, "deadline must throw instead of returning late work")
+        } catch is CancellationError {
+            assertTrue(cancellationObserved.isSet, "structured timeout must cancel and join cooperative work")
+        } catch {
+            assertTrue(false, "deadline must throw CancellationError, got \(error)")
         }
-
-        assertNil(result, "timeout should return through the throwing path instead of hanging")
     }
 
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns completed work before deadline") {
@@ -210,25 +221,69 @@ func testTranscriptedConstants() async {
     }
 
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns even when work ignores cancellation") {
-        // The work ignores cancellation: it waits on a gate only this test
-        // opens, after checking. If the timeout waited for the work, it would
-        // never return. (A cancelled Task.sleep returns at once, so a sleep loop
-        // isn't really non-cooperative and raced the assertion under load.)
-        let workFinished = DetachedTimeoutWorkFlag()
-        let gate = DetachedTimeoutGate()
-        let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 0.01) {
-            await gate.wait()
-            workFinished.set()
-            return "late"
+        let releaseWork = ParakeetAsyncInterleavingGate()
+        let workFinished = ParakeetAsyncInterleavingGate()
+        let cancellationObserved = DetachedTimeoutWorkFlag()
+        let cleanupNeeded = DetachedTimeoutWorkFlag()
+        // A harness escape hatch prevents a broken timeout from leaving a
+        // suspended task forever. Correctness is the event order, not elapsed
+        // time: work must remain held when the deadline returns.
+        let cleanup = Task {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            cleanupNeeded.set()
+            await releaseWork.open()
+            // Also bound the drain if a regression never invokes the operation.
+            await workFinished.open()
+        }
+        defer { cleanup.cancel() }
+
+        do {
+            _ = try await TranscriptedConstants.withDetachedTimeout(seconds: 0.01) {
+                // A continuation gate remains held even after cancellation;
+                // try? Task.sleep would instead finish immediately when cancelled.
+                await releaseWork.wait()
+                if Task.isCancelled { cancellationObserved.set() }
+                await workFinished.open()
+                return "late"
+            }
+            assertTrue(false, "deadline must throw instead of returning late work")
+        } catch is CancellationError {
+            let finishedBeforeRelease = await workFinished.opened()
+            assertFalse(finishedBeforeRelease, "deadline must return before non-cooperative work is released")
+        } catch {
+            assertTrue(false, "deadline must throw CancellationError, got \(error)")
         }
 
-        assertNil(result, "detached timeout should throw on deadline")
-        assertFalse(workFinished.isSet, "detached timeout should not wait for non-cooperative model work to unwind")
-        gate.open()
+        await releaseWork.open()
+        await workFinished.wait()
+        assertFalse(cleanupNeeded.isSet, "the operation must unwind without the harness escape hatch")
+        assertTrue(cancellationObserved.isSet, "timed-out work must receive cancellation even when it unwinds later")
+    }
+
+    for detached in [false, true] {
+        await runSuite("TranscriptedConstants timeout preserves operation errors (detached=\(detached))") {
+            let operation: @Sendable () async throws -> String = {
+                throw TimeoutTestFailure.operation
+            }
+            do {
+                if detached {
+                    _ = try await TranscriptedConstants.withDetachedTimeout(seconds: 30, operation: operation)
+                } else {
+                    _ = try await TranscriptedConstants.withTimeout(seconds: 30, operation: operation)
+                }
+                assertTrue(false, "a failed operation must not return a value")
+            } catch TimeoutTestFailure.operation {
+                assertTrue(true, "operation failure must reach the caller unchanged")
+            } catch {
+                assertTrue(false, "operation failure must not become a timeout or another error, got \(error)")
+            }
+        }
     }
 }
 
-/// Set by work that should still be running when a detached timeout returns.
+private enum TimeoutTestFailure: Error { case operation }
+
+/// Records cancellation observed by the real operation passed to the timeout.
 private final class DetachedTimeoutWorkFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var value = false
@@ -236,32 +291,4 @@ private final class DetachedTimeoutWorkFlag: @unchecked Sendable {
     var isSet: Bool { lock.withLock { value } }
 
     func set() { lock.withLock { value = true } }
-}
-
-/// A one-shot gate that ignores task cancellation, standing in for model work
-/// that won't unwind when cancelled.
-private final class DetachedTimeoutGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var isOpen = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            let resumeNow = lock.withLock { () -> Bool in
-                if isOpen { return true }
-                waiters.append(continuation)
-                return false
-            }
-            if resumeNow { continuation.resume() }
-        }
-    }
-
-    func open() {
-        let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
-            isOpen = true
-            defer { waiters.removeAll() }
-            return waiters
-        }
-        pending.forEach { $0.resume() }
-    }
 }

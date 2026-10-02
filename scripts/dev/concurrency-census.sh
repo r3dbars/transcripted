@@ -3,9 +3,13 @@
 #
 # Swift 6's strict concurrency checking turns data races and wrong-thread calls
 # into compile errors. The app still builds in Swift 5 mode, so this does a
-# typecheck-only pass (no binary, no codegen, nothing shipped changes) with
-# -strict-concurrency=complete and counts the concurrency warnings under each
-# Sources/ folder. The counts are the migration backlog: turn one folder to
+# typecheck pass with -strict-concurrency=complete (no app binary; nothing
+# shipped changes) and counts the concurrency warnings under each Sources/
+# folder. The TranscriptedWritingCore module has to be compiled first so the
+# app sources can import it; that compile also runs with
+# -strict-concurrency=complete (and -Onone, to keep it quick), and its
+# warnings land in the same log, so Sources/TranscriptedWriting/Core stays
+# counted. The counts are the migration backlog: turn one folder to
 # zero, then flip that folder to Swift 6 mode.
 #
 #   bash scripts/dev/concurrency-census.sh            # print counts, compare to the baseline
@@ -34,11 +38,23 @@ if [ ! -f deps-libs/libDraftDeps.a ] || [ ! -d deps-modules ]; then
 fi
 
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
-build_app_swiftc_args
 
 mkdir -p build
 log="build/concurrency-census.log"
-echo "Typechecking ${#APP_SOURCE_FILES[@]} app sources with -strict-concurrency=complete (no binary is built)..."
+core_log="build/concurrency-census-core.log"
+
+# WritingCore is its own module now, so it is not in APP_SOURCE_FILES. Build it
+# under strict concurrency and keep its warnings for the count.
+echo "Compiling TranscriptedWritingCore with -strict-concurrency=complete..."
+# shellcheck disable=SC2034  # read by build_writing_core_module
+WRITING_CORE_SWIFTC_FLAGS=(-Onone -strict-concurrency=complete)
+if ! build_app_swiftc_args > "$core_log" 2>&1; then
+    echo "TranscriptedWritingCore failed to compile; see $core_log"
+    grep -m 20 'error:' "$core_log" || true
+    exit 1
+fi
+
+echo "Typechecking ${#APP_SOURCE_FILES[@]} app sources with -strict-concurrency=complete (no app binary is built)..."
 set +e
 swiftc -typecheck \
     -strict-concurrency=complete \
@@ -48,6 +64,7 @@ swiftc -typecheck \
     > "$log" 2>&1
 status=$?
 set -e
+cat "$core_log" >> "$log"
 if [ "$status" -ne 0 ]; then
     echo "Typecheck failed (exit $status); see $log"
     grep -m 20 'error:' "$log" || true

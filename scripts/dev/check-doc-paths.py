@@ -38,6 +38,9 @@ SKIP_DOCS = {
     "docs/writing-plan.md": "names files in the Tilde repo being ported",
     "Tools/SpeakerEvalHarness/VOICEPRINT_BAKEOFF.md": "finished bake-off record; its scripts were removed",
     "Tools/SpeakerEvalHarness/VOICEPRINT_RESULTS.md": "finished bake-off record; its scripts were removed",
+    ".agent-review/test-audit-2026-09-30/fast.md": "point-in-time audit at 85bbcc09; lists tests deleted since",
+    "Tools/SpeakerEvalHarness/AB_DOT_VS_CLOUD.md": "finished study record; its script was removed",
+    "Tools/SpeakerEvalHarness/SEGMENTATION_FREQUENCY_REPORT.md": "finished study record; its drift sim was removed",
 }
 
 # Always-loaded entry files and their line budgets. Every agent session reads

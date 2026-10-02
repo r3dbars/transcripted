@@ -57,7 +57,6 @@ Command ownership:
 - `run-slow-pasteback-smoke.sh` — thin root wrapper for the deterministic fake slow Cmd+V pasteback target smoke
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
-- `scripts/ops/compare-parakeet-models.py` — runs Parakeet V3 and the experimental Parakeet Ultra through `transcripted-cli` on the same recordings and reports word error rate (with `<name>.txt` references) or where they disagree
 - `scripts/models/parakeet-ultra/` — converts Moondream's Parakeet Ultra to Core ML with FluidInference/mobius and installs it as an experimental model (macOS only; see its README)
 - `scripts/models/redimnet2/` — installs the ReDimNet2 b4 voiceprint model into the local model cache, from the bake-off's build, a given `.mlmodelc`/`.mlpackage`, or a fresh conversion; `build.sh` and `build-beta.sh` bundle it from there (macOS only; see its README)
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
@@ -176,7 +175,7 @@ python3 scripts/dev/check-file-size.py --hotspots
 
 Over 1,500 lines as of 2026-10-02, largest first:
 
-- `Sources/UI/Overlay/MeetingOverlayController.swift` (1,617) — the meeting panel lifecycle and recording-pill actions. The Notch island now draws meetings; follow-ups to PR #1946 delete the old pill code, so expect it to shrink.
+- None. `MeetingOverlayController.swift` was the last one; it dropped under 1,500 when the old meeting pill code went.
 
 Split hotspots. These were over 1,500 lines until 2026-10; each is now a core file plus `+*.swift` extensions or sibling files. The risk didn't move out with the lines, so read the whole set:
 

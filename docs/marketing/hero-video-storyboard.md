@@ -14,7 +14,7 @@ README web editor to get a `user-attachments` URL that plays inline).
 
 1. **(0–4s) The hook.** Title card on dark background:
    "A meeting ends. What did you actually agree to?"
-2. **(4–9s) Recording.** The meeting recording pill running during a real
+2. **(4–9s) Recording.** The Notch island recording a meeting during a real
    (demo-data) call, then clicking Stop. Caption: "Transcripted records right
    on your Mac — no bot joins the call."
 3. **(9–15s) The file.** The finished transcript opening — timestamps, speaker
