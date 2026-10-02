@@ -31,13 +31,22 @@ actor LiveMeetingCaptionTrack {
     /// two fallbacks.
     static let quietCloseSeconds: Double = 2.5
     static let longestUtteranceSeconds: Double = 20
-    private static let feedSamples = 16_000
+    /// One encoder step per feed, so a yield (a dictation's final pass
+    /// starting) waits behind at most one chunk, never a second of them.
+    private static let feedSamples = LiveMeetingCaptionTrack.chunkSize.shiftSamples
+    /// Zeros pushed through before a reset so the audio still sitting in the
+    /// recognizer's buffer (up to one chunk) is decoded, not dropped.
+    private static let flushSamples = LiveMeetingCaptionTrack.chunkSize.chunkSamples
     /// One encoder step of new audio. Waking for less only re-reads the
     /// same partial.
     private static let minimumFeedSamples = LiveMeetingCaptionTrack.chunkSize.shiftSamples
 
     nonisolated let queue = LiveMeetingCaptionSampleQueue()
-    private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize)
+    /// `eouDebounceMs: 0` closes at the end-of-utterance token itself.
+    /// FluidAudio's default waits ~1.3 s to confirm it, and its decoder skips
+    /// every chunk in that window, so speech resuming after a short pause was
+    /// never decoded.
+    private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize, eouDebounceMs: 0)
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)
     private var onEvent: (@Sendable (Event, Int) async -> Void)?
     private var eventSequence = 0
@@ -50,7 +59,10 @@ actor LiveMeetingCaptionTrack {
     /// Downloads (first time only) and loads the model, then pays CoreML's
     /// first-inference cost on a second of silence so it doesn't back up
     /// real audio.
-    func load() async -> LoadResult {
+    /// `beforeWarmup` runs between loading and the warmup inference, so a
+    /// caller can hold the Neural Engine work off while something else needs
+    /// it.
+    func load(beforeWarmup: (@Sendable () async -> Void)? = nil) async -> LoadResult {
         do {
             try await manager.loadModels()
             // Stopped while loading: don't keep the models until next time.
@@ -62,6 +74,7 @@ actor LiveMeetingCaptionTrack {
             TranscriptedCore.AppLogger.pipeline.warning("Live transcript model failed to load", ["error_type": String(describing: type(of: error))])
             return .failed
         }
+        await beforeWarmup?()
         if let silence = buffer(from: [Float](repeating: 0, count: 16_000)) {
             try? await manager.appendAudio(silence)
             try? await manager.processBufferedAudio()
@@ -97,9 +110,32 @@ actor LiveMeetingCaptionTrack {
         await manager.cleanup()
     }
 
+    /// Stops feeding and starts the decoder fresh, but keeps the model
+    /// loaded for the next `start`. The dictation preview's track lives for
+    /// the whole app session this way. The queue is left alone: the caller
+    /// clears it when the take ends, and the next take may already be
+    /// filling it.
+    func pause() async {
+        onEvent = nil
+        shouldYield = nil
+        drainTask?.cancel()
+        await drainTask?.value
+        drainTask = nil
+        lastPartial = ""
+        lastPartialAt = nil
+        utteranceSamples = 0
+        await manager.reset()
+    }
+
     private func drain() async {
         while !Task.isCancelled {
             guard queue.count >= Self.minimumFeedSamples else {
+                // Closing runs the recognizer too (the flush), so it waits
+                // out a yield like feeding does.
+                if let shouldYield, await shouldYield() {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
+                }
                 await closeIfQuiet()
                 try? await Task.sleep(for: .milliseconds(120))
                 continue
@@ -157,7 +193,19 @@ actor LiveMeetingCaptionTrack {
     }
 
     /// Commits what was heard and starts the decoder fresh for the next turn.
+    /// The audio still buffered in the recognizer is decoded first (pushed
+    /// through with a chunk of silence); a bare reset would drop it.
     private func closeUtterance() async {
+        if let silence = buffer(from: [Float](repeating: 0, count: Self.flushSamples)) {
+            do {
+                try await manager.appendAudio(silence)
+                try await manager.processBufferedAudio()
+                let flushed = await manager.getPartialTranscript().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !flushed.isEmpty { lastPartial = flushed }
+            } catch {
+                // Keep what was already heard.
+            }
+        }
         let text = lastPartial
         lastPartial = ""
         lastPartialAt = nil

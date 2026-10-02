@@ -16,10 +16,34 @@ func testNotchIslandPresentation() {
         let hovered = notchLayout(dictation: listening(), expanded: true)
         assertEqual(
             hovered.drop,
-            .dictationTarget(appName: "Notes", microphone: "MacBook Pro Microphone"),
-            "a hover says where the words go and which mic hears them"
+            .dictationTarget(appName: "Notes", showsPreview: false),
+            "with no live words, a hover offers Cancel and Insert into the app"
         )
         assertFalse(hovered.dropIsSticky, "a hover drop-down closes when the pointer leaves")
+    }
+
+    runSuite("NotchIslandPresentation shows the live words while a dictation streams") {
+        var content = listening()
+        content.showsLivePreview = true
+        assertEqual(
+            notchLayout(dictation: content, expanded: true).drop,
+            .dictationTarget(appName: "Notes", showsPreview: true),
+            "hovering a streaming take shows the words over Cancel and Insert"
+        )
+        content.phase = .writing
+        assertEqual(
+            notchLayout(dictation: content, expanded: true).drop,
+            .dictationTarget(appName: "Notes", showsPreview: true, isWriting: true),
+            "the words stay, without buttons, while the take is written"
+        )
+        content.phase = .success(title: "Pasted")
+        assertEqual(
+            notchLayout(dictation: content, expanded: true).drop,
+            .dictationTarget(appName: "Notes", showsPreview: true, isWriting: true),
+            "they stay through Pasted, where they turn into the written text"
+        )
+        content.showsLivePreview = false
+        assertNil(notchLayout(dictation: content, expanded: true).drop, "a take with no live words has nothing to show once released")
     }
 
     runSuite("NotchIslandPresentation keeps the key-down beat to a dot") {
@@ -162,6 +186,18 @@ func testNotchIslandPresentation() {
         assertEqual(layout.right, [.symbol(.mic, .accent), .dictationBars(count: 6)], "dictation takes the right")
     }
 
+    runSuite("NotchIslandPresentation keeps a meeting's hover during a dictation in it") {
+        var meeting = recording()
+        meeting.showsLiveTranscript = true
+        var content = listening()
+        content.showsLivePreview = true
+        assertEqual(
+            notchLayout(dictation: content, meeting: meeting, expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            "hovering during a meeting shows the meeting, not the dictation's words"
+        )
+    }
+
     runSuite("NotchIslandPresentation shows the call prompt with one Record") {
         let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
         let open = notchLayout(callPrompt: prompt)
@@ -205,8 +241,8 @@ func testNotchIslandPresentation() {
         let meetingDrop = NotchIslandDrop.meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true)
         assertEqual(
             notchLayout(dictation: listening(), meeting: transcribing, expanded: true).drop,
-            .dictationTarget(appName: listening().targetAppName, microphone: listening().microphoneName),
-            "a live dictation keeps Insert now and Cancel on hover"
+            meetingDrop,
+            "a dictation inside the meeting doesn't take the meeting's hover"
         )
         assertEqual(
             notchLayout(dictation: NotchIslandDictationContent(phase: .writing), meeting: transcribing, expanded: true).drop,
@@ -441,8 +477,7 @@ private func notchLayout(
 private func listening() -> NotchIslandDictationContent {
     NotchIslandDictationContent(
         phase: .listening,
-        targetAppName: "Notes",
-        microphoneName: "MacBook Pro Microphone"
+        targetAppName: "Notes"
     )
 }
 

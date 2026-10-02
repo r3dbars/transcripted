@@ -13,6 +13,9 @@ final class LiveMeetingTranscriptService {
     private(set) var sessionID: UUID?
     private(set) var sharingEnabled = false
     private var state = "idle"
+    /// A meeting is recording; a dictation inside it shows the meeting's
+    /// transcript on hover, not its own preview.
+    var isRecording: Bool { state == "recording" }
     private var liveStatus = "disabled"
     private var transcript = LiveMeetingTranscriptState()
     nonisolated let inbox = LiveMeetingAudioInbox()

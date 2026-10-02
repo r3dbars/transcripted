@@ -51,7 +51,10 @@ struct NotchIslandDictationContent: Equatable {
     /// The Esc-confirm prompt or the 5-minute cap countdown, while listening.
     var notice: String = ""
     var targetAppName: String?
-    var microphoneName: String?
+    /// The live preview is streaming this take, so the hover shows the
+    /// words as they're spoken (set by the island from
+    /// `LiveDictationCaptions`).
+    var showsLivePreview = false
 }
 
 struct NotchIslandMeetingContent: Equatable {
@@ -237,7 +240,10 @@ enum NotchIslandItem: Equatable {
 }
 
 enum NotchIslandDrop: Equatable {
-    case dictationTarget(appName: String?, microphone: String?)
+    /// Hovering a dictation: the words so far (when the live preview is
+    /// streaming), then Cancel and "Insert into <app>". While the words are
+    /// being written only the words stay.
+    case dictationTarget(appName: String?, showsPreview: Bool, isWriting: Bool = false)
     case dictationLoading(title: String, detail: String)
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
@@ -463,18 +469,23 @@ enum NotchIslandPresentation {
         meeting: NotchIslandMeetingContent?,
         recentInsert: NotchIslandRecentInsert?
     ) -> NotchIslandDrop? {
-        // A recording meeting owns the hover except while a dictation is
-        // live: once the key is up, hovering shows the meeting again rather
-        // than the dictation's writing beat or its Paste again linger.
+        // A recording meeting owns the hover: a dictation inside it, and the
+        // dictation that just landed, never take it over.
         let meetingRecords = meeting?.isRecording == true
-        if let dictation {
+        if let dictation, !meetingRecords {
             switch dictation.phase {
             case .starting, .listening:
-                return .dictationTarget(appName: dictation.targetAppName, microphone: dictation.microphoneName)
+                return .dictationTarget(appName: dictation.targetAppName, showsPreview: dictation.showsLivePreview)
             case .loading(let title, let detail, _):
                 return .dictationLoading(title: title, detail: detail)
-            case .writing, .success, .message:
-                if !meetingRecords { return nil }
+            case .writing, .success:
+                // The words stay while they're written, then turn into the
+                // real text.
+                return dictation.showsLivePreview
+                    ? .dictationTarget(appName: dictation.targetAppName, showsPreview: true, isWriting: true)
+                    : nil
+            case .message:
+                return nil
             }
         }
         if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {

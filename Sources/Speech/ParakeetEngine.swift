@@ -88,6 +88,9 @@ class ParakeetEngine: ObservableObject {
     nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     let pendingSamplesLock = NSLock()
     var pendingSamples = RecordedAudioTimeline()
+    /// The island's live preview copy of this take's audio, guarded by
+    /// `pendingSamplesLock`. Nil unless a preview is listening.
+    nonisolated(unsafe) var previewSink: DictationPreviewSampleSink?
     var lastAudioSampleAt: CFAbsoluteTime = 0
     /// When the first audio buffer of this dictation arrived. Guarded by
     /// `pendingSamplesLock`; a recovery restart keeps the original value.

@@ -43,7 +43,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private static let recentInsertLinger: UInt64 = 2_600_000_000
     private static let meterInterval: CFTimeInterval = 0.05
 
-    private var dictation: NotchIslandDictationContent?
+    var dictation: NotchIslandDictationContent?
     var meeting: NotchIslandMeetingContent?
     private var callPrompt: NotchIslandCallPromptContent?
     private var speakerReview: NotchIslandSpeakerReviewContent?
@@ -82,9 +82,11 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// the pointer instead of tracking areas on a window that may ignore it.
     private var pointerMonitors: [Any] = []
     var liveTranscriptWatch: AnyCancellable?
+    var dictationPreviewWatch: AnyCancellable?
 
     init() {
         watchLiveTranscript()
+        watchDictationPreview()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -148,6 +150,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     // MARK: - Dictation
 
     func updateDictation(_ content: NotchIslandDictationContent?, targetApp: NSRunningApplication?) {
+        let content = withLivePreview(content)
         if content?.phase == .starting || content == nil {
             listeningSince = nil
         }
@@ -182,6 +185,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         recentInsertTask?.cancel()
         recentInsertTask = nil
         recentInsert = NotchIslandRecentInsert(title: title, text: lastDictationTextProvider?())
+        if let text = recentInsert?.text { islandView?.dictationPreviewView?.showFinal(text) }
         if dictation == nil {
             scheduleRecentInsertExpiry()
             render()
