@@ -20,33 +20,6 @@ extension TranscriptionTaskManager {
         return frames / sampleRate
     }
 
-    /// Shared "is this audio long enough to transcribe" computation for the
-    /// live-capture and saved-audio start gates.
-    func audioUsability(
-        micURL: URL?,
-        systemURL: URL?,
-        minDuration: TimeInterval = 2.0
-    ) -> (micDuration: TimeInterval?, systemDuration: TimeInterval?, usableMic: Bool, usableSystem: Bool, unknownDuration: Bool) {
-        let micDuration = micURL.flatMap { audioDuration(url: $0) }
-        let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
-        return (
-            micDuration,
-            systemDuration,
-            micDuration.map { $0 >= minDuration } ?? false,
-            systemDuration.map { $0 >= minDuration } ?? false,
-            (micURL != nil && micDuration == nil) || (systemURL != nil && systemDuration == nil)
-        )
-    }
-
-    /// Placeholder transcript path a failed-audio archive is keyed under; the
-    /// stem format is shared with RecordingAudioArchiver's audio folder naming.
-    nonisolated static func placeholderFailedTranscriptURL(taskId: UUID, in directory: URL) -> URL {
-        let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
-        return directory
-            .appendingPathComponent(failedStem)
-            .appendingPathExtension("md")
-    }
-
     func sendFailureNotification(errorMessage: String) {
         guard let notifier else {
             AppLogger.pipeline.debug("Skipping failure notification — no notifier configured")

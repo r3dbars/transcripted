@@ -184,7 +184,7 @@ enum SpeakerBreakdownConsolidator {
     )
     private static let footerRegex = try? NSRegularExpression(pattern: #"\| (\d+) speakers\*"#)
 
-    struct SpeakerStats {
+    private struct SpeakerStats {
         var utterances = 0
         var words = 0
         var speakingSeconds = 0.0
@@ -196,7 +196,7 @@ enum SpeakerBreakdownConsolidator {
         }
     }
 
-    struct SpeakerBreakdownEntry {
+    private struct SpeakerBreakdownEntry {
         let name: String
         let utterances: Int
         let words: Int

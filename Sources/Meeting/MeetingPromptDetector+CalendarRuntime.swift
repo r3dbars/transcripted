@@ -20,51 +20,6 @@ extension MeetingPromptDetector {
         .first
     }
 
-    func refreshCalendarEventSnapshots(force: Bool = false) async {
-        guard refreshesCalendarEventSnapshots else { return }
-        let accessGranted = calendarAccessGranted()
-        let accessChanged = lastCalendarAccessGranted.map { $0 != accessGranted } ?? true
-        lastCalendarAccessGranted = accessGranted
-
-        guard accessGranted else {
-            calendarEventSnapshots = []
-            lastCalendarSnapshotRefreshAt = Date()
-            calendarSnapshotsNeedRefresh = false
-            return
-        }
-
-        let now = Date()
-        let refreshExpired = lastCalendarSnapshotRefreshAt.map {
-            now.timeIntervalSince($0) >= calendarSnapshotRefreshInterval
-        } ?? true
-        guard !isFetchingCalendarSnapshots,
-              force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired
-        else { return }
-
-        isFetchingCalendarSnapshots = true
-        calendarEventSnapshots = await fetchCalendarEventSnapshots(
-            now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
-            now.addingTimeInterval(calendarLookaheadInterval)
-        )
-        lastCalendarSnapshotRefreshAt = now
-        calendarSnapshotsNeedRefresh = false
-        isFetchingCalendarSnapshots = false
-    }
-
-    func installCalendarStoreObserver() {
-        guard calendarStoreObserver == nil else { return }
-        calendarStoreObserver = NotificationCenter.default.addObserver(
-            forName: .EKEventStoreChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.calendarSnapshotsNeedRefresh = true
-                self?.scheduleEvaluation(forceCalendarRefresh: true)
-            }
-        }
-    }
-
     func installWorkspaceObservers() {
         guard workspaceObservers.isEmpty else { return }
 

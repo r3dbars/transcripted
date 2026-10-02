@@ -183,7 +183,7 @@ extension Audio {
     /// BEFORE calling `stop()`.
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
-    public func createHealthInfo() -> RecordingHealthInfo {
+    func createHealthInfo() -> RecordingHealthInfo {
         return RecordingHealthInfo.from(audio: self, systemCapture: recordingSystemAudioCapture)
     }
 
