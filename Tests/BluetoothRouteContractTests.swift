@@ -1,41 +1,27 @@
 // BluetoothRouteContractTests.swift
 //
-// Two kinds of coverage live in this file; they are NOT the same strength of proof:
+// AirPods and other Bluetooth routes, checked through inputs and outputs.
 //
-// REAL BEHAVIORAL COVERAGE (compiled): the route-selection / readiness / recovery suites
-// exercise Foundation-pure decision types compiled into the fast-test runner —
-// DictationInputDeviceSelectionPolicy, ParakeetRouteDiagnosticsPolicy,
-// ParakeetAudioFormatReadinessPolicy, ParakeetDeviceRecoveryReadinessPolicy /
-// TimeoutPolicy, ParakeetTapSampleRatePolicy, ParakeetRecoveryState, and
-// RecordedAudioTimeline. These run the real logic over mocked devices and assert real
-// outputs (selection, route shape, HFP suspicion, readiness, recovery generations).
-// NOTE: these are MOCKED route contracts — automated policy proof, not hardware proof;
-// real connected AirPods/Bluetooth hardware still needs manual verification.
+// Most suites run real decision code over mocked devices: input selection,
+// route shape, HFP suspicion, readiness, recovery generations, the tap and
+// snapshot steps (through a fake input node), the binding sequence, config-change
+// admission and graph reuse, and persistent-input scheduling. These are MOCKED
+// route contracts: automated policy proof, not hardware proof. Real connected
+// AirPods/Bluetooth hardware still needs manual verification
+// (`bash check.sh hardware`).
 //
-// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the suites
-// "engine tap wiring keeps sample-rate pinning" and "input override happens before
-// format reads" read Sources/Speech/ParakeetEngine.swift as TEXT and grep for relative
-// ordering of statements inside installTapAndStartEngine / audioInputSnapshot.
-// ParakeetEngine is CoreAudio/Carbon-wired and is NOT compiled into this Foundation-only
-// runner, so these greps pin source structure, not runtime behavior. They guard REAL
-// invariants behind real AirPods bugs: the dictation tap must derive its sample rate from
-// CoreAudio's delivered buffer.format (not the AirPods HFP hardware rate), and the forced
-// input override must be applied BEFORE any input/output format read so AirPods are moved
-// off the headset mic before the format is sampled. They are intentionally kept as
-// source-text contracts rather than a runtime seam: extracting one would restructure
-// real-time CoreAudio tap/format-read control flow, which is too risky to refactor for
-// testability. Dictation must NEVER write the Mac-wide default input device per
-// session — capture binds the app's own AUHAL input only (2026-08-24 Bluetooth
-// audit: the per-session system-default write/restore cycle was the app-side
-// engine of the AirPods route flip-flop, start-latency tax, and music
-// perturbation, and its untracked writes silently killed the persistent-input
-// feature's ownership). The "QA report names mocked proof boundary" suite is a docs/report
-// consistency check, not a runtime check. If you move/rename these functions or reorder
-// their statements, update both the source and these greps together.
+// Two suites still read source as text because their code runs inside
+// ParakeetEngine / PersistentDictationInputController, which the fast runner
+// can't compile: the main-actor ordering in audioInputSnapshot (serialized
+// selection, fail-closed lookup, ignore window before the graph read, no
+// Mac-wide default-input write) and the persistent controller's CoreAudio
+// listener and shutdown wiring. The "QA report names mocked proof boundary"
+// suite is a docs/report consistency check.
 
+import AVFoundation
 import Foundation
 
-func testBluetoothRouteContract() {
+func testBluetoothRouteContract() async {
     runSuite("Bluetooth route contract - opt-in built-in mic recommendation stays explicit") {
         let airPodsInput = bluetoothDevice(1, "Justin's AirPods Pro", inputChannels: 1)
         let airPodsOutput = bluetoothDevice(2, "Justin's AirPods Pro", inputChannels: 0)
@@ -394,46 +380,309 @@ func testBluetoothRouteContract() {
         assertEqual(timeline.segments.first?.sampleRate, 48_000, "recorded timeline should preserve the pinned tap rate")
     }
 
-    runSuite("Bluetooth route contract - engine tap and final inference keep sample-rate pinning") {
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
-        guard let tapStart = source.range(of: "private func installTapAndStartEngine"),
-              let tapEnd = source.range(of: "func removeRecordingTap", range: tapStart.upperBound..<source.endIndex),
-              let inferenceStart = source.range(of: "private func drainRecordedSamplesForInference"),
-              let inferenceEnd = source.range(of: "// MARK: - Transcription", range: inferenceStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find dictation tap and final inference wiring")
+    runSuite("Bluetooth route contract - the dictation tap reads formats only after voice processing is applied") {
+        // Default input is AirPods; voice processing is on. VPIO can swap the
+        // graph's formats, so the tap must not be sized from a pre-VPIO read.
+        let node = FakeDictationTapNode(
+            inputFormat: bluetoothRouteFormat(24_000),
+            outputFormat: bluetoothRouteFormat(48_000)
+        )
+        var timings: [String: Int] = [:]
+        let format = try? ParakeetDictationTapPreparation.prepare(
+            node, voiceProcessingEnabled: true, isCurrent: { true }, stageTimings: &timings
+        )
+
+        assertEqual(format?.sampleRate, 48_000, "a VPIO tap uses the processed output format")
+        guard let apply = node.events.firstIndex(of: "apply_vp:true"),
+              let firstRead = node.events.firstIndex(where: { $0.hasPrefix("read_") }) else {
+            assertTrue(false, "the tap step should apply VPIO and read formats; got \(node.events)")
             return
         }
-        let tapBody = String(source[tapStart.lowerBound..<tapEnd.lowerBound])
-        let inferenceBody = String(source[inferenceStart.lowerBound..<inferenceEnd.lowerBound])
-
-        guard let applyProcessing = tapBody.range(of: "Self.applyDictationVoiceProcessingPreference(voiceProcessingEnabled, to: inputNode)"),
-              let resolveFormat = tapBody.range(of: "let tapFormat = try ParakeetInputTapFormatPolicy.format("),
-              let hardwareFormat = tapBody.range(of: "inputFormat: inputNode.inputFormat(forBus: 0)"),
-              let actualProcessing = tapBody.range(of: "voiceProcessingEnabled: inputNode.isVoiceProcessingEnabled"),
-              let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: tapFormat)"),
-              let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
-              let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
-              let retainedRate = tapBody.range(of: "pendingSamples.append(monoSamples, sampleRate: effectiveSampleRate)"),
-              let segments = inferenceBody.range(of: "resampleRecordedSegments(recoveredRecordingTimeline.segments)"),
-              let resampleRate = inferenceBody.range(of: "from: segment.sampleRate") else {
-            assertTrue(false, "dictation tap should use the delivered buffer format for sample-rate bookkeeping")
-            return
-        }
-
-        assertTrue(applyProcessing.lowerBound < resolveFormat.lowerBound, "format must be resolved after VPIO can change the graph")
-        assertTrue(resolveFormat.lowerBound < hardwareFormat.lowerBound && hardwareFormat.lowerBound < actualProcessing.lowerBound && actualProcessing.lowerBound < installTap.lowerBound,
-            "tap must use live formats and actual VPIO state, not the earlier readiness snapshot or requested preference")
-        assertFalse(tapBody.contains("format: nil"), "a raw input tap must not inherit a stale output-bus rate")
-        assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "bookkeeping must still read the delivered buffer format")
-        assertTrue(bufferFormat.lowerBound < effectiveRate.lowerBound, "buffer.format should feed the sample-rate policy")
-        assertTrue(effectiveRate.lowerBound < retainedRate.lowerBound, "each retained buffer must carry its delivered rate")
-        assertTrue(segments.lowerBound < resampleRate.lowerBound, "final inference must resample each segment at its own rate")
+        assertEqual(node.events.first, "remove_tap", "an old tap is cleared before anything else")
+        assertTrue(apply < firstRead, "formats are read after VPIO is applied; got \(node.events)")
+        assertTrue(timings["audio_tap_remove_ms"] != nil && timings["audio_voice_processing_apply_ms"] != nil, "stage timings stay reported")
     }
 
-    runSuite("Bluetooth route contract - input override happens before format reads") {
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
+    runSuite("Bluetooth route contract - the tap follows the node's actual voice-processing state, not the request") {
+        // AirPods HFP hardware at 24 kHz with a stale 48 kHz output bus. VPIO
+        // was requested but did not engage, so a raw input tap must use the
+        // live input rate; asking for the stale output rate would fail natively.
+        let node = FakeDictationTapNode(
+            inputFormat: bluetoothRouteFormat(24_000),
+            outputFormat: bluetoothRouteFormat(48_000),
+            applySucceeds: false
+        )
+        var timings: [String: Int] = [:]
+        let format = try? ParakeetDictationTapPreparation.prepare(
+            node, voiceProcessingEnabled: true, isCurrent: { true }, stageTimings: &timings
+        )
+
+        assertEqual(format?.sampleRate, 24_000, "a raw input tap uses the live hardware format")
+    }
+
+    runSuite("Bluetooth route contract - a failed voice-processing release stops the start before any tap") {
+        // Mic sharing asked for VPIO off and the disable failed: shared capture
+        // must not continue on a VPIO graph.
+        let node = FakeDictationTapNode(
+            inputFormat: bluetoothRouteFormat(48_000),
+            outputFormat: bluetoothRouteFormat(48_000),
+            voiceProcessingActive: true,
+            applySucceeds: false
+        )
+        var timings: [String: Int] = [:]
+        var threw = false
+        do {
+            _ = try ParakeetDictationTapPreparation.prepare(
+                node, voiceProcessingEnabled: false, isCurrent: { true }, stageTimings: &timings
+            )
+        } catch {
+            threw = true
+        }
+
+        assertTrue(threw, "a failed VPIO release must fail the start")
+        assertFalse(node.events.contains { $0.hasPrefix("read_") }, "no tap format is resolved after a failed release")
+    }
+
+    runSuite("Bluetooth route contract - a superseded start reads no tap format") {
+        let node = FakeDictationTapNode(
+            inputFormat: bluetoothRouteFormat(48_000),
+            outputFormat: bluetoothRouteFormat(48_000)
+        )
+        var timings: [String: Int] = [:]
+        var cancelled = false
+        do {
+            _ = try ParakeetDictationTapPreparation.prepare(
+                node, voiceProcessingEnabled: false, isCurrent: { false }, stageTimings: &timings
+            )
+        } catch is CancellationError {
+            cancelled = true
+        } catch {}
+
+        assertTrue(cancelled, "a start that lost ownership is cancelled")
+        assertFalse(node.events.contains { $0.hasPrefix("read_") }, "a cancelled start never touches the live formats")
+    }
+
+    runSuite("Bluetooth route contract - an unusable live tap format waits for the route to settle") {
+        // Mid-switch AirPods can report a 0 Hz input. That must become the
+        // recoverable route-settling failure, not a native installTap crash.
+        let node = FakeDictationTapNode(
+            inputFormat: bluetoothRouteFormat(0),
+            outputFormat: bluetoothRouteFormat(48_000)
+        )
+        var timings: [String: Int] = [:]
+        var reason: ParakeetStartRecordingFailureReason?
+        do {
+            _ = try ParakeetDictationTapPreparation.prepare(
+                node, voiceProcessingEnabled: false, isCurrent: { true }, stageTimings: &timings
+            )
+        } catch {
+            reason = ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+        }
+
+        assertEqual(reason, .audioRouteNotSettled, "an unsettled tap format uses the bounded route-settling recovery")
+    }
+
+    runSuite("Bluetooth route contract - final inference converts each segment from its own rate") {
+        // The take started at 48 kHz, then AirPods flipped the route and the
+        // tap delivered 24 kHz. Each segment must be converted from its own rate.
+        var timeline = RecordedAudioTimeline()
+        timeline.append(Array(repeating: 0.1, count: 480), sampleRate: 48_000)
+        timeline.append(Array(repeating: 0.2, count: 240), sampleRate: 24_000)
+
+        var calls: [(count: Int, rate: Double)] = []
+        let samples = RecordedAudioTimeline.speechSamples(from: timeline.segments) { segment, rate in
+            calls.append((segment.count, rate))
+            return Array(repeating: Float(rate / 1_000), count: 2)
+        }
+
+        assertEqual(calls.map(\.rate), [48_000, 24_000], "each segment is resampled from the rate it was captured at")
+        assertEqual(calls.map(\.count), [480, 240], "segments are converted whole, in capture order")
+        assertEqual(samples, [48, 48, 24, 24], "converted segments are joined in capture order")
+    }
+
+    runSuite("Bluetooth route contract - the input override lands before any format read") {
+        // AirPods are the macOS default; dictation pins the MacBook mic on its
+        // own AUHAL. Reading a format before that bind can pull the headset
+        // into call mode and samples the wrong route.
+        let stopped = FakeDictationSnapshotGraph(isRunning: false)
+        let reading = ParakeetDictationInputSnapshotRead.read(stopped)
+
+        assertEqual(
+            stopped.events,
+            ["is_running", "release_vp", "apply_input", "read_output", "read_input", "is_running"],
+            "a stopped graph unwraps VPIO, binds the mic, then reads formats"
+        )
+        assertEqual(reading.selectionApplication, "macbook-mic", "the bind result is carried to the snapshot")
+        assertEqual(reading.hwFormat.sampleRate, 48_000, "the hardware format comes from the bound mic")
+
+        let running = FakeDictationSnapshotGraph(isRunning: true)
+        _ = ParakeetDictationInputSnapshotRead.read(running)
+        assertFalse(running.events.contains("release_vp"), "a running graph keeps its voice-processing state")
+        guard let apply = running.events.firstIndex(of: "apply_input"),
+              let firstRead = running.events.firstIndex(where: { $0.hasPrefix("read_") }) else {
+            assertTrue(false, "running graph should bind and read; got \(running.events)")
+            return
+        }
+        assertTrue(apply < firstRead, "the override still precedes every format read on a running graph")
+    }
+
+    await runBluetoothBindingSequenceSuites()
+
+    runSuite("Bluetooth route contract - only a verified binding reports the auto-selected mic") {
+        let key = "1->3"
+        assertFalse(
+            DictationInputSelectionReportPolicy.shouldReportAutoSelection(
+                bindingVerified: false, didApplyOverride: true, reportKey: key, lastReportKey: nil
+            ),
+            "an issued route command is not success"
+        )
+        assertTrue(
+            DictationInputSelectionReportPolicy.shouldReportAutoSelection(
+                bindingVerified: true, didApplyOverride: true, reportKey: key, lastReportKey: nil
+            ),
+            "a verified move off the AirPods mic is reported"
+        )
+        assertFalse(
+            DictationInputSelectionReportPolicy.shouldReportAutoSelection(
+                bindingVerified: true, didApplyOverride: true, reportKey: key, lastReportKey: key
+            ),
+            "the same route is reported once"
+        )
+        assertFalse(
+            DictationInputSelectionReportPolicy.shouldReportAutoSelection(
+                bindingVerified: true, didApplyOverride: false, reportKey: nil, lastReportKey: nil
+            ),
+            "no route command, nothing to report"
+        )
+    }
+
+    runSuite("Bluetooth route contract - a failed selection lookup never reuses the pinned graph") {
+        var failure: DictationInputDeviceBindingError?
+        do {
+            _ = try DictationInputDeviceBindingPolicy.requireSelection(nil)
+        } catch let error as DictationInputDeviceBindingError {
+            failure = error
+        } catch {}
+        assertEqual(failure, .selectionUnavailable, "an unknown selection fails closed instead of trusting the last bind")
+    }
+
+    runSuite("Bluetooth route contract - active startup owns its config changes") {
+        // AirPods connect while dictation is starting: startup is mid-way through
+        // moving AUHAL to the MacBook mic. Recovery must not rebuild under it.
+        assertFalse(
+            ParakeetConfigChangeAdmissionPolicy.admits(
+                sharedMeetingMicClaimCurrent: false,
+                audioStartInProgress: true,
+                audioStopInProgress: false,
+                pinnedRecordingActive: false
+            ),
+            "recording startup owns route validation"
+        )
+        assertFalse(
+            ParakeetConfigChangeAdmissionPolicy.admits(
+                sharedMeetingMicClaimCurrent: false,
+                audioStartInProgress: false,
+                audioStopInProgress: true,
+                pinnedRecordingActive: false
+            ),
+            "a suspended stop must not be restarted by a route change"
+        )
+        assertFalse(
+            ParakeetConfigChangeAdmissionPolicy.admits(
+                sharedMeetingMicClaimCurrent: true,
+                audioStartInProgress: false,
+                audioStopInProgress: false,
+                pinnedRecordingActive: false
+            ),
+            "a borrowed meeting mic belongs to meeting recovery"
+        )
+        assertFalse(
+            ParakeetConfigChangeAdmissionPolicy.admits(
+                sharedMeetingMicClaimCurrent: false,
+                audioStartInProgress: false,
+                audioStopInProgress: false,
+                pinnedRecordingActive: true
+            ),
+            "the pinned recorder follows its own device; rebuilding would bind the default (AirPods) input"
+        )
+        assertTrue(
+            ParakeetConfigChangeAdmissionPolicy.admits(
+                sharedMeetingMicClaimCurrent: false,
+                audioStartInProgress: false,
+                audioStopInProgress: false,
+                pinnedRecordingActive: false
+            ),
+            "with no owner, recovery handles the change"
+        )
+    }
+
+    runSuite("Bluetooth route contract - a stable route echo keeps the current graph") {
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.action(
+                strategy: .reuseCurrentGraph, releasedVoiceProcessing: true, forceForMicrophoneSharing: false
+            ),
+            .reuseCurrentGraph,
+            "a same-route echo must not retire another engine"
+        )
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.action(
+                strategy: .rebuildGraph, releasedVoiceProcessing: true, forceForMicrophoneSharing: false
+            ),
+            .rebuildGraph(requiresFreshGraph: false),
+            "a real route change replaces the graph and may reuse a retired one"
+        )
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.action(
+                strategy: .reuseCurrentGraph, releasedVoiceProcessing: false, forceForMicrophoneSharing: false
+            ),
+            .rebuildGraph(requiresFreshGraph: true),
+            "a failed VPIO disarm never falls back to the same graph"
+        )
+        assertEqual(
+            ParakeetConfigChangeGraphPolicy.action(
+                strategy: .rebuildGraph, releasedVoiceProcessing: true, forceForMicrophoneSharing: true
+            ),
+            .rebuildGraph(requiresFreshGraph: true),
+            "a call app sharing the mic gets a fresh graph"
+        )
+    }
+
+    await runBluetoothDebounceSuites()
+    await runPersistentInputSchedulerSuites()
+
+    runSuite("Bluetooth route contract - quitting leaves another app's call alone") {
+        assertTrue(
+            DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit(externalInputActive: false),
+            "with no other capture, quitting restores the user's previous mic"
+        )
+        assertFalse(
+            DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit(externalInputActive: true),
+            "another app on a call (say over AirPods) keeps its mic"
+        )
+        assertFalse(
+            DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit(externalInputActive: nil),
+            "a blocked or unreadable activity check skips the restore and keeps the durable marker"
+        )
+    }
+
+    runSuite("Bluetooth route contract - restoration never overwrites a mic chosen outside Transcripted") {
+        assertTrue(
+            DictationPersistentInputRestorePolicy.shouldRestorePrevious(currentInput: UInt32(3), ownedSelectedInput: UInt32(3)),
+            "the input Transcripted chose is still active, so the previous one comes back"
+        )
+        assertFalse(
+            DictationPersistentInputRestorePolicy.shouldRestorePrevious(currentInput: UInt32(1), ownedSelectedInput: UInt32(3)),
+            "the user switched to AirPods themselves; leave them"
+        )
+    }
+
+    runSuite("Bluetooth route contract - snapshot selection is serialized and pinned before the graph is touched") {
+        // Still source text: these steps run on the main actor inside
+        // ParakeetEngine, which the fast runner can't compile. The graph reads
+        // themselves are behavior-tested above.
+        let source = readSourceFixture("Sources/Speech/ParakeetInputRoute.swift")
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
+              let snapshotEnd = source.range(of: "private nonisolated static func applyPreferredDictationInputDevice", range: snapshotStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation audioInputSnapshot")
             return
         }
@@ -443,28 +692,20 @@ func testBluetoothRouteContract() {
               let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let confirmedSelection = snapshotBody.range(of: "DictationInputDeviceBindingPolicy.requireSelection(loadedSelection)"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
-              let applyOverride = snapshotBody.range(of: "let selectionApplication = Self.applyPreferredDictationInputDevice("),
-              let overrideArguments = snapshotBody.range(of: "selection, to: inputNode, on: audioEngine,"),
-              let bindingIntent = snapshotBody.range(of: "bindingIntent: bindingIntent"),
-              let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
-              let inputFormatRead = snapshotBody.range(of: "inputNode.inputFormat(forBus: 0)") else {
+              let graphRead = snapshotBody.range(of: "ParakeetDictationInputSnapshotRead.read("),
+              let bindingIntent = snapshotBody.range(of: "bindingIntent: bindingIntent") else {
             assertTrue(false, "audioInputSnapshot should keep the AirPods override-before-read contract")
             return
         }
 
         assertTrue(loadSelection.lowerBound < serializedSelectionLookup.lowerBound, "selection should be serialized with system-input restore work")
-        assertTrue(serializedSelectionLookup.lowerBound < confirmedSelection.lowerBound && confirmedSelection.lowerBound < applyOverride.lowerBound,
+        assertTrue(serializedSelectionLookup.lowerBound < confirmedSelection.lowerBound && confirmedSelection.lowerBound < graphRead.lowerBound,
             "failed lookup must fail closed before touching a previously pinned graph")
-        assertTrue(serializedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
-        assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "the config-change ignore window should be armed before touching the input node")
-        assertTrue(applyOverride.lowerBound < overrideArguments.lowerBound && overrideArguments.lowerBound < bindingIntent.lowerBound,
-            "the override must carry the selected device, exact engine, and native-setter notification intent")
-        assertTrue(bindingIntent.lowerBound < outputFormatRead.lowerBound, "binding intent must accompany the override before format reads")
-        assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
-        assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")
+        assertTrue(avoidDefaultRead.lowerBound < graphRead.lowerBound, "the config-change ignore window should be armed before touching the input node")
+        assertTrue(graphRead.lowerBound < bindingIntent.lowerBound, "the graph read carries the native-setter notification intent")
         assertFalse(
-            snapshotBody.contains("Self.applyPreferredSystemInputDevice"),
-            "dictation must never write the Mac-wide default input per-session — capture binds the app's own AUHAL only"
+            snapshotBody.contains("pendingSystemInputRestore.replace("),
+            "audioInputSnapshot must never arm a system-input restore; it performs no Mac-wide write"
         )
         assertFalse(
             snapshotBody.contains("setDefaultInputDeviceID"),
@@ -472,202 +713,15 @@ func testBluetoothRouteContract() {
         )
     }
 
-    runSuite("Bluetooth route contract - failed binding cannot publish format readiness") {
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
-        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find audioInputSnapshot")
-            return
-        }
-        let body = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
-        guard let bindingGate = body.range(of: "guard snapshot.selectionApplication?.errorDescription == nil"),
-              let earlyReturn = body.range(of: "return snapshot"),
-              let settledVerification = body.range(of: "try DictationInputDeviceBindingPolicy.verify"),
-              let settledReturn = body.range(of: "return settledSnapshot") else {
-            assertTrue(false, "snapshot must contain both binding checks")
-            return
-        }
-        assertTrue(bindingGate.lowerBound < earlyReturn.lowerBound, "failed application must throw before the no-settle return")
-        assertTrue(settledVerification.lowerBound < settledReturn.lowerBound, "a successful setter must be reverified after settling")
-        assertTrue(body.contains("throw DictationInputDeviceBindingError.applicationFailed"), "failed binding should use the bounded route-settling recovery path")
-    }
-
-    runSuite("Bluetooth route contract - selection success waits for settled binding") {
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
-        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
-              let reporterStart = source.range(of: "private func recordInputSelection"),
-              let reporterEnd = source.range(of: "func inputSelectionContext", range: reporterStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find the input snapshot and selection reporter")
-            return
-        }
-        let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
-        let reporterBody = String(source[reporterStart.lowerBound..<reporterEnd.lowerBound])
-        guard let earlyReport = snapshotBody.range(of: "recordInputSelection(snapshot.selectionApplication, operation: operation, bindingVerified: false)"),
-              let settledVerification = snapshotBody.range(of: "try DictationInputDeviceBindingPolicy.verify"),
-              let verifiedReport = snapshotBody.range(of: "recordInputSelection(settledSnapshot.selectionApplication, operation: operation, bindingVerified: true)") else {
-            assertTrue(false, "selection reporting should distinguish an issued command from a verified binding")
-            return
-        }
-        assertTrue(earlyReport.lowerBound < settledVerification.lowerBound, "cache and immediate driver errors can be recorded before settling")
-        assertTrue(settledVerification.lowerBound < verifiedReport.lowerBound, "success must follow strict device binding verification")
-        assertTrue(reporterBody.contains("guard bindingVerified,"), "an issued command must not publish selection success")
-        assertTrue(snapshotBody.contains("recordInputSelection(failedApplication, operation: operation, bindingVerified: false)"), "a delayed binding mismatch should report failure")
-    }
-
-    runSuite("Bluetooth route contract - system input override restores after recording") {
-        let source = readSourceFixture("Sources/Speech/ParakeetEngine.swift")
-        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
-              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
-              let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
-              let startEnd = source.range(of: "private func extractMonoSamples", range: startStart.upperBound..<source.endIndex),
-              let cleanupStart = source.range(of: "// MARK: - Cleanup"),
-              let cleanupEnd = source.range(of: "deinit", range: cleanupStart.upperBound..<source.endIndex),
-              let stopStart = source.range(of: "func stopRecording() async"),
-              let stopEnd = source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find dictation audioInputSnapshot and stopRecording")
-            return
-        }
-        let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
-        let startBody = String(source[startStart.lowerBound..<startEnd.lowerBound])
-        let cleanupBody = String(source[cleanupStart.lowerBound..<cleanupEnd.lowerBound])
-        let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
-
-        assertFalse(
-            snapshotBody.contains("pendingSystemInputRestore.replace("),
-            "audioInputSnapshot must never arm a system-input restore — it performs no Mac-wide write to undo"
-        )
-        assertTrue(
-            startBody.contains("func failAudioStart() async -> Bool"),
-            "failed starts should share one bounded-retry path"
-        )
-        assertFalse(
-            startBody.contains("restorePendingSystemInputAfterRecording"),
-            "retryable start failures should keep the temporary built-in input stable instead of restoring and reapplying it"
-        )
-        assertTrue(
-            stopBody.contains("operation: \"stop_recording\"")
-                && stopBody.contains("ownedBy: pendingRestoreOwner"),
-            "normal stop should restore the prior system input only for its captured owner"
-        )
-        assertTrue(
-            stopBody.contains("operation: \"stop_recording_idle\"")
-                && stopBody.contains("ownedBy: pendingRestoreOwner"),
-            "canceled or interrupted start paths should restore only their captured temporary input"
-        )
-        assertTrue(
-            cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cancel\")"),
-            "explicit cancellation should restore its owned temporary input even though cancel() is synchronous"
-        )
-        assertTrue(
-            cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cleanup\")"),
-            "quit cleanup should restore its owned temporary input even though cleanup() is synchronous"
-        )
-        let systemInputSource = readSourceFixture("Sources/Speech/ParakeetSystemInputCoordination.swift")
-        assertTrue(
-            systemInputSource.contains("restoreError = try await Self.systemInputWorkCoordinator.run")
-                && systemInputSource.contains("Self.systemInputWorkCoordinator.schedule(")
-                && systemInputSource.contains("timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout")
-                && systemInputSource.contains("reconcileSystemInputAfterLateCompletion"),
-            "awaited and scheduled restores should use bounded replaceable work with late-write reconciliation"
-        )
-        assertTrue(
-            cleanupBody.contains("operation: \"abandon_blocked_recording_start\"")
-                && cleanupBody.contains("ownedBy: pendingRestoreOwner"),
-            "blocked-start abandonment should restore only the temporary input owned by that start"
-        )
-        assertTrue(
-            cleanupBody.contains("operation: \"reset_after_failed_recording_start\"")
-                && cleanupBody.contains("ownedBy: pendingRestoreOwner"),
-            "final failed-start cleanup should restore its owned temporary input after retries are exhausted"
-        )
-        assertFalse(
-            source.contains("setTemporaryRecoveryMarker"),
-            "the per-dictation temporary crash marker was retired with the Mac-wide write — nothing may reintroduce it"
-        )
-        assertFalse(
-            systemInputSource.contains("setTemporaryRecoveryMarker"),
-            "system-input restore coordination must not resurrect the retired temporary crash marker"
-        )
-    }
-
-    runSuite("Bluetooth route contract - active startup owns its config changes") {
-        // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
-        // (codebase audit 2026-07-08 wave 2).
-        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
-              let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find the audio config-change handler")
-            return
-        }
-        let handlerBody = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
-        guard let startupGuard = handlerBody.range(of: "if audioStartInProgress"),
-              let generationBump = handlerBody.range(of: "audioGraphGeneration += 1") else {
-            assertTrue(false, "startup config changes should be ignored before recovery mutates the graph")
-            return
-        }
-        assertTrue(
-            startupGuard.lowerBound < generationBump.lowerBound,
-            "recording startup should own route validation before config recovery can rebuild the graph"
-        )
-    }
-
-    runSuite("Bluetooth route contract - route telemetry commits only after debounce without gating recovery") {
-        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let handlerStart = source.range(of: "private func handleAudioConfigChange("),
-              let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex),
-              let reporterEnd = source.range(of: "// MARK: - Recovery execution", range: handlerEnd.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find the route debounce and reporter bodies")
-            return
-        }
-        let handler = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
-        let reporter = String(source[handlerEnd.lowerBound..<reporterEnd.lowerBound])
-
-        guard let debounceSleep = handler.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)"),
-              let stableReport = handler.range(of: "recordStableRouteChangeAnalytics("),
-              let recovery = handler.range(of: "self.attemptDeviceRecovery()") else {
-            assertTrue(false, "debounced route handling should report and then continue recovery")
-            return
-        }
-
-        assertTrue(debounceSleep.lowerBound < stableReport.lowerBound, "route analytics must wait until the config-change burst settles")
-        assertTrue(stableReport.lowerBound < recovery.lowerBound, "the stable-route lookup should be scheduled without gating the unconditional recovery call")
-        assertTrue(reporter.contains("commitPendingRoute()"), "analytics should require a genuinely new categorical route")
-        assertTrue(reporter.contains("dictation_audio_route_changed"), "a stable transition should keep the existing product event")
-        assertFalse(handler.contains("AnalyticsReporter.track("), "raw config notifications must not emit analytics before debounce")
-    }
-
-    runSuite("Bluetooth route contract - stable recovery echoes do not retire another engine") {
-        let source = readSourceFixture("Sources/Speech/ParakeetDeviceRecovery.swift")
-        guard let strategyStart = source.range(of: "switch releasedVoiceProcessing ? graphStrategy : .rebuildGraph"),
-              let reuseCase = source.range(of: "case .reuseCurrentGraph:", range: strategyStart.upperBound..<source.endIndex),
-              let rebuildCase = source.range(of: "case .rebuildGraph:", range: reuseCase.upperBound..<source.endIndex),
-              let strategyEnd = source.range(
-                of: "// Cancel any in-flight recovery",
-                range: rebuildCase.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "test should find the config-change graph strategy branches")
-            return
-        }
-
-        let reuseBody = String(source[reuseCase.upperBound..<rebuildCase.lowerBound])
-        let rebuildBody = String(source[rebuildCase.upperBound..<strategyEnd.lowerBound])
-        assertFalse(
-            reuseBody.contains("rebuildAudioEngine"),
-            "a stable same-route engine echo must keep the current graph instead of creating another retirement echo"
-        )
-        assertTrue(
-            rebuildBody.contains("rebuildAudioEngine(")
-                && rebuildBody.contains("reason: \"configuration_change\"")
-                && rebuildBody.contains("requiresFreshGraph: forceForMicrophoneSharing || !releasedVoiceProcessing"),
-            "route changes must retain replacement, and sharing or failed disarm must require a fresh graph"
-        )
-    }
-
     runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
+        // Still source text: PersistentDictationInputController wires CoreAudio
+        // listeners and isn't compiled in the fast runner. Its scheduling and
+        // restore decisions are behavior-tested above.
         let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
+        let app = readSourceFixture("Sources/TranscriptedApp.swift")
         guard let start = source.range(of: "func start()"),
               let stop = source.range(of: "func stopAndRestore()"),
+              let monitoring = source.range(of: "func stopMonitoring()"),
               let install = source.range(of: "private func installDefaultInputListener()"),
               let installDeviceList = source.range(of: "private func installDeviceListListener()"),
               let remove = source.range(of: "private func removeDefaultInputListener()"),
@@ -682,15 +736,6 @@ func testBluetoothRouteContract() {
         assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
         assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
         assertTrue(
-            source.contains("preferenceEnabled: DictationPersistentInputPreferences.isEnabled()")
-                && source.contains("hasRecoveryMarker: DictationPersistentInputPreferences.recoveryMarker() != nil"),
-            "device changes must retry durable crash restoration through the deferred scheduler"
-        )
-        assertTrue(
-            source.contains("guard currentInput == activeOverride.selectedInput else"),
-            "restoration must not overwrite a microphone the user changed outside Transcripted"
-        )
-        assertTrue(
             source.contains("mSelector: kAudioHardwarePropertyDevices"),
             "the saved preferred microphone should be reconsidered when USB devices reconnect"
         )
@@ -704,73 +749,14 @@ func testBluetoothRouteContract() {
                 && source.contains("runtimeOwnershipRelinquished = true"),
             "an external microphone selection must relinquish persistent runtime ownership"
         )
-    }
-
-    runSuite("Bluetooth route contract - preference changes wait for active dictation") {
-        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
-        guard let observerStart = source.range(of: "forName: .dictationPersistentInputPreferenceChanged"),
-              let observerEnd = source.range(of: "installDefaultInputListener()", range: observerStart.upperBound..<source.endIndex),
-              let schedulerStart = source.range(of: "private func scheduleTopologyRefresh("),
-              let schedulerEnd = source.range(of: "private func reconcileCurrentPreference(", range: schedulerStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find the preference observer and deferred refresh scheduler")
-            return
-        }
-
-        let observerBody = String(source[observerStart.lowerBound..<observerEnd.lowerBound])
-        let schedulerBody = String(source[schedulerStart.lowerBound..<schedulerEnd.lowerBound])
-        assertTrue(
-            observerBody.contains("scheduleTopologyRefresh(preferenceChanged: true)"),
-            "preference notifications must enter the same deferred maintenance path as route changes"
-        )
-        assertFalse(
-            observerBody.contains("reconcileCurrentPreference()"),
-            "preference notifications must never reconcile the system input directly during dictation"
-        )
-        guard let deferCheck = schedulerBody.range(of: "DictationPersistentInputRefreshPolicy.shouldDefer("),
-              let reconcile = schedulerBody.range(of: "self.reconcileCurrentPreference(") else {
-            assertTrue(false, "deferred refresh should wait for dictation before reconciling")
-            return
-        }
-        assertTrue(
-            deferCheck.lowerBound < reconcile.lowerBound,
-            "system input reconciliation must happen only after the active-dictation wait"
-        )
-        assertTrue(
-            schedulerBody.contains("isMeetingCaptureActive:"),
-            "persistent input maintenance must also wait out an active meeting capture"
-        )
-        assertTrue(
-            schedulerBody.contains("topologyRefreshTask?.cancel()"),
-            "repeated preference notifications should coalesce into one post-dictation refresh"
-        )
-    }
-
-    runSuite("Bluetooth route contract - global input maintenance protects other apps") {
-        let source = readSourceFixture("Sources/Speech/PersistentDictationInputController.swift")
-        let app = readSourceFixture("Sources/TranscriptedApp.swift")
-        guard let start = source.range(of: "func start()"),
-              let stop = source.range(of: "func stopAndRestore()"),
-              let monitoring = source.range(of: "func stopMonitoring()"),
-              let scheduler = source.range(of: "private func scheduleTopologyRefresh("),
-              let reader = source.range(of: "private func readExternalInputActivity()") else {
-            assertTrue(false, "persistent input lifecycle seams must remain explicit")
-            return
-        }
         let startupBody = String(source[start.upperBound..<stop.lowerBound])
+        assertTrue(startupBody.contains("scheduleTopologyRefresh(preferenceChanged: true)"), "preference notifications enter the deferred maintenance path")
         assertTrue(startupBody.contains("scheduleTopologyRefresh()"), "startup must use capture-aware deferred maintenance")
-        assertFalse(startupBody.contains("reconcileCurrentPreference()"), "launching during another app's call must not bypass the activity check")
+        assertFalse(startupBody.contains("reconcileCurrentPreference("), "neither launch nor a preference change may reconcile the system input directly")
         let shutdownBody = String(source[stop.upperBound..<monitoring.lowerBound])
-        guard let activityGuard = shutdownBody.range(of: "guard externalInputActive == false else"),
-              let restore = shutdownBody.range(of: "restoreIfStillOwned(operation:"),
-              activityGuard.lowerBound < restore.lowerBound else {
-            assertTrue(false, "shutdown restoration must require known-idle external capture")
-            return
-        }
         assertTrue(shutdownBody.contains("withDetachedTimeout"), "a blocked driver read must not prevent quitting")
+        assertTrue(shutdownBody.contains("DictationPersistentInputShutdownPolicy.shouldRestoreOnQuit("), "shutdown restoration goes through the tested quit policy")
         assertFalse(shutdownBody.contains("setRecoveryMarker(nil)"), "skipped shutdown restoration must leave a durable ownership marker")
-        let schedulerBody = String(source[scheduler.upperBound..<reader.lowerBound])
-        assertTrue(schedulerBody.contains("guard preferenceObserver != nil"), "late listener callbacks must not restart maintenance after shutdown")
-        assertTrue(schedulerBody.contains("externalInputActive: externalInputActive"), "external mic activity must reach the same gate as our own capture")
         assertTrue(app.contains("await self.persistentDictationInputController.stopAndRestore()"), "restoration must join asynchronous app shutdown")
     }
 
@@ -814,4 +800,337 @@ private func bluetoothRouteBuiltInDevice(
         transport: .builtIn,
         inputChannelCount: inputChannels
     )
+}
+
+// MARK: - Async suites
+
+@MainActor
+private func runBluetoothBindingSequenceSuites() async {
+    // AirPods are the macOS default; dictation issues a bind to the MacBook mic.
+    await runSuite("Bluetooth route contract - a failed bind can't publish format readiness") {
+        var reports: [DictationInputBindingReport] = []
+        var settled = false
+        var failure: DictationInputDeviceBindingError?
+        do {
+            _ = try await DictationInputBindingSequence.settle(
+                applicationErrorDescription: "AUHAL refused the device",
+                didApplyOverride: false,
+                checkCurrent: {},
+                report: { reports.append($0) },
+                settle: { () async throws -> String in settled = true; return "settled" }
+            )
+        } catch let error as DictationInputDeviceBindingError {
+            failure = error
+        } catch {}
+
+        assertEqual(failure, .applicationFailed, "a failed route command uses the bounded route-settling recovery")
+        assertEqual(reports, [.issued], "the failure is reported, never success")
+        assertFalse(settled, "no settled snapshot is read after a failed command")
+    }
+
+    await runSuite("Bluetooth route contract - selection success waits for a verified binding") {
+        var log: [String] = []
+        let result = try? await DictationInputBindingSequence.settle(
+            applicationErrorDescription: nil,
+            didApplyOverride: true,
+            checkCurrent: {},
+            report: { log.append("report:\($0)") },
+            settle: { () async throws -> String in
+                log.append("settle")
+                return "settled"
+            }
+        )
+
+        assertEqual(result, "settled", "a changed route returns the settled snapshot")
+        assertEqual(log, ["report:issued", "settle", "report:verified"], "success is reported only after settling")
+    }
+
+    await runSuite("Bluetooth route contract - a binding that never settles reports failure") {
+        // AUHAL still reads back the AirPods after the settle window.
+        var reports: [DictationInputBindingReport] = []
+        var failure: DictationInputDeviceBindingError?
+        do {
+            _ = try await DictationInputBindingSequence.settle(
+                applicationErrorDescription: nil,
+                didApplyOverride: true,
+                checkCurrent: {},
+                report: { reports.append($0) },
+                settle: { () async throws -> String in throw DictationInputDeviceBindingError.selectedDeviceNotBound }
+            )
+        } catch let error as DictationInputDeviceBindingError {
+            failure = error
+        } catch {}
+
+        assertEqual(failure, .selectedDeviceNotBound, "the mismatch is thrown")
+        assertEqual(reports, [.issued, .settleFailed(.selectedDeviceNotBound)], "a delayed mismatch reports failure, not success")
+    }
+
+    await runSuite("Bluetooth route contract - an unchanged route keeps the first snapshot") {
+        var reports: [DictationInputBindingReport] = []
+        var settled = false
+        var threw = false
+        var result: String? = "unset"
+        do {
+            result = try await DictationInputBindingSequence.settle(
+                applicationErrorDescription: nil,
+                didApplyOverride: false,
+                checkCurrent: {},
+                report: { reports.append($0) },
+                settle: { () async throws -> String in settled = true; return "settled" }
+            )
+        } catch {
+            threw = true
+        }
+
+        assertFalse(threw, "an unchanged, working route is not a failure")
+        assertEqual(result, nil, "no route command means the first snapshot stands")
+        assertFalse(settled, "no settle wait without a route command")
+        assertEqual(reports, [.issued], "nothing is reported as verified")
+    }
+
+    await runSuite("Bluetooth route contract - a superseded settle reports nothing") {
+        var reports: [DictationInputBindingReport] = []
+        var cancelled = false
+        do {
+            _ = try await DictationInputBindingSequence.settle(
+                applicationErrorDescription: nil,
+                didApplyOverride: true,
+                checkCurrent: { throw CancellationError() },
+                report: { reports.append($0) },
+                settle: { () async throws -> String in "settled" }
+            )
+        } catch is CancellationError {
+            cancelled = true
+        } catch {}
+
+        assertTrue(cancelled, "a newer recovery or owner cancels the stale settle")
+        assertEqual(reports, [.issued], "a stale settle never reports verified")
+    }
+}
+
+@MainActor
+private func runBluetoothDebounceSuites() async {
+    await runSuite("Bluetooth route contract - route telemetry never gates recovery") {
+        // An AirPods A -> B -> A burst: the route ends where it started, so
+        // telemetry has nothing new, but recovery still has to run.
+        var events: [String] = []
+        await ParakeetConfigChangeDebounce.settle(
+            sleep: { events.append("sleep") },
+            isCancelled: { false },
+            scheduleStableRouteReport: { events.append("schedule_report") },
+            attemptRecovery: { events.append("recover") }
+        )
+        assertEqual(events, ["sleep", "schedule_report", "recover"], "telemetry waits for the debounce and recovery always follows")
+
+        var route = ParakeetRouteTransitionDebounceState()
+        let builtIn = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "built_in", outputDeviceClass: "built_in", routeShape: "built_in_input_to_built_in_output"
+        )
+        let airPods = ParakeetCategoricalAudioRoute(
+            inputDeviceClass: "bluetooth", outputDeviceClass: "bluetooth", routeShape: "bluetooth_input_to_bluetooth_output"
+        )
+        route.seedStableRouteIfNeeded(builtIn)
+        route.observe(airPods)
+        route.observe(builtIn)
+        assertEqual(route.commitPendingRoute(), nil, "a burst that ends on the stable route emits no route event")
+        route.observe(airPods)
+        assertEqual(route.commitPendingRoute(), airPods, "a settled new route is reported once")
+        assertEqual(route.commitPendingRoute(), nil, "and not again")
+    }
+
+    await runSuite("Bluetooth route contract - a newer route change replaces the debounced one") {
+        var events: [String] = []
+        await ParakeetConfigChangeDebounce.settle(
+            sleep: { events.append("sleep") },
+            isCancelled: { true },
+            scheduleStableRouteReport: { events.append("schedule_report") },
+            attemptRecovery: { events.append("recover") }
+        )
+        assertEqual(events, ["sleep"], "a cancelled debounce neither reports nor recovers")
+    }
+}
+
+@MainActor
+private final class PersistentInputSchedulerHarness {
+    var monitoring = true
+    var preferenceEnabled = true
+    var hasRecoveryMarker = false
+    var dictationActive = false
+    var meetingActive = false
+    var externalReadings: [Bool?] = []
+    var delays = 0
+    var onDelay: ((Int) -> Void)?
+    var reconciles: [(defaultInputChanged: Bool, deviceListChanged: Bool, dictationActive: Bool)] = []
+
+    lazy var scheduler = DictationPersistentInputRefreshScheduler(
+        isMonitoring: { [unowned self] in self.monitoring },
+        preferenceEnabled: { [unowned self] in self.preferenceEnabled },
+        hasRecoveryMarker: { [unowned self] in self.hasRecoveryMarker },
+        isDictationActive: { [unowned self] in self.dictationActive },
+        isMeetingCaptureActive: { [unowned self] in self.meetingActive },
+        readExternalInputActivity: { [unowned self] in
+            self.externalReadings.isEmpty ? false : self.externalReadings.removeFirst()
+        },
+        delay: { [unowned self] in
+            self.delays += 1
+            self.onDelay?(self.delays)
+            await Task.yield()
+        },
+        reconcile: { [unowned self] defaultInputChanged, deviceListChanged in
+            self.reconciles.append((defaultInputChanged, deviceListChanged, self.dictationActive))
+        }
+    )
+
+    func finish() async {
+        await scheduler.refreshTask?.value
+    }
+}
+
+@MainActor
+private func runPersistentInputSchedulerSuites() async {
+    // The persistent-input preference rewrites the Mac-wide default input
+    // (for example moving it off AirPods). That write must never land under a
+    // live capture.
+    await runSuite("Bluetooth route contract - preference changes wait for active dictation") {
+        let harness = PersistentInputSchedulerHarness()
+        harness.dictationActive = true
+        harness.onDelay = { count in if count >= 3 { harness.dictationActive = false } }
+        harness.scheduler.schedule(preferenceChanged: true)
+        await harness.finish()
+
+        assertEqual(harness.reconciles.count, 1, "the change is applied once")
+        assertEqual(harness.reconciles.first?.dictationActive, false, "only after dictation has finished")
+        assertTrue(harness.delays >= 3, "maintenance kept waiting while dictation was live")
+    }
+
+    await runSuite("Bluetooth route contract - maintenance waits out meetings and other apps' capture") {
+        let meeting = PersistentInputSchedulerHarness()
+        meeting.meetingActive = true
+        meeting.onDelay = { count in if count >= 2 { meeting.meetingActive = false } }
+        meeting.scheduler.schedule(defaultInputChanged: true)
+        await meeting.finish()
+        assertEqual(meeting.reconciles.count, 1, "a meeting capture defers the write until it ends")
+        assertTrue(meeting.delays >= 2, "the write waited for the meeting")
+
+        // Another app on a call, then an unreadable reading, then idle.
+        let external = PersistentInputSchedulerHarness()
+        external.externalReadings = [true, nil, false]
+        external.scheduler.schedule(deviceListChanged: true)
+        await external.finish()
+        assertEqual(external.reconciles.count, 1, "the write lands once another app is known idle")
+        assertTrue(external.externalReadings.isEmpty, "busy and unknown readings both deferred the write")
+    }
+
+    await runSuite("Bluetooth route contract - repeated changes coalesce into one refresh") {
+        let harness = PersistentInputSchedulerHarness()
+        harness.scheduler.schedule(defaultInputChanged: true)
+        let first = harness.scheduler.refreshTask
+        harness.scheduler.schedule(deviceListChanged: true)
+        harness.scheduler.schedule(preferenceChanged: true)
+        await first?.value
+        await harness.finish()
+
+        assertEqual(harness.reconciles.count, 1, "a burst of notifications reconciles once")
+        assertEqual(harness.reconciles.first?.defaultInputChanged, true, "a default-input change is kept")
+        assertEqual(harness.reconciles.first?.deviceListChanged, true, "a reconnect is kept separately")
+    }
+
+    await runSuite("Bluetooth route contract - stopped maintenance ignores late listener callbacks") {
+        let harness = PersistentInputSchedulerHarness()
+        harness.monitoring = false
+        harness.scheduler.schedule(defaultInputChanged: true)
+        await harness.finish()
+        assertTrue(harness.scheduler.refreshTask == nil, "nothing is scheduled after shutdown")
+        assertEqual(harness.reconciles.count, 0, "and nothing is reconciled")
+
+        let waiting = PersistentInputSchedulerHarness()
+        waiting.dictationActive = true
+        waiting.onDelay = { count in if count >= 3 { waiting.scheduler.cancel() } }
+        waiting.scheduler.schedule(preferenceChanged: true)
+        await waiting.finish()
+        assertEqual(waiting.reconciles.count, 0, "stopping during a deferred wait drops the write")
+    }
+
+    await runSuite("Bluetooth route contract - maintenance runs only when it has work") {
+        let idle = PersistentInputSchedulerHarness()
+        idle.preferenceEnabled = false
+        idle.scheduler.schedule(defaultInputChanged: true)
+        await idle.finish()
+        assertEqual(idle.reconciles.count, 0, "with the preference off and no marker, route changes are ignored")
+
+        let turnedOff = PersistentInputSchedulerHarness()
+        turnedOff.preferenceEnabled = false
+        turnedOff.scheduler.schedule(preferenceChanged: true)
+        await turnedOff.finish()
+        assertEqual(turnedOff.reconciles.count, 1, "turning the preference off still reconciles, so the old mic comes back")
+
+        let crashed = PersistentInputSchedulerHarness()
+        crashed.preferenceEnabled = false
+        crashed.hasRecoveryMarker = true
+        crashed.scheduler.schedule(deviceListChanged: true)
+        await crashed.finish()
+        assertEqual(crashed.reconciles.count, 1, "a leftover crash marker retries restoration on device changes")
+    }
+}
+
+// MARK: - Fakes
+
+private func bluetoothRouteFormat(_ sampleRate: Double) -> AVAudioFormat {
+    AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sampleRate,
+        channels: 1,
+        interleaved: false
+    )!
+}
+
+private final class FakeDictationTapNode: ParakeetDictationTapInputNode {
+    private(set) var events: [String] = []
+    private let input: AVAudioFormat
+    private let output: AVAudioFormat
+    private var voiceProcessing: Bool
+    private let applySucceeds: Bool
+
+    init(
+        inputFormat: AVAudioFormat,
+        outputFormat: AVAudioFormat,
+        voiceProcessingActive: Bool = false,
+        applySucceeds: Bool = true
+    ) {
+        input = inputFormat
+        output = outputFormat
+        voiceProcessing = voiceProcessingActive
+        self.applySucceeds = applySucceeds
+    }
+
+    func removeInputTap() { events.append("remove_tap") }
+
+    func applyVoiceProcessingPreference(_ enabled: Bool) -> Bool {
+        events.append("apply_vp:\(enabled)")
+        if applySucceeds { voiceProcessing = enabled }
+        return voiceProcessing == enabled
+    }
+
+    var liveInputFormat: AVAudioFormat { events.append("read_input"); return input }
+    var liveOutputFormat: AVAudioFormat { events.append("read_output"); return output }
+    var isVoiceProcessingActive: Bool { events.append("read_vp"); return voiceProcessing }
+}
+
+private final class FakeDictationSnapshotGraph: ParakeetDictationInputSnapshotGraph {
+    private(set) var events: [String] = []
+    private let running: Bool
+
+    init(isRunning: Bool) { running = isRunning }
+
+    var isGraphRunning: Bool { events.append("is_running"); return running }
+    func releaseVoiceProcessing() { events.append("release_vp") }
+    func applySelectedInputDevice() -> String { events.append("apply_input"); return "macbook-mic" }
+    var outputFormatSummary: ParakeetAudioFormatSummary {
+        events.append("read_output")
+        return ParakeetAudioFormatSummary(sampleRate: 48_000, channelCount: 1)
+    }
+    var inputFormatSummary: ParakeetAudioFormatSummary {
+        events.append("read_input")
+        return ParakeetAudioFormatSummary(sampleRate: 48_000, channelCount: 1)
+    }
 }

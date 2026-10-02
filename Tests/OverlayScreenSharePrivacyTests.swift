@@ -9,17 +9,16 @@
 // with `sharingType = .none`.
 //
 // Source-text pins: "protected Transcripted NSWindow/NSPanel inits" and "non-sensitive titled windows
-// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift,
-// Sources/UI/MenuBar/PasteLastDictationFeedback.swift, and Sources/UI/Settings/{SpeakerNamingSheet,
+// stay capturable" below read Sources/UI/Overlay/MeetingOverlayPanel.swift
+// and Sources/UI/Settings/{SpeakerNamingSheet,
 // TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift as text instead of
-// constructing every surface. PasteLastDictationFeedbackPanel is `private` to its own file;
-// TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
+// constructing every surface. TranscriptedSettingsWindowController needs a live TranscriptedAppState/TranscriptedSettingsActions object
 // graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
 // TranscriptedOnboardingWindowController's init only takes closures (makeView returning
 // PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
 // in the same table rather than special-cased; NamingWindowController needs a real SpeakerNamingRequest.
-// FloatingOverlayPanel, CapturePillPanel, and NotchIslandPanel are compiled here and built live by the
-// first three suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
+// FloatingOverlayPanel, CapturePillPanel, NotchIslandPanel, and PasteLastDictationFeedbackPanel are
+// compiled here and built live by the first four suites, so they are not on the source table. MeetingOverlayPanel/MeetingOverlayTooltipPanel
 // live in a file this runner does not compile, so they stay on it. The CapturePillController suite greps
 // present()/installEventMonitor() because proving real Return/Escape key routing needs a live
 // NSApplication event loop delivering NSEvents, which this fast runner doesn't drive. The last suite
@@ -95,6 +94,21 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
+    runSuite("PasteLastDictationFeedbackPanel is excluded from screen capture") {
+        _ = NSApplication.shared
+        let panel = PasteLastDictationFeedbackPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 56),
+            styleMask: [],
+            backing: .buffered,
+            defer: true
+        )
+        assertEqual(
+            panel.sharingType,
+            .none,
+            "the paste-last-dictation notice shows dictated text and must not be visible to screen sharing / capture"
+        )
+    }
+
     runSuite("CapturePillController scopes Return and Escape to the pill panel") {
         let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
         let presentBlock = overlayPrivacySlice(
@@ -128,7 +142,6 @@ func testOverlayScreenSharePrivacy() async {
         // compiled here and built for real by the suites above; only the
         // surfaces this runner cannot construct stay on this source table.
         let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
-        let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
         let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let inits: [(name: String, body: String)] = [
             (
@@ -145,14 +158,6 @@ func testOverlayScreenSharePrivacy() async {
                     panelSource,
                     from: "final class MeetingOverlayTooltipPanel: NSPanel {",
                     to: "final class MeetingOverlayTooltipView"
-                )
-            ),
-            (
-                "PasteLastDictationFeedbackPanel",
-                overlayPrivacySlice(
-                    pasteFeedback,
-                    from: "private final class PasteLastDictationFeedbackPanel: NSPanel {",
-                    to: "override var canBecomeKey"
                 )
             ),
             (
@@ -210,7 +215,7 @@ func testOverlayScreenSharePrivacy() async {
 
     runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
         let expectedMarkers: [String] = [
-            "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|private final class PasteLastDictationFeedbackPanel: NSPanel {",
+            "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
             "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
             "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",

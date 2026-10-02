@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 func testMeetingSessionUIPolicy() {
@@ -177,31 +178,24 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
-    runSuite("MeetingSessionController wires Audio sleep/wake to the workspace center") {
-        let source = readSourceFixture(
-            "Sources/Meeting/MeetingSessionController.swift",
-            description: "MeetingSessionController.swift"
-        )
-        guard let audioInit = source.range(of: "MeetingCaptureBridge("),
-              let audioInitEnd = source.range(
-                of: "self.sttAdapter = MeetingSTTAdapter",
-                range: audioInit.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "production Audio construction should stay next to STT adapter setup")
-            return
-        }
-        let body = String(source[audioInit.lowerBound..<audioInitEnd.lowerBound])
+    runSuite("Meeting capture hears sleep and wake on the workspace center") {
         assertTrue(
-            body.contains("sleepWakeNotifications: AudioSleepWakeNotifications("),
-            "production must inject sleep/wake notifications instead of Audio(paths:) defaults"
+            MeetingSleepWakeNotificationSource.center === NSWorkspace.shared.notificationCenter,
+            "macOS posts sleep/wake on the workspace center, so capture must listen there"
         )
-        assertTrue(
-            body.contains("center: NSWorkspace.shared.notificationCenter"),
-            "sleep/wake must listen on the workspace center, not NotificationCenter.default"
+        assertFalse(
+            MeetingSleepWakeNotificationSource.center === NotificationCenter.default,
+            "the default center never sees workspace sleep/wake"
         )
-        assertTrue(
-            body.contains("NSWorkspaceWillSleepNotification") && body.contains("NSWorkspaceDidWakeNotification"),
-            "workspace sleep/wake notification names must stay wired"
+        assertEqual(
+            MeetingSleepWakeNotificationSource.willSleepName,
+            NSWorkspace.willSleepNotification,
+            "capture pauses on the real will-sleep notification"
+        )
+        assertEqual(
+            MeetingSleepWakeNotificationSource.didWakeName,
+            NSWorkspace.didWakeNotification,
+            "capture resumes on the real did-wake notification"
         )
     }
 
@@ -210,7 +204,7 @@ func testMeetingSessionUIPolicy() {
             "Sources/Meeting/MeetingSessionController.swift",
             description: "MeetingSessionController.swift"
         )
-        guard let start = source.range(of: "private func handleUnexpectedCaptureStop"),
+        guard let start = source.range(of: "func handleUnexpectedCaptureStop("),
               let end = source.range(
                 of: "// preserveQueuedTranscriptionJobsForShutdown",
                 range: start.upperBound..<source.endIndex
@@ -235,31 +229,24 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
-    runSuite("MeetingSessionController startRecording returns false for active capture") {
-        let source = readSourceFixture(
-            "Sources/Meeting/MeetingSessionController.swift",
-            description: "MeetingSessionController.swift"
-        )
-        guard let ignored = source.range(of: "Meeting start ignored because another meeting flow is active"),
-              let nextCase = source.range(
-                of: "case .idle, .loadingModels, .ready, .transcribing, .error:",
-                range: ignored.upperBound..<source.endIndex
-              ),
-              let ignoredReturn = source.range(
-                of: "return false",
-                range: ignored.upperBound..<nextCase.lowerBound
-              ) else {
-            assertTrue(false, "active-capture start ignore must return false before the free-state cases")
-            return
+    runSuite("A Record request is turned away while a capture is starting, recording, or stopping") {
+        let active: [MeetingSessionState] = [.startingRecording, .recording, .stoppingRecording]
+        for state in active {
+            let admission = MeetingSessionStateMachine.startAdmission(startCallInFlight: false, state: state)
+            assertEqual(admission, .ignoredActiveCapture, "\(state) already owns the capture")
+            assertFalse(admission.acceptsRecord, "an active capture must not count as an accepted Record (\(state))")
         }
-        assertTrue(
-            ignoredReturn.lowerBound < nextCase.lowerBound,
-            "startRecording must not treat an already-active capture as an accepted Record"
-        )
-        assertFalse(
-            String(source[ignored.upperBound..<nextCase.lowerBound]).contains("return true"),
-            "active-capture start ignore must not return true"
-        )
+
+        let free: [MeetingSessionState] = [.idle, .loadingModels, .ready, .transcribing, .error("synthetic")]
+        for state in free {
+            let admission = MeetingSessionStateMachine.startAdmission(startCallInFlight: false, state: state)
+            assertEqual(admission, .accepted, "\(state) leaves room for a new recording")
+            assertTrue(admission.acceptsRecord)
+        }
+
+        let competing = MeetingSessionStateMachine.startAdmission(startCallInFlight: true, state: .ready)
+        assertEqual(competing, .ignoredStartInFlight, "a second start while one is in flight is turned away")
+        assertFalse(competing.acceptsRecord, "a competing start must not count as an accepted Record")
     }
 
     runSuite("MeetingOverlayController Discard menu requires session.recording") {
@@ -312,31 +299,24 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
-    runSuite("MenuBar start/stop uses capture-active instead of steady-state isRecording") {
-        let source = readSourceFixture(
-            "Sources/UI/MenuBar/MenuBarPanelController.swift",
-            description: "MenuBarPanelController.swift"
+    runSuite("The menu meeting button means Stop for the whole capture, not just steady recording") {
+        assertEqual(MenuBarMeetingMenuAction.resolve(.recording), .stop)
+        assertEqual(
+            MenuBarMeetingMenuAction.resolve(.stoppingRecording),
+            .stop,
+            "a click while saving must not start a second meeting"
         )
-        guard let start = source.range(of: "private func startMeetingFromMenu()"),
-              let end = source.range(
-                of: "private func openSettingsFromMenu(",
-                range: start.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "menu meeting action should remain present")
-            return
+        assertEqual(
+            MenuBarMeetingMenuAction.resolve(.startingRecording),
+            .stopJoiningPendingStart,
+            "a Stop while the mic is engaging joins the pending start"
+        )
+        let free: [MeetingSessionState] = [.idle, .loadingModels, .ready, .transcribing, .error("synthetic")]
+        for state in free {
+            assertEqual(MenuBarMeetingMenuAction.resolve(state), .start, "\(state) starts a meeting")
         }
-        let body = String(source[start.lowerBound..<end.lowerBound])
-        assertTrue(
-            body.contains("isCaptureSessionActive"),
-            "menu must treat starting/recording/stopping as Stop, not Start"
-        )
-        assertTrue(
-            body.contains("stopRecordingJoiningPendingStart"),
-            "a Stop during .startingRecording must join the pending start"
-        )
-        assertFalse(
-            body.contains("meetingSession.isRecording"),
-            "steady-state isRecording would double-start during starting/stopping"
-        )
+        assertEqual(MenuBarMeetingMenuAction.start.analyticsActionID, "start_meeting")
+        assertEqual(MenuBarMeetingMenuAction.stop.analyticsActionID, "stop_meeting")
+        assertEqual(MenuBarMeetingMenuAction.stopJoiningPendingStart.analyticsActionID, "stop_meeting")
     }
 }

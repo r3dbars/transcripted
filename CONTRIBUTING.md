@@ -1,7 +1,7 @@
 # Contributing to Transcripted
 
-Transcripted is a local Mac app that turns meetings and dictation into
-structured voice artifacts people and agents can both use.
+Transcripted is a local Mac app that turns meetings, dictation, and (if you
+turn it on) your writing into Markdown files people and agents can both use.
 
 Quick repo orientation before you jump in:
 
@@ -62,6 +62,7 @@ is not the main app build.
 
 For the current script surface and legacy helpers, see `scripts/README.md`.
 For the active repo map and directory responsibilities, see `docs/repo-layout.md`.
+Every live doc under `docs/` is indexed in `docs/README.md`.
 For the path-to-verification map used by agents, see `.agents/test-matrix.yml`
 or run:
 
@@ -110,6 +111,7 @@ The codebase is organized around the current Transcripted app:
 | Dictation | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture and STT, saved dictation transcripts, hotkey and trigger routing |
 | Meetings | `Sources/Meeting/` | meeting recording, model warmup, transcript flow, bridge into Core |
 | Shared meeting core | `Sources/TranscriptedCore/` | meeting/transcription library and agent artifacts |
+| Writing | `Sources/Writing/`, `Sources/TranscriptedWriting/`, `Sources/TranscriptedKeyboard/` | opt-in autocomplete keyboard and Save my writing (app bridge, library ported from Tilde, IMKit keyboard) |
 | UI | `Sources/UI/` | grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
 | Accessibility | `Sources/Accessibility/` | focused-editor metadata, overlay placement, paste-back context |
 | Support | `Sources/Support/` | paths, permissions, preferences, paste, launch-at-login |
@@ -149,7 +151,8 @@ before async dispatch, never processed in-place.
 
 ### Testing
 
-Run the default test suite from the command line:
+`bash check.sh` runs the checks your diff needs (from `.agents/test-matrix.yml`).
+Run the default test suite on its own with:
 
 ```bash
 bash run-tests.sh

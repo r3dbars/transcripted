@@ -185,20 +185,45 @@ final class MicOnlyRecordingTests: XCTestCase {
     }
 
     /// #1781's tap diagnostics once read the stored tap directly, which
-    /// reported the previous meeting's tap on a mic-only one. Every read in
-    /// the snapshot must go through `recordingSystemAudioCapture`.
-    func testPipelineDiagnosticsNeverReadTheStoredTapDirectly() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioPipelineDiagnosticsSnapshot.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let directReads = try NSRegularExpression(pattern: "(?<![A-Za-z_])systemAudioCapture\\b")
-            .numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
-        XCTAssertEqual(directReads, 0)
-        XCTAssertTrue(source.contains("recordingSystemAudioCapture"))
+    /// reported the previous meeting's tap on a mic-only one. Every tap-derived
+    /// field must go blank when the meeting has no tap.
+    func testMicOnlyDiagnosticsReportNoneOfTheLastMeetingsTap() throws {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ))
+        let previousTap = CoreAudioSystemAudioCapture(
+            hardwareHooks: .init(
+                prepare: { format },
+                start: {},
+                stop: {},
+                currentFormat: { format }
+            ),
+            clock: { 100 }
+        )
+        try previousTap.prepare()
+        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: previousTap)
+
+        audio.capturesSystemAudio = true
+        audio.prepareForNewRecordingStart()
+        let withTap = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(withTap.systemRateHz, "48000", "control: a meeting with a tap reports it")
+        XCTAssertEqual(withTap.systemChannels, "2")
+        XCTAssertNotEqual(withTap.systemBackend, "none")
+        XCTAssertNotEqual(withTap.bufferSuccessBucket, "unknown")
+
+        audio.capturesSystemAudio = false
+        audio.prepareForNewRecordingStart()
+        let micOnly = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(micOnly.systemRateHz, "unknown")
+        XCTAssertEqual(micOnly.systemChannels, "unknown")
+        XCTAssertEqual(micOnly.systemBackend, "none")
+        XCTAssertEqual(micOnly.bufferSuccessBucket, "unknown")
+        XCTAssertEqual(micOnly.systemTap, .empty)
+        XCTAssertEqual(micOnly.systemTapFailedStep, SystemAudioTapFailure.none.step)
+        XCTAssertEqual(micOnly.systemTapFailedStatus, SystemAudioTapFailure.none.status)
     }
 
     func testMicOnlyRecordingIgnoresALateRecoveryEventFromTheLastMeetingsTap() {
@@ -468,29 +493,32 @@ final class MicOnlyRecordingTests: XCTestCase {
         }
     }
 
-    // MARK: - Start path shape
+    // MARK: - Start path
 
-    /// The tap is built in exactly one place. The mic-only check must sit in
-    /// front of it, or a mic-only meeting still asks macOS for system audio.
-    func testStartAudioCaptureChecksMicOnlyBeforeBuildingTheTap() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioFileManager.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let start = try XCTUnwrap(source.range(of: "func startAudioCapture(sessionGeneration: UInt64)"))
-        let body = source[start.upperBound...]
-
-        let micOnlyCheck = try XCTUnwrap(body.range(of: "if !currentRecordingCapturesSystemAudio {"))
-        let buildTap = try XCTUnwrap(body.range(of: "} else if let capture = makeSystemAudioCaptureForRecordingAttempt() {"))
-        XCTAssertLessThan(micOnlyCheck.lowerBound, buildTap.lowerBound)
-        XCTAssertEqual(
-            source.components(separatedBy: "makeSystemAudioCaptureForRecordingAttempt()").count - 1,
-            1,
-            "one call: the mic-only check covers every tap build"
+    /// A mic-only meeting must never build the tap, or it still asks macOS
+    /// for system audio right after the user declined it.
+    func testMicOnlyRecordingNeverBuildsASystemAudioTap() {
+        let builds = MicOnlyBuildCount()
+        let audio = Audio(
+            paths: makePaths(),
+            systemAudioCaptureForTesting: nil,
+            systemAudioCaptureFactoryForTesting: {
+                builds.advance()
+                return MicOnlyStubSystemAudioCapture(successRate: 1)
+            }
         )
+
+        audio.capturesSystemAudio = false
+        audio.prepareForNewRecordingStart()
+        let buildsBeforeMicOnly = builds.value
+        XCTAssertNil(audio.makeSystemAudioCaptureForRecordingAttempt())
+        XCTAssertEqual(builds.value, buildsBeforeMicOnly, "a mic-only recording must not build a tap")
+
+        audio.capturesSystemAudio = true
+        audio.prepareForNewRecordingStart()
+        let buildsBeforeFull = builds.value
+        XCTAssertNotNil(audio.makeSystemAudioCaptureForRecordingAttempt())
+        XCTAssertEqual(builds.value, buildsBeforeFull + 1, "control: a normal recording builds one")
     }
 
     private func makeDirectory() throws -> URL {
@@ -537,6 +565,23 @@ final class MicOnlyRecordingTests: XCTestCase {
 }
 
 @available(macOS 14.0, *)
+private final class MicOnlyBuildCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func advance() {
+        lock.lock()
+        stored += 1
+        lock.unlock()
+    }
+}
+
 private final class MicOnlyStubSystemAudioCapture: SystemAudioCaptureEngine, @unchecked Sendable {
     private let errorSubject = PassthroughSubject<String?, Never>()
     private let lock = NSLock()

@@ -78,7 +78,7 @@ reliability packet is derived from an already-captured `ObservabilityEvent`:
 directly as part of handling every event (see
 `Sources/Observability/EventReporter.swift`). `ReliabilityPacketRecorder` then
 re-shapes a subset of events (via its own coarse, bucketed allowlist — see
-`Sources/Observability/CLAUDE.md`) into `reliability.jsonl`, which is what gets
+`Sources/Observability/AGENTS.md`) into `reliability.jsonl`, which is what gets
 attached to user-submitted support diagnostics. If you're looking for where
 reliability packets come from, start at `EventReporter.capture`, not at
 `ReliabilityPacketRecorder`.

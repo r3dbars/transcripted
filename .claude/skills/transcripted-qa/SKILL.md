@@ -266,7 +266,7 @@ When a tier fails:
 
 ### Fix Loop Guardrails
 - Max 3 fix attempts per failure
-- NEVER modify the audio-thread files under `Sources/TranscriptedCore/Audio/` (`Audio.swift`, `CoreAudioSystemAudioCapture.swift`, `CoreAudioTapBufferRing.swift`, `AudioFileManager.swift`, `AudioLevelMonitor.swift`, `RealtimeAGC.swift`, `SCKAudioCapture.swift`) without asking the user
+- NEVER modify the audio-thread files under `Sources/TranscriptedCore/Audio/` (`Audio.swift`, `CoreAudioSystemAudioCapture.swift`, `CoreAudioTapBufferRing.swift`, `AudioFileManager.swift`, `Audio+MicBufferWrite.swift`, `Audio+SystemAudioWrite.swift`, `Audio+BufferUtilities.swift`, `SystemAudioCaptureStartAttempt.swift`, `AudioLevelMonitor.swift`, `RealtimeAGC.swift`, `SCKAudioCapture.swift`) without asking the user
 - If you can't fix it in 3 attempts, report it as unresolved and move on
 
 ## Key File Locations

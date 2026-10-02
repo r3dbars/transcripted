@@ -118,3 +118,32 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         }
     }
 }
+
+/// The actions on a Home failed-meeting row. Show Audio and Try again answer
+/// different questions: any kept audio file can be shown in Finder, even a
+/// partial set, but retry needs complete, retryable audio. Cleanup is always a
+/// confirmed, destructive delete.
+struct HomeFailedMeetingRowActions: Equatable {
+    let showsRevealAudio: Bool
+    let retryDisabled: Bool
+    let deleteTitle: String
+    let deleteIsDestructive: Bool
+
+    static func make(
+        item: FailedMeetingPresentation.FailedMeetingItem,
+        canRetry: Bool
+    ) -> HomeFailedMeetingRowActions {
+        HomeFailedMeetingRowActions(
+            showsRevealAudio: !item.audioURLs.isEmpty,
+            retryDisabled: FailedMeetingRecoveryPresentation.retryDisabled(
+                canRetry: canRetry,
+                isRetryable: item.isRetryable,
+                isRetrying: item.isRetrying,
+                hasAudioFiles: item.hasAudioFiles,
+                usableAudio: item.usableAudio
+            ),
+            deleteTitle: "Delete failed meeting",
+            deleteIsDestructive: true
+        )
+    }
+}

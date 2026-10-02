@@ -88,21 +88,101 @@ func testDictationRecordingStartAttempt() async {
         assertFalse(started, "optional recovery cannot change existing start-result semantics")
     }
 
-    runSuite("Both production start paths use failure-only recovery") {
-        do {
-            let speech = try String(contentsOf: repoFixtureURL("Sources/Speech/DictationSession.swift"), encoding: .utf8)
-            assertTrue(speech.contains("return await DictationRecordingStartAttempt.run("), "native microphone starts execute the tested production runner")
-            assertTrue(speech.contains("onFailure: onStartFailed"), "native failure is the sole recovery trigger")
-            let controller = try String(contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"), encoding: .utf8)
-            let begin = controller.components(separatedBy: "private func beginDictationRecording(sourceApp: NSRunningApplication?) {").last ?? ""
-            let body = begin.components(separatedBy: "private func waitForEngineAndStart(").first ?? ""
-            assertFalse(body.contains("startActivation.prepare"), "normal entrypoint must not activate before trying the mic")
-            assertFalse(controller.contains("activationPrepared"), "remove the old unconditional activation recursion")
-            assertTrue(controller.contains("!didAttemptStartActivation"), "recovery is admitted at most once per session")
-            assertTrue(controller.contains("didAttemptStartActivation = false"), "each new session gets a fresh recovery opportunity")
-            assertEqual(controller.components(separatedBy: "await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)").count - 1, 2, "fast starts and readiness-loop failures share the guarded recovery")
-        } catch {
-            assertTrue(false, "production wiring should be readable: \(error)")
-        }
+    await runSuite("A native start reports the open, then the route wait when it fails") {
+        var events: [String] = []
+        let started = await DictationNativeMicrophoneStart.run(
+            isRecoveryAttempt: false,
+            isCurrentSession: { true },
+            onStartStageChanged: { events.append($0.rawValue) },
+            onStartFailed: { events.append("recover") },
+            startRecording: { events.append("ordinary_start"); return false },
+            startRecordingRecoveryAttempt: { events.append("recovery_start"); return true }
+        )
+        assertFalse(started, "a failed open is reported as failed")
+        assertEqual(
+            events,
+            ["opening_microphone", "ordinary_start", "waiting_for_audio_route", "recover"],
+            "the stage names the open, a failure moves it to the route wait, and only then is focus recovery offered"
+        )
     }
+
+    await runSuite("The recovery loop's forced attempt uses the recovery start") {
+        var events: [String] = []
+        let started = await DictationNativeMicrophoneStart.run(
+            isRecoveryAttempt: true,
+            isCurrentSession: { true },
+            onStartStageChanged: { events.append($0.rawValue) },
+            onStartFailed: { events.append("recover") },
+            startRecording: { events.append("ordinary_start"); return false },
+            startRecordingRecoveryAttempt: { events.append("recovery_start"); return true }
+        )
+        assertTrue(started, "the forced recovery start's own result is returned")
+        assertEqual(events, ["opening_microphone", "recovery_start"], "a successful open never offers focus recovery")
+    }
+
+    await runSuite("A start the session no longer owns reports no stages") {
+        var stages: [String] = []
+        var recovered = false
+        let started = await DictationNativeMicrophoneStart.run(
+            isRecoveryAttempt: false,
+            isCurrentSession: { false },
+            onStartStageChanged: { stages.append($0.rawValue) },
+            onStartFailed: { recovered = true },
+            startRecording: { false },
+            startRecordingRecoveryAttempt: { true }
+        )
+        assertFalse(started, "the open's result still comes back")
+        assertEqual(stages, [], "a stale start can't move the stage of the session now running")
+        assertTrue(recovered, "the recovery decision itself is the gate's, keyed on the session id")
+    }
+
+    runSuite("Focus recovery is offered at most once per session") {
+        var gate = DictationStartActivationRecoveryGate()
+        let session = UUID()
+        assertTrue(admit(&gate, session: session), "the first failed background hotkey start may try the handshake")
+        assertFalse(admit(&gate, session: session), "a second failure in the same session doesn't activate again")
+        assertFalse(admit(&gate, session: session), "nor a third")
+    }
+
+    runSuite("Each new session gets its own recovery chance") {
+        var gate = DictationStartActivationRecoveryGate()
+        let first = UUID()
+        let second = UUID()
+        assertTrue(admit(&gate, session: first), "first session recovers once")
+        assertTrue(admit(&gate, session: second), "the next session isn't blocked by the last one's attempt")
+        assertFalse(admit(&gate, session: second), "and it gets only one too")
+    }
+
+    runSuite("Focus recovery is refused outside a failed background hotkey start") {
+        let session = UUID()
+        var gate = DictationStartActivationRecoveryGate()
+        assertFalse(admit(&gate, session: session, current: UUID()), "a late failure from a superseded session")
+        assertFalse(admit(&gate, session: session, isDictating: false), "the session already ended")
+        assertFalse(admit(&gate, session: session, isCancelled: true), "the start was cancelled (key released)")
+        assertFalse(admit(&gate, session: session, appIsActive: true), "Transcripted is already frontmost")
+        assertFalse(admit(&gate, session: session, allowsEscalation: false), "a menu or overlay start never steals focus")
+        assertFalse(admit(&gate, session: session, usesMeetingMic: true), "dictation borrowing the meeting mic has nothing to activate")
+        assertTrue(admit(&gate, session: session), "none of those refusals used up the session's one chance")
+    }
+}
+
+private func admit(
+    _ gate: inout DictationStartActivationRecoveryGate,
+    session: UUID,
+    current: UUID? = nil,
+    isDictating: Bool = true,
+    isCancelled: Bool = false,
+    appIsActive: Bool = false,
+    allowsEscalation: Bool = true,
+    usesMeetingMic: Bool = false
+) -> Bool {
+    gate.admit(
+        sessionID: session,
+        currentSessionID: current ?? session,
+        isDictating: isDictating,
+        isCancelled: isCancelled,
+        appIsActive: appIsActive,
+        allowsEscalation: allowsEscalation,
+        usesMeetingMic: { usesMeetingMic }
+    )
 }

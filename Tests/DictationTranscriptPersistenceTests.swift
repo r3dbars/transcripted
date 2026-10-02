@@ -22,27 +22,25 @@ func testDictationTranscriptPersistence() async {
         )
     }
 
-    runSuite("Session-cap production completion uses the save-proof telemetry policy") {
-        do {
-            let source = try String(
-                contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
-                encoding: .utf8
-            )
-            guard let capStart = source.range(of: "private func finalizeWithoutPaste("),
-                  let capEnd = source.range(of: "func cancelDictation(", range: capStart.upperBound..<source.endIndex),
-                  let snapshot = source.range(of: "DictationSessionCapCompletionTelemetryPolicy.snapshot(", range: capStart.upperBound..<capEnd.lowerBound),
-                  let saveProof = source.range(of: "saveSucceeded: saveResult.saved != nil", range: snapshot.upperBound..<capEnd.lowerBound),
-                  let delivery = source.range(of: "\"delivery\": completionTelemetry.delivery.rawValue", range: saveProof.upperBound..<capEnd.lowerBound),
-                  let failure = source.range(of: "completionProperties[\"failure_kind\"] = failureKind", range: delivery.upperBound..<capEnd.lowerBound),
-                  let track = source.range(of: "\"dictation_completed\"", range: failure.upperBound..<capEnd.lowerBound) else {
-                assertTrue(false, "production session-cap completion must label delivery and failure after save proof")
-                return
-            }
-            assertTrue(snapshot.lowerBound < saveProof.lowerBound && saveProof.lowerBound < delivery.lowerBound && delivery.lowerBound < failure.lowerBound && failure.lowerBound < track.lowerBound,
-                "failure classification must reach the terminal completion event without claiming saved delivery")
-        } catch {
-            assertTrue(false, "production controller source should be readable: \(error)")
-        }
+    runSuite("Session-cap completion event takes its delivery from the save result") {
+        let saved = DictationSessionCapCompletionTelemetryPolicy.completionProperties(
+            saveSucceeded: true, durationBucket: "5m_plus", trigger: "physical_key", wordCountBucket: "500_plus"
+        )
+        assertEqual(saved["delivery"], "saved_without_paste", "a saved cap take reports saved-without-paste")
+        assertNil(saved["failure_kind"], "a successful save carries no failure kind")
+        assertEqual(saved["auto_send"], "disabled", "the cap never auto-sends")
+        assertEqual(saved["trigger"], "physical_key", "the trigger is passed through")
+
+        let failed = DictationSessionCapCompletionTelemetryPolicy.completionProperties(
+            saveSucceeded: false, durationBucket: "5m_plus", trigger: "physical_key", wordCountBucket: "500_plus"
+        )
+        assertEqual(failed["delivery"], "failed", "a failed save never claims saved delivery")
+        assertEqual(failed["failure_kind"], "markdown_save_failed", "and says why it failed")
+        let allowed = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")?.allowedProperties ?? []
+        assertTrue(
+            failed.keys.allSatisfy { allowed.contains($0) },
+            "every cap completion key survives privacy filtering"
+        )
     }
     runSuite("Dictation save timing excludes delayed publication and includes failures") {
         let saved = SavedDictationTranscript(url: URL(fileURLWithPath: "/tmp/synthetic-dictation.md"), title: "Synthetic")

@@ -220,49 +220,96 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         XCTAssertEqual(try AVAudioFile(forReading: url).length, 0)
     }
 
-    // MARK: - Source-order contract
+    // MARK: - Through the real Audio.stop()
 
-    private var audioSourceURL: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/Audio.swift")
-    }
+    /// The tests above replay stop's steps by hand, so they can't notice if
+    /// `Audio.stop()` itself reorders them. Run the real `stop()` and deliver
+    /// one buffer at the exact instant the generation advances (the earliest
+    /// a stale buffer can arrive), with a second still queued in the ring for
+    /// the backend stop to drain. Both must be saved: the first needs the
+    /// finishing handoff armed before the bump, the second needs stop to
+    /// finish and drain the capture rather than cancel it.
+    func testRealStopSavesBuffersFromTheGenerationBumpAndTheDrainedRing() throws {
+        let directory = try makeTemporaryDirectory()
+        let audio = Audio(paths: CoreStoragePaths(
+            transcripts: directory.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: directory.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: directory.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: directory.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: directory.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: directory.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: directory.appendingPathComponent("logs", isDirectory: true)
+        ))
+        audio.prepareForNewRecordingStart()
+        let generation = audio.recordingSessionGeneration
 
-    /// `Audio.stop()` is long enough that the two orderings the tail depends on
-    /// are easy to move by accident. Pin them here: no unit test below this
-    /// level can observe the order of statements in that function, and no CI
-    /// job records real audio to notice the truncation.
-    func testStopArmsTheTailHandoffBeforeAdvancingTheRecordingGeneration() throws {
-        let lines = try String(contentsOf: audioSourceURL, encoding: .utf8)
-            .components(separatedBy: "\n")
-        guard let start = lines.firstIndex(of: "    public func stop() {") else {
-            return XCTFail("Could not find Audio.stop() — update this contract test")
-        }
-        // Everything up to the closing brace at the declaration's own indent.
-        guard let end = lines[(start + 1)...].firstIndex(of: "    }") else {
-            return XCTFail("Could not find the end of Audio.stop()")
-        }
-        let body = lines[(start + 1)..<end].joined(separator: "\n")
-
-        guard let arm = body.range(of: "beginFinishing()"),
-              let bump = body.range(of: "beginRecordingSessionGeneration()") else {
-            return XCTFail(
-                "Audio.stop() must arm the system-audio finishing handoff and "
-                + "advance the recording generation — one of them is gone"
+        let capture = makeCapture()
+        let attempt = SystemAudioCaptureStartAttempt(capture: capture)
+        let url = directory.appendingPathComponent("system.wav")
+        let writer = try AVAudioFile(forWriting: url, settings: Self.format.settings)
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: generation,
+                capture: attempt
+            )
+            XCTAssertTrue(
+                audio.systemAudioCaptureAttemptOwnership.install(
+                    writer,
+                    generation: generation,
+                    capture: attempt,
+                    fileURL: url
+                )
             )
         }
-        XCTAssertTrue(
-            arm.upperBound < bump.lowerBound,
-            "beginFinishing() must run before the generation advances, or every "
-            + "buffer the backend consumer delivers before the asynchronous HAL "
-            + "stop is dropped by a closed tail admission"
-        )
-        XCTAssertTrue(
-            body.contains("finishAndDrain()"),
-            "Stop must finish-and-drain the system capture; cancel() discards queued PCM"
-        )
+
+        // Mirrors AudioFileManager's production buffer callback.
+        let normalDeliveries = LockedCounter(0)
+        let finishingDeliveries = LockedCounter(0)
+        try attempt.prepare()
+        try attempt.startIfNotCancelled { [unowned audio] buffer in
+            guard generation == audio.recordingSessionGeneration else {
+                finishingDeliveries.advance()
+                attempt.enqueueFinishingBuffer(
+                    buffer,
+                    writer: writer,
+                    queue: audio.systemAudioFileQueue
+                ) { error in
+                    XCTFail("Tail write failed: \(error)")
+                }
+                return
+            }
+            normalDeliveries.advance()
+        }
+
+        let advances = LockedCounter(0)
+        audio.afterRecordingSessionGenerationAdvanceForTesting = { _ in
+            advances.advance()
+            capture.receiveForTesting(self.makeBuffer(marker: 0.25))
+            capture.drainForTesting()
+            // Left in the ring for the backend stop to drain.
+            capture.receiveForTesting(self.makeBuffer(marker: 0.5))
+        }
+        defer { audio.afterRecordingSessionGenerationAdvanceForTesting = nil }
+
+        let completed = expectation(description: "recording finalized")
+        audio.onRecordingComplete = { _, _ in completed.fulfill() }
+        audio.stop()
+        audio.afterRecordingSessionGenerationAdvanceForTesting = nil
+        XCTAssertEqual(advances.value, 1, "stop() must advance the generation exactly once")
+        wait(for: [completed], timeout: 5)
+
+        let savedFile = try AVAudioFile(forReading: url)
+        XCTAssertEqual(savedFile.length, 16, "Both tail buffers must reach the WAV before the writer closes")
+        XCTAssertEqual(normalDeliveries.value, 0, "The normal-write path must not satisfy this tail test")
+        XCTAssertEqual(finishingDeliveries.value, 2)
+        let savedPCM = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: savedFile.processingFormat, frameCapacity: 16))
+        try savedFile.read(into: savedPCM)
+        guard savedPCM.frameLength == 16 else {
+            return XCTFail("Expected 16 saved frames before inspecting tail markers")
+        }
+        let channels = try XCTUnwrap(savedPCM.floatChannelData)
+        XCTAssertEqual(channels[0][0], 0.25, accuracy: 0.0001)
+        XCTAssertEqual(channels[0][8], 0.5, accuracy: 0.0001)
+        XCTAssertFalse(attempt.hasFinalizationFailure)
     }
 }

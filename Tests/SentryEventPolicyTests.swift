@@ -568,20 +568,32 @@ func testSentryEventPolicy() {
         // Forwarding is gated on `.error` in EventReporter, so an allowlist
         // entry alone sends nothing. If this ever drops back to `.info` the
         // event silently stops reaching Sentry with no other symptom.
-        let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        let cancelPath = sentrySourceSlice(
-            controller,
-            from: "private func cancelPendingDictationStartAfterEarlyRelease",
-            to: "private func overlayStateName"
-        )
-        assertTrue(
-            cancelPath.contains("level: .error"),
+        assertEqual(
+            DictationEarlyReleaseCancelReport.level,
+            .error,
             "the cancel event must be recorded at .error or it never leaves the machine"
         )
-        assertFalse(
-            cancelPath.contains("level: .info"),
-            "an .info record here would be silently local-only"
+        assertNotNil(
+            SentryEventPolicy.policy(
+                forEngine: DictationEarlyReleaseCancelReport.engine,
+                event: DictationEarlyReleaseCancelReport.event
+            ),
+            "the event the controller records is the one Sentry allows"
         )
+        let recorded = SentryEventPolicy.diagnosticTags(
+            forEngine: DictationEarlyReleaseCancelReport.engine,
+            event: DictationEarlyReleaseCancelReport.event,
+            context: DictationEarlyReleaseCancelReport.context(
+                trigger: "physical_key",
+                shortcutMode: .handsFree,
+                pendingForMs: 2870,
+                pendingStage: "opening_microphone",
+                stagePendingForMs: 2705,
+                startPlan: "background",
+                appActive: false
+            )
+        )
+        assertEqual(recorded, tags, "the context the controller records yields the same Sentry tags as the hand-built one")
     }
 
     runSuite("Meeting stop emits one canonical Sentry terminal before generic degraded capture") {

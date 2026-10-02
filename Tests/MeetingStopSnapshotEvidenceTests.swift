@@ -66,14 +66,13 @@ func testMeetingStopSnapshotEvidence() {
     }
 
     runSuite("MeetingSessionController — unexpected stop evidence is captured before the warning clears") {
-        let source = readSourceFixture(
-            "Sources/Meeting/MeetingSessionController.swift",
-            description: "MeetingSessionController.swift"
-        )
-        guard let stash = source.range(of: "self.unexpectedCaptureStopEvidence = ("),
-              let clear = source.range(
+        let source = readMeetingSessionControllerSource()
+        // The capture-stop sink lives in MeetingSessionController+Subscriptions.swift.
+        let sink = readMeetingSessionControllerSource(part: "Subscriptions")
+        guard let stash = sink.range(of: "self.unexpectedCaptureStopEvidence = ("),
+              let clear = sink.range(
                 of: "self.systemAudioDegradationWarning = nil",
-                range: stash.upperBound..<source.endIndex
+                range: stash.upperBound..<sink.endIndex
               ) else {
             assertTrue(false, "the capture-stop sink must stash evidence and then clear the warning")
             return
@@ -84,9 +83,9 @@ func testMeetingStopSnapshotEvidence() {
                 && source.contains("atCaptureStop: atCaptureStop?.degradationWarning"),
             "the stop snapshot must read the stashed evidence"
         )
-        if let unheard = source.range(
+        if let unheard = sink.range(
             of: "self.unheardSecondsAtCaptureStop = self.unheardPlaybackWarningStartedAt",
-            range: stash.upperBound..<source.endIndex
+            range: stash.upperBound..<sink.endIndex
         ) {
             assertTrue(unheard.lowerBound < clear.lowerBound, "how long call audio went unheard is stashed with the rest")
         } else {

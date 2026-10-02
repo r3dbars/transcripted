@@ -195,53 +195,59 @@ final class MicStopTailHandoffTests: XCTestCase {
         XCTAssertEqual(audio.micAudioWriteBackpressure.pendingBytesForTesting, 0)
     }
 
-    // MARK: - Source-order contract
+    // MARK: - Arming order
 
-    private var audioSourceURL: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // MicStopTailHandoffTests.swift -> AudioTests/
-            .deletingLastPathComponent() // AudioTests/ -> TranscriptedCoreTests/
-            .deletingLastPathComponent() // TranscriptedCoreTests/ -> Tests/
-            .deletingLastPathComponent() // Tests/ -> repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/Audio.swift")
-    }
+    /// The end-to-end test above delivers its tail after `stop()` returns, so
+    /// it can't tell whether admission was armed a moment too late. Deliver
+    /// one buffer at the exact instant the generation advances: that is the
+    /// earliest a stale buffer can arrive, and it must still be saved.
+    func testBufferDeliveredTheInstantTheGenerationAdvancesIsSaved() throws {
+        let root = try makeRoot()
+        let audio = makeAudio(root: root)
+        audio.prepareForNewRecordingStart()
+        audio.realtimeAGC = nil
+        let generation = audio.recordingSessionGeneration
+        let writeContext = MicPCMWriteContext(
+            generation: generation,
+            monoFormat: Self.format,
+            inputChannelCount: 1
+        )
 
-    /// The end-to-end test above cannot tell whether admission was armed a
-    /// moment too late, because it delivers its tail after `stop()` returns.
-    /// Pin the two orderings directly.
-    func testStopArmsMicTailBeforeAdvancingGenerationAndClosesItAfterTeardown() throws {
-        let lines = try String(contentsOf: audioSourceURL, encoding: .utf8)
-            .components(separatedBy: "\n")
-        guard let start = lines.firstIndex(of: "    public func stop() {") else {
-            return XCTFail("Could not find Audio.stop() — update this contract test")
-        }
-        guard let end = lines[(start + 1)...].firstIndex(of: "    }") else {
-            return XCTFail("Could not find the end of Audio.stop()")
-        }
-        let body = lines[(start + 1)..<end].joined(separator: "\n")
-
-        guard let arm = body.range(of: "micAudioWriteBackpressure.beginFinishing(generation: captureGeneration)"),
-              let bump = body.range(of: "beginRecordingSessionGeneration()"),
-              let closeMicrophone = body.range(of: "closeMicrophone: {"),
-              let close = body.range(of: "micAudioWriteBackpressure.close(generation: captureGeneration)") else {
-            return XCTFail(
-                "Audio.stop() must arm the mic tail, advance the generation, and "
-                + "close mic admission inside closeMicrophone — one of them is gone"
-            )
-        }
-        XCTAssertTrue(
-            arm.upperBound < bump.lowerBound,
-            "Mic tail admission must be armed before the generation advances"
+        let url = root.appendingPathComponent("mic.wav")
+        let writer = try AVAudioFile(
+            forWriting: url,
+            settings: Self.format.settings,
+            commonFormat: Self.format.commonFormat,
+            interleaved: Self.format.isInterleaved
         )
         XCTAssertTrue(
-            closeMicrophone.upperBound < close.lowerBound,
-            "Mic admission must close in closeMicrophone, after the tap is torn "
-            + "down, or the last buffers before Stop are dropped"
+            audio.micAudioFileOwnership.installSessionWriter(
+                writer,
+                generation: generation
+            ).didInstall
         )
-        XCTAssertEqual(
-            body.components(separatedBy: "micAudioWriteBackpressure.close(").count - 1,
-            1,
-            "Closing mic admission anywhere earlier in stop() drops the tail again"
-        )
+
+        let advances = LockedCount()
+        audio.afterRecordingSessionGenerationAdvanceForTesting = { [unowned audio] _ in
+            advances.advance()
+            audio.handleMicBuffer(self.makeBuffer(marker: 0.25), writeContext: writeContext)
+        }
+        defer { audio.afterRecordingSessionGenerationAdvanceForTesting = nil }
+
+        let completed = expectation(description: "recording finalized")
+        audio.onRecordingComplete = { _, _ in completed.fulfill() }
+        audio.stop()
+        audio.afterRecordingSessionGenerationAdvanceForTesting = nil
+        XCTAssertEqual(advances.value, 1, "stop() must advance the generation exactly once")
+        wait(for: [completed], timeout: 5)
+
+        let saved = try AVAudioFile(forReading: url)
+        XCTAssertEqual(saved.length, 128, "the buffer from the instant of the generation bump must be saved")
+        let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: saved.processingFormat, frameCapacity: 128))
+        try saved.read(into: pcm)
+        guard pcm.frameLength == 128 else {
+            return XCTFail("Expected 128 saved frames before inspecting the marker")
+        }
+        XCTAssertEqual(try XCTUnwrap(pcm.floatChannelData)[0][0], 0.25, accuracy: 0.0001)
     }
 }

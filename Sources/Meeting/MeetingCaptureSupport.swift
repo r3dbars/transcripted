@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -730,4 +731,13 @@ enum MeetingAudioInactivityRecoveryPolicy {
         guard let rawValue else { return 0 }
         return Int(rawValue) ?? 0
     }
+}
+
+/// Where meeting capture listens for sleep and wake. macOS posts these on the
+/// workspace notification center, not `NotificationCenter.default`, so a
+/// capture that listened on the default center would never pause for sleep.
+enum MeetingSleepWakeNotificationSource {
+    static var center: NotificationCenter { NSWorkspace.shared.notificationCenter }
+    static let willSleepName = NSWorkspace.willSleepNotification
+    static let didWakeName = NSWorkspace.didWakeNotification
 }

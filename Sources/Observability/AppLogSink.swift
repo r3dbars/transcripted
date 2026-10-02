@@ -7,7 +7,9 @@
 
 import Foundation
 import SwiftUI
+#if canImport(TranscriptedCore)
 import TranscriptedCore
+#endif
 
 private actor AppLogSinkFileWriter {
     private var logPath: String?
@@ -112,9 +114,7 @@ private actor AppLogSinkFileWriter {
 class AppLogSink: ObservableObject {
     @Published var entries: [String] = []
 
-    private let logFilePath = FileManager.default.transcriptedLogsDirURL
-        .appendingPathComponent("debug.log", isDirectory: false)
-        .path
+    private let logFilePath: String
     private let fileWriter = AppLogSinkFileWriter()
 
     private let dateFormatter: DateFormatter = {
@@ -123,7 +123,14 @@ class AppLogSink: ObservableObject {
         return f
     }()
 
-    init() {
+    nonisolated static func defaultLogFileURL() -> URL {
+        FileManager.default.transcriptedLogsDirURL
+            .appendingPathComponent("debug.log", isDirectory: false)
+    }
+
+    /// `logFileURL` is for tests; the app always writes the default debug.log.
+    init(logFileURL: URL = AppLogSink.defaultLogFileURL()) {
+        logFilePath = logFileURL.path
         let path = logFilePath
         Task.detached(priority: .utility) { [fileWriter] in
             await fileWriter.reset(at: path)

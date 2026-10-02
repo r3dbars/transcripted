@@ -149,10 +149,11 @@ func testDictationSounds() {
     }
 
     // When the stop click plays (after the mic stops, before the snapshot) is a
-    // behavior test now: "Stop click plays once, after the mic stops and before
-    // the snapshot" in DictationStopCheckpointTests.swift.
+    // behavior test: "Stop click plays once, after the mic stops and before
+    // the snapshot" in DictationStopCheckpointTests.swift. The counts below
+    // read the controller core and every +Area extension together.
+    let controller = readDictationSessionControllerSource()
     runSuite("Stop is the only end-of-take click in the dictation controller") {
-        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         assertEqual(
             controller.components(separatedBy: "AppSoundPlayer.shared.play(.dictationStop)").count - 1,
             1,
@@ -161,9 +162,8 @@ func testDictationSounds() {
     }
 
     runSuite("Start click answers the key press on the fast path, once") {
-        let controller = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let fastPathBeforeMicStart = sourceSlice(
-            in: controller,
+            in: readDictationSessionControllerSource(part: "RecordingStart"),
             from: "case .skipLoadingAndStartRecording:",
             to: "recordingStartRetryTask = Task"
         )

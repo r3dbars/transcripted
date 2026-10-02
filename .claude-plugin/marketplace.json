@@ -1,0 +1,11 @@
+{
+  "name": "transcripted",
+  "owner": { "name": "Transcripted" },
+  "plugins": [
+    {
+      "name": "transcripted-live",
+      "source": "./Tools/TranscriptedLive/claude-mod",
+      "description": "Your Transcripted meeting, live in Claude Code: Claude has the call as context, a notes sidebar, Draft answer for questions aimed at you, and an after-call wrap-up with next steps."
+    }
+  ]
+}

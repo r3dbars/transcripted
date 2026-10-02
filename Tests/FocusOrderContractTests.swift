@@ -2,16 +2,17 @@
 //
 // The visual layout of a surface does not prove anything about the order the
 // focus ring travels through its controls. These checks pin the keyboard Tab
-// order so a UI sweep can't silently reshuffle it: a pure-logic half asserts the
-// FocusOrderContract is a well-formed loop and matches the identifiers and
-// ⌘ shortcuts the real TranscriptedSettingsPage cases produce, and a source
-// half asserts the real menu bar views and sidebar row join the key-view loop
-// and attach their identifiers in that same order. The source half greps
-// text — it runs no UI.
+// order so a UI sweep can't silently reshuffle it: FocusOrderContract must be
+// a well-formed loop, the real menu bar rows must take focus and activate from
+// the keyboard, the real section views must hand their rows over in the
+// declared order, and the settings sidebar's primary rows must match the
+// identifiers and ⌘ shortcuts the real TranscriptedSettingsPage cases produce.
 
+import AppKit
 import Foundation
 
-func testFocusOrderContract() {
+@MainActor
+func testFocusOrderContract() async {
     runSuite("Focus order contract - declared orders form well-formed Tab loops") {
         for surface in FocusOrderContract.Surface.allCases {
             let order = FocusOrderContract.order(for: surface)
@@ -75,50 +76,118 @@ func testFocusOrderContract() {
         )
     }
 
-    runSuite("Focus order contract - menu bar rows join the keyboard loop") {
-        let rowSource = readSourceFixture("Sources/UI/MenuBar/MenuBarActionRowView.swift")
-        let primarySource = readSourceFixture("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
-        let utilitySource = readSourceFixture("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
-        let contentSource = readSourceFixture("Sources/UI/MenuBar/MenuBarContentView.swift")
+    runSuite("Focus order contract - menu bar rows take focus and activate from the keyboard") {
+        _ = NSApplication.shared
+        let row = MenuBarActionRowView(frame: NSRect(x: 0, y: 0, width: 200, height: 28))
+        row.update(symbolName: "power", title: "Quit", detail: "")
+        var presses = 0
+        row.onPress = { presses += 1 }
 
-        // Rows must be focusable controls that activate by keyboard and draw a
-        // focus ring, otherwise Tab can never land on or trigger them.
-        assertTrue(
-            rowSource.contains("override var acceptsFirstResponder: Bool { isEnabled && !isHidden }")
-                && rowSource.contains("override var canBecomeKeyView: Bool { acceptsFirstResponder }")
-                && rowSource.contains("override func keyDown(with event: NSEvent)")
-                && rowSource.contains("event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76")
-                && rowSource.contains("override func drawFocusRingMask()")
-                && rowSource.contains("override var focusRingMaskBounds: NSRect { bounds }"),
-            "menu bar rows should accept first responder, activate on Space/Return, and draw a focus ring"
+        assertTrue(row.acceptsFirstResponder, "an enabled, visible row should accept keyboard focus")
+        assertTrue(row.canBecomeKeyView, "an enabled, visible row should join the key-view loop")
+        assertEqual(row.focusRingMaskBounds, row.bounds, "the focus ring should outline the whole row")
+
+        // Space (49), Return (36), and keypad Enter (76) activate, like AppKit buttons.
+        for (keyCode, characters) in [(UInt16(49), " "), (UInt16(36), "\r"), (UInt16(76), "\u{3}")] {
+            guard let event = focusOrderKeyDown(keyCode: keyCode, characters: characters) else {
+                assertTrue(false, "expected to build a key event for key code \(keyCode)")
+                continue
+            }
+            row.keyDown(with: event)
+        }
+        assertEqual(presses, 3, "Space, Return, and keypad Enter should each press the focused row")
+
+        row.isEnabled = false
+        assertFalse(row.acceptsFirstResponder, "a disabled row should drop out of the Tab loop")
+        assertFalse(row.canBecomeKeyView, "a disabled row should not be a key view")
+
+        row.isEnabled = true
+        row.isHidden = true
+        assertFalse(row.acceptsFirstResponder, "a hidden row should drop out of the Tab loop")
+    }
+
+    runSuite("Focus order contract - menu bar sections hand over their rows in the declared order") {
+        _ = NSApplication.shared
+        let primary = MenuBarPrimaryActionsView(frame: .zero)
+        let utility = MenuBarUtilityActionsView(frame: .zero)
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true
         )
 
-        // The section views expose their visible rows in Tab order and the
-        // content view chains them into one explicit key-view loop.
-        assertTrue(
-            primarySource.contains("var keyboardFocusableRows: [MenuBarActionRowView]")
-                && utilitySource.contains("var keyboardFocusableRows: [MenuBarActionRowView]"),
-            "primary and utility action views should expose keyboardFocusableRows in Tab order"
+        assertEqual(
+            primary.keyboardFocusableRows.map { $0.identifier?.rawValue ?? "" },
+            FocusOrderContract.menuBarPrimaryOrder,
+            "the primary buttons should reach Tab in FocusOrderContract.menuBarPrimaryOrder order"
         )
-        assertTrue(
-            contentSource.contains("private func configureKeyViewLoop()")
-                && contentSource.contains("row.nextKeyView =")
-                && contentSource.contains("window?.initialFirstResponder = chain.first")
-                && contentSource.contains("primaryActionsView.keyboardFocusableRows")
-                && contentSource.contains("utilityActionsView.keyboardFocusableRows"),
-            "MenuBarContentView should chain the rows into an explicit key-view loop with an initial first responder"
+        assertEqual(
+            utility.keyboardFocusableRows.map { $0.identifier?.rawValue ?? "" },
+            FocusOrderContract.menuBarUtilityOrder,
+            "the utility rows should reach Tab in FocusOrderContract.menuBarUtilityOrder order"
         )
 
-        // The shipping views must attach identifiers in the same relative order
-        // the contract declares, so the pinned Tab order matches the real views.
-        assertTrue(
-            sourceAttachesIdentifiersInOrder(primarySource, FocusOrderContract.menuBarPrimaryOrder),
-            "MenuBarPrimaryActionsView should attach identifiers in FocusOrderContract.menuBarPrimaryOrder order"
+        // A hidden update row leaves the loop instead of trapping focus.
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true,
+            showUpdateRow: false
         )
-        assertTrue(
-            sourceAttachesIdentifiersInOrder(utilitySource, FocusOrderContract.menuBarUtilityOrder),
-            "MenuBarUtilityActionsView should attach identifiers in FocusOrderContract.menuBarUtilityOrder order"
+        assertEqual(
+            utility.keyboardFocusableRows.map { $0.identifier?.rawValue ?? "" },
+            FocusOrderContract.menuBarUtilityOrder.filter { $0 != "transcripted.menubar.utility.check-updates" },
+            "a hidden update row should be skipped by Tab"
         )
+    }
+
+    runSuite("Focus order contract - the popover chains its rows into one explicit loop") {
+        _ = NSApplication.shared
+        let callout = MenuBarActionRowView(frame: .zero)
+        callout.isHidden = true
+        let primary = MenuBarPrimaryActionsView(frame: .zero)
+        let utility = MenuBarUtilityActionsView(frame: .zero)
+        utility.update(
+            updateSymbolName: "arrow.down.circle",
+            updateTitle: "Check for Updates",
+            updateDetail: "",
+            updateVersion: nil,
+            updateTone: .standard,
+            updateEnabled: true
+        )
+
+        let chain = MenuBarKeyViewLoop.orderedRows(
+            updateCallout: callout,
+            primary: primary.keyboardFocusableRows,
+            utility: utility.keyboardFocusableRows
+        )
+        assertEqual(
+            chain.map { $0.identifier?.rawValue ?? "" },
+            FocusOrderContract.menuBarPopoverOrder,
+            "with no update callout, the popover loop should be exactly the declared popover order"
+        )
+
+        let first = MenuBarKeyViewLoop.link(chain)
+        assertTrue(first === chain.first, "the first row in the loop should take initial focus")
+        for (index, row) in chain.enumerated() {
+            let expected = chain[(index + 1) % chain.count]
+            assertTrue(row.nextKeyView === expected, "Tab from row \(index) should land on the next row, wrapping at the end")
+        }
+
+        callout.isHidden = false
+        let withCallout = MenuBarKeyViewLoop.orderedRows(
+            updateCallout: callout,
+            primary: primary.keyboardFocusableRows,
+            utility: utility.keyboardFocusableRows
+        )
+        assertTrue(withCallout.first === callout, "a visible update callout should lead the Tab loop")
+        assertEqual(withCallout.count, chain.count + 1, "the callout should add exactly one stop")
     }
 
     runSuite("Focus order contract - settings sidebar nav matches the declared order") {
@@ -144,17 +213,10 @@ func testFocusOrderContract() {
             "the ⌘1–⌘6 navigation pages should stay in the settings navigation surface, in the declared focus order"
         )
 
-        // The sidebar row is a SwiftUI view this runner does not compile, so
-        // attaching the identifier is still a source-read assertion.
-        let sidebarSource = readSourceFixture("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
-        assertTrue(
-            sidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
-            "the sidebar should attach page.automationIdentifier so the pinned focus order is scriptable"
-        )
-        // The sidebar view isn't compiled here either, so its row order is
-        // still read from source until the sidebar takes its pages as data.
-        assertTrue(
-            sidebarSource.contains("pages: [.today, .home, .dictations, .writing, .people, .connectAgent]"),
+        // The sidebar's primary rows come from this list, in this order.
+        assertEqual(
+            SettingsSidebarSection.primarySection.pages.map(\.automationIdentifier),
+            FocusOrderContract.settingsSidebarOrder,
             "the sidebar's primary rows should list the pages in the focus order the contract pins"
         )
         // The primary pages are the ones with a ⌘ shortcut, in page order.
@@ -168,17 +230,17 @@ func testFocusOrderContract() {
     }
 }
 
-/// True when each identifier's `setAutomationIdentifier("…")` attachment appears
-/// in `source` strictly after the previous one — i.e. the source attaches them
-/// in the given order.
-private func sourceAttachesIdentifiersInOrder(_ source: String, _ identifiers: [String]) -> Bool {
-    var searchStart = source.startIndex
-    for identifier in identifiers {
-        let needle = "setAutomationIdentifier(\"\(identifier)\")"
-        guard let range = source.range(of: needle, range: searchStart..<source.endIndex) else {
-            return false
-        }
-        searchStart = range.upperBound
-    }
-    return true
+private func focusOrderKeyDown(keyCode: UInt16, characters: String) -> NSEvent? {
+    NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: characters,
+        charactersIgnoringModifiers: characters,
+        isARepeat: false,
+        keyCode: keyCode
+    )
 }

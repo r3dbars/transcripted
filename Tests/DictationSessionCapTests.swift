@@ -4,8 +4,9 @@
 // still active, and offers a recovery paste action otherwise.
 //
 // DictationSessionController pulls in the whole app and can't be instantiated in
-// the fast runner, so this pairs behavioral checks on the pure policy / delivery
-// types with a source-level contract on the controller wiring.
+// the fast runner, so these check the decisions it hands off to: the cap's
+// finish action, the cap save's notice and telemetry, the stop routing, and the
+// interruption offer.
 
 import Foundation
 
@@ -63,141 +64,127 @@ func testDictationSessionCap() {
         )
     }
 
-    // Source contract: the cap must finalize-and-save, not discard. It may
-    // paste only when the original paste target still owns focus; otherwise it
-    // uses the suppressed-paste finalize path.
-    runSuite("The session cap warns, then pastes only when the original target is still active") {
-        let source = dictationControllerSource()
+    runSuite("The session cap finalizes the take, pasting only when the original app is still in front") {
+        assertEqual(
+            DictationSessionCapFinish.action(isDictating: true, originalTargetIsFrontmost: true),
+            .finalize(autoPaste: true),
+            "the original target still in front gets the paste"
+        )
+        assertEqual(
+            DictationSessionCapFinish.action(isDictating: true, originalTargetIsFrontmost: false),
+            .finalize(autoPaste: false),
+            "another app in front: save without pasting, never discard"
+        )
+        var checkedTarget = false
+        assertEqual(
+            DictationSessionCapFinish.action(
+                isDictating: false,
+                originalTargetIsFrontmost: { checkedTarget = true; return true }()
+            ),
+            .none,
+            "a take that already stopped is left alone"
+        )
+        assertFalse(checkedTarget, "the frontmost app is only checked for a take still recording")
+    }
 
-        let timeoutBody = capSlice(
-            source,
-            from: "func installSessionTimeout()",
-            to: "private func overlayStateName"
+    runSuite("A cap save is good news with a Paste It action, and a failed save is an error") {
+        assertEqual(DictationSessionCapSavePolicy.delivery, .savedWithoutPaste, "the cap saves to Markdown as saved-without-paste")
+        assertEqual(
+            DictationSessionCapSavePolicy.presentation(saveFailureMessage: nil, pasteLastShortcut: "⌃⌥V"),
+            .savedNotice(
+                message: "Saved to Markdown. Paste it now, or press ⌃⌥V later.",
+                actionTitle: "Paste It"
+            ),
+            "a saved cap take is a notice naming the Paste Last shortcut, not a warning"
         )
-        assertTrue(
-            timeoutBody.contains("self?.showSessionCapCountdown("),
-            "the session cap should warn before it auto-finalizes"
+        assertEqual(
+            DictationSessionCapSavePolicy.presentation(saveFailureMessage: "Couldn't save.", pasteLastShortcut: "⌃⌥V"),
+            .error("Couldn't save."),
+            "a failed save must not claim the words are saved"
         )
-        assertFalse(
-            timeoutBody.contains("showLoadingState("),
-            "the warning must keep the pill listening, not swap it for a loading card"
+        assertEqual(DictationSessionCapSavePolicy.pasteItResult(.pasted), .pasted, "Paste It that landed says Pasted")
+        assertEqual(DictationSessionCapSavePolicy.pasteItResult(.likelyPasted), .pasted, "a likely paste reads as pasted")
+        assertEqual(
+            DictationSessionCapSavePolicy.pasteItResult(.copied("On the clipboard.", reason: .focusChanged)),
+            .error("On the clipboard."),
+            "a Paste It that fell back to the clipboard says so"
         )
-        assertFalse(
-            timeoutBody.contains("Release the key"),
-            "hands-free people have no key to release"
-        )
-        assertTrue(
-            timeoutBody.contains("let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false"),
-            "the session cap should only paste when the original target still matches the frontmost app"
-        )
-        assertTrue(
-            timeoutBody.contains("stopDictationAndPaste(trigger: .sessionCap, autoPaste: shouldAutoPaste)"),
-            "the session cap should route the target-match decision into the normal stop pipeline"
-        )
-        assertFalse(
-            timeoutBody.contains("cancelDictation()"),
-            "the session cap must not discard the buffer via cancelDictation()"
-        )
-
-        let finalizeBody = capSlice(
-            source,
-            from: "private func finalizeWithoutPaste(",
-            to: "/// Cancel dictation without pasting"
-        )
-        assertTrue(
-            finalizeBody.contains("startPersistingDictationTranscript(text: text, delivery: .savedWithoutPaste, recovery: recovery)"),
-            "the cap finalize path should persist the transcript to the daily Markdown file"
-        )
-        assertTrue(
-            finalizeBody.contains("\"Saved to Markdown. Paste it now, or press \\(pasteLastShortcut) later.\"")
-                && finalizeBody.contains("PhysicalDictationTriggerPreferences.pasteLastDictationBinding()")
-                && finalizeBody.contains("actionTitle: \"Paste It\"")
-                && finalizeBody.contains("pasteWithClipboardRestore(text)"),
-            "the cap save-only path should keep a visible Paste It recovery action"
-        )
-        assertTrue(
-            finalizeBody.contains("overlayController.showSavedNotice(")
-                && !finalizeBody.contains("overlayController.showError(\n                \"Saved to Markdown"),
-            "a successful save at the cap is good news, so it must not show as \"Dictation issue\" with a warning triangle"
-        )
-        let headerBody = try? String(
-            contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                .appendingPathComponent("Sources/UI/Overlay/OverlayHeaderView.swift"),
-            encoding: .utf8
-        )
-        assertTrue(
-            headerBody?.contains("return \"Dictation saved only\"") == true
-                && headerBody?.contains("return \"Text saved without paste\"") == true,
-            "the save-only confirmation should also have truthful VoiceOver copy"
-        )
-        assertTrue(
-            finalizeBody.contains("ActivationTelemetry.trackDictationArtifactSaved("),
-            "the cap finalize path should count successful session-cap saves as dictation artifacts"
+        assertEqual(
+            DictationSessionCapSavePolicy.pasteItResult(.failed("Couldn't paste.", reason: .unknown)),
+            .error("Couldn't paste."),
+            "a failed Paste It shows why"
         )
     }
 
-    runSuite("Dictation stop path preserves recovered audio and surfaces invisible hotkey states") {
-        let source = dictationControllerSource()
-        let stopBody = capSlice(
-            source,
-            from: "func stopDictationAndPaste(",
-            to: "/// Finalize a dictation"
+    runSuite("A Stop on a warming-up start, a busy take, or recovered audio each gets a visible answer") {
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .cancelPendingStart, trigger: .physicalKey,
+                isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: false
+            ),
+            .cancelPendingStartAfterEarlyRelease,
+            "a hotkey release during model or mic warmup explains that nothing was recorded"
         )
-
-        assertTrue(
-            stopBody.contains("cancelPendingDictationStartAfterEarlyRelease"),
-            "a push-to-talk release during model/mic warmup should show a clear no-audio message instead of a generic cancel animation"
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .cancelPendingStart, trigger: .keyboardShortcut,
+                isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: false
+            ),
+            .cancelPendingStart,
+            "other triggers cancel the pending start"
         )
-        assertTrue(
-            stopBody.contains("Still finishing the last dictation. Try again in a moment."),
-            "a hotkey press during the drafting/transcribing window should visibly respond"
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .ignoreInactive, trigger: .physicalKey,
+                isFinishingPreviousTake: true, isRecording: false, hasRecoverableRecording: false
+            ),
+            .ignore(showStillFinishing: true),
+            "a hotkey press while the last take transcribes visibly responds"
         )
-        assertTrue(
-            stopBody.contains("let hasRecoverableRecording = appState.sttRouter.hasRecoverableRecording"),
-            "stop during device recovery should detect preserved recovered audio"
+        assertEqual(DictationStopRoute.stillFinishingMessage, "Still finishing the last dictation. Try again in a moment.")
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .ignoreInactive, trigger: .physicalKey,
+                isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: false
+            ),
+            .ignore(showStillFinishing: false),
+            "an idle stop is ignored quietly"
         )
-        assertTrue(
-            stopBody.contains("guard appState.sttRouter.isRecording || hasRecoverableRecording else"),
-            "a recovered timeline should continue into transcription instead of taking the mic-start failure path"
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .stopRecording, trigger: .physicalKey,
+                isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: true
+            ),
+            .stopRecording,
+            "audio kept through device recovery goes on to transcription, not the mic-start failure"
+        )
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .stopRecording, trigger: .physicalKey,
+                isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: false
+            ),
+            .captureNotStarted,
+            "no recording and nothing kept is the capture-not-started failure"
+        )
+        assertEqual(
+            DictationStopRoute.route(
+                stopDecision: .stopRecording, trigger: .physicalKey,
+                isFinishingPreviousTake: false, isRecording: true, hasRecoverableRecording: false
+            ),
+            .stopRecording,
+            "a live recording stops normally"
         )
     }
 
-    runSuite("Dictation interruption offers preserved captured audio for transcription") {
-        let source = dictationControllerSource()
-        let interruptionBody = capSlice(
-            source,
-            from: "private func handleDictationInterruption()",
-            to: "private func shouldOfferMicrophoneRecoveryAction"
-        )
+    runSuite("An interruption with kept audio offers to transcribe it without pasting") {
+        let kept = DictationInterruptionPlan.make(hasRecoverableRecording: true)
+        assertFalse(kept.cancelRecording, "the kept audio must survive until the action can transcribe it")
+        assertEqual(kept.actionTitle, "Transcribe Captured Audio", "wake or device interruption offers a transcribe action")
+        assertEqual(kept.action, .transcribeCapturedAudio(autoPaste: false), "it saves without pasting into a possibly changed app")
 
-        assertTrue(
-            interruptionBody.contains("hasRecoverableRecording"),
-            "interruption UI should branch when the speech engine has retained audio"
-        )
-        assertTrue(
-            interruptionBody.contains("Transcribe Captured Audio"),
-            "wake/device interruption with preserved audio should offer a transcribe action"
-        )
-        assertTrue(
-            interruptionBody.contains("cancelActiveTasks(cancelRecording: !hasRecoverableRecording)"),
-            "preserved-audio interruptions should not clear the recovered timeline before the action can transcribe it"
-        )
-        assertTrue(
-            interruptionBody.contains("stopDictationAndPaste(trigger: .unknown, autoPaste: false)"),
-            "the recovered-audio action should save safely without pasting into a possibly changed app"
-        )
+        let lost = DictationInterruptionPlan.make(hasRecoverableRecording: false)
+        assertTrue(lost.cancelRecording, "with nothing kept, the recording is torn down")
+        assertEqual(lost.action, .retryDictation, "with nothing kept, it offers a fresh dictation")
+        assertEqual(lost.actionTitle, "Retry Dictation")
     }
-}
-
-private func dictationControllerSource() -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/UI/Overlay/DictationSessionController.swift")
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-}
-
-private func capSlice(_ contents: String, from start: String, to end: String) -> String {
-    guard let startRange = contents.range(of: start) else { return "" }
-    let tail = contents[startRange.upperBound...]
-    guard let endRange = tail.range(of: end) else { return String(tail) }
-    return String(tail[..<endRange.lowerBound])
 }

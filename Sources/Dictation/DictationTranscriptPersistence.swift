@@ -44,4 +44,65 @@ enum DictationSessionCapCompletionTelemetryPolicy {
             failureKind: saveSucceeded ? nil : "markdown_save_failed"
         )
     }
+
+    /// The `dictation_completed` properties for a take the cap saved. Delivery
+    /// comes from the save result, so a failed save never claims a saved one,
+    /// and the cap never auto-sends.
+    static func completionProperties(
+        saveSucceeded: Bool,
+        durationBucket: String,
+        trigger: String,
+        wordCountBucket: String
+    ) -> [String: String] {
+        let telemetry = snapshot(saveSucceeded: saveSucceeded)
+        var properties: [String: String] = [
+            "delivery": telemetry.delivery.rawValue,
+            "auto_send": "disabled",
+            "duration_bucket": durationBucket,
+            "trigger": trigger,
+            "word_count_bucket": wordCountBucket,
+        ]
+        if let failureKind = telemetry.failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        return properties
+    }
+}
+
+/// How a take the 5-minute cap finalized without pasting is saved and shown.
+enum DictationSessionCapSavePolicy {
+    /// The cap saves to Markdown without pasting; history records it as such.
+    static let delivery: DictationDelivery = .savedWithoutPaste
+
+    enum Presentation: Equatable {
+        /// Good news, not an error: the words are saved, with a way to paste them.
+        case savedNotice(message: String, actionTitle: String)
+        case error(String)
+    }
+
+    static func presentation(saveFailureMessage: String?, pasteLastShortcut: String) -> Presentation {
+        if let saveFailureMessage {
+            return .error(saveFailureMessage)
+        }
+        // The menu has no Paste Last row, so name the shortcut that reaches it.
+        return .savedNotice(
+            message: "Saved to Markdown. Paste it now, or press \(pasteLastShortcut) later.",
+            actionTitle: "Paste It"
+        )
+    }
+
+    enum PasteItResult: Equatable {
+        case pasted
+        case error(String)
+    }
+
+    /// What the notice's Paste It button shows after it tries to paste.
+    static func pasteItResult(_ outcome: TextPasteOutcome) -> PasteItResult {
+        switch outcome {
+        case .pasted, .likelyPasted:
+            return .pasted
+        case .copied(let message, reason: _), .failed(let message, reason: _):
+            return .error(message)
+        }
+    }
 }

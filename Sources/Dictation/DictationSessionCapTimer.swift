@@ -47,3 +47,20 @@ enum DictationSessionCapTimer {
         }
     }
 }
+
+/// What happens to a take when the 5-minute cap fires. The cap finalizes the
+/// take through the normal stop pipeline (it never discards the buffer), and
+/// pastes only when the app the take started in is still frontmost.
+enum DictationSessionCapFinish: Equatable {
+    case none
+    case finalize(autoPaste: Bool)
+
+    /// `originalTargetIsFrontmost` is only checked for a take still recording.
+    static func action(
+        isDictating: Bool,
+        originalTargetIsFrontmost: @autoclosure () -> Bool
+    ) -> DictationSessionCapFinish {
+        guard isDictating else { return .none }
+        return .finalize(autoPaste: originalTargetIsFrontmost())
+    }
+}

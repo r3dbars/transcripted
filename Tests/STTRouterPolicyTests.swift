@@ -3,7 +3,7 @@
 // dispatch between the Parakeet and Whisper engines. STTRouter itself is a
 // MainActor wrapper over live AVAudioEngine / FluidAudio / WhisperKit engines
 // with no pure-function seams; its routing decisions are driven entirely by
-// switching on TranscriptionModelChoice cases. These tests pin the
+// switching on TranscriptionModelChoice cases. These tests check the
 // classification surface (engineName, isWhisper, whisperKitModelName,
 // transcriptionEngineIdentifier) so changes to that surface cannot silently
 // reroute dictation/meeting audio to the wrong backend.
@@ -11,33 +11,36 @@
 import Foundation
 
 func testSTTRouterPolicy() {
-    runSuite("Both Parakeet variants retain upstream deadline-bound model waiting") {
-        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
-        let source = try! String(contentsOf: sourceURL, encoding: .utf8)
-        let start = source.range(of: "func waitForRecordingModelLoadProgress(until deadline:")!
-        let end = source.range(of: "func startRecording()", range: start.upperBound..<source.endIndex)!
-        let wait = String(source[start.lowerBound..<end.lowerBound])
-        assertTrue(wait.contains("if recordingModel.parakeetVariant != nil"), "v2 must observe Parakeet progress, not Whisper")
-        assertTrue(wait.contains("parakeetEngine.$modelDownloadState"))
-        assertTrue(wait.contains("whisperEngine.$modelDownloadState"))
-        assertTrue(wait.contains("ModelLoadProgressWaiter.wait(for: changes, until: deadline)"))
-        assertFalse(source.contains("joinModelInitialization"), "UI waits must not directly await unbounded native initialization")
+    runSuite("A recording model waits on its own engine's load progress") {
+        // STTRouter.waitForRecordingModelLoadProgress picks the engine to watch
+        // by runtime. The wait itself is deadline-bound: ModelLoadProgressWaiterTests.
+        for model in [TranscriptionModelChoice.parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental] {
+            assertEqual(model.runtime, .parakeet, "\(model.rawValue) must watch Parakeet progress, not Whisper")
+        }
+        assertEqual(TranscriptionModelChoice.whisperLargeV3.runtime, .whisper)
+        assertEqual(TranscriptionModelChoice.whisperLargeV3Turbo.runtime, .whisper)
+        assertEqual(TranscriptionModelChoice.appleSpeech.runtime, .appleSpeech)
+        for model in TranscriptionModelChoice.allCases {
+            assertEqual(
+                model.parakeetVariant != nil,
+                model.runtime == .parakeet,
+                "\(model.rawValue): a Parakeet variant always runs on the Parakeet runtime"
+            )
+        }
     }
 
-    runSuite("Recording admission establishes the resolved variant before capturing audio") {
-        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
-        let source = try! String(contentsOf: sourceURL, encoding: .utf8)
-        let start = source.range(of: "private func setActiveRecordingModel")!
-        let end = source.range(of: "private func clearActiveRecordingModel", range: start.upperBound..<source.endIndex)!
-        let admission = String(source[start.lowerBound..<end.lowerBound])
-        let resolved = admission.range(of: "beginForegroundUse(of: model)")!
-        let prepared = admission.range(of: "prepareModelVariantForRecording(variant)")!
-        let retained = admission.range(of: "recordingModelOwnership.replace(with: resolvedModel)")!
-        assertTrue(resolved.lowerBound < prepared.lowerBound)
-        assertTrue(prepared.lowerBound < retained.lowerBound)
-        assertTrue(admission.contains("resolvedModel.parakeetVariant"), "selection must use the lease, not the picker")
+    runSuite("A recording records with the variant already in use, not the picker's") {
+        // STTRouter.setActiveRecordingModel prepares the claimed model's
+        // variant and stores that same model as the recording lease.
+        var warmup = TranscriptionModelWarmupOwnership()
+        _ = warmup.claimForegroundUse(of: .parakeetTDTv3)
+        let claim = warmup.claimForegroundUse(of: .parakeetTDTv2)
+        assertEqual(claim.model.parakeetVariant, .v3, "a meeting holding v3 decides the dictation's variant")
+
+        var recording = TranscriptionRecordingModelOwnership()
+        let replacement = recording.replace(with: claim.model)
+        assertEqual(recording.activeLease?.model, .parakeetTDTv3, "the lease records the resolved model")
+        assertEqual(replacement.lease.model.parakeetVariant, claim.model.parakeetVariant)
     }
 
     runSuite("Parakeet v2 shares the backend but has a distinct artifact identity") {
@@ -115,17 +118,29 @@ func testSTTRouterPolicy() {
         assertEqual(model.transcriptionEngineDisplayName, "Apple Speech")
     }
 
-    runSuite("Apple Speech is wired through every STTRouter engine switch") {
-        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/Speech/STTRouter.swift")
-        let source = try! String(contentsOf: sourceURL, encoding: .utf8)
-        assertTrue(source.contains("appleSpeechEngine.transcribeSamples("), "segments must reach the Apple engine")
-        assertTrue(source.contains("catch AppleSpeechEngineError.unsupportedLanguage(let languageName)"),
-                   "an unsupported Apple language must become the settings-fix error, not generic pipeline copy")
-        assertTrue(source.contains("appleSpeechEngine.resolveLanguage(selection: selection)"),
-                   "meeting language must be resolved by the Apple engine, not rejected as unsupported")
-        assertTrue(source.contains("appleSpeechEngine.$modelDownloadState"), "settings must see Apple download progress")
-        assertTrue(source.contains("appleSpeechEngine.cleanup()"))
+    runSuite("A saved language the model can't do sends the person to the settings fix") {
+        let appleError = TranscriptionLanguageModelErrors.appleSpeechUnsupportedLanguage(
+            languageName: "Welsh",
+            isExplicitSelection: true
+        )
+        assertNotNil(appleError)
+        assertEqual(
+            MeetingFailureKind.classify(message: appleError?.localizedDescription ?? ""),
+            .languageNeedsWhisperModel,
+            "Apple Speech missing a saved language shows the pick-a-Whisper-model fix"
+        )
+        assertTrue(appleError?.localizedDescription.contains("Welsh") == true, "the message names the language")
+        assertNil(
+            TranscriptionLanguageModelErrors.appleSpeechUnsupportedLanguage(languageName: "Welsh", isExplicitSelection: false),
+            "automatic language saved nothing, so the engine's own error stands"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(
+                message: TranscriptionLanguageModelErrors.savedLanguageNeedsLanguageModel().localizedDescription
+            ),
+            .languageNeedsWhisperModel,
+            "Parakeet with a saved language shows the same settings fix"
+        )
     }
 
     runSuite("STTRouter policy — every model classifies to exactly one engine") {

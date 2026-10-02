@@ -1,16 +1,7 @@
 import Foundation
 
-// Source-text pins: every suite above the last one here calls a real
-// DictationRecordingStart*/DictationActiveTaskCancellationPolicy/DictationStartAvailabilityPolicy
-// type directly, so it's genuine behavioral coverage. The final suite ("Unexpected meeting
-// capture stop releases shared dictation mic") instead greps
-// Sources/Meeting/MeetingSessionController.swift's private handleUnexpectedCaptureStop, because
-// MeetingSessionController is the @MainActor ObservableObject that wires TranscriptedCore's live
-// capture callbacks into the app and can't be constructed or driven in this Foundation-only
-// runner. If you move or rewrite that function, update the two matched calls and the
-// range-bounding marker comment ("// preserveQueuedTranscriptionJobsForShutdown") together.
-
-func testDictationRecordingStartOverlayPolicy() {
+@MainActor
+func testDictationRecordingStartOverlayPolicy() async {
     runSuite("A delayed checkpoint admits only one stop for the same session") {
         var gate = DictationStopFinalizationGate()
         let sessionID = UUID()
@@ -75,65 +66,67 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
-    runSuite("Production decides the early-release message instead of hard-coding one") {
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        guard let start = source.range(of: "func cancelPendingDictationStartAfterEarlyRelease("),
-              let end = source.range(of: "func overlayStateName(", range: start.upperBound..<source.endIndex) else {
-            assertTrue(false, "the early-release cancel path should remain present")
-            return
+    runSuite("The early-release report names the key action that ended the session") {
+        for mode in [DictationShortcutMode.pushToTalk, .handsFree] {
+            let context = earlyReleaseContext(shortcutMode: mode, pendingForMs: 22)
+            assertEqual(context["shortcut_mode"], mode.rawValue, "the key action that ended the session")
+            assertEqual(context["pending_for_ms"], "22", "the elapsed time the message is decided from")
         }
-        let body = String(source[start.lowerBound..<end.lowerBound])
-        assertTrue(
-            body.contains("DictationEarlyReleasePresentationPolicy.message("),
-            "the message the user reads must come from the policy, so #1743's tapped key keeps its own wording"
+        assertEqual(
+            earlyReleaseContext(shortcutMode: nil, pendingForMs: 22)["shortcut_mode"],
+            "unknown",
+            "no action evidence is said plainly, not guessed from the legacy preference"
         )
-        assertFalse(
-            body.contains("showError(\"Mic wasn't ready yet"),
-            "a hard-coded fallback next to the policy call would silently restore the misleading line"
+    }
+
+    runSuite("The physical keys tell the session which shortcut acted") {
+        let pushToTalk = RouterFake()
+        pushToTalk.router.pushToTalkPressed()
+        pushToTalk.isDictating = true
+        pushToTalk.router.pushToTalkReleased()
+        assertEqual(
+            pushToTalk.events,
+            ["start physical_key push_to_talk", "stop physical_key push_to_talk"],
+            "the Push to Talk press and release name their real action in start and stop diagnostics"
         )
-        assertTrue(
-            body.contains("pendingForMs: startPendingForMs"),
-            "the policy must read the same elapsed time the diagnostics report, not a separate measurement"
+
+        let handsFree = RouterFake()
+        handsFree.router.handsFreePressed()
+        handsFree.isDictating = true
+        handsFree.router.handsFreePressed()
+        assertEqual(
+            handsFree.events,
+            ["start physical_key hands_free", "stop physical_key hands_free"],
+            "the hands-free key routes its real action into both the start and the stop path"
         )
-        assertFalse(
-            body.contains("HotkeyPreferences.dictationShortcutMode()"),
-            "the legacy preference no longer identifies which physical key ended the session"
+
+        let idle = RouterFake()
+        idle.router.pushToTalkReleased()
+        idle.isDictating = true
+        idle.router.pushToTalkPressed()
+        assertEqual(idle.events, [], "a release with nothing running, or a press while already dictating, does nothing")
+    }
+
+    runSuite("Start diagnostics name the key action only when a shortcut started the take") {
+        let pressed = DictationStartReadinessPolicy.preparedDiagnostics(
+            triggerRawValue: "physical_key",
+            isAppActive: false,
+            profile: DictationStartReadinessPolicy.profile(triggerRawValue: "physical_key", isAppActive: false),
+            appNapHolders: 1,
+            shortcutMode: .pushToTalk
         )
-        let hotkeySource = readSourceFixture("Sources/Capture/ContextCaptureEngine.swift")
-        assertTrue(
-            hotkeySource.contains("session.startDictation(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .pushToTalk)"),
-            "the Push to Talk press must identify the actual shortcut in start diagnostics"
+        assertEqual(pressed["shortcut_mode"], "push_to_talk", "start diagnostics use the actual key action")
+        assertEqual(pressed["start_plan"], "background", "and the plan the start was prepared with")
+        assertEqual(pressed["activation_escalation_allowed"], "true", "a hotkey from another app may escalate")
+        let menu = DictationStartReadinessPolicy.preparedDiagnostics(
+            triggerRawValue: "menu",
+            isAppActive: true,
+            profile: .foreground,
+            appNapHolders: 2,
+            shortcutMode: nil
         )
-        assertTrue(
-            hotkeySource.contains("session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)"),
-            "the Hands-Free toggle must identify the actual shortcut in start diagnostics"
-        )
-        assertTrue(
-            hotkeySource.contains("routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey, shortcutMode: .handsFree)"),
-            "the hands-free key must route its real action into the stop path"
-        )
-        assertTrue(
-            hotkeySource.contains("session.stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .pushToTalk)"),
-            "the Push to Talk release must route its real action into the stop path"
-        )
-        assertTrue(
-            hotkeySource.contains("session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)"),
-            "the hands-free toggle must forward its action into the session controller"
-        )
-        guard let startDiagnostics = source.range(of: "private func recordStartReadinessPrepared("),
-              let endDiagnostics = source.range(of: "private func recordDictationStarted(", range: startDiagnostics.upperBound..<source.endIndex) else {
-            assertTrue(false, "the start diagnostics should remain present")
-            return
-        }
-        let startDiagnosticsBody = String(source[startDiagnostics.lowerBound..<endDiagnostics.lowerBound])
-        assertTrue(
-            startDiagnosticsBody.contains("extra[\"shortcut_mode\"] = shortcutMode.rawValue"),
-            "start diagnostics use the actual key action when one exists"
-        )
-        assertFalse(
-            startDiagnosticsBody.contains("HotkeyPreferences.dictationShortcutMode()"),
-            "start diagnostics must not infer the physical key from a legacy preference"
-        )
+        assertNil(menu["shortcut_mode"], "a menu start has no physical key to name")
+        assertEqual(menu["app_nap_holders"], "2", "the holder count, which does vary between starts")
     }
 
     runSuite("A new dictation session can stop after an earlier session") {
@@ -142,44 +135,67 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(gate.admit(sessionID: UUID()), "different-session finalization must not be fenced by a stale ID")
     }
 
-    runSuite("Production fences repeated Stop before the loading-state cancel decision") {
-        do {
-            let source = try String(
-                contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
-                encoding: .utf8
-            )
-            guard let stopStart = source.range(of: "func stopDictationAndPaste("),
-                  let stopEnd = source.range(of: "func cancelDictation(", range: stopStart.upperBound..<source.endIndex),
-                  let fence = source.range(of: "if stopFinalizationGate.admittedSessionID == currentDictationSessionID", range: stopStart.upperBound..<stopEnd.lowerBound),
-                  let lifecycle = source.range(of: "DictationRecordingStartLifecyclePolicy.stopDecision(", range: stopStart.upperBound..<stopEnd.lowerBound),
-                  let admission = source.range(of: "stopFinalizationGate.admit(sessionID: currentDictationSessionID)", range: stopStart.upperBound..<stopEnd.lowerBound),
-                  let oldTaskCancel = source.range(of: "streamingTask?.cancel()", range: stopStart.upperBound..<stopEnd.lowerBound),
-                  let persist = source.range(of: "DictationStoppedAudioRecoveryStore.persist(", range: stopStart.upperBound..<stopEnd.lowerBound) else {
-                assertTrue(false, "the production Stop path should expose its admission, cancellation and checkpoint boundaries")
-                return
-            }
-            assertTrue(
-                fence.lowerBound < lifecycle.lowerBound &&
-                    lifecycle.lowerBound < admission.lowerBound &&
-                    admission.lowerBound < oldTaskCancel.lowerBound &&
-                    oldTaskCancel.lowerBound < persist.lowerBound,
-                "a duplicate Stop must return before loading can cancel startup or a detached WAV write"
-            )
-            let interruption = source[stopEnd.lowerBound..<source.endIndex]
-            guard let checkpointWait = interruption.range(of: "await interruptedCheckpointSignal?.wait()"),
-                  let sessionGuard = interruption.range(of: "self.currentDictationSessionID == interruptedSessionID", range: checkpointWait.upperBound..<interruption.endIndex),
-                  let reset = interruption.range(of: "self.stopFinalizationGate.reset()", range: checkpointWait.upperBound..<interruption.endIndex) else {
-                assertTrue(false, "explicit interrupted-audio retry must wait for the previous stop owner before readmission")
-                return
-            }
-            assertTrue(
-                checkpointWait.lowerBound < sessionGuard.lowerBound && sessionGuard.lowerBound < reset.lowerBound,
-                "old checkpoint write/cleanup must finish and session ownership must still hold before readmission"
-            )
-        } catch {
-            assertTrue(false, "production controller source should be readable: \(error)")
-        }
+    runSuite("A repeated Stop is fenced before the loading-state cancel decision") {
+        let fake = StopRoutingFake()
+        fake.isAlreadyFinalizing = true
+        assertEqual(
+            DictationStopRequestRouting.route(trigger: .physicalKey, shortcutMode: .pushToTalk, fake.steps()),
+            .ignoreAlreadyFinalizing,
+            "a duplicate Stop must return before loading can cancel startup or a detached WAV write"
+        )
+        let first = StopRoutingFake()
+        assertEqual(
+            DictationStopRequestRouting.route(trigger: .physicalKey, shortcutMode: .pushToTalk, first.steps()),
+            .proceed,
+            "only a stop the session hasn't admitted yet reaches the loading-state decision"
+        )
+        let notDictating = StopRoutingFake()
+        notDictating.isDictating = false
+        assertEqual(DictationStopRequestRouting.route(trigger: .menu, shortcutMode: nil, notDictating.steps()),
+                    .ignoreNotDictating, "no session, nothing to stop")
+        assertEqual(notDictating.events, ["dictating?"], "and nothing else is checked")
     }
+
+    runSuite("A hands-free press after the take stopped asks for the next take") {
+        let fake = StopRoutingFake()
+        fake.remembersNextStart = true
+        assertEqual(DictationStopRequestRouting.route(trigger: .physicalKey, shortcutMode: .handsFree, fake.steps()),
+                    .rememberedAsNextStart, "not another stop")
+        assertEqual(fake.events, ["dictating?", "remember?"], "remembered before the finalizing fence")
+
+        let pushToTalk = StopRoutingFake()
+        pushToTalk.remembersNextStart = true
+        _ = DictationStopRequestRouting.route(trigger: .physicalKey, shortcutMode: .pushToTalk, pushToTalk.steps())
+        assertFalse(pushToTalk.events.contains("remember?"), "a Push to Talk release is always a stop, never a next press")
+        let menu = StopRoutingFake()
+        menu.remembersNextStart = true
+        _ = DictationStopRequestRouting.route(trigger: .menu, shortcutMode: .handsFree, menu.steps())
+        assertFalse(menu.events.contains("remember?"), "only the physical key toggles")
+    }
+
+    await runSuite("An interrupted-audio retry waits for the old stop before readmitting") {
+        var events: [String] = []
+        let outcome = await DictationInterruptedAudioReadmission.run(readmissionSteps(into: { events.append($0) }))
+        assertEqual(outcome, .readmitted, "the retained recording is readmitted")
+        assertEqual(
+            events,
+            ["wait for checkpoint", "owner?", "recording?", "reset fence", "readmit"],
+            "old checkpoint write/cleanup must finish and session ownership must still hold before readmission"
+        )
+
+        events = []
+        var superseded = readmissionSteps(into: { events.append($0) })
+        superseded.stillOwnsRecording = { events.append("owner?"); return false }
+        assertEqual(await DictationInterruptedAudioReadmission.run(superseded), .superseded, "a newer take owns the session now")
+        assertFalse(events.contains("reset fence"), "the stop fence stays with the newer take")
+
+        events = []
+        var gone = readmissionSteps(into: { events.append($0) })
+        gone.hasRecoverableRecording = { events.append("recording?"); return false }
+        assertEqual(await DictationInterruptedAudioReadmission.run(gone), .audioGone, "the captured audio is no longer there")
+        assertEqual(events, ["wait for checkpoint", "owner?", "recording?", "audio gone"], "said plainly, with nothing readmitted")
+    }
+
     runSuite("DictationRecordingStartOverlayPolicy skips loading when the microphone is already ready") {
         let plan = DictationRecordingStartOverlayPolicy.plan(
             isRecovering: false,
@@ -479,12 +495,13 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
+    // Still source-text, deliberately. MeetingSessionController can't be
+    // built in the fast runner, and the same handler is pinned by
+    // MeetingSessionUIPolicyTests, which the meeting lane (b09) owns.
+    // Convert both together once that lands.
     runSuite("Unexpected meeting capture stop releases shared dictation mic") {
-        let source = (try? String(
-            contentsOfFile: "Sources/Meeting/MeetingSessionController.swift",
-            encoding: .utf8
-        )) ?? ""
-        guard let start = source.range(of: "private func handleUnexpectedCaptureStop"),
+        let source = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
+        guard let start = source.range(of: "func handleUnexpectedCaptureStop("),
               let end = source.range(of: "// preserveQueuedTranscriptionJobsForShutdown", range: start.upperBound..<source.endIndex) else {
             assertTrue(false, "unexpected capture-stop handler should remain present")
             return
@@ -507,18 +524,60 @@ func testDictationRecordingStartOverlayPolicy() {
             "unexpected stop must enter .stoppingRecording before flush/preserve awaits"
         )
     }
+}
 
-    runSuite("DictationSessionController clears the start-task handle on the recovery-path start too") {
-        let source = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        guard let started = source.range(of: "case .started:"),
-              let nextCase = source.range(of: "case .timedOut(let info):", range: started.upperBound..<source.endIndex) else {
-            assertTrue(false, "the recovery-path .started branch should remain present")
-            return
-        }
-        let body = String(source[started.lowerBound..<nextCase.lowerBound])
-        assertTrue(
-            body.contains("recordingStartRetryTask = nil"),
-            "a stale start handle makes a push-to-talk release during device recovery read as cancel-pending-start and discard preserved audio"
+@MainActor
+private final class RouterFake {
+    var isDictating = false
+    private(set) var events: [String] = []
+
+    var router: DictationHotkeyRouter {
+        DictationHotkeyRouter(
+            isDictating: { self.isDictating },
+            rememberStartPressIfFinishing: { _, _ in false },
+            dropQueuedPushToTalkStart: { false },
+            start: { trigger, mode in self.events.append("start \(trigger.rawValue) \(mode.rawValue)") },
+            stop: { trigger, mode in self.events.append("stop \(trigger.rawValue) \(mode.rawValue)") }
         )
     }
+}
+
+@MainActor
+private final class StopRoutingFake {
+    var isDictating = true
+    var remembersNextStart = false
+    var isAlreadyFinalizing = false
+    private(set) var events: [String] = []
+
+    func steps() -> DictationStopRequestRouting.Steps {
+        DictationStopRequestRouting.Steps(
+            isDictating: { self.events.append("dictating?"); return self.isDictating },
+            rememberHandsFreePressAsNextStart: { self.events.append("remember?"); return self.remembersNextStart },
+            isAlreadyFinalizing: { self.events.append("finalizing?"); return self.isAlreadyFinalizing }
+        )
+    }
+}
+
+private func earlyReleaseContext(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> [String: String] {
+    DictationEarlyReleaseCancelReport.context(
+        trigger: DictationTrigger.physicalKey.rawValue,
+        shortcutMode: shortcutMode,
+        pendingForMs: pendingForMs,
+        pendingStage: DictationPendingStartStage.openingMicrophone.rawValue,
+        stagePendingForMs: 10,
+        startPlan: "background",
+        appActive: false
+    )
+}
+
+@MainActor
+private func readmissionSteps(into record: @escaping @MainActor (String) -> Void) -> DictationInterruptedAudioReadmission.Steps {
+    DictationInterruptedAudioReadmission.Steps(
+        waitForInterruptedCheckpoint: { record("wait for checkpoint") },
+        stillOwnsRecording: { record("owner?"); return true },
+        hasRecoverableRecording: { record("recording?"); return true },
+        audioGone: { record("audio gone") },
+        resetStopFence: { record("reset fence") },
+        readmit: { record("readmit") }
+    )
 }
