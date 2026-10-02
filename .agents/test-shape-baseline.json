@@ -27,7 +27,7 @@
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 8,
     "Tests/OverlayScreenSharePrivacyTests.swift": 19,
-    "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 8,
+    "Tests/ParakeetAudioOwnershipSourceContractTests.swift": 1,
     "Tests/ParakeetMicrophoneSharingSourceContractTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 4,
     "Tests/PermissionStateHarnessContractTests.swift": 5,
@@ -36,7 +36,7 @@
     "Tests/SentryEventPolicyTests.swift": 4,
     "Tests/SingleInstanceGuardTests.swift": 1,
     "Tests/StatusItemPresentationTests.swift": 3,
-    "Tests/TestHelpers.swift": 11,
+    "Tests/TestHelpers.swift": 5,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 198

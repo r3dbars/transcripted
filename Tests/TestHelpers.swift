@@ -196,60 +196,6 @@ private func joinedSplitTypeText(directory: String, type: String, part: String?,
     }.joined(separator: "\n")
 }
 
-func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
-    readSourceFixture(
-        "Sources/Speech/ParakeetDeviceRecovery.swift",
-        description: "ParakeetDeviceRecovery.swift",
-        file: file,
-        line: line
-    )
-}
-
-func readParakeetZombieRecoverySource(file: String = #file, line: Int = #line) -> String {
-    readSourceFixture(
-        "Sources/Speech/ParakeetZombieEngineRecovery.swift",
-        description: "ParakeetZombieEngineRecovery.swift",
-        file: file,
-        line: line
-    )
-}
-
-func readParakeetSystemInputSource(file: String = #file, line: Int = #line) -> String {
-    readSourceFixture(
-        "Sources/Speech/ParakeetSystemInputCoordination.swift",
-        description: "ParakeetSystemInputCoordination.swift",
-        file: file,
-        line: line
-    )
-}
-
-func assertPostAwaitOwnershipGuard(
-    in body: String,
-    ownerCapture: String,
-    suspension: String,
-    guardStatement: String,
-    mutation: String,
-    helper: String,
-    file: String = #file,
-    line: Int = #line
-) {
-    guard let capture = body.range(of: ownerCapture),
-          let awaitPoint = body.range(of: suspension, range: capture.upperBound..<body.endIndex),
-          let ownershipGuard = body.range(of: guardStatement, range: awaitPoint.upperBound..<body.endIndex),
-          let sharedMutation = body.range(of: mutation, range: ownershipGuard.upperBound..<body.endIndex) else {
-        assertTrue(false, "\(helper) should guard delayed completion before shared-state mutation", file: file, line: line)
-        return
-    }
-    assertTrue(
-        capture.lowerBound < awaitPoint.lowerBound
-            && awaitPoint.lowerBound < ownershipGuard.lowerBound
-            && ownershipGuard.lowerBound < sharedMutation.lowerBound,
-        "\(helper) should capture owner, await work, revalidate owner, then mutate shared state",
-        file: file,
-        line: line
-    )
-}
-
 func readSourceFixture(
     _ relativePath: String,
     description: String? = nil,

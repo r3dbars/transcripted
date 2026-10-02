@@ -114,10 +114,10 @@ func testDictationAudioRecovery() {
         let engineSource = readParakeetEngineSource()
         let sessionSource = readDictationSessionControllerSource()
 
-        assertTrue(
-            engineSource.contains("recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)"),
-            "current-device audio should be retained with its native sample rate"
-        )
+        // Rate-preserving drains are behavior tests now: "Pending tap audio
+        // joins the take one segment at a time, each at its own rate" and
+        // "Bluetooth 48k to 24k transition preserves speech duration and order"
+        // in RecordedAudioTimelineTests.swift.
         if let start = engineSource.range(of: "private func markRecordingInterrupted()"),
            let end = engineSource.range(of: "func loadRecordedSamplesForDictationBenchmark", range: start.upperBound..<engineSource.endIndex) {
             let terminal = String(engineSource[start.lowerBound..<end.lowerBound])
@@ -171,10 +171,6 @@ func testDictationAudioRecovery() {
         assertFalse(
             sessionSource.contains("if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {\n                await appState.sttRouter.stopRecording()"),
             "the stop task must not re-check transient recording state before cancelling recovery"
-        )
-        assertTrue(
-            engineSource.contains("return await drainRecordedSamplesForInference()"),
-            "transcription should drain preserved segments instead of resampling all audio as one rate"
         )
     }
 }

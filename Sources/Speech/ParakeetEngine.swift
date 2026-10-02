@@ -26,18 +26,33 @@ class ParakeetEngine: ObservableObject {
         !recoveredRecordingTimeline.isEmpty
     }
 
-    var audioEngine = AVAudioEngine()
-    private(set) var audioEngineQueue = ParakeetEngine.makeAudioEngineQueue()
+    /// The AVAudioEngine graph slot. Every replacement and teardown of the
+    /// engine and its queue goes through it (ParakeetAudioGraph.swift).
+    let audioGraph = ParakeetAudioGraph(
+        driver: ParakeetAVAudioEngineGraphDriver(),
+        workLimiter: ParakeetEngine.timedAudioEngineWorkLimiter
+    )
+    var audioEngine: AVAudioEngine { audioGraph.engine }
+    var audioEngineQueue: DispatchQueue { audioGraph.queue }
     static let systemInputWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
         label: "com.transcripted.parakeet.system-input"
     )
     static let timedAudioEngineWorkLimiter = ParakeetTimedAudioEngineWorkLimiter()
-    var audioGraphGeneration = 0
-    var audioStartAdmission = ParakeetAudioStartAdmissionState()
+    var audioGraphGeneration: Int {
+        get { audioGraph.generation }
+        set { audioGraph.generation = newValue }
+    }
+    var audioStartAdmission: ParakeetAudioStartAdmissionState {
+        get { audioGraph.startAdmission }
+        set { audioGraph.startAdmission = newValue }
+    }
     var audioStartInProgress: Bool { audioStartAdmission.isInProgress }
     let audioStopLifecycle = ParakeetSingleFlightLifecycle()
     var audioStopInProgress: Bool { audioStopLifecycle.isInProgress }
-    var inputTapInstalled = false
+    var inputTapInstalled: Bool {
+        get { audioGraph.inputTapInstalled }
+        set { audioGraph.inputTapInstalled = newValue }
+    }
     /// Set while dictation records through the pinned-device recorder
     /// (ParakeetPinnedMicrophone.swift) instead of this engine.
     var pinnedDictationRecording: ParakeetPinnedDictationRecording?
@@ -79,7 +94,10 @@ class ParakeetEngine: ObservableObject {
     var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
     nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
-    var isEnginePrewarmed = false
+    var isEnginePrewarmed: Bool {
+        get { audioGraph.isPrewarmed }
+        set { audioGraph.isPrewarmed = newValue }
+    }
     private var wakeObserver: NSObjectProtocol?
     private var microphoneSharingObserver: AnyCancellable?
     var inputDeviceChangeObserverToken: DefaultInputDeviceMonitor.ObserverToken?
@@ -90,7 +108,6 @@ class ParakeetEngine: ObservableObject {
     )
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
-    private var didReportAudioEngineRetirementLimit = false
 
     var configChangeObserver: NSObjectProtocol?
     var configChangeDebounceTask: Task<Void, Never>?
@@ -129,7 +146,7 @@ class ParakeetEngine: ObservableObject {
     var audioWatchdogTask: Task<Void, Never>?
     var zombieRecoveryTask: Task<Void, Never>?
     var zombieRecoveryState = ParakeetZombieRecoveryState()
-    let audioEngineWorkOwnership = ParakeetTimedAudioEngineWorkOwnership()
+    var audioEngineWorkOwnership: ParakeetTimedAudioEngineWorkOwnership { audioGraph.workOwnership }
     var audioStartCancellationState: ParakeetAudioStartCancellationState?
     var zombieRecoveryStartGeneration: UInt64?
     let asrInferenceGate = ParakeetASRInferenceGate()
@@ -147,8 +164,6 @@ class ParakeetEngine: ObservableObject {
     var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     var lastInputSelectionReportKey: String?
     var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
-    var pendingSystemInputRestore = ParakeetOwnerBoundPendingState<ParakeetSystemInputRestoreTarget>()
-    lazy var systemInputReconciler = makeSystemInputReconciler()
     var prewarmAdmission = ParakeetPrewarmAdmissionState()
 
     var isModelLoaded: Bool { asrManagerReady }
@@ -210,12 +225,9 @@ class ParakeetEngine: ObservableObject {
     }
 
     init() {
+        audioGraph.host = self
         markCachedRuntimeModelIfAvailable()
         scheduleInputDeviceNameRefresh()
-    }
-
-    private static func makeAudioEngineQueue() -> DispatchQueue {
-        DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
     }
 
     nonisolated static func loadDictationInputDeviceSelection(
@@ -253,9 +265,7 @@ class ParakeetEngine: ObservableObject {
         cleanupAfterLateCompletion: ((AVAudioEngine) -> Void)? = nil,
         _ work: @escaping (AVAudioEngine) throws -> T
     ) async throws -> T {
-        try await Self.timedAudioEngineWorkLimiter.run(
-            on: audioEngineQueue,
-            resource: audioEngine,
+        try await audioGraph.runTimed(
             operation: operation,
             timeoutNanoseconds: timeoutNanoseconds,
             isWorkCurrent: isWorkCurrent,
@@ -299,7 +309,7 @@ class ParakeetEngine: ObservableObject {
         audioEngine.attachedNodes.compactMap { $0 as? AVAudioInputNode }.first
     }
 
-    private nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
+    nonisolated static func releaseStoppedVoiceProcessing(on audioEngine: AVAudioEngine) -> Bool {
         guard !audioEngine.isRunning else { return false }
         guard let inputNode = existingInputNode(on: audioEngine) else { return true }
         return applyDictationVoiceProcessingPreference(false, to: inputNode)
@@ -311,13 +321,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) -> T) async -> T {
-        let queue = audioEngineQueue
-        let engine = audioEngine
-        return await withCheckedContinuation { continuation in
-            queue.async {
-                continuation.resume(returning: work(engine))
-            }
-        }
+        await audioGraph.run(work)
     }
 
     func installAudioObserversIfNeeded() {
@@ -350,53 +354,21 @@ class ParakeetEngine: ObservableObject {
     }
 
     func removeRecordingTap(force: Bool = false) async {
-        guard force || inputTapInstalled else { return }
-        let tapOwner = currentAudioGraphOwnerToken()
-        await runAudioEngineWork { audioEngine in
-            // Stop + drain before removing the tap; the canonical stop path
-            // (`removeRecordingTap()` then `stopAudioEngine()`) otherwise removes
-            // the tap while the engine is still recording and can crash the
-            // audio IO thread with `isSink || tap != nullptr`.
-            Self.safelyRemoveInputTap(on: audioEngine)
-        }
-        guard ownsAudioGraph(tapOwner) else { return }
-        inputTapInstalled = false
+        await audioGraph.removeRecordingTap(force: force)
     }
 
     @discardableResult
     func stopAudioEngine() async -> Bool {
-        return await runAudioEngineWork { audioEngine in
-            if audioEngine.isRunning {
-                audioEngine.stop()
-            }
-            return Self.releaseStoppedVoiceProcessing(on: audioEngine)
-        }
+        await audioGraph.stopEngine()
     }
 
-    /// Called only after owned stop/drain work has completed and recording
-    /// bookkeeping is idle. A graph that failed to release VPIO is unsafe to
-    /// keep for another capture; don't retain it for the normal route-churn delay.
+    /// A graph that failed to release VPIO is unsafe to keep for another
+    /// capture; ParakeetAudioGraph drops it under its exact owner.
     @discardableResult
     func discardStoppedVoiceProcessingGraph(
         ownedBy owner: ParakeetAudioEngineQueueOwnerToken
     ) -> ParakeetAudioEngineQueueOwnerToken? {
-        guard ownsAudioEngineQueue(owner), !isRecording else { return nil }
-        removeAudioEngineConfigObserver()
-        let stoppedEngine = audioEngine
-        let stoppedQueue = audioEngineQueue
-        audioGraphGeneration += 1
-        audioEngine = AVAudioEngine()
-        // Let this synchronous owner handoff unwind before releasing our last
-        // retained reference on the graph queue. Native disposal may block too.
-        Task { @MainActor in
-            stoppedQueue.async { withExtendedLifetime(stoppedEngine) {} }
-        }
-        inputTapInstalled = false
-        isEnginePrewarmed = false
-        if !isShuttingDown {
-            installAudioEngineConfigObserverIfNeeded()
-        }
-        return currentAudioEngineQueueOwnerToken()
+        audioGraph.discardStoppedVoiceProcessingGraph(ownedBy: owner)
     }
 
     /// Tracks rebuild frequency and reports once if rebuilds are churning —
@@ -437,64 +409,7 @@ class ParakeetEngine: ObservableObject {
         reason: String,
         requiresFreshGraph: Bool = false
     ) async -> ParakeetAudioGraphOwnerToken? {
-        trackAudioEngineRebuildChurn(reason: reason)
-        audioGraphGeneration += 1
-        let rebuildOwner = currentAudioGraphOwnerToken()
-        removeAudioEngineConfigObserver()
-        defer {
-            restoreAudioEngineConfigObserverIfCurrent(rebuildOwner)
-        }
-        let releasedVoiceProcessing = await runAudioEngineWork { audioEngine in
-            let released = Self.safelyRemoveInputTap(on: audioEngine)
-            audioEngine.reset()
-            return released
-        }
-        guard ownsAudioGraph(rebuildOwner) else { return nil }
-        if !releasedVoiceProcessing {
-            return discardStoppedVoiceProcessingGraph(ownedBy: currentAudioEngineQueueOwnerToken())?.graphOwner
-        }
-        let retiredEngine = audioEngine
-        // A stale overlapping rebuild may have restored an observer for the
-        // engine being retired. Clear it before binding the replacement.
-        removeAudioEngineConfigObserver()
-        let didReserveRetiredEngine = reserveRetiredAudioEngine(
-            retiredEngine,
-            reason: reason
-        )
-        if didReserveRetiredEngine {
-            audioEngine = AVAudioEngine()
-        }
-        inputTapInstalled = false
-        isEnginePrewarmed = false
-        didReceiveAudioSamples = false
-        didReceiveNonZeroAudioSamples = false
-        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-        if !isShuttingDown {
-            installAudioEngineConfigObserverIfNeeded()
-        }
-        guard didReserveRetiredEngine else {
-            if requiresFreshGraph {
-                interruptRecordingPreservingRecoveredTimeline()
-                return nil
-            }
-            AppLogger.transcription.warning(
-                "PARAKEET | audio graph reset in place because retirement limit is full"
-            )
-            return currentAudioGraphOwnerToken()
-        }
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "parakeet",
-            event: "audio_engine_rebuilt",
-            message: "Audio engine rebuilt after microphone graph failure",
-            context: [
-                "reason": reason,
-                "recovering": "\(recoveryState.isRecovering)",
-                "format_ready": "\(recoveryState.inputFormatReady)",
-                "generation": "\(recoveryState.generation)"
-            ]
-        )
-        return currentAudioGraphOwnerToken()
+        await audioGraph.rebuild(reason: reason, requiresFreshGraph: requiresFreshGraph)
     }
 
     @discardableResult
@@ -502,105 +417,26 @@ class ParakeetEngine: ObservableObject {
         reason: String,
         expectedOwner: ParakeetAudioEngineQueueOwnerToken? = nil
     ) -> Bool {
-        if let expectedOwner, !ownsAudioEngineQueue(expectedOwner) {
-            return false
-        }
-        trackAudioEngineRebuildChurn(reason: reason)
-        _ = audioEngineWorkOwnership.claimPendingWorkForSuccessor(
-            currentEngine: audioEngine,
-            currentQueue: audioEngineQueue
-        )
-        audioGraphGeneration += 1
-        removeAudioEngineConfigObserver()
-        let retiredEngine = audioEngine
-        let retiredQueue = audioEngineQueue
-        guard reserveRetiredAudioEngine(retiredEngine, reason: reason) else {
-            if !isShuttingDown {
-                installAudioEngineConfigObserverIfNeeded()
-            }
-            return false
-        }
-        audioEngine = AVAudioEngine()
-        audioEngineQueue = Self.makeAudioEngineQueue()
-        retiredQueue.async {
-            Self.cleanUpLateAudioStart(on: retiredEngine)
-        }
-        inputTapInstalled = false
-        isEnginePrewarmed = false
-        didReceiveAudioSamples = false
-        didReceiveNonZeroAudioSamples = false
-        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-        if !isShuttingDown {
-            installAudioEngineConfigObserverIfNeeded()
-        }
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "parakeet",
-            event: "audio_engine_rebuilt",
-            message: "Audio engine rebuilt after blocked microphone graph recovery",
-            context: [
-                "reason": reason,
-                "hard_reset": "true",
-                "recovering": "\(recoveryState.isRecovering)",
-                "format_ready": "\(recoveryState.inputFormatReady)",
-                "generation": "\(recoveryState.generation)"
-            ]
-        )
-        return true
-    }
-
-    func reserveRetiredAudioEngine(
-        _ engine: AVAudioEngine,
-        reason: String
-    ) -> Bool {
-        guard ParakeetRetiredAudioEngineStore.shared.retire(
-            engine,
-            reason: reason
-        ) else {
-            guard !didReportAudioEngineRetirementLimit else { return false }
-            didReportAudioEngineRetirementLimit = true
-            EventReporter.shared.capture(
-                level: .error,
-                engine: "parakeet",
-                event: "audio_engine_retirement_limit_reached",
-                message: "Audio graph replacement stopped at its hard retention limit",
-                context: [
-                    "reason": reason,
-                    "limit": "\(ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount)",
-                ]
-            )
-            return false
-        }
-        didReportAudioEngineRetirementLimit = false
-        return true
+        audioGraph.abandonBlocked(reason: reason, expectedOwner: expectedOwner)
     }
 
     func currentAudioGraphOwnerToken() -> ParakeetAudioGraphOwnerToken {
-        ParakeetAudioGraphOwnerToken(generation: audioGraphGeneration, engine: audioEngine)
+        audioGraph.graphOwner
     }
 
     func ownsAudioGraph(_ owner: ParakeetAudioGraphOwnerToken) -> Bool {
-        owner.matches(generation: audioGraphGeneration, engine: audioEngine)
+        audioGraph.owns(owner)
     }
 
     func currentAudioEngineQueueOwnerToken() -> ParakeetAudioEngineQueueOwnerToken {
-        ParakeetAudioEngineQueueOwnerToken(
-            generation: audioGraphGeneration,
-            engine: audioEngine,
-            queue: audioEngineQueue
-        )
+        audioGraph.queueOwner
     }
 
     func ownsAudioEngineQueue(_ owner: ParakeetAudioEngineQueueOwnerToken) -> Bool {
-        owner.matches(
-            generation: audioGraphGeneration,
-            engine: audioEngine,
-            queue: audioEngineQueue
-        )
+        audioGraph.owns(owner)
     }
 
     func cleanup() {
-        let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicLevelMeter.end()
@@ -622,7 +458,6 @@ class ParakeetEngine: ObservableObject {
         cancelConfigRecoveryTimeout()
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
-        schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: "cleanup")
         Task { @MainActor [weak self] in
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }
@@ -657,12 +492,111 @@ class ParakeetEngine: ObservableObject {
                 DefaultInputDeviceMonitor.shared.removeObserver(inputDeviceChangeObserverToken)
             }
         }
-        audioEngineQueue.async { [audioEngine] in
-            ParakeetEngine.safelyRemoveInputTap(on: audioEngine)
-            audioEngine.reset()
-        }
-        ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
+        // audioGraph's own deinit cleans up and retires the last engine.
         let mgr = asrManager
         Task { await mgr?.cleanup() }
+    }
+}
+
+/// The real AVAudioEngine calls behind `ParakeetAudioGraph`. Teardown and the
+/// voice-processing probe only look at an input node the engine already has;
+/// none of these calls creates one, so none binds the macOS default input.
+struct ParakeetAVAudioEngineGraphDriver: ParakeetAudioGraphDriver {
+    func makeEngine() -> AVAudioEngine {
+        AVAudioEngine()
+    }
+
+    func makeQueue() -> DispatchQueue {
+        DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
+    }
+
+    func removeInputTap(on engine: AVAudioEngine) -> Bool {
+        ParakeetEngine.safelyRemoveInputTap(on: engine)
+    }
+
+    func stop(_ engine: AVAudioEngine) -> Bool {
+        if engine.isRunning {
+            engine.stop()
+        }
+        return ParakeetEngine.releaseStoppedVoiceProcessing(on: engine)
+    }
+
+    func reset(_ engine: AVAudioEngine) {
+        engine.reset()
+    }
+
+    func usesVoiceProcessing(_ engine: AVAudioEngine) -> Bool {
+        ParakeetEngine.existingInputNode(on: engine)?.isVoiceProcessingEnabled == true
+    }
+
+    func retire(_ engine: AVAudioEngine, reason: String) -> Bool {
+        ParakeetRetiredAudioEngineStore.shared.retire(engine, reason: reason)
+    }
+}
+
+extension ParakeetEngine: ParakeetAudioGraphHost {
+    func clearGraphSampleFlags() {
+        didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
+    }
+
+    func reportAudioGraphEvent(_ event: ParakeetAudioGraphEvent) {
+        switch event {
+        case .rebuilt(let reason):
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "audio_engine_rebuilt",
+                message: "Audio engine rebuilt after microphone graph failure",
+                context: [
+                    "reason": reason,
+                    "recovering": "\(recoveryState.isRecovering)",
+                    "format_ready": "\(recoveryState.inputFormatReady)",
+                    "generation": "\(recoveryState.generation)"
+                ]
+            )
+        case .abandoned(let reason):
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "audio_engine_rebuilt",
+                message: "Audio engine rebuilt after blocked microphone graph recovery",
+                context: [
+                    "reason": reason,
+                    "hard_reset": "true",
+                    "recovering": "\(recoveryState.isRecovering)",
+                    "format_ready": "\(recoveryState.inputFormatReady)",
+                    "generation": "\(recoveryState.generation)"
+                ]
+            )
+        case .zombieReplaced:
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "audio_engine_rebuilt",
+                message: "Audio engine replaced after zombie-state detection",
+                context: ["reason": "zombie_engine_recovery"]
+            )
+        case .resetInPlaceAtRetirementLimit:
+            AppLogger.transcription.warning(
+                "PARAKEET | audio graph reset in place because retirement limit is full"
+            )
+        case .zombieReplacementRefused:
+            AppLogger.transcription.error(
+                "PARAKEET | zombie audio graph replacement refused because retirement limit is full"
+            )
+        case .retirementLimitReached(let reason):
+            EventReporter.shared.capture(
+                level: .error,
+                engine: "parakeet",
+                event: "audio_engine_retirement_limit_reached",
+                message: "Audio graph replacement stopped at its hard retention limit",
+                context: [
+                    "reason": reason,
+                    "limit": "\(ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount)",
+                ]
+            )
+        }
     }
 }
