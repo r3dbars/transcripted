@@ -1,12 +1,11 @@
 {
   "source-text": {
-    "Tests/AnalyticsEventPolicyTests.swift": 9,
+    "Tests/AnalyticsEventPolicyTests.swift": 7,
     "Tests/AudioAutomationCoverageContractTests.swift": 8,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 8,
     "Tests/CaptureLibraryPathSafetySyncTests.swift": 2,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
-    "Tests/CrashReporterOptionsTests.swift": 1,
     "Tests/DeviceRecoveryPolicyTests.swift": 6,
     "Tests/DictationAudioRecoveryTests.swift": 1,
     "Tests/DictationInputDeviceSelectionPolicyTests.swift": 2,

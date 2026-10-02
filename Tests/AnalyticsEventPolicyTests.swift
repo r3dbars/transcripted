@@ -574,19 +574,80 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("WorkflowRecoveryTelemetry emits the allowlisted recovery attempt bucket") {
-        let source = readSourceFixture("Sources/Observability/WorkflowRecoveryTelemetry.swift")
-        assertTrue(
-            source.contains("\"recovery_attempt_bucket\": AnalyticsReporter.countBucket(attempt)"),
-            "workflow recovery helper should emit the allowlisted recovery attempt bucket key"
+        var recorded: [(event: String, properties: [String: String])] = []
+        let record: (String, [String: String]) -> Void = { recorded.append(($0, $1)) }
+
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            surface: "home",
+            artifactRetained: true,
+            track: record
         )
-        assertFalse(
-            source.contains("\"attempt_bucket\""),
-            "workflow recovery helper should not emit the legacy attempt bucket key"
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            result: "success",
+            elapsedSeconds: 45,
+            surface: "home",
+            artifactRetained: true,
+            track: record
         )
-        assertTrue(
-            source.contains("\"workflow_recovery_failed\""),
-            "workflow recovery helper should emit a dedicated failed terminal event for failure drill-down"
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_capture",
+            failureKind: "timeout",
+            retrySource: "capture_failure_notice",
+            attempt: 2,
+            result: "failed",
+            surface: "home",
+            artifactRetained: false,
+            track: record
         )
+
+        assertEqual(
+            recorded.map(\.event),
+            [
+                "workflow_recovery_attempted",
+                "workflow_recovery_finished",
+                "workflow_recovery_finished",
+                "workflow_recovery_failed",
+            ],
+            "a success finishes once; a failure also sends the dedicated failed terminal event"
+        )
+
+        for entry in recorded {
+            assertEqual(
+                entry.properties["recovery_attempt_bucket"],
+                AnalyticsReporter.countBucket(2),
+                "\(entry.event) should carry the allowlisted recovery attempt bucket"
+            )
+            assertNil(entry.properties["attempt_bucket"], "\(entry.event) should not send the legacy attempt bucket key")
+
+            guard let policy = AnalyticsEventPolicy.policy(forEvent: entry.event) else {
+                assertTrue(false, "\(entry.event) must be registered or AnalyticsReporter drops it")
+                continue
+            }
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                entry.properties,
+                allowedKeys: policy.allowedProperties
+            )
+            assertEqual(sanitized, entry.properties, "\(entry.event) properties should all survive the sanitizer and allowlist")
+        }
+
+        assertEqual(recorded[1].properties["result"], "success", "success result should be sent")
+        assertEqual(
+            recorded[1].properties["elapsed_bucket"],
+            AnalyticsReporter.durationBucket(seconds: 45),
+            "elapsed time should be sent only as a bucket"
+        )
+        assertEqual(recorded[1].properties["artifact_retained"], "true", "artifact retention should be a boolean string")
+        assertEqual(recorded[3].properties["result"], "failed", "failed event should carry the failed result")
+        assertEqual(recorded[3].properties["artifact_retained"], "false", "artifact retention should be a boolean string")
+        assertNil(recorded[3].properties["elapsed_bucket"], "no elapsed time means no elapsed bucket")
     }
 
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
