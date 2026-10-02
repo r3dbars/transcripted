@@ -5,6 +5,7 @@
 `Sources/` is the app target. On `main`, the app is centered on:
 
 - dictation capture and paste-back
+- Writing (opt-in): autocomplete through its own keyboard, and Save my writing day files
 - meeting capture, imported-audio transcription, and transcript browsing
 - optional local-speaker review for people sharing the room mic
 - wake / sleep recovery for active recording flows
@@ -12,7 +13,7 @@
 Important entry points:
 
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, detected-meeting prompt wiring, and activation-policy switching so active recordings stay visible in the macOS force-quit dialog
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, quiet launch-time warmup of the dictation and meeting models (re-run on model switch and wake), wake-recovery coordination, and lazy `MeetingSessionController`
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, quiet launch-time warmup of the dictation and meeting models (re-run on model switch and wake), wake-recovery coordination, and lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — app-active macOS command menus for capture, import, navigation, and speaker search; these are additive window-scoped shortcuts and do not replace global physical triggers
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
 - `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode, meeting shortcut compatibility, and legacy hotkey migration helpers
@@ -42,7 +43,8 @@ Important entry points:
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
-- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde (`Core/` pure policy, `Runtime/` model, helper, socket, Screen Memory); compiled into the app module, tested under `swift test`. Plan: `docs/writing-plan.md`; file map: `docs/writing-port-ledger.md`
+- `Writing/` — the app side of Writing: `WritingController` hosts the runtime, Save my writing day files, the Writing tab's model, count-only analytics
+- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde (`Core/` pure policy, `Runtime/` model, helper, socket, Screen Memory, Personal History, Save my writing); compiled into the app module, tested under `swift test`
 - `TranscriptedKeyboard/` — Writing's IMKit input method, a separate bundle built by `scripts/entrypoints/lib/bundle-input-method.sh`; excluded from the app binary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 
@@ -53,17 +55,18 @@ point-in-time reviews.
 
 ## Read before editing
 
-- touching dictation persistence: `Sources/Dictation/CLAUDE.md`
-- touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
-- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
-- touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
-- touching app-wide support utilities: `Sources/Support/CLAUDE.md`
-- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
-- touching the Settings window, Home, onboarding, or speaker settings files: also `Sources/UI/Settings/CLAUDE.md`
-- touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
-- touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`
-- touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/CLAUDE.md`
-- touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/CLAUDE.md`
+- touching dictation persistence: `Sources/Dictation/AGENTS.md`
+- touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/AGENTS.md`
+- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/AGENTS.md`
+- touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/AGENTS.md`
+- touching app-wide support utilities: `Sources/Support/AGENTS.md`
+- touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/AGENTS.md`
+- touching the Settings window, Home, onboarding, or speaker settings files: also `Sources/UI/Settings/AGENTS.md`
+- touching hotkeys or physical dictation trigger routing: `Sources/Capture/AGENTS.md`
+- touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/AGENTS.md`
+- touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/AGENTS.md`
+- touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/AGENTS.md`
+- touching Writing (the tab's runtime, Save my writing, analytics): `Sources/Writing/AGENTS.md`; the library: `Sources/TranscriptedWriting/AGENTS.md`; the keyboard: `Sources/TranscriptedKeyboard/AGENTS.md`
 - touching tests or package boundaries: `Tests/README.md`
 
 Prefer the local doc plus the actual Swift file list before assuming an older

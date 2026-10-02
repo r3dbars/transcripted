@@ -133,7 +133,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (`AboutSettingsPage.swift`, `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift`, `WritingSettingsPage.swift`); model, shortcut, permission, and reporting editors are injected into General's cards by the shell. The former Beta and Support pages dissolved in settings redesign phase 1: Support's two rows (email support, send diagnostics) moved into About under a "Support" section, and the Beta page's Nemotron toggle was later removed along with the Nemotron model itself. `HomeSettingsPage.swift` is pure view assembly (header, scan-warning/activity rows, search field, day-grouped meeting list, expanded-row preview, inline failed-meeting rows) — it takes the meeting day sections and every row action as injected values/closures and holds no runtime logic
 
-This is a summary of `Settings/`. `Sources/UI/Settings/CLAUDE.md` has the full per-file list, including the small presentation/policy helpers.
+This is a summary of `Settings/`. `Sources/UI/Settings/AGENTS.md` has the full per-file list, including the small presentation/policy helpers.
 
 ### Shared/
 

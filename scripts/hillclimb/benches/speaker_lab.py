@@ -176,7 +176,7 @@ SCRUBBED_ENV = (
 BACKENDS = ("pyannote", "nemotron")
 EMBEDDERS = {"wespeaker": "native", "eres2net": "eres2net"}
 # Presets NemotronDiarizationRunner.resolvePresetName accepts (DiarizationBackendTests.swift
-# pins fast128/fast32/fast32-int8; offline is documented in TranscriptedCore/CLAUDE.md). Core
+# pins fast128/fast32/fast32-int8; offline is documented in TranscriptedCore/AGENTS.md). Core
 # silently falls back to fast128 on an unknown name; the harness dump now refuses one
 # (resolvedNemotronPresetForDump), but a typo would still cost a whole failed trial, so the
 # adapter only allows known names.

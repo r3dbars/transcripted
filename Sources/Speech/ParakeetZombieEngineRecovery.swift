@@ -10,7 +10,7 @@
 // separate generation-gated recovery task that replaces the stale
 // AVAudioEngine through a bounded reset and retries once. Do not fold the
 // recovery task back into the watchdog or reuse a detected zombie graph —
-// see Sources/Speech/CLAUDE.md.
+// see Sources/Speech/AGENTS.md.
 //
 // These are internal collaborator methods on ParakeetEngine — ParakeetEngine
 // remains the public-API owner and MainActor home for this state

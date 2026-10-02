@@ -181,8 +181,23 @@ settings-side agent connection flow.
   `BetaSettingsPage.swift` and `SupportSettingsPage.swift` were dissolved in
   the settings redesign phase 1 pass: the two Support rows (email support,
   send diagnostics) moved into `AboutSettingsPage.swift` under a "Support"
-  section, and the Beta page's Nemotron toggle was later removed entirely
-  along with the Nemotron model itself.
+  section, and the Beta page's Nemotron toggle was later removed. Nemotron
+  is now the app's default with no Settings toggle
+  (`Sources/Support/DiarizationBackendPreferences.swift`); Core itself still
+  defaults to pyannote (see `Sources/TranscriptedCore/AGENTS.md`).
+- `Writing/` - the Writing tab's views, all driven by `WritingSettingsModel`
+  in `Sources/Writing/` (runtime changes go through `WritingController`,
+  never from a view): `WritingIntroView.swift` (two intro pages until setup
+  is done), `WritingDemoView.swift` + `WritingDemoScript.swift` (the looping
+  autocomplete demo, drawn in SwiftUI from data), `WritingSetupFlowView.swift`
+  (setup steps 1 to 3; they only fill the draft, "Turn on writing" applies
+  it), `WritingEverydayView.swift` (after setup: summary, today's saved
+  writing, autocomplete numbers), `WritingSettingsSection.swift` (the two
+  features, personalized suggestions, model switch, storage meter, Delete
+  all writing), `WritingComponents.swift` (shared buttons), and
+  `WritingSetupPresentation.swift` (Foundation-pure copy and small rules from
+  the approved design in `docs/writing-plan.md`; covered by
+  `Tests/WritingSetupPresentationTests.swift`).
 
 ## Guardrails
 

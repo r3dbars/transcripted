@@ -1,13 +1,13 @@
 # Transcripted agent guide
 
-The one set of rules for every coding agent (Claude, Codex, or other). `CLAUDE.md` imports this file.
+The one set of rules for every coding agent (Claude, Codex, or other). Agent docs are `AGENTS.md` only, here and in each folder; Claude Code reads them natively (v2.1.277+), so there's no `CLAUDE.md`. Don't add a `CLAUDE.md` or `CLAUDE.local.md` in the repo: by default Claude Code then reads it instead of `AGENTS.md`. `check-known-traps.py` fails on any `CLAUDE.md` that isn't a bare `@AGENTS.md` stub.
 
 Transcripted is a macOS 26+, Apple Silicon menubar app: dictation with paste-back, meeting capture (mic + system audio) with local transcription, imported audio and video, and Writing. Everything it captures is saved as agent-readable Markdown on disk.
 
 ## Start here
 
 1. `python3 scripts/dev/agent-context.py <changed paths>` prints the owner docs, the rules to keep true, and the checks for your change. Add `--symptom "short description"` when you don't know where a bug lives.
-2. Read the nearest `CLAUDE.md` in the folder you're changing (`Sources/<area>/CLAUDE.md`, `Tools/<package>/CLAUDE.md`). That's where subsystem detail lives.
+2. Read the nearest `AGENTS.md` in the folder you're changing (`Sources/<area>/AGENTS.md`, `Tools/<package>/AGENTS.md`). That's where subsystem detail lives.
 3. `docs/repo-layout.md` is the map: folders, commands, docs, and hotspot files.
 4. Before you hand off: `bash check.sh`.
 
@@ -19,7 +19,7 @@ When sources disagree: current code wins for runtime behavior, this file and `.a
 - **Local-first and private.** Never send or log raw transcript text, audio references, meeting titles, speaker names, emails, tokens, absolute paths, or raw device names off the device.
 - **`Sources/TranscriptedCore/` is a library.** The app reaches it only through `Sources/Meeting/`, and `build.sh` links it from the prebuilt archive, never compiling it into the app target. `Sources/Speech/` owns dictation STT; meetings reuse it through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - **CoreAudio real-time callbacks:** no I/O, locks, allocations, or ObjC calls inside them. Deep-copy buffers before any async hop. Session controllers and UI state are `@MainActor`; capture internals use `DispatchQueue` + `NSLock`.
-- **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device; if that's AirPods, they flip into call mode and the audio garbles. Every AirPods garble bug so far came from this. Any code that builds an engine or touches `inputNode` must say what happens with a Bluetooth headset as the default input. Read `Sources/Speech/CLAUDE.md` first.
+- **AirPods.** A fresh `AVAudioEngine`'s `inputNode` binds the macOS default input before you can pin a device; if that's AirPods, they flip into call mode and the audio garbles. Every AirPods garble bug so far came from this. Any code that builds an engine or touches `inputNode` must say what happens with a Bluetooth headset as the default input. Read `Sources/Speech/AGENTS.md` first.
 - **Harnesses never touch real user state.** Automated launches go through `AutomatedLaunchEnvironment`. Scripts, labs, and tests don't write to the real capture library or prefs. Anything that deletes checks the path is under the root it owns first. Use `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when running binaries directly.
 - **Owner's commit credit.** When an agent commits work for Justin, use `r3dbars <r3dbars@users.noreply.github.com>` as the Git author and committer. Do not add AI `Co-authored-by` trailers. Keep independent human contributors' credit intact. If a platform forces bot authorship, report that limitation instead of claiming the commit will show as `r3dbars`.
 
@@ -44,14 +44,14 @@ The pieces, when you need one directly: `bash build-deps.sh` (prebuilt audio lib
 Each of these has cost a red CI run or a wrong merge. The ones with a check fail loudly now; the rest you have to remember.
 
 - **Tests that read source as text.** 58 grandfathered test files still assert on exact code fragments, so a rename or a reflow can turn CI red. Before editing a file, run `python3 scripts/dev/check-source-pins.py --changed-only`. Most-pinned: `DictationSessionController.swift`, `ParakeetDeviceRecovery.swift`, `PersistentDictationInputController.swift`, `ParakeetEngine.swift`, `TranscriptedSettingsView.swift`, `TranscriptedApp.swift`, `MeetingSessionController.swift`. `Tests/OverlayScreenSharePrivacyTests.swift` scans all of `Sources/UI`. New ones are blocked by `check-test-shape.py`.
-- **Telemetry keys are dropped by substring.** The sanitizers silently drop any key whose name contains `audio`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url` and more, so `start_profile` never arrives ("profile" contains "file"). `python3 scripts/dev/check-telemetry-keys.py` catches it. Adding an analytics event is a lockstep edit; see `Sources/Observability/CLAUDE.md`.
+- **Telemetry keys are dropped by substring.** The sanitizers silently drop any key whose name contains `audio`, `error`, `file`, `name`, `path`, `speaker`, `text`, `title`, `token`, `url` and more, so `start_profile` never arrives ("profile" contains "file"). `python3 scripts/dev/check-telemetry-keys.py` catches it. Adding an analytics event is a lockstep edit; see `Sources/Observability/AGENTS.md`.
 - **Hand-kept source lists.** `run-tests.sh` and some smokes compile a listed subset of `Sources/`. A new file a test needs must be added there; the compile error now names the file and the list.
 - **A clean text merge isn't a working merge.** Git won't flag a new enum case missing from another PR's `switch`, two PRs bumping the same literal count, or a renamed helper another PR's test calls. When two PRs touch the same file, let CI build the merged result. Assert against explicit lists, not counts.
 - **"Dirty" on GitHub** is often a criss-cross history, not a real conflict: merge current `main` into the PR (a merge commit; never force-push). Before opening any repair or reland branch, run `python3 scripts/dev/check-superseded.py --pr <number>`; exit 3 means it already merged under another PR.
 - **Naming:** `Sources/Support/CaptureLibrary*.swift` is the relocatable capture *library* (saved Markdown and audio), not `Sources/Capture/` (hotkeys and triggers). `Sources/Support/ModelCacheInventory.swift` inventories `Sources/Speech/` model caches.
 - **New Tools package** needs a CI job and a test-matrix rule; `scripts/dev/check-known-traps.py` fails without them.
 
-**Hotspots.** Files over 1,500 lines, with `Sources/TranscriptedCore/Audio/Audio.swift` the riskiest: read the whole file and its folder's `CLAUDE.md` before editing, and don't add another responsibility to any of them. The list and what each owns is in `docs/repo-layout.md`.
+**Hotspots.** Files over 1,500 lines, with `Sources/TranscriptedCore/Audio/Audio.swift` the riskiest: read the whole file and its folder's `AGENTS.md` before editing, and don't add another responsibility to any of them. The list and what each owns is in `docs/repo-layout.md`.
 
 ## Releases
 
@@ -59,7 +59,7 @@ Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing r
 
 ## Observability
 
-Sentry and PostHog are bounded integrations, not log sinks. Off-device events pass allowlists in `Sources/Observability/SentryEventPolicy.swift` and `AnalyticsEventPolicy.swift`; if payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change. Keep the crash-reporting and analytics toggles in Settings and "Send diagnostics" in About. Config keys, env overrides, and sinks: `Sources/Observability/CLAUDE.md` and `docs/observability.md`.
+Sentry and PostHog are bounded integrations, not log sinks. Off-device events pass allowlists in `Sources/Observability/SentryEventPolicy.swift` and `AnalyticsEventPolicy.swift`; if payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change. Keep the crash-reporting and analytics toggles in Settings and "Send diagnostics" in About. Config keys, env overrides, and sinks: `Sources/Observability/AGENTS.md` and `docs/observability.md`.
 
 ## Storage
 

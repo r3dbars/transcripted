@@ -205,7 +205,7 @@ def normalize_repo_path(raw_path: str) -> str:
 def nearest_local_doc(path: str) -> str | None:
     current = (REPO_ROOT / path).parent
     while current != REPO_ROOT and REPO_ROOT in current.parents:
-        guide = current / "CLAUDE.md"
+        guide = current / "AGENTS.md"
         if guide.is_file():
             return guide.relative_to(REPO_ROOT).as_posix()
         current = current.parent
@@ -384,7 +384,7 @@ def self_test(contract_path: Path) -> None:
     nested_context = build_context(
         contract, ["Tools/TranscriptedMCP/Sources/TranscriptedMCP/Server.swift"], None
     )
-    if "Tools/TranscriptedMCP/CLAUDE.md" not in nested_context["docs"]:
+    if "Tools/TranscriptedMCP/AGENTS.md" not in nested_context["docs"]:
         raise ContractError("nested paths must include their nearest local guide")
     tracked_paths = _git_lines("ls-files")
     unmapped_paths = [

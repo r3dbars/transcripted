@@ -164,7 +164,7 @@ Everything runs locally. The CLI reuses the Parakeet models the Transcripted
 app already has — the installed app bundle first, then the shared
 `~/Library/Application Support/FluidAudio/Models/` cache — and only downloads
 them (~600MB, one time) when neither exists. See
-`Tools/TranscriptedCLI/CLAUDE.md` for the full command reference.
+`Tools/TranscriptedCLI/AGENTS.md` for the full command reference.
 
 ## Fallback Only: Web Chat
 

@@ -1,6 +1,6 @@
 # Speaker eval: multi-exemplar + negative-exemplar accuracy delta (2026-07)
 
-> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `CLAUDE.md`.
+> **Historical record.** This is a point-in-time write-up. Its status lines and file references reflect when it was written, not current `main`. For current behavior, read the source and the nearest `AGENTS.md`.
 
 > **Update (2026-07, retune shipped):** Recommendation #2 below is now implemented — the auto-accept
 > **margin** is computed against each profile's blended *average* representative instead of its best
@@ -86,10 +86,10 @@ SQLite. No RNG — fully deterministic (splits by sorted meeting/quality order).
 - Run:
   ```bash
   SPEAKER_EVAL_QMATRIX_DIR=/path/to/data/eval/qmatrix \
-  SPEAKER_EVAL_OUT=docs/speaker-eval-exemplar-delta-2026-07.result.json \
+  SPEAKER_EVAL_OUT=docs/archive/speaker-eval-exemplar-delta-2026-07.result.json \
     swift test --filter SpeakerExemplarDeltaEvalTests
   ```
-- Raw output: [`docs/speaker-eval-exemplar-delta-2026-07.result.json`](speaker-eval-exemplar-delta-2026-07.result.json)
+- Raw output: [`docs/archive/speaker-eval-exemplar-delta-2026-07.result.json`](archive/speaker-eval-exemplar-delta-2026-07.result.json)
   (values below copied from it verbatim).
 
 ## Results — multi-exemplar (#1488), degraded cross-condition identification
@@ -194,7 +194,7 @@ its average-based margin collapses and the auto-accept is withheld (routed to su
 single-average profiles pass `nil` and behave exactly as before.
 
 Re-run of this harness on the same corpus, WITH arm (multi-exemplar), AMI degraded slice — raw output
-in [`speaker-eval-exemplar-delta-2026-07.after-fix.result.json`](speaker-eval-exemplar-delta-2026-07.after-fix.result.json):
+in [`docs/archive/speaker-eval-exemplar-delta-2026-07.after-fix.result.json`](archive/speaker-eval-exemplar-delta-2026-07.after-fix.result.json):
 
 | metric | pre-fix (best-exemplar margin) | post-fix (average margin) | Δ |
 |---|---:|---:|---:|
@@ -252,8 +252,8 @@ bound (§ caveats), not an expected production rate.
 - `swift test --filter SpeakerNamingSimulationRunnerTests` — 7/7 pass (existing functional
   regression; confirms the Core test target builds + runs with the exemplar features on `main`).
 - `swift test --filter SpeakerExemplarDeltaEvalTests` — passes (this eval; ~3.4 s), writes
-  `docs/speaker-eval-exemplar-delta-2026-07.result.json` (pre-fix) and, re-run after the retune,
-  `docs/speaker-eval-exemplar-delta-2026-07.after-fix.result.json` (12 → 2 false-auto, recall held).
+  `docs/archive/speaker-eval-exemplar-delta-2026-07.result.json` (pre-fix) and, re-run after the retune,
+  `docs/archive/speaker-eval-exemplar-delta-2026-07.after-fix.result.json` (12 → 2 false-auto, recall held).
 - `swift test --filter SpeakerAutoAcceptMarginTests` — corpus-free, in-tree proof of the retune:
   constructs the lucky-exemplar impostor fixture and asserts the average-based margin withholds it
   while a genuine owner still auto-accepts (both at the policy gate and through `matchAgainstProfiles`).
