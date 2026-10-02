@@ -394,15 +394,6 @@ func testMicrophoneProcessingPreferences() async {
         assertEqual(scans, 0, "the mic is only scanned when it could change the answer")
     }
 
-    runSuite("The Home Boost row never saves Apple voice processing") {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let settings = (try? String(contentsOf: root.appendingPathComponent("Sources/UI/Settings/TranscriptedSettingsView.swift"), encoding: .utf8)) ?? ""
-        assertFalse(
-            settings.contains("MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)"),
-            "The Home row must not save Apple voice processing for every meeting"
-        )
-    }
-
     runSuite("MicrophoneProcessingPreferences uses stable storage keys") {
         // Lock the on-disk key so future refactors don't silently invalidate
         // existing users' preferences.

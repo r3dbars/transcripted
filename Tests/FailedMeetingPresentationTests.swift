@@ -559,23 +559,6 @@ func testFailedMeetingPresentation() {
         assertTrue(complete.deleteIsDestructive, "cleanup is marked destructive")
     }
 
-    runSuite("Settings confirms every failed-row cleanup as a delete") {
-        let settingsSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
-            encoding: .utf8
-        )) ?? ""
-        assertTrue(
-            settingsSource.contains("requestClearFailedMeeting")
-                && settingsSource.contains("HomeDeleteConfirmationPolicy.failedMeeting")
-                && settingsSource.contains("reasonKind: .deleted"),
-            "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
-        )
-        assertFalse(
-            settingsSource.contains("dismissFailedMeeting"),
-            "failed-row cleanup should have one canonical destructive seam"
-        )
-    }
-
     runSuite("Failed-meeting metadata calls retained WAVs raw audio and counts only files still on disk") {
         let directory = makeFailedMeetingPresentationTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

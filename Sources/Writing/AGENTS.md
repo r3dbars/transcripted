@@ -10,9 +10,10 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 
 `WritingBridge` in `.agents/modules.json`.
 
-- **Public surface:** `WritingController`, `WritingSettingsModel`, `WritingSetupState`, `WritingDayFileReader`, `WritingDayFileWriter`, `WritingStorageUsage`, `WritingAnalytics`.
+- **Public surface:** `WritingController`, `WritingSettingsModel`, `WritingSetupState`, `WritingSetupPresentation`, `WritingSidebarNewBadge`, `WritingDayFileReader`, `WritingDayFileWriter`, `WritingStorageUsage`, `WritingAnalytics`.
 - **May depend on:** WritingCore, WritingRuntime, Support, Observability. It's the only app module besides UISettings and AppShell that may name the runtime.
-- **Grandfathered crossing:** `WritingSettingsModel.swift` names `WritingSetupPresentation` and `WritingSidebarNewBadge` from `UI/Settings`. Moving `WritingSetupPresentation.swift` here and the badge's defaults key into its own file fixes it; both edits touch `run-tests.sh`, so they wait for #1946 and #1941.
+- **No grandfathered crossings.** `WritingSetupPresentation.swift` (the tab's copy) and `WritingSidebarNewBadge.swift` (the sidebar badge's defaults key) live here so the model never names `UI/Settings`. The badge's `isShown(for:dismissed:)` stays next to `TranscriptedSettingsPage`.
+- **WritingCore is a real Swift module** (`TranscriptedWritingCore`). Files here that name its types start with `#if canImport(TranscriptedWritingCore) import TranscriptedWritingCore #endif`.
 - **Tests:** see "Tests" below.
 
 ## Entry points
@@ -24,6 +25,9 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for the tab's Today list. Never writes.
 - `WritingAnalytics.swift` — the two count-only Writing events, through `AnalyticsReporter.track`.
 - `WritingStorageUsage.swift` — byte sizes for the tab's storage meter (models, saved writing, learning data). Never opens file contents.
+- `WritingSetupPresentation.swift` — the tab's words and small rules from the approved design (`docs/writing-plan.md`). Foundation plus two WritingCore value types, so the fast tests compile it.
+- `WritingPausableIngest.swift` — wraps Personal History ingest so "Pause for 1 hour" drops typed text (acknowledged, never kept) as well as suggestions.
+- `WritingSidebarNewBadge.swift` — the defaults key the Writing tab sets when setup finishes, which drops the sidebar's "New" badge.
 
 ## Rules
 
@@ -32,11 +36,11 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths. UI may use pure Core value types like `TildeModelChoice`.
 - **Off the main thread.** Front-window reads and helper probes don't block the main actor. Screen Memory never reads Transcripted's own windows.
 - **Screen Recording ask.** Meeting-only users never see it, and granting it must not relaunch the app during a meeting.
-- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`) stay Foundation-only. They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
+- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `WritingSetupPresentation`, `WritingSidebarNewBadge`) stay Foundation-only (plus WritingCore value types). They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
 
 ## Tests
 
-- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingDayFileReaderTests.swift`, plus the tab's `Tests/WritingSetupPresentationTests.swift` and `Tests/WritingDemoScriptTests.swift`. Run them with `bash run-tests.sh --filter Writing` (case-insensitive substring).
+- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingDayFileReaderTests.swift`, `Tests/WritingSetupPresentationTests.swift`, and the tab's `Tests/WritingDemoScriptTests.swift`. Run them with `bash run-tests.sh --filter Writing` (case-insensitive substring).
 - Library behavior (recorder, composer, scrubber, Personal History) is tested under `swift test --filter '^TranscriptedWritingTests\.'`.
 - `WritingController` has no unit tests; check it with a real signed build (autocomplete needs a real signing identity, see `Sources/TranscriptedWriting/AGENTS.md`).
 

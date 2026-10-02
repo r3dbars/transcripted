@@ -145,9 +145,10 @@ let package = Package(
         ),
         // Writing's pure policy layer, ported from Tilde's TildeCore
         // (docs/writing-plan.md). Foundation-only and dependency-free, so it
-        // takes none of the deps flags above. build.sh compiles these same
-        // files straight into the app module; this target exists so the
-        // ported Tilde tests can run under `swift test`.
+        // takes none of the deps flags above. The app build compiles these
+        // same files as its own static TranscriptedWritingCore module
+        // (scripts/entrypoints/lib/swiftc-app-args.sh); this target exists so
+        // the ported Tilde tests can run under `swift test`.
         .target(
             name: "TranscriptedWritingCore",
             path: "Sources/TranscriptedWriting/Core"
@@ -157,7 +158,8 @@ let package = Package(
         // server and peer auth, the llama-server host, the model manager,
         // Screen Memory, personal history, the outcome-ledger readers and the
         // keyboard installer. build.sh compiles these files straight into the
-        // app module too, so their Core import is guarded with
+        // app module too and links Core as a module; the fast tests compile a
+        // few Core files in directly, so the Core import is guarded with
         // `#if canImport(TranscriptedWritingCore)`. The app starts it through
         // WritingController in Sources/Writing/.
         .target(
