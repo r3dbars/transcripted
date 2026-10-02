@@ -13,6 +13,6 @@
     "Tests/OverlayScreenSharePrivacyTests.swift": 4,
     "Tests/PermissionStateHarnessContractTests.swift": 20,
     "Tests/ReleaseMetadataContractTests.swift": 6,
-    "Tests/UIAutomationSurfaceContractTests.swift": 155
+    "Tests/UIAutomationSurfaceContractTests.swift": 71
   }
 }

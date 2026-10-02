@@ -17,7 +17,7 @@
     "Tests/SentryEventPolicyTests.swift": 2,
     "Tests/StatusItemPresentationTests.swift": 1,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 113
+    "Tests/UIAutomationSurfaceContractTests.swift": 46
   },
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2,
