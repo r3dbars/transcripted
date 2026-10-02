@@ -73,17 +73,17 @@ final class MeetingPromptDetector {
     // MeetingPromptDetector+*.swift extensions use it. Treat it as private
     // to the type.
     let calendarAccessGranted: () -> Bool
-    let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
-    let refreshesCalendarEventSnapshots: Bool
+    private let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
+    private let refreshesCalendarEventSnapshots: Bool
     // Cache of upcoming meeting-link events refreshed off-main on a TTL or
     // EventKit invalidation. The 20s prompt loop should stay in-memory while idle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
     // the recording-start title closure), so they read this cache instead of querying
     // EKEventStore on the main actor.
-    var calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
-    var lastCalendarSnapshotRefreshAt: Date?
-    var lastCalendarAccessGranted: Bool?
-    var calendarSnapshotsNeedRefresh = true
+    private(set) var calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
+    private var lastCalendarSnapshotRefreshAt: Date?
+    private var lastCalendarAccessGranted: Bool?
+    private var calendarSnapshotsNeedRefresh = true
     // Guards against redundant concurrent EKEventStore queries: evaluate() is invoked
     // from several independent, unstructured Task{} sources (poll loop, workspace
     // notifications, mic/camera/audio signal changes, .EKEventStoreChanged). Two of
@@ -91,7 +91,7 @@ final class MeetingPromptDetector {
     // both pass the guard below (the need-refresh flags only clear after the await),
     // issuing a second redundant query. Callers don't need synchronously up-to-date
     // state on return — the same assumption the existing TTL-based skip already relies on.
-    var isFetchingCalendarSnapshots = false
+    private var isFetchingCalendarSnapshots = false
     private var pollingTask: Task<Void, Never>?
     // Evaluation passes that have been started and not finished yet, counting
     // the title reads that re-run evaluate when they land. Lets callers wait
@@ -99,7 +99,7 @@ final class MeetingPromptDetector {
     var evaluationsInFlight = 0
     private var settledWaiters: [CheckedContinuation<Void, Never>] = []
     var workspaceObservers: [NSObjectProtocol] = []
-    var calendarStoreObserver: NSObjectProtocol?
+    private var calendarStoreObserver: NSObjectProtocol?
     var snoozedUntil: [String: Date] = [:]
     var pendingUntil: [String: Date] = [:]
     var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
@@ -174,11 +174,11 @@ final class MeetingPromptDetector {
     private let pollIntervalNanoseconds: UInt64 = 120_000_000_000
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
-    let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
+    private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
     // Calendar queries are synchronous XPC work behind EventKit. Keep the 20s
     // prompt loop in-memory most of the time and refresh the EventKit snapshot
     // on a minutes-scale TTL or when EventKit tells us the calendar changed.
-    let calendarSnapshotRefreshInterval: TimeInterval = 5 * 60
+    private let calendarSnapshotRefreshInterval: TimeInterval = 5 * 60
 
     /// The user's current meeting shortcut as the menu bar shows it, read
     /// each time a prompt is built so a rebound shortcut shows up at once.
@@ -410,6 +410,53 @@ final class MeetingPromptDetector {
         }
         promptExpiryHistory = promptExpiryHistory.filter {
             now.timeIntervalSince($0.value.lastExpiredAt) <= MeetingPromptHeuristics.promptExpiryStreakResetInterval
+        }
+    }
+
+    // MARK: Calendar snapshot cache
+
+    private func refreshCalendarEventSnapshots(force: Bool = false) async {
+        guard refreshesCalendarEventSnapshots else { return }
+        let accessGranted = calendarAccessGranted()
+        let accessChanged = lastCalendarAccessGranted.map { $0 != accessGranted } ?? true
+        lastCalendarAccessGranted = accessGranted
+
+        guard accessGranted else {
+            calendarEventSnapshots = []
+            lastCalendarSnapshotRefreshAt = Date()
+            calendarSnapshotsNeedRefresh = false
+            return
+        }
+
+        let now = Date()
+        let refreshExpired = lastCalendarSnapshotRefreshAt.map {
+            now.timeIntervalSince($0) >= calendarSnapshotRefreshInterval
+        } ?? true
+        guard !isFetchingCalendarSnapshots,
+              force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired
+        else { return }
+
+        isFetchingCalendarSnapshots = true
+        calendarEventSnapshots = await fetchCalendarEventSnapshots(
+            now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
+            now.addingTimeInterval(calendarLookaheadInterval)
+        )
+        lastCalendarSnapshotRefreshAt = now
+        calendarSnapshotsNeedRefresh = false
+        isFetchingCalendarSnapshots = false
+    }
+
+    private func installCalendarStoreObserver() {
+        guard calendarStoreObserver == nil else { return }
+        calendarStoreObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.calendarSnapshotsNeedRefresh = true
+                self?.scheduleEvaluation(forceCalendarRefresh: true)
+            }
         }
     }
 

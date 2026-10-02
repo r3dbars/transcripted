@@ -418,7 +418,7 @@ extension MeetingSessionController {
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
         clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
-        savedMeetingReplacementCommitCount &+= 1
+        noteSavedMeetingReplacementCommit()
     }
 
     /// Legacy artifact hygiene: a retranscription rewrites the saved meeting's

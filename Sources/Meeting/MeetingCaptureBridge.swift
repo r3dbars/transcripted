@@ -87,8 +87,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// app launched during a slow start counts as launched mid-meeting.
     private var isStartingRecording = false
     /// One-shot scan of whether a call app holds the mic input. Runs off the
-    /// main actor. Tests replace it.
-    var callAppMicrophoneUseScan: @Sendable () -> Bool = {
+    /// main actor.
+    private var callAppMicrophoneUseScan: @Sendable () -> Bool = {
         MicrophoneSharingPolicy.isCallAppUsingMicrophone(
             micInputBundleIDs: MicActivityMonitor.currentMicInputBundleIDs()
         )
