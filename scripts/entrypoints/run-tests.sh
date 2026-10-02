@@ -335,15 +335,21 @@ EOF
 
 cat >> "$GENERATED_RUNNER" <<'EOF'
 
-        print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
+        // One print, so the count and the FAIL lines behind it land together
+        // even if something else writes to the same log.
+        var summary = "\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed\n"
         if quarantinedSuiteCount > 0 {
-            print("\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt")
+            summary += "\(quarantinedSuiteCount) quarantined suite(s) skipped; see Tests/quarantine.txt\n"
         }
         if failedTests > 0 {
-            print("FAILED")
+            summary += "Failures:\n"
+            for line in failureLines { summary += line + "\n" }
+            summary += "FAILED"
+            print(summary)
             exit(1)
         } else {
-            print("ALL TESTS PASSED")
+            summary += "ALL TESTS PASSED"
+            print(summary)
         }
     }
 
