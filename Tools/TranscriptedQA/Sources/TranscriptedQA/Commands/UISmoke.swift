@@ -352,7 +352,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.settings.sidebar.connect-agent",
             "transcripted.settings.sidebar.settings-toggle",
         ]
-        // Open Transcripted lands on Today; Meetings is checked from the sidebar below.
+        // Open Transcripted lands on Today; Meetings (empty here, so it offers import) is checked below.
         let homeIDs = [
             "transcripted.today.page",
         ]
@@ -382,7 +382,7 @@ final class UIAutomationSmokeRunner {
                 id: "settings-meetings",
                 title: "Meetings settings surface is visible",
                 triggerID: "transcripted.settings.sidebar.home",
-                requiredIDs: ["transcripted.home.find.toggle"]
+                requiredIDs: ["transcripted.home.find.toggle", "transcripted.home.meetings.empty.import-audio"]
             ),
             (
                 id: "settings-dictations",
@@ -454,11 +454,11 @@ final class UIAutomationSmokeRunner {
 
         // The settings area is one combined scrolling page (the old
         // General / Storage / About tab strip was removed): after the toggle,
-        // all three section identifiers must be present in a single snapshot.
+        // all three sections and the import row must be in a single snapshot.
         let settingsSectionIDs = [
             "transcripted.settings.page.general",
             "transcripted.settings.page.storage",
-            "transcripted.settings.page.about",
+            "transcripted.settings.page.about", "transcripted.settings.general.transcribe-audio-file",
         ]
 
         guard waitUntil(timeout: timeout, condition: {
