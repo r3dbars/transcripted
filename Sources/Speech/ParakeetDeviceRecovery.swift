@@ -34,16 +34,15 @@ extension ParakeetEngine {
             // window before the timestamp is taken.
             queue: nil
         ) { [weak self] _ in
-            let observedAt = CFAbsoluteTimeGetCurrent()
-            let token = bindingIntent.tokenForNotification(
+            let arrival = ParakeetConfigChangeArrival.stamp(
                 engineID: observedEngineID,
-                at: observedAt,
+                bindingIntent: bindingIntent,
                 window: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
             )
             self?.scheduleInputDeviceNameRefresh(
                 configChangeSource: .audioEngine,
-                observedAt: observedAt,
-                bindingToken: token
+                observedAt: arrival.observedAt,
+                bindingToken: arrival.bindingToken
             )
         }
     }
@@ -204,30 +203,29 @@ extension ParakeetEngine {
         let observedRouteIdentity = currentSelection.map {
             ParakeetAudioRouteIdentity(selection: $0)
         }
-        if let bindingToken, source == .audioEngine,
-           bindingToken.engineID == ObjectIdentifier(audioEngine) {
-            await bindingToken.waitForResolution(
-                nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
-            )
-            guard !Task.isCancelled, !isShuttingDown,
-                  !isSharedMeetingMicClaimCurrent,
-                  pinnedDictationRecording == nil,
-                  !audioStartInProgress, !audioStopInProgress,
-                  generationAtAdmission == audioConfigObservationGeneration else { return }
-        }
-        if ParakeetSelfInducedConfigChangePolicy.shouldIgnore(
-               source: source,
-               observedAt: configChangeObservedAt,
-               ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil,
-               windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
-               stableRoute: stableAudioRouteIdentity,
-               observedRoute: observedRouteIdentity,
-               bindingToken: bindingToken,
-               currentEngine: audioEngine,
-               forceForMicrophoneSharing: forceForMicrophoneSharing
-           ) {
-            return
-        }
+        let admission = await ParakeetConfigChangeAdmission.decide(
+            ParakeetConfigChangeAdmissionRequest(
+                source: source, observedAt: configChangeObservedAt, bindingToken: bindingToken,
+                forceForMicrophoneSharing: forceForMicrophoneSharing,
+                ignoreWindowUntil: ignoreInputSelectionConfigChangesUntil),
+            observedRoute: observedRouteIdentity,
+            stableRoute: stableAudioRouteIdentity,
+            windowDuration: TranscriptedConstants.selfInducedConfigChangeIgnoreWindow,
+            currentEngine: { audioEngine },
+            waitForResolution: { token in
+                await token.waitForResolution(
+                    nativeTimeoutNanoseconds: TranscriptedConstants.audioStartOperationTimeout
+                )
+            },
+            stillAdmitted: {
+                !Task.isCancelled && !isShuttingDown
+                    && !isSharedMeetingMicClaimCurrent
+                    && pinnedDictationRecording == nil
+                    && !audioStartInProgress && !audioStopInProgress
+                    && generationAtAdmission == audioConfigObservationGeneration
+            }
+        )
+        guard admission == .recover else { return }
         audioConfigObservationGeneration &+= 1
         let observationGeneration = audioConfigObservationGeneration
 
