@@ -96,7 +96,7 @@
     },
     {
       "name": "AppState",
-      "paths": ["Sources/TranscriptedAppState.swift"],
+      "paths": ["Sources/App/TranscriptedAppState.swift"],
       "mayDependOn": ["Capture", "WritingBridge", "Meeting", "Dictation", "Speech", "UIShared", "Support", "Observability", "Core:core-vocab"],
       "agentsDoc": "Sources/AGENTS.md"
     },

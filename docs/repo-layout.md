@@ -161,7 +161,7 @@ The app compiles as one Swift target (plus the `TranscriptedWritingCore` module)
 | UIOverlay | `Sources/UI/Overlay/` | UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
 | UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
 | UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
-| AppState | `Sources/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
+| AppState | `Sources/App/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
 | AppShell | `Sources/App/`, `Sources/TranscriptedApp.swift`, `Sources/TranscriptedAppDelegate+*.swift`, `Sources/TranscriptedMenuCommands.swift` | anything; nothing depends on it |
 
 Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.

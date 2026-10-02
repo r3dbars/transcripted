@@ -17,7 +17,7 @@ Important entry points:
 - `TranscriptedAppDelegate+SettingsActions.swift` — Settings actions, the audio-import queue, and the auto call detection preference
 - `TranscriptedAppDelegate+Lifecycle.swift` — login-item launch detection and the Quit confirmation dialogs
 - `TranscriptedAppDelegate+LaunchReports.swift` — launch UI smoke and first-run reliability reports for automated launches
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, quiet launch-time warmup of the dictation and meeting models (re-run on model switch and wake), wake-recovery coordination, and lazy `MeetingSessionController`
+- `App/TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, quiet launch-time warmup of the dictation and meeting models (re-run on model switch and wake), wake-recovery coordination, and lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — app-active macOS command menus for capture, import, navigation, and speaker search; these are additive window-scoped shortcuts and do not replace global physical triggers
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
 - `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode, meeting shortcut compatibility, and legacy hotkey migration helpers
@@ -71,7 +71,7 @@ Every Swift file here belongs to a module in `.agents/modules.json`, and `script
 
 Lab rule: the lab control channel must stay compiled out of beta/release builds. Keep everything that references its env var inside `LabControlChannel.swift`'s `#if`; `build-beta.sh` greps the built binary for that name and fails the release if it's there.
 
-**AppState** (`TranscriptedAppState.swift`). The service container: owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, the lazy `MeetingSessionController`, model warmup and wake recovery. Public surface: `TranscriptedAppState`. May depend on Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability and Core `core-vocab`. The UI modules (Overlay, MenuBar, Settings) may take the container; nothing below the UI may. Grandfathered: `Speech/DictationSession.swift` takes it today; the fix is injecting the narrow dependencies it uses.
+**AppState** (`App/TranscriptedAppState.swift`). The service container: owns `ContextCaptureEngine`, `STTRouter`, `WritingController`, the lazy `MeetingSessionController`, model warmup and wake recovery. Public surface: `TranscriptedAppState`. May depend on Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability and Core `core-vocab`. The UI modules (Overlay, MenuBar, Settings) may take the container; nothing below the UI may. Grandfathered: `Speech/DictationSession.swift` takes it today; the fix is injecting the narrow dependencies it uses.
 
 **Support** (`Support/`, `Accessibility/`, `Reliability/`). The base layer: preferences, storage paths, the capture library, permissions, constants, `AutomatedLaunchEnvironment`, clipboard paste-back, model-cache inventory, AX helpers and wake recovery. May depend only on Core `core-vocab`. Grandfathered: `TranscriptedPermissionAccess` naming `CoreAudioSystemAudioCapture`, and `ClaudeDesktopIntegrationInstaller` naming Observability's `AnalyticsRuntimeConfiguration`. Details: `Support/AGENTS.md`, `Accessibility/AGENTS.md`, `Reliability/AGENTS.md`.
 
