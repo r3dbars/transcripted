@@ -64,3 +64,107 @@ final class ParakeetTimedAudioEngineWorkLimiter: @unchecked Sendable {
         lock.unlock()
     }
 }
+
+extension ParakeetTimedAudioEngineWorkLimiter {
+    /// Runs `work` against `resource` on `queue`, resuming the caller on
+    /// whichever comes first: the work's result or the timeout.
+    ///
+    /// Queued work whose lease was claimed (`isWorkCurrent` false) never
+    /// starts. Work that loses its lease while running is cleaned up on its
+    /// own worker before the caller resumes. Work that outlives its timeout
+    /// gets `cleanupAfterLateCompletion` once it finally returns.
+    /// `ParakeetEngine.runTimedAudioEngineWork` calls this with its current
+    /// `AVAudioEngine` and serial queue.
+    func run<Resource, T>(
+        on queue: DispatchQueue,
+        resource: Resource,
+        operation: String,
+        timeoutNanoseconds: UInt64,
+        isWorkCurrent: (() -> Bool)? = nil,
+        cleanupAfterCancellation: ((Resource) -> Void)? = nil,
+        cleanupAfterLateCompletion: ((Resource) -> Void)? = nil,
+        _ work: @escaping (Resource) throws -> T
+    ) async throws -> T {
+        let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
+        guard let workerLease = acquire() else {
+            throw ParakeetAudioEngineWorkError.circuitOpen(
+                operation: operation,
+                activeWorkers: activeWorkerCount
+            )
+        }
+        let resumeLock = NSLock()
+        var didResume = false
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            func resumeOnce(_ result: Result<T, Error>) {
+                var shouldResume = false
+                resumeLock.withLock {
+                    if !didResume {
+                        didResume = true
+                        shouldResume = true
+                    }
+                }
+                guard shouldResume else { return }
+                continuation.resume(with: result)
+            }
+
+            queue.async { [workerLease] in
+                // A timed-out caller may have moved on to a replacement queue.
+                // Keep this lease until the old queue block itself returns; if
+                // CoreAudio is permanently wedged, the process-wide slot stays
+                // occupied and later work fails closed instead of spawning more
+                // blocked queues and native graphs.
+                defer { workerLease.release() }
+                let shouldRun = resumeLock.withLock { !didResume }
+                guard shouldRun else { return }
+                guard isWorkCurrent?() != false else {
+                    resumeOnce(.failure(CancellationError()))
+                    return
+                }
+
+                var result: Result<T, Error>
+                do {
+                    result = .success(try work(resource))
+                } catch {
+                    result = .failure(error)
+                }
+
+                let workStayedCurrent = isWorkCurrent?() != false
+                if !workStayedCurrent {
+                    cleanupAfterCancellation?(resource)
+                    result = .failure(CancellationError())
+                }
+
+                var completedBeforeTimeout = false
+                resumeLock.withLock {
+                    if !didResume {
+                        didResume = true
+                        completedBeforeTimeout = true
+                    }
+                }
+
+                if completedBeforeTimeout {
+                    continuation.resume(with: result)
+                } else if !workStayedCurrent {
+                    // Cancellation cleanup already ran synchronously on this
+                    // worker before any successor can use the replacement graph.
+                } else {
+                    cleanupAfterLateCompletion?(resource)
+                }
+            }
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
+            ) {
+                resumeOnce(
+                    .failure(
+                        ParakeetAudioEngineWorkError.timedOut(
+                            operation: operation,
+                            timeoutMs: timeoutMs
+                        )
+                    )
+                )
+            }
+        }
+    }
+}
