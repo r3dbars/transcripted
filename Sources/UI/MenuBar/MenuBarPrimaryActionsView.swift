@@ -24,8 +24,8 @@ final class MenuBarPrimaryActionsView: NSView {
         dictationRow.onPress = { [weak self] in self?.onStartDictation?() }
         meetingRow.onPress = { [weak self] in self?.onStartMeeting?() }
 
-        meetingRow.setAutomationIdentifier("transcripted.menubar.primary.start-meeting")
-        dictationRow.setAutomationIdentifier("transcripted.menubar.primary.start-dictation")
+        meetingRow.setAutomationIdentifier(.startMeeting)
+        dictationRow.setAutomationIdentifier(.startDictation)
 
         [meetingRow, dictationRow].forEach(addSubview(_:))
     }

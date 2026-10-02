@@ -125,6 +125,10 @@ final class MenuBarActionRowView: NSControl {
         setAccessibilityIdentifier(rawValue)
     }
 
+    func setAutomationIdentifier(_ id: MenuBarAutomationID) {
+        setAutomationIdentifier(id.rawValue)
+    }
+
     private func setupViews() {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)

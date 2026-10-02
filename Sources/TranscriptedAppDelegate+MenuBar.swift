@@ -291,3 +291,6 @@ extension TranscriptedAppDelegate {
         }
     }
 }
+
+// The menu commands route through `AppMenuActionPerforming.perform(_:)`.
+extension TranscriptedAppDelegate: AppMenuActionPerforming {}

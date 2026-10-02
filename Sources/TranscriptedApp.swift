@@ -819,8 +819,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.image = MenuBarGlyph.idle.image(accessibilityDescription: "Transcripted")
         button.imagePosition = .imageOnly
         button.toolTip = "Transcripted"
-        button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
-        button.setAccessibilityIdentifier("transcripted.status-item.button")
+        button.identifier = NSUserInterfaceItemIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
+        button.setAccessibilityIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
         button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
@@ -900,12 +900,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func menuOpenPage(_ page: TranscriptedSettingsPage) {
-        showSettingsWindow(page: page, source: "menu_command")
+        showSettingsWindow(page: page, source: AppMenuSettingsRoute.pageSource)
     }
 
     func menuOpenSettings() {
         closePopover()
-        showSettingsWindow(page: .general, source: "app_menu")
+        showSettingsWindow(page: AppMenuSettingsRoute.settingsPage, source: AppMenuSettingsRoute.settingsSource)
     }
 
     func menuFindSpeaker() {

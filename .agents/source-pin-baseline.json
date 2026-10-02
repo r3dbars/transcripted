@@ -27,6 +27,6 @@
     "Tests/SingleInstanceGuardTests.swift": 3,
     "Tests/StatusItemPresentationTests.swift": 8,
     "Tests/TranscriptedCoreTests/AudioTests/AudioInitializationTests.swift": 10,
-    "Tests/UIAutomationSurfaceContractTests.swift": 257
+    "Tests/UIAutomationSurfaceContractTests.swift": 158
   }
 }
