@@ -226,6 +226,9 @@ rules:
       - ".github/workflows/**"
       - "docs/repo-layout.md"
       - "*.sh"
+      - "scripts/entrypoints/build-deps.sh"
+      - "Sources/**/*.swift"
+      - "Tests/**/*.swift"
       - "scripts/dev/check-known-traps.py"
     checks:
       - "python3 scripts/dev/check-known-traps.py --self-test"

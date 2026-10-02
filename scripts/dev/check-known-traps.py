@@ -16,6 +16,12 @@ do:
                  else in a CLAUDE.md is a second copy of the rules that drifts.
                  Only tracked CLAUDE.md files count. A CLAUDE.local.md anywhere
                  on disk fails too: Claude Code reads it instead of AGENTS.md.
+  fluidaudio-pin A Tools package that pulls FluidAudio from SwiftPM pins the
+                 same version as FLUID_AUDIO_VERSION in build-deps.sh, so a
+                 bundled helper never runs an older FluidAudio than the app.
+  doc-pointers   A Sources/ or Tests/ Swift comment that names a repo .md path
+                 ("Read Sources/Speech/AGENTS.md first") points at a file that
+                 exists. Renamed docs used to leave dead pointers behind.
 
 Other traps already have their own checks: source-text tests
 (check-test-shape.py), source lists (check-build-source-lists.py plus the
@@ -31,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -150,10 +157,64 @@ def check_agent_docs(root: Path, stubs_required: bool | None = None) -> list[str
     return problems
 
 
+FLUID_AUDIO_DEFAULT = re.compile(r'^FLUID_AUDIO_VERSION="\$\{FLUID_AUDIO_VERSION:-([^}]+)\}"', re.MULTILINE)
+# Any version string on the FluidAudio package line: exact:, from:,
+# .upToNextMinor(from:), and so on.
+FLUID_AUDIO_PACKAGE_PIN = re.compile(r'FluidAudio(?:\.git)?"[^\n]*?"(\d+\.\d+\.\d+)"')
+
+
+def check_fluidaudio_pin(root: Path) -> list[str]:
+    deps_script = root / "scripts/entrypoints/build-deps.sh"
+    if not deps_script.exists():
+        return []
+    match = FLUID_AUDIO_DEFAULT.search(deps_script.read_text(encoding="utf-8"))
+    if not match:
+        return ["scripts/entrypoints/build-deps.sh no longer sets FLUID_AUDIO_VERSION. Update check_fluidaudio_pin."]
+    app_version = match.group(1)
+    problems: list[str] = []
+    for manifest in sorted((root / "Tools").glob("*/Package.swift")):
+        for pinned in FLUID_AUDIO_PACKAGE_PIN.findall(manifest.read_text(encoding="utf-8")):
+            if pinned != app_version:
+                problems.append(
+                    f"{manifest.relative_to(root)} pins FluidAudio {pinned}, but the app builds "
+                    f"{app_version} (FLUID_AUDIO_VERSION in scripts/entrypoints/build-deps.sh). Pin the same version."
+                )
+    return problems
+
+
+DOC_POINTER = re.compile(r"\b((?:Sources|Tests|Tools|docs|scripts)/[\w./+-]*?\.md)\b")
+# Pointers that aren't meant to resolve in this repo, each with the reason.
+DOC_POINTERS_ELSEWHERE = {
+    "docs/plans/": "Tilde's plan docs, kept verbatim from the Writing port (docs/writing-port-ledger.md)",
+    "docs/a-1.md": "an example string in WritingSecretScrubber's comment, not a pointer",
+}
+
+
+def check_doc_pointers(root: Path) -> list[str]:
+    problems: list[str] = []
+    for folder in ("Sources", "Tests"):
+        for path in sorted((root / folder).rglob("*.swift")):
+            for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+                # `//` not preceded by ":" so a URL in a string isn't a comment.
+                parts = re.split(r"(?<!:)//", line, maxsplit=1)
+                comment = parts[1] if len(parts) == 2 else ""
+                for pointer in DOC_POINTER.findall(comment):
+                    if pointer.startswith(tuple(DOC_POINTERS_ELSEWHERE)):
+                        continue
+                    if not (root / pointer).exists():
+                        problems.append(
+                            f"{path.relative_to(root)}:{line_number} points at {pointer}, which doesn't exist. "
+                            "Point it at the doc that replaced it (agent docs are AGENTS.md)."
+                        )
+    return problems
+
+
 CHECKS = (
     ("tools-ci", check_tools_ci),
     ("root-wrappers", check_root_wrappers),
     ("agent-docs", check_agent_docs),
+    ("fluidaudio-pin", check_fluidaudio_pin),
+    ("doc-pointers", check_doc_pointers),
 )
 
 
@@ -219,6 +280,39 @@ def self_test() -> None:
         problems = check_agent_docs(root, stubs_required=False)
         assert len(problems) == 1 and "CLAUDE.local.md makes Claude Code skip" in problems[0], problems
         (root / "CLAUDE.local.md").unlink()
+
+        (root / "scripts/entrypoints").mkdir(parents=True)
+        (root / "scripts/entrypoints/build-deps.sh").write_text(
+            'FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.17.0}"\n', encoding="utf-8"
+        )
+        (root / "Tools/Alpha/Package.swift").write_text(
+            '.package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.4")\n',
+            encoding="utf-8",
+        )
+        problems = check_fluidaudio_pin(root)
+        assert len(problems) == 1 and "pins FluidAudio 0.15.4" in problems[0], problems
+        (root / "Tools/Alpha/Package.swift").write_text(
+            '.package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.0")\n',
+            encoding="utf-8",
+        )
+        assert check_fluidaudio_pin(root) == []
+        (root / "Tools/Alpha/Package.swift").write_text(
+            '.package(url: "https://github.com/FluidInference/FluidAudio.git", .upToNextMinor(from: "0.16.1"))\n',
+            encoding="utf-8",
+        )
+        assert len(check_fluidaudio_pin(root)) == 1
+        (root / "Tools/Alpha/Package.swift").unlink()
+
+        (root / "Sources/Speech").mkdir(parents=True)
+        (root / "Sources/Speech/AGENTS.md").write_text("# speech\n", encoding="utf-8")
+        (root / "Sources/Speech/Route.swift").write_text(
+            "// Read Sources/Speech/CLAUDE.md before changing it.\n"
+            "let name = \"Sources/Speech/CLAUDE.md\" // see Sources/Speech/AGENTS.md\n"
+            "let url = \"https://example.com/docs/missing.md\"\n",
+            encoding="utf-8",
+        )
+        problems = check_doc_pointers(root)
+        assert len(problems) == 1 and "Route.swift:1 points at Sources/Speech/CLAUDE.md" in problems[0], problems
 
     # In a git checkout only tracked CLAUDE.md files count.
     with tempfile.TemporaryDirectory() as tmp:

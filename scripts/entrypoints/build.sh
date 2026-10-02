@@ -72,6 +72,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
+source "$ENTRYPOINT_DIR/lib/running-bundle-guard.sh"
 
 ensure_build_prerequisites() {
     if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then
@@ -444,6 +445,7 @@ bundle_llama_server() {
 
 echo "Building Transcripted..."
 
+refuse_if_bundle_running "$APP_BUNDLE"
 ensure_build_prerequisites
 ensure_deps_ready
 ORIGINAL_SENTRY_RELEASE_WAS_SET=0

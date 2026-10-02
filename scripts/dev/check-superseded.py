@@ -5,8 +5,12 @@ When a PR goes dirty (conflicting), the reflex is to spin up a fresh repair
 branch. But sometimes another thread already merged that exact change under a
 different PR number, so the repair branch is dead on arrival. This guard fetches
 the target title (from a PR number, a branch, or a raw string) and searches
-merged PRs for a title that covers the same scope. If it finds one, it prints a
-loud STOP and exits non-zero before any repair work happens.
+merged PRs for a title that covers the same scope. With --pr it first checks
+the PR itself: already merged, or its head commit already on origin/main
+(merge commits only; squash merges are caught by the title search; it reads
+the local origin/main, so fetch first). If any of
+that hits, it prints a loud STOP and exits non-zero before any repair work
+happens.
 
 Usage:
     scripts/dev/check-superseded.py --pr 1499
@@ -18,7 +22,8 @@ Usage:
 Exit codes:
     0  clear - no merged PR looks like it already did this
     1  usage or lookup error
-    3  STOP - a merged PR already covers this scope
+    3  STOP - a merged PR already covers this scope, or (--pr) that PR's own
+       work is already on main
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from typing import Callable
 
 # Similarity at or above this (0-1) counts as "same scope already merged".
 DEFAULT_THRESHOLD = 0.78
@@ -129,6 +135,30 @@ def similarity(a: str, b: str) -> float:
 def title_for_pr(number: int) -> str:
     data = json.loads(run_gh(["pr", "view", str(number), "--json", "title"]))
     return data.get("title", "").strip()
+
+
+def head_on_main(head_sha: str, base_ref: str = "origin/main") -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", head_sha, base_ref],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def landed_reason(state: str, head_sha: str, on_main: Callable[[str], bool]) -> str | None:
+    """Why this PR's own work is already on main, or None."""
+    if state == "MERGED":
+        return "it is already merged"
+    if head_sha and on_main(head_sha):
+        return f"its head {head_sha[:9]} is already on origin/main"
+    return None
+
+
+def pr_landed_reason(number: int) -> str | None:
+    data = json.loads(run_gh(["pr", "view", str(number), "--json", "state,headRefOid"]))
+    return landed_reason(data.get("state", ""), data.get("headRefOid", ""), head_on_main)
 
 
 def title_for_branch(branch: str) -> str:
@@ -285,6 +315,16 @@ def self_test() -> int:
                 f"  {query!r}: expected superseded={expect}, got {got} "
                 f"(top={hits[0][1].title if hits else None!r})"
             )
+    landed_cases = [
+        ("MERGED", "abc", False, True),
+        ("OPEN", "abc", True, True),
+        ("OPEN", "abc", False, False),
+        ("CLOSED", "", True, False),
+    ]
+    for state, sha, on_main, expect in landed_cases:
+        got = landed_reason(state, sha, lambda _sha, value=on_main: value) is not None
+        if got != expect:
+            failures.append(f"  landed_reason({state!r}, {sha!r}, on_main={on_main}): expected {expect}, got {got}")
     if failures:
         print("check-superseded self-test FAILED:", file=sys.stderr)
         for line in failures:
@@ -334,6 +374,20 @@ def main() -> int:
     if not query_title:
         print("error: could not determine a title to check.", file=sys.stderr)
         return 1
+
+    if args.pr is not None:
+        try:
+            reason = pr_landed_reason(args.pr)
+        except RuntimeError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        if reason:
+            if args.json:
+                print(json.dumps({"query": query_title, "superseded": True,
+                                  "matches": [], "pr": args.pr, "reason": reason}, indent=2))
+            else:
+                print(f"STOP: #{args.pr} needs no repair: {reason}.")
+            return 3
 
     try:
         candidates = fetch_candidates(query_title)

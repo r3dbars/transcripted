@@ -102,6 +102,7 @@ Folder summaries first, then every file by role. Counts are left out on purpose;
   - `NemotronDiarizationRunner.swift` — loads Nemotron 3 and runs it on a serial queue (`TRANSCRIPTED_NEMOTRON_PRESET` picks the preset)
   - `NemotronTurnBuilder.swift` — pure: Nemotron frame probabilities → non-overlapping speaker turns
   - `FluidAudioCompatibility.swift` — keeps the FluidAudio 0.17 upgrade from changing what shipped: unpinned diarizer model caches and the tuned offline config in 0.17 units
+  - FluidAudio's version lives in one place: `FLUID_AUDIO_VERSION` in `scripts/entrypoints/build-deps.sh` (a Tools package that pulls FluidAudio from SwiftPM pins the same version; `check-known-traps.py` compares them). build-deps checks the source out into a temp dir and deletes it, so to read FluidAudio's code use the SwiftPM cache: `git -C ~/Library/Caches/org.swift.swiftpm/repositories/FluidAudio-* show v<version>:<path>`. Don't trust a `.build/checkouts/FluidAudio` in some other checkout; those are often older.
   - `RecordingValidator.swift` — pre-recording system checks
   - `FailedTranscriptionManager.swift` — persistent failed-transcription queue
   - `CaptureLibraryPathSafety.swift` — synced copy of the capture-library path checks (also in `Sources/Support/` and `Tools/TranscriptedCaptureKit/`)

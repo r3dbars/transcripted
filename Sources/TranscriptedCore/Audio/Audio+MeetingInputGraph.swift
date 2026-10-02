@@ -8,7 +8,7 @@ import Synchronization
 // Meeting mic AVAudioEngine graph: build, validate, publish, discard,
 // and safe input-tap teardown. Every `AVAudioEngine()` / `.inputNode`
 // touch binds the macOS default input first; with AirPods as the default
-// that flips them into call mode. See Sources/Speech/CLAUDE.md.
+// that flips them into call mode. See Sources/Speech/AGENTS.md.
 extension Audio {
     func tearDownInputTapSafely(
         engine: AVAudioEngine,
