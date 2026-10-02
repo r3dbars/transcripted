@@ -12,7 +12,7 @@ enum FocusedTextPasteConfirmationPolicy {
     /// Accessibility clients can otherwise block for several seconds when an editor is
     /// briefly busy applying a paste (Notes is a common example). Confirmation is a
     /// best-effort signal and must never stall delivery or the target application.
-    static let messagingTimeout: Float = 0.05
+    private static let messagingTimeout: Float = 0.05
 
     /// The focused UI element, with every AX read on it and on the system-wide
     /// element bounded by `messagingTimeout`. Returns nil when the focused-element
@@ -61,7 +61,7 @@ enum FocusedTextPasteConfirmationPolicy {
     /// (kitty, Alacritty, Ghostty, Warp) report their window or a group, yet
     /// all of them take a paste. Refuting those told people "Not pasted" after
     /// the text landed.
-    static let nonTextEntryRoles: Set<String> = [
+    private static let nonTextEntryRoles: Set<String> = [
         "AXWebArea", "AXStaticText", "AXLink", "AXImage",
         "AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
         "AXDisclosureTriangle", "AXSlider",
