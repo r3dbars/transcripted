@@ -4,52 +4,6 @@ import FluidAudio
 import QuartzCore
 import TranscriptedCore
 
-/// 16 kHz mono samples waiting for one track's recognizer. Filled from the
-/// live-PCM delivery queue (never a CoreAudio callback), drained by the
-/// track. Bounded: past `capacity` the oldest audio goes and the track is
-/// told, so it can close the utterance it was in.
-final class LiveMeetingCaptionSampleQueue: @unchecked Sendable {
-    private let lock = NSLock()
-    private var samples: [Float] = []
-    private var overflowed = false
-    let capacity: Int
-
-    /// 30 seconds rides out a dictation (the tracks pause while one runs)
-    /// and the first model load.
-    init(capacity: Int = 16_000 * 30) {
-        self.capacity = max(1, capacity)
-    }
-
-    func append(_ newSamples: [Float]) {
-        lock.withLock {
-            samples.append(contentsOf: newSamples)
-            if samples.count > capacity {
-                samples.removeFirst(samples.count - capacity)
-                overflowed = true
-            }
-        }
-    }
-
-    /// Up to `limit` samples in arrival order, and whether audio was lost
-    /// since the last take.
-    func take(limit: Int) -> (samples: [Float], overflowed: Bool) {
-        lock.withLock {
-            let count = min(limit, samples.count)
-            let taken = Array(samples.prefix(count))
-            samples.removeFirst(count)
-            defer { overflowed = false }
-            return (taken, overflowed)
-        }
-    }
-
-    func removeAll() {
-        lock.withLock {
-            samples.removeAll()
-            overflowed = false
-        }
-    }
-}
-
 /// Drives one FluidAudio streaming Parakeet EOU recognizer for one capture
 /// track. One per track: the recognizer holds a single decoder and endpoint
 /// state, so mixing mic and call audio would corrupt both.
@@ -78,11 +32,15 @@ actor LiveMeetingCaptionTrack {
     static let quietCloseSeconds: Double = 2.5
     static let longestUtteranceSeconds: Double = 20
     private static let feedSamples = 16_000
+    /// One encoder step of new audio. Waking for less only re-reads the
+    /// same partial.
+    private static let minimumFeedSamples = LiveMeetingCaptionTrack.chunkSize.shiftSamples
 
     nonisolated let queue = LiveMeetingCaptionSampleQueue()
     private let manager = StreamingEouAsrManager(chunkSize: LiveMeetingCaptionTrack.chunkSize)
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)
-    private var onEvent: (@Sendable (Event) -> Void)?
+    private var onEvent: (@Sendable (Event, Int) -> Void)?
+    private var eventSequence = 0
     private var shouldYield: (@Sendable () async -> Bool)?
     private var drainTask: Task<Void, Never>?
     private var lastPartial = ""
@@ -95,6 +53,11 @@ actor LiveMeetingCaptionTrack {
     func load() async -> LoadResult {
         do {
             try await manager.loadModels()
+            // Stopped while loading: don't keep the models until next time.
+            if Task.isCancelled {
+                await manager.cleanup()
+                return .failed
+            }
         } catch {
             TranscriptedCore.AppLogger.pipeline.warning("Live transcript model failed to load", ["error_type": String(describing: type(of: error))])
             return .failed
@@ -109,12 +72,14 @@ actor LiveMeetingCaptionTrack {
 
     func start(
         shouldYield: @escaping @Sendable () async -> Bool,
-        onEvent: @escaping @Sendable (Event) -> Void
+        onEvent: @escaping @Sendable (Event, Int) -> Void
     ) {
         self.onEvent = onEvent
         self.shouldYield = shouldYield
         drainTask?.cancel()
-        drainTask = Task { [weak self] in await self?.drain() }
+        // Utility: the live transcript must never compete with dictation or
+        // the UI at user-initiated priority.
+        drainTask = Task(priority: .utility) { [weak self] in await self?.drain() }
     }
 
     /// Stops feeding and frees the model. Words still being heard are
@@ -134,19 +99,20 @@ actor LiveMeetingCaptionTrack {
 
     private func drain() async {
         while !Task.isCancelled {
+            guard queue.count >= Self.minimumFeedSamples else {
+                await closeIfQuiet()
+                try? await Task.sleep(for: .milliseconds(120))
+                continue
+            }
             if let shouldYield, await shouldYield() {
-                // Dictation has the Neural Engine; audio waits in the queue.
-                try? await Task.sleep(for: .milliseconds(200))
+                // A dictation or a saved meeting has the Neural Engine; audio
+                // waits in the queue and the transcript catches up after.
+                try? await Task.sleep(for: .milliseconds(250))
                 continue
             }
             let (samples, overflowed) = queue.take(limit: Self.feedSamples)
             if overflowed {
                 await closeUtterance()
-            }
-            guard !samples.isEmpty else {
-                await closeIfQuiet()
-                try? await Task.sleep(for: .milliseconds(60))
-                continue
             }
             await feed(samples)
         }
@@ -172,7 +138,7 @@ actor LiveMeetingCaptionTrack {
         if partial != lastPartial {
             lastPartial = partial
             lastPartialAt = CACurrentMediaTime()
-            if !partial.isEmpty { onEvent?(.partial(partial)) }
+            if !partial.isEmpty { emit(.partial(partial)) }
         }
         if !lastPartial.isEmpty, Double(utteranceSamples) / 16_000 > Self.longestUtteranceSeconds {
             await closeUtterance()
@@ -194,7 +160,12 @@ actor LiveMeetingCaptionTrack {
         lastPartialAt = nil
         utteranceSamples = 0
         await manager.reset()
-        if !text.isEmpty { onEvent?(.utterance(text)) }
+        if !text.isEmpty { emit(.utterance(text)) }
+    }
+
+    private func emit(_ event: Event) {
+        eventSequence += 1
+        onEvent?(event, eventSequence)
     }
 
     private func buffer(from samples: [Float]) -> AVAudioPCMBuffer? {

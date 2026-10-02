@@ -203,6 +203,9 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         let showsTranscript = Self.showsLiveTranscript(content)
         content?.showsLiveTranscript = showsTranscript
         guard content != meeting else { return }
+        // The view must exist before a drop-down asks for it, or the first
+        // hover would draw the level lanes instead.
+        if showsTranscript { ensureLiveTranscriptView() }
         meeting = content
         live.meetingElapsed = content?.duration ?? 0
         if case .transcribing(let progress, _)? = content?.phase {
@@ -227,16 +230,24 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     func updateLiveTranscript(_ log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status) {
         // Nothing to show yet: don't build the panel for it.
         if islandView == nil, log.isEmpty, status == .off { return }
-        let (_, islandView) = ensurePanel()
-        let view = islandView.liveTranscriptView ?? NotchIslandLiveTranscriptView(width: NotchIslandDropView.contentWidth)
-        islandView.liveTranscriptView = view
-        view.apply(log, status: status)
+        ensureLiveTranscriptView().apply(log, status: status)
         // The setting was flipped mid-meeting: swap lanes and transcript.
         if var meeting, meeting.showsLiveTranscript != Self.showsLiveTranscript(meeting) {
             meeting.showsLiveTranscript = Self.showsLiveTranscript(meeting)
             self.meeting = meeting
             render()
         }
+    }
+
+    @discardableResult
+    private func ensureLiveTranscriptView() -> NotchIslandLiveTranscriptView {
+        let (_, islandView) = ensurePanel()
+        if let view = islandView.liveTranscriptView { return view }
+        let view = NotchIslandLiveTranscriptView(width: NotchIslandDropView.contentWidth)
+        islandView.liveTranscriptView = view
+        let captions = LiveMeetingCaptions.shared
+        view.apply(captions.log, status: captions.status)
+        return view
     }
 
     private static func showsLiveTranscript(_ meeting: NotchIslandMeetingContent?) -> Bool {

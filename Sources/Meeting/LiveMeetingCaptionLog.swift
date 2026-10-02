@@ -22,6 +22,10 @@ struct LiveMeetingCaptionLog: Equatable, Sendable {
     let maximumCharacters: Int
     private var committedCharacters = 0
 
+    /// A long monologue continues on a new line (same speaker) past this, so
+    /// no single line grows with the meeting and every edit stays small.
+    static let longestLineBytes = 1_200
+
     /// About eight hours of two-sided talk. Past that the oldest lines go.
     init(maximumCharacters: Int = 1_000_000) {
         self.maximumCharacters = max(1, maximumCharacters)
@@ -38,7 +42,8 @@ struct LiveMeetingCaptionLog: Equatable, Sendable {
         tentative[track] = nil
         let trimmed = Self.clean(text)
         guard !trimmed.isEmpty else { return }
-        if let last = lines.indices.last, lines[last].track == track {
+        if let last = lines.indices.last, lines[last].track == track,
+           lines[last].text.utf8.count < Self.longestLineBytes {
             lines[last].text += " " + trimmed
             committedCharacters += trimmed.count + 1
         } else {
@@ -46,10 +51,12 @@ struct LiveMeetingCaptionLog: Equatable, Sendable {
             committedCharacters += trimmed.count
         }
         guard committedCharacters > maximumCharacters else { return }
+        var removed = 0
         while committedCharacters > maximumCharacters, lines.count > 1 {
             committedCharacters -= lines.removeFirst().text.count
+            removed += 1
         }
-        trimGeneration += 1
+        if removed > 0 { trimGeneration += 1 }
     }
 
     /// Plain text for Copy all: one "You:" or "Them:" paragraph per turn,

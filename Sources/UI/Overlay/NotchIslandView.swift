@@ -693,9 +693,8 @@ final class NotchIslandDropView: NSView {
             add(titleBlock("Recording", subtitle))
             if showsTranscript, let liveTranscriptView {
                 liveTranscriptView.removeFromSuperview()
-                add(liveTranscriptView)
+                stack.addArrangedSubview(liveTranscriptView) // not add(): it pins its own size
                 readableText.append(liveTranscriptView)
-                // Each opening starts at the newest words.
                 DispatchQueue.main.async { [weak liveTranscriptView] in liveTranscriptView?.scrollToNewest() }
                 var leading = [copyTranscriptButton()]
                 if note == .off {

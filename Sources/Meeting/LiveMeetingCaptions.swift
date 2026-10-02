@@ -23,18 +23,28 @@ final class LiveMeetingCaptions: ObservableObject {
     @Published private(set) var log = LiveMeetingCaptionLog()
     @Published private(set) var status: Status = .off
 
-    /// Read on the live-PCM queue: whether offered audio has anywhere to go.
-    nonisolated private let accepting = Atomic<Bool>(false)
-    nonisolated private let microphone = LiveMeetingCaptionTrack()
-    nonisolated private let system = LiveMeetingCaptionTrack()
+    /// This meeting's two recognizers, read on the live-PCM queue. A fresh
+    /// pair per meeting, so a stop's cleanup can never reach the next
+    /// meeting's models; nil when nothing runs, so an idle app holds no
+    /// buffers or models.
+    private struct Tracks: Sendable {
+        let microphone = LiveMeetingCaptionTrack()
+        let system = LiveMeetingCaptionTrack()
+    }
+    nonisolated private let current = Mutex<Tracks?>(nil)
     private var sessionID: UUID?
+    private var lastLogSessionID: UUID?
+    /// Per track, the newest event applied, so a partial that lands late
+    /// can't bring back words already committed.
+    private var lastSequence: [LiveMeetingTrack: Int] = [:]
     private var generation = 0
     private var startTask: Task<Void, Never>?
-    /// The last stop's model cleanup; a new start waits for it so it can't
-    /// free the models the new start just loaded.
+    /// The last stop's cleanup; a new start waits for it, so two meetings'
+    /// models are never loaded at once.
     private var teardown: Task<Void, Never>?
 
-    var isActive: Bool { status != .off }
+    /// Loading or listening: it wants audio.
+    var isActive: Bool { status == .preparing || status == .listening }
 
     /// Starts transcribing this recording. Clears the last meeting's text.
     func start(sessionID: UUID, shouldYield: @escaping @MainActor () -> Bool) {
@@ -43,27 +53,33 @@ final class LiveMeetingCaptions: ObservableObject {
         self.sessionID = sessionID
         generation += 1
         let generation = generation
-        log = LiveMeetingCaptionLog()
+        // Turning the setting off and on again mid-meeting keeps what was said.
+        if sessionID != lastLogSessionID {
+            log = LiveMeetingCaptionLog()
+            lastLogSessionID = sessionID
+        }
         status = .preparing
+        let tracks = Tracks()
+        lastSequence = [:]
         // Audio queues while the models load, up to the tracks' bound.
-        accepting.store(true, ordering: .releasing)
+        current.withLock { $0 = tracks }
         let yield: @Sendable () async -> Bool = { await MainActor.run { shouldYield() } }
-        startTask = Task { [weak self, microphone = self.microphone, system = self.system, teardown = self.teardown] in
+        startTask = Task(priority: .utility) { [weak self, teardown = self.teardown] in
             await teardown?.value
             // One at a time: both tracks share one model download.
-            let micLoad = await microphone.load()
-            let systemLoad = await system.load()
+            let micLoad: LiveMeetingCaptionTrack.LoadResult = Task.isCancelled ? .failed : await tracks.microphone.load()
+            let systemLoad: LiveMeetingCaptionTrack.LoadResult = Task.isCancelled ? .failed : await tracks.system.load()
             guard let self, self.generation == generation, !Task.isCancelled else { return }
             guard micLoad == .ready, systemLoad == .ready else {
                 self.status = .unavailable
-                self.accepting.store(false, ordering: .releasing)
+                self.stopTracks()
                 return
             }
-            await microphone.start(shouldYield: yield) { [weak self] event in
-                Task { @MainActor [weak self] in self?.apply(event, track: .microphone, generation: generation) }
+            await tracks.microphone.start(shouldYield: yield) { [weak self] event, sequence in
+                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .microphone, generation: generation) }
             }
-            await system.start(shouldYield: yield) { [weak self] event in
-                Task { @MainActor [weak self] in self?.apply(event, track: .system, generation: generation) }
+            await tracks.system.start(shouldYield: yield) { [weak self] event, sequence in
+                Task { @MainActor [weak self] in self?.apply(event, sequence: sequence, track: .system, generation: generation) }
             }
             self.status = .listening
         }
@@ -82,27 +98,37 @@ final class LiveMeetingCaptions: ObservableObject {
     /// Called on Core's live-PCM delivery queue, never a CoreAudio callback.
     /// `samples` are 16 kHz mono.
     nonisolated func offer(_ samples: [Float], track: LiveMeetingTrack) {
-        guard accepting.load(ordering: .acquiring), !samples.isEmpty else { return }
+        guard !samples.isEmpty, let tracks = current.withLock({ $0 }) else { return }
         switch track {
-        case .microphone: microphone.queue.append(samples)
-        case .system: system.queue.append(samples)
+        case .microphone: tracks.microphone.queue.append(samples)
+        case .system: tracks.system.queue.append(samples)
         }
     }
 
+    /// Stops this meeting's tracks and frees their models and buffers. Waits
+    /// for an in-flight load to finish first, so a load can't put the
+    /// models back after they were freed.
     private func stopTracks() {
-        accepting.store(false, ordering: .releasing)
         generation += 1
-        startTask?.cancel()
+        let tracks = current.withLock { tracks in
+            defer { tracks = nil }
+            return tracks
+        }
+        let loading = startTask
+        loading?.cancel()
         startTask = nil
-        teardown = Task { [microphone = self.microphone, system = self.system, teardown = self.teardown] in
+        guard let tracks else { return }
+        teardown = Task(priority: .utility) { [teardown = self.teardown] in
             await teardown?.value
-            await microphone.stop()
-            await system.stop()
+            await loading?.value
+            await tracks.microphone.stop()
+            await tracks.system.stop()
         }
     }
 
-    private func apply(_ event: LiveMeetingCaptionTrack.Event, track: LiveMeetingTrack, generation: Int) {
-        guard generation == self.generation else { return }
+    private func apply(_ event: LiveMeetingCaptionTrack.Event, sequence: Int, track: LiveMeetingTrack, generation: Int) {
+        guard generation == self.generation, sequence > lastSequence[track, default: -1] else { return }
+        lastSequence[track] = sequence
         switch event {
         case .partial(let text): log.setTentative(text, track: track)
         case .utterance(let text): log.commit(text, track: track)

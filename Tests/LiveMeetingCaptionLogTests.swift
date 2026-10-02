@@ -57,4 +57,23 @@ func testLiveMeetingCaptionLog() {
         assertEqual(log.lines.map(\.text), ["second turn", "third"], "the newest turns stay")
         assertTrue(log.trimGeneration > 0, "a view knows to redraw once")
     }
+
+    runSuite("LiveMeetingCaptionLog starts a new line in a long monologue") {
+        var log = LiveMeetingCaptionLog()
+        let sentence = String(repeating: "word ", count: 60).trimmingCharacters(in: .whitespaces)
+        for _ in 0..<10 { log.commit(sentence, track: .system) }
+        assertTrue(log.lines.count > 1, "one speaker's hour-long talk doesn't become one ever-growing line")
+        assertTrue(log.lines.allSatisfy { $0.track == .system }, "every line keeps its speaker")
+        assertTrue(
+            log.lines.allSatisfy { $0.text.utf8.count < LiveMeetingCaptionLog.longestLineBytes + sentence.utf8.count + 1 },
+            "no line runs far past the limit"
+        )
+    }
+
+    runSuite("LiveMeetingCaptionLog only signals a redraw when lines were dropped") {
+        var log = LiveMeetingCaptionLog(maximumCharacters: 10)
+        log.commit("a single line much longer than the limit", track: .microphone)
+        log.commit("and more", track: .microphone)
+        assertEqual(log.trimGeneration, 0, "a lone line can't be trimmed, so nothing changed for the view")
+    }
 }

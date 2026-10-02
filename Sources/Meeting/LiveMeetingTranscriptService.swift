@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
@@ -30,10 +31,18 @@ final class LiveMeetingTranscriptService {
     private var mayInfer: (() -> Bool)?
     private var lastErrorCode: String?
     private var captionsYield: (@MainActor () -> Bool)?
+    private var lastDelivery: (enabled: Bool, epoch: UInt64)?
+    private var captionsStatusWatch: AnyCancellable?
     private var captionsSetting = NotchIslandPreferences.showsLiveTranscript()
     private var settingsObserver: NSObjectProtocol?
 
     private init() {
+        // Captions that fail to load stop needing audio.
+        captionsStatusWatch = LiveMeetingCaptions.shared.$status
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateDelivery() }
+            }
         // Turning "Live transcript" on or off mid-meeting applies at once.
         settingsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
@@ -53,7 +62,7 @@ final class LiveMeetingTranscriptService {
                       deliveryEnabled: @escaping (Bool, UInt64) -> Void, deliveryDrops: @escaping () -> Int,
                       mayInfer: @escaping () -> Bool,
                       shouldCaptionsYield: @escaping @MainActor () -> Bool = { false }) {
-        self.deliveryEnabled?(false, previewEpoch)
+        self.setDelivery(false)
         previewEpoch &+= 1
         worker?.cancel()
         workerGeneration = UUID()
@@ -95,11 +104,21 @@ final class LiveMeetingTranscriptService {
         updateDelivery()
     }
 
+    /// Core restarts its delivery generation (dropping buffers in flight and
+    /// zeroing its drop count) on every call, so only call when something
+    /// actually changed.
+    private func setDelivery(_ enabled: Bool) {
+        guard lastDelivery?.enabled != enabled || lastDelivery?.epoch != previewEpoch else { return }
+        lastDelivery = (enabled, previewEpoch)
+        deliveryEnabled?(enabled, previewEpoch)
+    }
+
     /// Live PCM flows while either consumer wants it: agent sharing (gated by
     /// the preview epoch in the inbox) or the island's live transcript.
     private func updateDelivery() {
-        let wanted = state == "recording" && (sharingEnabled || LiveMeetingCaptions.shared.isActive)
-        deliveryEnabled?(wanted, previewEpoch)
+        let sharingNeedsAudio = sharingEnabled && liveStatus != "unavailable"
+        let wanted = state == "recording" && (sharingNeedsAudio || LiveMeetingCaptions.shared.isActive)
+        setDelivery(wanted)
     }
 
     @discardableResult
@@ -107,7 +126,7 @@ final class LiveMeetingTranscriptService {
         guard self.sessionID == sessionID else { return false }
         guard !enabled || state == "recording" else { return false }
         guard enabled != sharingEnabled else { return true }
-        deliveryEnabled?(false, previewEpoch)
+        setDelivery(false)
         previewEpoch &+= 1
         sharingEnabled = enabled
         if !enabled {
@@ -121,7 +140,7 @@ final class LiveMeetingTranscriptService {
             updateDelivery()
         } else if state == "recording" {
             inbox.begin(sessionID: sessionID, origin: origin, previewEpoch: previewEpoch)
-            deliveryEnabled?(true, previewEpoch)
+            setDelivery(true)
             startWorker(sessionID: sessionID)
         } else {
             liveStatus = "finished"
@@ -131,7 +150,7 @@ final class LiveMeetingTranscriptService {
 
     func finishCapture(sessionID: UUID) {
         guard self.sessionID == sessionID else { return }
-        deliveryEnabled?(false, previewEpoch)
+        setDelivery(false)
         LiveMeetingCaptions.shared.stop(sessionID: sessionID)
         state = "finished"
         finishedElapsed = max(0, CACurrentMediaTime() - origin)
@@ -216,7 +235,7 @@ final class LiveMeetingTranscriptService {
                 self.liveStatus = "unavailable"
                 self.lastErrorCode = "model_unavailable"
                 // The island's live transcript may still need the audio.
-                self.deliveryEnabled?(LiveMeetingCaptions.shared.isActive, self.previewEpoch)
+                self.updateDelivery()
                 self.inbox.cancel()
                 return
             }
