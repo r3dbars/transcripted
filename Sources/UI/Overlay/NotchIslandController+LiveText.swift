@@ -59,6 +59,9 @@ extension NotchIslandController {
             content.showsLivePreview = captions.isStreaming
         // Recording stops a beat before the phase moves on: keep the words.
         case .listening, .writing, .success:
+            // Key-up shows Writing before the mic has stopped: stop feeding
+            // the preview now so the final pass has the Neural Engine.
+            if content.phase != .listening { captions.releaseRequested() }
             content.showsLivePreview = captions.isStreaming || !captions.preview.isEmpty
         case .loading, .message:
             content.showsLivePreview = false

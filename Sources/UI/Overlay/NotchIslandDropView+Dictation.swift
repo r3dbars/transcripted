@@ -11,6 +11,7 @@ extension NotchIslandDropView {
             preview.removeFromSuperview()
             add(preview)
             readableText.append(preview)
+            DispatchQueue.main.async { [weak preview] in preview?.scrollToNewest() }
         }
         // Released: the words are being written; there's nothing to press.
         guard !isWriting else { return }
@@ -27,6 +28,7 @@ extension NotchIslandDropView {
             preview.removeFromSuperview()
             add(preview)
             readableText.append(preview)
+            DispatchQueue.main.async { [weak preview] in preview?.scrollToNewest() }
         } else {
             add(body("“\(text)”", maxLines: 3))
         }
