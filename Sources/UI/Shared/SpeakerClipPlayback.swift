@@ -11,8 +11,8 @@ import Foundation
 /// state bump landing in the hosting section without the `LazyVStack` rows
 /// ever re-rendering — the play buttons stayed on the play glyph while
 /// audio was audibly playing. The static facade and the state-change
-/// notification remain for the AppKit consumer (`SpeakerNamingSheet`) and
-/// existing call sites.
+/// notification remain for the AppKit consumer
+/// (`NotchIslandSpeakerReviewControls`) and existing call sites.
 @MainActor
 final class SpeakerClipPlayback: ObservableObject {
     static let shared = SpeakerClipPlayback()
