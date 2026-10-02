@@ -3,11 +3,15 @@ import Foundation
 // Source-text pins: most suites in this file exercise the real DictationStoppedAudioRecovery
 // types (registry retain/remove, WAV persistence/cleanup, the commit policy) against real temp
 // directories — genuine behavioral coverage. The last suite in testDictationStoppedAudioRecovery
-// ("Stopped audio is reused, retired and found again at launch") instead greps two
-// source files — ParakeetDictationTranscription.swift and TranscriptedApp.swift — because each is a @MainActor type
+// ("Dictation controller checkpoints audio before waiting for the model" and "Stopped audio is
+// reused, retired and found again at launch") instead grep the DictationSessionController and
+// MeetingSessionController files, ParakeetDictationTranscription.swift and TranscriptedApp.swift,
+// because each is a @MainActor type
 // (or, for TranscriptedApp.swift, the @main app delegate itself) wired to CoreAudio/AppKit/
 // TranscriptedCore that this Foundation-only runner cannot instantiate. What's pinned is the
-// *ordering* of statements inside their real methods (ownership re-check before the prepared
+// *ordering* of statements inside their real methods (persist-before-model-wait in
+// DictationSessionController+Stop.swift, mark-then-bounded-wait-then-cancel in
+// finishDictationForTermination in +Recovery.swift, ownership re-check before the prepared
 // snapshot clears native samples): the assertions compare string-range offsets, not just
 // presence, so reordering those statements without moving the matched substrings will break the
 // test even though nothing else changed. Treat the ordering as the real contract and keep it in
@@ -222,12 +226,91 @@ func testDictationStoppedAudioRecovery() {
         )
     }
 
-    // The controller's stop-path wiring (checkpoint before the model wait,
-    // the empty-take branches, the Quit preservation order) was read here as
-    // source text from DictationSessionController.swift. That code moved to
-    // the DictationSessionController+*.swift extensions and isn't re-pinned;
-    // the stages themselves are behavior tests in DictationStopCheckpointTests,
-    // DictationEmptyTranscriptPolicyTests and DictationTerminationCheckpointTests.
+    // Reads the controller core and every +Area extension joined. The stop
+    // path's anchors sit in DictationSessionController+Stop.swift and the
+    // Quit sequence in +Recovery.swift.
+    runSuite("Dictation controller checkpoints audio before waiting for the model") {
+        let controller = readDictationSessionControllerSource()
+        let meetingSource = readMeetingSessionControllerSource()
+        guard let persistRange = controller.range(of: "DictationStoppedAudioRecoveryStore.persist("),
+              let modelWaitRange = controller.range(of: "DictationPostStopModelWait.run(", range: persistRange.upperBound..<controller.endIndex) else {
+            assertTrue(false, "controller should persist stopped audio before the model wait")
+            return
+        }
+        assertTrue(persistRange.lowerBound < modelWaitRange.lowerBound, "durable checkpoint must precede the model failure boundary")
+        // The session re-check between snapshot and write, and writing the
+        // WAV off the main actor, are behavior tests in
+        // DictationStopCheckpointTests.swift. The controller still has to
+        // give that stage the real ownership check.
+        // The checkpoint's steps are built just before the persist call.
+        if let isCurrent = controller.range(of: "isCurrent: {", options: .backwards, range: controller.startIndex..<persistRange.lowerBound),
+           let nextStep = controller.range(of: "stopMicrophone:", range: isCurrent.upperBound..<persistRange.lowerBound) {
+            let check = controller[isCurrent.upperBound..<nextStep.lowerBound]
+            assertTrue(check.contains("DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(")
+                       && check.contains("taskCancelled: Task.isCancelled"),
+                       "the stop checkpoint's session check must be the stop task's cancellation plus session ownership")
+        } else {
+            assertTrue(false, "the controller must pass DictationStopCheckpoint a session check")
+        }
+        assertTrue(
+            controller.contains("preparedRecording: stoppedRecordingSnapshot"),
+            "transcription should reuse the already-resampled stopped recording snapshot"
+        )
+        assertTrue(
+            meetingSource.contains("transcriptPersisted: true"),
+            "a successfully imported restart checkpoint should be retired after its transcript is saved"
+        )
+        assertTrue(controller.contains("DictationStoppedAudioRecoveryStore.cleanup(recovery, transcriptPersisted: result.saved != nil)"), "cleanup should be tied to successful transcript persistence")
+        // Which reasons discard the audio is a behavior test
+        // (DictationEmptyTranscriptPolicyTests); the controller must act on it.
+        assertTrue(controller.contains("if emptyDecision.discardsSavedRecording"), "only real silence or too-short capture may discard stopped audio")
+        // Controller wiring the policy tests can't see: a mis-tap is judged by
+        // how long the key was held, and it closes like a cancel.
+        assertTrue(controller.contains("pressDuration: stopTiming.requestedAt - sessionStartTime"),
+                   "a mis-tap is judged by how long the shortcut was held, not by how long transcription took")
+        if let closeLikeCancel = controller.range(of: "case .closeLikeCancel:"),
+           let next = controller.range(of: "case .showNoSpeechAndDismiss:", range: closeLikeCancel.upperBound..<controller.endIndex) {
+            let body = controller[closeLikeCancel.upperBound..<next.lowerBound]
+            assertTrue(body.contains("hideWithCancelAnimation()") && !body.contains("showError"),
+                       "a mis-tap hides the overlay like a cancel, with no error text")
+        } else {
+            assertTrue(false, "the controller must handle the mis-tap decision")
+        }
+        assertTrue(
+            controller.contains("let savedAudioAction = self.savedDictationAudioAction(for: recovery.url)")
+                && controller.contains("actionTitle: savedAudioAction.title"),
+            "undecoded audio must have an immediate recovery action (Transcribe It, or Show Audio when import isn't wired)"
+        )
+        assertTrue(
+            controller.contains("cancelDictation(preserveStoppedAudio: true)"),
+            "termination timeout must not convert a durable checkpoint into an implicit discard"
+        )
+        assertTrue(
+            controller.contains("stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"),
+            "termination cancellation must mark the active session before cancelling its stop task"
+        )
+        let terminationSource = controller.components(separatedBy: "func finishDictationForTermination() async -> Bool").last ?? ""
+        guard let preservationRange = terminationSource.range(
+            of: "stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"
+        ),
+        let checkpointWaitRange = terminationSource.range(
+            of: "await stoppedAudioCheckpointSignal.waitForCompletion(timeoutNanoseconds: 2_000_000_000)",
+            range: preservationRange.upperBound..<terminationSource.endIndex
+        ),
+        let preservingCancelRange = terminationSource.range(
+            of: "cancelDictation(preserveStoppedAudio: true)",
+            range: checkpointWaitRange.upperBound..<terminationSource.endIndex
+        ) else {
+            assertTrue(false, "termination must defer Quit until the bounded checkpoint settles before cancelling the stop task")
+            return
+        }
+        assertTrue(
+            preservationRange.lowerBound < checkpointWaitRange.lowerBound
+                && checkpointWaitRange.lowerBound < preservingCancelRange.lowerBound,
+            "termination must mark, await, then cancel the active stopped-audio session"
+        )
+    }
+
     runSuite("Stopped audio is reused, retired and found again at launch") {
         do {
             let speechSource = try String(

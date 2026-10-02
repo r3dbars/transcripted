@@ -65,16 +65,32 @@ func testMeetingStopSnapshotEvidence() {
         )
     }
 
-    runSuite("MeetingSessionController — the stop snapshot reads the evidence stashed at capture stop") {
-        let source = readSourceFixture(
-            "Sources/Meeting/MeetingSessionController.swift",
-            description: "MeetingSessionController.swift"
-        )
+    runSuite("MeetingSessionController — unexpected stop evidence is captured before the warning clears") {
+        let source = readMeetingSessionControllerSource()
+        // The capture-stop sink lives in MeetingSessionController+Subscriptions.swift.
+        let sink = readMeetingSessionControllerSource(part: "Subscriptions")
+        guard let stash = sink.range(of: "self.unexpectedCaptureStopEvidence = ("),
+              let clear = sink.range(
+                of: "self.systemAudioDegradationWarning = nil",
+                range: stash.upperBound..<sink.endIndex
+              ) else {
+            assertTrue(false, "the capture-stop sink must stash evidence and then clear the warning")
+            return
+        }
+        assertTrue(stash.lowerBound < clear.lowerBound, "evidence must be stashed before the warning is cleared")
         assertTrue(
             source.contains("atCaptureStop: atCaptureStop?.systemAudioStatus")
                 && source.contains("atCaptureStop: atCaptureStop?.degradationWarning"),
             "the stop snapshot must read the stashed evidence"
         )
+        if let unheard = sink.range(
+            of: "self.unheardSecondsAtCaptureStop = self.unheardPlaybackWarningStartedAt",
+            range: stash.upperBound..<sink.endIndex
+        ) {
+            assertTrue(unheard.lowerBound < clear.lowerBound, "how long call audio went unheard is stashed with the rest")
+        } else {
+            assertTrue(false, "the capture-stop sink must stash how long call audio went unheard")
+        }
         assertTrue(
             source.contains("unheardSeconds: unheardSecondsAtCaptureStop"),
             "the stop snapshot must prefer the stashed unheard time"

@@ -186,10 +186,9 @@ func testDictationTerminationCheckpoint() async {
     }
 
     do {
-        let controller = try String(
-            contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
-            encoding: .utf8
-        )
+        // The core file comes first, then the +Area extensions; the stop
+        // path's anchors below all sit in DictationSessionController+Stop.swift.
+        let controller = readDictationSessionControllerSource()
         let app = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
         let appAdmission = app.range(of: "guard await self.sessionController.finishDictationForTermination() else")
         let appAdmissionEnd = appAdmission?.upperBound ?? app.startIndex
@@ -203,6 +202,9 @@ func testDictationTerminationCheckpoint() async {
                                           range: (startGuard?.upperBound ?? controller.startIndex)..<controller.endIndex)
         let recoveryReset = controller.range(of: "stoppedAudioRecovery = nil",
                                              range: (newSession?.upperBound ?? controller.startIndex)..<controller.endIndex)
+        let unsavedAudio = controller.range(of: "case .offerCheckpointRetry:")
+        let unsavedAudioRetry = controller.range(of: "showFailedCheckpointRecoveryError()",
+                                                 range: (unsavedAudio?.upperBound ?? controller.startIndex)..<controller.endIndex)
 
         // Still read as text until the start path and the app's Quit handler
         // have seams: TranscriptedApp.swift is in open PR #1946, and the
@@ -221,13 +223,26 @@ func testDictationTerminationCheckpoint() async {
                 assertTrue(startGuard.lowerBound < newSession.lowerBound && newSession.lowerBound < recoveryReset.lowerBound,
                            "the failed-checkpoint guard must precede every fresh-session side effect")
             }
-            // The stop path's checkpoint wiring (offer Retry Saving for an
-            // undecoded take, stop before transcribing when no snapshot was
-            // written) was source text on DictationSessionController.swift. It
-            // moved to DictationSessionController+Stop.swift and isn't
-            // re-pinned. The stage itself is "No snapshot while native audio is
-            // still in memory stops before transcribing" in
-            // DictationStopCheckpointTests.swift.
+            assertTrue(unsavedAudio != nil && unsavedAudioRetry != nil,
+                       "an undecoded recording without WAV must offer retained-RAM saving retry instead of claiming only model-empty speech")
+            // A failed WAV snapshot with audio still in memory stopping before
+            // inference is a behavior test: "No snapshot while native audio
+            // is still in memory stops before transcribing" in
+            // DictationStopCheckpointTests.swift. What's left to pin is the
+            // controller's wiring of that outcome, until the rest of the stop
+            // path moves out of the controller.
+            let unavailable = controller.range(of: "case .checkpointUnavailable:")
+            let checkpointFailed = controller.range(of: "case .checkpointFailed(let error):")
+            let inference = controller.range(of: "let voiceText = await appState.sttRouter.transcribe(")
+            if let unavailable, let checkpointFailed, let inference, unavailable.upperBound < checkpointFailed.lowerBound {
+                let handling = controller[unavailable.upperBound..<checkpointFailed.lowerBound]
+                assertTrue(handling.contains("showFailedCheckpointRecoveryError()") && handling.contains("return"),
+                           "an unavailable checkpoint must show the recovery error and return")
+                assertTrue(checkpointFailed.lowerBound < inference.lowerBound,
+                           "the checkpoint outcome must be handled before the model runs")
+            } else {
+                assertTrue(false, "the controller must handle DictationStopCheckpoint's unavailable outcome before transcribing")
+            }
         }
     } catch {
         runSuite("Production Quit source fixtures are readable") {

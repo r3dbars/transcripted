@@ -14,6 +14,8 @@ do:
                  AGENTS.md natively (v2.1.277+), so a CLAUDE.md may only be the
                  one-line `@AGENTS.md` stub next to an AGENTS.md. Anything
                  else in a CLAUDE.md is a second copy of the rules that drifts.
+                 Only tracked CLAUDE.md files count. A CLAUDE.local.md anywhere
+                 on disk fails too: Claude Code reads it instead of AGENTS.md.
 
 Other traps already have their own checks: source-text tests
 (check-test-shape.py), source lists (check-build-source-lists.py plus the
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -89,13 +92,34 @@ CLAUDE_STUB = "@AGENTS.md"
 AGENT_DOC_SKIP_DIRS = {".git", ".build", "build", ".claude", "node_modules", "deps-libs", "deps-modules", "deps-frameworks"}
 
 
-def _agent_doc_files(root: Path, name: str) -> list[Path]:
+def _walk_files(root: Path, name: str) -> list[Path]:
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in AGENT_DOC_SKIP_DIRS)
         if name in filenames:
             found.append(Path(dirpath) / name)
     return found
+
+
+def _agent_doc_files(root: Path, name: str) -> list[Path]:
+    """Tracked files called `name`, so an untracked or vendored copy (a venv,
+    scratch notes) can't fail a local run that CI would pass. When `root`
+    isn't the top of a git checkout (say a temp dir under build/), walk it."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, check=True, env=env,
+        ).stdout.decode("utf-8", errors="replace")
+
+    try:
+        if Path(git("rev-parse", "--show-toplevel").strip()).resolve() != root.resolve():
+            return _walk_files(root, name)
+        out = git("ls-files", "-z", "--", name, f"**/{name}")
+    except (OSError, subprocess.CalledProcessError):
+        return _walk_files(root, name)
+    paths = {root / rel for rel in out.split("\0") if rel}
+    return sorted(p for p in paths if p.is_file())
 
 
 def check_agent_docs(root: Path, stubs_required: bool | None = None) -> list[str]:
@@ -110,6 +134,14 @@ def check_agent_docs(root: Path, stubs_required: bool | None = None) -> list[str
             )
         elif not (claude.parent / "AGENTS.md").is_file():
             problems.append(f"{rel} imports an AGENTS.md that isn't there. Delete it or add the AGENTS.md.")
+    # CLAUDE.local.md is gitignored, so it only ever exists on disk. Look there:
+    # Claude Code reads it instead of AGENTS.md, and no repo rules load.
+    for local in _walk_files(root, "CLAUDE.local.md"):
+        rel = local.relative_to(root).as_posix()
+        problems.append(
+            f"{rel} makes Claude Code skip AGENTS.md, so no repo rules load. "
+            "Keep personal notes outside the repo and delete it."
+        )
     if required:
         for agents in _agent_doc_files(root, "AGENTS.md"):
             if not (agents.parent / "CLAUDE.md").is_file():
@@ -183,6 +215,28 @@ def self_test() -> None:
         (root / ".build").mkdir()
         (root / ".build/CLAUDE.md").write_text("vendored\n", encoding="utf-8")
         assert check_agent_docs(root, stubs_required=False) == []
+        (root / "CLAUDE.local.md").write_text("my notes\n", encoding="utf-8")
+        problems = check_agent_docs(root, stubs_required=False)
+        assert len(problems) == 1 and "CLAUDE.local.md makes Claude Code skip" in problems[0], problems
+        (root / "CLAUDE.local.md").unlink()
+
+    # In a git checkout only tracked CLAUDE.md files count.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "init", "-q", str(root)], check=True, env=env)
+        (root / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+        (root / "venv/lib").mkdir(parents=True)
+        (root / "venv/lib/CLAUDE.md").write_text("vendored notes\n", encoding="utf-8")
+        assert check_agent_docs(root, stubs_required=False) == []
+        (root / "docs").mkdir()
+        (root / "docs/CLAUDE.md").write_text("tracked rules\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "docs/CLAUDE.md"], check=True, env=env)
+        problems = check_agent_docs(root, stubs_required=False)
+        assert len(problems) == 1 and "docs/CLAUDE.md has content" in problems[0], problems
+        (root / "CLAUDE.local.md").write_text("my notes\n", encoding="utf-8")
+        problems = check_agent_docs(root, stubs_required=False)
+        assert len(problems) == 2 and any("CLAUDE.local.md" in p for p in problems), problems
     print("check-known-traps self-test passed")
 
 

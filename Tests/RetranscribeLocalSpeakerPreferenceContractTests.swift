@@ -2,9 +2,28 @@ import Foundation
 
 func testRetranscribeLocalSpeakerPreferenceContract() {
     runSuite("Meeting transcription entry points resolve splitLocalSpeakers from the preference") {
-        let controller = readSourceFixture("Sources/Meeting/MeetingSessionController.swift")
+        let controller = readMeetingSessionControllerSource()
+        let requests = readMeetingSessionControllerSource(part: "TranscriptionRequests")
         let coordinator = readSourceFixture("Sources/Meeting/TranscriptionQueueCoordinator.swift")
 
+        guard let retranscribeStart = requests.range(of: "func retranscribeSavedMeeting("),
+              let retranscribeEnd = requests.range(
+                  of: "func handleReplacementTranscriptCommitted(",
+                  range: retranscribeStart.upperBound..<requests.endIndex
+              ) else {
+            assertTrue(false, "test should find retranscribeSavedMeeting")
+            return
+        }
+        let retranscribe = String(requests[retranscribeStart.lowerBound..<retranscribeEnd.lowerBound])
+
+        assertTrue(
+            retranscribe.contains("splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()"),
+            "saved-audio retranscription should honour the People-in-the-room preference"
+        )
+        assertTrue(
+            !retranscribe.contains("splitLocalSpeakers: true"),
+            "saved-audio retranscription should not hard-code local speaker splitting"
+        )
         assertTrue(
             coordinator.contains("splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()"),
             "live capture transcription should keep reading the preference"
