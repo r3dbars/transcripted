@@ -1,11 +1,12 @@
 // Repo-structure / contract suite, not behavioral coverage.
 // What's left here reads Swift files as text, for one of three reasons:
-//   - the code lives in TranscriptedApp.swift, TranscriptedSettingsView.swift,
-//     SpeakerPeopleSettingsSection.swift or HomeView.swift, which were being
-//     split while these were converted; they need seams of their own next;
+//   - the code lives in TranscriptedApp.swift, the TranscriptedSettingsView
+//     split, the SpeakerPeople split, or HomeView.swift, which need seams of
+//     their own next;
 //   - the code is the meeting pill or the speaker naming window, which the
 //     #1946 follow-ups delete;
-//   - it's a contract with a script or another package (the QA CLI and bench).
+//   - it's a contract with a script or another package (the QA CLI and bench,
+//     and the identifiers the QA smokes press).
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
 // AutomationSurfaceBehaviorTests.swift now.
@@ -43,7 +44,113 @@ private func homeSurfaceContractContains(_ needle: String) -> Bool {
         || contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains(needle)
 }
 
+// Some Settings types are split across files: TranscriptedSettingsView.swift
+// plus its TranscriptedSettingsView+*.swift extensions, and the Speakers
+// section plus SpeakerPeopleRows.swift and its view-model files. A guard on
+// one of them reads every Sources/UI/Settings file whose name starts with the
+// prefix, so it follows code that moves between those files. That matters most
+// for "must never contain" guards: one that reads only the core file passes no
+// matter what the extensions do.
+private var settingsSplitSourceCache: [String: String] = [:]
+
+private func settingsSplitSource(prefix: String) -> String {
+    if let cached = settingsSplitSourceCache[prefix] {
+        return cached
+    }
+    let directory = "Sources/UI/Settings"
+    let names = ((try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(directory).path)) ?? [])
+        .filter { $0.hasPrefix(prefix) && $0.hasSuffix(".swift") }
+        .sorted()
+    let joined = names.map { contractSource("\(directory)/\($0)") }.joined(separator: "\n")
+    settingsSplitSourceCache[prefix] = joined
+    return joined
+}
+
+// TranscriptedSettingsView.swift and every TranscriptedSettingsView+*.swift.
+private func settingsShellSource() -> String {
+    settingsSplitSource(prefix: "TranscriptedSettingsView")
+}
+
+// SpeakerPeopleSettingsSection.swift, SpeakerPeopleRows.swift and the
+// SpeakerPeopleSettingsViewModel files.
+private func speakersSettingsSource() -> String {
+    settingsSplitSource(prefix: "SpeakerPeople")
+}
+
+private func settingsSurfaceContractContains(_ needle: String) -> Bool {
+    settingsShellSource().contains(needle) || [
+        "Sources/UI/Settings/Pages/GeneralSettingsPage.swift",
+        "Sources/UI/Settings/Pages/StorageSettingsPage.swift",
+        "Sources/UI/Settings/Pages/AboutSettingsPage.swift",
+        "Sources/UI/Settings/Pages/HomeSettingsPage.swift",
+    ].contains { contractSource($0).contains(needle) }
+}
+
 func testUIAutomationSurfaceContract() {
+    // Guards that read TranscriptedSettingsView.swift alone before the shell was
+    // split into TranscriptedSettingsView+*.swift extensions. They now read the
+    // whole split, so they hold wherever the code lives.
+    runSuite("Settings shell guards cover every TranscriptedSettingsView file") {
+        // The split readers must find the files, or every "must never" guard
+        // below passes on empty text.
+        assertTrue(
+            settingsShellSource().contains("struct TranscriptedSettingsView: View")
+                && settingsShellSource().contains("extension TranscriptedSettingsView"),
+            "the Settings shell reader should load the core file and its extensions"
+        )
+        assertTrue(
+            speakersSettingsSource().contains("struct SpeakerPeopleSettingsSection")
+                && speakersSettingsSource().contains("SpeakerQuietPlayButton("),
+            "the Speakers reader should load the section and its row views"
+        )
+
+        assertTrue(
+            settingsShellSource().contains("func revealOwnFile(")
+                && settingsShellSource().contains("OwnFileResolver.resolveForReveal(candidateURLs:")
+                && settingsShellSource().contains("func openOwnFile(")
+                && settingsShellSource().contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "Home reveal/open should route through OwnFileResolver helpers, surfacing a failure instead of a dead click"
+        )
+
+        assertFalse(
+            settingsShellSource().contains("MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)"),
+            "The Home Boost row must not save Apple voice processing for every meeting"
+        )
+
+        assertTrue(
+            settingsShellSource().contains("requestClearFailedMeeting")
+                && settingsShellSource().contains("HomeDeleteConfirmationPolicy.failedMeeting")
+                && settingsShellSource().contains("reasonKind: .deleted"),
+            "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
+        )
+        assertFalse(
+            settingsShellSource().contains("dismissFailedMeeting"),
+            "failed-row cleanup should have one canonical destructive seam"
+        )
+
+        // The one Microphone picker shows only while the Mac mic recorder is on.
+        assertTrue(
+            settingsShellSource().contains("if pinnedMicrophoneRecorderOn {\n            VStack(alignment: .leading, spacing: 0) {\n                generalMicrophoneChoiceEditor"),
+            "the one picker shows while the recorder is on"
+        )
+        assertTrue(
+            settingsShellSource().contains("if meetingMicProcessingMode.usesAppleVoiceProcessing {\n                    Divider()\n                    generalFasterBluetoothDictationToggle"),
+            "voice-processing users keep the toggle that still protects their dictation"
+        )
+        assertTrue(
+            settingsShellSource().contains("        } else {\n            generalFasterBluetoothDictationEditor\n        }"),
+            "the old Bluetooth dictation rows stay while the recorder is off"
+        )
+        assertTrue(
+            settingsShellSource().contains("if !pinnedMicrophoneRecorderOn {\n                        MeetingMicrophoneSettingRow("),
+            "the meetings-only macOS-input toggle is folded into the one picker while the recorder is on"
+        )
+        assertTrue(
+            settingsShellSource().contains("Text(\"Same as macOS Sound settings\").tag(MicrophoneChoice.macOSInput)"),
+            "the picker keeps a way to record the AirPods mic on purpose"
+        )
+    }
+
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
         assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayRootView.swift").contains("titleLabel.stringValue = systemAudioUnverified ? \"Audio unverified\""),
             "Acknowledgement must not hide the unverified capture state")
@@ -166,20 +273,42 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
+
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar rows should expose each page's automation identifier"
         )
 
+            ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
+            ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
+            ("AboutSettingsPage", "Sources/UI/Settings/Pages/AboutSettingsPage.swift"),
+            ("HomeSettingsPage", "Sources/UI/Settings/Pages/HomeSettingsPage.swift"),
+            ("WritingSettingsPage", "Sources/UI/Settings/Pages/WritingSettingsPage.swift"),
+        ] {
+            assertTrue(
+                contractSource(path).contains("struct \(typeName)"),
+                "\(typeName) should stay extracted while the Settings shell owns its bindings"
+            )
+        }
+
+        for requiredSourceHook in [
+            "actions.importAudioFile()",
+            "trackSettingsAction(\"empty_import_audio\", page: .home)",
+        ] {
+            assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
+        }
+
         for requiredHomeActionHook in [
             "HomeRowMenuItem(title: \"Open Markdown\"",
             "HomeRowMenuItem(title: \"Report issue\"",
             "HomeRowMenuItem(title: \"Delete meeting\"",
+            "HomeDeleteConfirmationPolicy.failedMeeting",
+            "homeDeleteConfirmation = HomeDeleteConfirmation(",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
+            assertTrue(settingsShellSource().contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
         }
         assertFalse(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("presentFailedMeetingDeleteConfirmation("),
+            settingsShellSource().contains("presentFailedMeetingDeleteConfirmation("),
             "failed-meeting delete confirmation should use SwiftUI alert state instead of a hand-built NSAlert"
         )
 
@@ -226,12 +355,12 @@ func testUIAutomationSurfaceContract() {
             "ClosureMenuItem should defer its handler off the NSMenu.popUp tracking loop so menu-triggered SwiftUI alerts/sheets present"
         )
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: rootAlertBinding)"),
+            settingsShellSource().contains(".alert(item: rootAlertBinding)"),
             "the Home delete and delete-failure alerts should present through one rootAlertBinding so neither is shadowed"
         )
         assertFalse(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteConfirmation)")
-                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteFailure)"),
+            settingsShellSource().contains(".alert(item: $homeDeleteConfirmation)")
+                || settingsShellSource().contains(".alert(item: $homeDeleteFailure)"),
             "Home alerts must not be re-stacked as separate `.alert(item:)` modifiers — stacked legacy alerts shadow all but the last"
         )
         assertTrue(
@@ -242,13 +371,6 @@ func testUIAutomationSurfaceContract() {
         // HomeRootAlertPolicy, never clear both. HomeRootAlertPolicyTests
         // covers the priority/dismissal behavior directly.
 
-        // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
-        // Every Home/meeting control that touches an app-owned file (transcript or
-        // audio) must route through OwnFileResolver so a path that drifted
-        // after scanning (restyle/rename, WAV→M4A recompression, deletion) surfaces
-        // an error instead of a silent dead click. Behavior is covered by
-        // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
-        // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
         let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
         // Quiet-library redesign: the meeting preview sheet's separate
         // handleCopyMeetingPreview() dissolved — QuietMeetingRow and
@@ -307,7 +429,7 @@ func testUIAutomationSurfaceContract() {
             "NSWorkspace.shared.open(transcriptURL)",
         ] {
             assertFalse(
-                contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(staleRawCall),
+                settingsShellSource().contains(staleRawCall),
                 "Home own-file action must not call NSWorkspace on a raw scan-time URL (\(staleRawCall)) — route it through OwnFileResolver"
             )
         }
@@ -315,8 +437,8 @@ func testUIAutomationSurfaceContract() {
         // Copy/export and re-transcribe must surface a failure, not a silent beep,
         // when the source file cannot be resolved.
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not copy meeting")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not re-transcribe meeting"),
+            settingsShellSource().contains("Could not copy meeting")
+                && settingsShellSource().contains("Could not re-transcribe meeting"),
             "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
         )
 
@@ -406,9 +528,46 @@ func testUIAutomationSurfaceContract() {
                 && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
             "pill context-menu actions should keep stable titles for automation"
         )
+
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
+        for identifier in [
+            "transcripted.settings.footer.check-updates",
+            "transcripted.settings.general.launch-at-login",
+            "transcripted.settings.general.show-in-dock",
+            "transcripted.settings.general.dictation-sounds",
+            "transcripted.settings.general.cleanup-pasted-text",
+            "transcripted.settings.section.dictation",
+            "transcripted.settings.section.bluetooth-microphone",
+            "transcripted.settings.section.send-after-dictation",
+            "transcripted.settings.section.meetings",
+            "transcripted.settings.section.speakers",
+            "transcripted.settings.section.transcription",
+            "transcripted.settings.section.app",
+            "transcripted.settings.section.permissions",
+            "transcripted.settings.section.privacy",
+            "transcripted.settings.general.keyboard-shortcuts",
+            "transcripted.settings.general.bluetooth-dictation",
+            "transcripted.settings.general.microphone",
+            "transcripted.settings.general.auto-send",
+            "transcripted.settings.general.model",
+            "transcripted.settings.general.corrections",
+            "transcripted.settings.general.people-in-room",
+            "transcripted.settings.general.call-matching",
+            "transcripted.settings.general.crash-reports",
+            "transcripted.settings.general.usage-stats",
+            "transcripted.settings.storage.capture-library",
+            "transcripted.settings.storage.delete-audio",
+            "transcripted.settings.storage.free-up-space",
+            "transcripted.settings.storage.support-files",
+            "transcripted.settings.about.automatic-updates",
+            "transcripted.settings.about.support",
+            "transcripted.settings.general.corrections.clear-all",
+        ] {
+            assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
+        }
+
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.inbox")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".id(ScrollTarget.reviewQueue)")
@@ -427,28 +586,44 @@ func testUIAutomationSurfaceContract() {
             "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
         )
 
+        // The play control is a bare glyph (SpeakerQuietPlayButton) used by
+        // the queue row, the person row and the person card's player; the
+        // compact icon label backs the two overflow menus.
+        assertTrue(
+            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 3,
+            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
+        )
+        assertTrue(
+            speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,
+            "queue and person overflow menus should use the compact 40pt hit-target label"
+        )
+
         assertFalse(
-            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.refresh"),
+            speakersSettingsSource().contains("transcripted.speakers.refresh"),
             "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
         )
 
         for identifier in [
             "transcripted.speakers.voice-to-name.play",
+            "transcripted.speakers.voice-to-name.menu",
             "transcripted.speakers.search.field",
+            "transcripted.speakers.person.play",
+            "transcripted.speakers.person.menu",
         ] {
             assertTrue(
-                contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(identifier),
+                speakersSettingsSource().contains(identifier),
                 "\(identifier) should keep the speakers surface's icon-only controls scriptable without using speaker names"
             )
         }
 
         assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRowMenuItem(title: \"Review speakers\"")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("if !audioRevealURLs.isEmpty")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
+            settingsShellSource().contains("HomeRowMenuItem(title: \"Review speakers\"")
+                && settingsShellSource().contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
+                && settingsShellSource().contains("if !audioRevealURLs.isEmpty")
+                && settingsShellSource().contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
+
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
@@ -552,8 +727,24 @@ func testUIAutomationSurfaceContract() {
         // copy to pin here anymore.
 
         // Settings statuses: the plain-words copy itself is checked by
-        // SettingsActionFailureCopyTests.
+        // SettingsActionFailureCopyTests; here, the shell must use it, keep a
+        // Copy Details reveal, and never put a raw error in the status line.
+        assertTrue(
+            settingsShellSource().contains("SettingsActionFailureCopy.modelCacheRemoval")
+                && settingsShellSource().contains("SettingsActionFailureCopy.launchAtLogin")
+                && settingsShellSource().contains("SettingsActionFailureCopy.captureLibraryMigration(")
+                && settingsShellSource().contains("func settingsFailureDetailsButton("),
+            "Settings action failures should route through SettingsActionFailureCopy with a Copy Details reveal"
+        )
+        assertFalse(
+            settingsShellSource().contains("setup failed: \\(error.localizedDescription)")
+                || settingsShellSource().contains("Could not remove stale models: \\(error")
+                || settingsShellSource().contains("Could not update launch at login: \\(error")
+                || settingsShellSource().contains("Copy stopped: \\(error"),
+            "Settings status lines must not interpolate a raw error into user-facing text"
+        )
     }
+
 }
 
 private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {

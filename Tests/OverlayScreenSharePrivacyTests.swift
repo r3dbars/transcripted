@@ -16,12 +16,12 @@
 // window are deleted by the #1946 follow-ups; the two window controllers need
 // the live app graph (or a window factory seam) this runner never builds.
 // "detected meeting prompts route through the capture pill" reads
-// TranscriptedApp.swift, which another lane is splitting; convert it after.
+// TranscriptedApp.swift; it needs an app-delegate seam first.
 // The window/panel marker scan is a legitimate static check: there is no
 // runtime signal for "a new window got added", so update expectedMarkers when
 // you add, rename, or remove one.
 //
-// Built for real: FloatingOverlayPanel, CapturePillPanel, NotchIslandPanel
+// Built for real: CapturePillPanel, NotchIslandPanel
 // (including its screen-sharing switch) and PasteLastDictationFeedbackPanel.
 // The call prompt's Return/Escape scoping runs through CapturePillKeyRouting.
 
@@ -33,21 +33,6 @@ func testOverlayScreenSharePrivacy() async {
     // Behavioral: these panels are dependency-free, so the fast runner can
     // instantiate them and assert the real runtime property instead of only
     // inspecting source.
-    runSuite("FloatingOverlayPanel is excluded from screen capture") {
-        _ = NSApplication.shared
-        let panel = FloatingOverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: true
-        )
-        assertEqual(
-            panel.sharingType,
-            .none,
-            "the dictation overlay must not be visible to screen sharing / capture"
-        )
-    }
-
     runSuite("CapturePillPanel is excluded from screen capture") {
         _ = NSApplication.shared
         let panel = CapturePillPanel(
@@ -146,7 +131,7 @@ func testOverlayScreenSharePrivacy() async {
     // Source contract: most app surfaces live in files the fast runner cannot
     // compile in isolation, so guard their init bodies at the source level.
     runSuite("protected Transcripted NSWindow/NSPanel inits set sharingType = .none") {
-        // FloatingOverlayPanel, CapturePillPanel, and NotchIslandPanel are
+        // CapturePillPanel and NotchIslandPanel are
         // compiled here and built for real by the suites above; only the
         // surfaces this runner cannot construct stay on this source table.
         let panelSource = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayPanel.swift")
@@ -225,7 +210,6 @@ func testOverlayScreenSharePrivacy() async {
         let expectedMarkers: [String] = [
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/CapturePillController.swift|final class CapturePillPanel: NSPanel {",
-            "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
             "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayPanel: NSPanel {",
             "Sources/UI/Overlay/MeetingOverlayPanel.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
             "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",

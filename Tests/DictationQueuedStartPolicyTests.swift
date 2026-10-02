@@ -162,10 +162,9 @@ func testDictationQueuedStartPolicy() async {
     }
 
     // Still source-text, deliberately. Both live where a fake can't reach yet:
-    // the overlay's own message flag (FloatingOverlayController, which the
-    // #1946 follow-up that deletes the near-text window rewrites) and the
-    // controller's Esc callback wiring. Convert them after that follow-up,
-    // once the overlay has a testable message model.
+    // the overlay's own message flag (FloatingOverlayController, rewritten by
+    // #1959 when the near-text window was deleted) and the controller's Esc
+    // callback wiring. Convert them next, with a testable message model.
     runSuite("Esc takes back a waiting start, and other messages hold back the next take") {
         let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
         assertTrue(

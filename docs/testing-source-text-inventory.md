@@ -99,7 +99,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `DictationLanguageScriptPolicyTests.swift` | `Speech/STTRouter.swift`, `UI/Overlay/DictationSessionController.swift` | 4 | Paste Anyway pastes and saves the held-back text instead of dropping it. | **converted**: reads no source text after PR #1950. Was needs-seam: dictation pipeline seam. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
 | `DictationQueuedStartPolicyTests.swift` | `Capture/ContextCaptureEngine.swift`, `UI/Overlay/DictationSessionController.swift`, `UI/Overlay/FloatingOverlayController.swift` | ~10 | Presses during a finishing take go through the queue. Esc and Quit drop a waiting start. A passing note gives way to the next take. A refused Quit lets presses queue again. | needs-seam: dictation pipeline seam (the policy itself is already tested in this file). PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
 | `DictationRecordingStartOverlayPolicyTests.swift` | `Capture/ContextCaptureEngine.swift`, `Meeting/MeetingSessionController.swift`, `UI/Overlay/DictationSessionController.swift` | ~25 | The early-release message comes from the policy. A repeated Stop is fenced before the loading cancel. An unexpected meeting stop hands the mic back to dictation. The start handle is cleared on the recovery path. | needs-seam: dictation pipeline seam; meeting unexpected-stop seam. PR #1949 cut more of these; see `.agents/test-shape-baseline.json` for what's left. |
-| `DictationSessionCapTests.swift` | `UI/Overlay/DictationSessionController.swift`, `UI/Overlay/OverlayHeaderView.swift` | 0 | The five-minute cap warns, pastes only if the original target is still frontmost, saves to Markdown with a Paste It action, and an interruption with preserved audio offers Transcribe. | **converted** in PR #1949: no source reads left. |
+| `DictationSessionCapTests.swift` | `UI/Overlay/DictationSessionController.swift` | 0 | The five-minute cap warns, pastes only if the original target is still frontmost, saves to Markdown with a Paste It action, and an interruption with preserved audio offers Transcribe. | **converted** in PR #1949: no source reads left. |
 | `DictationRecordingStartAttemptTests.swift` | `Speech/DictationSession.swift`, `UI/Overlay/DictationSessionController.swift` | 0 | Both production start paths use the tested failure-only recovery runner, at most once per session. | **converted** in PR #1949: no source reads left. |
 | `DictationSoundsTests.swift` | `UI/Overlay/DictationSessionController.swift`, `UI/Settings/TranscriptedSettingsView.swift`, `UI/Shared/TranscriptedSupportActions.swift` | 8 | The stop click plays once, after the mic stops (so speakers can't leak it into the take) and before transcription and paste. The start click plays once, on the fast path. Feedback submit stays silent. | needs-seam: dictation pipeline seam with an injected sound player. |
 | `DictationStartReadinessTests.swift` | `Speech/DictationSession.swift`, `UI/Overlay/DictationSessionController.swift` | 0 | Hotkey trigger raw values match `DictationTrigger`. The App Nap reason uses a label the readmission sites set. The cancel diagnostic names the pending stage. Recovery-loop stage reports reach the session-scoped controller. | **converted** in PR #1949: no source reads left. |
@@ -132,7 +132,7 @@ Paths in "Reads" are relative to `Sources/` unless shown otherwise.
 | `STTRouterPolicyTests.swift` | `Speech/STTRouter.swift` | 0 | Both Parakeet variants wait for the model with a deadline. Recording establishes the resolved variant before capture. Apple Speech is wired through every engine switch. | **converted** in PR #1949: no source reads left. |
 | `TestHelpers.swift` | `Speech/` engine files | 0 | Shared readers (`readSourceFixture`, `readParakeetEngineSource`) for the pinned suites. | keep: remove `readParakeetEngineSource` when its last caller converts. The device-recovery, zombie and system-input readers are gone. |
 | `SingleInstanceGuardTests.swift` | `TranscriptedApp.swift` | 5 | Reopening the app surfaces the existing controls (onboarding, popover, settings fallback) without a modal alert. | needs-seam: a compiled reopen policy that returns which surface to show. |
-| `UIAutomationSurfaceContractTests.swift` | `TranscriptedApp.swift`, `UI/Settings/{TranscriptedSettingsView,SpeakerPeopleSettingsSection,HomeView,SpeakerNamingSheet,...}.swift`, the meeting pill, the QA CLI and bench | 129 (was 347 before the #1960 split, 310 after) | Menubar, Settings, and Home controls keep stable AX identifiers, hit targets, and shortcuts for the QA AX smoke. Empty and error states teach and act. | **converted (partial)** in Cleanup 2; see "Cleanup 2" below. What's left reads `TranscriptedApp`, `TranscriptedSettingsView`, `SpeakerPeopleSettingsSection` and `HomeView` (split during this pass; they need seams next), the meeting pill and naming window (deleted by the #1946 follow-ups), or the QA CLI and bench (keep). |
+| `UIAutomationSurfaceContractTests.swift` | `TranscriptedApp.swift`, `UI/Settings/{TranscriptedSettingsView,SpeakerPeopleSettingsSection,HomeView,SpeakerNamingSheet,...}.swift`, the meeting pill, the QA CLI and bench | 105 (main had 286 when this landed) | Menubar, Settings, and Home controls keep stable AX identifiers, hit targets, and shortcuts for the QA AX smoke. Empty and error states teach and act. | **converted (partial)** in Cleanup 2; see "Cleanup 2" below. What's left reads `TranscriptedApp`, `TranscriptedSettingsView`, `SpeakerPeopleSettingsSection` and `HomeView` (split during this pass; they need seams next), the meeting pill and naming window (deleted by the #1946 follow-ups), or the QA CLI and bench (keep). |
 | `WhisperCustomDictionaryTests.swift` | `Speech/WhisperEngine.swift` | 0 | Whisper output goes through the custom dictionary before it is returned. | **converted** in PR #1949: no source reads left. |
 
 ## Outside the grep
@@ -183,9 +183,9 @@ file's source-text count went 6 -> 3 (baseline 501 -> 498).
 ## Cleanup 2: the pins #1946 was blocking
 
 #1946 (Notch island only) merged, so the pins held for it could move. This pass
-took the resolved pin count from 559 to 362 (`.agents/source-pin-baseline.json`)
-and the source-text reads from 302 to 200 (`.agents/test-shape-baseline.json`),
-counted against main after the #1960 splits.
+took the resolved pin count from 535 to 338 (`.agents/source-pin-baseline.json`)
+and the source-text reads from 287 to 195 (`.agents/test-shape-baseline.json`),
+counted against main after #1959, #1960 and #1964.
 
 New seams, all compiled into the fast runner:
 
@@ -232,8 +232,8 @@ Deferred, with the reason:
 
 - Pins on `TranscriptedApp.swift`, `TranscriptedSettingsView.swift`,
   `SpeakerPeopleSettingsSection.swift` and `HomeView.swift`: another lane was
-  splitting those files during this pass (#1960), so they were left alone. This
-  includes the Quit pins
+  splitting those files during this pass (#1960, then #1964 pointed the guards
+  at the split files), so they were left alone. This includes the Quit pins
   (`DictationTerminationCheckpointTests`, the `stopAndRestore` await in
   `BluetoothRouteContractTests`), the Settings mic picker and Boost row pins
   (`MicrophoneChoicePreferencesTests`, `MicrophoneProcessingPreferencesTests`), and the
@@ -245,6 +245,7 @@ Deferred, with the reason:
   code, so a seam now would be thrown away.
 - The queued-start Esc pins in `DictationQueuedStartPolicyTests`
   (`DictationSessionController` Esc wiring, `FloatingOverlayController` message
-  flag): the #1946 follow-up that deletes the near-text window rewrites
-  `FloatingOverlayController`. Convert them against what's left after it.
+  flag): #1959, which deleted the near-text window and rewrote
+  `FloatingOverlayController`, merged while this ran. Convert them against the
+  new controller next.
 

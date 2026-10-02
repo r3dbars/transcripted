@@ -1,19 +1,3 @@
-enum DictationCancelHintPolicy {
-    static func shortcutHint(
-        dictationShortcutsEnabled: Bool,
-        pushToTalkDisplay: String,
-        handsFreeDisplay: String
-    ) -> String {
-        guard dictationShortcutsEnabled else { return "" }
-        return "\(pushToTalkDisplay) / \(handsFreeDisplay)"
-    }
-
-    static func cancelHintText(for shortcutHint: String) -> String {
-        guard !shortcutHint.isEmpty else { return "" }
-        return "Cancel: \(shortcutHint)"
-    }
-}
-
 /// Esc is a global key: people press it to close an autocomplete or leave an
 /// edit box while dictating hands-free. A single stray press used to throw
 /// away the whole take with no sound and no undo. So once real audio has been
