@@ -1,7 +1,9 @@
 // ParakeetRecordingTeardown.swift
 // Dictation recording teardown for ParakeetEngine: stop, system-wake
 // interruption, cancel, failed-start reset, blocked-start abandonment, and
-// idle hardware release. Split out of ParakeetEngine.swift.
+// idle hardware release. Split out of ParakeetEngine.swift. The stop's order
+// lives in `ParakeetStopRecordingSequence` and the graph work in
+// `ParakeetAudioGraph`; this file supplies the engine's side of both.
 //
 // These are internal collaborator methods on ParakeetEngine. ParakeetEngine
 // (ParakeetEngine.swift) stays the public-API owner and @MainActor home for
@@ -58,20 +60,16 @@ extension ParakeetEngine {
         let wasRecording = isRecording
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
-        let wakeCleanupOwner = currentAudioEngineQueueOwnerToken()
-        if isRecording {
-            preserveCurrentRecordingBuffersForRecovery()
-            await removeRecordingTap()
-            guard ownsAudioEngineQueue(wakeCleanupOwner) else { return }
-            isRecording = false
-            audioLevel = 0
-        }
-
-        let releasedVoiceProcessing = await stopAudioEngine()
-        guard ownsAudioEngineQueue(wakeCleanupOwner) else { return }
-        isEnginePrewarmed = false
-        if !releasedVoiceProcessing {
-            discardStoppedVoiceProcessingGraph(ownedBy: wakeCleanupOwner)
+        guard let teardown = await audioGraph.stopForRecovery(
+            isRecording: isRecording,
+            preserveRecording: { preserveCurrentRecordingBuffersForRecovery() },
+            markRecordingStopped: {
+                isRecording = false
+                audioLevel = 0
+            }
+        ) else { return }
+        if !teardown.releasedVoiceProcessing {
+            discardStoppedVoiceProcessingGraph(ownedBy: teardown.owner)
         }
 
         if wasRecording {
@@ -86,123 +84,11 @@ extension ParakeetEngine {
         // waits for the one tap removal and buffer drain.
         await audioStopLifecycle.run { [weak self] in
             guard let self else { return }
-            await self.performStopRecording()
+            await ParakeetStopRecordingSequence.run(graph: self.audioGraph, host: self)
         }
     }
 
-    private func performStopRecording() async {
-        // Presence-only, same as updateSharedMeetingMicAudioLevel/
-        // resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded above: a
-        // claim on file, dead or alive, still means there is no local
-        // AVAudioEngine to tear down, so which teardown path runs must stay
-        // behavior-identical to the old bare Bool.
-        if sharedMeetingMicClaim != nil || sharedMeetingMicTransition.isResumeInProgress {
-            sharedMeetingMicTransition.invalidate()
-        }
-        if sharedMeetingMicClaim != nil {
-            finishSharedMeetingMicRecording(keepRecordingState: false)
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
-                event: "dictation_shared_meeting_mic_stopped",
-                message: "Dictation stopped borrowing the active meeting microphone stream"
-            )
-            return
-        }
-
-        let configRecoveryGeneration = recoveryState.isRecovering
-            ? recoveryState.generation
-            : nil
-        audioGraphGeneration += 1
-        cancelAudioWatchdog()
-        if let configRecoveryGeneration {
-            cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)
-        }
-
-        let pendingRestoreOwner = pendingSystemInputRestore.owner
-        guard isRecording else {
-            // Genuinely preserved/recovered audio (e.g. real pre-sleep audio held
-            // across a wake-recovery gap) must win over a merely-pending zombie
-            // restart, so a stop during an in-flight zombie retry drains real
-            // audio instead of discarding it.
-            let idleStop = ParakeetRecordingContinuityPolicy.idleStopAction(
-                preservingAcrossRecovery: preservingRecordingAcrossRecovery,
-                hasRecoveredAudio: !recoveredRecordingTimeline.isEmpty,
-                zombieRestartPending: zombieRecoveryRestartPending
-            )
-            if idleStop == .drainRecoveredAudio {
-                cancelPendingRecordingRecovery()
-                await restorePendingSystemInputAfterRecording(
-                    ownedBy: pendingRestoreOwner,
-                    operation: "stop_recording_preserved_recovery"
-                )
-                return
-            }
-            // A zombie reset marks recording idle while it waits to retry, with
-            // nothing preserved worth keeping. Treat a user stop in that window
-            // as cancellation of the pending restart.
-            if idleStop == .cancelPendingZombieRestart {
-                let stopGraphGeneration = audioGraphGeneration
-                audioStartAdmission.cancel()
-                clearRecoveredRecordingTimeline(keepingCapacity: true)
-                await releaseIdleAudioHardware(
-                    removeTap: true,
-                    expectedGeneration: stopGraphGeneration
-                )
-                await restorePendingSystemInputAfterRecording(
-                    ownedBy: pendingRestoreOwner,
-                    operation: "stop_recording_zombie_restart"
-                )
-                return
-            }
-            if audioStartInProgress {
-                // A normal start can be blocked inside CoreAudio just like a
-                // zombie restart. Claim its exact timed-work lease and replace
-                // both resources before allowing the next start to enqueue.
-                audioStartAdmission.cancel()
-            } else {
-                clearRecoveredRecordingTimeline(keepingCapacity: true)
-            }
-            await restorePendingSystemInputAfterRecording(
-                ownedBy: pendingRestoreOwner,
-                operation: "stop_recording_idle"
-            )
-            return
-        }
-        if pinnedDictationRecording != nil {
-            await stopPinnedDictationRecording()
-            await restorePendingSystemInputAfterRecording(
-                ownedBy: pendingRestoreOwner,
-                operation: "stop_recording_pinned"
-            )
-            return
-        }
-        let stopOwner = currentAudioEngineQueueOwnerToken()
-        await removeRecordingTap()
-        var stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
-        var releasedVoiceProcessing = true
-        if stillOwnsStopGraph {
-            releasedVoiceProcessing = await stopAudioEngine()
-            stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
-        }
-        await restorePendingSystemInputAfterRecording(
-            ownedBy: pendingRestoreOwner,
-            operation: "stop_recording"
-        )
-        guard stillOwnsStopGraph, ownsAudioEngineQueue(stopOwner) else { return }
-        isEnginePrewarmed = false
-        drainPendingSamplesIntoTimeline()
-        isRecording = false
-        audioLevel = 0
-        if !releasedVoiceProcessing {
-            discardStoppedVoiceProcessingGraph(ownedBy: stopOwner)
-        }
-        let stoppedSampleCount = recoveredRecordingTimeline.totalSourceSampleCount
-        let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
-        AppLogger.transcription.info("PARAKEET | recording stopped (\(stoppedSampleCount) samples, \(String(format: "%.1f", stoppedDuration))s)")
-    }
-
-    private func cancelPendingRecordingRecovery() {
+    func cancelPendingRecordingRecovery() {
         audioGraphGeneration += 1
         cancelAudioWatchdog()
         audioStartAdmission.cancel()
@@ -224,7 +110,6 @@ extension ParakeetEngine {
 
     func resetAfterFailedRecordingStart() async {
         beginFreshRecordingSession()
-        let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicLevelMeter.end()
@@ -260,15 +145,10 @@ extension ParakeetEngine {
             removeTap: true,
             expectedGeneration: failedStartCleanupOwner.graphOwner.generation
         )
-        await restorePendingSystemInputAfterRecording(
-            ownedBy: pendingRestoreOwner,
-            operation: "reset_after_failed_recording_start"
-        )
     }
 
     func abandonBlockedRecordingStart(reason: String) {
         beginFreshRecordingSession()
-        let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicLevelMeter.end()
@@ -297,18 +177,14 @@ extension ParakeetEngine {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        schedulePendingSystemInputRestore(
-            ownedBy: pendingRestoreOwner,
-            operation: "abandon_blocked_recording_start"
+        audioGraph.abandonBlockedStart(
+            reason: reason,
+            replacedByCancellation: didReplaceBlockedGraph
         )
-        if !didReplaceBlockedGraph {
-            abandonBlockedAudioEngine(reason: reason)
-        }
     }
 
     func cancel() {
         beginFreshRecordingSession()
-        let pendingRestoreOwner = pendingSystemInputRestore.owner
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicLevelMeter.end()
@@ -335,7 +211,6 @@ extension ParakeetEngine {
         }
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
-        schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: "cancel")
         Task { @MainActor [weak self] in
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }
@@ -348,21 +223,53 @@ extension ParakeetEngine {
         removeTap: Bool,
         expectedGeneration: Int? = nil
     ) async -> ParakeetAudioEngineQueueOwnerToken? {
-        if let expectedGeneration, expectedGeneration != audioGraphGeneration {
-            return nil
-        }
-        audioGraphGeneration += 1
-        let idleCleanupOwner = currentAudioEngineQueueOwnerToken()
-        if removeTap {
-            await removeRecordingTap(force: true)
-        }
-        guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }
-        let releasedVoiceProcessing = await stopAudioEngine()
-        guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }
-        isEnginePrewarmed = false
-        if !releasedVoiceProcessing {
-            return discardStoppedVoiceProcessingGraph(ownedBy: idleCleanupOwner)
-        }
-        return idleCleanupOwner
+        await audioGraph.releaseIdleHardware(
+            removeTap: removeTap,
+            expectedGeneration: expectedGeneration
+        )
+    }
+}
+
+extension ParakeetEngine: ParakeetStopRecordingHost {
+    var hasSharedMeetingMicClaim: Bool { sharedMeetingMicClaim != nil }
+    var isSharedMeetingMicResumeInProgress: Bool { sharedMeetingMicTransition.isResumeInProgress }
+    var hasPinnedDictationRecording: Bool { pinnedDictationRecording != nil }
+
+    var activeConfigRecoveryGeneration: UInt64? {
+        recoveryState.isRecovering ? recoveryState.generation : nil
+    }
+
+    func invalidateSharedMeetingMicTransition() {
+        sharedMeetingMicTransition.invalidate()
+    }
+
+    func finishSharedMeetingMicStop() {
+        finishSharedMeetingMicRecording(keepRecordingState: false)
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "parakeet",
+            event: "dictation_shared_meeting_mic_stopped",
+            message: "Dictation stopped borrowing the active meeting microphone stream"
+        )
+    }
+
+    func idleStopAction() -> ParakeetIdleStopAction {
+        ParakeetRecordingContinuityPolicy.idleStopAction(
+            preservingAcrossRecovery: preservingRecordingAcrossRecovery,
+            hasRecoveredAudio: !recoveredRecordingTimeline.isEmpty,
+            zombieRestartPending: zombieRecoveryRestartPending
+        )
+    }
+
+    func finishStoppedRecording() {
+        drainPendingSamplesIntoTimeline()
+        isRecording = false
+        audioLevel = 0
+    }
+
+    func reportRecordingStopped() {
+        let stoppedSampleCount = recoveredRecordingTimeline.totalSourceSampleCount
+        let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
+        AppLogger.transcription.info("PARAKEET | recording stopped (\(stoppedSampleCount) samples, \(String(format: "%.1f", stoppedDuration))s)")
     }
 }

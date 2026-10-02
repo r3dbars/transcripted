@@ -76,40 +76,14 @@ extension DictationSessionController {
             // open, and `waiting_for_audio_route` when it falls back.
             isCurrentSession: { true },
             onStartStageChanged: nil,
-            onStartFailed: { [weak self] in
-                await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)
-            }
+            onStartFailed: startFailureRecovery(sessionID: sessionID)
         )
     }
 
-    /// A successful ordinary start never changes focus. Only a real native
-    /// start failure can request this one recovery step for the current session.
-    ///
-    /// This is now the second line of defence, not the first: issue #1743's
-    /// front-loaded preparation — the App Nap suppression assertion, taken
-    /// before the first microphone open — is what a background start relies
-    /// on. This stays for the case where the process was prepared and the
-    /// open still failed.
-    ///
-    /// The guard reads `allowsForegroundActivationEscalation` rather than
-    /// listing triggers inline as PR #1744 did. That list named
-    /// `keyboardShortcut` and `rightOptionTap`, neither of which anything in
-    /// the tree constructs, so it read as coverage it did not have.
-    private func recoverBackgroundHotkeyStart(sessionID: UUID) async {
-        guard let appState,
-              startActivationRecoveryGate.admit(
-                  sessionID: sessionID,
-                  currentSessionID: currentDictationSessionID,
-                  isDictating: isDictating,
-                  isCancelled: Task.isCancelled,
-                  appIsActive: NSApp.isActive,
-                  allowsEscalation: currentStartReadinessProfile.allowsForegroundActivationEscalation,
-                  usesMeetingMic: { self.canUseActiveMeetingMicForDictation(appState: appState) }
-              ) else { return }
-        _ = await startActivation.prepare(
-            sourceApp: sessionSourceApp,
-            isCurrent: { self.isDictating && self.currentDictationSessionID == sessionID }
-        )
+    /// For `recoverBackgroundHotkeyStart` in DictationSessionPipeline.swift.
+    var activeMeetingMicCheck: (() -> Bool)? {
+        guard let appState else { return nil }
+        return { self.canUseActiveMeetingMicForDictation(appState: appState) }
     }
 
     /// Actually start dictation recording — called directly from startDictation
@@ -126,13 +100,13 @@ extension DictationSessionController {
             // still runs asynchronously so a slow device graph never blocks UI.
             enterPendingStartStage(.openingMicrophone)
             overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
-            if DictationStartCuePolicy.playsOnKeyPress(
-                recordedInput: appState.sttRouter.parakeetEngine.cachedInputDeviceSelection?.selectedInput
-            ) {
-                playStartCueOnce()
-            }
-            recordingStartRetryTask?.cancel()
-            recordingStartRetryTask = Task { @MainActor [weak self] in
+            // The start click is queued before the mic start task, so it
+            // doesn't wait on the microphone opening.
+            launchFastStart(
+                startCuePlaysOnKeyPress: DictationStartCuePolicy.playsOnKeyPress(
+                    recordedInput: appState.sttRouter.parakeetEngine.cachedInputDeviceSelection?.selectedInput
+                )
+            ) { [weak self] in
                 guard let self,
                       self.isDictating,
                       let appState = self.appState,
@@ -252,9 +226,7 @@ extension DictationSessionController {
             isDictating: { [weak self] in
                 self?.isDictating == true && self?.currentDictationSessionID == sessionID
             },
-            onStartFailed: { [weak self] in
-                await self?.recoverBackgroundHotkeyStart(sessionID: sessionID)
-            },
+            onStartFailed: startFailureRecovery(sessionID: sessionID),
             onStartStageChanged: { [weak self] stage in
                 guard let self else { return }
                 self.pendingStartStage.enterReported(
@@ -345,7 +317,7 @@ extension DictationSessionController {
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
-                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger, isRetry: true)
+                    self.retryDictation(sourceApp: sourceApp, anchorRect: nil)
                 }
             )
         }
@@ -412,23 +384,13 @@ extension DictationSessionController {
                             )
                             return
                         }
-                        self.startDictation(
-                            sourceApp: sourceApp,
-                            trigger: self.currentDictationTrigger,
-                            anchorRect: self.sessionAnchorRect,
-                            isRetry: true
-                        )
+                        self.retryDictation(sourceApp: sourceApp, anchorRect: self.sessionAnchorRect)
                     }
                 case .denied, .restricted:
                     overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
-                    self.startDictation(
-                        sourceApp: sourceApp,
-                        trigger: self.currentDictationTrigger,
-                        anchorRect: self.sessionAnchorRect,
-                        isRetry: true
-                    )
+                    self.retryDictation(sourceApp: sourceApp, anchorRect: self.sessionAnchorRect)
                 @unknown default:
                     overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
@@ -479,12 +441,7 @@ extension DictationSessionController {
                     "Dictation couldn't start: \(message)",
                     actionTitle: "Retry Dictation",
                     action: { [weak self] in
-                        self?.startDictation(
-                            sourceApp: sourceApp,
-                            trigger: self?.currentDictationTrigger ?? .unknown,
-                            anchorRect: self?.sessionAnchorRect,
-                            isRetry: true
-                        )
+                        self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
                     }
                 )
             case .timedOut:
@@ -501,12 +458,7 @@ extension DictationSessionController {
                     "The voice model is still warming up. Try again in a moment.",
                     actionTitle: "Retry Dictation",
                     action: { [weak self] in
-                        self?.startDictation(
-                            sourceApp: sourceApp,
-                            trigger: self?.currentDictationTrigger ?? .unknown,
-                            anchorRect: self?.sessionAnchorRect,
-                            isRetry: true
-                        )
+                        self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
                     }
                 )
             case .aborted:

@@ -53,13 +53,25 @@ Usage:
     python3 scripts/dev/check-source-pins.py --changed-only main
     python3 scripts/dev/check-source-pins.py --verbose       # also list unresolved reasons
     python3 scripts/dev/check-source-pins.py --self-test
+    python3 scripts/dev/check-source-pins.py --count-baseline          # pin-count ratchet
+    python3 scripts/dev/check-source-pins.py --count-baseline --shrink # lower it after removing pins
+
+Pin-count ratchet: .agents/source-pin-baseline.json holds the number of resolved
+pins per test file. ``--count-baseline`` fails when a file goes ABOVE its count
+(a file not listed has a count of 0) and when a file drops BELOW it without the
+baseline being shrunk, so the pile can only get smaller. ``--shrink`` lowers
+counts to match the tree and never raises one or adds a file; growing the
+baseline is a human edit made in review. ``check-test-shape.py`` already counts
+source reads per file; this counts the assertions made on them.
 
 Exit status: 0 when no pin is broken, 1 when a pin is broken, 2 on usage errors.
+With --count-baseline: 0 when the counts match the baseline, 1 otherwise.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -69,6 +81,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+COUNT_BASELINE_REL = ".agents/source-pin-baseline.json"
+COUNT_BASELINE_KEY = "resolved-pins"
 
 # --------------------------------------------------------------------------- lexer
 
@@ -2003,6 +2017,103 @@ private func sneakyBlock(_ text: String, from start: String) -> String {
 '''
 
 
+# --------------------------------------------------------------------------- pin-count ratchet
+
+
+def pin_counts(root: Path) -> dict[str, int]:
+    counts: Counter[str] = Counter(p.test_file for p in extract(root, test_files(root)).pins)
+    return dict(counts)
+
+
+def load_count_baseline(path: Path) -> dict[str, int]:
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {str(k): int(v) for k, v in data.get(COUNT_BASELINE_KEY, {}).items()}
+
+
+def write_count_baseline(path: Path, counts: dict[str, int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = {COUNT_BASELINE_KEY: {k: counts[k] for k in sorted(counts) if counts[k] > 0}}
+    path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+
+
+def run_count_baseline(root: Path, baseline_path: Path, shrink: bool) -> int:
+    current = pin_counts(root)
+    baseline = load_count_baseline(baseline_path)
+    grew, shrank = [], []
+    for rel in sorted(set(current) | set(baseline)):
+        now, allowed = current.get(rel, 0), baseline.get(rel, 0)
+        if now > allowed:
+            grew.append(f"{rel}: {allowed} -> {now}")
+        elif now < allowed:
+            shrank.append(f"{rel}: {allowed} -> {now}")
+    if shrink:
+        if grew:
+            print("Refusing to shrink the source-pin baseline while these files grew:")
+            for item in grew:
+                print(f"  - {item}")
+            return 1
+        write_count_baseline(baseline_path, {k: min(v, baseline.get(k, 0)) for k, v in current.items()})
+        print(f"Source-pin baseline shrunk ({len(shrank)} change(s)). Commit {COUNT_BASELINE_REL}.")
+        return 0
+    failed = False
+    if grew:
+        failed = True
+        print("New source-text pins (tests should check behavior; see Tests/README.md, Test rules):")
+        for item in grew:
+            print(f"  - {item}")
+    if shrank:
+        failed = True
+        print("Fewer source-text pins. Lock it in so they can't come back:")
+        for item in shrank:
+            print(f"  - {item}")
+        print("  Run: python3 scripts/dev/check-source-pins.py --count-baseline --shrink")
+    if failed:
+        return 1
+    print(f"source-pin count OK: {sum(current.values())} resolved pin(s) in {len(current)} test file(s); none new.")
+    return 0
+
+
+def count_baseline_self_test(failures: list[str]) -> None:
+    import contextlib
+    import io
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+        root = Path(tmp)
+        (root / "Sources").mkdir()
+        (root / "Tests").mkdir()
+        (root / "Sources" / "Target.swift").write_text("func a() {}\nfunc b() {}\n", encoding="utf-8")
+        test = root / "Tests" / "FooTests.swift"
+        one = 'let s = readSourceFixture("Sources/Target.swift")\nassertTrue(s.contains("func a()"), "a")\n'
+        two = one + 'assertTrue(s.contains("func b()"), "b")\n'
+        base = root / COUNT_BASELINE_REL
+
+        def expect(label: str, got: int, want: int) -> None:
+            if got != want:
+                failures.append(f"count ratchet: {label}: exit {got}, want {want}")
+
+        test.write_text(one, encoding="utf-8")
+        expect("a new pin fails against an empty baseline", run_count_baseline(root, base, False), 1)
+        expect("--shrink refuses to grandfather a new pin", run_count_baseline(root, base, True), 1)
+        if base.exists():
+            failures.append("count ratchet: a refused shrink must not write the baseline")
+        write_count_baseline(base, {"Tests/FooTests.swift": 1})
+        expect("a reviewed baseline passes", run_count_baseline(root, base, False), 0)
+        test.write_text(two, encoding="utf-8")
+        expect("a second pin in a listed file fails", run_count_baseline(root, base, False), 1)
+        expect("--shrink never raises a count", run_count_baseline(root, base, True), 1)
+        if load_count_baseline(base) != {"Tests/FooTests.swift": 1}:
+            failures.append(f"count ratchet: baseline changed on a refused shrink: {load_count_baseline(base)}")
+        test.write_text("// no pins left\n", encoding="utf-8")
+        expect("a removed pin fails until the baseline shrinks", run_count_baseline(root, base, False), 1)
+        expect("--shrink lowers the count", run_count_baseline(root, base, True), 0)
+        if load_count_baseline(base) != {}:
+            failures.append(f"count ratchet: shrink should drop the emptied file, got {load_count_baseline(base)}")
+        expect("a shrunk baseline passes", run_count_baseline(root, base, False), 0)
+
+
 def self_test() -> int:
     import tempfile
 
@@ -2053,6 +2164,8 @@ def self_test() -> int:
         if ex.stats.unresolved_total < 5:
             failures.append(f"expected several unresolved atoms, got {dict(ex.stats.unresolved)}")
 
+    count_baseline_self_test(failures)
+
     # Lexer unit checks.
     toks = lex('let a = "x\\ny\\u{41}" // c "no"\nlet b = #"raw \\n"#')
     strs = [t.value for t in toks if t.kind == "str"]
@@ -2084,10 +2197,23 @@ def main(argv: list[str]) -> int:
         help="only check pins whose target or test file changed vs BASE (default origin/main)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="list unresolved counts by reason")
+    parser.add_argument(
+        "--count-baseline",
+        action="store_true",
+        help=f"check resolved pins per test file against {COUNT_BASELINE_REL} (can only shrink)",
+    )
+    parser.add_argument("--shrink", action="store_true", help="with --count-baseline: lower counts to match the tree (never raises)")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.shrink and not args.count_baseline:
+        parser.error("--shrink needs --count-baseline")
+    if args.count_baseline:
+        if args.changed_only is not None:
+            parser.error("--count-baseline always checks the whole tree; drop --changed-only")
+        root = args.root.resolve()
+        return run_count_baseline(root, root / COUNT_BASELINE_REL, args.shrink)
     return run(args.root.resolve(), args.changed_only, args.verbose)
 
 

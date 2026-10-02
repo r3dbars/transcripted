@@ -111,6 +111,22 @@ enum MeetingPromptTelemetry {
         return properties
     }
 
+    /// A recording's prompt outcome (started, start failed, saved, skipped,
+    /// failed). nil when the recording didn't come from a detected prompt
+    /// (manual or hotkey), so it never borrows another meeting's prompt.
+    static func sessionOutcomeProperties(
+        promptProperties: [String: String]?,
+        outcomeKind: OutcomeKind,
+        elapsedSeconds: TimeInterval? = nil
+    ) -> [String: String]? {
+        guard let promptProperties else { return nil }
+        return outcomeProperties(
+            promptProperties: promptProperties,
+            outcomeKind: outcomeKind,
+            elapsedSeconds: elapsedSeconds
+        )
+    }
+
     static func outcomeProperties(
         promptProperties: [String: String],
         outcomeKind: OutcomeKind,

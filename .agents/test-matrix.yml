@@ -203,6 +203,17 @@ rules:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
 
+  # Source-pin count ratchet: resolved source-text pins per test file can only
+  # shrink (.agents/source-pin-baseline.json). Shrink with
+  # `check-source-pins.py --count-baseline --shrink`.
+  - paths:
+      - "Tests/**/*.swift"
+      - ".agents/source-pin-baseline.json"
+      - "scripts/dev/check-source-pins.py"
+    checks:
+      - "python3 scripts/dev/check-source-pins.py --self-test"
+      - "python3 scripts/dev/check-source-pins.py --count-baseline"
+
   # Module-boundary and file-size ratchets: every Sources/ file belongs to a
   # module in .agents/modules.json and names only types its module may depend
   # on; no new Swift file over 800 lines. Both baselines can only shrink.

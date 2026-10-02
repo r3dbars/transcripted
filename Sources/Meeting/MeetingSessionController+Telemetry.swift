@@ -125,15 +125,12 @@ extension MeetingSessionController {
                     "meeting_transcript_saved",
                     properties: properties
                 )
-                if let promptTelemetryProperties {
-                    AnalyticsReporter.track(
-                        "meeting_prompt_outcome_recorded",
-                        properties: MeetingPromptTelemetry.outcomeProperties(
-                            promptProperties: promptTelemetryProperties,
-                            outcomeKind: .transcriptSaved,
-                            elapsedSeconds: promptRecordingStartedAt.map { Date().timeIntervalSince($0) }
-                        )
-                    )
+                if let promptOutcomeProperties = MeetingPromptTelemetry.sessionOutcomeProperties(
+                    promptProperties: promptTelemetryProperties,
+                    outcomeKind: .transcriptSaved,
+                    elapsedSeconds: promptRecordingStartedAt.map { Date().timeIntervalSince($0) }
+                ) {
+                    AnalyticsReporter.track("meeting_prompt_outcome_recorded", properties: promptOutcomeProperties)
                 }
                 for eventProperties in autoRecognitionEvents {
                     AnalyticsReporter.track(

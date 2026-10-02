@@ -4,7 +4,8 @@ import Foundation
 /// then save the take to a private WAV checkpoint before anything waits on the
 /// voice model.
 ///
-/// `DictationSessionController.stopDictationAndPaste` runs this with the real
+/// `DictationSessionController.stopDictationAndPaste` runs this (through
+/// `runStopUntilTranscribed` in DictationSessionPipeline.swift) with the real
 /// router, sound player and recovery store; tests run it with fakes, so the
 /// order and the session fences are checked through behavior instead of by
 /// reading the controller's source.
