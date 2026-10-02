@@ -6,7 +6,6 @@
     "Tests/BluetoothRouteContractTests.swift": 3,
     "Tests/CIWorkflowContractTests.swift": 14,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
-    "Tests/DeviceRecoveryPolicyTests.swift": 26,
     "Tests/DictationInputDeviceSelectionPolicyTests.swift": 3,
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationRecordingStartOverlayPolicyTests.swift": 7,
