@@ -1,7 +1,7 @@
 # Meeting transcription language
 
-Settings → Model includes a **Meeting language** picker for meetings and
-imported recordings. Dictation is unchanged.
+Settings → Transcription includes a **Meeting language** picker, under the
+model picker, for meetings and imported recordings. Dictation is unchanged.
 
 - **Auto** is the default. With Whisper, the pipeline checks up to three
   non-overlapping, speech-candidate windows from across the available recording

@@ -32,23 +32,23 @@ It should no longer include:
 
 The settings window becomes the app's control center.
 
-It uses a native macOS sidebar with these pages:
+It uses a native macOS sidebar with these pages (`TranscriptedSettingsPage`):
 
-- `Home`
-- `Recording`
-  - `Dictation`
-  - `People`
-  - `Shortcuts`
-- `Setup`
-  - `General`
-  - `Models`
-  - `Storage`
-  - `Agent`
-- `Trust`
-  - `Privacy`
-  - `About`
+- `Today` (the default page, ⌘1)
+- `Meetings` (raw value `home`, kept so automation ids and analytics stay stable, ⌘2)
+- `Dictations` (⌘3)
+- `Writing` (⌘4)
+- `Speakers` (raw value `people`, ⌘5)
+- `Agent` (raw value `connectAgent`, ⌘6)
+- `Settings` (the gear; one combined page, see "Card layout" below)
 
 There is no first-class `Advanced` page in this version.
+
+The per-area sections below (Shortcuts, General, Models, People, Dictation,
+Storage, Agent, About) began as separate pages. Today Shortcuts, General,
+Models, Dictation, Storage and About are cards on the one Settings page,
+People is the Speakers page, and Agent is its own page. Their purpose lines
+still hold.
 
 ## Visual Direction
 
@@ -97,7 +97,7 @@ Under the buttons:
 
 ## Settings Window
 
-### Home
+### Meetings (`home`)
 
 Purpose:
 Show the simplest ways to use Transcripted and surface high-value status.
@@ -163,7 +163,7 @@ Contents:
 - duplicate cleanup
 - local speaker split toggle
 
-Meeting start, recent meeting transcripts, and unfinished meeting repair live on `Home`.
+Meeting start, recent meeting transcripts, and unfinished meeting repair live on `Meetings`.
 
 ### Dictation
 
@@ -251,7 +251,7 @@ Optional supporting text can explain local-first behavior in one short paragraph
 
 ### Transcribe Audio File
 
-- appears on `General`
+- appears on `Settings` (Transcription card)
 - does not appear in the menubar popover in this version
 
 ### Update Status

@@ -54,11 +54,9 @@
 - **Types what you say.** Tap a key, talk, and your words show up where you
   were typing.
 - **Transcribes files.** Drop in an audio or video file you already have.
-- **Helps you write, if you want** (coming in 1.1.67). Turn on Writing to save
-  what you write, in every app or just the ones you pick, so your AI has it
-  too. It can also suggest the next few words as you type.
-
-<!-- When 1.1.67 ships, drop "(coming in 1.1.67)" here and in Requirements. -->
+- **Helps you write, if you want.** Turn on Writing to save what you write, in
+  every app or just the ones you pick, so your AI has it too. It can also
+  suggest the next few words as you type. It's off until you turn it on.
 
 Everything runs on your Mac. The speech models ship inside the app, so
 transcription works offline.
@@ -128,10 +126,10 @@ your notes, but they can't change or delete anything. Setup details are in
 
 - A Mac with Apple silicon (M1 or later)
 - macOS 26 Tahoe or later
-- About 500 MB download, speech models included
+- About 700 MB download, speech models included
 - No account
 
-Autocomplete (coming in 1.1.67) is optional. Turning it on downloads a 3.4 GB
+Autocomplete is optional. Turning it on downloads a 3.4 GB
 model. If your Mac has 16 GB of memory or more, you can pick a larger 5.6 GB
 model instead.
 
