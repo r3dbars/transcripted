@@ -740,48 +740,68 @@ final class AudioInitializationTests: XCTestCase {
     }
 
     /// The format check before `installTap` only turns a crash into a failed
-    /// start. AirPods flip on nearly every first start, so the start must
-    /// rebuild on the settled route before it sizes the mic file.
-    func testMeetingStartSettlesTheMicRouteBeforeCreatingTheMicFile() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioFileManager.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let start = try XCTUnwrap(source.range(of: "func startAudioCapture(sessionGeneration: UInt64)"))
-        let body = source[start.upperBound...]
+    /// start. AirPods flip on nearly every first start, so meeting start and
+    /// mic recovery both settle the route before they size the mic file, then
+    /// recheck the format right before installing the tap.
+    func testMeetingMicStartSettlesBeforeSizingTheFileAndChecksFormatRightBeforeTheTap() throws {
+        let recorder = MicStartStepRecorder()
 
-        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
-        let micFile = try XCTUnwrap(body.range(of: "_mic.wav"))
-        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
-        let installTap = try XCTUnwrap(body.range(of: "inputNode.installTap("))
+        let started = try recorder.run(graph: 48_000)
 
-        XCTAssertLessThan(settle.lowerBound, micFile.lowerBound)
-        XCTAssertLessThan(micFile.lowerBound, tapGuard.lowerBound)
-        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+        XCTAssertEqual(recorder.steps, [
+            "settle", "createSegment", "lock", "checkFormat", "installTap", "unlock"
+        ])
+        XCTAssertEqual(started.graph, 48_000)
+        XCTAssertEqual(started.segment, "segment@48000")
     }
 
-    func testMicRecoverySettlesTheRouteBeforeSizingTheRecoverySegment() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-            .appendingPathComponent("Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let start = try XCTUnwrap(source.range(of: "func recoverFromDeviceChange("))
-        let body = source[start.upperBound...]
+    func testMeetingMicStartSizesTheSegmentFromTheSettledRouteWhenAirPodsFlip() throws {
+        let recorder = MicStartStepRecorder()
+        recorder.settledGraph = 24_000
 
-        let settle = try XCTUnwrap(body.range(of: "settleMeetingInputGraphFormat("))
-        let snapshot = try XCTUnwrap(body.range(of: "let recordingSnapshot = preparedGraph.recordingSnapshot"))
-        let tapGuard = try XCTUnwrap(body.range(of: "ensureMicTapFormatStillMatches("))
-        let installTap = try XCTUnwrap(body.range(of: "newInputNode.installTap("))
+        let started = try recorder.run(graph: 48_000)
 
-        XCTAssertLessThan(settle.lowerBound, snapshot.lowerBound)
-        XCTAssertLessThan(snapshot.lowerBound, tapGuard.lowerBound)
-        XCTAssertLessThan(tapGuard.lowerBound, installTap.lowerBound)
+        XCTAssertEqual(recorder.createdSegmentFor, [24_000], "the mic file must be sized for the 24 kHz call profile")
+        XCTAssertEqual(recorder.checkedFormatFor, [24_000])
+        XCTAssertEqual(recorder.installedTapFor, [24_000])
+        XCTAssertEqual(started.segment, "segment@24000")
+    }
+
+    func testMeetingMicStartStopsBeforeTheTapWhenTheFormatMovesAfterTheFile() {
+        let recorder = MicStartStepRecorder()
+        recorder.formatCheckError = MicStartTestError.formatMoved
+
+        XCTAssertThrowsError(try recorder.run(graph: 48_000)) { error in
+            let failure = error as? MeetingMicGraphStartSequence.Failure
+            XCTAssertEqual(failure?.step, .checkFormat)
+            XCTAssertEqual(failure?.underlying as? MicStartTestError, .formatMoved)
+        }
+        XCTAssertEqual(recorder.steps, ["settle", "createSegment", "lock", "checkFormat", "unlock"])
+        XCTAssertTrue(recorder.installedTapFor.isEmpty)
+    }
+
+    func testMeetingMicStartTagsEachStepsFailureSoCallersKeepTheirHandling() {
+        let settleFails = MicStartStepRecorder()
+        settleFails.settleError = MicStartTestError.routeNeverSettled
+        XCTAssertThrowsError(try settleFails.run(graph: 48_000)) { error in
+            XCTAssertEqual((error as? MeetingMicGraphStartSequence.Failure)?.step, .settle)
+        }
+        XCTAssertEqual(settleFails.steps, ["settle"], "no mic file is made for a route that never settled")
+
+        let segmentFails = MicStartStepRecorder()
+        segmentFails.segmentError = MicStartTestError.diskFull
+        XCTAssertThrowsError(try segmentFails.run(graph: 48_000)) { error in
+            XCTAssertEqual((error as? MeetingMicGraphStartSequence.Failure)?.step, .createSegment)
+        }
+        XCTAssertEqual(segmentFails.steps, ["settle", "createSegment"])
+
+        let lockFails = MicStartStepRecorder()
+        lockFails.engineStartError = MicStartTestError.engineRefused
+        XCTAssertThrowsError(try lockFails.run(graph: 48_000)) { error in
+            let failure = error as? MeetingMicGraphStartSequence.Failure
+            XCTAssertEqual(failure?.step, .installTap)
+            XCTAssertEqual(failure?.underlying as? MicStartTestError, .engineRefused)
+        }
     }
 
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
@@ -1435,5 +1455,59 @@ private final class CaptureFactorySequence: @unchecked Sendable {
         defer { lock.unlock() }
         guard !captures.isEmpty else { return nil }
         return captures.removeFirst()
+    }
+}
+
+private enum MicStartTestError: Error, Equatable {
+    case formatMoved
+    case routeNeverSettled
+    case diskFull
+    case engineRefused
+}
+
+/// Drives `MeetingMicGraphStartSequence` with sample rates standing in for
+/// graphs and records every step it takes.
+private final class MicStartStepRecorder {
+    var settledGraph: Double?
+    var settleError: Error?
+    var segmentError: Error?
+    var formatCheckError: Error?
+    var engineStartError: Error?
+
+    private(set) var steps: [String] = []
+    private(set) var createdSegmentFor: [Double] = []
+    private(set) var checkedFormatFor: [Double] = []
+    private(set) var installedTapFor: [Double] = []
+
+    func run(graph: Double) throws -> (graph: Double, segment: String) {
+        try MeetingMicGraphStartSequence.run(
+            graph,
+            settle: { graph in
+                self.steps.append("settle")
+                if let settleError = self.settleError { throw settleError }
+                return self.settledGraph ?? graph
+            },
+            createSegment: { graph in
+                self.steps.append("createSegment")
+                if let segmentError = self.segmentError { throw segmentError }
+                self.createdSegmentFor.append(graph)
+                return "segment@\(Int(graph))"
+            },
+            checkFormat: { graph in
+                self.steps.append("checkFormat")
+                self.checkedFormatFor.append(graph)
+                if let formatCheckError = self.formatCheckError { throw formatCheckError }
+            },
+            installTap: { graph, _ in
+                self.steps.append("installTap")
+                self.installedTapFor.append(graph)
+            },
+            withinGraphLock: { _, body in
+                self.steps.append("lock")
+                defer { self.steps.append("unlock") }
+                try body()
+                if let engineStartError = self.engineStartError { throw engineStartError }
+            }
+        )
     }
 }

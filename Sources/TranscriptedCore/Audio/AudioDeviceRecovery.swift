@@ -724,7 +724,7 @@ extension Audio {
         // graph from scratch, retry once, and validate both device ID and
         // hardware format before installing another tap.
         let bluetoothInputWasSelected = reason == .deviceChange && meetingInputIsBluetooth()
-        let preparedGraph: PreparedMeetingInputGraph
+        let unsettledGraph: PreparedMeetingInputGraph
         var usedInPlaceRestart = false
         do {
             if let inPlaceSelection,
@@ -736,230 +736,144 @@ extension Audio {
                    selection: inPlaceSelection,
                    sessionGeneration: sessionGeneration
                ) {
-                preparedGraph = inPlaceGraph
+                unsettledGraph = inPlaceGraph
                 usedInPlaceRestart = true
             } else {
-                // Opening a Bluetooth mic after a wake or reconnect can flip it to
-                // its call profile, same as at start. Rebuild on the settled
-                // route before the recovery segment is sized for the old rate.
-                preparedGraph = try settleMeetingInputGraphFormat(
-                    makeReadyMeetingInputGraph(
-                        operation: "device_recovery",
-                        resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
-                            .shouldResetMeetingSelectionBeforeRetry(for: reason),
-                        sessionGeneration: sessionGeneration,
-                        routeWasUnstable: bluetoothInputWasSelected
-                    ),
+                unsettledGraph = try makeReadyMeetingInputGraph(
                     operation: "device_recovery",
-                    sessionGeneration: sessionGeneration
+                    resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
+                        .shouldResetMeetingSelectionBeforeRetry(for: reason),
+                    sessionGeneration: sessionGeneration,
+                    routeWasUnstable: bluetoothInputWasSelected
                 )
             }
         } catch {
-            if error is AudioCaptureStaleSessionError { return }
-            AppLogger.audioMic.error("Failed to prepare microphone recovery graph", [
-                "error": error.localizedDescription
-            ])
-            logMicRecoveryWillRetry(stage: "prepare_graph")
+            logMicRecoveryGraphPrepareFailure(error)
             return
         }
-        let engine = preparedGraph.engine
-        let newInputNode = preparedGraph.inputNode
-        let recordingFormat = preparedGraph.recordingFormat
-        let recordingSnapshot = preparedGraph.recordingSnapshot
-        refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
-        let oldChannelCount = self.inputChannelCount
-        AppLogger.audioMic.info(
-            usedInPlaceRestart
-                ? "Restarting mic engine in place on pinned meeting input"
-                : "Rebuilt mic engine on pinned meeting input",
-            ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"]
-        )
 
-        // ALWAYS update channel count for proper downmix handling
-        // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work
-        self.inputChannelCount = recordingSnapshot.channelCount
-        if recordingSnapshot.channelCount > 1 && oldChannelCount != recordingSnapshot.channelCount {
-            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
-        }
-
-        let channelCountChanged = oldChannelCount != recordingSnapshot.channelCount
-        var recoverySegmentURL: URL?
-        var recoveryWriter: AVAudioFile?
-        var recoveryWriterWasInstalled = false
-        var recoverySegmentWasRegistered = false
-        var shouldKeepRecoverySegment = false
+        let segmentAttempt = MicRecoverySegmentAttempt()
         defer {
-            if let recoverySegmentURL, !shouldKeepRecoverySegment,
-               recoverySegmentWasRegistered,
-               !unregisterMicRecoverySegment(recoverySegmentURL, sessionGeneration: sessionGeneration) {
-                // Stop landed after the segment was registered. It already
-                // listed, closed and will merge this file, including any
-                // audio that arrived before the tap came down.
-                AppLogger.audioMic.info("Stop took the in-progress recovery segment", [
-                    "file": recoverySegmentURL.lastPathComponent
-                ])
-            } else if let recoverySegmentURL, !shouldKeepRecoverySegment {
-                if let recoveryWriter {
-                    let shouldCloseWriter = !recoveryWriterWasInstalled || micAudioFileQueue.sync {
-                        micAudioFileOwnership.removeIfOwned(
-                            recoveryWriter,
-                            generation: sessionGeneration
+            discardUnkeptMicRecoverySegment(segmentAttempt, sessionGeneration: sessionGeneration)
+        }
+
+        func failRestart(_ error: Error, engine: AVAudioEngine, inputNode: AVAudioInputNode) {
+            failMicRecoveryRestart(
+                error,
+                engine: engine,
+                inputNode: inputNode,
+                sessionGeneration: sessionGeneration,
+                reason: reason,
+                afterSystemWake: afterSystemWake,
+                usedInPlaceRestart: usedInPlaceRestart
+            )
+        }
+
+        // Settle the route, size the recovery segment from the settled graph,
+        // then recheck the format and install the tap under the graph lock.
+        // `engine.start()` only proves the graph was accepted; the frame wait
+        // after this proves the selected microphone delivers.
+        var settledGraphForFailure: PreparedMeetingInputGraph?
+        var bufferCountBeforeRestart = 0
+        let restarted: (graph: PreparedMeetingInputGraph, segment: MicRecoverySegmentStart)
+        do {
+            restarted = try MeetingMicGraphStartSequence.run(
+                unsettledGraph,
+                settle: { graph in
+                    // Opening a Bluetooth mic after a wake or reconnect can
+                    // flip it to its call profile, same as at start. Rebuild
+                    // on the settled route before the recovery segment is
+                    // sized for the old rate. A reused in-place graph was
+                    // already validated on the pinned mic.
+                    let settled = usedInPlaceRestart
+                        ? graph
+                        : try settleMeetingInputGraphFormat(
+                            graph,
+                            operation: "device_recovery",
+                            sessionGeneration: sessionGeneration
                         )
+                    settledGraphForFailure = settled
+                    return settled
+                },
+                createSegment: { graph in
+                    try createMicRecoverySegment(
+                        for: graph,
+                        attempt: segmentAttempt,
+                        usedInPlaceRestart: usedInPlaceRestart,
+                        sessionGeneration: sessionGeneration,
+                        switchStart: switchStart,
+                        lastMicBufferTime: &lastMicBufferTime
+                    )
+                },
+                checkFormat: { graph in
+                    try ensureMicTapFormatStillMatches(
+                        graph.recordingFormat,
+                        on: graph.inputNode,
+                        voiceProcessingEnabled: graph.voiceProcessingEnabled,
+                        operation: "device_recovery"
+                    )
+                },
+                installTap: { graph, segment in
+                    let micWriteContext = segment.writeContext
+                    try AudioTapInstallGuard.run(operation: "device_recovery") {
+                        graph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: graph.recordingFormat) { [weak self] buffer, _ in
+                            self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                        }
                     }
-                    if shouldCloseWriter {
-                        recoveryWriter.close()
+                },
+                withinGraphLock: { graph, checkAndInstallTap in
+                    let engine = graph.engine
+                    let newInputNode = graph.inputNode
+                    bufferCountBeforeRestart = micBufferCount
+                    try withAudioGraphLock {
+                        guard sessionGeneration == recordingSessionGeneration else {
+                            throw AudioCaptureStaleSessionError()
+                        }
+                        // Reinstall tap using shared buffer handler
+                        tearDownInputTapSafely(
+                            engine: engine,
+                            inputNode: newInputNode,
+                            operation: "device_recovery_restart"
+                        )
+                        try checkAndInstallTap()
+                        do {
+                            engine.prepare()
+                            try engine.start()
+                        } catch {
+                            tearDownInputTapSafely(
+                                engine: engine,
+                                inputNode: newInputNode,
+                                operation: "device_recovery_restart_failed"
+                            )
+                            throw error
+                        }
                     }
                 }
-                try? FileManager.default.removeItem(at: recoverySegmentURL)
-            }
-        }
-
-        if channelCountChanged {
-            AppLogger.audioMic.info("Input channel count changed during recovery", [
-                "oldChannels": "\(oldChannelCount)",
-                "newChannels": "\(recordingSnapshot.channelCount)"
-            ])
-        }
-
-        AppLogger.audioMic.warning("Closing current mic file and creating recovery segment")
-        // Close explicitly so the retiring segment's WAV header is finalized
-        // before the merger can ever read it. Even same-rate device switches
-        // need a new segment so the missing-buffer interval can be padded.
-        switch micAudioFileQueue.sync(execute: {
-            micAudioFileOwnership.retireWriterForRecovery(by: sessionGeneration)
-        }) {
-        case .retired(let retiringWriter):
-            retiringWriter.close()
-            micRecoveryGapAnchor = lastMicBufferTime
-        case .alreadyRetired:
-            // An earlier attempt closed the last segment and then failed.
-            // Its gap is still open; this attempt's segment pads all of it,
-            // from the last frame that segment kept. Frames a failed attempt
-            // wrote were deleted with its segment, so they don't count.
-            lastMicBufferTime = MicRecoveryGapAnchorPolicy.anchor(
-                storedAnchor: micRecoveryGapAnchor,
-                lastBufferTime: lastMicBufferTime
             )
-            AppLogger.audioMic.info("Previous mic recovery left no open segment; creating a new one")
-        case .notOwned:
-            AppLogger.audioMic.info("Skipping recovery because mic writer ownership changed", [
-                "expectedSession": "\(sessionGeneration)",
-                "currentSession": "\(recordingSessionGeneration)"
-            ])
-            return
-        }
-
-        let captureDir = self.paths.audioCaptures
-        try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-        let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-        let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
-        recoverySegmentURL = fileURL
-
-        let micWriteContext: MicPCMWriteContext
-        do {
-            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
-                sampleRate: recordingSnapshot.sampleRate
-            )
-            self.monoOutputFormat = monoFormat
-            micWriteContext = MicPCMWriteContext(
-                generation: sessionGeneration,
-                monoFormat: monoFormat,
-                inputChannelCount: recordingSnapshot.channelCount
-            )
-
-            let newFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: monoFormat.settings,
-                commonFormat: monoFormat.commonFormat,
-                interleaved: monoFormat.isInterleaved
-            )
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            recoveryWriter = newFile
-            let installed = micAudioFileQueue.sync {
-                micAudioFileOwnership.installRecoveryWriter(
-                    newFile,
-                    generation: sessionGeneration
-                )
-            }
-            guard installed else {
-                AppLogger.audioMic.info("Skipping stale recovery writer replacement", [
-                    "expectedSession": "\(sessionGeneration)",
-                    "currentSession": "\(recordingSessionGeneration)"
-                ])
-                return
-            }
-            recoveryWriterWasInstalled = true
-            // List the segment with the recording before any buffer can
-            // reach it, so a Stop during the restart keeps its audio instead
-            // of deleting it. The gap is corrected once the first frame lands.
-            guard registerMicRecoverySegment(
-                MicRecordingSegment(
-                    url: fileURL,
-                    gapBeforeDuration: max(
-                        CACurrentMediaTime() - lastMicBufferTime,
-                        Date().timeIntervalSince(switchStart)
-                    )
-                ),
-                sessionGeneration: sessionGeneration
-            ) else {
-                AppLogger.audioMic.info("Skipping stale recovery before segment registration", [
-                    "expectedSession": "\(sessionGeneration)",
-                    "currentSession": "\(recordingSessionGeneration)"
-                ])
-                return
-            }
-            recoverySegmentWasRegistered = true
-            AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
         } catch {
-            AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
-            return
-        }
-
-        guard sessionGeneration == recordingSessionGeneration else {
-            AppLogger.audioMic.info("Skipping stale recovery before engine restart", [
-                "expectedSession": "\(sessionGeneration)",
-                "currentSession": "\(recordingSessionGeneration)"
-            ])
-            return
-        }
-
-        // Restart engine. `engine.start()` only proves the graph was accepted;
-        // it does not prove the selected microphone can deliver frames.
-        let bufferCountBeforeRestart = micBufferCount
-        do {
-            try withAudioGraphLock {
-                guard sessionGeneration == recordingSessionGeneration else {
-                    throw AudioCaptureStaleSessionError()
-                }
-                // Reinstall tap using shared buffer handler
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: newInputNode,
-                    operation: "device_recovery_restart"
-                )
-                try ensureMicTapFormatStillMatches(
-                    recordingFormat,
-                    on: newInputNode,
-                    voiceProcessingEnabled: preparedGraph.voiceProcessingEnabled,
-                    operation: "device_recovery"
-                )
-                try AudioTapInstallGuard.run(operation: "device_recovery") {
-                    newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                        self?.handleMicBuffer(buffer, writeContext: micWriteContext)
-                    }
-                }
-                do {
-                    engine.prepare()
-                    try engine.start()
-                } catch {
-                    tearDownInputTapSafely(
-                        engine: engine,
-                        inputNode: newInputNode,
-                        operation: "device_recovery_restart_failed"
+            let failure = error as? MeetingMicGraphStartSequence.Failure
+            switch failure?.step {
+            case .settle:
+                logMicRecoveryGraphPrepareFailure(failure?.underlying ?? error)
+            case .checkFormat, .installTap:
+                if let settledGraphForFailure {
+                    failRestart(
+                        failure?.underlying ?? error,
+                        engine: settledGraphForFailure.engine,
+                        inputNode: settledGraphForFailure.inputNode
                     )
-                    throw error
                 }
+            case .createSegment, nil:
+                // The segment step logged why it stopped; no retry from here.
+                break
             }
+            return
+        }
+
+        let engine = restarted.graph.engine
+        let newInputNode = restarted.graph.inputNode
+        let fileURL = restarted.segment.url
+        do {
             guard waitForMicBuffer(
                 after: bufferCountBeforeRestart,
                 sessionGeneration: sessionGeneration,
@@ -1019,44 +933,12 @@ extension Audio {
             guard finalized else {
                 throw AudioCaptureStaleSessionError()
             }
-            if recoverySegmentURL != nil {
-                shouldKeepRecoverySegment = true
+            if segmentAttempt.url != nil {
+                segmentAttempt.shouldKeep = true
             }
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
-            if error is AudioCaptureStaleSessionError {
-                AppLogger.audioMic.info("Skipping stale recovery restart", [
-                    "expectedSession": "\(sessionGeneration)",
-                    "currentSession": "\(recordingSessionGeneration)"
-                ])
-                return
-            }
-            AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
-            // The recovery segment is discarded below, so a slow mic that
-            // starts delivering now would only feed a nil writer while
-            // looking healthy to the watchdog. Stop it; the retry rebuilds.
-            withAudioGraphLock {
-                guard sessionGeneration == recordingSessionGeneration else { return }
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: newInputNode,
-                    operation: "device_recovery_no_audio"
-                )
-            }
-            logMicRecoveryWillRetry(stage: "restart_engine")
-            if usedInPlaceRestart {
-                // The reused graph went stale. Build a fresh one right away
-                // instead of waiting out the watchdog cooldown. Delayed a
-                // beat so this attempt's ownership is released first.
-                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    self?.recoverFromDeviceChange(
-                        sessionGeneration: sessionGeneration,
-                        reason: reason,
-                        afterSystemWake: afterSystemWake,
-                        freshGraphRequested: true
-                    )
-                }
-            }
+            failRestart(error, engine: engine, inputNode: newInputNode)
         }
     }
 
@@ -1128,7 +1010,7 @@ extension Audio {
     /// recording and the watchdog retries on its cooldown, trying the
     /// built-in mic first from the second attempt on. The watchdog still
     /// stops the recording with an error after `maxRecoveryAttempts` in a row.
-    private func logMicRecoveryWillRetry(stage: String) {
+    func logMicRecoveryWillRetry(stage: String) {
         AppLogger.audioMic.warning("Microphone recovery attempt failed; recording continues and will retry", [
             "stage": stage,
             "attempt": "\(recoveryAttemptCount)",
