@@ -1,8 +1,9 @@
 // ParakeetMicrophoneSharingTests.swift
 // A call app (Zoom, Meet, Teams) opening while dictation holds the mic through
 // Apple voice processing. These suites drive the decisions ParakeetEngine and
-// ParakeetDeviceRecovery consult; the AVAudioEngine wiring around them is in
-// ParakeetMicrophoneSharingSourceContractTests.swift.
+// ParakeetDeviceRecovery consult. The start and teardown order around them is
+// in ParakeetAudioGraphTests.swift, and forced sharing recovery in
+// ParakeetRecoveryStateTests.swift.
 
 import Foundation
 

@@ -11,9 +11,8 @@
 // The last suite ("preserves dictation audio across route recovery") runs the compiled
 // ParakeetInterruptionTerminal, the one helper ParakeetEngine marks a recording interrupted
 // through, against a fake engine state. The multi-rate timeline is covered by
-// RecordedAudioTimelineTests; the call-site pin on preserveCurrentRecordingBuffersForRecovery()
-// lives in ParakeetMicrophoneSharingSourceContractTests and
-// ParakeetAudioOwnershipSourceContractTests.
+// RecordedAudioTimelineTests, and buffer preservation across recovery by
+// ParakeetAudioGraphTests.
 
 import Foundation
 
