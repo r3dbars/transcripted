@@ -147,26 +147,48 @@ func testFailedMeetingPresentation() {
         )
     }
 
-    runSuite("MeetingSessionController surfaces skipped no-speech outcomes visibly") {
-        let source = readMeetingSessionControllerSource(part: "TranscriptionOutcomes")
+    runSuite("A skipped no-speech transcript surfaces as a visible error") {
+        let message = "No speech detected"
+        assertTrue(
+            MeetingFailureKind.noSpeechDetected.shouldReportAsSkippedTranscript,
+            "no-speech failures take the skipped-transcript path"
+        )
 
-        // 2026-08 state-collapse audit: the direct `state = .error(...)`
-        // assignment this guard originally checked for was replaced first by
-        // the single-writer `transition(to:reason:)` call, then by
-        // `reportUnrelatedFailure(_:reason:)` (transitions to `.error`
-        // unless a different meeting is actively capturing live, in which
-        // case it must not stomp that capture — see that function's doc
-        // comment) — same effective transition in the common case (skipped
-        // outcomes still surface as a visible .error), just routed through
-        // one function instead of a raw assignment.
-        assertTrue(
-            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)"),
-            "skipped no-speech transcripts should still record a terminal failure outcome"
+        let whileTranscribing = MeetingSessionStateMachine.skippedTranscript(
+            diagnosticMessage: message,
+            while: .transcribing
         )
-        assertTrue(
-            source.contains("reportUnrelatedFailure(diagnosticMessage, reason: \"transcript_skipped\")"),
-            "skipped no-speech transcripts should still publish a visible recovery notice (unless a different meeting is actively capturing live)"
+        assertEqual(whileTranscribing.terminalOutcome, .failed(message), "a skipped transcript ends as a failure, not a save or a discard")
+        assertEqual(whileTranscribing.visibleState, .error(message), "with no live capture the error shows right away")
+        assertEqual(
+            MeetingSessionStateMachine.settledTransition(after: whileTranscribing.terminalOutcome, current: .error(message))?.state,
+            .error(message),
+            "settling the queue keeps the error visible"
         )
+
+        let duringAnotherMeeting = MeetingSessionStateMachine.skippedTranscript(
+            diagnosticMessage: message,
+            while: .recording
+        )
+        assertEqual(duringAnotherMeeting.terminalOutcome, .failed(message))
+        assertNil(duringAnotherMeeting.visibleState, "a queued job's skip must not stomp a different meeting that is recording live")
+        assertNil(
+            MeetingSessionStateMachine.settledTransition(after: duringAnotherMeeting.terminalOutcome, current: .recording),
+            "the queue does not settle while capture is live"
+        )
+        assertEqual(
+            MeetingSessionStateMachine.settledTransition(after: duringAnotherMeeting.terminalOutcome, current: .transcribing)?.state,
+            .error(message),
+            "once that capture ends the skip still surfaces as an error"
+        )
+    }
+
+    runSuite("The transcription queue settles onto how the last job ended") {
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: .transcriptSaved, current: .transcribing)?.state, .ready)
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: .discarded, current: .transcribing)?.state, .ready)
+        assertEqual(MeetingSessionStateMachine.settledTransition(after: nil, current: .transcribing)?.state, .ready)
+        assertNil(MeetingSessionStateMachine.settledTransition(after: nil, current: .ready), "nothing finished and nothing running: stay put")
+        assertNil(MeetingSessionStateMachine.settledTransition(after: .transcriptSaved, current: .stoppingRecording), "never settles over a capture still stopping")
     }
 
     runSuite("HomeFailedMeetingInlinePresentation shows details for non-retryable failures") {
