@@ -62,87 +62,86 @@ extension Transcription {
             AppLogger.transcription.info("Loading and resampling audio to 16kHz")
             let resampleStart = CFAbsoluteTimeGetCurrent()
 
-            // Resample both tracks at once. Each conversion streams 30 s chunks
-            // into an output reserved up front, and both outputs are held
-            // together below anyway, so running them in parallel only adds one
-            // extra chunk buffer to the peak, not a second whole-meeting copy.
-            //
-            // Both are whole-meeting 16kHz buffers (~460MB per channel for a
-            // 2h recording), declared `var` so each can be cleared (`= []`)
+            // Only an engine that detects the spoken language reads these
+            // windows (Whisper); finding them scans both whole tracks. The
+            // job's model is fixed by now, so this can be read before loading.
+            var wantsLanguageSamples = false
+            if languageSelection == .automatic {
+                wantsLanguageSamples = await parakeet.usesRepresentativeLanguageSamples
+            }
+
+            // Both tracks become whole-meeting 16kHz buffers (~230MB per
+            // channel per hour), declared `var` so each can be cleared (`= []`)
             // right after its last use below instead of staying alive for the
             // entire diarize → transcribe → merge run.
-            // Timed once around the pair (wall time), as when they ran one after
-            // the other; each load opts out so the overlap isn't counted twice.
-            let (systemLoadResult, micLoadResult) = await MeetingPipelineTimings.measureAsync(.resample) {
-                async let systemLoad = Self.loadResampledTrack(url: systemURL)
-                async let micLoad = Self.loadResampledTrack(url: micURL)
-                return await (systemLoad, micLoad)
-            }
-
-            var systemSamples: [Float]
-            var systemAudioLoadError: Error?
-            do {
-                systemSamples = try systemLoadResult?.get() ?? []
-            } catch {
-                // Mirror the microphone fallback below: a damaged/empty remote
-                // track must not erase a valid local conversation. The
-                // too-short check further down routes to the mic-only pipeline
-                // when the mic track is usable.
-                systemSamples = []
-                systemAudioLoadError = error
-                AppLogger.transcription.warning("System audio could not be loaded; will fall back to microphone-only if usable", [
-                    "fallback": "microphone_only"
-                ])
-            }
-            var micSamples: [Float]
-            var microphoneAudioOutcome: TranscriptionResult.MicrophoneAudioOutcome
-            if let micLoadResult {
-                do {
-                    micSamples = try micLoadResult.get()
-                    microphoneAudioOutcome = micSamples.isEmpty ? .unusable : .usable
-                } catch {
-                    // A damaged/empty local track must not erase a valid remote
-                    // conversation. Keep the artifact for retry, but run the
-                    // transcription as system-audio-only partial success.
-                    micSamples = []
-                    microphoneAudioOutcome = .unusable
-                    AppLogger.transcription.warning("Microphone audio could not be loaded; continuing with system audio", [
-                        "fallback": "system_audio_only"
-                    ])
+            //
+            // The default mic path needs its buffer only in the mic phase. It
+            // is measured here, released before the call track loads, and
+            // loaded again at the start of the mic phase, so the two buffers
+            // are never alive together and the mic isn't held through
+            // diarization or system STT. Phase order, progress and error
+            // handling stay the same.
+            let releasesMicDuringSystemPhase = Self.releasesMicDuringSystemPhase(
+                micURL: micURL,
+                splitLocalSpeakers: splitLocalSpeakers,
+                wantsLanguageSamples: wantsLanguageSamples
+            )
+            var systemLoadResult: Result<[Float], Error>?
+            let micLoadResult: Result<[Float], Error>?
+            if releasesMicDuringSystemPhase {
+                micLoadResult = await MeetingPipelineTimings.measureAsync(.resample) {
+                    Self.loadResampledTrack(url: micURL)
                 }
             } else {
-                micSamples = []
-                microphoneAudioOutcome = .notProvided
+                // Resample both tracks at once. Each conversion streams 30 s
+                // chunks into an output reserved up front, and both outputs are
+                // held together below anyway, so running them in parallel only
+                // adds one extra chunk buffer to the peak, not a second
+                // whole-meeting copy. Timed once around the pair (wall time);
+                // each load opts out so the overlap isn't counted twice.
+                let (systemLoad, micLoad) = await MeetingPipelineTimings.measureAsync(.resample) {
+                    async let systemLoad = Self.loadResampledTrack(url: systemURL)
+                    async let micLoad = Self.loadResampledTrack(url: micURL)
+                    return await (systemLoad, micLoad)
+                }
+                systemLoadResult = systemLoad
+                micLoadResult = micLoad
             }
 
-            let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
-            AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
-
-            AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
+            var (micSamples, microphoneAudioOutcome) = Self.micTrack(from: micLoadResult)
             if let _ = micURL {
                 AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
             } else {
                 AppLogger.transcription.debug("Mic: skipped for system-audio-only transcription")
             }
+            let micSignalAnalysis = Self.screenMicCaptureSignal(
+                micURL: micURL,
+                samples: &micSamples,
+                outcome: &microphoneAudioOutcome
+            )
+            // Pre-compute mic energy per 100ms frame for embedding quality gating.
+            // When the local user is speaking, system audio embeddings are contaminated
+            // with their voice echo, producing unreliable remote speaker voiceprints.
+            let micActivity = MeetingMicActivity(samples: micSamples, analysis: micSignalAnalysis)
+            // What the system phase needs to know about the mic, kept as plain
+            // values so it reads the same whether or not the buffer is released.
+            let micSampleCount = micSamples.count
+            let micTrackPresent = !micSamples.isEmpty
 
-            var micSignalAnalysis: AudioSignalAnalysis?
-            if micURL != nil, !micSamples.isEmpty {
-                let rawMicAnalysis = AudioSignalRecovery.analyze(samples: micSamples, sampleRate: 16000)
-                var context = rawMicAnalysis.context
-                context["suggested_gain"] = String(format: "%.2f", AudioSignalRecovery.normalizationGain(for: rawMicAnalysis))
-                AppLogger.transcription.info("Analyzed meeting mic signal", context)
-                if AudioSignalRecovery.hasUsableCaptureSignal(samples: micSamples, sampleRate: 16000) {
-                    micSignalAnalysis = rawMicAnalysis
-                } else {
-                    context["fallback"] = "system_audio_only"
-                    AppLogger.transcription.warning("Microphone artifact had no usable capture signal; continuing with system audio", context)
-                    micSamples = []
-                    micSignalAnalysis = nil
-                    microphoneAudioOutcome = .unusable
+            if releasesMicDuringSystemPhase {
+                micSamples = []
+                systemLoadResult = await MeetingPipelineTimings.measureAsync(.resample) {
+                    Self.loadResampledTrack(url: systemURL)
                 }
-            } else {
-                micSignalAnalysis = nil
             }
+            let systemTrack = Self.systemTrack(from: systemLoadResult)
+            var systemSamples = systemTrack.samples
+            let systemAudioLoadError = systemTrack.loadError
+
+            let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
+            AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
+
+            AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
 
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
@@ -159,13 +158,13 @@ extension Transcription {
                 // non-recoverable, so that turned a good recording into a dead
                 // failed-queue row the user could only dismiss. Route to the
                 // mic-only pipeline instead, and only fail when neither track
-                // has usable audio. `micSamples` is already emptied above when
-                // the mic track has no usable capture signal, so this reads
-                // real usability rather than mere presence.
-                if micURL != nil, micSamples.count >= 16000 {
+                // has usable audio. `micSampleCount` is already 0 when the mic
+                // track has no usable capture signal, so this reads real
+                // usability rather than mere presence.
+                if micURL != nil, micSampleCount >= 16000 {
                     AppLogger.transcription.warning("System audio too short or empty; transcribing microphone only", [
                         "systemSamples": "\(systemSamples.count)",
-                        "micSamples": "\(micSamples.count)",
+                        "micSamples": "\(micSampleCount)",
                         "fallback": "microphone_only"
                     ])
                     // Keep processing in this pipeline rather than delegating to
@@ -188,12 +187,6 @@ extension Transcription {
                 }
             }
 
-            // Only an engine that detects the spoken language reads these
-            // windows (Whisper); finding them scans both whole tracks.
-            var wantsLanguageSamples = false
-            if languageSelection == .automatic {
-                wantsLanguageSamples = await parakeet.usesRepresentativeLanguageSamples
-            }
             let languageContext = try await parakeet.resolveLanguage(
                 representativeSamples: wantsLanguageSamples
                     ? Self.representativeLanguageSamples(
@@ -202,41 +195,6 @@ extension Transcription {
                     ) : [],
                 selection: languageSelection
             )
-
-            // Pre-compute mic energy per 100ms frame for embedding quality gating.
-            // When the local user is speaking, system audio embeddings are contaminated
-            // with their voice echo, producing unreliable remote speaker voiceprints.
-            let micEnergyFrameDuration = 0.1  // 100ms frames
-            let micFrameSize = Int(16000.0 * micEnergyFrameDuration)  // 1600 samples
-            let micFrameCount = micSamples.count / micFrameSize
-            var micEnergyPerFrame = [Float](repeating: 0, count: micFrameCount)
-
-            micSamples.withUnsafeBufferPointer { ptr in
-                // Security: guard against nil baseAddress (empty buffer) before pointer arithmetic
-                guard let baseAddr = ptr.baseAddress else { return }
-                for i in 0..<micFrameCount {
-                    let start = i * micFrameSize
-                    var sumSquares: Float = 0
-                    vDSP_dotpr(baseAddr + start, 1,
-                               baseAddr + start, 1,
-                               &sumSquares,
-                               vDSP_Length(micFrameSize))
-                    micEnergyPerFrame[i] = sqrt(sumSquares / Float(micFrameSize))
-                }
-            }
-            let micActiveThreshold = AudioSignalRecovery.speechDetectionThreshold(
-                for: micSignalAnalysis ?? AudioSignalRecovery.analyze(samples: [], sampleRate: 16000)
-            )
-
-            /// Returns the fraction of a time range where the local mic was active (0.0-1.0).
-            func micActiveFraction(startTime: Double, endTime: Double) -> Double {
-                let startFrame = max(0, Int(startTime / micEnergyFrameDuration))
-                let endFrame = min(micFrameCount, Int(endTime / micEnergyFrameDuration))
-                guard endFrame > startFrame else { return 0 }
-                var activeCount = 0
-                for i in startFrame..<endFrame where micEnergyPerFrame[i] >= micActiveThreshold { activeCount += 1 }
-                return Double(activeCount) / Double(endFrame - startFrame)
-            }
 
             onProgress?(0.10)
 
@@ -257,7 +215,7 @@ extension Transcription {
                     rawSegments = try await Self.diarizeSystemAudio(
                         samples: systemSamples,
                         diarization: diarization,
-                        hasMicTrack: micURL != nil && !micSamples.isEmpty,
+                        hasMicTrack: micURL != nil && micTrackPresent,
                         clusteringThreshold: speakerSeparation?.clusteringThreshold
                     )
                 } catch let error where Self.isExplicitNoSpeechError(error) {
@@ -324,7 +282,7 @@ extension Transcription {
                 negativeExemplarsByProfile: negativeExemplarsByProfile,
                 speakerThresholds: speakerThresholds,
                 speakerDB: speakerDB,
-                micActiveFraction: micActiveFraction
+                micActiveFraction: { micActivity.activeFraction(startTime: $0, endTime: $1) }
             )
             let speakerMatchResults = identities.matchResults
             let speakerNewProfiles = identities.newProfiles
@@ -433,6 +391,11 @@ extension Transcription {
                     await MainActor.run {
                         self.processingStatus = "Transcribing mic audio..."
                     }
+                    if releasesMicDuringSystemPhase, let micURL {
+                        // Released before the call track loaded; a failure here
+                        // takes the same fallback as any other mic failure.
+                        micSamples = try Self.reloadReleasedMicTrack(url: micURL, expectedSampleCount: micSampleCount)
+                    }
 
                     if splitLocalSpeakers {
                         // B) Mic diarization path
@@ -470,8 +433,9 @@ extension Transcription {
                         ])
                     } else {
                         // A) Default: silence-split, single speaker
-                        // `micSamples` is still the buffer `micSignalAnalysis`
-                        // measured, so reuse it instead of scanning again.
+                        // `micSamples` holds the same samples `micSignalAnalysis`
+                        // measured (held or reloaded), so reuse it instead of
+                        // scanning again.
                         let micSegments = Self.detectSpeechSegments(
                             samples: micSamples,
                             sampleRate: 16000,
