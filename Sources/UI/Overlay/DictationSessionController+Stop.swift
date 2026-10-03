@@ -177,6 +177,7 @@ extension DictationSessionController {
             // admission, but keep the policy as the final ownership check.
             return
         }
+        releaseDictationMuffleForStop()
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         clearSessionCapCountdown()

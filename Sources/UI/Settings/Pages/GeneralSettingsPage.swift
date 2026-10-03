@@ -28,6 +28,7 @@ struct GeneralSettingsPage<
     @Binding var showTranscriptedInDock: Bool
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
+    @Binding var dictationMuffleEnabled: Bool
     @Binding var autoDetectCallsEnabled: Bool
 
     let correctionsStatusLine: String
@@ -79,6 +80,17 @@ struct GeneralSettingsPage<
                         message: "Lightly fixes filler words, repeats, and spacing before pasting. Off pastes the raw transcript."
                     ),
                     automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
+                )
+
+                GeneralToggleRow(
+                    title: "Muffle other audio",
+                    isOn: $dictationMuffleEnabled,
+                    help: dictationMuffleEnabled ? "Music sounds muffled while you talk." : "Other audio plays normally.",
+                    info: GeneralInfo(
+                        title: "Muffle other audio",
+                        message: "While you dictate, music and videos keep playing but sound muffled, like stepping outside the club, then come back when you stop. Calls and other apps using a mic are left alone. Needs System Audio Recording access. Skipped during meetings, with Apple voice processing on, and on AirPlay, surround or virtual outputs, or headphones whose mic would have to switch on."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.dictation-muffle"
                 )
 
                 shortcutEditor()

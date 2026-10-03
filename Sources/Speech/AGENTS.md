@@ -77,8 +77,16 @@
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
 - `DictationLanguageScriptPolicy.swift` — flags dictation text that is nearly all (80%+, 4+ letters) one non-Latin script none of the person's languages use (Russian from an English speaker); Parakeet V3, Ultra and Whisper guess the language themselves. It runs for every model and ignores Latin-vs-Latin mixups. `DictationUserLanguages.swift` gathers those languages (Mac preferred languages, enabled keyboards, a chosen meeting language), read only when the text is flagged. `STTRouter.transcribe` holds the text in `heldBackDictationText` and reports `.otherLanguage`; the controller keeps the audio and offers Paste Anyway
 
+- Dictation muffle ("Muffle other audio" in Settings): other apps keep playing, low-passed, while the dictation mic is open.
+  - `DictationAudioMuffler.swift`: the coordinator, called by `DictationSessionController+Muffle.swift`. It runs the machine on one serial queue, performs its effects on the route, and is the only part that logs.
+  - `DictationMuffleMachine.swift`: the pure timeline (inputs, effects, a virtual clock). Fast-tested.
+  - `DictationMuffleRoute.swift`: the Core Audio objects. Tap A (unmuted, include-list) feeds the copy through a private aggregate on the output. Tap B (`.mutedWhenTapped`, include-list) in a tap-only aggregate is started only at the cut. Never change a running tap's mute behavior: coreaudiod restarts the IO and leaves a ~60 ms hole.
+  - `DictationMuffleFilter.swift`: the sound (TPT cutoff glide plus output gate). It runs on the IO thread and is fast-tested.
+  - `DictationMufflePolicy.swift` and `DictationMuffleHAL.swift`: the rules and fail-closed HAL reads.
+
 ## Current Notes
 
+- Dictation muffle and Bluetooth: the muffle never opens an input device, `AVAudioEngine` or `inputNode`, so a Bluetooth headset as the default input is unaffected. It only builds its aggregate on outputs with no input streams; an unreadable count is refused. Starting a headset's input stream is what flips AirPods into call mode. On macOS 26, AirPods expose an output-only device plus a separate mic, so muffle works on them. It also stops on an output rate change.
 - This directory powers dictation.
 - `ParakeetEngine` consults `ParakeetPrewarmPolicy` before checking microphone input readiness. Idle readiness checks must not leave `AVAudioEngine` running, because that keeps the macOS microphone indicator active.
 - `ParakeetEngine` consults `ParakeetShortAudioGate` before spending work on extremely short clips, so short-tap behavior changes belong here rather than in UI controllers.
