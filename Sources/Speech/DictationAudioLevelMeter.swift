@@ -1,6 +1,24 @@
 import AVFoundation
 import Foundation
 
+/// One reading of the dictation waveform meter, on `DictationAudioLevelMeter`'s
+/// 0...1 scale (the same floor and ceiling as always).
+struct DictationAudioLevel: Equatable, Sendable {
+    /// RMS of every frame since the last reading.
+    let level: Float
+    /// The loudest single buffer in that span, so a short syllable the
+    /// average would flatten can still show at its height. Never below
+    /// `level`.
+    let peak: Float
+
+    init(level: Float, peak: Float? = nil) {
+        self.level = level
+        self.peak = max(level, peak ?? level)
+    }
+
+    static let silent = DictationAudioLevel(level: 0)
+}
+
 enum DictationAudioLevelMeter {
     static func normalizedLevel(
         from buffer: AVAudioPCMBuffer,
