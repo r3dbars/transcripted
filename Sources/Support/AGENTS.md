@@ -12,6 +12,7 @@
 - `AppSoundPlayer.swift` — UI sound preferences (`UISoundPreferences`) and the cue playback helper (`AppSoundPlayer`) used by dictation, meetings and the menu bar
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
+- `UserDefaults+WriteIfChanged.swift` — writes or removes a defaults key only when the stored value differs; every write posts `UserDefaults.didChangeNotification` app-wide, so hot paths (the permission caches) use it
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference (the Settings toggle; `AnalyticsReporter` and `ClaudeDesktopIntegrationInstaller` read it)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)

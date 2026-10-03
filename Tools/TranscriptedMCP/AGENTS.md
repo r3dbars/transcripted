@@ -52,6 +52,7 @@ reach the real one.
 | File | Purpose |
 |------|---------|
 | `Main.swift` | `@main` entry point; resolves directories, builds the index (with an `NLEmbeddingProvider` for semantic search), starts file watchers, then starts the MCP stdio server |
+| `BlockingStdioTransport.swift` | Default stdio transport (wrapped by `CompanionTransport`): one blocking reader thread plus a serial-queue writer, newline framing identical to SDK 0.12 `StdioTransport`, never touches O_NONBLOCK, no polling while idle |
 | `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct handler; the tool bodies themselves live in the `ToolHandlers+*.swift` files below |
 | `ToolHandlers+Meetings.swift` | `list_meetings` / `read_meeting` handlers |
@@ -234,6 +235,8 @@ The in-app Claude Desktop installer copies that helper into:
 ## Gotchas
 
 - transport is stdio, not HTTP
+- don't switch back to the SDK's `StdioTransport`: 0.12 sets O_NONBLOCK on the client's fds and polls stdin every 10 ms forever (~0.5% of a core and ~200 context switches/s per idle server), and sleeps 10 ms per full pipe on large replies. `BlockingStdioTransport` sleeps in read(2)/poll(2) instead. Running servers keep the old binary until their client restarts.
+- the index dir also holds `mcp_index.embed.lock` (a per-pass cross-process lock around `reconcileEmbeddings`) and an additive `embedding_cache` table (content-keyed vector reuse, 72 h TTL, cleared on model change; old helpers ignore it)
 - direct file reads are path-validated and reject traversal or symlink escapes
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
