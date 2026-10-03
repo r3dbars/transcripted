@@ -170,14 +170,34 @@ struct TodayTapeDay: Identifiable, Equatable, Sendable {
     let isToday: Bool
     let meetings: [TodayTapeMark]
     let dictations: [TodayTapeMark]
-    var writing: [TodayTapeMark] = []
+    let writing: [TodayTapeMark]
+    /// Every mark in time order, for stepping through the day. Sorted once
+    /// here (off-main, in `TodayTapeBuilder.days`) because the day card reads
+    /// it per mark on every render, which made each pass quadratic.
+    let allMarks: [TodayTapeMark]
+    /// The day in sessions, oldest first (`TodaySessionBuilder`).
+    let sessions: [TodaySession]
+
+    init(
+        day: Date,
+        isToday: Bool,
+        meetings: [TodayTapeMark],
+        dictations: [TodayTapeMark],
+        writing: [TodayTapeMark] = []
+    ) {
+        self.day = day
+        self.isToday = isToday
+        self.meetings = meetings
+        self.dictations = dictations
+        self.writing = writing
+        let allMarks = (meetings + dictations + writing)
+            .sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        self.allMarks = allMarks
+        self.sessions = TodaySessionBuilder.sessions(allMarks.map(\.item))
+    }
 
     var id: TimeInterval { day.timeIntervalSinceReferenceDate }
     var isEmpty: Bool { meetings.isEmpty && dictations.isEmpty && writing.isEmpty }
-    /// Every mark in time order, for stepping through the day.
-    var allMarks: [TodayTapeMark] {
-        (meetings + dictations + writing).sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
-    }
 }
 
 enum TodayTapeBuilder {
@@ -461,10 +481,17 @@ enum TodayWritingParser {
         return facts
     }
 
+    // Sendable value types: no shared mutable formatter, and no ICU
+    // formatter built per entry (that was ~180 us an entry).
+    private static let fractionalStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let plainStyle = Date.ISO8601FormatStyle()
+
     private static func parseDate(_ value: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return withFraction.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        // The writer stores "...:ss.SSSZ", so the fractional form goes first.
+        guard let parsed = (try? fractionalStyle.parse(value)) ?? (try? plainStyle.parse(value)) else { return nil }
+        // FormatStyle can land one ulp (~0.12 us) off the millisecond; snapping
+        // keeps the Date identical to what ISO8601DateFormatter returned.
+        return Date(timeIntervalSince1970: (parsed.timeIntervalSince1970 * 1_000).rounded() / 1_000)
     }
 
     /// A writing row's title: the first line, trimmed like a dictation title
@@ -568,6 +595,13 @@ enum TodayCopy {
             return TodayFormatterCache.string(from: start, template: "jmm", locale: locale, calendar: calendar)
         }
         return TodayFormatterCache.timeRange(from: start, to: end, locale: locale, calendar: calendar)
+    }
+
+    /// Whole minutes since the reference date. Everything the day card shows
+    /// about `now` (the "Now 2:41 PM" label, the now line, "Yesterday") moves
+    /// at most once a minute, so the card skips renders inside one minute.
+    static func minuteKey(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSinceReferenceDate / 60).rounded(.down))
     }
 
     /// Time of day for today's rows, "Yesterday", or a short weekday/date.

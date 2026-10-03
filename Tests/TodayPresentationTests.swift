@@ -262,4 +262,119 @@ func testTodayPresentation() {
         assertEqual(dayStats?.todayWritingApps.map(\.appName), ["Slack", "Notes"], "the day's apps by words")
         assertEqual(TodayCopy.weekdayLong(for: date(20), locale: locale, calendar: calendar), "Sunday", "long weekday")
     }
+    runSuite("TodayTapeDay - marks keep time order with ties broken by id, and sessions come with the day") {
+        func item(_ kind: TodayRecentItem.Kind, _ id: String, _ at: Date, _ seconds: Int? = nil) -> TodayRecentItem {
+            TodayRecentItem(kind: kind, id: id, title: id, date: at, durationSeconds: seconds, transcriptURL: nil)
+        }
+        let captures = [
+            item(.dictation, "d-b", date(24, 3)),          // before 6 AM: both clamp to the left edge
+            item(.dictation, "d-a", date(24, 4)),
+            item(.writing, "w", date(24, 9), 60),
+            item(.meeting, "m", date(24, 9), 30 * 60),     // same minute as the writing entry
+            item(.dictation, "d-c", date(24, 9, 10)),
+        ]
+        let today = TodayTapeBuilder.days(captures: captures, now: now, calendar: calendar).last
+        assertEqual(today?.allMarks.map(\.id), ["d-a", "d-b", "m", "w", "d-c"], "time order, ties by id")
+        assertEqual(today?.sessions.map { $0.items.map(\.id) }, [["d-b"], ["d-a"], ["m", "w", "d-c"]], "sessions split at a 30-minute pause")
+        assertEqual(today?.sessions.map(\.title), ["d-b", "d-a", "m"], "session titles by rule")
+        assertEqual(today?.sessions, TodaySessionBuilder.sessions(today?.allMarks.map(\.item) ?? []), "same sessions as building them from the marks")
+
+        let later = TodayTapeBuilder.days(
+            captures: captures + [item(.dictation, "d-new", date(24, 14))],
+            now: now,
+            calendar: calendar
+        ).last
+        assertEqual(later?.id, today?.id, "a new capture keeps the day's id")
+        assertTrue(later != today, "but the day no longer compares equal, so the card redraws")
+        assertEqual(later?.allMarks.last?.id, "d-new", "the new capture is on the tape")
+    }
+
+    runSuite("TodayCopy.minuteKey - equal keys never hide a change in the day card's time copy") {
+        let utc = TimeZone(identifier: "UTC")!
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = utc
+        // 15:00 UTC on Oct 3, 2026 is 01:30 on Lord Howe, half an hour before
+        // its 30-minute DST jump, so the hour below crosses it.
+        let start = utcCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 15, minute: 0, second: 0))!
+        var hidden = 0
+        var changes = 0
+        for zone in ["UTC", "America/Los_Angeles", "Asia/Kathmandu", "America/St_Johns", "Australia/Lord_Howe"] {
+            var zoned = Calendar(identifier: .gregorian)
+            zoned.timeZone = TimeZone(identifier: zone)!
+            var previous = start.addingTimeInterval(-1)
+            var previousText = TodayCopy.rowWhen(for: previous, now: previous, locale: locale, calendar: zoned)
+            for second in 0..<3_600 {
+                let instant = start.addingTimeInterval(TimeInterval(second))
+                let text = TodayCopy.rowWhen(for: instant, now: instant, locale: locale, calendar: zoned)
+                if text != previousText {
+                    changes += 1
+                    if TodayCopy.minuteKey(instant) == TodayCopy.minuteKey(previous) { hidden += 1 }
+                }
+                previous = instant
+                previousText = text
+            }
+        }
+        assertEqual(hidden, 0, "every change of the Now label lands on a new minute key")
+        assertTrue(changes >= 5 * 60, "the label changed every minute in every zone")
+    }
+
+    runSuite("TodayWritingParser - Captured keeps the exact millisecond") {
+        let posix = DateFormatter()
+        posix.locale = Locale(identifier: "en_US_POSIX")
+        posix.timeZone = TimeZone(identifier: "UTC")
+        posix.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        func captured(_ ms: Int64) -> String {
+            let seconds = ms / 1_000
+            let rest = Int(ms % 1_000)
+            let millis = rest < 10 ? "00\(rest)" : (rest < 100 ? "0\(rest)" : "\(rest)")
+            return posix.string(from: Date(timeIntervalSince1970: TimeInterval(seconds))) + "." + millis + "Z"
+        }
+        func dayFile(_ capturedValues: [String]) -> String {
+            var text = "# Writing\n"
+            for (index, value) in capturedValues.enumerated() {
+                text += "\n## 10:00 AM - Entry\n\nEntry ID: `w-\(index)`\nCaptured: \(value)\nSource app: Notes\nWords: 1\n\nword\n"
+            }
+            return text
+        }
+
+        var values: [Int64] = (0..<1_000).map { 1_790_265_900_000 + Int64($0) }   // every ms of one second
+        var seed: UInt64 = 0x2545_F491_4F6C_DD1D
+        for _ in 0..<2_000 {                                                      // 2000 to 2100, fixed LCG
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            values.append(946_684_800_000 + Int64(seed >> 20) % 3_155_760_000_000)
+        }
+        for zone in ["America/Chicago", "Asia/Kathmandu", "Australia/Adelaide"] {  // local midnight +/- 1 ms
+            var zoned = Calendar(identifier: .gregorian)
+            zoned.timeZone = TimeZone(identifier: zone)!
+            let midnight = zoned.date(from: DateComponents(year: 2026, month: 9, day: 24))!
+            let ms = Int64(midnight.timeIntervalSince1970 * 1_000)
+            values += [ms - 1, ms, ms + 1]
+        }
+
+        let strings = values.map(captured)
+        let entries = TodayWritingParser.entries(fromDayFile: dayFile(strings))
+        assertEqual(entries.count, values.count, "every entry parses")
+        let reference = ISO8601DateFormatter()
+        reference.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var offExact = 0
+        var offReference = 0
+        for (index, entry) in entries.enumerated() where index < values.count {
+            if entry.date != Date(timeIntervalSince1970: Double(values[index]) / 1_000) { offExact += 1 }
+            if entry.date != reference.date(from: strings[index]) { offReference += 1 }
+        }
+        assertEqual(offExact, 0, "each date is exactly its millisecond")
+        assertEqual(offReference, 0, "each date matches ISO8601DateFormatter bit for bit")
+
+        let offsets = TodayWritingParser.entries(fromDayFile: dayFile([
+            "2026-09-24T16:05:00.387Z",
+            "2026-09-24T16:05:00.387+00:00",
+            "2026-09-24T11:05:00.387-05:00",
+            "2026-09-24T11:05:00-05:00",
+        ]))
+        let instant = Date(timeIntervalSince1970: 1_790_265_900.387)
+        assertEqual(offsets.map(\.date), [instant, instant, instant, Date(timeIntervalSince1970: 1_790_265_900)], "offsets parse to the same instant")
+
+        let rejected = TodayWritingParser.entries(fromDayFile: dayFile(["2026-09-24 16:05:00.387Z", "not a date"]))
+        assertTrue(rejected.isEmpty, "out-of-format Captured values make no entry")
+    }
 }
