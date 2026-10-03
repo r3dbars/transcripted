@@ -147,39 +147,43 @@ public final class FluidOfflineWeSpeakerSegmentEmbedder: ContextualSpeakerSegmen
     }
 
     /// One 10 s window of `audio` from `start` (zero beyond `length`), with the weight
-    /// mask on only for samples `activeFrom..<activeTo` of the window.
+    /// mask on only for samples `activeFrom..<activeTo` of the window. One pool around
+    /// both predictions (the fbank output is the second model's input), so Core ML's
+    /// autoreleased arrays are freed per window, not when the whole meeting is done.
     private func embedWindow(_ audio: [Float], start: Int, length: Int, activeFrom: Int, activeTo: Int) -> [Float]? {
         lock.lock()
         defer { lock.unlock() }
-        do {
-            let audioArray = try MLMultiArray(shape: fbankShape, dataType: .float32)
-            let audioPointer = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
-            audioPointer.update(repeating: 0, count: audioArray.count)
-            let copy = min(length, audioArray.count)
-            audio.withUnsafeBufferPointer { buffer in
-                audioPointer.update(from: buffer.baseAddress! + start, count: copy)
+        return autoreleasepool { () -> [Float]? in
+            do {
+                let audioArray = try MLMultiArray(shape: fbankShape, dataType: .float32)
+                let audioPointer = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
+                audioPointer.update(repeating: 0, count: audioArray.count)
+                let copy = min(length, audioArray.count)
+                audio.withUnsafeBufferPointer { buffer in
+                    audioPointer.update(from: buffer.baseAddress! + start, count: copy)
+                }
+                let fbankOut = try fbankModel.prediction(from: MLDictionaryFeatureProvider(dictionary: ["audio": audioArray]))
+                guard let features = fbankOut.featureValue(for: "fbank_features")?.multiArrayValue else { return nil }
+
+                let weights = try MLMultiArray(shape: weightShape, dataType: .float32)
+                let weightPointer = weights.dataPointer.assumingMemoryBound(to: Float.self)
+                weightPointer.update(repeating: 0, count: weights.count)
+                let firstFrame = max(0, min(weightFrames - 1,
+                    Int((Double(activeFrom) / Double(Self.windowSamples) * Double(weightFrames)).rounded(.down))))
+                let lastFrame = max(firstFrame + 1, min(weightFrames,
+                    Int((Double(activeTo) / Double(Self.windowSamples) * Double(weightFrames)).rounded(.up))))
+                for frame in firstFrame..<min(lastFrame, weights.count) { weightPointer[frame] = 1 }
+
+                let out = try embeddingModel.prediction(from: MLDictionaryFeatureProvider(dictionary: [
+                    "fbank_features": features, "weights": weights,
+                ]))
+                guard let embedding = out.featureValue(for: "embedding")?.multiArrayValue else { return nil }
+                let vector = Self.floats(embedding)
+                return vector.allSatisfy(\.isFinite) ? vector : nil
+            } catch {
+                AppLogger.transcription.warning("Offline WeSpeaker embedding failed", ["error": error.localizedDescription])
+                return nil
             }
-            let fbankOut = try fbankModel.prediction(from: MLDictionaryFeatureProvider(dictionary: ["audio": audioArray]))
-            guard let features = fbankOut.featureValue(for: "fbank_features")?.multiArrayValue else { return nil }
-
-            let weights = try MLMultiArray(shape: weightShape, dataType: .float32)
-            let weightPointer = weights.dataPointer.assumingMemoryBound(to: Float.self)
-            weightPointer.update(repeating: 0, count: weights.count)
-            let firstFrame = max(0, min(weightFrames - 1,
-                Int((Double(activeFrom) / Double(Self.windowSamples) * Double(weightFrames)).rounded(.down))))
-            let lastFrame = max(firstFrame + 1, min(weightFrames,
-                Int((Double(activeTo) / Double(Self.windowSamples) * Double(weightFrames)).rounded(.up))))
-            for frame in firstFrame..<min(lastFrame, weights.count) { weightPointer[frame] = 1 }
-
-            let out = try embeddingModel.prediction(from: MLDictionaryFeatureProvider(dictionary: [
-                "fbank_features": features, "weights": weights,
-            ]))
-            guard let embedding = out.featureValue(for: "embedding")?.multiArrayValue else { return nil }
-            let vector = Self.floats(embedding)
-            return vector.allSatisfy(\.isFinite) ? vector : nil
-        } catch {
-            AppLogger.transcription.warning("Offline WeSpeaker embedding failed", ["error": error.localizedDescription])
-            return nil
         }
     }
 
