@@ -32,6 +32,28 @@ final class LlamaCompletionEngine: @unchecked Sendable {
         }
     }
 
+    /// Prompt-cache counts llama-server attaches to a frame when the request
+    /// asks for `timings_per_token`: `cache_n` prompt tokens reused from the
+    /// slot, `prompt_n` re-processed. Decoded on its own with every field
+    /// optional, so a missing or odd `timings` object can never fail the
+    /// stream; counts only, no text.
+    struct PromptCacheTimings: Decodable {
+        struct Timings: Decodable {
+            let cacheN: Int?
+            let promptN: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case cacheN = "cache_n"
+                case promptN = "prompt_n"
+            }
+        }
+
+        let timings: Timings?
+
+        var cacheN: Int? { timings?.cacheN }
+        var promptN: Int? { timings?.promptN }
+    }
+
     private let baseURL: URL
     private let accessKey: LlamaServerAccessKey?
     private let cleaner: CompletionOutputCleaner
@@ -170,6 +192,10 @@ final class LlamaCompletionEngine: @unchecked Sendable {
             "cache_prompt": true,
             "stop": ["\n"],
             "stream": true,
+            // Adds a `timings` object to each streamed frame so the first
+            // content frame can say how much of the prompt the slot reused.
+            // Generation is unchanged.
+            "timings_per_token": true,
         ]
         var urlRequest = URLRequest(url: baseURL.appendingPathComponent("completion"))
         urlRequest.httpMethod = "POST"
@@ -189,6 +215,7 @@ final class LlamaCompletionEngine: @unchecked Sendable {
         var firstTokenMilliseconds: Int?
         var firstPartialMilliseconds: Int?
         var stoppedAtCap = false
+        var promptCache: PromptCacheTimings?
         let content = try await withTaskCancellationHandler {
             var rawOutput = ""
             var lastPartialVisibleText = ""
@@ -212,6 +239,9 @@ final class LlamaCompletionEngine: @unchecked Sendable {
                 if let piece = frame.content, !piece.isEmpty {
                     if firstTokenMilliseconds == nil {
                         firstTokenMilliseconds = Self.milliseconds(since: startedAt)
+                        // First content frame only, and `try?`: a malformed
+                        // or missing `timings` object just logs nothing.
+                        promptCache = try? frameDecoder.decode(PromptCacheTimings.self, from: Data(json.utf8))
                     }
                     // llama.cpp emits token deltas. Always append: a repeated
                     // token can legitimately equal the text so far (" is" + " is").
@@ -295,6 +325,12 @@ final class LlamaCompletionEngine: @unchecked Sendable {
             timing["firstPartialMilliseconds"] = String(firstPartialMilliseconds)
         }
         timing["stoppedAtCap"] = String(stoppedAtCap)
+        if let cacheN = promptCache?.cacheN, cacheN >= 0 {
+            timing["cache_n"] = String(cacheN)
+        }
+        if let promptN = promptCache?.promptN, promptN >= 0 {
+            timing["prompt_n"] = String(promptN)
+        }
         diagnostics.record("llama-completion-timing", metadata: timing)
         return Decision(
             suggestion: suggestion,
