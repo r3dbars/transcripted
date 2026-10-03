@@ -195,10 +195,8 @@ extension TranscriptionTaskManager {
             micURL: micURL,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            onProgress: { [weak self] progress in
-                Task { @MainActor in
-                    self?.displayStatus = .transcribing(progress: progress)
-                }
+            onProgress: TranscribingProgressGate.onProgress { [weak self] progress in
+                self?.displayStatus = .transcribing(progress: progress)
             }
         )
 
@@ -377,10 +375,8 @@ extension TranscriptionTaskManager {
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
             speakerSeparation: speakerSeparation,
-            onProgress: { [weak self] progress in
-                Task { @MainActor in
-                    self?.displayStatus = .transcribing(progress: progress)
-                }
+            onProgress: TranscribingProgressGate.onProgress { [weak self] progress in
+                self?.displayStatus = .transcribing(progress: progress)
             }
         )
 

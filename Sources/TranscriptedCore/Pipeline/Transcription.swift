@@ -90,12 +90,11 @@ public class Transcription: ObservableObject {
         }
 
         hasInitialized = true
-        if !parakeet.isReady {
-            await parakeet.initialize()
-        }
-        if !diarization.isReady {
-            await diarization.initialize()
-        }
+        // Load both at once, like `MeetingModelDownloader` does. Each engine
+        // is idempotent and owns its own progress state.
+        async let speechReady: Void = Self.initializeIfNeeded(parakeet)
+        async let diarizationReady: Void = Self.initializeIfNeeded(diarization)
+        _ = await (speechReady, diarizationReady)
 
         guard parakeet.isReady else {
             throw PipelineError.modelNotLoaded(model: parakeet.transcriptionEngineDescriptor.displayName)
@@ -103,5 +102,13 @@ public class Transcription: ObservableObject {
         guard diarization.isReady else {
             throw PipelineError.modelNotLoaded(model: "Diarization")
         }
+    }
+
+    private static func initializeIfNeeded(_ engine: any SpeechToTextEngine) async {
+        if !engine.isReady { await engine.initialize() }
+    }
+
+    private static func initializeIfNeeded(_ engine: any DiarizationEngine) async {
+        if !engine.isReady { await engine.initialize() }
     }
 }

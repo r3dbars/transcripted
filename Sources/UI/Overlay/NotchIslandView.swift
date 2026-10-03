@@ -1069,7 +1069,7 @@ final class NotchIslandView: NSView {
             Self.blur(itemsView, from: 0, to: NotchIslandMotion.blurRadius, duration: NotchIslandMotion.contentFadeOut)
         }
     }
-
+    func prewarmBlur() { Self.prewarmBlur(on: itemsView) } // NotchIslandView+Blur.swift
     /// Drops any blur left from the last hide.
     func resetBlur() {
         itemsView.layer?.removeAnimation(forKey: "islandBlur")

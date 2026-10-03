@@ -34,6 +34,10 @@ final class LiveMeetingTranscriptService {
     private var mayInfer: (() -> Bool)?
     private var lastErrorCode: String?
     private var captionsYield: (@MainActor @Sendable () -> Bool)?
+    /// `captionsYield`'s answer, kept current on main for the caption tracks'
+    /// drain loops so they never hop to the main actor to ask.
+    nonisolated private let captionsYieldFlag = LiveMeetingCaptionYield()
+    private var captionsYieldWatch: AnyCancellable?
     private var lastDelivery: (enabled: Bool, epoch: UInt64)?
     private var captionsStatusWatch: AnyCancellable?
     private var captionsSetting = NotchIslandPreferences.showsLiveTranscript()
@@ -95,6 +99,16 @@ final class LiveMeetingTranscriptService {
         lastErrorCode = nil
         transcript = LiveMeetingTranscriptState()
         captionsYield = shouldCaptionsYield
+        syncCaptionsYield()
+        captionsYieldWatch = Publishers.Merge(
+            router.$isRecording.removeDuplicates().map { _ in () },
+            router.$isTranscribing.removeDuplicates().map { _ in () }
+        )
+        // @Published fires before the value lands; read it after.
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncCaptionsYield() }
+        }
         refreshCaptions()
     }
 
@@ -103,12 +117,16 @@ final class LiveMeetingTranscriptService {
     func refreshCaptions() {
         let captions = LiveMeetingCaptions.shared
         let wanted = state == "recording" && NotchIslandPreferences.showsLiveTranscript()
-        if wanted, let sessionID, let captionsYield {
-            captions.start(sessionID: sessionID, shouldYield: captionsYield)
+        if wanted, let sessionID, captionsYield != nil {
+            captions.start(sessionID: sessionID, shouldYield: captionsYieldFlag)
         } else if !wanted {
             captions.stop()
         }
         updateDelivery()
+    }
+
+    private func syncCaptionsYield() {
+        captionsYieldFlag.set(captionsYield?() ?? false)
     }
 
     /// Core restarts its delivery generation (dropping buffers in flight and
@@ -159,6 +177,7 @@ final class LiveMeetingTranscriptService {
         guard self.sessionID == sessionID else { return }
         setDelivery(false)
         LiveMeetingCaptions.shared.stop(sessionID: sessionID)
+        captionsYieldWatch = nil
         state = "finished"
         finishedElapsed = max(0, CACurrentMediaTime() - origin)
         inbox.finish()
@@ -167,7 +186,7 @@ final class LiveMeetingTranscriptService {
 
     /// Invoked on Core's bounded live-delivery worker, not an audio callback.
     nonisolated func receive(_ buffer: AVAudioPCMBuffer, source: LiveMeetingAudioSource, capturedAt: TimeInterval, previewEpoch: UInt64) {
-        guard let samples = Self.monoSamples(buffer), !samples.isEmpty else { return }
+        guard let samples = LiveMeetingAudioDownmix.monoSamples(buffer), !samples.isEmpty else { return }
         let rate = buffer.format.sampleRate
         guard rate.isFinite, rate >= 8_000, rate <= 192_000 else { return }
         let resampled = AudioResampler.resample(samples, from: rate, to: 16_000)
@@ -288,21 +307,5 @@ final class LiveMeetingTranscriptService {
 
     private func isCurrent(_ sessionID: UUID, _ generation: UUID) -> Bool {
         self.sessionID == sessionID && workerGeneration == generation && sharingEnabled
-    }
-
-    nonisolated private static func monoSamples(_ buffer: AVAudioPCMBuffer) -> [Float]? {
-        let frames = Int(buffer.frameLength)
-        let channels = Int(buffer.format.channelCount)
-        guard frames > 0, frames <= 192_000, channels > 0, channels <= 32, let data = buffer.floatChannelData else { return nil }
-        if channels == 1 { return Array(UnsafeBufferPointer(start: data[0], count: frames)) }
-        var mono = [Float](repeating: 0, count: frames)
-        for frame in 0..<frames {
-            var sample: Float = 0
-            for channel in 0..<channels {
-                sample += buffer.format.isInterleaved ? data[0][frame * channels + channel] : data[channel][frame]
-            }
-            mono[frame] = sample / Float(channels)
-        }
-        return mono
     }
 }

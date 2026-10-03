@@ -256,7 +256,7 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
-        session.$audioLevel
+        session.audioLevels.$micLevel
             .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentMicLevel = level
@@ -264,7 +264,7 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
-        session.$systemLevel
+        session.audioLevels.$systemLevel
             .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentSystemLevel = level

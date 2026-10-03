@@ -61,7 +61,6 @@ final class LiveDictationCaptions: ObservableObject {
     /// app startup.
     static let loadDelay: Duration = .seconds(8)
     private static let pumpInterval: Duration = .milliseconds(100)
-    private static let idlePoll: Duration = .milliseconds(500)
 
     private let track = LiveMeetingCaptionTrack()
     private let mode = Mode.fromEnvironment()
@@ -120,9 +119,39 @@ final class LiveDictationCaptions: ObservableObject {
         return router.isRecordingModelLoaded && !router.isRecording && !router.isTranscribing
     }
 
+    /// Waits for `isIdle` by waking on the router's state changes instead of
+    /// polling. `@Published` emits before the value lands, so each wake
+    /// re-checks on a later main-actor turn. A slow backstop re-check covers
+    /// the parts of `isRecordingModelLoaded` that aren't published (the
+    /// recording lease and foreground warmup) and a router that went away.
     private func waitUntilIdle() async {
-        while !isIdle, !Task.isCancelled {
-            try? await Task.sleep(for: Self.idlePoll)
+        guard !isIdle, !Task.isCancelled else { return }
+        let (wakes, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var watch: AnyCancellable?
+        if let router {
+            watch = Publishers.MergeMany([
+                router.$isRecording.map { _ in () }.eraseToAnyPublisher(),
+                router.$isTranscribing.map { _ in () }.eraseToAnyPublisher(),
+                router.$modelDownloadState.map { _ in () }.eraseToAnyPublisher(),
+                router.$selectedModel.map { _ in () }.eraseToAnyPublisher(),
+                router.parakeetEngine.$modelDownloadState.map { _ in () }.eraseToAnyPublisher(),
+            ])
+            .sink { wake.yield() }
+        }
+        let backstop = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                wake.yield()
+            }
+        }
+        defer {
+            watch?.cancel()
+            backstop.cancel()
+            wake.finish()
+        }
+        // Ends on cancellation too: an `AsyncStream` iterator returns nil then.
+        for await _ in wakes where isIdle || Task.isCancelled {
+            return
         }
     }
 

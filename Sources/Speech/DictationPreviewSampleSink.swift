@@ -50,12 +50,13 @@ final class DictationPreviewSampleSink: @unchecked Sendable {
     /// converter low-passes before decimating and keeps its filter state
     /// across calls, like a continuous stream.
     func take() -> [Float] {
-        let taken = lock.withLock { () -> [(samples: [Float], sampleRate: Double)] in
-            defer {
-                segments.removeAll(keepingCapacity: true)
-                storedSeconds = 0
-            }
-            return segments
+        // Swapped out, not copied then cleared: clearing a shared array with
+        // `keepingCapacity` allocates a new buffer, and this lock is the one
+        // the capture queue appends under.
+        var taken: [(samples: [Float], sampleRate: Double)] = []
+        lock.withLock {
+            swap(&taken, &segments)
+            storedSeconds = 0
         }
         var output: [Float] = []
         for segment in taken {

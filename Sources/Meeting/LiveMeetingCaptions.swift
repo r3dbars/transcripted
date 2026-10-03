@@ -45,6 +45,9 @@ final class LiveMeetingCaptions: ObservableObject {
     /// so a meeting never waits on it. The first Neural Engine compile takes
     /// ~20 s on an M5 and can take a minute on an M1, longer than the 30 s
     /// the tracks can queue. Loads one copy and frees it straight away.
+    /// Skipped when the dictation preview is loading or holding the same
+    /// model: that load already compiled it, and a second copy would only
+    /// pay for the load again.
     func prewarm() {
         guard !prewarmed, prewarmTask == nil, status == .off else { return }
         prewarmTask = Task(priority: .background) { [weak self] in
@@ -52,6 +55,16 @@ final class LiveMeetingCaptions: ObservableObject {
             try? await Task.sleep(for: .seconds(20))
             guard let self, !Task.isCancelled, self.status == .off else {
                 self?.prewarmTask = nil
+                return
+            }
+            // The dictation preview loads the same model; if it's mid-load, let
+            // it settle. Skip only when it ended ready (the compile is cached);
+            // if it failed, prewarm as before so the first meeting isn't cold.
+            while LiveDictationCaptions.shared.status == .preparing, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            if LiveDictationCaptions.shared.status == .ready || Task.isCancelled {
+                self.prewarmTask = nil
                 return
             }
             let track = LiveMeetingCaptionTrack()
@@ -66,7 +79,9 @@ final class LiveMeetingCaptions: ObservableObject {
     var isActive: Bool { status == .preparing || status == .listening }
 
     /// Starts transcribing this recording. Clears the last meeting's text.
-    func start(sessionID: UUID, shouldYield: @escaping @MainActor @Sendable () -> Bool) {
+    /// `shouldYield` is read by the tracks' drain loops on their own tasks;
+    /// the caller keeps it current on the main actor.
+    func start(sessionID: UUID, shouldYield: LiveMeetingCaptionYield) {
         guard self.sessionID != sessionID || status == .off else { return }
         prewarmTask?.cancel()
         prewarmTask = nil
@@ -84,7 +99,9 @@ final class LiveMeetingCaptions: ObservableObject {
         lastSequence = [:]
         // Audio queues while the models load, up to the tracks' bound.
         current.tracks.withLock { $0 = tracks }
-        let yield: @Sendable () async -> Bool = { await MainActor.run { shouldYield() } }
+        // A lock read, not a main-actor hop: the drains poll it several
+        // times a second per track.
+        let yield: @Sendable () async -> Bool = { shouldYield.value }
         startTask = Task(priority: .utility) { [weak self, teardown = self.teardown] in
             await teardown?.value
             // One at a time: both tracks share one model download.
@@ -152,6 +169,17 @@ final class LiveMeetingCaptions: ObservableObject {
 struct LiveMeetingCaptionTracks: Sendable {
     let microphone = LiveMeetingCaptionTrack()
     let system = LiveMeetingCaptionTrack()
+}
+
+/// Whether the live transcript should pause for a dictation. Set on the main
+/// actor when the router's recording or transcribing state changes, read by
+/// the tracks' drain loops without hopping to the main actor.
+final class LiveMeetingCaptionYield: Sendable {
+    private let current = Mutex(false)
+
+    var value: Bool { current.withLock { $0 } }
+
+    func set(_ value: Bool) { current.withLock { $0 = value } }
 }
 
 /// The audio side of the live transcript, read on Core's live-PCM delivery

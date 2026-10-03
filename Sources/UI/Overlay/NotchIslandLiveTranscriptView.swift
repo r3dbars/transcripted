@@ -84,7 +84,18 @@ final class NotchIslandLiveTranscriptView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    /// The newest state while the drop-down is closed. Updates are
+    /// incremental, so applying only the latest one on open draws the same
+    /// text as applying every one in between.
+    private var pending: (log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status)?
+
     func apply(_ log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status) {
+        // Off screen: no text edits, layout or scrolling until it opens.
+        guard window != nil else {
+            pending = (log, status)
+            return
+        }
+        pending = nil
         placeholder.stringValue = Self.placeholderText(status)
         placeholder.isHidden = !log.isEmpty
         guard let storage = textView.textStorage else { return }
@@ -131,6 +142,13 @@ final class NotchIslandLiveTranscriptView: NSView {
         storage.endEditing()
 
         if followsNewest { scrollToNewest() }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, let pending {
+            apply(pending.log, status: pending.status)
+        }
     }
 
     /// Opening the drop-down shows the newest words.

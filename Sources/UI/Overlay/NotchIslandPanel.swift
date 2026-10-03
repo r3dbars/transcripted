@@ -53,7 +53,10 @@ final class NotchIslandPanel: NSPanel {
     /// Show island in screen sharing. The controller calls this before each
     /// show, so the switch applies at once.
     func applyScreenSharingPreference(userDefaults: UserDefaults = .standard) {
-        sharingType = NotchIslandPreferences.visibleInScreenSharing(userDefaults: userDefaults) ? .readOnly : .none
+        let wanted: NSWindow.SharingType = NotchIslandPreferences.visibleInScreenSharing(userDefaults: userDefaults) ? .readOnly : .none
+        // Called on every render; skip the window-server round trip when
+        // nothing changed.
+        if sharingType != wanted { sharingType = wanted }
     }
 
     /// AppKit keeps windows out of the menu bar; the island belongs there.

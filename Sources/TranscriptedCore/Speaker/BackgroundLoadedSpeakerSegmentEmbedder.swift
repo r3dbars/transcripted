@@ -109,6 +109,16 @@ public final class BackgroundLoadedSpeakerSegmentEmbedder: BackgroundLoadingSpea
         loadedEmbedderBlocking()?.embed(samples: samples, sampleRate: sampleRate)
     }
 
+    /// Starts the first load if nothing has yet (that load warms the model by
+    /// itself); once loaded, passes the prewarm on. Never waits for a load.
+    public func prewarm() {
+        condition.lock()
+        startLoadingLocked()
+        let ready = state == .loaded ? loaded : nil
+        condition.unlock()
+        ready?.prewarm()
+    }
+
     // MARK: - Loading
 
     private func startLoadingLocked() {

@@ -43,9 +43,18 @@ extension Transcription {
                 self.processingStatus = "Transcribing microphone audio..."
             }
 
+            // One scan of the whole mic track, shared by language sampling,
+            // normalization and silence splitting below.
+            let micSignalAnalysis = AudioSignalRecovery.analyze(samples: micSamples, sampleRate: 16000)
+            // Only an engine that detects the spoken language reads these
+            // windows (Whisper).
+            var wantsLanguageSamples = false
+            if languageSelection == .automatic {
+                wantsLanguageSamples = await parakeet.usesRepresentativeLanguageSamples
+            }
             let languageContext = try await parakeet.resolveLanguage(
-                representativeSamples: languageSelection == .automatic
-                    ? Self.representativeLanguageSamples(tracks: [micSamples]) : [],
+                representativeSamples: wantsLanguageSamples
+                    ? Self.representativeLanguageSamples(tracks: [micSamples], analyses: [micSignalAnalysis]) : [],
                 selection: languageSelection
             )
             let shouldSplitLocalSpeakers = splitLocalSpeakers
@@ -53,7 +62,6 @@ extension Transcription {
             if shouldSplitLocalSpeakers {
                 let diarization = await MainActor.run { self.diarization }
                 let speakerDB = await MainActor.run { self.speakerDB }
-                let micSignalAnalysis = AudioSignalRecovery.analyze(samples: micSamples, sampleRate: 16000)
                 let diarizationMicSamples = AudioSignalRecovery.normalizeForSpeech(
                     samples: micSamples,
                     sampleRate: 16000,
@@ -134,7 +142,11 @@ extension Transcription {
                 )
             }
 
-            let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+            let micSegments = Self.detectSpeechSegments(
+                samples: micSamples,
+                sampleRate: 16000,
+                analysis: micSignalAnalysis
+            )
             AppLogger.transcription.info("Mic-only audio segmented by silence", [
                 "segments": "\(micSegments.count)"
             ])

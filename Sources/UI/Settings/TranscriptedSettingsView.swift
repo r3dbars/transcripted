@@ -436,8 +436,8 @@ struct TranscriptedSettingsView: View {
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
             guard !Task.isCancelled, homeExpandedMeetingID == item.id else { return }
             switch readResult {
-            case .success(let markdown):
-                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+            case .success(let markdown, let content):
+                homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown, content: content)
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
                     actionKind: .preview,
@@ -486,7 +486,8 @@ struct TranscriptedSettingsView: View {
             // preview still loads instead of falling straight to a read error.
             let resolved = OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
             do {
-                return .success(try String(contentsOf: resolved, encoding: .utf8))
+                let markdown = try String(contentsOf: resolved, encoding: .utf8)
+                return .success(markdown, HomeMeetingPreviewContent.make(from: markdown))
             } catch {
                 return .failure(error.localizedDescription)
             }

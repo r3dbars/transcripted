@@ -245,7 +245,7 @@ final class WritingController {
     // identity — no new permission needed, `CGWindowListCopyWindowInfo`'s
     // layer/pid/window-number fields are unrestricted — and fires the same
     // window-changed trigger on any change, cross- or same-app alike.
-    private var windowIdentityPollTimer: Timer?
+    private var windowIdentityPollTimer: Timer? { didSet { windowIdentityPollTimer?.tolerance = 0.5 } } // same 1 s cadence; slack lets macOS coalesce the wakeup
     private var lastFrontWindowIdentity: FrontWindowIdentity?
     /// Bumped on every start and stop, so a read that comes back after the
     /// poll stopped or restarted is dropped.
