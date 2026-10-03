@@ -752,13 +752,7 @@ final class ModelManager: @unchecked Sendable {
         return .valid
     }
 
-    private func sha256(from handle: FileHandle) throws -> String {
-        var hash = SHA256()
-        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
-            hash.update(data: chunk)
-        }
-        return hash.finalize().map { String(format: "%02x", $0) }.joined()
-    }
+    private func sha256(from handle: FileHandle) throws -> String { try ModelFileHasher.sha256Hex(from: handle) }
 
     private func ensureModelDirectory() throws {
         do {
