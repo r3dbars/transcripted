@@ -24,6 +24,7 @@ class DictationSessionController: ObservableObject {
             } else {
                 processActivity.release()
                 processActivityLabel.sessionEnded()
+                DictationAudioMuffler.shared.release()
             }
         }
     }
@@ -32,6 +33,7 @@ class DictationSessionController: ObservableObject {
     // Session state below is internal only so the DictationSessionController+*.swift
     // extensions can share it. It is not for use outside the controller.
     private var interruptionSubscription: AnyCancellable?
+    private var muffleSubscription: AnyCancellable?
     let textPaster = ClipboardRestoringTextPaster()
     let autoSender = DictationAutoSender()
     /// Owns the engine-facing half of a dictation session: the recovery
@@ -184,6 +186,7 @@ class DictationSessionController: ObservableObject {
                 guard let self = self, self.isDictating else { return }
                 self.handleDictationInterruption()
             }
+        muffleSubscription = makeDictationMuffleSubscription(appState: appState)
     }
 
     // MARK: - Dictation Mode (Option+Space)

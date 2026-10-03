@@ -33,6 +33,7 @@ struct TranscriptedSettingsView: View {
     @State var customDictionaryPreviewInput = ""
     @State var showCorrectionPreview = false
     @State var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
+    @State var dictationMuffleEnabled = DictationMufflePreferences.isEnabled()
     @State var showAdvancedCorrectionsText = false
     @StateObject var pastMeetingsModel = DictionaryPastMeetingsModel()
     @State var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?

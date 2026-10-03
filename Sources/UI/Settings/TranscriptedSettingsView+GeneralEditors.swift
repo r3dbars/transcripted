@@ -35,6 +35,21 @@ extension TranscriptedSettingsView {
                 persist: { DictationCleanupPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("dictation_cleanup", enabled: $0, page: .general) }
             ),
+            dictationMuffleEnabled: persistedSettingsBinding(
+                $dictationMuffleEnabled,
+                persist: { DictationMufflePreferences.setEnabled($0) },
+                track: { trackSettingsToggle("dictation_muffle", enabled: $0, page: .general) },
+                sideEffect: { enabled in
+                    // Ask for System Audio Recording here, where the user just
+                    // chose the feature, so dictation never has to prompt.
+                    guard enabled,
+                          TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .notDetermined
+                    else { return }
+                    Task { @MainActor in
+                        _ = await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess()
+                    }
+                }
+            ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
