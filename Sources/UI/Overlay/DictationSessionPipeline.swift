@@ -170,17 +170,24 @@ extension DictationSessionPipelineHost {
 
     /// The ready-engine fast path: the start click (when it plays on the key
     /// press) is queued before the mic start task, so it never waits on the
-    /// microphone opening.
+    /// microphone opening. With `opensInThisTurn` the open starts in this
+    /// turn instead of after the island's first frame commits; see
+    /// `DictationFastStartLaunch`.
     func launchFastStart(
         startCuePlaysOnKeyPress: Bool,
+        opensInThisTurn: Bool = false,
         openMicrophone: @escaping @MainActor () async -> Void
     ) {
         if startCuePlaysOnKeyPress {
             playStartCueOnce()
         }
         recordingStartRetryTask?.cancel()
-        recordingStartRetryTask = Task { @MainActor in
-            await openMicrophone()
+        recordingStartRetryTask = nil
+        if let handle = DictationFastStartLaunch.start(
+            opensInThisTurn: opensInThisTurn,
+            openMicrophone: openMicrophone
+        ) {
+            recordingStartRetryTask = handle
         }
     }
 
@@ -598,5 +605,47 @@ extension DictationSessionPipelineHost {
             showFailedCheckpointRecoveryError()
         }
         return canTerminate
+    }
+}
+
+// MARK: - Fast-start launch
+
+/// A plain `Task {}` made inside the key press's main-actor job only runs
+/// after that job ends, which is after the island's first Core Animation
+/// commit. `Task.immediate` runs the open's synchronous prefix right now, so
+/// the pinned prepare reaches its coordinator alongside that commit (~3-5 ms
+/// sooner on a physical-key start). The island still goes up first in the
+/// same turn; only where the open starts moves.
+///
+/// The caller gates it (`opensInThisTurn`). Off for a borrowed meeting mic
+/// (no coordinator hop to win, and it can finish without suspending), the
+/// first start since launch (it can register the default-input listener on
+/// main against a cold HAL), and an unloaded model (the prefix may tear down
+/// and check caches). Those keep the deferred task.
+@MainActor
+enum DictationFastStartLaunch {
+    /// Set once the open has run to the end.
+    @MainActor private final class Attempt {
+        var finished = false
+    }
+
+    /// Starts the open and returns the handle to keep as the in-flight start,
+    /// or nil when the open already finished before this returned. A finished
+    /// open has already run `finishRecordingStart` (or its failure path), so
+    /// storing its task would make a later key release read as a start that is
+    /// still pending.
+    static func start(
+        opensInThisTurn: Bool,
+        openMicrophone: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never>? {
+        guard opensInThisTurn else {
+            return Task { @MainActor in await openMicrophone() }
+        }
+        let attempt = Attempt()
+        let task = Task.immediate { @MainActor in
+            await openMicrophone()
+            attempt.finished = true
+        }
+        return attempt.finished ? nil : task
     }
 }

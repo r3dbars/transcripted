@@ -101,11 +101,16 @@ extension DictationSessionController {
             enterPendingStartStage(.openingMicrophone)
             overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
             // The start click is queued before the mic start task, so it
-            // doesn't wait on the microphone opening.
+            // doesn't wait on the microphone opening. The open starts in this
+            // turn except for a borrowed meeting mic, the first start since
+            // launch, or an unloaded model (see DictationFastStartLaunch).
             launchFastStart(
                 startCuePlaysOnKeyPress: DictationStartCuePolicy.playsOnKeyPress(
                     recordedInput: appState.sttRouter.parakeetEngine.cachedInputDeviceSelection?.selectedInput
-                )
+                ),
+                opensInThisTurn: !canUseMeetingMic
+                    && !currentRequestIsFirstSinceLaunch
+                    && appState.sttRouter.isRecordingModelLoaded
             ) { [weak self] in
                 guard let self,
                       self.isDictating,

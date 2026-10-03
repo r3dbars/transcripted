@@ -19,7 +19,9 @@ class STTRouter: ObservableObject {
     @Published private(set) var appleSpeechLanguageDownload: AppleSpeechLanguageDownload?
     @Published var isRecording = false
     @Published var isTranscribing = false
-    @Published var audioLevel: Float = 0
+    /// Dictation mic level for the island meter. A `let`, not `@Published`,
+    /// so a level tick doesn't re-render views that observe the router.
+    let audioLevels = DictationAudioLevels()
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
@@ -81,7 +83,9 @@ class STTRouter: ObservableObject {
     init() {
         parakeetEngine.$isRecording.assign(to: &$isRecording)
         parakeetEngine.$isTranscribing.assign(to: &$isTranscribing)
-        parakeetEngine.$audioLevel.assign(to: &$audioLevel)
+        parakeetEngine.$audioLevel
+            .sink { [audioLevels] in audioLevels.update($0) }
+            .store(in: &cancellables)
         parakeetEngine.$recordingInterrupted.assign(to: &$recordingInterrupted)
         parakeetEngine.$isRecovering.assign(to: &$isRecovering)
         parakeetEngine.$inputFormatReady.assign(to: &$inputFormatReady)

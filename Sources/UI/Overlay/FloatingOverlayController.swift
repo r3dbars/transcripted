@@ -159,7 +159,7 @@ class FloatingOverlayController {
         LiveDictationCaptions.shared.attach(router: sttRouter)
 
         // Combine subscriptions: push live engine data to the island
-        sttRouter.$audioLevel
+        sttRouter.audioLevels.$level
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 guard let self else { return }
