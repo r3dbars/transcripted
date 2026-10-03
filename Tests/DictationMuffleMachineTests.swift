@@ -378,11 +378,26 @@ func testDictationMuffleMachine() {
         run.engageToMuffled()
         let closedAt = run.now + ms(10)
         run.send(.micClosed, at: closedAt)
-        run.run(until: closedAt + ms(2_000))
+        run.run(until: closedAt + ms(5_000))
         assertEqual(run.times(of: .cut).count, 1, "one cut")
         assertEqual(run.times(of: .handBack).count, 1, "one hand back")
         assertEqual(run.times(of: .closeRoute).count, 1, "one close")
         assertEqual(run.machine.phase, .idle, "idle at the end")
+    }
+
+    runSuite("With default timing, a take a couple of seconds after the last one cuts again without rebuilding the route") {
+        var run = MuffleMachineRun(timing: DictationMuffleTiming())
+        run.engageToMuffled()
+        let closedAt = run.now + ms(10)
+        run.send(.micClosed, at: closedAt)
+        run.run(until: closedAt + ms(2_000))
+        let reopenAt = run.now
+        let batch = run.send(.micOpened, at: reopenAt)
+        assertTrue(batch.contains(.cut), "a quick next take cuts at once")
+        assertFalse(batch.contains(.openRoute), "without rebuilding the route")
+        run.run(until: reopenAt + ms(300))
+        assertEqual(run.machine.phase, .muffled, "muffled again")
+        assertEqual(run.times(of: .closeRoute).count, 0, "the route never closed between the takes")
     }
 }
 

@@ -144,6 +144,14 @@ final class DictationMuffleRoute {
 
     private var listeners: [(object: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
 
+    /// Core Audio delivers some listener notifications (a device's IsRunning
+    /// among them) synchronously onto the queue they were registered with,
+    /// from inside the HAL. Registering them on the muffler's own queue
+    /// deadlocks when that queue is busy stopping the same device (seen: a
+    /// 14 s stall in teardown). So listeners live on this queue, which never
+    /// does anything but forward to the muffler's queue.
+    private static let listenerQueue = DispatchQueue(label: "com.transcripted.dictation-muffle.listeners", qos: .utility)
+
     private init(plan: Plan, queue: DispatchQueue, onLost: @escaping (String) -> Void) {
         bluetooth = plan.bluetooth
         processCount = plan.processes.count
@@ -220,7 +228,7 @@ final class DictationMuffleRoute {
     func close() {
         for listener in listeners {
             var address = listener.address
-            AudioObjectRemovePropertyListenerBlock(listener.object, &address, queue, listener.block)
+            AudioObjectRemovePropertyListenerBlock(listener.object, &address, Self.listenerQueue, listener.block)
         }
         listeners.removeAll()
 
@@ -374,9 +382,9 @@ final class DictationMuffleRoute {
         cutRunning = false
     }
 
-    /// Route-ending changes are delivered to the muffler on the next queue
-    /// turn, never inside the listener itself, so closing (which removes the
-    /// listener) can't happen from within its own block.
+    /// Route-ending changes are forwarded to the muffler's queue
+    /// asynchronously, so closing (which removes the listener) never runs
+    /// inside a listener block, and a busy muffler queue never blocks the HAL.
     private func listen(
         _ object: AudioObjectID,
         _ selector: AudioObjectPropertySelector,
@@ -392,7 +400,7 @@ final class DictationMuffleRoute {
             }
         }
         var address = DictationMuffleHAL.address(selector)
-        if AudioObjectAddPropertyListenerBlock(object, &address, queue, block) == noErr {
+        if AudioObjectAddPropertyListenerBlock(object, &address, Self.listenerQueue, block) == noErr {
             listeners.append((object, address, block))
         }
     }

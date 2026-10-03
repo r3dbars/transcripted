@@ -49,9 +49,11 @@ struct DictationMuffleTiming: Equatable {
     /// How long the glide back to dry takes (DictationMuffleFilter.releaseSeconds
     /// plus a margin) before the originals come back.
     var releaseGlideNanos: UInt64 = 240_000_000
-    /// After the hand back, how long before the route closes (the gate fade
-    /// plus a margin).
-    var handBackSettleNanos: UInt64 = 15_000_000
+    /// After the hand back, how long the route stays open (copy silent,
+    /// originals playing normally) before it closes. People dictate in quick
+    /// bursts a few seconds apart; a take inside this window cuts at once,
+    /// with no rebuild and no wait for the tap. At least the gate fade.
+    var handBackSettleNanos: UInt64 = 3_000_000_000
 }
 
 enum DictationMufflePhase: Equatable {
