@@ -24,7 +24,7 @@ class DictationSessionController: ObservableObject {
             } else {
                 processActivity.release()
                 processActivityLabel.sessionEnded()
-                DictationAudioMuffler.shared.release()
+                DictationAudioMuffler.shared.micClosed()
             }
         }
     }

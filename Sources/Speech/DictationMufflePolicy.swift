@@ -14,36 +14,36 @@ enum DictationMuffleSkipReason: String, Equatable {
     case sharedMeetingMic = "shared_meeting_mic"
     case voiceProcessing = "voice_processing"
     case automatedLaunch = "automated_launch"
+    /// No other app is playing to the output (or only apps that are also
+    /// using a microphone, which are left alone).
+    case nothingPlaying = "nothing_playing"
 }
 
-enum DictationMuffleDecision: Equatable {
-    case muffle
-    case skip(DictationMuffleSkipReason)
+/// What the dictation controller knows when the mic opens, snapshotted on the
+/// main actor so the muffler never reads app state from its own queue.
+struct DictationMuffleContext: Equatable {
+    var enabled: Bool
+    var meetingRecording: Bool
+    var dictatingFromSharedMeetingMic: Bool
+    var voiceProcessingRequested: Bool
+    var automatedLaunch: Bool
 }
 
 enum DictationMufflePolicy {
-    /// Muffle only runs when the user turned it on, macOS already granted
-    /// System Audio Recording (it never prompts mid-dictation), and no meeting
-    /// is being captured. During a meeting the other apps' audio is the call,
-    /// and the meeting's own system-audio tap is reading it. With Apple voice
-    /// processing on, macOS already ducks other apps; re-rendering them from
-    /// our process would dodge that ducking and the echo canceller's
-    /// reference, so muffle stays out of the way.
-    static func decision(
-        enabled: Bool,
-        systemAudioAuthorized: Bool,
-        meetingRecording: Bool,
-        dictatingFromSharedMeetingMic: Bool,
-        voiceProcessingRequested: Bool,
-        automatedLaunch: Bool
-    ) -> DictationMuffleDecision {
-        if automatedLaunch { return .skip(.automatedLaunch) }
-        if !enabled { return .skip(.disabled) }
-        if meetingRecording { return .skip(.meetingRecording) }
-        if dictatingFromSharedMeetingMic { return .skip(.sharedMeetingMic) }
-        if voiceProcessingRequested { return .skip(.voiceProcessing) }
-        if !systemAudioAuthorized { return .skip(.permissionMissing) }
-        return .muffle
+    /// The cheap rules, checked before anything touches Core Audio or the
+    /// privacy service. Muffle only runs when the user turned it on and no
+    /// meeting is being captured: during a meeting the other apps' audio is
+    /// the call, and the meeting's own system-audio tap is reading it. With
+    /// Apple voice processing on, macOS already ducks other apps; re-rendering
+    /// them from our process would dodge that ducking and the echo
+    /// canceller's reference, so muffle stays out of the way.
+    static func gate(_ context: DictationMuffleContext) -> DictationMuffleSkipReason? {
+        if context.automatedLaunch { return .automatedLaunch }
+        if !context.enabled { return .disabled }
+        if context.meetingRecording { return .meetingRecording }
+        if context.dictatingFromSharedMeetingMic { return .sharedMeetingMic }
+        if context.voiceProcessingRequested { return .voiceProcessing }
+        return nil
     }
 }
 
@@ -69,6 +69,8 @@ enum DictationMuffleOutputIneligibility: String, Equatable {
     case unknownTransport = "unknown_transport"
     case hasInputStreams = "has_input_streams"
     case noOutputChannels = "no_output_channels"
+    case multichannel = "multichannel_output"
+    case unreadable = "unreadable_route"
 }
 
 enum DictationMuffleOutputRoute {
@@ -82,14 +84,19 @@ enum DictationMuffleOutputRoute {
     /// is allowed and starting it never touches the mic. A Bluetooth (or USB)
     /// headset that still exposes its mic on the output device is refused:
     /// starting that input stream is what flips AirPods into call mode and
-    /// garbles playback, the same trap behind every AirPods dictation bug.
+    /// garbles playback, the same trap behind every AirPods dictation bug. A
+    /// count that can't be read is refused too, so a HAL error can never let
+    /// that through.
+    ///
     /// AirPlay and virtual or aggregate outputs are refused because their
     /// latency and clocking are not something a dictation side effect should
-    /// gamble on.
+    /// gamble on. Outputs with more than two channels are refused because the
+    /// muffled copy is stereo, and the muted apps' other channels would drop
+    /// out for the take.
     static func ineligibility(
         transport: DictationMuffleOutputTransport,
-        inputStreamCount: Int,
-        outputChannelCount: Int
+        inputStreamCount: Int?,
+        outputChannelCount: Int?
     ) -> DictationMuffleOutputIneligibility? {
         switch transport {
         case .airPlay:
@@ -101,8 +108,10 @@ enum DictationMuffleOutputRoute {
         case .builtIn, .usb, .displayLink, .thunderbolt, .pci, .firewire, .bluetooth:
             break
         }
+        guard let inputStreamCount, let outputChannelCount else { return .unreadable }
         if inputStreamCount > 0 { return .hasInputStreams }
         if outputChannelCount <= 0 { return .noOutputChannels }
+        if outputChannelCount > 2 { return .multichannel }
         return nil
     }
 }

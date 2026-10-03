@@ -1,115 +1,100 @@
 // DictationMuffleFilter.swift
-// The "outside the club" sound: a 4th-order low-pass (two cascaded RBJ
-// biquads) at a few hundred hertz with a little gain cut, cross-faded with the
-// untouched signal so muffle eases in and out instead of snapping.
+// The "outside the club" sound. A 4th-order low-pass (two cascaded TPT
+// state-variable filters per channel) whose cutoff glides exponentially from
+// wide open down to a few hundred hertz and back, like a door closing, with a
+// gentle level dip. At rest it is an exact passthrough.
 //
-// Runs on the CoreAudio IO thread, so nothing here allocates, locks, or calls
-// into ObjC. All state is fixed-size stored properties.
+// Why a cutoff glide and not a dry/wet crossfade: the low-pass is -180° at its
+// cutoff, so dry + wet cancels there mid-ramp (a deep notch you hear as a
+// hollow sweep). A glide has no dry path to cancel against, and TPT filters
+// stay clean while their cutoff moves.
+//
+// A separate output gate fades the whole output in and out over a few
+// milliseconds. The muffler uses it to bring the copy in exactly when the
+// originals are muted, and to take it out before the originals come back.
+//
+// Runs on the Core Audio IO thread: no allocation, locks or ObjC. All state is
+// fixed-size stored properties; coefficients are recomputed per short control
+// block only while the cutoff is moving.
 
 import CoreAudio
 import Foundation
 
 struct DictationMuffleFilter {
-    static let cutoffHz: Double = 450
-    static let wetGain: Float = 0.7
-    static let rampSeconds: Double = 0.18
-    /// How fast the muffled copy fades in over the still-playing original at
-    /// start, before the original is muted. Short enough that the brief
-    /// overlap of the two is inaudible.
-    static let handoffFadeSeconds: Double = 0.012
+    static let openCutoffHz: Double = 18_000
+    static let closedCutoffHz: Double = 450
+    static let closedLevel: Float = 0.7
+    /// How long the cutoff takes to close when muffling starts.
+    static let engageSeconds: Double = 0.32
+    /// How long it takes to open again when muffling ends.
+    static let releaseSeconds: Double = 0.22
+    /// How long the output gate takes to fade the whole copy in or out.
+    static let gateSeconds: Double = 0.004
+    /// Frames between coefficient updates while the cutoff moves.
+    static let controlBlockFrames = 16
 
-    private var b0: Float = 1
-    private var b1: Float = 0
-    private var b2: Float = 0
+    private static let damping: Float = 1.414_213_6 // 1/Q for Q = 0.7071
+
+    private let sampleRate: Double
+    private let openCutoff: Double
+    private let amountStepPerBlockEngage: Float
+    private let amountStepPerBlockRelease: Float
+    private let gateStep: Float
+
+    /// 0 is wide open (exact passthrough), 1 is fully muffled.
+    private(set) var amount: Float = 0
+    /// Output level gate, 0...1.
+    private(set) var gate: Float
+
+    // Smoothed control values for the current block.
+    private var level: Float = 1
+    private var blend: Float = 0
     private var a1: Float = 0
     private var a2: Float = 0
-    // Transposed direct form II state: [channel][stage] -> (z1, z2).
-    private var l1z1: Float = 0, l1z2: Float = 0, l2z1: Float = 0, l2z2: Float = 0
-    private var r1z1: Float = 0, r1z2: Float = 0, r2z1: Float = 0, r2z2: Float = 0
+    private var a3: Float = 0
 
-    /// 0 is the untouched signal, 1 is fully muffled.
-    private(set) var mix: Float = 0
-    private var mixStep: Float = 1
-    /// Overall output level, 0...1. Starts at 1 unless built `startSilent`.
-    private(set) var outputGain: Float = 1
-    private var gainStep: Float = 1
+    // TPT SVF integrator states: (stage 1, stage 2) x (left, right).
+    private var l1s1: Float = 0, l1s2: Float = 0, l2s1: Float = 0, l2s2: Float = 0
+    private var r1s1: Float = 0, r1s2: Float = 0, r2s1: Float = 0, r2s2: Float = 0
 
-    init(sampleRate: Double, cutoffHz: Double = DictationMuffleFilter.cutoffHz, startSilent: Bool = false) {
+    init(sampleRate: Double, startGated: Bool = false) {
         let rate = sampleRate > 0 ? sampleRate : 48_000
-        let cutoff = min(cutoffHz, rate * 0.45)
-        let omega = 2 * Double.pi * cutoff / rate
-        let alpha = sin(omega) / (2 * 0.7071)
-        let cosw = cos(omega)
-        let a0 = 1 + alpha
-        b0 = Float((1 - cosw) / 2 / a0)
-        b1 = Float((1 - cosw) / a0)
-        b2 = b0
-        a1 = Float(-2 * cosw / a0)
-        a2 = Float((1 - alpha) / a0)
-        mixStep = Float(1 / max(1, Self.rampSeconds * rate))
-        gainStep = Float(1 / max(1, Self.handoffFadeSeconds * rate))
-        outputGain = startSilent ? 0 : 1
+        self.sampleRate = rate
+        openCutoff = min(Self.openCutoffHz, rate * 0.45)
+        let block = Double(Self.controlBlockFrames)
+        amountStepPerBlockEngage = Float(block / max(1, Self.engageSeconds * rate))
+        amountStepPerBlockRelease = Float(block / max(1, Self.releaseSeconds * rate))
+        gateStep = Float(1 / max(1, Self.gateSeconds * rate))
+        gate = startGated ? 0 : 1
+        updateCoefficients()
     }
 
-    /// Processes one stereo frame, moving `mix` one step toward `target`.
-    /// Transposed direct form II; the loop-carried path is two fused
-    /// multiply-adds per stage.
-    @inline(__always)
-    mutating func process(left: Float, right: Float, target: Float) -> (Float, Float) {
-        if mix < target {
-            mix = min(target, mix + mixStep)
-        } else if mix > target {
-            mix = max(target, mix - mixStep)
-        }
-
-        var y = l1z1.addingProduct(b0, left)
-        l1z1 = l1z2.addingProduct(b1, left).addingProduct(-a1, y)
-        l1z2 = (b2 * left).addingProduct(-a2, y)
-        let lIn = y
-        y = l2z1.addingProduct(b0, lIn)
-        l2z1 = l2z2.addingProduct(b1, lIn).addingProduct(-a1, y)
-        l2z2 = (b2 * lIn).addingProduct(-a2, y)
-        let lWet = y
-
-        y = r1z1.addingProduct(b0, right)
-        r1z1 = r1z2.addingProduct(b1, right).addingProduct(-a1, y)
-        r1z2 = (b2 * right).addingProduct(-a2, y)
-        let rIn = y
-        y = r2z1.addingProduct(b0, rIn)
-        r2z1 = r2z2.addingProduct(b1, rIn).addingProduct(-a1, y)
-        r2z2 = (b2 * rIn).addingProduct(-a2, y)
-        let rWet = y
-
-        let dry = 1 - mix
-        let wet = mix * Self.wetGain
-        return (dry * left + wet * lWet, dry * right + wet * rWet)
-    }
-
-    /// Reads the tap's audio from `input`, muffles it, and writes it to
-    /// `output`. Handles interleaved or split Float32 buffers on either side:
-    /// mono input feeds both sides, a mono output gets the average, and
-    /// output channels past the second are silenced. A missing or short input
-    /// renders as silence rather than stale memory.
+    /// Reads the tap's audio from `input`, filters it at the current amount,
+    /// and writes it to `output`. `muffleTarget` (0 or 1) is where the cutoff
+    /// glides toward; `gateTarget` (0 or 1) is where the output gate fades.
     ///
-    /// `gainTarget` fades the whole output toward 0 or 1 over
-    /// `handoffFadeSeconds`. Returns true when the input carried any nonzero
-    /// sample, which is how the muffler knows the tap is really flowing.
+    /// Handles interleaved or split Float32 buffers on either side: mono input
+    /// feeds both sides, a mono output gets the average, and output channels
+    /// past the second are silenced. A missing or short input renders as
+    /// silence rather than stale memory.
     ///
-    /// The buffer layout is resolved once per IO cycle, not per frame:
-    /// UnsafeMutableAudioBufferListPointer's collection methods don't inline
-    /// across modules, and walking them per frame cost about 3x the filter.
+    /// Returns the cycle's input peak (absolute), which the muffler uses to
+    /// know the tap is really delivering audio and to find quiet moments.
     @discardableResult
     mutating func render(
         input: UnsafePointer<AudioBufferList>?,
         output: UnsafeMutablePointer<AudioBufferList>?,
-        target: Float,
-        gainTarget: Float = 1
-    ) -> Bool {
-        guard let output else { return false }
+        muffleTarget: Float,
+        gateTarget: Float
+    ) -> Float {
+        guard let output else { return 0 }
         let outList = UnsafeMutableAudioBufferListPointer(output)
         let outCount = outList.count
-        guard outCount > 0 else { return false }
+        guard outCount > 0 else { return 0 }
 
+        // Resolve the layout once per cycle: UnsafeMutableAudioBufferListPointer's
+        // collection methods don't inline across modules, so walking them per
+        // frame costs several times the filter itself.
         var outL: UnsafeMutablePointer<Float>?
         var outR: UnsafeMutablePointer<Float>?
         var outLStride = 0
@@ -123,8 +108,8 @@ struct DictationMuffleFilter {
                 totalChannels += channels
                 continue
             }
-            // Zero first so channels past the second, and any frames the
-            // input can't cover, are silence.
+            // Zero first so channels past the second, and frames the input
+            // can't cover, are silence.
             memset(raw, 0, Int(buffer.mDataByteSize))
             let data = raw.assumingMemoryBound(to: Float.self)
             frames = min(frames, Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * channels))
@@ -141,7 +126,7 @@ struct DictationMuffleFilter {
             }
             totalChannels += channels
         }
-        guard let outL, frames != Int.max, frames > 0 else { return false }
+        guard let outL, frames != Int.max, frames > 0 else { return 0 }
         let monoOut = totalChannels == 1
 
         var inL: UnsafePointer<Float>?
@@ -182,46 +167,124 @@ struct DictationMuffleFilter {
             }
         }
 
-        var gain = outputGain
-        let step = gainStep
-        var sawSignal = false
-        for frame in 0..<frames {
-            var left: Float = 0
-            var right: Float = 0
-            if frame < inputFrames, let inL, let inR {
-                left = inL[frame &* inLStride]
-                right = inR[frame &* inRStride]
-                if left != 0 || right != 0 { sawSignal = true }
-            }
-            if gain < gainTarget {
-                gain = min(gainTarget, gain + step)
-            } else if gain > gainTarget {
-                gain = max(gainTarget, gain - step)
-            }
-            let (outLeft, outRight) = process(left: left, right: right, target: target)
-            if monoOut {
-                outL[frame &* outLStride] = (outLeft + outRight) * 0.5 * gain
-            } else {
-                outL[frame &* outLStride] = outLeft * gain
-                outR?[frame &* outRStride] = outRight * gain
+        let gateTarget = min(max(gateTarget, 0), 1)
+        let muffleTarget = min(max(muffleTarget, 0), 1)
+        var peak: Float = 0
+        var frame = 0
+        while frame < frames {
+            advanceAmount(toward: muffleTarget)
+            let blockEnd = min(frames, frame + Self.controlBlockFrames)
+            while frame < blockEnd {
+                var left: Float = 0
+                var right: Float = 0
+                if frame < inputFrames, let inL, let inR {
+                    left = inL[frame &* inLStride]
+                    right = inR[frame &* inRStride]
+                    // A non-finite sample from the tap would poison the filter
+                    // and click; treat it as silence.
+                    if !left.isFinite { left = 0 }
+                    if !right.isFinite { right = 0 }
+                    peak = max(peak, max(abs(left), abs(right)))
+                }
+                if gate < gateTarget {
+                    gate = min(gateTarget, gate + gateStep)
+                } else if gate > gateTarget {
+                    gate = max(gateTarget, gate - gateStep)
+                }
+                var (outLeft, outRight) = process(left: left, right: right)
+                outLeft *= gate
+                outRight *= gate
+                if monoOut {
+                    outL[frame &* outLStride] = (outLeft + outRight) * 0.5
+                } else {
+                    outL[frame &* outLStride] = outLeft
+                    outR?[frame &* outRStride] = outRight
+                }
+                frame &+= 1
             }
         }
-        outputGain = gain
         flushFilterState()
-        return sawSignal
+        return peak
     }
 
-    /// Once per cycle: zero filter state that has decayed below audibility
-    /// (on silence it otherwise settles into denormals, which are slow on
-    /// Apple Silicon) or gone non-finite (one NaN from the tap would
-    /// otherwise silence the rest of the take).
+    /// One stereo frame through both TPT stages at the current coefficients,
+    /// then the level and the open-end blend. Exact passthrough at rest.
+    @inline(__always)
+    private mutating func process(left: Float, right: Float) -> (Float, Float) {
+        // Always run the filter so its state tracks the signal and the glide
+        // starts without a transient.
+        let lLow = Self.stage(left, &l1s1, &l1s2, a1, a2, a3)
+        let lOut = Self.stage(lLow, &l2s1, &l2s2, a1, a2, a3)
+        let rLow = Self.stage(right, &r1s1, &r1s2, a1, a2, a3)
+        let rOut = Self.stage(rLow, &r2s1, &r2s2, a1, a2, a3)
+        if blend == 0 {
+            return (left, right)
+        }
+        let wetL = left + blend * (lOut - left)
+        let wetR = right + blend * (rOut - right)
+        return (wetL * level, wetR * level)
+    }
+
+    /// Zavalishin's TPT state-variable low-pass, one stage.
+    @inline(__always)
+    private static func stage(
+        _ x: Float,
+        _ s1: inout Float,
+        _ s2: inout Float,
+        _ a1: Float,
+        _ a2: Float,
+        _ a3: Float
+    ) -> Float {
+        let v3 = x - s2
+        let v1 = a1 * s1 + a2 * v3
+        let v2 = s2 + a2 * s1 + a3 * v3
+        s1 = 2 * v1 - s1
+        s2 = 2 * v2 - s2
+        return v2
+    }
+
+    @inline(__always)
+    private mutating func advanceAmount(toward target: Float) {
+        guard amount != target else { return }
+        if amount < target {
+            amount = min(target, amount + amountStepPerBlockEngage)
+        } else {
+            amount = max(target, amount - amountStepPerBlockRelease)
+        }
+        updateCoefficients()
+    }
+
+    /// Maps `amount` to cutoff, level and blend. Smoothstep so the glide eases
+    /// in and out; exponential in frequency so it sounds even.
+    private mutating func updateCoefficients() {
+        let u = Double(amount)
+        let shaped = u * u * (3 - 2 * u)
+        let cutoff = openCutoff * pow(Self.closedCutoffHz / openCutoff, shaped)
+        let g = tan(Double.pi * cutoff / sampleRate)
+        let k = Double(Self.damping)
+        let c1 = 1 / (1 + g * (g + k))
+        let c2 = g * c1
+        a1 = Float(c1)
+        a2 = Float(c2)
+        a3 = Float(g * c2)
+        level = 1 + (Self.closedLevel - 1) * Float(shaped)
+        // Fade from the exact dry signal into the (nearly transparent) open
+        // filter over the first few percent of the glide, so leaving and
+        // reaching rest are both seamless.
+        blend = Float(min(1, shaped / 0.02))
+    }
+
+    /// Once per cycle: zero filter state that has decayed below audibility (on
+    /// silence it otherwise settles into denormals, which are slow on Apple
+    /// Silicon) or gone non-finite (one NaN from the tap would otherwise
+    /// silence the rest of the take).
     @inline(__always)
     private mutating func flushFilterState() {
         @inline(__always) func clean(_ value: inout Float) {
             let magnitude = abs(value)
             if !(magnitude >= 1e-15 && magnitude <= 1e6) { value = 0 }
         }
-        clean(&l1z1); clean(&l1z2); clean(&l2z1); clean(&l2z2)
-        clean(&r1z1); clean(&r1z2); clean(&r2z1); clean(&r2z2)
+        clean(&l1s1); clean(&l1s2); clean(&l2s1); clean(&l2s2)
+        clean(&r1s1); clean(&r1s2); clean(&r2s1); clean(&r2s2)
     }
 }
