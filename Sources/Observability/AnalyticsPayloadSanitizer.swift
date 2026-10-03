@@ -5,6 +5,11 @@ enum AnalyticsPayloadSanitizer {
     // Analytics drops exactly the shared base fragments; see
     // `PayloadSanitizationCore.baseSensitiveKeyFragments`.
     private static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments
+    private static let uuidValuedKeys: Set<String> = ["session_id", "correlation_id", "install_uuid"]
+    private static let categoryValuedKeys: Set<String> = [
+        "failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger",
+        "quality_reason", "capture_outcome", "finalization_reason", "review_mode", "mic_backend",
+    ]
 
     static func sanitizeProperties(
         _ properties: [String: String],
@@ -15,9 +20,8 @@ enum AnalyticsPayloadSanitizer {
         for (key, value) in properties {
             guard allowedKeys.contains(key) else { continue }
             guard !shouldDrop(key: key) else { continue }
-            if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
-            if ["failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger", "quality_reason", "capture_outcome", "finalization_reason", "review_mode", "mic_backend"].contains(key),
-               PayloadSanitizationCore.category(value) == nil { continue }
+            if uuidValuedKeys.contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
+            if categoryValuedKeys.contains(key), PayloadSanitizationCore.category(value) == nil { continue }
 
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
