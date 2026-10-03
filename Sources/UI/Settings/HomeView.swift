@@ -286,6 +286,30 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
 // MARK: - Failed meeting row
 
+/// Play/pause for a failed row's kept audio. It alone observes the shared
+/// player, which publishes a few times a second while audio plays, so only
+/// this button re-renders on those ticks instead of every failed row.
+private struct HomeFailedMeetingPlayAudioButton: View {
+    let audioAttachment: MeetingAudioAttachment
+
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
+
+    var body: some View {
+        Button {
+            playback.toggle(audioAttachment)
+        } label: {
+            Label(
+                playback.isActive(audioAttachment) ? "Pause audio" : "Play audio",
+                systemImage: playback.isActive(audioAttachment) ? "pause.fill" : "play.fill"
+            )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Play this meeting's audio")
+        .accessibilityIdentifier("transcripted.home.failed-meeting.play-audio")
+    }
+}
+
 struct HomeFailedMeetingInlineRow: View {
     let item: MeetingSessionController.FailedMeetingItem
     let canRetry: Bool
@@ -297,8 +321,6 @@ struct HomeFailedMeetingInlineRow: View {
     /// surface for it since the failed-meetings card was retired). `nil`
     /// hides the control.
     var audioAttachment: MeetingAudioAttachment? = nil
-
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     @State private var isHovering = false
 
@@ -358,18 +380,7 @@ struct HomeFailedMeetingInlineRow: View {
     private var hoverActions: some View {
         HStack(spacing: 6) {
             if let audioAttachment {
-                Button {
-                    playback.toggle(audioAttachment)
-                } label: {
-                    Label(
-                        playback.isActive(audioAttachment) ? "Pause audio" : "Play audio",
-                        systemImage: playback.isActive(audioAttachment) ? "pause.fill" : "play.fill"
-                    )
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Play this meeting's audio")
-                .accessibilityIdentifier("transcripted.home.failed-meeting.play-audio")
+                HomeFailedMeetingPlayAudioButton(audioAttachment: audioAttachment)
             }
 
             if rowActions.showsRevealAudio {

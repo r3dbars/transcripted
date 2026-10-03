@@ -454,6 +454,40 @@ func testNotchIslandPresentation() {
         assertFalse(NotchIslandPresentation.speakerReviewKeepsKeyboard(done, onScreen: true), "Everyone's named gives it back")
         assertFalse(NotchIslandPresentation.speakerReviewKeepsKeyboard(nil, onScreen: false), "a finished or replaced review gives it back")
     }
+
+    runSuite("A meeting tick that only moves the clock skips the full island rebuild") {
+        let base = recording()
+        var ticked = base
+        ticked.duration += 1
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: base), .unchanged, "same snapshot, nothing to do")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: ticked), .durationOnly, "a clock tick only refreshes the timer")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: nil, to: nil), .unchanged, "no meeting before or after")
+    }
+
+    runSuite("Any meeting change besides the clock rebuilds the island") {
+        let base = recording()
+        var phase = base
+        phase.phase = .transcribing(progress: 0.5, detail: "Transcribing")
+        var prompt = base
+        prompt.prompt = NotchIslandMeetingContent.Prompt(
+            title: "Meeting detected",
+            detail: "Zoom",
+            countdown: "10",
+            primaryTitle: "Record",
+            secondaryTitle: "Not now",
+            tertiaryTitle: nil
+        )
+        var note = base
+        note.callAudioNote = .off
+        var phaseAndClock = phase
+        phaseAndClock.duration += 1
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: phase), .full, "a new phase")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: prompt), .full, "a new prompt")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: note), .full, "a new call-audio note")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: phaseAndClock), .full, "a new phase with a tick")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: nil), .full, "the meeting went away")
+        assertEqual(NotchIslandPresentation.meetingUpdate(from: nil, to: base), .full, "a meeting arrived")
+    }
 }
 
 private func notchLayout(

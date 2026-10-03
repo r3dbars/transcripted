@@ -49,6 +49,10 @@ public protocol DiarizationEngine: ObservableObject {
     /// The backend and voiceprint model the next `diarizeOffline` call runs.
     /// The pipeline records it in the saved transcript.
     var activeRunDescriptor: DiarizationRunDescriptor { get }
+
+    /// Starts reloading, in the background, any voiceprint model released while
+    /// idle, so it is back before the next diarization re-embeds. Returns at once.
+    nonisolated func prewarmVoiceprintInBackground()
 }
 
 @available(macOS 14.0, *)
@@ -60,6 +64,9 @@ public extension DiarizationEngine {
     var activeRunDescriptor: DiarizationRunDescriptor {
         DiarizationRunDescriptor(backend: .pyannote, voiceprintModel: nil)
     }
+
+    /// Default: nothing to prewarm.
+    nonisolated func prewarmVoiceprintInBackground() {}
 
     /// Default: no clustering knob, so the threshold is ignored.
     func diarizeOffline(samples: [Float], sampleRate: Int, clusteringThreshold: Double?) async throws -> [SpeakerSegment] {

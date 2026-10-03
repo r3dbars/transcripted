@@ -36,6 +36,9 @@ extension Transcription {
         let parakeet = await MainActor.run { self.parakeet }
         let diarization = await MainActor.run { self.diarization }
         let speakerDB = await MainActor.run { self.speakerDB }
+        // The voiceprint model releases after a minute idle; start reloading it
+        // now so it overlaps resampling instead of the first re-embed.
+        diarization.prewarmVoiceprintInBackground()
 
         await MainActor.run {
             self.isProcessing = true
@@ -59,18 +62,27 @@ extension Transcription {
             AppLogger.transcription.info("Loading and resampling audio to 16kHz")
             let resampleStart = CFAbsoluteTimeGetCurrent()
 
-            // Load sequentially to avoid both resampling buffers in memory simultaneously.
-            // async let forces concurrent resampling (~460MB peak for long recordings);
-            // sequential means only one resampling buffer exists at a time.
+            // Resample both tracks at once. Each conversion streams 30 s chunks
+            // into an output reserved up front, and both outputs are held
+            // together below anyway, so running them in parallel only adds one
+            // extra chunk buffer to the peak, not a second whole-meeting copy.
             //
             // Both are whole-meeting 16kHz buffers (~460MB per channel for a
             // 2h recording), declared `var` so each can be cleared (`= []`)
             // right after its last use below instead of staying alive for the
             // entire diarize → transcribe → merge run.
+            // Timed once around the pair (wall time), as when they ran one after
+            // the other; each load opts out so the overlap isn't counted twice.
+            let (systemLoadResult, micLoadResult) = await MeetingPipelineTimings.measureAsync(.resample) {
+                async let systemLoad = Self.loadResampledTrack(url: systemURL)
+                async let micLoad = Self.loadResampledTrack(url: micURL)
+                return await (systemLoad, micLoad)
+            }
+
             var systemSamples: [Float]
             var systemAudioLoadError: Error?
             do {
-                systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+                systemSamples = try systemLoadResult?.get() ?? []
             } catch {
                 // Mirror the microphone fallback below: a damaged/empty remote
                 // track must not erase a valid local conversation. The
@@ -84,9 +96,9 @@ extension Transcription {
             }
             var micSamples: [Float]
             var microphoneAudioOutcome: TranscriptionResult.MicrophoneAudioOutcome
-            if let micURL {
+            if let micLoadResult {
                 do {
-                    micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+                    micSamples = try micLoadResult.get()
                     microphoneAudioOutcome = micSamples.isEmpty ? .unusable : .usable
                 } catch {
                     // A damaged/empty local track must not erase a valid remote
@@ -176,9 +188,18 @@ extension Transcription {
                 }
             }
 
+            // Only an engine that detects the spoken language reads these
+            // windows (Whisper); finding them scans both whole tracks.
+            var wantsLanguageSamples = false
+            if languageSelection == .automatic {
+                wantsLanguageSamples = await parakeet.usesRepresentativeLanguageSamples
+            }
             let languageContext = try await parakeet.resolveLanguage(
-                representativeSamples: languageSelection == .automatic
-                    ? Self.representativeLanguageSamples(tracks: [systemSamples, micSamples]) : [],
+                representativeSamples: wantsLanguageSamples
+                    ? Self.representativeLanguageSamples(
+                        tracks: [systemSamples, micSamples],
+                        analyses: [nil, micSignalAnalysis]
+                    ) : [],
                 selection: languageSelection
             )
 
@@ -449,7 +470,13 @@ extension Transcription {
                         ])
                     } else {
                         // A) Default: silence-split, single speaker
-                        let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+                        // `micSamples` is still the buffer `micSignalAnalysis`
+                        // measured, so reuse it instead of scanning again.
+                        let micSegments = Self.detectSpeechSegments(
+                            samples: micSamples,
+                            sampleRate: 16000,
+                            analysis: micSignalAnalysis
+                        )
                         AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
 
                         struct PendingMicSegment {

@@ -4,7 +4,13 @@ extension Transcription {
     /// Bounded acoustic evidence from the beginning, middle and end of voiced
     /// regions. Never repeats/overlaps time windows to manufacture agreement.
     /// The energy gate identifies candidates, not proof that audio is speech.
-    nonisolated static func representativeLanguageSamples(tracks: [[Float]]) -> [[Float]] {
+    ///
+    /// `analyses[i]`, when present, is `AudioSignalRecovery.analyze` of
+    /// `tracks[i]`, reused so the whole track isn't scanned again.
+    nonisolated static func representativeLanguageSamples(
+        tracks: [[Float]],
+        analyses: [AudioSignalAnalysis?] = []
+    ) -> [[Float]] {
         struct Candidate {
             let track: Int
             let start: Int
@@ -15,7 +21,11 @@ extension Transcription {
         let minimum = 2 * rate
         var candidates: [Candidate] = []
         for (track, samples) in tracks.enumerated() where samples.count >= minimum {
-            let segments = detectSpeechSegments(samples: samples, sampleRate: Double(rate))
+            let segments = detectSpeechSegments(
+                samples: samples,
+                sampleRate: Double(rate),
+                analysis: track < analyses.count ? analyses[track] : nil
+            )
             for segment in segments {
                 var start = max(0, Int(segment.start * Double(rate)))
                 let end = min(samples.count, Int(segment.end * Double(rate)))
