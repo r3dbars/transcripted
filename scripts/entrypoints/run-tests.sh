@@ -629,6 +629,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/NotchIslandPresentation.swift"
     "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
     "Sources/UI/Overlay/NotchIslandGeometry.swift"
+    "Sources/UI/Overlay/NotchIslandLevelScroller.swift"
     "Sources/UI/Overlay/NotchIslandPanel.swift"
     "Sources/UI/Overlay/DictationOverlayPlacementPolicy.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"

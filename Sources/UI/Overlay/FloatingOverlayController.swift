@@ -164,8 +164,8 @@ class FloatingOverlayController {
             .sink { [weak self] reading in
                 guard let self, self.isIslandMode else { return }
                 self.island?.updateDictationLevel(DictationMeterPolicy.presentation(
-                    isListening: self.state == .listening, sttIsRecording: sttRouter.isRecording, rawLevel: reading.level
-                ).level)
+                    isListening: self.state == .listening, sttIsRecording: sttRouter.isRecording, reading: reading
+                ))
             }
             .store(in: &subscriptions)
 

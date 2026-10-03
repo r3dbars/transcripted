@@ -81,63 +81,6 @@ enum NotchIslandPalette {
 
 // MARK: - Small drawings
 
-/// Level bars that scroll: each new level pushes in from the right.
-final class NotchIslandBarsView: NSView {
-    private var levels: [CGFloat]
-    private let barWidth: CGFloat
-    private let gap: CGFloat
-    private let maxBarHeight: CGFloat
-    var barColor: NSColor
-
-    init(count: Int, barWidth: CGFloat = 2.5, gap: CGFloat = 2, maxHeight: CGFloat = 16, color: NSColor) {
-        self.levels = Array(repeating: 0, count: max(1, count))
-        self.barWidth = barWidth
-        self.gap = gap
-        self.maxBarHeight = maxHeight
-        self.barColor = color
-        super.init(frame: .zero)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override var isFlipped: Bool { true }
-
-    override var intrinsicContentSize: NSSize {
-        let count = CGFloat(levels.count)
-        return NSSize(width: count * barWidth + (count - 1) * gap, height: maxBarHeight)
-    }
-
-    func push(_ level: Float) {
-        levels.removeFirst()
-        levels.append(Self.shaped(level))
-        needsDisplay = true
-    }
-
-    func quiet() {
-        levels = levels.map { _ in 0 }
-        needsDisplay = true
-    }
-
-    static func shaped(_ level: Float) -> CGFloat {
-        CGFloat(min(1, pow(Double(max(0, level)), 0.6) * 1.15))
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        barColor.setFill()
-        for (index, level) in levels.enumerated() {
-            let height = max(3, level * maxBarHeight)
-            let rect = NSRect(
-                x: CGFloat(index) * (barWidth + gap),
-                y: (bounds.height - height) / 2,
-                width: barWidth,
-                height: height
-            )
-            NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
-        }
-    }
-}
-
 /// You and the call as two tiny three-bar meters.
 final class NotchIslandMetersView: NSView {
     private var mic: CGFloat = 0
@@ -409,8 +352,12 @@ final class NotchIslandWingView: NSView {
         }
     }
 
-    func pushDictationLevel(_ level: Float) {
-        barViews.forEach { $0.push(level) }
+    func receiveDictationLevel(_ reading: DictationAudioLevel, at time: TimeInterval) {
+        barViews.forEach { $0.receive(reading, at: time) }
+    }
+
+    func advanceDictationBars(to time: TimeInterval, frameDuration: TimeInterval) {
+        barViews.forEach { $0.advance(to: time, frameDuration: frameDuration) }
     }
 
     func updateMeters(mic: Float, system: Float) {
@@ -488,7 +435,7 @@ final class NotchIslandWingView: NSView {
             liveLabels.append((value, label))
             return label
         case .dictationBars(let count):
-            let bars = NotchIslandBarsView(count: count, color: NotchIslandPalette.accent)
+            let bars = NotchIslandBarsView(count: count, color: NotchIslandPalette.accent, clocked: true)
             barViews.append(bars)
             return bars
         case .meetingMeters:
@@ -1101,9 +1048,17 @@ final class NotchIslandView: NSView {
         CATransaction.commit()
     }
 
-    func pushDictationLevel(_ level: Float) {
-        leftWing.pushDictationLevel(level)
-        rightWing.pushDictationLevel(level)
+    /// A dictation meter reading for the waveform's next step.
+    func receiveDictationLevel(_ reading: DictationAudioLevel, at time: TimeInterval) {
+        leftWing.receiveDictationLevel(reading, at: time)
+        rightWing.receiveDictationLevel(reading, at: time)
+    }
+
+    /// One display frame for the dictation waveform (NotchIslandController's
+    /// display link, while a dictation listens).
+    func advanceDictationBars(to time: TimeInterval, frameDuration: TimeInterval) {
+        leftWing.advanceDictationBars(to: time, frameDuration: frameDuration)
+        rightWing.advanceDictationBars(to: time, frameDuration: frameDuration)
     }
 
     func pushMeetingLevels(mic: Float, system: Float) {

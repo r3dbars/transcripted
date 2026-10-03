@@ -105,7 +105,6 @@ class ParakeetEngine: ObservableObject {
     /// `pendingSamplesLock`; a recovery restart keeps the original value.
     var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
-    nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed: Bool {
         get { audioGraph.isPrewarmed }
         set { audioGraph.isPrewarmed = newValue }

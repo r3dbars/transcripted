@@ -78,6 +78,8 @@ extension ParakeetEngine {
     private func makeDictationTapHandler(
         lease: ParakeetAudioStartLease
     ) -> (AVAudioPCMBuffer) -> Void {
+        // Meters every buffer of this start for the island's waveform.
+        let levelWindow = DictationAudioLevelWindow()
         return { [weak self] buffer in
             guard let self,
                   let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -152,15 +154,12 @@ extension ParakeetEngine {
                 }
             }
 
-            let now = CFAbsoluteTimeGetCurrent()
-            guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
-            self.lastLevelUpdate = now
-
-            let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
-
+            // Every buffer counts toward the waveform; a reading comes about
+            // 25 times a second and takes one hop to the main actor.
+            guard let reading = levelWindow.add(buffer) else { return }
             Task { @MainActor [weak self] in
                 guard lease.canDeliverSamples else { return }
-                self?.audioLevel = normalized
+                self?.audioLevels.update(reading)
             }
         }
     }

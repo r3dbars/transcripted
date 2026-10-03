@@ -68,7 +68,10 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private(set) var islandView: NotchIslandView?
     /// The screen the island is on, kept while it is up so it never jumps.
     private var screen: NotchIslandScreenInfo?
-    private var isShown = false
+    private(set) var isShown = false
+    /// Steps the dictation waveform while a dictation listens on screen
+    /// (NotchIslandController+DictationBars.swift).
+    let dictationBarsClock = NotchIslandFrameClock()
     /// Where the finished island sits on screen (the panel can be larger
     /// while the shape springs).
     private var targetFrame: NSRect?
@@ -177,11 +180,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         }
         render()
         updateTicker()
-    }
-
-    func updateDictationLevel(_ level: Float) {
-        guard isShown, dictation?.phase == .listening else { return }
-        islandView?.pushDictationLevel(level)
     }
 
     /// The dictation landed. The island lingers on it after the "Pasted"
@@ -553,6 +551,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         hoverTask = nil
         tickTask?.cancel()
         tickTask = nil
+        dictationBarsClock.stop()
         expanded = false
         isHovered = false
         guard isShown, let panel, let islandView else { return }
@@ -658,6 +657,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     }
 
     private func updateTicker() {
+        updateDictationBarsClock()
         guard isShown, dictation?.phase == .listening else {
             tickTask?.cancel()
             tickTask = nil
