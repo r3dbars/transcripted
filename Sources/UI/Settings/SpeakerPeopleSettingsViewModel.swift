@@ -47,7 +47,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
     private var duplicateProfileIDs: Set<UUID> = []
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
-    private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
+    private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
     private var refreshGeneration = SupersessionEpoch()
@@ -57,7 +57,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCandidates: [SpeakerDuplicateCandidate]
         let duplicateProfileIDs: Set<UUID>
         let duplicateCountsByProfileID: [UUID: Int]
-        let mergeTargetsByProfileID: [UUID: [SpeakerProfile]]
+        let mergeTargetIndex: SpeakerMergeTargetIndex
         let clipURLsByProfileID: [UUID: URL]
         let reviewQueueItems: [SpeakerPendingReviewItem]
         let undoableMergesByTargetID: [UUID: SpeakerMergeRecord]
@@ -620,8 +620,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID[profile.id] ?? 0
     }
 
-    func mergeTargets(for profile: SpeakerProfile) -> [SpeakerProfile] {
-        mergeTargetsByProfileID[profile.id] ?? []
+    /// O(1) view over the snapshot's shared merge order; rows call this on every body pass.
+    func mergeTargets(for profile: SpeakerProfile) -> SpeakerMergeTargetList {
+        mergeTargetIndex.targets(for: profile.id)
     }
 
     /// The most recent merge into this profile that can still be undone, if any.
@@ -678,7 +679,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCandidates = snapshot.duplicateCandidates
         duplicateProfileIDs = snapshot.duplicateProfileIDs
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
-        mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
+        mergeTargetIndex = snapshot.mergeTargetIndex
         clipURLsByProfileID = snapshot.clipURLsByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
         undoableMergesByTargetID = snapshot.undoableMergesByTargetID
@@ -728,17 +729,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
 
         let duplicateProfileIDs = Set(duplicateCountsByProfileID.keys)
-        let mergeTargetsByProfileID = Dictionary(
-            uniqueKeysWithValues: profiles.map { profile in
-                (
-                    profile.id,
-                    sortedMergeTargets(
-                        for: profile,
-                        in: profiles,
-                        duplicatePeerIds: duplicatePeerIDsByProfileID[profile.id] ?? []
-                    )
-                )
-            }
+        let mergeTargetIndex = SpeakerMergeTargetIndex(
+            profiles: profiles,
+            duplicatePeerIDsByProfileID: duplicatePeerIDsByProfileID
         )
 
         var clipURLsByProfileID: [UUID: URL] = [:]
@@ -762,7 +755,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCandidates: duplicateCandidates,
             duplicateProfileIDs: duplicateProfileIDs,
             duplicateCountsByProfileID: duplicateCountsByProfileID,
-            mergeTargetsByProfileID: mergeTargetsByProfileID,
+            mergeTargetIndex: mergeTargetIndex,
             clipURLsByProfileID: clipURLsByProfileID,
             reviewQueueItems: reviewQueueItems,
             undoableMergesByTargetID: undoableMergesByTargetID
