@@ -1,7 +1,7 @@
 // NotchIslandBarsView.swift
-// The island's scrolling level bars: the dictation waveform in the wing and
-// the recording drop-down's You and Call lanes. Split out of
-// NotchIslandView.swift.
+// The island's level drawings: the scrolling bars (the dictation waveform in
+// the wing and the recording drop-down's You and Call lanes) and the meeting
+// wing's two tiny meters. Split out of NotchIslandView.swift.
 
 import AppKit
 
@@ -75,6 +75,39 @@ final class NotchIslandBarsView: NSView {
                 height: height
             )
             NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+        }
+    }
+}
+
+/// You and the call as two tiny three-bar meters.
+final class NotchIslandMetersView: NSView {
+    private var mic: CGFloat = 0
+    private var system: CGFloat = 0
+    private var phase = 0
+
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: 26, height: 14) }
+
+    func update(mic: Float, system: Float) {
+        self.mic = NotchIslandBarsView.shaped(mic)
+        self.system = NotchIslandBarsView.shaped(system)
+        phase += 1
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shape: [CGFloat] = [0.55, 1, 0.7]
+        drawGroup(level: mic, originX: 0, color: NotchIslandPalette.accent, shape: shape)
+        drawGroup(level: system, originX: 16, color: NSColor(white: 1, alpha: 0.72), shape: shape.reversed())
+    }
+
+    private func drawGroup(level: CGFloat, originX: CGFloat, color: NSColor, shape: [CGFloat]) {
+        color.setFill()
+        for (index, factor) in shape.enumerated() {
+            let wobble = CGFloat((phase + index * 3) % 5) * 0.04
+            let height = max(3, min(14, (level * factor + wobble) * 14))
+            let rect = NSRect(x: originX + CGFloat(index) * 4, y: (bounds.height - height) / 2, width: 2, height: height)
+            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
         }
     }
 }

@@ -272,6 +272,14 @@ enum NotchIslandDrop: Equatable {
             return ""
         }
     }
+
+    /// The dictation hover's drop-down while the take is still spoken. The
+    /// island keeps that one built between hovers, so each hover only puts
+    /// it back; every other drop-down is built when it opens.
+    var staysBuiltBetweenHovers: Bool {
+        if case .dictationTarget(_, _, false) = self { return true }
+        return false
+    }
 }
 
 struct NotchIslandLayout: Equatable {

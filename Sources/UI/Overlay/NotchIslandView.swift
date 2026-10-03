@@ -81,39 +81,6 @@ enum NotchIslandPalette {
 
 // MARK: - Small drawings
 
-/// You and the call as two tiny three-bar meters.
-final class NotchIslandMetersView: NSView {
-    private var mic: CGFloat = 0
-    private var system: CGFloat = 0
-    private var phase = 0
-
-    override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: 26, height: 14) }
-
-    func update(mic: Float, system: Float) {
-        self.mic = NotchIslandBarsView.shaped(mic)
-        self.system = NotchIslandBarsView.shaped(system)
-        phase += 1
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let shape: [CGFloat] = [0.55, 1, 0.7]
-        drawGroup(level: mic, originX: 0, color: NotchIslandPalette.accent, shape: shape)
-        drawGroup(level: system, originX: 16, color: NSColor(white: 1, alpha: 0.72), shape: shape.reversed())
-    }
-
-    private func drawGroup(level: CGFloat, originX: CGFloat, color: NSColor, shape: [CGFloat]) {
-        color.setFill()
-        for (index, factor) in shape.enumerated() {
-            let wobble = CGFloat((phase + index * 3) % 5) * 0.04
-            let height = max(3, min(14, (level * factor + wobble) * 14))
-            let rect = NSRect(x: originX + CGFloat(index) * 4, y: (bounds.height - height) / 2, width: 2, height: height)
-            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
-        }
-    }
-}
-
 /// A round progress ring, or a spinning arc when there is no number yet.
 final class NotchIslandRingView: NSView {
     private let track = CAShapeLayer()
@@ -522,7 +489,7 @@ final class NotchIslandDropView: NSView {
     init(
         drop: NotchIslandDrop,
         live: NotchIslandLiveValues,
-        targetIcon: NSImage?,
+        targetIcon: () -> NSImage?,
         speakerReviewView: NSView? = nil,
         liveTranscriptView: NotchIslandLiveTranscriptView? = nil,
         dictationPreviewView: NotchIslandDictationPreviewView? = nil
@@ -555,6 +522,16 @@ final class NotchIslandDropView: NSView {
 
     var fittingHeight: CGFloat { ceil(stack.fittingSize.height) }
 
+    /// Measured once per island render (`NotchIslandView.measureDropHeight`),
+    /// so the island's layout passes don't each solve the stack again.
+    private(set) var measuredHeight: CGFloat?
+
+    func measureHeight() -> CGFloat {
+        let height = fittingHeight
+        measuredHeight = height
+        return height
+    }
+
     /// Nothing in the drop-down reads a live value today: the call prompt's
     /// countdown is the ring around Skip, which runs by itself.
     func updateLive(_ live: NotchIslandLiveValues) {}
@@ -581,7 +558,7 @@ final class NotchIslandDropView: NSView {
 
     // MARK: Building
 
-    private func build(live: NotchIslandLiveValues, targetIcon: NSImage?) {
+    private func build(live: NotchIslandLiveValues, targetIcon: () -> NSImage?) {
         switch drop {
         case .dictationTarget(let appName, let showsPreview, let isWriting):
             buildDictationTarget(appName: appName, icon: targetIcon, showsPreview: showsPreview, isWriting: isWriting)
@@ -848,7 +825,9 @@ final class NotchIslandView: NSView {
     var onAction: ((NotchIslandAction) -> Void)?
     var onBackgroundClick: (() -> Void)?
     var menuProvider: (() -> NSMenu?)?
-    var targetAppIcon: NSImage?
+    /// The target app's icon for "Insert into <app>", asked for only when a
+    /// drop-down shows it (drawn once per take by the controller's cache).
+    var targetAppIconProvider: (() -> NSImage?)?
 
     private let contentView = NotchIslandContentView(frame: .zero)
     /// A live rounded rectangle with Apple's continuous corners: springing
@@ -863,6 +842,10 @@ final class NotchIslandView: NSView {
     private let leftWing = NotchIslandWingView(side: .leading)
     private let rightWing = NotchIslandWingView(side: .trailing)
     private var dropView: NotchIslandDropView?
+    /// The dictation hover's drop-down, kept built between hovers while the
+    /// take is spoken (`NotchIslandDrop.staysBuiltBetweenHovers`), so the
+    /// next hover puts it back instead of building it again.
+    private var keptDictationDrop: NotchIslandDropView?
     /// Set by the controller while a speaker review is up.
     var speakerReviewView: NSView?
     /// Set by the controller while a meeting with live transcript records.
@@ -879,6 +862,7 @@ final class NotchIslandView: NSView {
     private var shapeRect: CGRect = .zero
     private var shapeRadius: CGFloat = 0
     private var morphGeneration = 0
+    private var cachedLayerIsYDown: Bool?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -925,7 +909,8 @@ final class NotchIslandView: NSView {
         (leftWing.contentWidth, rightWing.contentWidth)
     }
 
-    var dropHeight: CGFloat? { dropView?.fittingHeight }
+    /// The drop-down's height, measured once per render.
+    func measureDropHeight() -> CGFloat? { dropView?.measureHeight() }
 
     var currentCornerRadius: CGFloat { cornerRadius }
 
@@ -938,13 +923,16 @@ final class NotchIslandView: NSView {
         if layout.drop != dropView?.drop,
            !(layout.drop.map { dropView?.adoptIfOnlyCountdownChanged($0) ?? false } ?? false) {
             let hadDrop = dropView != nil
-            dropView?.removeFromSuperview()
+            if let outgoing = dropView {
+                outgoing.removeFromSuperview()
+                if outgoing.drop.staysBuiltBetweenHovers { keptDictationDrop = outgoing }
+            }
             dropView = nil
             if let drop = layout.drop {
-                let view = NotchIslandDropView(
+                let view = takeKeptDictationDrop(for: drop) ?? NotchIslandDropView(
                     drop: drop,
                     live: live,
-                    targetIcon: targetAppIcon,
+                    targetIcon: { targetAppIconProvider?() },
                     speakerReviewView: speakerReviewView,
                     liveTranscriptView: liveTranscriptView,
                     dictationPreviewView: dictationPreviewView
@@ -967,6 +955,24 @@ final class NotchIslandView: NSView {
         }
         setAccessibilityValue(Self.accessibilitySummary(layout))
         needsLayout = true
+    }
+
+    /// The kept dictation drop-down, ready to show again in the state a new
+    /// one starts in, or nil when it doesn't fit this drop.
+    private func takeKeptDictationDrop(for drop: NotchIslandDrop) -> NotchIslandDropView? {
+        guard let kept = keptDictationDrop, drop.staysBuiltBetweenHovers else { return nil }
+        keptDictationDrop = nil
+        guard kept.drop == drop, kept.canComeBack else { return nil }
+        kept.layer?.removeAnimation(forKey: "islandBlur")
+        kept.contentFilters = []
+        kept.alphaValue = 1
+        kept.cameBack()
+        return kept
+    }
+
+    /// The take is over: its kept drop-down goes.
+    func releaseKeptDictationDrop() {
+        keptDictationDrop = nil
     }
 
     /// Holds the Dismiss ring while the pointer rests on the island.
@@ -1169,10 +1175,20 @@ final class NotchIslandView: NSView {
         CATransaction.commit()
     }
 
-    /// True when the content layer's y axis runs down, like the view's.
+    /// True when the content layer's y axis runs down, like the view's. It
+    /// can't change while the view stays in its window, so it's read there
+    /// once instead of forcing a layout pass on every morph.
     private var layerIsYDown: Bool {
+        if let cachedLayerIsYDown { return cachedLayerIsYDown }
         contentView.layoutSubtreeIfNeeded()
-        return (orientationProbe.layer?.frame.minY ?? 0) < 0.5
+        let yDown = (orientationProbe.layer?.frame.minY ?? 0) < 0.5
+        if window != nil { cachedLayerIsYDown = yDown }
+        return yDown
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        cachedLayerIsYDown = nil
     }
 
     /// A rect in this view's (flipped) coordinates, in the mask's.
@@ -1219,7 +1235,7 @@ final class NotchIslandView: NSView {
                 x: (x0 + (width - dropWidth) / 2).rounded(),
                 y: y0 + rowHeight + NotchIslandGeometry.dropTopGap,
                 width: dropWidth,
-                height: dropView.fittingHeight
+                height: dropView.measuredHeight ?? dropView.measureHeight()
             )
         }
         if let edgeProgress {
