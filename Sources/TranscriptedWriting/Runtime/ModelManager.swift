@@ -464,7 +464,7 @@ final class ModelManager: @unchecked Sendable {
             // Hold the launch check's hashed clone so the first runtime
             // handoff serves those bytes instead of hashing the multi-GB
             // model a second time.
-            let installed = try await verifyInstalledModel(qos: .utility)
+            let installed = try await verifyInstalledModel(qos: .userInitiated)
             if installed.result == .valid {
                 publish(.ready(modelURL), generation: generation, held: installed.held)
                 return

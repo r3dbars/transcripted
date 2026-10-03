@@ -41,6 +41,8 @@ Built from `2115b73` plus that patch with the same recipe as above (2026-10-03).
 - **Re-arm:** after one more request the patched heartbeat runs again (about 163 wakeups/s, same as upstream while armed).
 - **Shutdown:** SIGTERM exits with status 0 within 1 s, both inside the armed window and after it lapsed, for both binaries.
 
+The host's launch arguments include a RAM-tiered `--cache-ram` (no flag at 64 GiB and up, so the build's 8 GiB default; 4096 MiB at 32 GiB and up; 1024 MiB below). Small Macs avoid swap; big Macs keep today's revisit speed (a cache hit restores in 0.08-0.6 s where a re-prefill takes about 1.2 s).
+
 Pins for the owned build, once hosted (ad-hoc signed with `--digest-algorithm=sha1,sha256`, so `codesign --remove-signature` in `build-deps.sh` works on it unchanged):
 
 - Ad-hoc signed asset: `dc5e138a9c7a0ea949084e16e92cd1c13da549d5f4f176358a8202428531f0cf`

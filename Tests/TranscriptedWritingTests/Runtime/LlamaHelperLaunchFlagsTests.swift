@@ -41,20 +41,32 @@ struct LlamaHelperLaunchFlagsTests {
     }
 
     @Test(
-        "The helper's prompt cache is bounded and holds three worst-case entries of the largest model this Mac may run",
-        arguments: [8, 16, 18, 24, 32, 64, 128] as [UInt64]
+        "The prompt cache is tiered by RAM: big Macs keep the build's default, smaller ones get a bound",
+        arguments: [
+            (16, 1_024), (24, 1_024), (32, 4_096), (48, 4_096), (64, nil), (128, nil),
+        ] as [(UInt64, Int?)]
     )
-    func promptCacheIsBounded(gibibytes: UInt64) throws {
+    func promptCacheIsTiered(gibibytes: UInt64, expectedMiB: Int?) throws {
         let memory = gibibytes * Self.gib
+        #expect(LlamaServerProcessHost.promptCacheMiB(physicalMemoryBytes: memory) == expectedMiB)
         let arguments = Self.launch(physicalMemoryBytes: memory)
-        #expect(arguments.filter { $0 == "--cache-ram" }.count == 1)
-        let mib = try #require(Self.value(after: "--cache-ram", in: arguments).flatMap(Int.init))
-        #expect(mib > 0)
-        let worstCaseEntryMiB = WritingModelEligibility.isEligible(.qwen35B9B, physicalMemoryBytes: memory) ? 330 : 160
-        #expect(mib >= 3 * worstCaseEntryMiB)
-        // Far under the pinned build's 8 GiB default.
-        #expect(mib <= 2_048)
+        if let expectedMiB {
+            #expect(arguments.filter { $0 == "--cache-ram" }.count == 1)
+            let mib = try #require(Self.value(after: "--cache-ram", in: arguments).flatMap(Int.init))
+            #expect(mib == expectedMiB)
+            // Three worst-case Qwen entries (~330 MiB each) still fit.
+            #expect(mib >= 3 * 330)
+        } else {
+            // Same as before the cap existed: the build's own 8 GiB default.
+            #expect(!arguments.contains("--cache-ram"))
+        }
         #expect(!arguments.contains("--ctx-checkpoints"))
+    }
+
+    @Test("Just under a tier boundary takes the smaller cache")
+    func promptCacheBoundaries() {
+        #expect(LlamaServerProcessHost.promptCacheMiB(physicalMemoryBytes: 32 * Self.gib - 1) == 1_024)
+        #expect(LlamaServerProcessHost.promptCacheMiB(physicalMemoryBytes: 64 * Self.gib - 1) == 4_096)
     }
 
     @Test("The bounded cache keeps the existing launch promises")
@@ -106,7 +118,8 @@ struct LlamaHelperLaunchFlagsTests {
         try #require(!argv.isEmpty)
         #expect(argv.contains("-np 1"))
         #expect(argv.contains("--poll 0"))
-        #expect(argv.contains("--cache-ram "))
+        let cacheMiB = LlamaServerProcessHost.promptCacheMiB(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
+        #expect(argv.contains("--cache-ram ") == (cacheMiB != nil))
         #expect(!argv.contains("--kv-unified"))
     }
 }

@@ -136,7 +136,9 @@ public final class LiveRunner {
                 continue
             }
             // A failed load ends the helper, like a failed load at startup:
-            // the session stays idle and the mod starts a fresh one.
+            // the session stays idle and the mod starts a fresh one. Refresh
+            // `updatedAt` first: nothing writes session.json during the load.
+            try output.touch()
             try await you.load()
             try await them.load()
             defer { releaseModels() }

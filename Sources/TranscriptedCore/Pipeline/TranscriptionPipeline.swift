@@ -86,8 +86,11 @@ extension Transcription {
                 splitLocalSpeakers: splitLocalSpeakers,
                 wantsLanguageSamples: wantsLanguageSamples
             )
+            // Both load results are `var`s cleared right after unpacking: a
+            // kept `Result` shares the array's storage, so `= []` on the
+            // unpacked buffer alone wouldn't free it.
             var systemLoadResult: Result<[Float], Error>?
-            let micLoadResult: Result<[Float], Error>?
+            var micLoadResult: Result<[Float], Error>? = nil
             if releasesMicDuringSystemPhase {
                 micLoadResult = await MeetingPipelineTimings.measureAsync(.resample) {
                     Self.loadResampledTrack(url: micURL)
@@ -109,6 +112,7 @@ extension Transcription {
             }
 
             var (micSamples, microphoneAudioOutcome) = Self.micTrack(from: micLoadResult)
+            micLoadResult = nil
             if let _ = micURL {
                 AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
             } else {
@@ -134,9 +138,16 @@ extension Transcription {
                     Self.loadResampledTrack(url: systemURL)
                 }
             }
-            let systemTrack = Self.systemTrack(from: systemLoadResult)
-            var systemSamples = systemTrack.samples
-            let systemAudioLoadError = systemTrack.loadError
+            var systemSamples: [Float]
+            let systemAudioLoadError: Error?
+            do {
+                // Scoped so the unpacked tuple can't keep the buffer alive
+                // past `systemSamples = []` below.
+                let systemTrack = Self.systemTrack(from: systemLoadResult)
+                systemSamples = systemTrack.samples
+                systemAudioLoadError = systemTrack.loadError
+            }
+            systemLoadResult = nil
 
             let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
             AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")

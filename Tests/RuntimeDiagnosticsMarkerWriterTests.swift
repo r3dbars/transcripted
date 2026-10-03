@@ -1,15 +1,16 @@
 import Foundation
 
-// Promise: runtime-marker writes leave the caller right away, land in order
-// with the newest snapshot winning, and a durable write (launch, clean
-// shutdown) is never overwritten by an older queued one.
+// Promise: queued heartbeat writes leave the caller right away, land in order
+// with the newest snapshot winning, and a synchronous write (launch, session
+// stage, clean shutdown) is on disk when it returns and is never overwritten
+// by an older queued heartbeat.
 func testRuntimeDiagnosticsMarkerWriter() {
     runSuite("clean-shutdown marker is never overwritten by an earlier queued write") {
         let firstSaveStarted = DispatchSemaphore(value: 0)
         let releaseFirstSave = DispatchSemaphore(value: 0)
         let log = MarkerSaveLog()
         let writer = RuntimeDiagnosticsMarkerWriter(url: markerTestURL()) { marker, _ in
-            if marker.lastEvent == "dictation_transcribing" {
+            if marker.lastEvent == "heartbeat" {
                 firstSaveStarted.signal()
                 // Failure watchdog only; no assertion on scheduling speed.
                 _ = releaseFirstSave.wait(timeout: .now() + 30)
@@ -17,14 +18,14 @@ func testRuntimeDiagnosticsMarkerWriter() {
             log.append(marker, isMainThread: Thread.isMainThread)
         }
 
-        writer.submit(markerFixture(lastEvent: "dictation_transcribing"))
+        writer.submit(markerFixture(lastEvent: "heartbeat"))
         guard firstSaveStarted.wait(timeout: .now() + 30) == .success else {
             releaseFirstSave.signal()
             assertTrue(false, "the marker worker did not start")
             return
         }
         // The first save is stalled; submit must still return.
-        writer.submit(markerFixture(lastEvent: "dictation_completed"))
+        writer.submit(markerFixture(lastEvent: "heartbeat_later"))
 
         let cleanWritten = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
@@ -40,7 +41,7 @@ func testRuntimeDiagnosticsMarkerWriter() {
         let saved = log.events
         assertEqual(saved.last, "clean_shutdown", "the clean marker is the last write")
         assertEqual(saved.filter { $0 == "clean_shutdown" }.count, 1, "the clean marker is written once")
-        assertEqual(saved.first, "dictation_transcribing", "the queued writes ran first, in order")
+        assertEqual(saved.first, "heartbeat", "the queued heartbeats ran first, in order")
         assertFalse(log.usedMainThread, "marker saves never run on the main thread")
     }
 
@@ -71,7 +72,7 @@ func testRuntimeDiagnosticsMarkerWriter() {
         releaseFirstSave.signal()
         writer.writeNow(markerFixture(lastEvent: "d"))
 
-        assertEqual(RuntimeDiagnosticsStore.load(from: url), markerFixture(lastEvent: "d"), "the durable write is what's on disk")
+        assertEqual(RuntimeDiagnosticsStore.load(from: url), markerFixture(lastEvent: "d"), "the synchronous write is what's on disk")
     }
 
     runSuite("runtime marker lands owner-only even when its folder was deleted") {

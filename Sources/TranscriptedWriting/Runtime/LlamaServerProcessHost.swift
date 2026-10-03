@@ -314,7 +314,8 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     ///   sent an overlapping request to a cold slot (a full prefill). Any
     ///   future second consumer of the helper needs its own design (its own
     ///   slot via `id_slot`, or its own helper), not a bigger `-np`.
-    /// - `--cache-ram`: see `promptCacheMiB(physicalMemoryBytes:)`.
+    /// - `--cache-ram`: RAM-tiered, and left out at 64 GiB and up; see
+    ///   `promptCacheMiB(physicalMemoryBytes:)`.
     /// - `--poll 0`: every layer runs on Metal, so the CPU pool only does the
     ///   embedding lookup. The pinned build defaults to `--poll 50`, which
     ///   keeps the idle workers spinning after every token (~90% of the
@@ -330,6 +331,8 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     ) -> LaunchConfiguration {
         var environment = inheritedEnvironment
         environment[LlamaServerAccessKey.environmentVariable] = apiKey
+        let promptCache = promptCacheMiB(physicalMemoryBytes: physicalMemoryBytes)
+            .map { ["--cache-ram", String($0)] } ?? []
         return LaunchConfiguration(
             arguments: [
                 "-m", model,
@@ -339,7 +342,7 @@ final class LlamaServerProcessHost: @unchecked Sendable {
                 "-np", "1",
                 "--swa-full",
                 "--cache-reuse", "256",
-                "--cache-ram", String(promptCacheMiB(physicalMemoryBytes: physicalMemoryBytes)),
+            ] + promptCache + [
                 "--poll", "0",
                 "--no-webui",
             ],
@@ -348,17 +351,21 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     }
 
     /// The helper keeps prompts it moves out of its slot in a host RAM cache
-    /// so a return to an earlier context restores instead of re-prefilling.
-    /// The pinned build caps that cache at 8 GiB, and macOS malloc keeps the
-    /// freed blocks, so on Qwen (~180 MB per entry) the helper could climb
-    /// toward 8.5 GB over a day of context switches. The cap here holds at
-    /// least 3 worst-case entries of the largest model this Mac may run
-    /// (Qwen ~330 MiB, Gemma ~160 MiB at 4,096 tokens); eviction is oldest
-    /// first. Never 0 or -1 (off and unlimited).
-    static func promptCacheMiB(physicalMemoryBytes: UInt64) -> Int {
-        WritingModelEligibility.isEligible(.qwen35B9B, physicalMemoryBytes: physicalMemoryBytes)
-            ? 1_024
-            : 512
+    /// so a return to an earlier context restores (0.08-0.6 s) instead of
+    /// re-prefilling (~1.2 s). The pinned build caps that cache at 8 GiB, and
+    /// macOS malloc keeps the freed blocks, so on Qwen (~180 MB per entry) the
+    /// helper could climb toward 8.5 GB over a day of context switches.
+    /// Tiered by RAM so small Macs avoid swap while big Macs keep today's
+    /// revisit speed: 64 GiB and up passes nothing (nil: the build's 8 GiB
+    /// default, same as before), 32 GiB and up gets 4096 MiB, anything less
+    /// 1024 MiB. Every cap holds at least 3 worst-case Qwen entries (~330 MiB
+    /// at 4,096 tokens); eviction is oldest first. Never 0 or -1 (off and
+    /// unlimited).
+    static func promptCacheMiB(physicalMemoryBytes: UInt64) -> Int? {
+        let gibibyte: UInt64 = 1 << 30
+        if physicalMemoryBytes >= 64 * gibibyte { return nil }
+        if physicalMemoryBytes >= 32 * gibibyte { return 4_096 }
+        return 1_024
     }
 
     private func handleExit(_ child: Process) {

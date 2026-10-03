@@ -27,6 +27,9 @@ final class EmbeddingStore: @unchecked Sendable {
     private let provider: EmbeddingProvider
     private let dbPath: URL
     private let embedLockPath: URL
+    /// How long a pass waits for another server's embed lock before running
+    /// unlocked. Bounded so a stopped (SIGTSTP) holder can't stall it forever.
+    private let embedLockTimeout: TimeInterval
     /// Mixed into every `embedding_cache` key so vectors from a different model,
     /// dimension or OS model revision are never reused.
     private let cacheNamespace: Data
@@ -51,9 +54,11 @@ final class EmbeddingStore: @unchecked Sendable {
         dbPath: URL,
         provider: EmbeddingProvider,
         cacheTTL: TimeInterval = 72 * 60 * 60,
+        embedLockTimeout: TimeInterval = 30,
         now: @escaping @Sendable () -> Date = { Date() }
     ) throws {
         self.dbPath = dbPath
+        self.embedLockTimeout = embedLockTimeout
         self.provider = provider
         self.embedLockPath = dbPath.deletingLastPathComponent()
             .appendingPathComponent("mcp_index.embed.lock", isDirectory: false)
@@ -143,8 +148,9 @@ final class EmbeddingStore: @unchecked Sendable {
         // `reconciliationActive` is set, so semantic search keeps answering here
         // while another process embeds. Never taken while holding the lexical
         // reconcile lock (TranscriptIndex.reconcile releases it first). If the
-        // lock file can't be opened, run unlocked as before.
-        let embedLockDescriptor = Self.acquireEmbedLock(at: embedLockPath)
+        // lock file can't be opened, or the holder doesn't let go within
+        // `embedLockTimeout` (a stopped process), run unlocked as before.
+        let embedLockDescriptor = Self.acquireEmbedLock(at: embedLockPath, timeout: embedLockTimeout)
         defer { Self.releaseEmbedLock(embedLockDescriptor) }
 
         admissionCondition.lock()
@@ -191,14 +197,21 @@ final class EmbeddingStore: @unchecked Sendable {
 
     // MARK: - Cross-process embed lock
 
-    private static func acquireEmbedLock(at lockPath: URL) -> Int32? {
+    /// Polls a non-blocking lock about every 100 ms until `timeout`. EINTR
+    /// retries; any other error, or the deadline, closes the descriptor and
+    /// returns nil so the caller runs unlocked.
+    private static func acquireEmbedLock(at lockPath: URL, timeout: TimeInterval) -> Int32? {
         let descriptor = open(lockPath.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { return nil }
-        while flock(descriptor, LOCK_EX) != 0 {
-            guard errno == EINTR else {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            let failure = errno
+            if failure == EINTR { continue }
+            guard failure == EWOULDBLOCK, DispatchTime.now().uptimeNanoseconds < deadline else {
                 close(descriptor)
                 return nil
             }
+            usleep(100_000)
         }
         _ = fchmod(descriptor, 0o600)
         return descriptor

@@ -10,9 +10,11 @@ enum SettingsClosedWindowRefreshPolicy {
         var shortcuts: Bool
         var launchAtLogin: Bool
         /// Today keeps its snapshot fresh either way (held, not shown, while
-        /// closed); the Home and Dictations reload is decided by
-        /// `reloadsDashboard`.
+        /// closed).
         var recentCaptures: Bool
+        /// Whether activation also reloads Home and Dictations. Skipped while
+        /// closed; opening the window forces that reload anyway.
+        var dashboard: Bool
     }
 
     /// Work for `NSApplication.didBecomeActiveNotification`. Opening the
@@ -22,15 +24,13 @@ enum SettingsClosedWindowRefreshPolicy {
             permissions: isWindowOpen,
             shortcuts: isWindowOpen,
             launchAtLogin: isWindowOpen,
-            recentCaptures: true
+            recentCaptures: true,
+            dashboard: isWindowOpen
         )
     }
-
-    /// Whether a library change reloads the Home/Dictations dashboard. The
-    /// window's open refresh forces one, so a closed window skips it.
-    static func reloadsDashboard(isWindowOpen: Bool) -> Bool {
-        isWindowOpen
-    }
+    // Library changes (a meeting or dictation save) reload the dashboard
+    // whether the window is open or closed, as on main, so a reopen or a
+    // reveal finds the new row already there. Only app activation skips it.
 }
 
 /// Holds the newest value while the window is closed instead of publishing

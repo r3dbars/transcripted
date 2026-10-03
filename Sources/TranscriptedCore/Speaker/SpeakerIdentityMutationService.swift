@@ -271,9 +271,10 @@ public enum SpeakerIdentityMutationService {
         // when neither profile has a display name, so when both are unnamed there is
         // no name to mirror. Fabricating one stamped a database identifier into the
         // YAML `name:` and every body label, which is exactly what the invariant
-        // above says this must not do. Reachable in normal use — duplicateReason
-        // flags two unnamed profiles at cosine >= 0.90 as a suggested duplicate and
-        // sortedMergeTargets applies no name filter.
+        // above says this must not do. Reachable in normal use —
+        // SpeakerDuplicateMatchPolicy.reason flags two unnamed profiles at
+        // cosine >= 0.90 as a suggested duplicate, and SpeakerMergeTargetIndex
+        // applies no name filter.
         let resolvedName = targetProfile?.displayName ?? sourceProfile?.displayName
 
         let planned = try planAffectedTranscripts(matchingDbId: sourceId, directory: directory)

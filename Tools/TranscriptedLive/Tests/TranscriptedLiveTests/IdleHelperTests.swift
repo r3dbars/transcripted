@@ -73,6 +73,18 @@ private func readSession(_ output: LiveOutput) throws -> LiveSession {
         #expect(session.partial == ["them": "so the plan"])
     }
 
+    @Test func touchRefreshesUpdatedAtBeforeTheHeartbeatIsDue() throws {
+        let root = try tempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = VirtualClock()
+        let output = try LiveOutput(root: root, model: "test", now: { clock.now })
+        let before = try readSession(output).updatedAt
+
+        clock.advance(1)  // heartbeat isn't due for another 3 s
+        try output.touch()
+        #expect(try readSession(output).updatedAt > before)
+    }
+
     @Test func aClockThatJumpsBackStillGetsAHeartbeat() throws {
         let root = try tempDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

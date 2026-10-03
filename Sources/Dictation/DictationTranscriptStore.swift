@@ -696,15 +696,27 @@ enum DictationTranscriptStore {
             return nil
         }
 
-        guard let parsed = (try? fractionalCreatedAtStyle.parse(value))
-            ?? (try? plainCreatedAtStyle.parse(value)) else {
+        // ISO8601DateFormatter truncated the fraction to the millisecond, so
+        // cut a hand-edited longer fraction to 3 digits first. What's left is
+        // a whole millisecond that FormatStyle can land a fraction of a
+        // microsecond off, so snap to the nearest one. Together that keeps
+        // createdAt, entry ids and legacy delete matching bit-identical.
+        let trimmed = truncatingFractionToMilliseconds(value)
+        guard let parsed = (try? fractionalCreatedAtStyle.parse(trimmed))
+            ?? (try? plainCreatedAtStyle.parse(trimmed)) else {
             return nil
         }
-        // FormatStyle can land a fraction of a microsecond off the
-        // millisecond. ISO8601DateFormatter truncated to the millisecond, so
-        // snap down the same way (the small nudge absorbs that error) to keep
-        // createdAt, entry ids and legacy delete matching bit-identical.
-        let milliseconds = (parsed.timeIntervalSince1970 * 1_000 + 0.001).rounded(.down)
+        let milliseconds = (parsed.timeIntervalSince1970 * 1_000).rounded()
         return Date(timeIntervalSince1970: milliseconds / 1_000)
+    }
+
+    /// `...:00.1239999Z` becomes `...:00.123Z`; anything else is unchanged.
+    private static func truncatingFractionToMilliseconds(_ value: String) -> String {
+        guard let dot = value.firstIndex(of: ".") else { return value }
+        let digitsStart = value.index(after: dot)
+        let digitsEnd = value[digitsStart...].firstIndex { !$0.isASCII || !$0.isNumber } ?? value.endIndex
+        guard value.distance(from: digitsStart, to: digitsEnd) > 3 else { return value }
+        let keepEnd = value.index(digitsStart, offsetBy: 3)
+        return String(value[..<keepEnd] + value[digitsEnd...])
     }
 }

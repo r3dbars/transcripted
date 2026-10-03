@@ -72,7 +72,9 @@ final class WritingFrontWindowPoller: @unchecked Sendable {
             }
         }
         guard detector.withLock({ $0.record(identity) }) else { return }
-        DispatchQueue.main.async { [weak self] in
+        // Default mode only, like the old main-run-loop Timer: a change seen
+        // during menu tracking or a live resize lands when tracking ends.
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
             MainActor.assumeIsolated { self?.deliver() }
         }
     }

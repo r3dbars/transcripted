@@ -55,9 +55,11 @@ enum RuntimeDiagnosticsStore {
         return try? JSONDecoder().decode(RuntimeDiagnosticsMarker.self, from: data)
     }
 
-    /// Writes the marker as an owner-only (0600) file via temp file + fsync +
-    /// rename. The temp file is created 0600, so there's no stat/chmod per
-    /// save; the folder is created (0700) only when it's missing.
+    /// Writes the marker as an owner-only (0600) file via temp file + rename,
+    /// the same durability as main's `.atomic` write (no fsync; a rename
+    /// already survives a process crash). The temp file is created 0600, so
+    /// there's no stat/chmod per save; the folder is created (0700) only when
+    /// it's missing.
     static func save(_ marker: RuntimeDiagnosticsMarker, to url: URL) {
         do {
             let data = try JSONEncoder().encode(marker)
@@ -96,7 +98,6 @@ enum RuntimeDiagnosticsStore {
                 cursor += written
             }
         }
-        if failure == 0, fsync(descriptor) != 0 { failure = errno }
         if close(descriptor) != 0, failure == 0 { failure = errno }
         if failure == 0, rename(tempURL.path, url.path) != 0 { failure = errno }
         if failure != 0 {

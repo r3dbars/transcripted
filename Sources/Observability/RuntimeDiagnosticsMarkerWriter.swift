@@ -5,7 +5,9 @@ import Synchronization
 /// latest-wins coalescing: while one save runs, at most one newer snapshot
 /// waits, and newer submits replace it.
 ///
-/// `writeNow` is for the launch marker and clean shutdown. It runs on the same
+/// Only the periodic heartbeat uses `submit`. `writeNow` is for the launch,
+/// stage and clean-shutdown markers, so crash evidence is on disk before the
+/// caller moves on, as on main. It runs on the same
 /// serial queue behind anything already queued, so an older queued snapshot
 /// can never land after it. Nothing on this queue touches the main thread or
 /// the main actor, so calling `writeNow` from main can't deadlock.
@@ -40,7 +42,7 @@ final class RuntimeDiagnosticsMarkerWriter: Sendable {
         }
     }
 
-    /// Write a snapshot durably before returning, after any queued write, and
+    /// Write a snapshot before returning, after any queued write, and
     /// discard any snapshot still waiting (it's older than this one).
     func writeNow(_ snapshot: RuntimeDiagnosticsMarker) {
         queue.sync {

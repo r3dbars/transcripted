@@ -510,10 +510,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         hostTime == 0 ? nil : TimeInterval(AudioConvertHostTimeToNanos(hostTime)) / 1_000_000_000
     }
 
-    /// The silence a reconnect pads. Drain ticks only bracket the hole to
-    /// the nearest drain tick and miss audio a rebuild threw away, so the
-    /// host-clock stamps of the last kept and first new sample win when the
-    /// HAL gave both and they are plausible (deep review M8).
+    /// The silence a reconnect pads. Drain ticks bracket the hole only to a tick
+    /// (~50 ms steady, so a `clockGap` pad can run that short) and miss audio a
+    /// rebuild threw away, so host-clock stamps of the last kept and first new
+    /// sample win when the HAL gave both and they're plausible (review M8).
     static func interruptionGap(
         clockGap: TimeInterval,
         lastDeliveredEnd: TimeInterval?,

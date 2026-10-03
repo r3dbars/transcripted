@@ -44,7 +44,7 @@ final class RuntimeDiagnostics {
             buildRevision: TelemetryContext.currentBuildRevision,
             osMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         )
-        persist(event: "app_launched", durably: true)
+        persist(event: "app_launched")
         startHeartbeatTimer()
     }
 
@@ -154,7 +154,7 @@ final class RuntimeDiagnostics {
         heartbeatTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.persist(event: "heartbeat")
+                self?.persist(event: "heartbeat", durably: false)
             }
         }
         // The heartbeat only needs coarse "app is alive" granularity; a generous
@@ -165,7 +165,7 @@ final class RuntimeDiagnostics {
         heartbeatTimer = timer
     }
 
-    private func persist(event: String, durably: Bool = false) {
+    private func persist(event: String, durably: Bool = true) {
         updateMarker(durably: durably) { marker in
             marker.lastEvent = event
             if event == "heartbeat" {
@@ -177,10 +177,11 @@ final class RuntimeDiagnostics {
         }
     }
 
-    /// Stage and heartbeat writes go to the marker queue (off main, in order,
-    /// latest wins). The launch marker and clean shutdown are written durably
-    /// before returning, behind anything already queued.
-    private func updateMarker(durably: Bool = false, _ update: (inout RuntimeDiagnosticsMarker) -> Void) {
+    /// Launch, stage and clean-shutdown markers are on disk before this
+    /// returns, as on main, so crash evidence is never a stage behind. Only
+    /// the periodic heartbeat goes to the marker queue (off main, in order,
+    /// latest wins); `writeNow` lands behind anything already queued.
+    private func updateMarker(durably: Bool = true, _ update: (inout RuntimeDiagnosticsMarker) -> Void) {
         guard var marker else { return }
         update(&marker)
         marker.cleanShutdown = false

@@ -54,7 +54,9 @@ struct FrontWindowChangeDetector<Identity: Equatable> {
 
 /// Reuses the last bundle ID while the front window's (pid, window number)
 /// stays the same, so an unchanged tick skips the LaunchServices read. A nil
-/// result is never reused: the next read asks again.
+/// result is never reused: the next read asks again. A value-to-nil flip on
+/// the same (pid, window) is deliberately suppressed: that's a LaunchServices
+/// miss or a process tearing down, not a window change.
 struct FrontWindowBundleMemo {
     private var key: (pid: Int32, window: UInt32)?
     private var bundleIdentifier: String?

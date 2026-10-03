@@ -138,6 +138,11 @@ func testDictationTodayCount() async {
                 "2026-09-24T21:35:00+05:30",
                 "2026-09-24T16:05:00.9999Z",
                 "2026-09-24T16:05:00.1Z",
+                // Hand-edited sub-millisecond tails truncate, never round up.
+                "2026-09-24T16:05:00.1239999Z",
+                "2026-09-24T16:05:00.123999Z",
+                "2026-09-24T16:05:00.1239995Z",
+                "2026-09-24T11:05:00.0009999-05:00",
             ]
             captured.append(contentsOf: extras)
 

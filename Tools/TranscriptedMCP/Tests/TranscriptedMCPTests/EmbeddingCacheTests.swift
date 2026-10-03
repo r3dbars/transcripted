@@ -339,6 +339,37 @@ final class EmbeddingCacheTests: XCTestCase {
         XCTAssertEqual(try semanticDictationTexts(index, query: newText).first, newText)
     }
 
+    func testStoppedLockHolderDoesNotBlockTheEmbeddingPassForever() throws {
+        let provider = HashingCountingProvider()
+        let index = try TranscriptIndex(indexDir: indexDir)
+        let store = try EmbeddingStore(
+            dbPath: indexDir.appendingPathComponent("mcp_index.sqlite"),
+            provider: provider,
+            embedLockTimeout: 0.3
+        )
+        try writeDictationDay(baseTexts, bump: 0)
+        try index.reconcile(meetingsDir: library, dictationsDir: library, updateEmbeddings: false)
+
+        // Stand in for a stopped server: take the embed lock and never let go
+        // while the pass runs.
+        let lockPath = indexDir.appendingPathComponent("mcp_index.embed.lock").path
+        let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        XCTAssertGreaterThanOrEqual(lockFD, 0)
+        XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
+        defer {
+            flock(lockFD, LOCK_UN)
+            close(lockFD)
+        }
+
+        let passDone = expectation(description: "embedding pass gave up waiting and ran unlocked")
+        DispatchQueue.global(qos: .utility).async {
+            store.reconcileEmbeddings()
+            passDone.fulfill()
+        }
+        wait(for: [passDone], timeout: 10)
+        XCTAssertEqual(provider.embedCalls, baseTexts.count, "the unlocked pass still embedded every new row")
+    }
+
     // MARK: - TTL garbage collection
 
     func testCacheDropsTextsUnusedForLongerThanTheTTL() throws {

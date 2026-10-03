@@ -134,6 +134,13 @@ public final class LiveOutput {
         try writeSession(force: true)
     }
 
+    /// Writes session.json now, whatever the heartbeat gap. The watch calls
+    /// it right before a model reload, which writes nothing while it runs,
+    /// so `updatedAt` starts that window fresh.
+    public func touch() throws {
+        try writeSession(force: true)
+    }
+
     public func end() throws {
         try? handle?.close()
         handle = nil

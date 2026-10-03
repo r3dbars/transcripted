@@ -614,8 +614,9 @@ extension DictationSessionPipelineHost {
 /// after that job ends, which is after the island's first Core Animation
 /// commit. `Task.immediate` runs the open's synchronous prefix right now, so
 /// the pinned prepare reaches its coordinator alongside that commit (~3-5 ms
-/// sooner on a physical-key start). The island still goes up first in the
-/// same turn; only where the open starts moves.
+/// sooner on a physical-key start). The island's state is still set first;
+/// its frame now commits right after the open's synchronous prefix (no HAL
+/// work, well under a millisecond) instead of before it.
 ///
 /// The caller gates it (`opensInThisTurn`). Off for a borrowed meeting mic
 /// (no coordinator hop to win, and it can finish without suspending), the

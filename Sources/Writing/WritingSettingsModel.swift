@@ -166,6 +166,7 @@ final class WritingSettingsModel: ObservableObject {
     func resumeTimers() {
         guard isPageMounted, armTimers() else { return }
         refreshLive()
+        refreshStats()
     }
 
     @discardableResult

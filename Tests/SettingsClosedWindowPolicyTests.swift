@@ -9,16 +9,14 @@ func testSettingsClosedWindowPolicy() {
         assertFalse(closed.shortcuts, "no shortcut re-read for a closed window")
         assertFalse(closed.launchAtLogin, "no login-item read for a closed window")
         assertTrue(closed.recentCaptures, "Today still rebuilds (held until the window shows)")
-        assertFalse(SettingsClosedWindowRefreshPolicy.reloadsDashboard(isWindowOpen: false),
-                    "Home and Dictations reload when the window opens instead")
+        assertFalse(closed.dashboard, "activation doesn't reload Home and Dictations for a closed window")
 
         let open = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: true)
         assertEqual(
             open,
-            .init(permissions: true, shortcuts: true, launchAtLogin: true, recentCaptures: true),
+            .init(permissions: true, shortcuts: true, launchAtLogin: true, recentCaptures: true, dashboard: true),
             "an open window refreshes everything on activation, as before"
         )
-        assertTrue(SettingsClosedWindowRefreshPolicy.reloadsDashboard(isWindowOpen: true), "open windows reload")
     }
 
     runSuite("Closed window - rebuilds are held, and the newest one shows on reopen") {
