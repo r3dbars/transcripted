@@ -310,7 +310,28 @@ protocol NotchIslandCallPromptPresenting: AnyObject {
 
 // MARK: - The rules
 
+/// How a new meeting snapshot differs from the one on screen.
+enum NotchIslandMeetingUpdate: Equatable {
+    case unchanged
+    /// Only the elapsed time moved. The layout never reads it (the timer
+    /// text comes from the live values), so no rebuild is needed.
+    case durationOnly
+    case full
+}
+
 enum NotchIslandPresentation {
+    /// Whether a meeting snapshot needs a full island render or only a
+    /// timer refresh.
+    static func meetingUpdate(
+        from old: NotchIslandMeetingContent?,
+        to new: NotchIslandMeetingContent?
+    ) -> NotchIslandMeetingUpdate {
+        guard old != new else { return .unchanged }
+        guard var old, let new else { return .full }
+        old.duration = new.duration
+        return old == new ? .durationOnly : .full
+    }
+
     /// The auto-opened drop-down that is due right now, if any, ignoring
     /// whether the person closed it.
     static func stickyKey(

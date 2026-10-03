@@ -42,6 +42,12 @@ public protocol SpeechToTextEngine: ObservableObject {
     func resolveLanguage(representativeSamples: [[Float]], selection: TranscriptionLanguageSelection) async throws -> TranscriptionLanguageContext
     func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String
 
+    /// Whether `resolveLanguage` reads `representativeSamples` for the model
+    /// the next job will use. Finding those windows scans every whole track,
+    /// so the pipeline passes `[]` when this is false. Defaults to true, so an
+    /// engine that never says otherwise always gets the samples.
+    var usesRepresentativeLanguageSamples: Bool { get }
+
     /// Largest packed input, in 16 kHz samples, that one call covers at a
     /// fixed cost. nil (the default) means the engine does not pack, and the
     /// pipeline makes one call per segment.
@@ -66,6 +72,8 @@ public extension SpeechToTextEngine {
         guard selection == .automatic else { throw TranscriptionLanguageError.explicitLanguageUnsupported }
         return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .unsupported)
     }
+
+    var usesRepresentativeLanguageSamples: Bool { true }
 
     func transcribeSegment(samples: [Float], source: AudioSource, language: TranscriptionLanguageContext) async throws -> String {
         guard language.selection == .automatic else { throw TranscriptionLanguageError.explicitLanguageUnsupported }

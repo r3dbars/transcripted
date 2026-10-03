@@ -28,6 +28,17 @@ extension Transcription {
         return durations.max() ?? 0
     }
 
+    /// Loads one track as 16 kHz mono, keeping a load failure as a value so
+    /// the caller can resample both tracks at once and still handle each
+    /// failure on its own. nil when there is no track.
+    nonisolated static func loadResampledTrack(url: URL?) -> Result<[Float], Error>? {
+        guard let url else { return nil }
+        // The caller times both loads together; don't record each one too.
+        return MeetingPipelineTimings.$current.withValue(nil) {
+            Result { try AudioResampler.loadAndResample(url: url, targetRate: 16000) }
+        }
+    }
+
     nonisolated static func audioDuration(at url: URL) throws -> TimeInterval {
         let file = try AVAudioFile(forReading: url)
         return Double(file.length) / file.processingFormat.sampleRate
@@ -207,17 +218,28 @@ extension Transcription {
     /// - Parameters:
     ///   - samples: 16kHz mono Float32 audio samples
     ///   - sampleRate: Sample rate (16000)
+    ///   - analysis: `AudioSignalRecovery.analyze` of these exact samples, when
+    ///     the caller already has it. It's only a shortcut: one that doesn't
+    ///     match the buffer's length and rate is ignored and recomputed.
     /// - Returns: Array of speech segments with start/end times
     nonisolated static func detectSpeechSegments(
         samples: [Float],
-        sampleRate: Double
+        sampleRate: Double,
+        analysis precomputedAnalysis: AudioSignalAnalysis? = nil
     ) -> [SpeechSegment] {
         guard !samples.isEmpty,
               AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return [] }
 
         let frameSamples = Int(sampleRate * 0.025)  // 25ms frames (400 samples at 16kHz)
         let hopSamples = Int(sampleRate * 0.010)    // 10ms hop
-        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+        let analysis: AudioSignalAnalysis
+        if let precomputedAnalysis,
+           precomputedAnalysis.sampleCount == samples.count,
+           precomputedAnalysis.sampleRate == sampleRate {
+            analysis = precomputedAnalysis
+        } else {
+            analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+        }
         let silenceThreshold = AudioSignalRecovery.speechDetectionThreshold(for: analysis)
         let minSilenceDuration: Double = 0.4        // 400ms gap to split
         let minSegmentDuration: Double = 0.5        // Don't create segments shorter than this

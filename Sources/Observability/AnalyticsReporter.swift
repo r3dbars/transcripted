@@ -548,7 +548,7 @@ final class AnalyticsReporter {
 
         if usageStore != nil {
             let timer = DispatchSource.makeTimerSource(queue: deliveryQueue)
-            timer.schedule(deadline: .now() + 60, repeating: 60)
+            timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(10)) // leeway lets macOS coalesce the wakeup
             timer.setEventHandler { [weak self] in
                 self?.enqueueUsageDigests(includeCurrentDay: false)
                 self?.flushPendingCapturesLocked()

@@ -49,6 +49,41 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(engine.contexts.last?.languageCode, "de")
     }
 
+    /// An engine that doesn't detect language from audio (Parakeet, Apple Speech)
+    /// gets no sample windows, and the meeting still resolves language once and
+    /// transcribes both tracks with that context.
+    @MainActor
+    func testEngineThatIgnoresLanguageSamplesIsHandedNone() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let mic = root.appendingPathComponent("mic.wav")
+        let system = root.appendingPathComponent("system.wav")
+        let samples = alternatingSamples(amplitude: 0.08, count: 480_000)
+        try writeMonoWAV(to: mic, samples: samples)
+        try writeMonoWAV(to: system, samples: samples)
+        let engine = LanguageTrackingEngine()
+        engine.usesRepresentativeLanguageSamples = false
+        engine.windows = -1
+        let transcription = Transcription(
+            speechToText: engine,
+            diarization: PipelineStubDiarizationEngine(segments: [speakerSegment(speakerId: 0, start: 0, end: 30, embedding: [1, 0], qualityScore: 0.95)]),
+            speakerStore: try temporarySpeakerDatabase(),
+            speakerClipsDirectory: root.appendingPathComponent("clips")
+        )
+        let result = try await transcription.transcribeMultichannel(micURL: mic, systemURL: system)
+        XCTAssertEqual(engine.resolutions, 1)
+        XCTAssertEqual(engine.windows, 0)
+        XCTAssertTrue(engine.sources.contains(.microphone))
+        XCTAssertTrue(engine.sources.contains(.system))
+        XCTAssertTrue(engine.contexts.allSatisfy { $0 == result.languageContext })
+
+        engine.windows = -1
+        _ = try await transcription.transcribeMicrophoneOnly(micURL: mic)
+        XCTAssertEqual(engine.resolutions, 2)
+        XCTAssertEqual(engine.windows, 0)
+    }
+
     @MainActor
     func testLegacySpeechEngineRejectsExplicitLanguageRatherThanIgnoringIt() async throws {
         let engine = PipelineStubSpeechToTextEngine(transcript: "legacy")
@@ -1112,6 +1147,7 @@ private final class PipelineStubSpeechToTextEngine: SpeechToTextEngine {
 private final class LanguageTrackingEngine: SpeechToTextEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
     var isReady = true
+    var usesRepresentativeLanguageSamples = true
     var resolutions = 0
     var windows = 0
     var contexts: [TranscriptionLanguageContext] = []

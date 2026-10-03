@@ -87,9 +87,12 @@ struct HomeMeetingPreview: Identifiable {
     let readError: String?
     let feedbackTarget: HomeFeedbackTarget
 
+    /// Pass `content` when it was already parsed off main (see
+    /// `readMeetingMarkdown`); otherwise it's parsed here from `markdown`.
     init(
         item: RecentMeetingItem,
         markdown: String,
+        content: HomeMeetingPreviewContent? = nil,
         readError: String? = nil
     ) {
         id = item.id
@@ -98,7 +101,7 @@ struct HomeMeetingPreview: Identifiable {
         transcriptURL = item.transcriptURL
         audio = item.audio
         self.markdown = markdown
-        content = HomeMeetingPreviewContent.make(from: markdown)
+        self.content = content ?? HomeMeetingPreviewContent.make(from: markdown)
         self.readError = readError
         feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
@@ -146,7 +149,11 @@ struct HomeMeetingPreview: Identifiable {
     }
 
     /// Returns a copy with freshly-read transcript text after an inline speaker edit.
-    func updatingMarkdown(_ markdown: String, readError: String? = nil) -> HomeMeetingPreview {
+    func updatingMarkdown(
+        _ markdown: String,
+        content: HomeMeetingPreviewContent? = nil,
+        readError: String? = nil
+    ) -> HomeMeetingPreview {
         HomeMeetingPreview(
             id: id,
             title: title,
@@ -154,7 +161,7 @@ struct HomeMeetingPreview: Identifiable {
             transcriptURL: transcriptURL,
             audio: audio,
             markdown: markdown,
-            content: HomeMeetingPreviewContent.make(from: markdown),
+            content: content ?? HomeMeetingPreviewContent.make(from: markdown),
             readError: readError,
             feedbackTarget: feedbackTarget
         )
@@ -162,7 +169,9 @@ struct HomeMeetingPreview: Identifiable {
 }
 
 enum HomeMeetingMarkdownReadResult {
-    case success(String)
+    /// The preview content is parsed on the same background read, so the
+    /// main actor only assigns it.
+    case success(String, HomeMeetingPreviewContent)
     case failure(String)
 }
 

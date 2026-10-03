@@ -263,6 +263,9 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
 
     /// One model call: exactly one window's samples in, the raw output out.
     private let predict: @Sendable ([Float]) -> [Float]?
+    /// Multifunction model: loads the window-length function again after an idle
+    /// release. nil for a single-function model, which is never released.
+    private let prewarmWindowFunction: (@Sendable () -> Void)?
 
     /// Loads `configuration.modelURL` and checks it against the configuration.
     public convenience init(configuration: CoreMLSpeakerEmbedderConfiguration) throws {
@@ -291,7 +294,8 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
             try self.init(
                 identifier: configuration.identifier, dimension: configuration.dimension,
                 thresholds: configuration.thresholds, plan: plan, functionsByLength: functions,
-                predict: { router.predict($0) })
+                predict: { router.predict($0) },
+                prewarm: { [windowSamples = plan.windowSamples] in _ = try? router.preload(length: windowSamples) })
             AppLogger.speakers.info("Core ML speaker embedder loaded", [
                 "embedder": identifier, "functions": "\(functions.count)",
                 "dim": "\(dimension)", "minSamples": "\(plan.minSamples)", "maxSamples": "\(plan.maxSamples)",
@@ -347,7 +351,8 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         thresholds: SpeakerEmbeddingThresholds,
         plan: CoreMLSpeakerEmbeddingPlan,
         functionsByLength: [Int: String]? = nil,
-        predict: @escaping @Sendable ([Float]) -> [Float]?
+        predict: @escaping @Sendable ([Float]) -> [Float]?,
+        prewarm: (@Sendable () -> Void)? = nil
     ) throws {
         guard Self.isValidIdentifier(identifier) else {
             throw CoreMLSpeakerEmbedderError("embedder id must be letters, digits, '.', '_' or '-'")
@@ -361,6 +366,14 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         self.plan = plan
         self.functionsByLength = functionsByLength
         self.predict = predict
+        self.prewarmWindowFunction = prewarm
+    }
+
+    /// Reloads the function most calls use if an idle release dropped it, so the
+    /// next meeting's first embed doesn't wait on it. Blocks while it loads; call
+    /// it off the main thread. It counts as a use for the idle timer.
+    public func prewarm() {
+        prewarmWindowFunction?()
     }
 
     public func embed(samples: [Float], sampleRate: Int) -> [Float]? {
@@ -677,104 +690,4 @@ enum CoreMLVoiceprintFunctions {
 private final class CoreMLCallbackBox<T>: @unchecked Sendable {
     let lock = NSLock()
     var value: T?
-}
-
-/// Sends each model call to the function built for its length. A function loads on
-/// its first call and is kept; one that fails to load fails its calls from then on
-/// without being loaded again.
-final class CoreMLVoiceprintFunctionRouter: @unchecked Sendable {
-    typealias Predictor = @Sendable ([Float]) -> [Float]?
-
-    /// The lengths that have a function, ascending.
-    let lengths: [Int]
-
-    private let functionsByLength: [Int: String]
-    private let load: (_ functionName: String) throws -> Predictor
-    private let idleReleaseSeconds: TimeInterval?
-    private let lock = NSLock()
-    private var loaded: [Int: Result<Predictor, Error>] = [:]
-    /// Bumped by every call; an idle release only fires if no call came since.
-    private var callGeneration = 0
-    private static let releaseQueue = DispatchQueue(label: "com.transcripted.voiceprint.idle-release", qos: .utility)
-
-    init(
-        functionsByLength: [Int: String],
-        idleReleaseSeconds: TimeInterval? = nil,
-        load: @escaping (_ functionName: String) throws -> Predictor
-    ) {
-        self.functionsByLength = functionsByLength
-        self.lengths = functionsByLength.keys.sorted()
-        self.idleReleaseSeconds = idleReleaseSeconds
-        self.load = load
-    }
-
-    /// How many functions are loaded (or failed to load) right now.
-    var loadedCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return loaded.count
-    }
-
-    /// Drops every loaded function; the next call for a length loads it again. A
-    /// call already running keeps its model alive until it returns.
-    func releaseLoadedFunctions() {
-        lock.lock()
-        let count = loaded.count
-        loaded.removeAll()
-        lock.unlock()
-        if count > 0 {
-            AppLogger.speakers.info("Core ML speaker embedder released idle model functions", ["functions": "\(count)"])
-        }
-    }
-
-    /// After a call, schedule a release that fires only if no other call follows
-    /// within `idleReleaseSeconds`.
-    private func scheduleIdleRelease() {
-        guard let seconds = idleReleaseSeconds else { return }
-        lock.lock()
-        callGeneration &+= 1
-        let generation = callGeneration
-        lock.unlock()
-        Self.releaseQueue.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let idle = self.callGeneration == generation
-            self.lock.unlock()
-            if idle { self.releaseLoadedFunctions() }
-        }
-    }
-
-    /// Loads the function for `length` now; throws if there is none or it fails.
-    func preload(length: Int) throws {
-        _ = try predictor(forLength: length).get()
-        scheduleIdleRelease()
-    }
-
-    /// Runs `window` on the function for its length; nil if there is none or it
-    /// failed to load.
-    func predict(_ window: [Float]) -> [Float]? {
-        guard case .success(let run) = predictor(forLength: window.count) else { return nil }
-        defer { scheduleIdleRelease() }
-        return run(window)
-    }
-
-    private func predictor(forLength length: Int) -> Result<Predictor, Error> {
-        guard let name = functionsByLength[length] else {
-            AppLogger.speakers.error("Core ML speaker embedder: no function for this length", [
-                "samples": "\(length)",
-            ])
-            return .failure(CoreMLSpeakerEmbedderError("no model function takes \(length) samples"))
-        }
-        lock.lock()
-        defer { lock.unlock() }
-        if let cached = loaded[length] { return cached }
-        let result = Result { try load(name) }
-        if case .failure(let error) = result {
-            AppLogger.speakers.error("Core ML speaker embedder: model function failed to load", [
-                "function": name, "error": (error as? CoreMLSpeakerEmbedderError)?.message ?? "load failed",
-            ])
-        }
-        loaded[length] = result
-        return result
-    }
 }

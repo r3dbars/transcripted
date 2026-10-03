@@ -100,8 +100,8 @@ final class MeetingSessionController: ObservableObject {
     }
 
     // Pass-throughs for UI convenience (updated via Combine subscriptions below).
-    @Published private(set) var audioLevel: Float = 0          // mic-only level
-    @Published private(set) var systemLevel: Float = 0         // system audio level
+    /// Live meter levels, kept off this controller's `objectWillChange`.
+    let audioLevels = MeetingAudioLevels()
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var displayStatus: DisplayStatus = .idle
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
@@ -763,11 +763,11 @@ final class MeetingSessionController: ObservableObject {
 // write them only through these.
 extension MeetingSessionController {
     func mirrorMicLevel(_ level: Float) {
-        audioLevel = level
+        audioLevels.updateMic(level)
     }
 
     func mirrorSystemLevel(_ level: Float) {
-        systemLevel = level
+        audioLevels.updateSystem(level)
     }
 
     func mirrorRecordingDuration(_ duration: TimeInterval) {

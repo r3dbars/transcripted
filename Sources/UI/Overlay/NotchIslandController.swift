@@ -141,8 +141,13 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             display: true
         )
         panel.orderFrontRegardless()
+        // Compile the show-time blur at alpha 0 too, then drop it so the
+        // island rests with no filter.
+        islandView.prewarmBlur()
         panel.display()
+        CATransaction.flush() // commit the filter so Core Image actually builds it
         panel.orderOut(nil)
+        islandView.resetBlur()
         panel.alphaValue = 1
         self.screen = nil
     }
@@ -198,11 +203,28 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         var content = content
         let showsTranscript = Self.showsLiveTranscript(content)
         content?.showsLiveTranscript = showsTranscript
-        guard content != meeting else { return }
+        switch NotchIslandPresentation.meetingUpdate(from: meeting, to: content) {
+        case .unchanged:
+            return
+        case .durationOnly:
+            // The once-a-second clock tick: the layout never reads the
+            // duration, so refresh the timer text instead of rebuilding.
+            // refreshLive still renders if a wing needs room for a digit.
+            meeting = content
+            live.meetingElapsed = content?.duration ?? 0
+            // A full render re-reads this each time; keep the Settings
+            // switch applying within a tick on this path too.
+            if isShown { panel?.applyScreenSharingPreference() }
+            refreshLive()
+            return
+        case .full:
+            break
+        }
         // The view must exist before a drop-down asks for it, or the first
         // hover would draw the level lanes instead.
         if showsTranscript { ensureLiveTranscriptView() }
         meeting = content
+        if !showsTranscript { releaseLiveTranscriptViewIfRecordingEnded() }
         live.meetingElapsed = content?.duration ?? 0
         if case .transcribing(let progress, _)? = content?.phase {
             live.transcriptionProgress = progress ?? 0
@@ -483,7 +505,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         }
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            Task { @MainActor [weak self] in self?.pointerMoved() }
+            // Global monitors deliver on the main thread, like the local one.
+            MainActor.assumeIsolated { self?.pointerMoved() }
         }) {
             pointerMonitors.append(global)
         }

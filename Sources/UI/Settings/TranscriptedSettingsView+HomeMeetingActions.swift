@@ -352,8 +352,8 @@ extension TranscriptedSettingsView {
             guard !Task.isCancelled,
                   homeExpandedMeetingPreview?.id == preview.id else { return }
             switch readResult {
-            case .success(let markdown):
-                homeExpandedMeetingPreview = preview.updatingMarkdown(markdown)
+            case .success(let markdown, let content):
+                homeExpandedMeetingPreview = preview.updatingMarkdown(markdown, content: content)
             case .failure(let message):
                 homeExpandedMeetingPreview = preview.updatingMarkdown("", readError: message)
             }
