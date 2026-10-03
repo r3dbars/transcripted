@@ -39,21 +39,7 @@ extension TranscriptedSettingsView {
                 $dictationMuffleEnabled,
                 persist: { DictationMufflePreferences.setEnabled($0) },
                 track: { trackSettingsToggle("dictation_muffle", enabled: $0, page: .general) },
-                sideEffect: { enabled in
-                    DictationAudioMuffler.shared.settingChanged(enabled: enabled)
-                    guard enabled else { return }
-                    // Ask for System Audio Recording here, where the user just
-                    // chose the feature, so dictation never has to prompt. The
-                    // status read is a round trip to the privacy service, so it
-                    // stays off the click.
-                    Task { @MainActor in
-                        let status = await Task.detached(priority: .userInitiated) {
-                            TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
-                        }.value
-                        guard status == .notDetermined else { return }
-                        _ = await TranscriptedPermissionAccess.requestSystemAudioCaptureAccess()
-                    }
-                }
+                sideEffect: { Self.dictationMuffleSettingChanged($0) }
             ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,

@@ -1,57 +1,25 @@
 // DictationAudioMuffler.swift
 // Makes other apps' audio sound muffled while the dictation mic is open.
 //
-// How: a private process tap on the default output device (every process
-// but ours). It starts unmuted and switches to `.mutedWhenTapped` once our
-// copy is audible (see scheduleHandoff), so the apps go quiet only while we
-// are reading the tap. Apps playing to other devices are not tapped at all.
-// The tap and the current output device share one private aggregate; its
-// IOProc reads the tap, runs DictationMuffleFilter, and writes the result
-// straight to the output. One device clock, no ring buffer, a single IO cycle
-// of added latency.
+// The coordinator: it runs DictationMuffleMachine (the timeline) on one
+// serial queue, performs its effects on a DictationMuffleRoute (the Core
+// Audio objects), and is the only part that logs. See those two files for the
+// design; DictationMuffleFilter is the sound.
 //
-// Failure is always "audio sounds normal". If the IOProc stops, the process
-// quits or crashes, or the output changes, macOS unmutes the apps because
-// nothing is reading the tap any more.
+// Order of work when the mic opens, cheapest first so a take that won't
+// muffle costs almost nothing: the policy gate (plain values), the saved
+// System Audio Recording decision (a UserDefaults read; the privacy-service
+// round trip only when the saved decision isn't a grant), the output route
+// checks, a
+// one-property "is anything playing" check, then the process scan and the
+// route build. All of it runs after the mic is already open, on this queue,
+// never on the main thread.
 //
-// Bluetooth: an output device that has an input stream is refused by
-// DictationMuffleOutputRoute before anything is built, because starting the
-// aggregate would start that input stream and flip a headset into call mode.
-// On macOS 26 AirPods expose an output-only device and a separate mic, so the
-// output is allowed and the mic is never started. As a backstop, if the
-// output's sample rate changes mid-take (what call mode looks like from
-// here), muffle stops at once. The dictation mic itself is not involved here
-// at all, so a Bluetooth headset as the default *input* is unaffected: no
-// AVAudioEngine, no inputNode, no input device is opened by this file.
-//
-// Threading: every HAL call happens on `queue`; all mutable state is confined
-// to it. The IO thread only touches the render context (an atomic flag and a
-// preallocated filter).
+// Bluetooth: see DictationMuffleRoute. No input device is ever opened here.
 
 import CoreAudio
 import Foundation
-import Synchronization
 import TranscriptedCore
-
-private final class DictationMuffleRenderContext {
-    let muffled = Atomic<Bool>(true)
-    /// False until the start handoff: our copy stays silent while the
-    /// original still plays unmuted.
-    let audible = Atomic<Bool>(false)
-    /// Set by the IO thread once the tap delivers real (nonzero) audio.
-    let tapFlowing = Atomic<Bool>(false)
-    let filter: UnsafeMutablePointer<DictationMuffleFilter>
-
-    init(sampleRate: Double) {
-        filter = .allocate(capacity: 1)
-        filter.initialize(to: DictationMuffleFilter(sampleRate: sampleRate, startSilent: true))
-    }
-
-    deinit {
-        filter.deinitialize(count: 1)
-        filter.deallocate()
-    }
-}
 
 final class DictationAudioMuffler: @unchecked Sendable {
     static let shared = DictationAudioMuffler()
@@ -59,510 +27,211 @@ final class DictationAudioMuffler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.transcripted.dictation-muffle", qos: .userInitiated)
 
     // Queue-confined state.
-    private var tap = AudioObjectID(kAudioObjectUnknown)
-    private var device = AudioObjectID(kAudioObjectUnknown)
-    private var proc: AudioDeviceIOProcID?
-    private var context: Unmanaged<DictationMuffleRenderContext>?
-    private var outputListener: AudioObjectPropertyListenerBlock?
-    private var rateListener: AudioObjectPropertyListenerBlock?
-    private var rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
-    private var releaseGeneration = 0
-    /// When tccd last said System Audio Recording is allowed. The preflight
-    /// is an XPC round trip per call, so a grant is trusted for a while
-    /// instead of re-asked every take. A revoked grant is still safe: the tap
-    /// then delivers no audio, and the handoff tears down instead of muting.
-    private var systemAudioAuthorizedAt: DispatchTime?
-    private static let authorizationTrustNanoseconds: UInt64 = 10 * 60 * 1_000_000_000
-    private var buildGeneration = 0
-    private var tapDescription: CATapDescription?
-    private var originalsMuted = false
+    private var machine = DictationMuffleMachine()
+    private var route: DictationMuffleRoute?
+    private var routeGeneration = 0
+    private var pendingPlan: DictationMuffleRoute.Plan?
+    private var pendingInputs: [DictationMuffleInput] = []
+    private var draining = false
+    private var wakeGeneration = 0
+    private var take = TakeTiming()
+    /// The cut in the current effect batch failed; its "engaged" report is
+    /// dropped (the route-lost report follows).
+    private var cutFailed = false
 
-    private static let nominalSampleRateAddress = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyNominalSampleRate,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-    )
-
-    private static let defaultOutputAddress = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-    )
-
-    /// Starts muffling, or cancels a fade-out still in progress. Returns
-    /// immediately; never blocks the mic start. The System Audio Recording
-    /// preflight is an XPC round trip to tccd, so it runs here on `queue`
-    /// rather than on main while the mic is opening.
-    func engage(
-        enabled: Bool,
-        meetingRecording: Bool,
-        dictatingFromSharedMeetingMic: Bool,
-        voiceProcessingRequested: Bool
-    ) {
-        let requestedAt = DispatchTime.now()
-        queue.async {
-            let decision = DictationMufflePolicy.decision(
-                enabled: enabled,
-                systemAudioAuthorized: enabled && self.systemAudioAuthorized(),
-                meetingRecording: meetingRecording,
-                dictatingFromSharedMeetingMic: dictatingFromSharedMeetingMic,
-                voiceProcessingRequested: voiceProcessingRequested,
-                automatedLaunch: AutomatedLaunchEnvironment.isActive()
-            )
-            guard decision == .muffle else { return }
-            self.engageOnQueue(requestedAt: requestedAt)
-        }
+    private struct TakeTiming {
+        var requestedAt: UInt64 = 0
+        var gatedAt: UInt64 = 0
+        var builtAt: UInt64 = 0
     }
 
-    /// Fades back to normal, then tears the tap down.
-    func release() {
-        queue.async { self.releaseOnQueue() }
+    /// The dictation mic is open. Returns at once; never blocks the caller.
+    func micOpened(_ context: DictationMuffleContext) {
+        let requestedAt = Self.now()
+        queue.async { self.handleMicOpened(context, requestedAt: requestedAt) }
+    }
+
+    /// The user is done talking (stop admitted) or the mic closed.
+    func micClosed() {
+        queue.async { self.enqueue(.micClosed) }
+    }
+
+    /// The Settings toggle changed. Turning it off mid-take lets the music
+    /// back in right away.
+    func settingChanged(enabled: Bool) {
+        guard !enabled else { return }
+        micClosed()
     }
 
     // MARK: - Queue
 
-    private func systemAudioAuthorized() -> Bool {
-        let now = DispatchTime.now()
-        if let systemAudioAuthorizedAt,
-           now.uptimeNanoseconds &- systemAudioAuthorizedAt.uptimeNanoseconds < Self.authorizationTrustNanoseconds {
-            return true
-        }
-        let authorized = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
-        systemAudioAuthorizedAt = authorized ? now : nil
-        return authorized
-    }
-
-    private func engageOnQueue(requestedAt: DispatchTime) {
-        releaseGeneration += 1
-        if let context, device != kAudioObjectUnknown {
-            context.takeUnretainedValue().muffled.store(true, ordering: .relaxed)
-            if !originalsMuted {
-                // Re-engaged before the first handoff finished: run it again.
-                scheduleHandoff(build: buildGeneration, startedAt: DispatchTime.now(), timing: nil)
-            }
+    private func handleMicOpened(_ context: DictationMuffleContext, requestedAt: UInt64) {
+        guard machine.phase == .idle else {
+            // Mid-release or mid-hand-back: the machine resumes without
+            // rebuilding anything.
+            enqueue(.micOpened)
             return
         }
-        guard Self.anotherProcessIsPlayingAudio(excluding: getpid()) else { return }
-        do {
-            let buildStart = DispatchTime.now()
-            try build()
-            let started = DispatchTime.now()
-            scheduleHandoff(
-                build: buildGeneration,
-                startedAt: started,
-                timing: EngageTiming(
-                    queuedMs: Self.milliseconds(from: requestedAt, to: buildStart),
-                    buildMs: Self.milliseconds(from: buildStart, to: started)
-                )
-            )
-        } catch let failure as BuildFailure {
-            teardown()
-            AppLogger.transcription.info("DICTATION | muffle skipped", ["reason": failure.reason])
-        } catch {
-            teardown()
-        }
-    }
-
-    private func releaseOnQueue() {
-        // Both the mic closing and the session ending call release; only the
-        // first one schedules anything.
-        guard let context, device != kAudioObjectUnknown,
-              context.takeUnretainedValue().muffled.exchange(false, ordering: .relaxed) else { return }
-        releaseGeneration += 1
-        let generation = releaseGeneration
-        if !originalsMuted {
-            // Released before the handoff finished: the originals never went
-            // quiet, so just fade our copy out from on top of them.
-            context.takeUnretainedValue().audible.store(false, ordering: .relaxed)
-            queue.asyncAfter(deadline: .now() + DictationMuffleFilter.handoffFadeSeconds + 0.03) { [weak self] in
-                guard let self, self.releaseGeneration == generation else { return }
-                self.teardown()
-            }
+        if let reason = DictationMufflePolicy.gate(context) {
+            // Feature off is the normal case for most people; don't log it.
+            if reason != .disabled { logSkip(reason.rawValue) }
             return
         }
-        // Let the filter fade back to full range before the apps unmute, so the
-        // handoff is a crossfade and not a jump.
-        queue.asyncAfter(deadline: .now() + DictationMuffleFilter.rampSeconds + 0.08) { [weak self] in
-            guard let self, self.releaseGeneration == generation else { return }
-            self.teardown()
+        guard isSystemAudioAuthorized() else {
+            logSkip(DictationMuffleSkipReason.permissionMissing.rawValue)
+            return
         }
-    }
-
-    private struct BuildFailure: Error {
-        let reason: String
-    }
-
-    /// The start handoff that avoids a dropout. `.mutedWhenTapped` would
-    /// silence the originals the instant the IOProc starts, while our copy
-    /// reaches the speaker a few milliseconds later through the tap, and that
-    /// gap is an audible skip. So the tap starts unmuted, we wait for it to
-    /// deliver real audio, fade our copy in over the still-playing original,
-    /// and only then switch the tap to muted. The overlap lasts about one
-    /// fade and is not audible; a gap is.
-    /// Local log only: where engage time goes (policy + TCC + scan before the
-    /// build, then tap/aggregate/start, then the wait for tap audio).
-    private struct EngageTiming {
-        let queuedMs: Int
-        let buildMs: Int
-    }
-
-    private static func milliseconds(from start: DispatchTime, to end: DispatchTime) -> Int {
-        Int((end.uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000)
-    }
-
-    private func scheduleHandoff(build: Int, startedAt: DispatchTime, timing: EngageTiming?) {
-        queue.asyncAfter(deadline: .now() + 0.004) { [weak self] in
-            guard let self, self.buildGeneration == build, let context = self.context else { return }
-            let renderContext = context.takeUnretainedValue()
-            guard renderContext.muffled.load(ordering: .relaxed) else { return }
-            let waitedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds
-            guard renderContext.tapFlowing.load(ordering: .relaxed) else {
-                if waitedNanoseconds < 400_000_000 {
-                    self.scheduleHandoff(build: build, startedAt: startedAt, timing: timing)
-                    return
-                }
-                // No audio from the tap: a quiet passage, or the grant was
-                // revoked. Muting now could silence the apps, so stand down.
-                self.systemAudioAuthorizedAt = nil
-                self.releaseGeneration += 1
-                self.teardown()
-                AppLogger.transcription.info("DICTATION | muffle skipped", [
-                    "reason": "tap_silent",
-                    "queued_ms": timing.map { String($0.queuedMs) } ?? "-",
-                    "build_ms": timing.map { String($0.buildMs) } ?? "-"
-                ])
-                return
-            }
-            renderContext.audible.store(true, ordering: .relaxed)
-            self.queue.asyncAfter(deadline: .now() + DictationMuffleFilter.handoffFadeSeconds + 0.012) { [weak self] in
-                guard let self, self.buildGeneration == build, let context = self.context else { return }
-                guard context.takeUnretainedValue().muffled.load(ordering: .relaxed) else { return }
-                guard self.muteOriginals() else {
-                    self.releaseGeneration += 1
-                    self.teardown()
-                    AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": "mute_failed"])
-                    return
-                }
-                AppLogger.transcription.info("DICTATION | muffling other audio", [
-                    "queued_ms": timing.map { String($0.queuedMs) } ?? "-",
-                    "build_ms": timing.map { String($0.buildMs) } ?? "-",
-                    "handoff_ms": String(waitedNanoseconds / 1_000_000)
-                ])
-            }
+        guard let output = DictationMuffleHAL.defaultOutputDevice() else {
+            logSkip("no_output")
+            return
         }
-    }
-
-    private func muteOriginals() -> Bool {
-        guard let tapDescription, tap != kAudioObjectUnknown else { return false }
-        tapDescription.muteBehavior = .mutedWhenTapped
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyDescription,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var reference = tapDescription
-        let status = withUnsafeMutablePointer(to: &reference) { pointer in
-            AudioObjectSetPropertyData(tap, &address, 0, nil, UInt32(MemoryLayout<CATapDescription>.size), pointer)
-        }
-        originalsMuted = status == noErr
-        return originalsMuted
-    }
-
-    private func build() throws {
-        buildGeneration += 1
-        // Listen before reading the default output, so a switch that lands
-        // while this builds still tears the build down once it finishes.
-        installOutputListener()
-        let output = try Self.defaultOutputDevice()
-        let transport = Self.transport(of: output)
-        let inputStreams = Self.streamCount(of: output, scope: kAudioObjectPropertyScopeInput)
-        let outputChannels = Self.channelCount(of: output, scope: kAudioObjectPropertyScopeOutput)
+        let transport = DictationMuffleHAL.transport(of: output)
         if let ineligible = DictationMuffleOutputRoute.ineligibility(
             transport: transport,
-            inputStreamCount: inputStreams,
-            outputChannelCount: outputChannels
+            inputStreamCount: DictationMuffleHAL.streamCount(of: output, scope: kAudioObjectPropertyScopeInput),
+            outputChannelCount: DictationMuffleHAL.channelCount(of: output, scope: kAudioObjectPropertyScopeOutput)
         ) {
-            throw BuildFailure(reason: ineligible.rawValue)
+            logSkip(ineligible.rawValue)
+            return
         }
-        guard let outputUID = Self.stringProperty(kAudioDevicePropertyDeviceUID, of: output) else {
-            throw BuildFailure(reason: "output_uid")
+        guard let outputUID = DictationMuffleHAL.string(output, kAudioDevicePropertyDeviceUID),
+              let own = DictationMuffleHAL.ownProcessObject() else {
+            logSkip(DictationMuffleOutputIneligibility.unreadable.rawValue)
+            return
         }
-        installRateListener(on: output)
-
-        var pid = getpid()
-        var process = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
+        let processes = DictationMuffleHAL.processesPlaying(to: output, excluding: own)
+        guard !processes.isEmpty else {
+            AppLogger.transcription.debug("DICTATION | muffle skipped", ["reason": DictationMuffleSkipReason.nothingPlaying.rawValue])
+            return
+        }
+        pendingPlan = DictationMuffleRoute.Plan(
+            output: output,
+            outputUID: outputUID,
+            bluetooth: transport == .bluetooth,
+            processes: processes
         )
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address,
-            UInt32(MemoryLayout<pid_t>.size), &pid, &size, &process
-        ) == noErr, process != kAudioObjectUnknown else {
-            throw BuildFailure(reason: "own_process")
-        }
+        take = TakeTiming(requestedAt: requestedAt, gatedAt: Self.now(), builtAt: 0)
+        enqueue(.micOpened)
+    }
 
-        // Scoped to the default output's first stream, not global: an app
-        // pinned to another device (a call on a USB headset, a DAW on an
-        // interface) must keep playing where it was, untouched.
-        let description = CATapDescription(excludingProcesses: [process], deviceUID: outputUID, stream: 0)
-        description.uuid = UUID()
-        description.isPrivate = true
-        // Unmuted at first; scheduleHandoff switches it to muted once our
-        // copy is playing.
-        description.muteBehavior = .unmuted
-        guard AudioHardwareCreateProcessTap(description, &tap) == noErr, tap != kAudioObjectUnknown else {
-            tap = AudioObjectID(kAudioObjectUnknown)
-            throw BuildFailure(reason: "tap")
-        }
-        tapDescription = description
-
-        let properties: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Transcripted Dictation Muffle",
-            kAudioAggregateDeviceUIDKey: UUID().uuidString,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
-            kAudioAggregateDeviceTapAutoStartKey: false,
-            kAudioAggregateDeviceTapListKey: [[
-                kAudioSubTapUIDKey: description.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: true
-            ]]
-        ]
-        guard AudioHardwareCreateAggregateDevice(properties as CFDictionary, &device) == noErr,
-              device != kAudioObjectUnknown else {
-            device = AudioObjectID(kAudioObjectUnknown)
-            throw BuildFailure(reason: "aggregate")
-        }
-
-        let sampleRate = Self.nominalSampleRate(of: device)
-        let context = Unmanaged.passRetained(DictationMuffleRenderContext(sampleRate: sampleRate))
-        let status = AudioDeviceCreateIOProcID(device, { _, _, input, _, output, _, clientData in
-            guard let clientData else { return noErr }
-            let context = Unmanaged<DictationMuffleRenderContext>.fromOpaque(clientData).takeUnretainedValue()
-            let target: Float = context.muffled.load(ordering: .relaxed) ? 1 : 0
-            let gain: Float = context.audible.load(ordering: .relaxed) ? 1 : 0
-            let sawSignal = context.filter.pointee.render(input: input, output: output, target: target, gainTarget: gain)
-            if sawSignal, !context.tapFlowing.load(ordering: .relaxed) {
-                context.tapFlowing.store(true, ordering: .relaxed)
+    /// Feeds the machine one input at a time, in order, even when an effect
+    /// produces the next input (opening the route reports routeOpened).
+    private func enqueue(_ input: DictationMuffleInput) {
+        pendingInputs.append(input)
+        guard !draining else { return }
+        draining = true
+        while !pendingInputs.isEmpty {
+            let next = pendingInputs.removeFirst()
+            for effect in machine.handle(next, now: Self.now()) {
+                perform(effect)
             }
-            return noErr
-        }, context.toOpaque(), &proc)
-        guard status == noErr, proc != nil else {
-            context.release()
-            proc = nil
-            throw BuildFailure(reason: "ioproc")
         }
-        self.context = context
+        draining = false
+    }
 
-        guard AudioDeviceStart(device, proc) == noErr else {
-            throw BuildFailure(reason: "start")
+    private func perform(_ effect: DictationMuffleEffect) {
+        switch effect {
+        case .openRoute:
+            guard let plan = pendingPlan else {
+                enqueue(.routeFailed(reason: "no_plan"))
+                return
+            }
+            pendingPlan = nil
+            routeGeneration &+= 1
+            let generation = routeGeneration
+            do {
+                route = try DictationMuffleRoute.open(plan, queue: queue) { [weak self] reason in
+                    // A late event from a route that already closed must not
+                    // end the next one.
+                    guard let self, generation == self.routeGeneration, self.route != nil else { return }
+                    self.enqueue(.routeLost(reason: reason))
+                }
+                take.builtAt = Self.now()
+                enqueue(.routeOpened(bluetooth: plan.bluetooth))
+            } catch let failure as DictationMuffleRoute.OpenFailure {
+                enqueue(.routeFailed(reason: failure.step))
+            } catch {
+                enqueue(.routeFailed(reason: "open"))
+            }
+        case .cut:
+            cutFailed = route?.cut() != true
+            if cutFailed {
+                enqueue(.routeLost(reason: "mute_failed"))
+            }
+        case .setMuffled(let muffled):
+            route?.setMuffled(muffled)
+        case .handBack:
+            route?.handBack()
+        case .closeRoute:
+            route?.close()
+            route = nil
+        case .wake(let at):
+            wakeGeneration &+= 1
+            let generation = wakeGeneration
+            queue.asyncAfter(deadline: DispatchTime(uptimeNanoseconds: at)) { [weak self] in
+                guard let self, generation == self.wakeGeneration else { return }
+                self.enqueue(.tick(self.route?.signals() ?? .none))
+            }
+        case .report(let report):
+            log(report)
         }
     }
 
-    /// Order matters: stop and detach the IOProc before freeing its context,
-    /// then the aggregate, then the tap. If HAL refuses to destroy the IOProc,
-    /// leak the context rather than free memory the IO thread may still read.
-    private func teardown() {
-        buildGeneration += 1
-        tapDescription = nil
-        originalsMuted = false
-        removeOutputListener()
-        removeRateListener()
-        if let proc, device != kAudioObjectUnknown {
-            AudioDeviceStop(device, proc)
-            let status = AudioDeviceDestroyIOProcID(device, proc)
-            if status == noErr { context?.release() }
-        } else {
-            context?.release()
-        }
-        proc = nil
-        context = nil
-        if device != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(device)
-            device = AudioObjectID(kAudioObjectUnknown)
-        }
-        if tap != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tap)
-            tap = AudioObjectID(kAudioObjectUnknown)
-        }
+    // MARK: - Permission
+
+    /// Reads the app's saved System Audio Recording decision each take (a
+    /// UserDefaults read). The app re-reads macOS's real decision when it
+    /// becomes active and when a meeting starts, so a grant removed in System
+    /// Settings shows up here before the next take. The privacy-service
+    /// round trip (which can take hundreds of ms) runs only when the saved
+    /// decision isn't a grant, so dictation never builds a tap, and never
+    /// triggers macOS's prompt, without a confirmed grant.
+    private func isSystemAudioAuthorized() -> Bool {
+        if TranscriptedPermissionAccess.systemAudioRecordingGranted() { return true }
+        return TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
     }
 
-    /// The aggregate is pinned to the output that was default at start. If the
-    /// user switches outputs mid-take, stop muffling rather than keep playing
-    /// to the old device.
-    private func installOutputListener() {
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self, self.device != kAudioObjectUnknown else { return }
-            self.releaseGeneration += 1
-            self.teardown()
-            AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": "output_changed"])
-        }
-        var address = Self.defaultOutputAddress
-        if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener) == noErr {
-            outputListener = listener
-        }
-    }
+    // MARK: - Logging (local only; numbers and fixed reasons, never names)
 
-    /// A rate change on the output mid-take means something re-clocked it:
-    /// most likely a Bluetooth headset dropping into call mode, or another app
-    /// changing the rate. Either way the filter was tuned for the old rate
-    /// and the route is no longer the one that was checked, so let the apps
-    /// play normally again.
-    private func installRateListener(on output: AudioObjectID) {
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self, self.device != kAudioObjectUnknown else { return }
-            self.releaseGeneration += 1
-            self.teardown()
-            AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": "output_rate_changed"])
-        }
-        var address = Self.nominalSampleRateAddress
-        if AudioObjectAddPropertyListenerBlock(output, &address, queue, listener) == noErr {
-            rateListener = listener
-            rateListenerDevice = output
+    private func log(_ report: DictationMuffleReport) {
+        switch report {
+        case let .engaged(soundWait, quietWait, cutInQuiet):
+            guard !cutFailed else { return }
+            // A re-cut (mic reopened during the hand back) built nothing new.
+            let rebuilt = take.builtAt >= take.gatedAt && take.gatedAt >= take.requestedAt && take.requestedAt > 0
+            AppLogger.transcription.info("DICTATION | muffling other audio", [
+                "gate_ms": rebuilt ? Self.milliseconds(take.gatedAt - take.requestedAt) : "-",
+                "build_ms": rebuilt ? Self.milliseconds(take.builtAt - take.gatedAt) : "-",
+                "first_sound_ms": Self.milliseconds(soundWait),
+                "quiet_wait_ms": Self.milliseconds(quietWait),
+                "cut_in_quiet": String(cutInQuiet),
+                "copy_delay_ms": route?.copyDelayNanos.map { Self.milliseconds($0, decimals: 1) } ?? "-",
+                "buffer_frames": String(route?.copyBufferFrames ?? 0),
+                "bluetooth": String(route?.bluetooth ?? false),
+                "apps": String(route?.processCount ?? 0),
+            ])
+            take = TakeTiming()
+        case .skipped(let reason):
+            if reason == "tap_silent" {
+                // A revoked grant delivers silence; refresh the saved
+                // decision so the next take sees it.
+                TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+            }
+            logSkip(reason)
+        case .stopped(let reason):
+            AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": reason])
         }
     }
 
-    private func removeRateListener() {
-        guard let rateListener else { return }
-        var address = Self.nominalSampleRateAddress
-        AudioObjectRemovePropertyListenerBlock(rateListenerDevice, &address, queue, rateListener)
-        self.rateListener = nil
-        rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
+    private func logSkip(_ reason: String) {
+        AppLogger.transcription.info("DICTATION | muffle skipped", ["reason": reason])
     }
 
-    private func removeOutputListener() {
-        guard let outputListener else { return }
-        var address = Self.defaultOutputAddress
-        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, outputListener)
-        self.outputListener = nil
+    private static func now() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
     }
 
-    // MARK: - HAL reads
-
-    private static func defaultOutputDevice() throws -> AudioObjectID {
-        var address = defaultOutputAddress
-        var device = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr,
-              device != kAudioObjectUnknown else {
-            throw BuildFailure(reason: "no_output")
-        }
-        return device
-    }
-
-    private static func transport(of device: AudioObjectID) -> DictationMuffleOutputTransport {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var value: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return .unknown }
-        switch value {
-        case kAudioDeviceTransportTypeBuiltIn: return .builtIn
-        case kAudioDeviceTransportTypeUSB: return .usb
-        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort: return .displayLink
-        case kAudioDeviceTransportTypeThunderbolt: return .thunderbolt
-        case kAudioDeviceTransportTypePCI: return .pci
-        case kAudioDeviceTransportTypeFireWire: return .firewire
-        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: return .bluetooth
-        case kAudioDeviceTransportTypeAirPlay: return .airPlay
-        case kAudioDeviceTransportTypeVirtual: return .virtual
-        case kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate: return .aggregate
-        default: return .unknown
-        }
-    }
-
-    private static func streamCount(of device: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreams,
-            mScope: scope,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr else { return 0 }
-        return Int(size) / MemoryLayout<AudioStreamID>.size
-    }
-
-    private static func channelCount(of device: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: scope,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
-        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
-        defer { raw.deallocate() }
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr else { return 0 }
-        let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
-        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
-    }
-
-    private static func stringProperty(_ selector: AudioObjectPropertySelector, of device: AudioObjectID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var value: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr,
-              let value else { return nil }
-        return value.takeRetainedValue() as String
-    }
-
-    private static func nominalSampleRate(of device: AudioObjectID) -> Double {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var rate: Double = 0
-        var size = UInt32(MemoryLayout<Double>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &rate) == noErr, rate > 0 else {
-            return 48_000
-        }
-        return rate
-    }
-
-    /// True when any other process is running audio output. Read-only; with
-    /// nothing playing there is nothing to muffle, so no tap is built.
-    private static func anotherProcessIsPlayingAudio(excluding ownPID: pid_t) -> Bool {
-        let system = AudioObjectID(kAudioObjectSystemObject)
-        var listAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyProcessObjectList,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &size) == noErr, size > 0 else { return false }
-        var processes = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(system, &listAddress, 0, nil, &size, &processes) == noErr else { return false }
-        for process in processes.prefix(Int(size) / MemoryLayout<AudioObjectID>.size) {
-            var running: UInt32 = 0
-            var runningSize = UInt32(MemoryLayout<UInt32>.size)
-            var runningAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioProcessPropertyIsRunningOutput,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            guard AudioObjectGetPropertyData(process, &runningAddress, 0, nil, &runningSize, &running) == noErr,
-                  running != 0 else { continue }
-            var pid: pid_t = 0
-            var pidSize = UInt32(MemoryLayout<pid_t>.size)
-            var pidAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioProcessPropertyPID,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            if AudioObjectGetPropertyData(process, &pidAddress, 0, nil, &pidSize, &pid) == noErr, pid == ownPID { continue }
-            return true
-        }
-        return false
+    private static func milliseconds(_ nanos: UInt64, decimals: Int = 0) -> String {
+        String(format: "%.\(decimals)f", Double(nanos) / 1_000_000)
     }
 }

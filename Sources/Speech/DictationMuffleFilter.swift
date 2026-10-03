@@ -10,8 +10,8 @@
 // stay clean while their cutoff moves.
 //
 // A separate output gate fades the whole output in and out over a few
-// milliseconds. The muffler uses it to bring the copy in exactly when the
-// originals are muted, and to take it out before the originals come back.
+// milliseconds. The muffler opens it as the originals are muted, and closes
+// it just after they come back, so the copy fades out over them.
 //
 // Runs on the Core Audio IO thread: no allocation, locks or ObjC. All state is
 // fixed-size stored properties; coefficients are recomputed per short control

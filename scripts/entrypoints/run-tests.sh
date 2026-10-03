@@ -442,6 +442,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationProcessActivity.swift"
     "Sources/Speech/DictationMufflePolicy.swift"
     "Sources/Speech/DictationMuffleFilter.swift"
+    "Sources/Speech/DictationMuffleMachine.swift"
     "Sources/Speech/DictationSessionTypes.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetModelState.swift"
