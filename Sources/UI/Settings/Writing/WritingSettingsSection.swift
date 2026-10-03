@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// The everyday view's settings: the two features, personalized
-/// suggestions, the model switch, the storage meter and Delete all writing.
+/// suggestions, the model switch, the storage meter with Delete model, and
+/// Delete all writing.
 /// Replaces Tilde's settings window (`TildeSettingsWindowController`).
 struct WritingSettingsSection: View {
     typealias Copy = WritingSetupPresentation
 
     @ObservedObject var model: WritingSettingsModel
     @State private var confirmsDelete = false
+    @State private var confirmsDeleteModel = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -23,6 +25,7 @@ struct WritingSettingsSection: View {
                     title: Copy.Step1.autocompleteTitle,
                     line: Copy.Step1.autocompleteLine,
                     isOn: Binding(get: { model.autocomplete }, set: { model.setAutocomplete($0) }),
+                    isEnabled: !model.isDeleting,
                     automationIdentifier: "transcripted.settings.writing.settings.autocomplete"
                 )
                 toggleRow(
@@ -54,6 +57,22 @@ struct WritingSettingsSection: View {
             Button(Copy.cancel, role: .cancel) {}
         } message: {
             Text(Copy.deleteConfirmMessage)
+        }
+        .confirmationDialog(
+            Copy.deleteModelConfirmTitle,
+            isPresented: $confirmsDeleteModel,
+            titleVisibility: .visible
+        ) {
+            Button(Copy.deleteModel, role: .destructive) {
+                model.deleteModel()
+            }
+            .accessibilityIdentifier("transcripted.settings.writing.delete-model.confirm")
+            Button(Copy.cancel, role: .cancel) {}
+        } message: {
+            Text(Copy.deleteModelConfirmMessage(
+                autocompleteOn: model.autocomplete,
+                modelBytes: model.storage?.modelBytes ?? 0
+            ))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.writing.settings")
@@ -137,13 +156,39 @@ struct WritingSettingsSection: View {
                     .foregroundStyle(LibraryTokens.ink2)
                     .monospacedDigit()
             }
+            if let usage = model.storage, usage.modelBytes > 0 || model.deleteModelFailed {
+                deleteModelRow
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.writing.settings.storage")
+    }
+
+    private var deleteModelRow: some View {
+        HStack(spacing: 12) {
+            if model.deleteModelFailed {
+                Text(Copy.deleteModelFailed)
+                    .font(LibraryTokens.meta.weight(.semibold))
+                    .foregroundStyle(LibraryTokens.attention)
+            }
+            Spacer()
+            if model.isDeletingModel {
+                ProgressView().controlSize(.small)
+            }
+            SettingsInlineActionButton(
+                title: Copy.deleteModel,
+                symbolName: "trash",
+                tone: .destructive,
+                automationIdentifier: "transcripted.settings.writing.delete-model"
+            ) {
+                confirmsDeleteModel = true
+            }
+            .disabled(model.isDeleting)
+        }
     }
 
     private var deleteRow: some View {
@@ -154,7 +199,7 @@ struct WritingSettingsSection: View {
                     .foregroundStyle(LibraryTokens.attention)
             }
             Spacer()
-            if model.isDeleting {
+            if model.isDeleting, !model.isDeletingModel {
                 ProgressView().controlSize(.small)
             }
             SettingsInlineActionButton(

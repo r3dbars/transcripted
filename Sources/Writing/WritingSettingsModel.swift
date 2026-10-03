@@ -95,6 +95,10 @@ final class WritingSettingsModel: ObservableObject {
     @Published private(set) var installedApps: [Presentation.AppChoice] = []
     @Published private(set) var isDeleting = false
     @Published private(set) var deleteFailed = false
+    /// Delete model left files behind.
+    @Published private(set) var deleteModelFailed = false
+    /// The delete in flight is Delete model, for the spinner's place.
+    @Published private(set) var isDeletingModel = false
 
     private let timers = WritingRefreshTimers(
         liveInterval: WritingSettingsModel.liveRefreshInterval,
@@ -418,6 +422,9 @@ final class WritingSettingsModel: ObservableObject {
     /// pending with the steps (`WritingKeyboardSetupState`), and nothing
     /// opens System Settings unasked.
     func turnOnWriting() {
+        // A model prepared now would land in the folder Delete model is
+        // emptying, and Autocomplete would read on with no model.
+        guard !isDeleting else { return }
         let choices = draft
         guard choices.canContinueStep1, choices.canContinueStep2 else { return }
 
@@ -486,6 +493,9 @@ final class WritingSettingsModel: ObservableObject {
     }
 
     func setAutocomplete(_ enabled: Bool) {
+        // Turning it on mid-delete would start a download into the folder
+        // Delete model is emptying.
+        guard !isDeleting else { return }
         controller.setAutocomplete(enabled)
         controller.applyRunState()
         refreshLive()
@@ -497,6 +507,7 @@ final class WritingSettingsModel: ObservableObject {
     }
 
     func selectModel(_ choice: TildeModelChoice) {
+        guard !isDeleting else { return }
         controller.selectModel(choice)
         refreshLive()
         refreshStorage()
@@ -553,6 +564,27 @@ final class WritingSettingsModel: ObservableObject {
             self.refreshLive()
             self.reloadToday()
             self.refreshStats()
+            self.refreshStorage()
+        }
+    }
+
+    /// Delete model. Shares `isDeleting` with Delete all writing so only
+    /// one delete runs at a time.
+    func deleteModel() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        isDeletingModel = true
+        deleteModelFailed = false
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.controller.deleteDownloadedModels()
+            // Autocomplete is off now; with Save my writing off too, Writing
+            // stops.
+            self.controller.applyRunState()
+            self.isDeleting = false
+            self.isDeletingModel = false
+            if case .incomplete = outcome { self.deleteModelFailed = true }
+            self.refreshLive()
             self.refreshStorage()
         }
     }
