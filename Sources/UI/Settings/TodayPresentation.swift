@@ -461,17 +461,10 @@ enum TodayWritingParser {
         return facts
     }
 
-    // Built once, not per entry. ISO8601DateFormatter is thread-safe for
-    // parsing, so sharing them across reads is fine.
-    private static let fractionalSecondsFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    private static let plainFormatter = ISO8601DateFormatter()
-
     private static func parseDate(_ value: String) -> Date? {
-        fractionalSecondsFormatter.date(from: value) ?? plainFormatter.date(from: value)
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
     /// A writing row's title: the first line, trimmed like a dictation title
