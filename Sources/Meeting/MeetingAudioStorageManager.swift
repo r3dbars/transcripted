@@ -140,69 +140,49 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
         // Relative loudness cannot distinguish speaker bleed from independent
         // microphone speech. Keep both tracks, including quiet and overlapping
         // speech, at stable gains rather than gating entire blocks of the mic.
-        for frame in 0..<frameCount {
+        // Buffer properties are read once per chunk, not per sample.
+        let system = MixChunkView(systemBuffer), microphone = MixChunkView(microphoneBuffer)
+        let output = MixChunkView(outputBuffer)
+        guard let out = output.data else { return }
+        let writable = max(0, min(frameCount, output.frameLength))
+        withExtendedLifetime((microphoneBuffer, systemBuffer, outputBuffer)) {
             for channel in 0..<outputChannelCount {
-                let systemSample = sample(
-                    from: systemBuffer,
-                    channel: channel,
-                    frame: frame
-                )
-                let microphoneSample = sample(
-                    from: microphoneBuffer,
-                    channel: channel,
-                    frame: frame
-                )
-                let mixedSample = (systemSample * Self.systemGain)
-                    + (microphoneSample * Self.microphoneGain)
-                write(
-                    limited(mixedSample),
-                    to: outputBuffer,
-                    channel: channel,
-                    frame: frame
-                )
+                let destination = min(channel, output.channelCount - 1)
+                for frame in 0..<writable {
+                    let mixedSample = (system.sample(channel: channel, frame: frame) * Self.systemGain)
+                        + (microphone.sample(channel: channel, frame: frame) * Self.microphoneGain)
+                    if output.isInterleaved {
+                        out[0][frame * output.channelCount + destination] = limited(mixedSample)
+                    } else {
+                        out[destination][frame] = limited(mixedSample)
+                    }
+                }
             }
         }
     }
 
-    private func sample(
-        from buffer: AVAudioPCMBuffer?,
-        channel: Int,
-        frame: Int
-    ) -> Float {
-        guard let buffer,
-              frame >= 0,
-              frame < Int(buffer.frameLength),
-              let channelData = buffer.floatChannelData else {
-            return 0
+    /// Plain-pointer view of one chunk's buffer; only valid while `mix` holds the buffers.
+    private struct MixChunkView {
+        let data: UnsafePointer<UnsafeMutablePointer<Float>>?
+        let frameLength: Int
+        let channelCount: Int
+        let isInterleaved: Bool
+
+        init(_ buffer: AVAudioPCMBuffer?) {
+            guard let buffer, let channelData = buffer.floatChannelData else {
+                (data, frameLength, channelCount, isInterleaved) = (nil, 0, 1, false)
+                return
+            }
+            data = UnsafePointer(channelData)
+            frameLength = Int(buffer.frameLength)
+            channelCount = max(1, Int(buffer.format.channelCount))
+            isInterleaved = buffer.format.isInterleaved
         }
 
-        let channelCount = max(1, Int(buffer.format.channelCount))
-        let sourceChannel = channelCount == 1 ? 0 : min(channel, channelCount - 1)
-        if buffer.format.isInterleaved {
-            return channelData[0][frame * channelCount + sourceChannel]
-        }
-
-        return channelData[sourceChannel][frame]
-    }
-
-    private func write(
-        _ sample: Float,
-        to buffer: AVAudioPCMBuffer,
-        channel: Int,
-        frame: Int
-    ) {
-        guard let channelData = buffer.floatChannelData,
-              frame >= 0,
-              frame < Int(buffer.frameLength) else {
-            return
-        }
-
-        let channelCount = max(1, Int(buffer.format.channelCount))
-        let destinationChannel = min(channel, channelCount - 1)
-        if buffer.format.isInterleaved {
-            channelData[0][frame * channelCount + destinationChannel] = sample
-        } else {
-            channelData[destinationChannel][frame] = sample
+        @inline(__always) func sample(channel: Int, frame: Int) -> Float {
+            guard let data, frame >= 0, frame < frameLength else { return 0 }
+            let sourceChannel = channelCount == 1 ? 0 : min(channel, channelCount - 1)
+            return isInterleaved ? data[0][frame * channelCount + sourceChannel] : data[sourceChannel][frame]
         }
     }
 
@@ -985,7 +965,7 @@ enum MeetingAudioStorageManager {
     private static func previewString(at url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        let data = try handle.read(upToCount: frontmatterPreviewByteLimit) ?? Data()
+        let data = try autoreleasepool(invoking: { try handle.read(upToCount: frontmatterPreviewByteLimit) }) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }
 
@@ -1229,11 +1209,8 @@ enum MeetingAudioStorageManager {
     }
 
     private static func isSymbolicLink(_ url: URL, fileManager: FileManager) -> Bool {
-        if let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-           let type = attributes[.type] as? FileAttributeType,
-           type == .typeSymbolicLink {
-            return true
-        }
+        var status = stat()
+        if lstat(url.path, &status) == 0, (status.st_mode & S_IFMT) == S_IFLNK { return true }
 
         let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
         return values?.isSymbolicLink == true
