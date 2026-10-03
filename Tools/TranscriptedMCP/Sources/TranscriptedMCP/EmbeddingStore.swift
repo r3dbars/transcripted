@@ -1,4 +1,7 @@
+import CryptoKit
+import Darwin
 import Foundation
+import NaturalLanguage
 import SQLite3
 
 /// On-device vector store for semantic search.
@@ -23,6 +26,15 @@ final class EmbeddingStore: @unchecked Sendable {
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let provider: EmbeddingProvider
     private let dbPath: URL
+    private let embedLockPath: URL
+    /// Mixed into every `embedding_cache` key so vectors from a different model,
+    /// dimension or OS model revision are never reused.
+    private let cacheNamespace: Data
+    private let now: @Sendable () -> Date
+    private let cacheTTL: TimeInterval
+    /// A cache hit only rewrites `last_used` when it is at least this stale, so
+    /// a steady stream of hits doesn't turn into a stream of writes.
+    private let cacheTouchInterval: TimeInterval = 60 * 60
 
     /// Minimum cosine similarity for a row to count as a semantic match.
     /// NLEmbedding sentence vectors have a fairly high similarity floor (even
@@ -35,9 +47,19 @@ final class EmbeddingStore: @unchecked Sendable {
     /// very large libraries. Personal-scale libraries stay well under this.
     private let maxCandidateRows = 50_000
 
-    init(dbPath: URL, provider: EmbeddingProvider) throws {
+    init(
+        dbPath: URL,
+        provider: EmbeddingProvider,
+        cacheTTL: TimeInterval = 72 * 60 * 60,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) throws {
         self.dbPath = dbPath
         self.provider = provider
+        self.embedLockPath = dbPath.deletingLastPathComponent()
+            .appendingPathComponent("mcp_index.embed.lock", isDirectory: false)
+        self.cacheNamespace = Data(Self.cacheNamespace(for: provider).utf8)
+        self.cacheTTL = cacheTTL
+        self.now = now
         try queue.sync {
             if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
                 throw MCPIndexError.databaseOpenFailed(dbErrorLocked())
@@ -78,6 +100,21 @@ final class EmbeddingStore: @unchecked Sendable {
                 vec BLOB NOT NULL
             )
         """)
+        // Content-keyed vector reuse. Lexical reindexing deletes and reinserts
+        // every row of a rewritten file (a whole dictation day on each new
+        // entry, a whole meeting on a speaker rename), so per-rowid vectors are
+        // orphaned even when the text is unchanged. key = SHA-256 of
+        // namespace + 0x00 + the exact text handed to the provider. Additive:
+        // older helpers never read it, and the lexical schema gate leaves it
+        // alone.
+        execLocked("""
+            CREATE TABLE IF NOT EXISTS embedding_cache (
+                key BLOB PRIMARY KEY,
+                vec BLOB NOT NULL,
+                last_used INTEGER NOT NULL
+            ) WITHOUT ROWID
+        """)
+        execLocked("CREATE INDEX IF NOT EXISTS embedding_cache_last_used ON embedding_cache(last_used)")
     }
 
     // MARK: - Embedding reconciliation
@@ -99,6 +136,16 @@ final class EmbeddingStore: @unchecked Sendable {
     /// call after every lexical reconcile; it only does work for new/changed rows.
     func reconcileEmbeddings() {
         guard provider.isAvailable else { return }
+
+        // Every MCP client runs its own server on this index. Serialize the
+        // embedding pass across them so one server embeds a new row and the rest
+        // find it already done (or reuse it from embedding_cache). Taken before
+        // `reconciliationActive` is set, so semantic search keeps answering here
+        // while another process embeds. Never taken while holding the lexical
+        // reconcile lock (TranscriptIndex.reconcile releases it first). If the
+        // lock file can't be opened, run unlocked as before.
+        let embedLockDescriptor = Self.acquireEmbedLock(at: embedLockPath)
+        defer { Self.releaseEmbedLock(embedLockDescriptor) }
 
         admissionCondition.lock()
         while reconciliationActive {
@@ -138,7 +185,94 @@ final class EmbeddingStore: @unchecked Sendable {
                 """,
                 insertSQL: "INSERT OR REPLACE INTO dictation_entry_vectors (rowid, vec) VALUES (?, ?)"
             )
+            pruneEmbeddingCacheLocked()
         }
+    }
+
+    // MARK: - Cross-process embed lock
+
+    private static func acquireEmbedLock(at lockPath: URL) -> Int32? {
+        let descriptor = open(lockPath.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { return nil }
+        while flock(descriptor, LOCK_EX) != 0 {
+            guard errno == EINTR else {
+                close(descriptor)
+                return nil
+            }
+        }
+        _ = fchmod(descriptor, 0o600)
+        return descriptor
+    }
+
+    private static func releaseEmbedLock(_ descriptor: Int32?) {
+        guard let descriptor else { return }
+        _ = flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
+
+    // MARK: - Embedding cache
+
+    static func cacheNamespace(for provider: EmbeddingProvider) -> String {
+        var namespace = "\(provider.modelID)|\(provider.dimension)"
+        if provider is NLEmbeddingProvider {
+            // modelID is "nl.sentence.<language>.v1"; an OS update can ship a new
+            // sentence-embedding revision under the same id.
+            let parts = provider.modelID.split(separator: ".")
+            if parts.count >= 3 {
+                let language = NLLanguage(rawValue: String(parts[2]))
+                namespace += "|rev\(NLEmbedding.currentSentenceEmbeddingRevision(for: language))"
+            }
+        }
+        return namespace
+    }
+
+    private func cacheKey(for text: String) -> Data {
+        var hasher = SHA256()
+        hasher.update(data: cacheNamespace)
+        hasher.update(data: Data([0]))
+        hasher.update(data: Data(text.utf8))
+        return Data(hasher.finalize())
+    }
+
+    private func nowSeconds() -> Int64 {
+        Int64(now().timeIntervalSince1970)
+    }
+
+    /// Cached vectors (and when each was last used) for the given keys. Only
+    /// blobs of the provider's exact size count as hits.
+    private func lookupCachedVectorsLocked(_ keys: [Data]) -> [Data: (vec: Data, lastUsed: Int64)] {
+        var hits: [Data: (vec: Data, lastUsed: Int64)] = [:]
+        let expectedBytes = provider.dimension * MemoryLayout<Float>.stride
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT vec, last_used FROM embedding_cache WHERE key = ?", -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            return hits
+        }
+        defer { sqlite3_finalize(stmt) }
+        for key in keys where hits[key] == nil {
+            sqlite3_reset(stmt)
+            sqlite3_clear_bindings(stmt)
+            _ = key.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 1, raw.baseAddress, Int32(key.count), SQLITE_TRANSIENT)
+            }
+            guard sqlite3_step(stmt) == SQLITE_ROW,
+                  let blobPtr = sqlite3_column_blob(stmt, 0) else { continue }
+            let blobLen = Int(sqlite3_column_bytes(stmt, 0))
+            guard expectedBytes > 0, blobLen == expectedBytes else { continue }
+            hits[key] = (Data(bytes: blobPtr, count: blobLen), sqlite3_column_int64(stmt, 1))
+        }
+        return hits
+    }
+
+    private func pruneEmbeddingCacheLocked() {
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM embedding_cache WHERE last_used < ?", -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int64(stmt, 1, nowSeconds() - Int64(cacheTTL))
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                log("Vector store SQL operation failed")
+            }
+        }
+        sqlite3_finalize(stmt)
     }
 
     private func invalidateOnModelChangeLocked() {
@@ -159,6 +293,7 @@ final class EmbeddingStore: @unchecked Sendable {
             log("Embedding model changed (\(storedModel ?? "?")/\(storedDim) -> \(provider.modelID)/\(provider.dimension)); re-embedding")
             execLocked("DELETE FROM utterance_vectors")
             execLocked("DELETE FROM dictation_entry_vectors")
+            execLocked("DELETE FROM embedding_cache")
         }
         var upsert: OpaquePointer?
         if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO embedding_meta (id, model_id, dimension) VALUES (0, ?, ?)", -1, &upsert, nil) == SQLITE_OK {
@@ -184,33 +319,105 @@ final class EmbeddingStore: @unchecked Sendable {
         guard !pending.isEmpty else { return }
 
         var inserted = 0
+        var providerEmbedded = 0
+        var embeddedThisPass: [Data: Data] = [:]
         for batchStart in stride(from: 0, to: pending.count, by: 100) {
             let batchEnd = min(batchStart + 100, pending.count)
-            let vectors = pending[batchStart..<batchEnd].compactMap { item -> (Int64, [Float])? in
-                provider.embed(item.text).map { (item.rowid, $0) }
+            let batch = pending[batchStart..<batchEnd].map { item in
+                (rowid: item.rowid, text: item.text, key: cacheKey(for: item.text))
             }
-            guard !vectors.isEmpty else { continue }
+            let cached = lookupCachedVectorsLocked(batch.map { $0.key })
+            let timestamp = nowSeconds()
+            let staleBefore = timestamp - Int64(cacheTouchInterval)
 
-            // Keep the database write lock short. Vector computation is the slow
-            // part and happens before the transaction so lexical watcher updates
-            // can continue while a large semantic backlog is processed.
+            // Vector computation is the slow part and happens before the
+            // transaction, so lexical watcher updates can continue while a large
+            // semantic backlog is processed. Cache hits and texts already
+            // embedded earlier in this pass skip the provider entirely.
+            var rows: [(rowid: Int64, blob: Data)] = []
+            var newCacheRows: [(key: Data, blob: Data)] = []
+            var touchedKeys: Set<Data> = []
+            for item in batch {
+                if let hit = cached[item.key] {
+                    rows.append((item.rowid, hit.vec))
+                    if hit.lastUsed < staleBefore { touchedKeys.insert(item.key) }
+                } else if let blob = embeddedThisPass[item.key] {
+                    rows.append((item.rowid, blob))
+                } else if let vector = provider.embed(item.text) {
+                    providerEmbedded += 1
+                    let blob = VectorMath.blob(from: vector)
+                    rows.append((item.rowid, blob))
+                    embeddedThisPass[item.key] = blob
+                    // Never cache a vector of the wrong size; lookups would
+                    // reject it anyway.
+                    if blob.count == provider.dimension * MemoryLayout<Float>.stride {
+                        newCacheRows.append((item.key, blob))
+                    }
+                }
+            }
+            guard !rows.isEmpty else { continue }
+
+            // Keep the database write lock short.
             sqlite3_exec(db, "BEGIN", nil, nil, nil)
-            for (rowid, vector) in vectors {
+            for (rowid, blob) in rows {
                 var stmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else { continue }
                 sqlite3_bind_int64(stmt, 1, rowid)
-                let blob = VectorMath.blob(from: vector)
                 _ = blob.withUnsafeBytes { raw in
                     sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(blob.count), SQLITE_TRANSIENT)
                 }
                 if sqlite3_step(stmt) == SQLITE_DONE { inserted += 1 }
                 sqlite3_finalize(stmt)
             }
+            for (key, blob) in newCacheRows {
+                bindAndStepLocked(
+                    "INSERT OR IGNORE INTO embedding_cache (key, vec, last_used) VALUES (?, ?, ?)",
+                    key: key,
+                    blob: blob,
+                    timestamp: timestamp
+                )
+            }
+            for key in touchedKeys {
+                bindAndStepLocked(
+                    "UPDATE embedding_cache SET last_used = ? WHERE key = ?",
+                    key: key,
+                    blob: nil,
+                    timestamp: timestamp
+                )
+            }
             sqlite3_exec(db, "COMMIT", nil, nil, nil)
         }
         if inserted > 0 {
-            log("Embedded semantic rows (count_bucket=\(MCPLogPrivacy.countBucket(inserted)))")
+            // count_bucket is rows the provider had to embed; reused_bucket is
+            // rows filled from embedding_cache. Buckets only, never keys.
+            log("Embedded semantic rows (count_bucket=\(MCPLogPrivacy.countBucket(providerEmbedded)), reused_bucket=\(MCPLogPrivacy.countBucket(max(0, inserted - providerEmbedded))))")
         }
+    }
+
+    /// Runs one cache write. With a blob: (key, vec, last_used). Without one:
+    /// (last_used, key).
+    private func bindAndStepLocked(_ sql: String, key: Data, blob: Data?, timestamp: Int64) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        if let blob {
+            _ = key.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 1, raw.baseAddress, Int32(key.count), SQLITE_TRANSIENT)
+            }
+            _ = blob.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(blob.count), SQLITE_TRANSIENT)
+            }
+            sqlite3_bind_int64(stmt, 3, timestamp)
+        } else {
+            sqlite3_bind_int64(stmt, 1, timestamp)
+            _ = key.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(key.count), SQLITE_TRANSIENT)
+            }
+        }
+        _ = sqlite3_step(stmt)
     }
 
     // MARK: - Semantic search
