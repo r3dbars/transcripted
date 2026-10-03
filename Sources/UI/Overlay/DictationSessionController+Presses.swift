@@ -2,6 +2,7 @@
 // Back-to-back and early presses: queued starts, modifier combos, early release.
 
 import AppKit
+import Combine
 
 extension DictationSessionController {
     /// A hands-free modifier press started this session, then another key went
@@ -100,48 +101,68 @@ extension DictationSessionController {
         appState?.logger.log("DICTATION | start press remembered while the last dictation finishes")
         queuedDictationStartTask?.cancel()
         queuedDictationStartTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self, let request = self.queuedDictationStart else { return }
-                let stillFinishing = self.isDictating || (self.appState?.sttRouter.isTranscribing ?? false)
-                let waited = ProcessInfo.processInfo.systemUptime - request.requestedAt
-                // A take that ended in a problem or a "press ⌘V" notice keeps
-                // its message; starting over it would wipe the only sign the
-                // text didn't land (and its Transcribe It or Paste It button).
-                let previousLeftMessage = self.overlayController.map {
-                    DictationQueuedStartPolicy.previousLeftMessage(
-                        isDrafting: $0.state == .drafting,
-                        errorMessage: $0.errorMessage,
-                        messageCanGiveWayToNextStart: $0.messageCanGiveWayToNextStart
+            guard let requestedAt = self?.queuedDictationStart?.requestedAt else { return }
+            let decision = await DictationQueuedStartWait.run(DictationQueuedStartWait.Steps(
+                evaluate: { [weak self] waited in
+                    guard let self, self.queuedDictationStart != nil else { return nil }
+                    let stillFinishing = self.isDictating || (self.appState?.sttRouter.isTranscribing ?? false)
+                    // A take that ended in a problem or a "press ⌘V" notice keeps
+                    // its message; starting over it would wipe the only sign the
+                    // text didn't land (and its Transcribe It or Paste It button).
+                    let previousLeftMessage = self.overlayController.map {
+                        DictationQueuedStartPolicy.previousLeftMessage(
+                            isDrafting: $0.state == .drafting,
+                            errorMessage: $0.errorMessage,
+                            messageCanGiveWayToNextStart: $0.messageCanGiveWayToNextStart
+                        )
+                    } ?? false
+                    return DictationQueuedStartPolicy.decision(
+                        previousStillFinishing: stillFinishing,
+                        previousLeftMessage: previousLeftMessage,
+                        secondsWaited: waited
                     )
-                } ?? false
-                switch DictationQueuedStartPolicy.decision(
-                    previousStillFinishing: stillFinishing,
-                    previousLeftMessage: previousLeftMessage,
-                    secondsWaited: waited
-                ) {
-                case .keepWaiting:
-                    break
-                case .start:
-                    self.queuedDictationStart = nil
-                    self.queuedDictationStartTask = nil
-                    self.clearQueuedStartNotice()
-                    self.startDictation(
-                        sourceApp: request.sourceApp,
-                        trigger: request.trigger,
-                        shortcutMode: request.shortcutMode,
-                        isRetry: request.isRetry
-                    )
-                    return
-                case .giveUp:
-                    self.queuedDictationStartTask = nil
-                    self.dropQueuedDictationStart(showMessage: true)
-                    return
-                case .dropForMessage:
-                    self.queuedDictationStartTask = nil
-                    self.dropQueuedDictationStart(showMessage: false)
-                    return
-                }
-                try? await Task.sleep(nanoseconds: DictationQueuedStartPolicy.pollIntervalNanos)
+                },
+                watchChanges: { [weak self] wake in
+                    guard let self else { return {} }
+                    // Only wakes: @Published emits in willSet, so the check
+                    // runs on the next turn, once the new value is in place.
+                    // dropFirst: the current value isn't a change.
+                    var changes: [AnyPublisher<Void, Never>] = [
+                        self.$isDictating.dropFirst().map { _ in () }.eraseToAnyPublisher()
+                    ]
+                    if let router = self.appState?.sttRouter {
+                        changes.append(router.$isTranscribing.dropFirst().map { _ in () }.eraseToAnyPublisher())
+                    }
+                    let watch = Publishers.MergeMany(changes).sink { _ in wake() }
+                    return { watch.cancel() }
+                },
+                now: { ProcessInfo.processInfo.systemUptime },
+                requestedAt: requestedAt,
+                // Not Task.sleep(for:): ContinuousClock counts system sleep,
+                // and systemUptime (what `requestedAt` is on) doesn't.
+                sleep: { try? await Task.sleep(nanoseconds: $0) }
+            ))
+            guard let self, let decision, !Task.isCancelled,
+                  let request = self.queuedDictationStart else { return }
+            switch decision {
+            case .keepWaiting:
+                return
+            case .start:
+                self.queuedDictationStart = nil
+                self.queuedDictationStartTask = nil
+                self.clearQueuedStartNotice()
+                self.startDictation(
+                    sourceApp: request.sourceApp,
+                    trigger: request.trigger,
+                    shortcutMode: request.shortcutMode,
+                    isRetry: request.isRetry
+                )
+            case .giveUp:
+                self.queuedDictationStartTask = nil
+                self.dropQueuedDictationStart(showMessage: true)
+            case .dropForMessage:
+                self.queuedDictationStartTask = nil
+                self.dropQueuedDictationStart(showMessage: false)
             }
         }
         return true

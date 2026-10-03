@@ -160,6 +160,10 @@ struct TodayTapeMark: Identifiable, Equatable, Sendable {
     let start: Double
     /// nil draws a dot.
     let end: Double?
+    /// The hover line ("Weekly sync · 2:10 PM · 42 min"), made once when the
+    /// day is built (`TodayTapeBuilder.days`), so the day card doesn't format
+    /// a date for every mark each time it draws.
+    var hoverText = ""
 
     var id: String { item.id }
     var isDot: Bool { end == nil }
@@ -170,13 +174,51 @@ struct TodayTapeDay: Identifiable, Equatable, Sendable {
     let isToday: Bool
     let meetings: [TodayTapeMark]
     let dictations: [TodayTapeMark]
-    var writing: [TodayTapeMark] = []
+    let writing: [TodayTapeMark]
+    /// Every mark in time order, for stepping through the day. Sorted once
+    /// here: the day card reads it for every mark it draws, and a busy day
+    /// has hundreds of dictations.
+    let allMarks: [TodayTapeMark]
+    /// The day split into sessions (`TodaySessionBuilder`), also made once.
+    let sessions: [TodaySession]
+
+    init(
+        day: Date,
+        isToday: Bool,
+        meetings: [TodayTapeMark],
+        dictations: [TodayTapeMark],
+        writing: [TodayTapeMark] = []
+    ) {
+        self.day = day
+        self.isToday = isToday
+        self.meetings = meetings
+        self.dictations = dictations
+        self.writing = writing
+        allMarks = (meetings + dictations + writing)
+            .sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        sessions = TodaySessionBuilder.sessions(allMarks.map(\.item))
+    }
 
     var id: TimeInterval { day.timeIntervalSinceReferenceDate }
     var isEmpty: Bool { meetings.isEmpty && dictations.isEmpty && writing.isEmpty }
-    /// Every mark in time order, for stepping through the day.
-    var allMarks: [TodayTapeMark] {
-        (meetings + dictations + writing).sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+}
+
+/// What the day card shows, worked out once per draw instead of once per
+/// mark: the hovered mark, else the picked one, else the day's latest
+/// capture, and where that sits in the day for Prev and Next.
+struct TodayTapeSelection: Equatable {
+    let picked: TodayTapeMark?
+    let shown: TodayTapeMark?
+    /// `shown`'s place in `TodayTapeDay.allMarks`.
+    let shownIndex: Int?
+
+    init(day: TodayTapeDay, pickedID: String?, hoveredID: String?) {
+        let marks = day.allMarks
+        let picked = marks.first { $0.id == pickedID } ?? marks.max { $0.item.date < $1.item.date }
+        let shown = marks.first { $0.id == hoveredID } ?? picked
+        self.picked = picked
+        self.shown = shown
+        shownIndex = shown.flatMap { shown in marks.firstIndex { $0.id == shown.id } }
     }
 }
 
@@ -189,7 +231,8 @@ enum TodayTapeBuilder {
     static func days(
         captures: [TodayRecentItem],
         now: Date,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        locale: Locale = .current
     ) -> [TodayTapeDay] {
         let today = calendar.startOfDay(for: now)
         return (0..<dayCount).reversed().compactMap { offset -> TodayTapeDay? in
@@ -199,11 +242,15 @@ enum TodayTapeBuilder {
                 .sorted { $0.date < $1.date }
             func mark(_ item: TodayRecentItem) -> TodayTapeMark {
                 let start = fraction(of: item.date, onDayStarting: day, calendar: calendar)
-                guard item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 else {
-                    return TodayTapeMark(item: item, start: start, end: item.kind == .dictation ? nil : start)
+                var mark: TodayTapeMark
+                if item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 {
+                    let end = fraction(of: item.date.addingTimeInterval(TimeInterval(seconds)), onDayStarting: day, calendar: calendar)
+                    mark = TodayTapeMark(item: item, start: start, end: max(start, end))
+                } else {
+                    mark = TodayTapeMark(item: item, start: start, end: item.kind == .dictation ? nil : start)
                 }
-                let end = fraction(of: item.date.addingTimeInterval(TimeInterval(seconds)), onDayStarting: day, calendar: calendar)
-                return TodayTapeMark(item: item, start: start, end: max(start, end))
+                mark.hoverText = markDescription(mark, now: now, locale: locale, calendar: calendar)
+                return mark
             }
             return TodayTapeDay(
                 day: day,
@@ -461,10 +508,17 @@ enum TodayWritingParser {
         return facts
     }
 
+    // Sendable value types: no shared mutable formatter, and no ICU
+    // formatter built per entry (that was ~180 us an entry).
+    private static let fractionalStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let plainStyle = Date.ISO8601FormatStyle()
+
     private static func parseDate(_ value: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return withFraction.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        // The writer stores "...:ss.SSSZ", so the fractional form goes first.
+        guard let parsed = (try? fractionalStyle.parse(value)) ?? (try? plainStyle.parse(value)) else { return nil }
+        // FormatStyle can land one ulp (~0.12 us) off the millisecond; snapping
+        // keeps the Date identical to what ISO8601DateFormatter returned.
+        return Date(timeIntervalSince1970: (parsed.timeIntervalSince1970 * 1_000).rounded() / 1_000)
     }
 
     /// A writing row's title: the first line, trimmed like a dictation title
@@ -568,6 +622,13 @@ enum TodayCopy {
             return TodayFormatterCache.string(from: start, template: "jmm", locale: locale, calendar: calendar)
         }
         return TodayFormatterCache.timeRange(from: start, to: end, locale: locale, calendar: calendar)
+    }
+
+    /// Whole minutes since the reference date. Everything the day card shows
+    /// about `now` (the "Now 2:41 PM" label, the now line, "Yesterday") moves
+    /// at most once a minute, so the card skips renders inside one minute.
+    static func minuteKey(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSinceReferenceDate / 60).rounded(.down))
     }
 
     /// Time of day for today's rows, "Yesterday", or a short weekday/date.

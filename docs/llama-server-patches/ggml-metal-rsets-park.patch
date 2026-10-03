@@ -1,0 +1,76 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.m b/ggml/src/ggml-metal/ggml-metal-device.m
+index 312b00d..4e03bb8 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.m
++++ b/ggml/src/ggml-metal/ggml-metal-device.m
+@@ -556,6 +556,9 @@ void ggml_metal_encoder_end_encoding(ggml_metal_encoder_t encoder) {
+     atomic_int  d_loop;
+ 
+     dispatch_group_t d_group;
++
++    // parks the heartbeat while d_loop <= 0, so an idle process takes no wakeups
++    dispatch_semaphore_t d_wake;
+ };
+ 
+ #if defined(GGML_METAL_HAS_RESIDENCY_SETS)
+@@ -610,6 +613,7 @@ ggml_metal_rsets_t ggml_metal_rsets_init(ggml_metal_device_t dev) {
+     atomic_store_explicit(&res->d_loop, res->loops_per_s*res->keep_alive_s, memory_order_relaxed);
+ 
+     res->d_group = dispatch_group_create();
++    res->d_wake  = dispatch_semaphore_create(0);
+ 
+     // start a background thread that periodically requests residency for all the currently active sets in the collection
+     // the requests stop after a certain amount of time (keep_alive_s) of inactivity
+@@ -617,8 +621,8 @@ ggml_metal_rsets_t ggml_metal_rsets_init(ggml_metal_device_t dev) {
+     dispatch_group_async(res->d_group, d_queue, ^{
+ #if defined(GGML_METAL_HAS_RESIDENCY_SETS)
+         if (@available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, *)) {
+-              while (!atomic_load_explicit(&res->d_stop, memory_order_relaxed)) {
+-                  if (atomic_load_explicit(&res->d_loop, memory_order_relaxed) > 0) {
++              while (!atomic_load_explicit(&res->d_stop, memory_order_acquire)) {
++                  if (atomic_load_explicit(&res->d_loop, memory_order_acquire) > 0) {
+                       [res->lock lock];
+ 
+                       for (int i = 0; i < (int) res->data.count; ++i) {
+@@ -628,9 +632,12 @@ ggml_metal_rsets_t ggml_metal_rsets_init(ggml_metal_device_t dev) {
+                       atomic_fetch_sub_explicit(&res->d_loop, 1, memory_order_relaxed);
+ 
+                       [res->lock unlock];
+-                  }
+ 
+-                  usleep(res->time_per_loop_ms * 1000);
++                      usleep(res->time_per_loop_ms * 1000);
++                  } else {
++                      // keep-alive window lapsed: park until keep_alive re-arms d_loop or free sets d_stop
++                      dispatch_semaphore_wait(res->d_wake, DISPATCH_TIME_FOREVER);
++                  }
+               }
+         }
+ #endif
+@@ -656,10 +663,13 @@ void ggml_metal_rsets_free(ggml_metal_rsets_t rsets) {
+     // note: if you hit this assert, most likely you haven't deallocated all Metal resources before exiting
+     GGML_ASSERT([rsets->data count] == 0);
+ 
+-    atomic_store_explicit(&rsets->d_stop, true, memory_order_relaxed);
++    atomic_store_explicit(&rsets->d_stop, true, memory_order_release);
++    // wake a parked heartbeat so it can see d_stop (otherwise the group wait below never returns)
++    dispatch_semaphore_signal(rsets->d_wake);
+ 
+     dispatch_group_wait(rsets->d_group, DISPATCH_TIME_FOREVER);
+     dispatch_release(rsets->d_group);
++    dispatch_release(rsets->d_wake);
+ 
+     [rsets->data release];
+     [rsets->lock release];
+@@ -1018,7 +1028,11 @@ void ggml_metal_device_rsets_keep_alive(ggml_metal_device_t dev) {
+         return;
+     }
+ 
+-    atomic_store_explicit(&dev->rsets->d_loop, dev->rsets->loops_per_s*dev->rsets->keep_alive_s, memory_order_relaxed);
++    const int prev = atomic_exchange_explicit(&dev->rsets->d_loop, dev->rsets->loops_per_s*dev->rsets->keep_alive_s, memory_order_acq_rel);
++    if (prev <= 0) {
++        // idle -> armed edge: wake the parked heartbeat
++        dispatch_semaphore_signal(dev->rsets->d_wake);
++    }
+ }
+ 
+ struct ggml_metal_event {

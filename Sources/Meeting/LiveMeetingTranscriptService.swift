@@ -62,7 +62,11 @@ final class LiveMeetingTranscriptService {
                 guard setting != self.captionsSetting else { return }
                 self.captionsSetting = setting
                 self.refreshCaptions()
-                if setting { LiveMeetingCaptions.shared.prewarm() }
+                if setting {
+                    LiveMeetingCaptions.shared.prewarm()
+                } else {
+                    LiveMeetingCaptions.shared.cancelPrewarm()
+                }
             }
         }
         if captionsSetting { LiveMeetingCaptions.shared.prewarm() }

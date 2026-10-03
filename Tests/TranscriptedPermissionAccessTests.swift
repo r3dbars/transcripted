@@ -1147,4 +1147,95 @@ func testTranscriptedPermissionAccess() async {
                 "Allow and Don't Allow are both remembered; no answer changes nothing")
         }
     }
+
+    // Every UserDefaults write posts didChangeNotification to every observer
+    // in the app, even when the value didn't change, so a refresh that finds
+    // the same answer must not write.
+    runSuite("Refreshing an unchanged System Audio Recording answer writes nothing") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+        func refresh(_ answer: SystemAudioCaptureTCCStatus) -> SystemAudioCaptureTCCStatus {
+            TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(
+                tcc: SystemAudioCaptureTCC(preflight: { answer }, request: { nil })
+            )
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+        let counter = StandardDefaultsChangeCounter()
+        defer { counter.stop() }
+
+        assertEqual(refresh(.authorized), .authorized, "macOS's answer comes back as read")
+        assertEqual(counter.take(), 0, "an authorized answer over a cached grant posts no defaults change")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .granted, "the grant stays")
+
+        assertEqual(refresh(.denied), .denied, "a denial comes back as read")
+        assertTrue(counter.take() > 0, "a denial over a cached grant does write")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .denied, "and the cache says denied")
+
+        assertEqual(refresh(.denied), .denied, "the same denial again")
+        assertEqual(counter.take(), 0, "a denial over a cached denial posts nothing")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .denied, "still denied")
+
+        assertEqual(refresh(.authorized), .authorized, "a grant after a denial")
+        assertTrue(counter.take() > 0, "a grant over a cached denial does write")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .granted, "and the cache says granted")
+
+        assertEqual(refresh(.unavailable), .unavailable, "an unreadable answer comes back as read")
+        assertEqual(counter.take(), 0, "an unavailable read writes nothing")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .granted, "and leaves the grant alone")
+
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+        _ = counter.take()
+        assertEqual(refresh(.notDetermined), .notDetermined, "a not-yet-asked answer comes back as read")
+        assertEqual(counter.take(), 0, "not determined with nothing cached posts nothing")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .unknown, "still unknown")
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+        _ = counter.take()
+        assertEqual(refresh(.notDetermined), .notDetermined, "a reset Mac")
+        assertTrue(counter.take() > 0, "not determined over a cached grant clears it, which posts")
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .unknown, "and the cache is unknown again")
+    }
+}
+
+/// Counts UserDefaults.didChangeNotification posts from UserDefaults.standard
+/// only (object identity), so another defaults object can't add to the count.
+private final class StandardDefaultsChangeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var posts = 0
+    private var token: NSObjectProtocol?
+
+    init() {
+        token = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: nil
+        ) { [weak self] _ in
+            self?.increment()
+        }
+    }
+
+    private func increment() {
+        lock.lock(); posts += 1; lock.unlock()
+    }
+
+    /// Posts seen since the last call.
+    func take() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        let seen = posts
+        posts = 0
+        return seen
+    }
+
+    func stop() {
+        if let token { NotificationCenter.default.removeObserver(token) }
+        token = nil
+    }
 }

@@ -35,6 +35,12 @@ extension TranscriptedSettingsView {
                 persist: { DictationCleanupPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("dictation_cleanup", enabled: $0, page: .general) }
             ),
+            dictationMuffleEnabled: persistedSettingsBinding(
+                $dictationMuffleEnabled,
+                persist: { DictationMufflePreferences.setEnabled($0) },
+                track: { trackSettingsToggle("dictation_muffle", enabled: $0, page: .general) },
+                sideEffect: { Self.dictationMuffleSettingChanged($0) }
+            ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },

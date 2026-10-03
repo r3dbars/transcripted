@@ -353,10 +353,26 @@ extension TranscriptedSettingsView {
         }
     }
 
-    func refreshRecentCaptures(force: Bool = false) {
+    /// App activation. A closed window skips the sweep (about 9 TCC reads on
+    /// main per popover open); opening it runs the full `refreshState()`.
+    func refreshAfterAppActivation() {
+        let work = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: navigation.isWindowOpen)
+        if work.permissions { refreshPermissions() }
+        if work.recentCaptures { refreshRecentCaptures(reloadDashboard: work.dashboard) }
+        if work.shortcuts { refreshShortcutState() }
+        // Coming back from Login Items should clear a stale approval or
+        // failure line.
+        if work.launchAtLogin { refreshLaunchAtLoginState() }
+    }
+
+    /// `reloadDashboard` is false only for app activation with the window
+    /// closed; library changes always reload Home and Dictations.
+    func refreshRecentCaptures(force: Bool = false, reloadDashboard: Bool = true) {
         if navigation.selectedPage == .today {
+            // Runs closed too: Today holds the result until the window shows.
             todayViewModel.refresh(force: force)
         }
+        guard reloadDashboard else { return }
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
             refreshHomeDashboard(force: force)

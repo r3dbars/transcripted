@@ -15,11 +15,20 @@ import TranscriptedCore
 class ParakeetEngine: ObservableObject {
     @Published var isRecording = false
     @Published var isTranscribing = false
-    @Published var audioLevel: Float = 0
     @Published var modelDownloadState: ParakeetModelState = .notLoaded
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
+    /// The waveform's live meter reading. STTRouter hands it in and holds it
+    /// too; it ticks ~25-30 times a second while recording, so it stays off
+    /// this engine's and the router's objectWillChange (DictationAudioLevels).
+    let audioLevels: DictationAudioLevels
+    /// The latest level, for the resets to silence on start, stop and
+    /// recovery. A plain level reads as its own peak.
+    var audioLevel: Float {
+        get { audioLevels.current.level }
+        set { audioLevels.update(DictationAudioLevel(level: newValue)) }
+    }
     var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
 
     var hasRecoverableRecording: Bool {
@@ -96,7 +105,6 @@ class ParakeetEngine: ObservableObject {
     /// `pendingSamplesLock`; a recovery restart keeps the original value.
     var firstAudioSampleAt: CFAbsoluteTime?
     var didReportPendingSampleTruncation = false
-    nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     var isEnginePrewarmed: Bool {
         get { audioGraph.isPrewarmed }
         set { audioGraph.isPrewarmed = newValue }
@@ -136,6 +144,7 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     var asrManager: AsrManager?
+    var decoderLayerCountCache = ParakeetDecoderLayerCountCache()
     var modelVariant: ParakeetModelVariant = .v3
     var loadedModelVariant: ParakeetModelVariant?
     var modelCleanupTask: Task<Void, Never>?
@@ -227,10 +236,15 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    init() {
+    init(audioLevels: DictationAudioLevels) {
+        self.audioLevels = audioLevels
         audioGraph.host = self
         markCachedRuntimeModelIfAvailable()
         scheduleInputDeviceNameRefresh()
+    }
+
+    convenience init() {
+        self.init(audioLevels: DictationAudioLevels())
     }
 
     nonisolated static func loadDictationInputDeviceSelection(

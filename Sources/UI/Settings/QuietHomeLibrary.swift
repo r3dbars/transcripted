@@ -211,18 +211,9 @@ struct QuietWorkingRow: View {
     var body: some View {
         HStack(spacing: 10) {
             if let recordingElapsed {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(LibraryTokens.recording)
-                        .frame(width: 7, height: 7)
-                    Text("Recording")
-                        .font(LibraryTokens.rowTitle)
-                    Text("·  \(recordingElapsed)")
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink2)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Recording, \(recordingElapsed) elapsed")
+                // The live time comes from the shell's clock, so the
+                // once-a-second tick redraws only this label.
+                QuietRecordingElapsedLabel(fallback: recordingElapsed)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -240,8 +231,8 @@ struct QuietWorkingRow: View {
                         Text(status)
                             .font(.system(size: 11.5))
                             .foregroundStyle(LibraryTokens.ink2)
-                        if let progress, progress > 0 {
-                            Text("\(Int(progress * 100))%")
+                        if let percent = HomeActivityPercent.displayed(progress) {
+                            Text("\(percent)%")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(LibraryTokens.ink3)
                         }
@@ -277,14 +268,7 @@ struct QuietWorkingRow: View {
     }
 
     static func formatElapsed(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds))
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let secs = total % 60
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, secs)
-        }
-        return String(format: "%d:%02d", minutes, secs)
+        HomeRecordingElapsed.text(seconds)
     }
 }
 

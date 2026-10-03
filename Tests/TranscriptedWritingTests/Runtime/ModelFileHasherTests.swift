@@ -49,17 +49,23 @@ struct ModelFileHasherTests {
 
     @Test("Hashing a large file doesn't keep its chunks in memory")
     func memoryStaysFlat() throws {
-        let megabytes = 96
+        // Footprint is process-wide and other suites run in parallel, so the
+        // file is big enough that the no-pool case (~192 MB) can't hide under
+        // their noise, and the bar sits well clear of both.
+        let megabytes = 192
         let (url, digest) = try Self.makeFile(megabytes: megabytes)
         defer { try? FileManager.default.removeItem(at: url) }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         let before = Self.physicalFootprint()
         let result = try ModelFileHasher.sha256Hex(from: handle)
-        let grown = Self.physicalFootprint() &- before
+        let after = Self.physicalFootprint()
+        // Parallel suites can free memory meanwhile; a shrink is zero growth,
+        // not an unsigned wrap.
+        let grown = after > before ? after - before : 0
         #expect(result == digest)
-        // Without a pool per chunk, all 96 chunks are still alive here
-        // (footprint grows by ~96 MB). With it, growth stays a few MB.
-        #expect(grown < 32 * 1024 * 1024, "footprint grew \(grown / 1_048_576) MB while hashing \(megabytes) MB")
+        // Without a pool per chunk, all 192 chunks are still alive here
+        // (footprint grows by ~192 MB). With it, growth stays a few MB.
+        #expect(grown < 64 * 1024 * 1024, "footprint grew \(grown / 1_048_576) MB while hashing \(megabytes) MB")
     }
 }

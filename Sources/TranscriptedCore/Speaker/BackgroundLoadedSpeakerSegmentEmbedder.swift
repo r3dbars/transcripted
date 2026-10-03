@@ -161,3 +161,14 @@ public final class BackgroundLoadedSpeakerSegmentEmbedder: BackgroundLoadingSpea
         return loaded
     }
 }
+
+extension BackgroundLoadedSpeakerSegmentEmbedder: SpeakerSegmentLengthPrewarming {
+    /// Passes a warm-up for known turn lengths to the loaded model. Does nothing
+    /// before the load ends; never waits for it.
+    public func prewarm(sampleCounts: [Int]) {
+        condition.lock()
+        let ready = state == .loaded ? loaded : nil
+        condition.unlock()
+        (ready as? any SpeakerSegmentLengthPrewarming)?.prewarm(sampleCounts: sampleCounts)
+    }
+}

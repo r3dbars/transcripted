@@ -395,6 +395,9 @@ public class DiarizationService: ObservableObject {
         }
 
         await waitForBackgroundSegmentEmbedder()
+        if let embedder = segmentEmbedder {
+            prewarmVoiceprintLengths(for: segments, sampleCount: samples.count, sampleRate: sampleRate, using: embedder)
+        }
         let finalSegments = reembedIfNeeded(segments: segments, samples: samples, sampleRate: sampleRate)
         MeetingPipelineTimings.current?.add(
             .diarize,
@@ -415,6 +418,32 @@ public class DiarizationService: ObservableObject {
     nonisolated public func prewarmVoiceprintInBackground() {
         guard let embedder = segmentEmbedder else { return }
         DispatchQueue.global(qos: .utility).async { embedder.prewarm() }
+    }
+
+    /// Hands the turn lengths `reembed` is about to embed to an embedder that can
+    /// warm up for them, on a background queue, and returns at once. Re-embedding
+    /// starts right away; a call on a function still warming waits for it, then
+    /// runs at steady speed. Never changes the vectors.
+    nonisolated func prewarmVoiceprintLengths(
+        for segments: [SpeakerSegment],
+        sampleCount total: Int,
+        sampleRate: Int,
+        using embedder: any SpeakerSegmentEmbedder
+    ) {
+        guard let warming = embedder as? any SpeakerSegmentLengthPrewarming,
+              !(embedder is any ContextualSpeakerSegmentEmbedder) else { return }
+        let counts = segments.compactMap { segment -> Int? in
+            let bounds = Self.sampleBounds(of: segment, sampleRate: sampleRate, total: total)
+            return bounds.end > bounds.start ? bounds.end - bounds.start : nil
+        }
+        guard !counts.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async { warming.prewarm(sampleCounts: counts) }
+    }
+
+    /// The samples of a `total`-sample recording that `segment` covers, as
+    /// `reembed` slices them (clamped to the recording; empty when end <= start).
+    nonisolated static func sampleBounds(of segment: SpeakerSegment, sampleRate: Int, total: Int) -> (start: Int, end: Int) {
+        (max(0, Int(segment.startTime * Double(sampleRate))), min(total, Int(segment.endTime * Double(sampleRate))))
     }
 
     nonisolated static func isVendorNoSpeechResult(_ error: Error) -> Bool {
@@ -468,27 +497,30 @@ public class DiarizationService: ObservableObject {
                 qualityScore: segment.qualityScore
             )
         }
+        // One pool per turn: whatever the embedder autoreleases (Core ML arrays) is
+        // freed before the next turn, not when the whole meeting is done.
         let result = segments.map { segment -> SpeakerSegment in
-            let a = max(0, Int(segment.startTime * Double(sampleRate)))
-            let b = min(total, Int(segment.endTime * Double(sampleRate)))
-            guard b > a else { return withoutEmbedding(segment) }
-            let embedding: [Float]?
-            if let contextual = embedder as? any ContextualSpeakerSegmentEmbedder {
-                embedding = contextual.embed(audio: samples, sampleRate: sampleRate, startSample: a, endSample: b)
-            } else {
-                embedding = embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate)
+            autoreleasepool { () -> SpeakerSegment in
+                let (a, b) = Self.sampleBounds(of: segment, sampleRate: sampleRate, total: total)
+                guard b > a else { return withoutEmbedding(segment) }
+                let embedding: [Float]?
+                if let contextual = embedder as? any ContextualSpeakerSegmentEmbedder {
+                    embedding = contextual.embed(audio: samples, sampleRate: sampleRate, startSample: a, endSample: b)
+                } else {
+                    embedding = embedder.embed(samples: Array(samples[a..<b]), sampleRate: sampleRate)
+                }
+                guard let emb = embedding else {
+                    return withoutEmbedding(segment)
+                }
+                replaced += 1
+                return SpeakerSegment(
+                    speakerId: segment.speakerId,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime,
+                    embedding: emb,
+                    qualityScore: segment.qualityScore
+                )
             }
-            guard let emb = embedding else {
-                return withoutEmbedding(segment)
-            }
-            replaced += 1
-            return SpeakerSegment(
-                speakerId: segment.speakerId,
-                startTime: segment.startTime,
-                endTime: segment.endTime,
-                embedding: emb,
-                qualityScore: segment.qualityScore
-            )
         }
         AppLogger.transcription.info("Re-embedded segments with \(embedder.identifier)", [
             "replaced": "\(replaced)", "total": "\(segments.count)", "dim": "\(embedder.dimension)"
@@ -571,6 +603,7 @@ public class DiarizationService: ObservableObject {
                 qualityScore: min(max(turn.meanActiveProbability, 0), 1)
             )
         }
+        prewarmVoiceprintLengths(for: segments, sampleCount: audio.count, sampleRate: modelSampleRate, using: embedder)
         let finalSegments = reembed(segments: segments, samples: audio, sampleRate: modelSampleRate, using: embedder)
 
         let speakerIds = Set(finalSegments.map { $0.speakerId })

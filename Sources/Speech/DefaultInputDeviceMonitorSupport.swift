@@ -5,7 +5,9 @@
 // without pulling in EventReporter/CoreAudioInputDeviceLookup, the
 // same constraint that keeps DefaultInputDeviceMonitor's @MainActor class
 // itself out of that list. See DefaultInputDeviceMonitor.swift for the
-// CoreAudio-facing facade that owns these.
+// CoreAudio-facing facade that owns these. Also holds the off-main HAL
+// listener registration queue and the default-input registration state
+// machine (see "Off-main HAL listener registration" below).
 
 import CoreAudio
 import Foundation
@@ -283,5 +285,196 @@ final class DefaultInputDeviceNotificationLookupDispatcher: @unchecked Sendable 
             guard !mailbox.isClosed else { return }
             await deliver(deviceID, request)
         }
+    }
+}
+
+// MARK: - Off-main HAL listener registration
+
+/// Carries one `AudioObjectPropertyListenerBlock` value across the
+/// registration queue hop. The add and the later remove must pass the *same*
+/// block object: re-bridging a Swift closure makes a new block, and
+/// `AudioObjectRemovePropertyListenerBlock` then silently fails to match.
+/// The block itself is only ever invoked by CoreAudio on `DispatchQueue.main`.
+final class HALListenerBlockBox: @unchecked Sendable {
+    let block: AudioObjectPropertyListenerBlock
+
+    init(_ block: @escaping AudioObjectPropertyListenerBlock) {
+        self.block = block
+    }
+}
+
+/// The app's first CoreAudio call pays for HAL client init (40 ms on a warm
+/// coreaudiod, 5 s+ when its XPC to the capture-defaults service stalls; Sentry
+/// APPLE-MACOS-31). At launch that first call used to be a listener add on the
+/// main thread, before the status item existed. Both launch-time system-object
+/// listener adds (default input in `DefaultInputDeviceMonitor`, device list in
+/// `PersistentDictationInputController+Live.swift`) now run on this one serial
+/// queue instead; CoreAudio still delivers their callbacks on
+/// `DispatchQueue.main`, so subscribers see no change. Whichever add runs
+/// first does (or waits for) HAL init off main.
+///
+/// Registering a listener opens no device and never touches an
+/// `AVAudioEngine` or its `inputNode`, so AirPods as the default input stay in
+/// A2DP exactly as before. Removes stay on main: they only run after their add
+/// finished, when the HAL is already up and a remove costs microseconds.
+enum HALListenerRegistrationQueue {
+    static let queue = DispatchQueue(
+        label: "com.transcripted.hal-listener-registration",
+        qos: .userInitiated
+    )
+
+    /// Adds `listener` for `selector` on the system object off main, with
+    /// callbacks delivered on main. `completion` runs on the main actor with
+    /// the HAL status, after the add returned.
+    static func addSystemObjectListener(
+        selector: AudioObjectPropertySelector,
+        listener: HALListenerBlockBox,
+        completion: @escaping @MainActor (OSStatus) -> Void
+    ) {
+        run({
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            return AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                DispatchQueue.main,
+                listener.block
+            )
+        }, then: completion)
+    }
+
+    /// Runs `work` on the registration queue, in submission order, then hands
+    /// its result to `completion` on the main actor. Completions arrive in the
+    /// same order as their work (both hops are FIFO serial queues).
+    static func run<Result>(
+        _ work: @escaping @Sendable () -> Result,
+        then completion: @escaping @MainActor (Result) -> Void
+    ) {
+        let hop = RegistrationHop(work: work, completion: completion)
+        queue.async {
+            let result = RegistrationResult(hop.work())
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { hop.completion(result.value) }
+            }
+        }
+    }
+}
+
+/// Carries registration work and its main-actor completion through the queue
+/// hop. `work` only runs on `HALListenerRegistrationQueue.queue`;
+/// `completion` only runs back on the main queue.
+private final class RegistrationHop<Result>: @unchecked Sendable {
+    let work: @Sendable () -> Result
+    let completion: @MainActor (Result) -> Void
+
+    init(work: @escaping @Sendable () -> Result, completion: @escaping @MainActor (Result) -> Void) {
+        self.work = work
+        self.completion = completion
+    }
+}
+
+private final class RegistrationResult<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+}
+
+/// The one default-input listener registration as a small state machine:
+/// idle, registering (the add is queued or blocked in HAL init), registered.
+/// `start` is a no-op unless idle, so callers that start while an add is
+/// pending (ParakeetEngine prewarm, MicActivityMonitor) never queue a second
+/// one. `stop` while registering bumps the generation; the late completion
+/// then removes the very token it added. A failed add goes back to idle so a
+/// later `start` retries. Generic over the token so tests drive it with a
+/// fake registrar and no CoreAudio.
+@MainActor
+final class DefaultInputDeviceListenerRegistrar<Token> {
+    typealias Add = (_ token: Token, _ completion: @escaping @MainActor (OSStatus) -> Void) -> Void
+    typealias Remove = (_ token: Token) -> OSStatus
+
+    private enum Phase {
+        case idle
+        case registering
+        case registered(Token)
+    }
+
+    private var phase: Phase = .idle
+    private let add: Add
+    private let remove: Remove
+
+    /// Bumped on every stop and every failed add. Results tagged with an older
+    /// generation are stale.
+    private(set) var generation: UInt64 = 0
+
+    init(add: @escaping Add, remove: @escaping Remove) {
+        self.add = add
+        self.remove = remove
+    }
+
+    /// True while an add is pending or live.
+    var isActive: Bool {
+        if case .idle = phase { return false }
+        return true
+    }
+
+    var isRegistered: Bool {
+        if case .registered = phase { return true }
+        return false
+    }
+
+    /// Queues one add. Returns false (and does nothing) unless idle.
+    /// `onFailure` runs on the main actor with the HAL status if this add is
+    /// still current when it fails.
+    @discardableResult
+    func start(_ token: Token, onFailure: @escaping @MainActor (OSStatus) -> Void) -> Bool {
+        guard case .idle = phase else { return false }
+        phase = .registering
+        let started = generation
+        add(token) { [weak self] status in
+            self?.complete(token, generation: started, status: status, onFailure: onFailure)
+        }
+        return true
+    }
+
+    /// Tears the registration down. Returns false when nothing was pending or
+    /// live, or when the HAL refused the remove (state kept, as before).
+    @discardableResult
+    func stop() -> Bool {
+        switch phase {
+        case .idle:
+            return false
+        case .registering:
+            break
+        case .registered(let token):
+            guard remove(token) == noErr else { return false }
+        }
+        phase = .idle
+        generation &+= 1
+        return true
+    }
+
+    private func complete(
+        _ token: Token,
+        generation started: UInt64,
+        status: OSStatus,
+        onFailure: @MainActor (OSStatus) -> Void
+    ) {
+        guard started == generation, case .registering = phase else {
+            // stop() ran while this add was pending. Undo it with the same token.
+            if status == noErr { _ = remove(token) }
+            return
+        }
+        guard status == noErr else {
+            phase = .idle
+            generation &+= 1
+            onFailure(status)
+            return
+        }
+        phase = .registered(token)
     }
 }

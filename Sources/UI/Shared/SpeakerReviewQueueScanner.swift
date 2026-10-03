@@ -546,7 +546,10 @@ enum SpeakerReviewQueueScanner {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
-        guard let data = try? handle.read(upToCount: reviewPreviewByteLimit) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        // Pool the read so a scan over many files doesn't keep every buffer alive.
+        return autoreleasepool(invoking: { () -> String? in
+            guard let data = try? handle.read(upToCount: reviewPreviewByteLimit) else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        })
     }
 }

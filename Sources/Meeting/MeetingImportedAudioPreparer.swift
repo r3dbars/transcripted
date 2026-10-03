@@ -993,12 +993,12 @@ enum MeetingImportedAudioPreparer {
         }
 
         do {
-            while true {
+            // One pool per chunk: without it every chunk's Data stays alive until the
+            // loop ends, so the copy would hold (and leave dirty) the whole file.
+            while try autoreleasepool(invoking: { () throws -> Bool in
                 try Task.checkCancellation()
-                let chunk = try readHandle.read(upToCount: chunkSize) ?? Data()
-                if chunk.isEmpty { break }
-                try writeHandle.write(contentsOf: chunk)
-            }
+                guard let chunk = try readHandle.read(upToCount: chunkSize), !chunk.isEmpty else { return false }
+                try writeHandle.write(contentsOf: chunk); return true }) {}
             try writeHandle.close()
         } catch {
             try? writeHandle.close()

@@ -139,16 +139,22 @@ extension Audio {
 
     // MARK: - System Audio Level
 
+    /// The system tap drains in ~50 ms bursts once buffers flow, so a 0.15 s
+    /// gate would land some publishes on the fourth burst (200 ms) and slow
+    /// the meter's scroll. 0.13 s publishes on every third burst, ~150 ms,
+    /// the same pace as the mic.
+    static let systemLevelPublishInterval: CFTimeInterval = 0.13
+
     func calculateSystemLevel(buffer: AVAudioPCMBuffer) {
         recordSystemSignalPeak(linearPeak(buffer: buffer))
 
-        // System buffers land far more often than mic buffers. Same time-gate
-        // as the mic path so the visualizer history publishes on a fixed
+        // System buffers land far more often than mic buffers. A time gate
+        // like the mic path's, so the visualizer history publishes on a fixed
         // cadence instead of per callback (the old every-4th-callback counter
         // still updated ~24x/s).
         let shouldProcess: Bool = systemLevelLock.withLock {
             let now = CACurrentMediaTime()
-            guard now - lastSystemLevelPublishTime >= Audio.levelPublishInterval else { return false }
+            guard now - lastSystemLevelPublishTime >= Audio.systemLevelPublishInterval else { return false }
             lastSystemLevelPublishTime = now
             return true
         }

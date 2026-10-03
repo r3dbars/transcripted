@@ -6,7 +6,7 @@
 import AppKit
 
 extension NotchIslandDropView {
-    func buildDictationTarget(appName: String?, icon: NSImage?, showsPreview: Bool, isWriting: Bool) {
+    func buildDictationTarget(appName: String?, icon: () -> NSImage?, showsPreview: Bool, isWriting: Bool) {
         if showsPreview, let preview = dictationPreviewView {
             preview.removeFromSuperview()
             add(preview)
@@ -17,8 +17,22 @@ extension NotchIslandDropView {
         guard !isWriting else { return }
         add(buttonRow(leading: [], trailing: [
             button("Cancel", .plain, .dictationCancel),
-            button(Self.insertTitle(appName: appName), .accent, .dictationStop, appIcon: appName == nil ? nil : icon),
+            button(Self.insertTitle(appName: appName), .accent, .dictationStop, appIcon: appName == nil ? nil : icon()),
         ]))
+    }
+
+    /// The live words are one view every dictation drop-down shares. A kept
+    /// drop-down can come back only while it still holds them.
+    var canComeBack: Bool {
+        guard case .dictationTarget(_, true, _) = drop else { return true }
+        return dictationPreviewView?.isDescendant(of: self) ?? false
+    }
+
+    /// A kept drop-down is on screen again: show the newest words, as a new
+    /// one does when it opens.
+    func cameBack() {
+        guard case .dictationTarget(_, true, _) = drop, let preview = dictationPreviewView else { return }
+        DispatchQueue.main.async { [weak preview] in preview?.scrollToNewest() }
     }
 
     /// The take that just landed. When the live words were up, the same view

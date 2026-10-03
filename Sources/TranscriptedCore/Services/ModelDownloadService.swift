@@ -418,10 +418,12 @@ public enum ModelDownloadService {
         defer { try? fileHandle.close() }
         var hasher = CryptoKit.SHA256()
         let chunkSize = 1024 * 1024 // 1MB chunks — large enough for throughput, small enough for memory safety
-        while true {
-            guard let chunk = try fileHandle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+        // Pool each chunk; otherwise every 1 MB read lives until the loop ends.
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            guard let chunk = try fileHandle.read(upToCount: chunkSize), !chunk.isEmpty else { return false }
             hasher.update(data: chunk)
-        }
+            return true
+        }) {}
         let digest = hasher.finalize()
         return digest.map { String(format: "%02x", $0) }.joined()
     }

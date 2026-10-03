@@ -56,6 +56,14 @@
 // mic" keeps music in another browser from ever entering it. It is per
 // process, so the same browser's other tabs (YouTube, a voice assistant
 // talking back) do count; that is why it only shortens the wait.
+//
+// Scan cost: each read is a coreaudiod round trip, and a Mac has 30-60 audio
+// clients. A scan reads every process's bundle ID first and only probes the
+// running flags of processes that can map to a provider (`shouldProbe`:
+// native conferencing apps and browsers, plus any whose bundle read failed).
+// So the three emitted sets only ever hold such bundles; nothing downstream
+// uses others. Widen `shouldProbe` if a consumer ever needs more. The
+// one-shot `currentMicInputBundleIDs` (Boost Mic) stays unfiltered.
 
 import CoreAudio
 import Foundation
@@ -250,6 +258,60 @@ final class MicActivityMonitor: @unchecked Sendable {
                   micFamilies.contains(family) else { return nil }
             return bundleID
         })
+    }
+
+    /// Whether a scan should read a process's running flags, from the bundle
+    /// ID read first. Every consumer of the three sets only acts on bundles
+    /// that map to a provider (`micInputProvider`: native conferencing apps
+    /// and browsers), so other processes are skipped. A failed read (`nil`)
+    /// fails open and is probed; `""` (no bundle) and our own family are
+    /// dropped downstream anyway. Widen this if a consumer ever needs more.
+    static func shouldProbe(bundleID: String?, ownBundleID: String) -> Bool {
+        guard let bundleID else { return true }
+        guard !bundleID.isEmpty else { return false }
+        if !ownBundleID.isEmpty, bundleID.matchesBundleFamily(ownBundleID) { return false }
+        return MeetingPromptProvider.micInputProvider(forBundleID: bundleID) != nil
+    }
+
+    /// One scan's process rows, with the CoreAudio reads injected so the
+    /// filtering is testable. Reads each process's bundle ID (`label`) first
+    /// and only probes the ones `shouldProbe` keeps. Output is read for
+    /// native conferencing processes always, for browser processes only
+    /// when some browser holds the mic this scan (the only time browser
+    /// output is used), and for unlabeled processes always. A process with
+    /// a flag set gets a fresh `bundleID` read, and that value is what the
+    /// row carries, as before this filter existed.
+    static func probedProcessAudioState<Object>(
+        objects: [Object],
+        ownBundleID: String,
+        label: (Object) -> String?,
+        bundleID: (Object) -> String?,
+        isRunningInput: (Object) -> Bool,
+        isRunningOutput: (Object) -> Bool
+    ) -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
+        let probed: [(object: Object, label: String?, isRunningInput: Bool, freshBundleID: String?)] =
+            objects.compactMap { object in
+                let objectLabel = label(object)
+                guard shouldProbe(bundleID: objectLabel, ownBundleID: ownBundleID) else { return nil }
+                let input = isRunningInput(object)
+                return (object, objectLabel, input, input ? bundleID(object) : nil)
+            }
+        let browserHoldsMic = probed.contains { row in
+            row.isRunningInput
+                && row.freshBundleID.flatMap(MeetingPromptProvider.browserFamily(forBundleID:)) != nil
+        }
+        return probed.map { row in
+            let readsOutput: Bool
+            if let objectLabel = row.label {
+                readsOutput = MeetingPromptProvider.audioOutputProvider(forBundleID: objectLabel) != nil
+                    || (browserHoldsMic && MeetingPromptProvider.browserFamily(forBundleID: objectLabel) != nil)
+            } else {
+                readsOutput = true
+            }
+            let output = readsOutput && isRunningOutput(row.object)
+            let fresh = row.isRunningInput ? row.freshBundleID : (output ? bundleID(row.object) : nil)
+            return (bundleID: fresh, isRunningInput: row.isRunningInput, isRunningOutput: output)
+        }
     }
 
     // MARK: - Scanning (on `queue`)
@@ -490,19 +552,14 @@ final class MicActivityMonitor: @unchecked Sendable {
     // static one-shot; read-only, no stored-state mutation)
 
     private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
-        Self.processObjectIDs().map { object in
-            let isRunningInput = Self.isRunningInputProperty(object)
-            let isRunningOutput = Self.isRunningOutputProperty(object)
-            // Every consumer ignores the bundle ID of a process that is doing
-            // no audio, and most of the 30-60 audio clients on a Mac are idle.
-            // Skipping the read saves a coreaudiod round trip and a CFString
-            // per idle process on every scan, including the 5 s backstop.
-            return (
-                bundleID: (isRunningInput || isRunningOutput) ? Self.bundleIDProperty(object) : nil,
-                isRunningInput: isRunningInput,
-                isRunningOutput: isRunningOutput
-            )
-        }
+        Self.probedProcessAudioState(
+            objects: Self.processObjectIDs(),
+            ownBundleID: ownBundleID,
+            label: Self.rawBundleIDProperty,
+            bundleID: Self.bundleIDProperty,
+            isRunningInput: Self.isRunningInputProperty,
+            isRunningOutput: Self.isRunningOutputProperty
+        )
     }
 
     /// One-shot read of which non-self processes hold the mic input right
@@ -565,6 +622,14 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private static func bundleIDProperty(_ object: AudioObjectID) -> String? {
+        guard let bundleID = rawBundleIDProperty(object) else { return nil }
+        return bundleID.isEmpty ? nil : bundleID
+    }
+
+    /// The process's bundle ID as CoreAudio reports it: `nil` only when the
+    /// read itself failed, `""` for a process with no bundle (a daemon).
+    /// `shouldProbe` needs that difference: it fails open on `nil`.
+    private static func rawBundleIDProperty(_ object: AudioObjectID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyBundleID,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -574,8 +639,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &unmanaged)
         guard status == noErr, let unmanaged else { return nil }
-        let bundleID = unmanaged.takeRetainedValue() as String
-        return bundleID.isEmpty ? nil : bundleID
+        return unmanaged.takeRetainedValue() as String
     }
 
     private func defaultInputDeviceID() -> AudioObjectID? {

@@ -12,9 +12,12 @@
 // The model is a multifunction package, one fixed-length function per input length
 // (1, 2, 4 and 8 s, fp16): a single flexible-length graph re-plans on every length
 // change and falls off the GPU. `CoreMLSpeakerSegmentEmbedder` tiles each piece up to
-// the next length and routes it to that length's function. Each loaded function holds
-// about 125 MB of GPU memory, so they are released after a minute without a call and
-// reload on the next meeting.
+// the next length and routes it to that length's function. Loading a function costs
+// a few MB; its GPU memory comes with its first prediction (about 370 MB for the 8 s
+// function, 470-540 MB with all four in use, settling to about 210-230 MB a few
+// seconds after the last call). They are released after a minute without a call and
+// reload on the next meeting: the pipeline reloads all four at job start (load only)
+// and warms the lengths a meeting's turns need just before re-embedding them.
 
 import Foundation
 import CoreML

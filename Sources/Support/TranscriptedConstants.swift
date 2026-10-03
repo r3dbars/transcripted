@@ -22,8 +22,13 @@ enum TranscriptedConstants {
     /// Audio tap buffer size (AVAudioEngine installTap)
     static let audioTapBufferSize: UInt32 = 1024
 
-    /// Audio level metering throttle interval in seconds (~20Hz)
+    /// Audio level metering throttle interval in seconds (~20Hz). Also the
+    /// dictation waveform's pace: the island steps one bar per interval.
     static let audioMeteringInterval: TimeInterval = 0.05
+
+    /// Audio per dictation waveform reading: every buffer in it is metered
+    /// (`DictationAudioLevelWindow`), about 25-30 readings a second.
+    static let dictationLevelReadingInterval: TimeInterval = 1.0 / 30
 
     /// Audio level floor in dB (below this = silence)
     static let audioLevelFloorDB: Float = -50.0

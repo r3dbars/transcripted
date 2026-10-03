@@ -13,7 +13,7 @@ actor CompanionTransport: Transport {
     private var forwarding: Task<Void, Never>?
     private var started = false
 
-    init(underlying: any Transport = StdioTransport()) {
+    init(underlying: any Transport = BlockingStdioTransport()) {
         self.underlying = underlying
         var continuation: AsyncThrowingStream<Data, Swift.Error>.Continuation!
         self.stream = AsyncThrowingStream { continuation = $0 }

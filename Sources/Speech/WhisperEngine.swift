@@ -17,6 +17,15 @@ final class WhisperEngine: ObservableObject {
     private var initializationTask: Task<Void, Never>?
     private var initializationGeneration = SupersessionEpoch()
 
+    /// Ties the cached-model manifest to this app build, so the first Whisper
+    /// load after an update re-checks Hugging Face once, like every load did.
+    private static let cacheRevision: String = {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(version)-\(build)"
+    }()
+
     func isModelLoaded(for model: TranscriptionModelChoice) -> Bool {
         loadedModel == model && whisperKit != nil && modelDownloadState.isReady
     }
@@ -255,40 +264,71 @@ final class WhisperEngine: ObservableObject {
 
         do {
             let downloadBase = FileManager.default.transcriptedWhisperModelsDir
-            let modelFolder = try await WhisperKit.download(
+            let repo = modelRepo
+            // Fast path: a Transcripted-written manifest that still matches the
+            // disk lets us skip the Hugging Face listing + HEADs (and works
+            // offline). Any mismatch, or a failed cached load, falls back to
+            // the original download-then-load path once.
+            let outcome = try await WhisperCachedModelLoad.run(
+                downloadBase: downloadBase,
+                repo: repo,
                 variant: variant,
-                downloadBase: downloadBase,
-                useBackgroundSession: false,
-                from: modelRepo
-            ) { [weak self] progress in
-                Task { @MainActor in
-                    guard
-                        let self,
-                        self.initializationGeneration.isCurrent(generation),
-                        self.initializingModel == model
-                    else { return }
-                    self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+                revision: Self.cacheRevision,
+                isCurrent: { [weak self] in
+                    guard let self else { return false }
+                    return self.initializationGeneration.isCurrent(generation)
+                },
+                willLoad: { [weak self] folder, cached in
+                    guard let self else { return }
+                    self.modelDownloadState = .loading
+                    if cached {
+                        AppLogger.transcription.info("WHISPER | using cached \(model.title) from \(folder.path)")
+                    } else {
+                        AppLogger.transcription.info("WHISPER | loading \(model.title) from \(folder.path)")
+                    }
+                },
+                download: { [weak self] in
+                    // Only after a failed cached load; the normal path is
+                    // already .downloading(progress: 0) from above.
+                    if let self, self.modelDownloadState == .loading {
+                        self.modelDownloadState = .downloading(progress: 0)
+                    }
+                    return try await WhisperKit.download(
+                        variant: variant,
+                        downloadBase: downloadBase,
+                        useBackgroundSession: false,
+                        from: repo
+                    ) { [weak self] progress in
+                        Task { @MainActor in
+                            guard
+                                let self,
+                                self.initializationGeneration.isCurrent(generation),
+                                self.initializingModel == model
+                            else { return }
+                            self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+                        }
+                    }
+                },
+                load: { folder in
+                    let config = WhisperKitConfig(
+                        model: variant,
+                        downloadBase: downloadBase,
+                        modelRepo: repo,
+                        modelFolder: folder.path,
+                        verbose: false,
+                        logLevel: .error,
+                        prewarm: false,
+                        load: true,
+                        download: false,
+                        useBackgroundDownloadSession: false
+                    )
+                    return try await WhisperKit(config)
                 }
-            }
-
-            guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
-            modelDownloadState = .loading
-            AppLogger.transcription.info("WHISPER | loading \(model.title) from \(modelFolder.path)")
-
-            let config = WhisperKitConfig(
-                model: variant,
-                downloadBase: downloadBase,
-                modelRepo: modelRepo,
-                modelFolder: modelFolder.path,
-                verbose: false,
-                logLevel: .error,
-                prewarm: false,
-                load: true,
-                download: false,
-                useBackgroundDownloadSession: false
             )
-            let pipe = try await WhisperKit(config)
 
+            guard let outcome else { return }
+            let pipe = outcome.pipe
+            let modelFolder = outcome.modelFolder
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else {
                 await pipe.unloadModels()
                 return

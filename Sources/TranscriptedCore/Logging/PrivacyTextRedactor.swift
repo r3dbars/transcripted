@@ -68,6 +68,39 @@ public enum PrivacyTextRedactor {
         pathDiagnosticMetadataKeys: Set<String>,
         redactEmbeddedAbsolutePaths: Bool = false
     ) -> String {
+        // Most telemetry values are short ASCII tokens ("true", UUIDs, event
+        // names) that no pattern below can match. Returning them unchanged is
+        // exactly what the regex chain would do, minus ~16 regex passes.
+        if isInertASCII(text) { return text }
+        return redactChain(
+            text,
+            pathDiagnosticMetadataKeys: pathDiagnosticMetadataKeys,
+            redactEmbeddedAbsolutePaths: redactEmbeddedAbsolutePaths,
+            useByteGates: true
+        )
+    }
+
+    /// Reference path for differential tests: the full regex chain with no
+    /// fast paths or byte gates. Output must always equal `redact`.
+    static func redactWithoutFastPaths(
+        _ text: String,
+        pathDiagnosticMetadataKeys: Set<String>,
+        redactEmbeddedAbsolutePaths: Bool = false
+    ) -> String {
+        redactChain(
+            text,
+            pathDiagnosticMetadataKeys: pathDiagnosticMetadataKeys,
+            redactEmbeddedAbsolutePaths: redactEmbeddedAbsolutePaths,
+            useByteGates: false
+        )
+    }
+
+    private static func redactChain(
+        _ text: String,
+        pathDiagnosticMetadataKeys: Set<String>,
+        redactEmbeddedAbsolutePaths: Bool,
+        useByteGates: Bool
+    ) -> String {
         var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return "" }
 
@@ -90,9 +123,66 @@ public enum PrivacyTextRedactor {
         result = replace(inlineSensitiveAssignmentRegex, in: result, with: "$1=\(redactedSensitiveValue)")
         result = replace(engineDeviceLogRegex, in: result, with: "($1, \(redactedSensitiveValue))")
         result = replace(secretAssignmentRegex, in: result, with: "$1=\(redactedSecret)")
-        result = replace(emailRegex, in: result, with: redactedEmail)
-        result = replace(localHostnameRegex, in: result, with: "[redacted-host]")
+        // Both patterns need a literal byte sequence to match: emailRegex an
+        // '@', localHostnameRegex (case-sensitive) ".local". Check the current
+        // intermediate result at the UTF-8 byte level, never Character-level.
+        if !useByteGates || utf8Contains(result, byte: 0x40) {
+            result = replace(emailRegex, in: result, with: redactedEmail)
+        }
+        if !useByteGates || utf8Contains(result, needle: localNeedle) {
+            result = replace(localHostnameRegex, in: result, with: "[redacted-host]")
+        }
         return result
+    }
+
+    // MARK: - Fast-path predicates
+
+    // Every pattern in the chain above needs at least one of these to match:
+    // whitespace or a control/non-ASCII byte, one of the guard bytes
+    // / : = @ " (, or one of the case-sensitive needles below. Any new pattern
+    // must need one of these bytes or needles, or this predicate must be
+    // updated alongside it (PrivacyTextRedactorFastPathTests checks parity).
+    private static let inertNeedles: [[UInt8]] = [
+        "sk-", ".local", "-----", "ghp_", "github_pat_", "phc_", "AKIA", "ASIA", "AIza", "xox", "eyJ",
+    ].map { Array($0.utf8) }
+    private static let localNeedle: [UInt8] = Array(".local".utf8)
+
+    /// Non-empty printable ASCII (0x21-0x7E) with no guard byte or needle.
+    /// Such text has nothing to trim and nothing any pattern can match.
+    private static func isInertASCII(_ text: String) -> Bool {
+        withUTF8Bytes(text) { bytes in
+            guard !bytes.isEmpty else { return false }
+            for byte in bytes {
+                switch byte {
+                case 0x2F, 0x3A, 0x3D, 0x40, 0x22, 0x28: // / : = @ " (
+                    return false
+                case 0x21...0x7E:
+                    continue
+                default:
+                    return false
+                }
+            }
+            for needle in inertNeedles where bytes.containsSubsequence(needle) {
+                return false
+            }
+            return true
+        }
+    }
+
+    private static func utf8Contains(_ text: String, byte: UInt8) -> Bool {
+        withUTF8Bytes(text) { $0.contains(byte) }
+    }
+
+    private static func utf8Contains(_ text: String, needle: [UInt8]) -> Bool {
+        withUTF8Bytes(text) { $0.containsSubsequence(needle) }
+    }
+
+    private static func withUTF8Bytes<R>(_ text: String, _ body: (UnsafeBufferPointer<UInt8>) -> R) -> R {
+        if let result = text.utf8.withContiguousStorageIfAvailable(body) {
+            return result
+        }
+        var native = text
+        return native.withUTF8(body)
     }
 
     private static func makeRegex(
@@ -309,5 +399,31 @@ public enum PrivacyTextRedactor {
 
     private static func normalizedPathToken(_ token: String) -> String {
         token.trimmingCharacters(in: CharacterSet(charactersIn: ",;:)]}"))
+    }
+}
+
+private extension UnsafeBufferPointer where Element == UInt8 {
+    func containsSubsequence(_ needle: [UInt8]) -> Bool {
+        guard !needle.isEmpty else { return true }
+        guard needle.count <= count else { return false }
+        let first = needle[0]
+        var start = 0
+        let lastStart = count - needle.count
+        while start <= lastStart {
+            if self[start] == first {
+                var matched = true
+                var offset = 1
+                while offset < needle.count {
+                    if self[start + offset] != needle[offset] {
+                        matched = false
+                        break
+                    }
+                    offset += 1
+                }
+                if matched { return true }
+            }
+            start += 1
+        }
+        return false
     }
 }

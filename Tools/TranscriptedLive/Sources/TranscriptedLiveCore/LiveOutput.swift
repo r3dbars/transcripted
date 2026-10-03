@@ -50,6 +50,7 @@ public final class LiveOutput {
     private var session: LiveSession
     private var handle: FileHandle?
     private var lastSessionWrite = Date.distantPast
+    private let now: () -> Date
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -57,15 +58,20 @@ public final class LiveOutput {
         return encoder
     }()
 
-    public init(root: URL = LiveOutput.defaultRoot, model: String) throws {
+    public convenience init(root: URL = LiveOutput.defaultRoot, model: String) throws {
+        try self.init(root: root, model: model, now: { Date() })
+    }
+
+    init(root: URL, model: String, now: @escaping () -> Date) throws {
         self.root = root
+        self.now = now
         try FileManager.default.createDirectory(at: root.appendingPathComponent("meetings"), withIntermediateDirectories: true)
         if let pid = Self.runningHelperPid(sessionURL: root.appendingPathComponent("session.json")) {
             throw LiveOutputError.alreadyRunning(pid: pid)
         }
         session = LiveSession(
             state: .idle, meetingId: nil, title: nil, source: nil, model: model,
-            startedAt: nil, endedAt: nil, updatedAt: Date(), utterancesPath: nil, lineCount: 0,
+            startedAt: nil, endedAt: nil, updatedAt: now(), utterancesPath: nil, lineCount: 0,
             audioSeconds: 0, partial: [:], pid: ProcessInfo.processInfo.processIdentifier
         )
         try writeSession(force: true)
@@ -112,16 +118,34 @@ public final class LiveOutput {
         try writeSession(force: false)
     }
 
+    /// The idle heartbeat: at most one session.json write this often. The mod
+    /// (claude-mod/hooks/register.tsx) counts a helper as alive for
+    /// HELPER_ALIVE_MS = 10 s and a recording as stale after STALE_MS = 15 s,
+    /// so keep this well under both. The two ship separately (the helper with
+    /// the app, the mod through the marketplace); change them together.
+    static let heartbeatSeconds: TimeInterval = 4
+
     /// Keeps `updatedAt` fresh so the mod can tell a live helper from a dead one.
+    /// While recording, `update()` already writes up to four times a second.
     public func heartbeat() throws {
-        try writeSession(force: Date().timeIntervalSince(lastSessionWrite) > 2)
+        let elapsed = now().timeIntervalSince(lastSessionWrite)
+        // A negative gap means the wall clock jumped back; write rather than stall.
+        guard elapsed >= Self.heartbeatSeconds || elapsed < 0 else { return }
+        try writeSession(force: true)
+    }
+
+    /// Writes session.json now, whatever the heartbeat gap. The watch calls
+    /// it right before a model reload, which writes nothing while it runs,
+    /// so `updatedAt` starts that window fresh.
+    public func touch() throws {
+        try writeSession(force: true)
     }
 
     public func end() throws {
         try? handle?.close()
         handle = nil
         session.state = .ended
-        session.endedAt = Date()
+        session.endedAt = now()
         session.partial = [:]
         try writeSession(force: true)
     }
@@ -129,7 +153,7 @@ public final class LiveOutput {
     public func shutdown() {
         try? handle?.close()
         handle = nil
-        if session.state == .recording { session.endedAt = Date() }
+        if session.state == .recording { session.endedAt = now() }
         session.state = session.meetingId == nil ? .idle : .ended
         session.partial = [:]
         session.pid = 0
@@ -137,11 +161,11 @@ public final class LiveOutput {
     }
 
     private func writeSession(force: Bool) throws {
-        let now = Date()
-        guard force || now.timeIntervalSince(lastSessionWrite) >= 0.25 else { return }
-        session.updatedAt = now
+        let time = now()
+        guard force || time.timeIntervalSince(lastSessionWrite) >= 0.25 else { return }
+        session.updatedAt = time
         try encoder.encode(session).write(to: sessionURL, options: .atomic)
-        lastSessionWrite = now
+        lastSessionWrite = time
     }
 
     /// The pid in an existing session.json, if that process is still a

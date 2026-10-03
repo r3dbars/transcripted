@@ -6,6 +6,9 @@ import TranscriptedCore
 final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDelegate {
     private let speakerPeopleModel: SpeakerPeopleSettingsViewModel
     private let navigationModel: TranscriptedSettingsNavigationModel
+    /// Owned here, not by the view, so a closed window can hold Today's
+    /// rebuilds and hand the newest one over before it shows again.
+    private let todayViewModel: TodayViewModel
     private let hostingController: NSHostingController<TranscriptedSettingsView>
 
     init(appState: TranscriptedAppState, actions: TranscriptedSettingsActions) {
@@ -19,11 +22,14 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         )
         self.speakerPeopleModel = speakerPeopleModel
         self.navigationModel = TranscriptedSettingsNavigationModel()
+        let todayViewModel = TodayViewModel()
+        self.todayViewModel = todayViewModel
         self.hostingController = NSHostingController(
             rootView: TranscriptedSettingsView(
                 appState: appState,
                 navigation: navigationModel,
                 speakerPeopleModel: speakerPeopleModel,
+                todayViewModel: todayViewModel,
                 actions: actions
             )
         )
@@ -61,6 +67,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
+        navigationModel.isWindowOpen = true
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page
         navigationModel.selectedPage = page
@@ -73,6 +80,8 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
                 "source": source,
             ]
         )
+        // Publish anything Today built while closed before the first frame.
+        todayViewModel.windowWillShow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -100,5 +109,9 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
+        // Not a cancel: Home's search, playback and Today's data stay as they
+        // are, so reopening shows the same window. Hidden work is gated on this.
+        navigationModel.isWindowOpen = false
+        todayViewModel.windowDidClose()
     }
 }

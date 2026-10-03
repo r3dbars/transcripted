@@ -279,9 +279,18 @@ extension MeetingSessionController {
                 )
             }
         case .transcribing(let progress):
-            let previousBucket = Int(previousStatus.progress * 4)
-            let currentBucket = Int(progress * 4)
-            if previousStatus.diagnosticName != status.diagnosticName || previousBucket != currentBucket {
+            // Compare raw pipeline progress on both sides; `previousStatus.progress`
+            // is the UI-mapped value and would log on nearly every tick.
+            let previousTranscribingProgress: Double?
+            if case .transcribing(let previousProgress) = previousStatus {
+                previousTranscribingProgress = previousProgress
+            } else {
+                previousTranscribingProgress = nil
+            }
+            if MeetingPipelinePhaseCadence.shouldRecord(
+                previousTranscribingProgress: previousTranscribingProgress,
+                progress: progress
+            ) {
                 DiagnosticsTrail.record(
                     engine: "meeting",
                     event: "meeting_pipeline_phase",

@@ -170,18 +170,6 @@ enum ModelDownloadNetworkPolicy {
     }
 }
 
-private final class ModelDownloadRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        completionHandler(request.url.map(ModelDownloadNetworkPolicy.allows) == true ? request : nil)
-    }
-}
-
 /// Convenient adapter for tests and other local callers.
 struct ClosureModelDownloadTransport: ModelDownloadTransport {
     let handler: @Sendable (URLRequest) async throws -> ModelDownloadResponse
@@ -192,91 +180,6 @@ struct ClosureModelDownloadTransport: ModelDownloadTransport {
 
     func response(for request: URLRequest) async throws -> ModelDownloadResponse {
         try await handler(request)
-    }
-}
-
-/// The production HTTP transport.  URLSession's async byte API feeds bounded
-/// chunks into the manager; no completed model-sized `Data` is retained.
-struct URLSessionModelDownloadTransport: ModelDownloadTransport, Sendable {
-    private let session: URLSession
-    private let chunkSize: Int
-
-    init(session: URLSession? = nil, chunkSize: Int = 64 * 1024) {
-        if let session {
-            self.session = session
-        } else {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-            configuration.urlCache = nil
-            configuration.httpShouldSetCookies = false
-            configuration.httpCookieStorage = nil
-            self.session = URLSession(
-                configuration: configuration,
-                delegate: ModelDownloadRedirectDelegate(),
-                delegateQueue: nil
-            )
-        }
-        self.chunkSize = max(1, chunkSize)
-    }
-
-    func response(for request: URLRequest) async throws -> ModelDownloadResponse {
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TransportError.notHTTPResponse
-        }
-
-        let body = AsyncThrowingStream<Data, Error>(bufferingPolicy: .bufferingOldest(2)) { continuation in
-            let producer = Task {
-                do {
-                    var chunk: [UInt8] = []
-                    chunk.reserveCapacity(chunkSize)
-                    for try await byte in bytes {
-                        chunk.append(byte)
-                        if chunk.count >= chunkSize {
-                            try await Self.yield(Data(chunk), to: continuation)
-                            chunk.removeAll(keepingCapacity: true)
-                        }
-                    }
-                    if !chunk.isEmpty { try await Self.yield(Data(chunk), to: continuation) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in producer.cancel() }
-        }
-
-        var headers: [String: String] = [:]
-        for (key, value) in http.allHeaderFields {
-            if let key = key as? String, let value = value as? String {
-                headers[key] = value
-            }
-        }
-        return ModelDownloadResponse(statusCode: http.statusCode, headers: headers, body: body)
-    }
-
-    /// `AsyncThrowingStream` does not otherwise apply producer backpressure.
-    /// Retry a full bounded buffer instead of dropping a model chunk.
-    private static func yield(
-        _ chunk: Data,
-        to continuation: AsyncThrowingStream<Data, Error>.Continuation
-    ) async throws {
-        while true {
-            switch continuation.yield(chunk) {
-            case .enqueued:
-                return
-            case .dropped:
-                try await Task.sleep(for: .milliseconds(1))
-            case .terminated:
-                throw CancellationError()
-            @unknown default:
-                throw CancellationError()
-            }
-        }
-    }
-
-    private enum TransportError: Error {
-        case notHTTPResponse
     }
 }
 
@@ -319,38 +222,90 @@ final class ModelManager: @unchecked Sendable {
     /// manager's initial check.
     ///
     /// The full SHA-256 of the model (3.4–5.6 GB, seconds of I/O and one
-    /// saturated core) runs once per process for a given set of bytes. The
-    /// clone is still taken every time, and the source's content fingerprint
-    /// (inode, size, modification, change, and creation times, read under
-    /// the directory lock on the descriptor the clone is made from) must
-    /// equal the one recorded at the last full verification in this process.
-    /// Any in-place write or replacement moves the fingerprint and forces the
-    /// full hash again; the size and magic checks still run on every handoff.
-    /// The cache lives in memory only and is dropped whenever the manager
-    /// leaves `.ready`, so an install, delete, or re-download always hashes.
-    /// What this removes is the re-hash on every helper restart.
+    /// saturated core) runs on an unlinked read-only clone of `model.gguf`,
+    /// and the manager holds that clone. While the source's content
+    /// fingerprint (inode, size, modification, change, and creation times,
+    /// read under the directory lock) still equals the one the clone was made
+    /// at, the handoff serves the held bytes: the first time a duplicate of
+    /// the hashed descriptor itself (its pages are already warm), after that
+    /// a fresh clone of it. The served bytes are therefore always bytes this
+    /// process hashed, even if the source is written through a shared
+    /// mapping that the fingerprint can't see. Any in-place write or
+    /// replacement moves the fingerprint and forces a fresh clone and full
+    /// hash; the size and magic checks still run on every handoff. The held
+    /// clone is dropped whenever the manager leaves `.ready`, is cancelled,
+    /// or deletes the model, so an install, delete, or re-download always
+    /// hashes. What this removes is the re-hash on every helper restart.
     func verifiedInstalledModelFile() -> VerifiedModelFile? {
         guard state.isReady else { return nil }
+        if let held = stateQueue.sync(execute: { heldModel }),
+           SecureLocalStorage.contentFingerprint(ofOwnerOnlyFileAt: modelURL) == held.fingerprint,
+           let served = serve(from: held) {
+            return VerifiedModelFile(url: modelURL, handle: served)
+        }
+        releaseHeldModel()
         var fingerprint: SecureLocalStorage.FileContentFingerprint?
-        guard let handle = SecureLocalStorage.openUnlinkedCloneForReading(
-            at: modelURL,
-            fingerprint: &fingerprint
-        ) else { return nil }
-        let previouslyVerified = stateQueue.sync { verifiedFingerprint }
-        let result: VerificationResult?
-        if let fingerprint, fingerprint == previouslyVerified {
-            result = try? verifyModelShape(from: handle)
+        guard let clone = SecureLocalStorage.openUnlinkedCloneForReading(at: modelURL, fingerprint: &fingerprint),
+              let fingerprint,
+              (try? verifyModel(from: clone)) == .valid else { return nil }
+        let candidate = HeldModel(handle: clone, fingerprint: fingerprint, handedOut: false)
+        let replaced: HeldModel? = stateQueue.sync {
+            guard stateStorage.isReady else { return nil }
+            defer { heldModel = candidate }
+            return heldModel
+        }
+        _ = replaced
+        guard let served = serve(from: candidate) else { return nil }
+        return VerifiedModelFile(url: modelURL, handle: served)
+    }
+
+    /// A clone this process hashed, and the source fingerprint it was made at.
+    private struct HeldModel {
+        let handle: FileHandle
+        let fingerprint: SecureLocalStorage.FileContentFingerprint
+        let handedOut: Bool
+    }
+
+    /// Never hands out the held handle itself: the first handoff gets a
+    /// duplicate descriptor, later ones a fresh clone, which is then held in
+    /// its place so the previous helper's pages can go.
+    private func serve(from held: HeldModel) -> FileHandle? {
+        let served: FileHandle
+        let next: HeldModel
+        if held.handedOut {
+            guard let clone = SecureLocalStorage.openUnlinkedClone(of: held.handle, inDirectory: modelDirectory),
+                  let keep = Self.duplicate(clone) else { return nil }
+            served = clone
+            next = HeldModel(handle: keep, fingerprint: held.fingerprint, handedOut: true)
         } else {
-            result = try? verifyModel(from: handle)
+            guard let duplicate = Self.duplicate(held.handle) else { return nil }
+            served = duplicate
+            next = HeldModel(handle: held.handle, fingerprint: held.fingerprint, handedOut: true)
         }
-        guard result == .valid else {
-            stateQueue.sync { verifiedFingerprint = nil }
-            try? handle.close()
-            return nil
+        guard (try? verifyModelShape(from: served)) == .valid,
+              (try? served.seek(toOffset: 0)) != nil else { return nil }
+        let replaced: HeldModel? = stateQueue.sync {
+            guard heldModel?.handle === held.handle else { return nil }
+            defer { heldModel = next }
+            return heldModel
         }
-        stateQueue.sync { verifiedFingerprint = fingerprint }
-        try? handle.seek(toOffset: 0)
-        return VerifiedModelFile(url: modelURL, handle: handle)
+        _ = replaced
+        return served
+    }
+
+    private static func duplicate(_ handle: FileHandle) -> FileHandle? {
+        let descriptor = fcntl(handle.fileDescriptor, F_DUPFD_CLOEXEC, 0)
+        return descriptor >= 0 ? FileHandle(fileDescriptor: descriptor, closeOnDealloc: true) : nil
+    }
+
+    /// Drops the held clone outside `stateQueue`, so closing its descriptor
+    /// never runs under the lock.
+    private func releaseHeldModel() {
+        let released: HeldModel? = stateQueue.sync {
+            defer { heldModel = nil }
+            return heldModel
+        }
+        _ = released
     }
 
     /// Number of full content hashes this manager has computed; tests only.
@@ -359,6 +314,8 @@ final class ModelManager: @unchecked Sendable {
     private let transport: any ModelDownloadTransport
     private let callbackQueue: DispatchQueue
     private let stateQueue = DispatchQueue(label: "com.justinbetker.draft.model-manager-state")
+    /// Full hashes run here, never on the Swift cooperative pool.
+    private let hashQueue = DispatchQueue(label: "com.justinbetker.draft.model-manager-hash")
     private let availableDiskSpace: DiskSpaceProvider
     private let retryDelays: [Duration]
     private let stateHandler: StateHandler?
@@ -366,7 +323,7 @@ final class ModelManager: @unchecked Sendable {
     private var stateStorage: ModelState = .checking
     private var activeTask: Task<Void, Never>?
     private var activeGeneration: UInt64 = 0
-    private var verifiedFingerprint: SecureLocalStorage.FileContentFingerprint?
+    private var heldModel: HeldModel?
     private var fullVerifications = 0
 
     init(
@@ -469,6 +426,7 @@ final class ModelManager: @unchecked Sendable {
             return oldTask
         }
         task?.cancel()
+        releaseHeldModel()
     }
 
     /// Cancels an in-flight operation and removes both the verified model and
@@ -487,6 +445,7 @@ final class ModelManager: @unchecked Sendable {
         }
         task?.cancel()
         await task?.value
+        releaseHeldModel()
         do {
             try removeModelFiles()
             publish(.missing)
@@ -502,12 +461,12 @@ final class ModelManager: @unchecked Sendable {
             try Task.checkCancellation()
             try ensureModelDirectory()
 
-            // Record the launch check's fingerprint so the first runtime
-            // handoff takes the shape-check path instead of hashing the
-            // multi-GB model a second time.
-            var installedFingerprint: SecureLocalStorage.FileContentFingerprint?
-            if case .valid = try verifyModel(at: modelURL, fingerprint: &installedFingerprint) {
-                publish(.ready(modelURL), generation: generation, verifiedFingerprint: installedFingerprint)
+            // Hold the launch check's hashed clone so the first runtime
+            // handoff serves those bytes instead of hashing the multi-GB
+            // model a second time.
+            let installed = try await verifyInstalledModel(qos: .userInitiated)
+            if installed.result == .valid {
+                publish(.ready(modelURL), generation: generation, held: installed.held)
                 return
             }
             if FileManager.default.fileExists(atPath: modelURL.path) {
@@ -521,7 +480,7 @@ final class ModelManager: @unchecked Sendable {
                 partialBytes = 0
             }
             if partialBytes == descriptor.expectedBytes {
-                switch try verifyModel(at: partialURL) {
+                switch try await verifyPartial() {
                 case .valid:
                     try promotePartial()
                     publish(.ready(modelURL), generation: generation)
@@ -535,7 +494,7 @@ final class ModelManager: @unchecked Sendable {
             publish(.verifying, generation: generation)
             try Task.checkCancellation()
 
-            switch try verifyModel(at: partialURL) {
+            switch try await verifyPartial() {
             case .valid:
                 break
             case .checksumMismatch:
@@ -546,8 +505,8 @@ final class ModelManager: @unchecked Sendable {
                 throw ManagerError.invalidModel
             }
             try promotePartial()
-            var promotedFingerprint: SecureLocalStorage.FileContentFingerprint?
-            switch try verifyModel(at: modelURL, fingerprint: &promotedFingerprint) {
+            let promoted = try await verifyInstalledModel(qos: .userInitiated)
+            switch promoted.result {
             case .valid:
                 break
             case .checksumMismatch:
@@ -557,7 +516,7 @@ final class ModelManager: @unchecked Sendable {
                 try? removeItem(at: modelURL)
                 throw ManagerError.invalidModel
             }
-            publish(.ready(modelURL), generation: generation, verifiedFingerprint: promotedFingerprint)
+            publish(.ready(modelURL), generation: generation, held: promoted.held)
         } catch is CancellationError {
             // A delete or a newer operation owns the next state.  Do not turn
             // an intentional cancellation into a user-visible failure.
@@ -694,20 +653,60 @@ final class ModelManager: @unchecked Sendable {
 
     private enum VerificationResult: Equatable { case valid, invalid, checksumMismatch }
 
-    private func verifyModel(at url: URL) throws -> VerificationResult {
-        var unused: SecureLocalStorage.FileContentFingerprint?
-        return try verifyModel(at: url, fingerprint: &unused)
+    /// Hashes an unlinked clone of `model.gguf` off the cooperative pool and
+    /// returns it to hold for the first handoff. A looser mode is tightened
+    /// to 0600 first (only when it differs). When the clone can't be made the
+    /// file is hashed in place instead, so a clone failure never becomes a
+    /// verdict that deletes the model; cancellation throws.
+    private func verifyInstalledModel(
+        qos: DispatchQoS.QoSClass
+    ) async throws -> (result: VerificationResult, held: HeldModel?) {
+        var info = stat()
+        if lstat(modelURL.path, &info) != 0 {
+            if errno == ENOENT { return (.invalid, nil) }
+            throw ManagerError.installationFailed
+        }
+        guard let source = SecureLocalStorage.openExistingFileForReadingAndWriting(at: modelURL) else {
+            throw ManagerError.installationFailed
+        }
+        try? source.close()
+        return try await hashOffPool(qos: qos) { isCancelled in
+            var fingerprint: SecureLocalStorage.FileContentFingerprint?
+            guard let clone = SecureLocalStorage.openUnlinkedCloneForReading(at: self.modelURL, fingerprint: &fingerprint),
+                  let fingerprint else {
+                return (result: try self.verifyModel(at: self.modelURL, isCancelled: isCancelled), held: nil)
+            }
+            let result = try self.verifyModel(from: clone, isCancelled: isCancelled)
+            let held = result == .valid ? HeldModel(handle: clone, fingerprint: fingerprint, handedOut: false) : nil
+            return (result: result, held: held)
+        }
     }
 
-    /// `verifyModel(at:)` that also reports the content fingerprint of the
-    /// exact bytes it hashed. The fingerprint is read from the same locked
-    /// descriptor before and after the hash, and is reported only when the
-    /// bytes hashed valid and nothing about the file moved in between.
-    private func verifyModel(
-        at url: URL,
-        fingerprint: inout SecureLocalStorage.FileContentFingerprint?
-    ) throws -> VerificationResult {
-        fingerprint = nil
+    private func verifyPartial() async throws -> VerificationResult {
+        try await hashOffPool(qos: .userInitiated) { isCancelled in
+            try self.verifyModel(at: self.partialURL, isCancelled: isCancelled)
+        }
+    }
+
+    /// Runs `work` on `hashQueue` at `qos`; cancelling the calling task makes
+    /// the hash throw `CancellationError` at its next chunk.
+    private func hashOffPool<T>(
+        qos: DispatchQoS.QoSClass,
+        _ work: @escaping @Sendable (_ isCancelled: () -> Bool) throws -> T
+    ) async throws -> T {
+        let cancellation = ModelHashCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                hashQueue.async(qos: DispatchQoS(qosClass: qos, relativePriority: 0), flags: .enforceQoS) {
+                    continuation.resume(with: Result { try work(cancellation.isCancelled) })
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+
+    private func verifyModel(at url: URL, isCancelled: () -> Bool = { false }) throws -> VerificationResult {
         var info = stat()
         if lstat(url.path, &info) != 0 {
             if errno == ENOENT { return .invalid }
@@ -717,23 +716,15 @@ final class ModelManager: @unchecked Sendable {
             throw ManagerError.installationFailed
         }
         defer { try? handle.close() }
-        var before = stat()
-        guard fstat(handle.fileDescriptor, &before) == 0 else { throw ManagerError.installationFailed }
-        let result = try verifyModel(from: handle)
-        var after = stat()
-        if result == .valid, fstat(handle.fileDescriptor, &after) == 0 {
-            let hashed = SecureLocalStorage.FileContentFingerprint(before)
-            if SecureLocalStorage.FileContentFingerprint(after) == hashed { fingerprint = hashed }
-        }
-        return result
+        return try verifyModel(from: handle, isCancelled: isCancelled)
     }
 
-    private func verifyModel(from handle: FileHandle) throws -> VerificationResult {
+    private func verifyModel(from handle: FileHandle, isCancelled: () -> Bool = { false }) throws -> VerificationResult {
         let shape = try verifyModelShape(from: handle)
         guard shape == .valid else { return shape }
         try handle.seek(toOffset: 0)
         stateQueue.sync { fullVerifications += 1 }
-        let digest = try sha256(from: handle)
+        let digest = try ModelFileHasher.sha256Hex(from: handle, isCancelled: isCancelled)
         return digest == descriptor.sha256.lowercased() ? .valid : .checksumMismatch
     }
 
@@ -751,8 +742,6 @@ final class ModelManager: @unchecked Sendable {
               bytes == Data([0x47, 0x47, 0x55, 0x46]) else { return .invalid }
         return .valid
     }
-
-    private func sha256(from handle: FileHandle) throws -> String { try ModelFileHasher.sha256Hex(from: handle) }
 
     private func ensureModelDirectory() throws {
         do {
@@ -842,18 +831,19 @@ final class ModelManager: @unchecked Sendable {
     private func publish(
         _ state: ModelState,
         generation: UInt64? = nil,
-        verifiedFingerprint newFingerprint: SecureLocalStorage.FileContentFingerprint? = nil
+        held newHeld: HeldModel? = nil
     ) {
+        var released: HeldModel?
         let callbacks: (StateHandler?, ProgressHandler?) = stateQueue.sync {
             if let generation, generation != activeGeneration { return (nil, nil) }
             stateStorage = state
-            if !state.isReady {
-                verifiedFingerprint = nil
-            } else if let newFingerprint {
-                verifiedFingerprint = newFingerprint
+            if !state.isReady || newHeld != nil {
+                released = heldModel
+                heldModel = newHeld
             }
             return (stateHandler, progressHandler)
         }
+        _ = released
         guard callbacks.0 != nil || callbacks.1 != nil else { return }
         callbackQueue.async {
             callbacks.0?(state)

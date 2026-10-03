@@ -212,48 +212,54 @@ extension TranscriptedSettingsView {
     }
 
     private var todayPage: some View {
-        TodaySettingsPage(
-            todayViewModel: todayViewModel,
-            now: Date(),
-            onOpenRecentItem: { item in
-                switch item.kind {
-                case .meeting:
-                    trackSettingsAction("today_open_recent_meeting", page: .today)
-                    if let transcriptURL = item.transcriptURL {
-                        navigation.selectedPage = .home
-                        navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+        // The page reads the clock at minute granularity: a fresh Date() on
+        // every shell evaluation made SwiftUI redraw every Today mark each
+        // time the window above it changed. TimelineView still moves the
+        // "Now" label and line each minute.
+        TimelineView(.everyMinute) { context in
+            TodaySettingsPage(
+                todayViewModel: todayViewModel,
+                now: context.date,
+                onOpenRecentItem: { item in
+                    switch item.kind {
+                    case .meeting:
+                        trackSettingsAction("today_open_recent_meeting", page: .today)
+                        if let transcriptURL = item.transcriptURL {
+                            navigation.selectedPage = .home
+                            navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+                        }
+                    case .dictation:
+                        trackSettingsAction("today_open_recent_dictation", page: .today)
+                        navigation.selectedPage = .dictations
+                    case .writing:
+                        // No Writing page on main yet: open the day's file.
+                        if let dayFile = item.transcriptURL {
+                            NSWorkspace.shared.open(dayFile)
+                        }
                     }
-                case .dictation:
-                    trackSettingsAction("today_open_recent_dictation", page: .today)
+                },
+                onShowMeetings: {
+                    trackSettingsAction("today_show_meetings", page: .today)
+                    navigation.selectedPage = .home
+                },
+                onShowDictations: {
+                    trackSettingsAction("today_show_dictations", page: .today)
                     navigation.selectedPage = .dictations
-                case .writing:
-                    // No Writing page on main yet: open the day's file.
-                    if let dayFile = item.transcriptURL {
-                        NSWorkspace.shared.open(dayFile)
-                    }
+                },
+                onStartMeeting: {
+                    trackSettingsAction("empty_start_meeting", page: .today)
+                    actions.startMeeting()
+                },
+                onImportAudioFile: {
+                    trackSettingsAction("empty_import_audio", page: .today)
+                    actions.importAudioFile()
+                },
+                onStartDictation: {
+                    trackSettingsAction("empty_start_dictation", page: .today)
+                    actions.startDictation()
                 }
-            },
-            onShowMeetings: {
-                trackSettingsAction("today_show_meetings", page: .today)
-                navigation.selectedPage = .home
-            },
-            onShowDictations: {
-                trackSettingsAction("today_show_dictations", page: .today)
-                navigation.selectedPage = .dictations
-            },
-            onStartMeeting: {
-                trackSettingsAction("empty_start_meeting", page: .today)
-                actions.startMeeting()
-            },
-            onImportAudioFile: {
-                trackSettingsAction("empty_import_audio", page: .today)
-                actions.importAudioFile()
-            },
-            onStartDictation: {
-                trackSettingsAction("empty_start_dictation", page: .today)
-                actions.startDictation()
-            }
-        )
+            )
+        }
         .onAppear {
             todayViewModel.setShown(true)
         }
