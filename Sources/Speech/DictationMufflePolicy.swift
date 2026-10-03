@@ -64,7 +64,6 @@ enum DictationMuffleOutputTransport: Equatable {
 }
 
 enum DictationMuffleOutputIneligibility: String, Equatable {
-    case bluetooth
     case airPlay = "airplay"
     case virtualOrAggregate = "virtual_or_aggregate"
     case unknownTransport = "unknown_transport"
@@ -77,28 +76,29 @@ enum DictationMuffleOutputRoute {
     /// sub-device is the current output. Starting that aggregate starts every
     /// stream on the sub-device, input included.
     ///
-    /// Bluetooth headsets (AirPods) are refused outright: starting their input
-    /// stream flips them into call mode and garbles playback, the same trap
-    /// that caused every AirPods dictation bug. Any other output that also has
-    /// an input stream (a USB headset) is refused for the same reason, and so
-    /// the aggregate's input is the tap alone. AirPlay and virtual or
-    /// aggregate outputs are refused because their latency and clocking are
-    /// not something a dictation side effect should gamble on.
+    /// So the rule that keeps AirPods safe is "the output has no input
+    /// stream", not "the output isn't Bluetooth". On macOS 26 AirPods show up
+    /// as two devices, an output-only one and a separate mic, so the output
+    /// is allowed and starting it never touches the mic. A Bluetooth (or USB)
+    /// headset that still exposes its mic on the output device is refused:
+    /// starting that input stream is what flips AirPods into call mode and
+    /// garbles playback, the same trap behind every AirPods dictation bug.
+    /// AirPlay and virtual or aggregate outputs are refused because their
+    /// latency and clocking are not something a dictation side effect should
+    /// gamble on.
     static func ineligibility(
         transport: DictationMuffleOutputTransport,
         inputStreamCount: Int,
         outputChannelCount: Int
     ) -> DictationMuffleOutputIneligibility? {
         switch transport {
-        case .bluetooth:
-            return .bluetooth
         case .airPlay:
             return .airPlay
         case .virtual, .aggregate:
             return .virtualOrAggregate
         case .unknown:
             return .unknownTransport
-        case .builtIn, .usb, .displayLink, .thunderbolt, .pci, .firewire:
+        case .builtIn, .usb, .displayLink, .thunderbolt, .pci, .firewire, .bluetooth:
             break
         }
         if inputStreamCount > 0 { return .hasInputStreams }

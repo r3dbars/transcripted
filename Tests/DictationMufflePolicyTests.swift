@@ -66,15 +66,19 @@ func testDictationMufflePolicy() {
         assertEqual(muffleCount, 1, "exactly one of 64 combinations should muffle")
     }
 
-    runSuite("Bluetooth output (AirPods) is never muffled, even with no input streams") {
-        for inputs in [0, 1, 2] {
-            for outputs in [0, 1, 2, 8] {
-                assertEqual(
-                    DictationMuffleOutputRoute.ineligibility(transport: .bluetooth, inputStreamCount: inputs, outputChannelCount: outputs),
-                    .bluetooth,
-                    "bluetooth inputs=\(inputs) outputs=\(outputs)"
-                )
-            }
+    runSuite("AirPods output-only device can be muffled; a headset whose output carries its mic cannot") {
+        for outputs in [1, 2] {
+            assertNil(
+                DictationMuffleOutputRoute.ineligibility(transport: .bluetooth, inputStreamCount: 0, outputChannelCount: outputs),
+                "bluetooth output with no mic stream and \(outputs) channels should be allowed"
+            )
+        }
+        for inputs in [1, 2] {
+            assertEqual(
+                DictationMuffleOutputRoute.ineligibility(transport: .bluetooth, inputStreamCount: inputs, outputChannelCount: 2),
+                .hasInputStreams,
+                "bluetooth output that also carries \(inputs) mic streams would flip into call mode"
+            )
         }
     }
 
@@ -140,7 +144,7 @@ func testDictationMufflePolicy() {
 }
 
 private let allowedMuffleTransports: [DictationMuffleOutputTransport] = [
-    .builtIn, .usb, .displayLink, .thunderbolt, .pci, .firewire,
+    .builtIn, .usb, .displayLink, .thunderbolt, .pci, .firewire, .bluetooth,
 ]
 
 private func muffleDecision(

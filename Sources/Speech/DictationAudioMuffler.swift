@@ -13,11 +13,14 @@
 // quits or crashes, or the output changes, macOS unmutes the apps because
 // nothing is reading the tap any more.
 //
-// Bluetooth: never touched. AirPods (or any Bluetooth output) as the output
-// device are refused by DictationMuffleOutputRoute before anything is built,
-// because starting the aggregate would start the headset's input stream and
-// flip it into call mode. The dictation mic itself is not involved here at
-// all, so a Bluetooth headset as the default *input* is unaffected: no
+// Bluetooth: an output device that has an input stream is refused by
+// DictationMuffleOutputRoute before anything is built, because starting the
+// aggregate would start that input stream and flip a headset into call mode.
+// On macOS 26 AirPods expose an output-only device and a separate mic, so the
+// output is allowed and the mic is never started. As a backstop, if the
+// output's sample rate changes mid-take (what call mode looks like from
+// here), muffle stops at once. The dictation mic itself is not involved here
+// at all, so a Bluetooth headset as the default *input* is unaffected: no
 // AVAudioEngine, no inputNode, no input device is opened by this file.
 //
 // Threading: every HAL call happens on `queue`; all mutable state is confined
@@ -55,7 +58,15 @@ final class DictationAudioMuffler: @unchecked Sendable {
     private var proc: AudioDeviceIOProcID?
     private var context: Unmanaged<DictationMuffleRenderContext>?
     private var outputListener: AudioObjectPropertyListenerBlock?
+    private var rateListener: AudioObjectPropertyListenerBlock?
+    private var rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
     private var releaseGeneration = 0
+
+    private static let nominalSampleRateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
 
     private static let defaultOutputAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -148,6 +159,7 @@ final class DictationAudioMuffler: @unchecked Sendable {
         guard let outputUID = Self.stringProperty(kAudioDevicePropertyDeviceUID, of: output) else {
             throw BuildFailure(reason: "output_uid")
         }
+        installRateListener(on: output)
 
         var pid = getpid()
         var process = AudioObjectID(kAudioObjectUnknown)
@@ -220,6 +232,7 @@ final class DictationAudioMuffler: @unchecked Sendable {
     /// leak the context rather than free memory the IO thread may still read.
     private func teardown() {
         removeOutputListener()
+        removeRateListener()
         if let proc, device != kAudioObjectUnknown {
             AudioDeviceStop(device, proc)
             let status = AudioDeviceDestroyIOProcID(device, proc)
@@ -253,6 +266,33 @@ final class DictationAudioMuffler: @unchecked Sendable {
         if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener) == noErr {
             outputListener = listener
         }
+    }
+
+    /// A rate change on the output mid-take means something re-clocked it:
+    /// most likely a Bluetooth headset dropping into call mode, or another app
+    /// changing the rate. Either way the filter was tuned for the old rate
+    /// and the route is no longer the one that was checked, so let the apps
+    /// play normally again.
+    private func installRateListener(on output: AudioObjectID) {
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.device != kAudioObjectUnknown else { return }
+            self.releaseGeneration += 1
+            self.teardown()
+            AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": "output_rate_changed"])
+        }
+        var address = Self.nominalSampleRateAddress
+        if AudioObjectAddPropertyListenerBlock(output, &address, queue, listener) == noErr {
+            rateListener = listener
+            rateListenerDevice = output
+        }
+    }
+
+    private func removeRateListener() {
+        guard let rateListener else { return }
+        var address = Self.nominalSampleRateAddress
+        AudioObjectRemovePropertyListenerBlock(rateListenerDevice, &address, queue, rateListener)
+        self.rateListener = nil
+        rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
     }
 
     private func removeOutputListener() {

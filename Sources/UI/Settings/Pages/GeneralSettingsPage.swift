@@ -88,7 +88,7 @@ struct GeneralSettingsPage<
                     help: dictationMuffleEnabled ? "Music sounds muffled while you talk." : "Other audio plays normally.",
                     info: GeneralInfo(
                         title: "Muffle other audio",
-                        message: "While you dictate, music and videos keep playing but sound muffled, like stepping outside the club. Needs System Audio Recording access. Skipped during meetings, with Apple voice processing on (it already lowers other audio), and when sound is going to Bluetooth headphones or AirPlay."
+                        message: "While you dictate, music and videos keep playing but sound muffled, like stepping outside the club. Needs System Audio Recording access. Skipped during meetings, with Apple voice processing on (it already lowers other audio), and when sound is going to AirPlay or to headphones whose mic would have to switch on."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-muffle"
                 )
