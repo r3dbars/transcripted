@@ -84,14 +84,18 @@ final class NotchIslandLiveTranscriptView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// The newest state while the drop-down is closed. Updates are
-    /// incremental, so applying only the latest one on open draws the same
-    /// text as applying every one in between.
+    /// The newest state while the drop-down is closed and the last catch-up
+    /// was under 5 s ago. Updates are incremental, so applying only the
+    /// latest one draws the same text as applying every one in between.
     private var pending: (log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status)?
+    /// The clock the hidden catch-up is gated on; tests inject their own.
+    var now: () -> CFTimeInterval = CACurrentMediaTime
+    private var lastHiddenFlush: CFTimeInterval?
 
     func apply(_ log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status) {
-        // Off screen: no text edits, layout or scrolling until it opens.
-        guard window != nil else {
+        // Off screen: catch up at most every 5 s, so opening never has to
+        // lay out a long backlog in the hover turn.
+        guard window != nil || flushesWhileHidden(log) else {
             pending = (log, status)
             return
         }
@@ -141,7 +145,24 @@ final class NotchIslandLiveTranscriptView: NSView {
         tentativeLength = storage.length - before
         storage.endEditing()
 
-        if followsNewest { scrollToNewest() }
+        if followsNewest {
+            scrollToNewest()
+        } else if window == nil, let container = textView.textContainer {
+            // Scrolled up before it closed: still lay out now, without moving.
+            textView.layoutManager?.ensureLayout(for: container)
+        }
+    }
+
+    private func flushesWhileHidden(_ log: LiveMeetingCaptionLog) -> Bool {
+        let time = now()
+        guard NotchIslandPresentation.flushesHiddenTranscript(
+            now: time,
+            lastFlush: lastHiddenFlush,
+            trimGeneration: log.trimGeneration,
+            renderedTrimGeneration: renderedTrimGeneration
+        ) else { return false }
+        lastHiddenFlush = time
+        return true
     }
 
     override func viewDidMoveToWindow() {

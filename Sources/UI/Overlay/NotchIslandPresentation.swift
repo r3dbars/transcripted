@@ -631,3 +631,24 @@ enum NotchIslandPresentation {
         return .text(title, style == .warning || style == .destructive ? .warning : .secondary)
     }
 }
+
+// MARK: - Live transcript while the drop-down is closed
+
+extension NotchIslandPresentation {
+    /// How often a closed drop-down's live transcript catches up.
+    static let hiddenTranscriptFlushInterval: TimeInterval = 5
+
+    /// Whether a closed drop-down's live transcript applies this update now.
+    /// At most every 5 s, so opening lays out at most 5 s of text. A trim
+    /// rebuilds the whole text, so that one still waits for the open.
+    static func flushesHiddenTranscript(
+        now: TimeInterval,
+        lastFlush: TimeInterval?,
+        trimGeneration: Int,
+        renderedTrimGeneration: Int
+    ) -> Bool {
+        guard trimGeneration == renderedTrimGeneration else { return false }
+        guard let lastFlush else { return true }
+        return now - lastFlush >= hiddenTranscriptFlushInterval
+    }
+}

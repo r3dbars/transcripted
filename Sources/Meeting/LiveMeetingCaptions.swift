@@ -57,13 +57,17 @@ final class LiveMeetingCaptions: ObservableObject {
                 self?.prewarmTask = nil
                 return
             }
-            // The dictation preview loads the same model; if it's mid-load, let
-            // it settle. Skip only when it ended ready (the compile is cached);
-            // if it failed, prewarm as before so the first meeting isn't cold.
-            while LiveDictationCaptions.shared.status == .preparing, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-            }
-            if LiveDictationCaptions.shared.status == .ready || Task.isCancelled {
+            // The dictation preview loads the same model; if it's mid-load, or
+            // still waiting on the dictation model, let it settle (bounded).
+            // Skip only when it ended ready (the compile is cached); if it
+            // failed, prewarm as before so the first meeting isn't cold.
+            let preview = LiveDictationCaptions.shared
+            let outcome = await LiveTranscriptPrewarmPolicy.settle(
+                state: { preview.prewarmState },
+                sleep: { try? await Task.sleep(for: $0) },
+                isCancelled: { Task.isCancelled }
+            )
+            guard outcome == .load, !Task.isCancelled else {
                 self.prewarmTask = nil
                 return
             }
@@ -73,6 +77,13 @@ final class LiveMeetingCaptions: ObservableObject {
             self.prewarmed = result == .ready
             self.prewarmTask = nil
         }
+    }
+
+    /// "Live transcript" was turned off: stop waiting to prewarm. The task
+    /// clears itself as it exits (at once while it waits), so turning the
+    /// setting back on mid-load can't start a second copy.
+    func cancelPrewarm() {
+        prewarmTask?.cancel()
     }
 
     /// Loading or listening: it wants audio.
