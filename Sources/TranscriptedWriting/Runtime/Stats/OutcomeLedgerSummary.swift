@@ -163,12 +163,7 @@ struct OutcomeLedgerSummary: Equatable, Sendable {
         calendar: Calendar = .current,
         truncated: Bool = false
     ) -> OutcomeLedgerSummary {
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfWindow = calendar.date(
-            byAdding: .day,
-            value: -(windowDays - 1),
-            to: startOfToday
-        ) ?? startOfToday
+        let (startOfToday, startOfWindow) = windowBounds(now: now, calendar: calendar)
 
         let window = facts.filter { $0.occurredAt >= startOfWindow }
         let today = window.filter { $0.occurredAt >= startOfToday }
@@ -208,6 +203,21 @@ struct OutcomeLedgerSummary: Equatable, Sendable {
             keystrokesSavedLast7Days: window.reduce(0) { $0 + $1.acceptedCharacters },
             truncated: truncated
         )
+    }
+
+    /// Where "today" and the seven-day window start for `now`. The only
+    /// parts of `now` the aggregation depends on.
+    static func windowBounds(
+        now: Date,
+        calendar: Calendar = .current
+    ) -> (startOfToday: Date, startOfWindow: Date) {
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfWindow = calendar.date(
+            byAdding: .day,
+            value: -(windowDays - 1),
+            to: startOfToday
+        ) ?? startOfToday
+        return (startOfToday, startOfWindow)
     }
 
     /// Maximal runs of `streakMinimumAccepts` or more accepts inside one
@@ -273,7 +283,13 @@ enum OutcomeLedgerReader {
         guard maximumBytes > 0,
               let handle = try? FileHandle(forReadingFrom: url) else { return .empty }
         defer { try? handle.close() }
+        return readTail(handle: handle, maximumBytes: maximumBytes)
+    }
 
+    /// The tail of an already open ledger. `summary(url:now:maximumBytes:reusing:)`
+    /// reads through the same handle it stamped.
+    static func readTail(handle: FileHandle, maximumBytes: Int) -> Tail {
+        guard maximumBytes > 0 else { return .empty }
         guard let end = try? handle.seekToEnd(), end > 0 else { return .empty }
         let truncated = end > UInt64(maximumBytes)
         let offset = truncated ? end - UInt64(maximumBytes) : 0
@@ -316,6 +332,77 @@ enum OutcomeLedgerReader {
                 truncated: tail.truncated
             )
         }.value
+    }
+}
+
+extension OutcomeLedgerReader {
+    /// What a summary was computed from: the open file's identity, length
+    /// and modification time, plus everything else `make` depends on. The
+    /// ledger is append-only, so an equal stamp means an equal summary.
+    struct Stamp: Equatable, Sendable {
+        let device: Int64
+        let inode: UInt64
+        let size: Int64
+        let modifiedSeconds: Int
+        let modifiedNanoseconds: Int
+        let startOfToday: Date
+        let startOfWindow: Date
+        let maximumBytes: Int
+    }
+
+    /// The Writing tab's refresh. Like `summary(url:now:maximumBytes:)`, but
+    /// when the open file and the day still match `previous`, it hands back
+    /// the previous summary without reading a line. The stamp comes from
+    /// `fstat` on the same handle the tail is read from, taken before the
+    /// read, so an append mid-read only means the next refresh recomputes.
+    /// A missing or unreadable file is `.empty` with no stamp.
+    static func summary(
+        url: URL,
+        now: Date = Date(),
+        maximumBytes: Int = maximumTailBytes,
+        reusing previous: (stamp: Stamp, summary: OutcomeLedgerSummary)?
+    ) async -> (summary: OutcomeLedgerSummary, stamp: Stamp?) {
+        await Task.detached(priority: .utility) {
+            stampedSummary(url: url, now: now, maximumBytes: maximumBytes, reusing: previous)
+        }.value
+    }
+
+    static func stampedSummary(
+        url: URL,
+        now: Date,
+        maximumBytes: Int,
+        reusing previous: (stamp: Stamp, summary: OutcomeLedgerSummary)?,
+        calendar: Calendar = .current
+    ) -> (summary: OutcomeLedgerSummary, stamp: Stamp?) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return (.empty, nil) }
+        defer { try? handle.close() }
+
+        let bounds = OutcomeLedgerSummary.windowBounds(now: now, calendar: calendar)
+        var info = stat()
+        let stamp: Stamp? = fstat(handle.fileDescriptor, &info) == 0
+            ? Stamp(
+                device: Int64(info.st_dev),
+                inode: UInt64(info.st_ino),
+                size: Int64(info.st_size),
+                modifiedSeconds: Int(info.st_mtimespec.tv_sec),
+                modifiedNanoseconds: Int(info.st_mtimespec.tv_nsec),
+                startOfToday: bounds.startOfToday,
+                startOfWindow: bounds.startOfWindow,
+                maximumBytes: maximumBytes
+            )
+            : nil
+        if let stamp, let previous, previous.stamp == stamp {
+            return (previous.summary, stamp)
+        }
+
+        let tail = readTail(handle: handle, maximumBytes: maximumBytes)
+        let summary = OutcomeLedgerSummary.make(
+            facts: facts(in: tail),
+            now: now,
+            calendar: calendar,
+            truncated: tail.truncated
+        )
+        return (summary, stamp)
     }
 }
 
