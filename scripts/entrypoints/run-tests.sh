@@ -380,6 +380,7 @@ APP_SOURCES=(
     "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
+    "Sources/Support/UserDefaultsChangeOnlyWrites.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/CompanionProtocol.swift"
