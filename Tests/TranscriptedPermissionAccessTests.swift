@@ -36,6 +36,32 @@ private final class AudioPermissionCaptureFake: @unchecked Sendable {
     }
 }
 
+private final class SystemAudioStatusReadFake: @unchecked Sendable {
+    private let lock = NSLock()
+    private let status: SystemAudioCaptureTCCStatus
+    private var preflights = 0
+    private var requests = 0
+
+    init(status: SystemAudioCaptureTCCStatus) { self.status = status }
+    var tcc: SystemAudioCaptureTCC {
+        SystemAudioCaptureTCC(preflight: { self.readStatus() }, request: { self.requestAccess() })
+    }
+    private func readStatus() -> SystemAudioCaptureTCCStatus {
+        lock.lock(); defer { lock.unlock() }
+        preflights += 1
+        return status
+    }
+    private func requestAccess() -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        requests += 1
+        return false
+    }
+    var counts: (preflights: Int, requests: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (preflights, requests)
+    }
+}
+
 @MainActor
 private func awaitAudioPermissionCondition(_ condition: () -> Bool) async -> Bool {
     for _ in 0..<100 {
@@ -868,65 +894,56 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — updates stale cached grants") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
+    for cached: TranscriptedPermissionAccess.SystemAudioPermissionState in [.unknown, .denied, .granted] {
+        for status: SystemAudioCaptureTCCStatus in [.authorized, .denied, .notDetermined, .unavailable] {
+            await runSuite("Status refresh stays quiet with cached \(cached) and macOS \(status)") {
+                let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+                let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+                defer {
+                    restore(originalKnown, forKey: knownKey)
+                    restore(originalGranted, forKey: grantedKey)
+                }
+                UserDefaults.standard.set(cached != .unknown, forKey: knownKey)
+                UserDefaults.standard.set(cached == .granted, forKey: grantedKey)
+                let fake = SystemAudioStatusReadFake(status: status)
+                let expected: TranscriptedPermissionAccess.SystemAudioPermissionState
+                switch status {
+                case .authorized: expected = .granted
+                case .denied: expected = .denied
+                case .notDetermined: expected = .unknown
+                case .unavailable: expected = cached
+                }
+                // Reopening a status surface must remain quiet after refusal.
+                for _ in 0..<2 {
+                    let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus(
+                        tcc: fake.tcc, skipSmokeRevalidation: false
+                    )
+                    assertEqual(granted, expected == .granted, "return the recorded status without requesting access")
+                    assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), expected,
+                        "unavailable status preserves the cache; a recorded decision replaces it")
+                }
+                assertEqual(fake.counts.preflights, 2, "each refresh reads the current macOS decision")
+                assertEqual(fake.counts.requests, 0, "status refresh never asks macOS for permission")
+            }
         }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            requestBox.callCount += 1
-            return false
-        }
-
-        assertFalse(granted, "a failed revalidation should return the live denied state")
-        assertEqual(requestBox.callCount, 1, "status-surface revalidation should perform a real probe")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "revalidation should keep the permission state marked as known"
-        )
-        assertFalse(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "revalidation should clear stale cached grants after revocation"
-        )
     }
 
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — smoke mode preserves cached granted state without a live probe") {
+    await runSuite("Smoke status refresh preserves cache without contacting macOS") {
         let originalKnown = UserDefaults.standard.object(forKey: knownKey)
         let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
         defer {
             restore(originalKnown, forKey: knownKey)
             restore(originalGranted, forKey: grantedKey)
         }
-
         UserDefaults.standard.set(true, forKey: knownKey)
         UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let requestBox = PermissionRequestBox()
+        let fake = SystemAudioStatusReadFake(status: .denied)
         let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus(
-            requester: {
-                requestBox.callCount += 1
-                return false
-            },
-            skipSmokeRevalidation: true
+            tcc: fake.tcc, skipSmokeRevalidation: true
         )
-
-        assertTrue(granted, "smoke-mode revalidation should keep the cached granted state")
-        assertEqual(requestBox.callCount, 0, "smoke mode should not perform a live system-audio probe")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "smoke mode should keep the cached system-audio state marked as known"
-        )
-        assertTrue(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "smoke mode should preserve the cached granted state"
-        )
+        assertTrue(granted, "automated launch retains cached state")
+        assertEqual(fake.counts.preflights, 0, "automated launch does not read host permission state")
+        assertEqual(fake.counts.requests, 0, "automated launch never requests permission")
     }
 
     await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
@@ -1045,38 +1062,6 @@ func testTranscriptedPermissionAccess() async {
             TranscriptedPermissionAccess.systemAudioRecordingStatus(),
             .granted,
             "cached positive result should stay granted"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — refreshes stale cache") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(false, forKey: grantedKey)
-        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            true
-        }
-
-        assertTrue(granted, "revalidation should return the fresh requester result")
-        assertEqual(
-            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
-            .granted,
-            "revalidation should replace stale denied cache with the fresh grant"
-        )
-
-        let denied = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            false
-        }
-        assertFalse(denied, "revalidation should also report revocations")
-        assertEqual(
-            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
-            .denied,
-            "revalidation should replace stale granted cache after revocation"
         )
     }
 

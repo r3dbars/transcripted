@@ -7,14 +7,8 @@ import CoreGraphics
 
 // MARK: - Shared Hotkey Routing
 
-// Global shortcut events can fire back-to-back before Transcripted finishes
-// updating its session state. Ignore rapid repeats so start/stop/cancel
-// transitions stay single-shot and predictable.
-// Use systemUptime (monotonic) instead of CFAbsoluteTimeGetCurrent (wall clock)
-// so NTP adjustments, manual time changes, or DST transitions can't make a
-// backward clock jump silently drop all subsequent hotkey presses.
-// Each toggle action has its own bucket; push-to-talk is never debounced
-// (see HotkeyActionDebouncer and PhysicalShortcutAction.hotkeyDebounceID).
+// Per-action monotonic debounce keeps rapid toggle presses from racing.
+// Push-to-talk is never debounced; its key-up must pair with key-down.
 private var hotkeyActionDebouncer = HotkeyActionDebouncer()
 
 private func shouldAcceptHotkeyAction(
@@ -119,7 +113,12 @@ private final class PhysicalShortcutDetector {
 
     func install() -> String? {
         remove()
+        return PhysicalShortcutTriggerStatus.installIfGranted(
+            accessibilityGranted: TranscriptedPermissionAccess.isGranted(.accessibility)
+        ) { installGrantedTap() }
+    }
 
+    private func installGrantedTap() -> String? {
         let eventMask =
             (CGEventMask(1) << CGEventType.keyDown.rawValue) |
             (CGEventMask(1) << CGEventType.keyUp.rawValue) |

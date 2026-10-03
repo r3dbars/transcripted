@@ -74,7 +74,6 @@ enum TranscriptedPermissionAccess {
     // change. This cache is historical evidence, not a live macOS TCC query.
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
-    @MainActor private static var activeSystemAudioRevalidator: Task<Bool, Never>?
     private static var isLaunchSmokeMode: Bool {
         AutomatedLaunchEnvironment.isActive()
     }
@@ -416,50 +415,23 @@ enum TranscriptedPermissionAccess {
         return applySystemAudioRecordingProbeResult(result)
     }
 
-    @MainActor
-    static func revalidateSystemAudioRecordingStatus() async -> Bool {
-        if isLaunchSmokeMode {
-            return systemAudioRecordingGranted()
-        }
-        if let activeSystemAudioRevalidator {
-            return await activeSystemAudioRevalidator.value
-        }
-
-        let cachedBefore = systemAudioRecordingStatus()
-        switch refreshSystemAudioRecordingStatusFromSystem() {
-        case .authorized, .denied, .notDetermined:
-            if systemAudioRecordingStatus() != cachedBefore {
-                notifyPermissionsDidChange(kind: .systemAudioRecording)
-            }
-            return systemAudioRecordingGranted()
-        case .unavailable:
-            break
-        }
-
-        let task = Task { @MainActor in
-            let result = await performSystemAudioRecordingAccessRequest()
-            let granted = applySystemAudioRecordingProbeResult(result).canProceed
-            notifyPermissionsDidChange(kind: .systemAudioRecording)
-            return granted
-        }
-        activeSystemAudioRevalidator = task
-        let granted = await task.value
-        activeSystemAudioRevalidator = nil
-        return granted
-    }
-
+    /// Status surfaces must never create a capture tap or ask for permission.
+    /// If macOS cannot report its decision, retain the cache until the user
+    /// explicitly checks access or starts a recording.
     @MainActor
     static func revalidateSystemAudioRecordingStatus(
-        requester: @escaping @MainActor () async -> Bool,
+        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC,
         skipSmokeRevalidation: Bool = isLaunchSmokeMode
     ) async -> Bool {
         if skipSmokeRevalidation {
             return systemAudioRecordingGranted()
         }
-        let granted = await requester()
-        _ = applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
-        notifyPermissionsDidChange(kind: .systemAudioRecording)
-        return granted
+        let cachedBefore = systemAudioRecordingStatus()
+        refreshSystemAudioRecordingStatusFromSystem(tcc: tcc)
+        if systemAudioRecordingStatus() != cachedBefore {
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+        }
+        return systemAudioRecordingGranted()
     }
 
     @MainActor
@@ -572,8 +544,8 @@ enum SystemAudioCaptureTCCStatus: String, Equatable, Sendable {
     case authorized
     case denied
     case notDetermined = "not_determined"
-    /// macOS's permission API could not be loaded. Callers fall back to the
-    /// tap probe and the in-recording signal check.
+    /// macOS's permission API could not be loaded. Status reads keep the cache;
+    /// only explicit access or recording actions may fall back to a tap probe.
     case unavailable
 }
 
@@ -581,8 +553,8 @@ enum SystemAudioCaptureTCCStatus: String, Equatable, Sendable {
 /// (`kTCCServiceAudioCapture`). Core Audio process taps have no public
 /// permission query, so this uses TCC.framework's `TCCAccessPreflight` and
 /// `TCCAccessRequest`. They are private symbols, loaded lazily; a missing
-/// symbol reads as `.unavailable` so an OS change degrades to the old probe
-/// instead of crashing or inventing an answer.
+/// symbol reads as `.unavailable`: passive reads keep the cache, and explicit
+/// access requests can probe without inventing a permission decision.
 struct SystemAudioCaptureTCC: Sendable {
     let preflight: @Sendable () -> SystemAudioCaptureTCCStatus
     /// Shows the macOS allow box when the decision is open; returns the

@@ -328,6 +328,16 @@ enum PhysicalShortcutTriggerStatus {
     static let accessibilityPermissionErrorMessage = "Shortcut trigger needs Accessibility permission"
     static let failedToStartMessage = "Shortcut trigger failed to start"
 
+    /// Launch and wake may register shortcuts, but only an explicit permission
+    /// button may ask for access. A protected tap creation can itself prompt.
+    static func installIfGranted(
+        accessibilityGranted: Bool,
+        install: () -> String?
+    ) -> String? {
+        guard accessibilityGranted else { return accessibilityPermissionErrorMessage }
+        return install()
+    }
+
     /// Why the tap couldn't be created.
     static func tapCreateFailureMessage(accessibilityGranted: Bool) -> String {
         accessibilityGranted ? failedToStartMessage : accessibilityPermissionErrorMessage
