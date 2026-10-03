@@ -5,13 +5,13 @@ import Foundation
 /// Follows one speaker's WAV files (the mic can roll over to recovery
 /// segments) and feeds whatever is new to that speaker's transcriber.
 final class TailedStream {
-    let transcriber: StreamTranscriber
+    let transcriber: LiveTranscribing
     private(set) var files: [URL] = []
     private var tails: [URL: WAVTail] = [:]
     private var index = 0
     private var finishedSeconds: Double = 0
 
-    init(transcriber: StreamTranscriber) {
+    init(transcriber: LiveTranscribing) {
         self.transcriber = transcriber
     }
 
@@ -64,15 +64,23 @@ final class TailedStream {
 
 public final class LiveRunner {
     public let output: LiveOutput
-    private let you: StreamTranscriber
-    private let them: StreamTranscriber
+    private let makeTranscriber: (String) -> LiveTranscribing
+    private var you: LiveTranscribing
+    private var them: LiveTranscribing
     private let log: (String) -> Void
     private var echo = EchoFilter()
 
-    public init(output: LiveOutput, chunkSize: StreamingChunkSize, pauseMs: Int, log: @escaping (String) -> Void) {
+    public convenience init(output: LiveOutput, chunkSize: StreamingChunkSize, pauseMs: Int, log: @escaping (String) -> Void) {
+        self.init(output: output, log: log) { speaker in
+            StreamTranscriber(speaker: speaker, chunkSize: chunkSize, pauseMs: pauseMs)
+        }
+    }
+
+    init(output: LiveOutput, log: @escaping (String) -> Void, makeTranscriber: @escaping (String) -> LiveTranscribing) {
         self.output = output
-        self.you = StreamTranscriber(speaker: "you", chunkSize: chunkSize, pauseMs: pauseMs)
-        self.them = StreamTranscriber(speaker: "them", chunkSize: chunkSize, pauseMs: pauseMs)
+        self.makeTranscriber = makeTranscriber
+        self.you = makeTranscriber("you")
+        self.them = makeTranscriber("them")
         self.log = log
     }
 
@@ -83,21 +91,55 @@ public final class LiveRunner {
         log("model ready")
     }
 
+    /// Lets go of both loaded models (24-40 MB) by swapping in fresh, unloaded
+    /// transcribers. Watch mode holds them only while a meeting is live.
+    private func releaseModels() {
+        you = makeTranscriber("you")
+        them = makeTranscriber("them")
+    }
+
+    /// True when the helper was started with `TRANSCRIPTED_LIVE_EXIT_WITH_PARENT=1`
+    /// by a real parent (not launchd) and that parent has since gone away.
+    public static func parentIsGone(launchParent: Int32, currentParent: Int32, isEnabled: Bool) -> Bool {
+        isEnabled && launchParent > 1 && currentParent != launchParent
+    }
+
     // MARK: - Watch
 
     /// Waits for Transcripted to start recording a meeting, transcribes it live,
-    /// then waits for the next one. Runs until the task is cancelled.
-    public func watch(recordingsDirectory: URL, pollSeconds: Double = 0.25) async throws {
+    /// then waits for the next one. Runs until the task is cancelled, or returns
+    /// when `parentIsGone` says so while no meeting is live.
+    ///
+    /// The models load at startup (download, validation) but are released while
+    /// idle and reloaded from the local cache when a meeting starts (~0.15 s;
+    /// the helper reads each recording from its first sample, so nothing is lost).
+    public func watch(
+        recordingsDirectory: URL,
+        pollSeconds: Double = 0.25,
+        idleSeconds: Double = 1,
+        parentIsGone: () -> Bool = { false }
+    ) async throws {
         log("watching \(recordingsDirectory.path)")
+        releaseModels()
         var finished = Set<String>()
 
         while !Task.isCancelled {
             guard let recording = RecordingLocator.liveRecordings(in: recordingsDirectory)
                 .last(where: { !finished.contains($0.meetingId) }) else {
+                // Only between meetings: a live one always finishes first.
+                if parentIsGone() {
+                    log("parent process exited; stopping")
+                    return
+                }
                 try output.heartbeat()
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try await Task.sleep(nanoseconds: UInt64(idleSeconds * 1_000_000_000))
                 continue
             }
+            // A failed load ends the helper, like a failed load at startup:
+            // the session stays idle and the mod starts a fresh one.
+            try await you.load()
+            try await them.load()
+            defer { releaseModels() }
             do {
                 try await follow(recording, pollSeconds: pollSeconds)
             } catch is CancellationError {
