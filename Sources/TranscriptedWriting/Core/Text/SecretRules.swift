@@ -162,14 +162,14 @@ public enum SecretRules {
     private static func pemMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"-----BEGIN [A-Z0-9 ]+-----[\s\S]+?-----END [A-Z0-9 ]+-----"#
+            regex: pemRegex
         )
     }
 
     private static func jwtMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#
+            regex: jwtRegex
         )
     }
 
@@ -187,7 +187,7 @@ public enum SecretRules {
     /// coincidence, leaving trailing account digits of the real IBAN
     /// unredacted.
     private static func ibanMatches(_ text: String) -> [Range<String.Index>] {
-        let headers = regexMatches(text, pattern: #"\b[A-Za-z]{2}\d{2}"#)
+        let headers = regexMatches(text, regex: ibanHeaderRegex)
         var results: [Range<String.Index>] = []
         for header in headers {
             let countryCode = String(text[header.lowerBound]).uppercased()
@@ -246,7 +246,7 @@ public enum SecretRules {
     /// the first that validates — so a valid card prefix wins even when
     /// trailing unrelated digits made the maximal span invalid.
     private static func creditCardMatches(_ text: String) -> [Range<String.Index>] {
-        let starts = regexMatches(text, pattern: #"(?<!\d)\d"#)
+        let starts = regexMatches(text, regex: cardStartRegex)
         var results: [Range<String.Index>] = []
         for start in starts {
             var digits: [(character: Character, index: String.Index)] = []
@@ -279,7 +279,7 @@ public enum SecretRules {
     private static func ssnMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"#,
+            regex: ssnRegex,
             validate: isValidSSNShape
         )
     }
@@ -289,15 +289,15 @@ public enum SecretRules {
     /// total characters neither is long enough to fall back on the generic
     /// ≥32-char high-entropy rule.
     private static func awsAccessKeyMatches(_ text: String) -> [Range<String.Index>] {
-        regexMatches(text, pattern: #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#)
+        regexMatches(text, regex: awsAccessKeyRegex)
     }
 
     private static func openAIKeyMatches(_ text: String) -> [Range<String.Index>] {
-        regexMatches(text, pattern: #"\bsk-[A-Za-z0-9_-]{20,}\b"#)
+        regexMatches(text, regex: openAIKeyRegex)
     }
 
     private static func githubTokenMatches(_ text: String) -> [Range<String.Index>] {
-        regexMatches(text, pattern: #"\bgh[pousr]_[A-Za-z0-9]{36,}\b"#)
+        regexMatches(text, regex: githubTokenRegex)
     }
 
     /// Generic high-entropy token, ≥32 characters with no whitespace, drawn
@@ -316,7 +316,7 @@ public enum SecretRules {
     private static func highEntropyTokenMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])"#,
+            regex: highEntropyTokenRegex,
             validate: isHighEntropySecretShape
         )
     }
@@ -324,7 +324,7 @@ public enum SecretRules {
     private static func emailMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"#
+            regex: emailRegex
         )
     }
 
@@ -337,7 +337,7 @@ public enum SecretRules {
     private static func phoneMatches(_ text: String) -> [Range<String.Index>] {
         regexMatches(
             text,
-            pattern: #"(?<!\d)(?:\+1[-.\s])?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)"#
+            regex: phoneRegex
         )
     }
 
@@ -431,13 +431,28 @@ public enum SecretRules {
 
     // MARK: - Regex plumbing
 
+    // Compiled once. NSRegularExpression is immutable and thread-safe, and the
+    // patterns and options are the same as when each call compiled its own,
+    // so matches are byte-identical. `try?` keeps the old "bad pattern means
+    // no matches" behavior (all of these compile).
+    private static let pemRegex = try? NSRegularExpression(pattern: #"-----BEGIN [A-Z0-9 ]+-----[\s\S]+?-----END [A-Z0-9 ]+-----"#)
+    private static let jwtRegex = try? NSRegularExpression(pattern: #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#)
+    private static let ibanHeaderRegex = try? NSRegularExpression(pattern: #"\b[A-Za-z]{2}\d{2}"#)
+    private static let cardStartRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d"#)
+    private static let ssnRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"#)
+    private static let awsAccessKeyRegex = try? NSRegularExpression(pattern: #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#)
+    private static let openAIKeyRegex = try? NSRegularExpression(pattern: #"\bsk-[A-Za-z0-9_-]{20,}\b"#)
+    private static let githubTokenRegex = try? NSRegularExpression(pattern: #"\bgh[pousr]_[A-Za-z0-9]{36,}\b"#)
+    private static let highEntropyTokenRegex = try? NSRegularExpression(pattern: #"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])"#)
+    private static let emailRegex = try? NSRegularExpression(pattern: #"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"#)
+    private static let phoneRegex = try? NSRegularExpression(pattern: #"(?<!\d)(?:\+1[-.\s])?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)"#)
+
     private static func regexMatches(
         _ text: String,
-        pattern: String,
-        options: NSRegularExpression.Options = [],
+        regex: NSRegularExpression?,
         validate: (String) -> Bool = { _ in true }
     ) -> [Range<String.Index>] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return [] }
+        guard let regex else { return [] }
         let nsText = text as NSString
         var results: [Range<String.Index>] = []
         regex.enumerateMatches(in: text, range: NSRange(location: 0, length: nsText.length)) { match, _, _ in

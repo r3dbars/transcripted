@@ -111,8 +111,9 @@ public enum TranscriptFrontmatter {
 
         while data.count < readLimit {
             let remaining = readLimit - data.count
-            guard let chunk = try handle.read(upToCount: min(chunkSize, remaining)),
-                  !chunk.isEmpty else {
+            guard let chunk = try autoreleasepool(invoking: {
+                try handle.read(upToCount: min(chunkSize, remaining))
+            }), !chunk.isEmpty else {
                 break
             }
             data.append(chunk)

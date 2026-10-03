@@ -40,6 +40,9 @@ final class LiveMeetingCaptions: ObservableObject {
 
     private var prewarmTask: Task<Void, Never>?
     private var prewarmed = false
+    /// Set once the prewarm reaches its model load; `cancelPrewarm` leaves a
+    /// load under way alone so it still finishes and sets `prewarmed`.
+    private var prewarmLoading = false
 
     /// Downloads and compiles the model in the background, once per launch,
     /// so a meeting never waits on it. The first Neural Engine compile takes
@@ -57,22 +60,37 @@ final class LiveMeetingCaptions: ObservableObject {
                 self?.prewarmTask = nil
                 return
             }
-            // The dictation preview loads the same model; if it's mid-load, let
-            // it settle. Skip only when it ended ready (the compile is cached);
-            // if it failed, prewarm as before so the first meeting isn't cold.
-            while LiveDictationCaptions.shared.status == .preparing, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-            }
-            if LiveDictationCaptions.shared.status == .ready || Task.isCancelled {
+            // The dictation preview loads the same model; if it's mid-load, or
+            // still waiting on the dictation model, let it settle (bounded).
+            // Skip only when it ended ready (the compile is cached); if it
+            // failed, prewarm as before so the first meeting isn't cold.
+            let preview = LiveDictationCaptions.shared
+            let outcome = await LiveTranscriptPrewarmPolicy.settle(
+                state: { preview.prewarmState },
+                sleep: { try? await Task.sleep(for: $0) },
+                isCancelled: { Task.isCancelled }
+            )
+            guard outcome == .load, !Task.isCancelled else {
                 self.prewarmTask = nil
                 return
             }
+            self.prewarmLoading = true
             let track = LiveMeetingCaptionTrack()
             let result = await track.load()
             await track.stop()
             self.prewarmed = result == .ready
+            self.prewarmLoading = false
             self.prewarmTask = nil
         }
+    }
+
+    /// "Live transcript" was turned off: stop waiting to prewarm. Only the
+    /// 20 s wait and the settle step are cancelled; a model load already
+    /// under way runs to the end, so turning the setting back on mid-load
+    /// neither starts a second copy nor leaves the launch unprewarmed.
+    func cancelPrewarm() {
+        guard !prewarmLoading else { return }
+        prewarmTask?.cancel()
     }
 
     /// Loading or listening: it wants audio.

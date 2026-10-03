@@ -214,6 +214,39 @@ enum SecureLocalStorage {
         at source: URL,
         fingerprint: UnsafeMutablePointer<FileContentFingerprint?>?
     ) -> FileHandle? {
+        withLockedOwnerOnlySource(at: source) { directoryDescriptor, sourceDescriptor, info in
+            fingerprint?.pointee = FileContentFingerprint(info)
+            return cloneAndUnlink(sourceDescriptor, into: directoryDescriptor)
+        } ?? nil
+    }
+
+    /// The installed source's content fingerprint, read under the directory
+    /// lock with the same checks as `openUnlinkedCloneForReading`, without
+    /// cloning or changing anything.
+    static func contentFingerprint(ofOwnerOnlyFileAt source: URL) -> FileContentFingerprint? {
+        withLockedOwnerOnlySource(at: source) { _, _, info in FileContentFingerprint(info) }
+    }
+
+    /// A fresh unlinked read-only clone of an already open clone (for example
+    /// one `openUnlinkedCloneForReading` returned), made in `directory`. The
+    /// new descriptor has its own file offset and inode, and shares nothing
+    /// writable with any named file.
+    static func openUnlinkedClone(of handle: FileHandle, inDirectory directory: URL) -> FileHandle? {
+        guard let directoryDescriptor = secureDirectoryDescriptor(at: directory) else { return nil }
+        defer { close(directoryDescriptor) }
+        var info = stat()
+        guard flock(directoryDescriptor, LOCK_EX) == 0,
+              fstat(handle.fileDescriptor, &info) == 0,
+              info.st_mode & S_IFMT == S_IFREG,
+              info.st_uid == getuid(),
+              info.st_mode & 0o7777 == 0o400 || info.st_mode & 0o7777 == 0o600 else { return nil }
+        return cloneAndUnlink(handle.fileDescriptor, into: directoryDescriptor)
+    }
+
+    private static func withLockedOwnerOnlySource<T>(
+        at source: URL,
+        _ body: (_ directoryDescriptor: Int32, _ sourceDescriptor: Int32, _ info: stat) -> T
+    ) -> T? {
         let directory = source.deletingLastPathComponent()
         guard !source.lastPathComponent.isEmpty,
               let directoryDescriptor = secureDirectoryDescriptor(at: directory) else { return nil }
@@ -233,8 +266,12 @@ enum SecureLocalStorage {
               info.st_uid == getuid(),
               info.st_mode & 0o7777 == 0o600,
               info.st_nlink > 0 else { return nil }
-        fingerprint?.pointee = FileContentFingerprint(info)
+        return body(directoryDescriptor, sourceDescriptor, info)
+    }
 
+    /// Clones `sourceDescriptor` into the locked directory, opens the clone
+    /// read-only at 0400, and unlinks its name before returning it.
+    private static func cloneAndUnlink(_ sourceDescriptor: Int32, into directoryDescriptor: Int32) -> FileHandle? {
         let snapshotName = ".model-runtime-\(UUID().uuidString)"
         guard fclonefileat(sourceDescriptor, directoryDescriptor, snapshotName, 0) == 0 else {
             return nil
@@ -248,7 +285,9 @@ enum SecureLocalStorage {
             _ = unlinkat(directoryDescriptor, snapshotName, 0)
             return nil
         }
-        guard fchmod(snapshotDescriptor, 0o400) == 0,
+        var info = stat()
+        guard fstat(snapshotDescriptor, &info) == 0,
+              info.st_mode & 0o7777 == 0o400 || fchmod(snapshotDescriptor, 0o400) == 0,
               fstat(snapshotDescriptor, &info) == 0,
               info.st_mode & S_IFMT == S_IFREG,
               info.st_uid == getuid(),
@@ -293,7 +332,8 @@ enum SecureLocalStorage {
         guard fstat(descriptor, &info) == 0,
               info.st_mode & S_IFMT == S_IFREG,
               info.st_uid == getuid(),
-              fchmod(descriptor, 0o600) == 0,
+              // Only when the mode differs: a no-op fchmod still moves ctime.
+              info.st_mode & 0o7777 == 0o600 || fchmod(descriptor, 0o600) == 0,
               fstat(descriptor, &info) == 0,
               info.st_mode & S_IFMT == S_IFREG,
               info.st_uid == getuid(),

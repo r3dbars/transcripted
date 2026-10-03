@@ -203,13 +203,34 @@ enum TranscriptLoader {
             return []
         }
 
-        return files.compactMap { url in
-            guard case .valid(let safeURL) = PathSecurity.validateExistingFile(url, under: directory),
-                  let kind = artifactKind(for: safeURL) else { return nil }
+        var seenKinds: [String: ArtifactKindCache.Entry] = [:]
+        let previousKinds = ArtifactKindCache.shared.entries(for: enumerationRoot.path)
+        let artifacts: [ContextArtifactFile] = files.compactMap { url in
+            guard case .valid(let safeURL) = PathSecurity.validateExistingFile(url, under: directory) else {
+                return nil
+            }
+            let kind: ContextArtifactKind
+            let path = safeURL.standardizedFileURL.path
+            let identity = ArtifactKindCache.FileIdentity(path: path)
+            if let identity, let cached = previousKinds[path], cached.identity == identity {
+                kind = cached.kind
+                seenKinds[path] = cached
+            } else {
+                guard let classified = artifactKind(for: safeURL) else { return nil }
+                kind = classified
+                // Only a positive classification is cached. A nil can mean a
+                // failed read as well as "not a capture file", so it is
+                // re-checked next pass, exactly as before the cache existed.
+                if let identity {
+                    seenKinds[path] = ArtifactKindCache.Entry(identity: identity, kind: classified)
+                }
+            }
             let modDate = (try? safeURL.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate?.timeIntervalSince1970) ?? 0
             return ContextArtifactFile(url: safeURL, modDate: modDate, kind: kind)
         }
+        ArtifactKindCache.shared.replaceEntries(for: enumerationRoot.path, with: seenKinds)
+        return artifacts
     }
 
     /// Filename-derived display title for a meeting with no better title source:
@@ -227,6 +248,65 @@ enum TranscriptLoader {
             lookup[speaker.id] = (speaker.name, speaker.persistentSpeakerId)
         }
         return lookup
+    }
+}
+
+/// Per-process memo of `TranscriptLoader.artifactKind(for:)` so a reconcile
+/// pass over an unchanged library is stat-only instead of re-reading every
+/// meeting's frontmatter prefix. An entry is reused only while the file's
+/// device, inode, size, mtime and ctime all match. ctime moves on any content
+/// or attribute change, even when mtime is restored afterwards, and an atomic
+/// rewrite gets a new inode. Each directory's entries are replaced wholesale on
+/// every enumeration, so deleted files drop out. enumerateArtifacts runs on
+/// several watcher queues at once, hence the lock.
+final class ArtifactKindCache: @unchecked Sendable {
+    struct FileIdentity: Equatable {
+        let device: Int64
+        let inode: UInt64
+        let size: Int64
+        let mtimeSeconds: Int
+        let mtimeNanoseconds: Int
+        let ctimeSeconds: Int
+        let ctimeNanoseconds: Int
+
+        /// nil when the file can't be stat'ed; such files are never cached.
+        init?(path: String) {
+            var info = stat()
+            guard lstat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+            device = Int64(info.st_dev)
+            inode = UInt64(info.st_ino)
+            size = Int64(info.st_size)
+            mtimeSeconds = Int(info.st_mtimespec.tv_sec)
+            mtimeNanoseconds = Int(info.st_mtimespec.tv_nsec)
+            ctimeSeconds = Int(info.st_ctimespec.tv_sec)
+            ctimeNanoseconds = Int(info.st_ctimespec.tv_nsec)
+        }
+    }
+
+    struct Entry {
+        let identity: FileIdentity
+        let kind: ContextArtifactKind
+    }
+
+    static let shared = ArtifactKindCache()
+
+    private let lock = NSLock()
+    private var entriesByDirectory: [String: [String: Entry]] = [:]
+
+    func entries(for directoryPath: String) -> [String: Entry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return entriesByDirectory[directoryPath] ?? [:]
+    }
+
+    func replaceEntries(for directoryPath: String, with entries: [String: Entry]) {
+        lock.lock()
+        defer { lock.unlock() }
+        if entries.isEmpty {
+            entriesByDirectory.removeValue(forKey: directoryPath)
+        } else {
+            entriesByDirectory[directoryPath] = entries
+        }
     }
 }
 

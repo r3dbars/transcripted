@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class RuntimeDiagnostics {
     private let markerURL: URL
+    private let markerWriter: RuntimeDiagnosticsMarkerWriter
     private var marker: RuntimeDiagnosticsMarker?
     private var heartbeatTimer: Timer?
     private var activeWorkProvider: (() -> Bool)?
@@ -13,6 +14,7 @@ final class RuntimeDiagnostics {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.markerURL = markerURL
+        self.markerWriter = RuntimeDiagnosticsMarkerWriter(url: markerURL)
         self.isDisabled = environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] == "1"
     }
 
@@ -36,8 +38,10 @@ final class RuntimeDiagnostics {
         marker = RuntimeDiagnosticsStore.makeLaunchMarker(
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             buildVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
-            buildChannel: AnalyticsRuntimeConfiguration.buildChannel(),
-            buildRevision: AnalyticsRuntimeConfiguration.buildRevision(),
+            buildChannel: AnalyticsRuntimeConfiguration.buildChannel(
+                environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment
+            ),
+            buildRevision: TelemetryContext.currentBuildRevision,
             osMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         )
         persist(event: "app_launched")
@@ -51,7 +55,7 @@ final class RuntimeDiagnostics {
         marker.updatedAt = Date()
         marker.lastEvent = "clean_shutdown"
         self.marker = marker
-        RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        markerWriter.writeNow(marker)
         CrashReporter.setRuntimeDiagnosticsContext(
             RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
         )
@@ -150,7 +154,7 @@ final class RuntimeDiagnostics {
         heartbeatTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.persist(event: "heartbeat")
+                self?.persist(event: "heartbeat", durably: false)
             }
         }
         // The heartbeat only needs coarse "app is alive" granularity; a generous
@@ -161,8 +165,8 @@ final class RuntimeDiagnostics {
         heartbeatTimer = timer
     }
 
-    private func persist(event: String) {
-        updateMarker { marker in
+    private func persist(event: String, durably: Bool = true) {
+        updateMarker(durably: durably) { marker in
             marker.lastEvent = event
             if event == "heartbeat" {
                 RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(
@@ -173,13 +177,21 @@ final class RuntimeDiagnostics {
         }
     }
 
-    private func updateMarker(_ update: (inout RuntimeDiagnosticsMarker) -> Void) {
+    /// Launch, stage and clean-shutdown markers are on disk before this
+    /// returns, as on main, so crash evidence is never a stage behind. Only
+    /// the periodic heartbeat goes to the marker queue (off main, in order,
+    /// latest wins); `writeNow` lands behind anything already queued.
+    private func updateMarker(durably: Bool = true, _ update: (inout RuntimeDiagnosticsMarker) -> Void) {
         guard var marker else { return }
         update(&marker)
         marker.cleanShutdown = false
         marker.updatedAt = Date()
         self.marker = marker
-        RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        if durably {
+            markerWriter.writeNow(marker)
+        } else {
+            markerWriter.submit(marker)
+        }
         CrashReporter.setRuntimeDiagnosticsContext(
             RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
         )

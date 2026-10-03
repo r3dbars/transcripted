@@ -197,11 +197,9 @@ extension FileManager {
     private func setPOSIXPermissionsIfNeeded(_ permissions: NSNumber, ofItemAtPath path: String) {
         guard fileExists(atPath: path) else { return }
 
-        if let attributes = try? attributesOfItem(atPath: path),
-           let currentPermissions = attributes[.posixPermissions] as? NSNumber,
-           currentPermissions == permissions {
-            return
-        }
+        // lstat matches attributesOfItem (which does not follow links) at a fraction of the cost.
+        var status = stat()
+        if lstat(path, &status) == 0, Int(status.st_mode & 0o7777) == permissions.intValue { return }
 
         try? setAttributes([.posixPermissions: permissions], ofItemAtPath: path)
     }

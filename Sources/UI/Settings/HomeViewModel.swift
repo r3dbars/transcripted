@@ -242,7 +242,7 @@ final class HomeViewModel: ObservableObject {
             let snapshot = await RecentCaptureLoader.load(
                 dictationLimit: requestedDictationLimit + 1,
                 meetingLimit: requestedMeetingLimit + 1,
-                includeDictationCounts: true
+                dictationCountScope: .todayOnly
             )
             let diagnosis = await Task.detached(priority: .utility) {
                 RecentMeetingsScanner.diagnose()
@@ -256,7 +256,7 @@ final class HomeViewModel: ObservableObject {
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
-            self.todayDictationCount = snapshot.dictationCounts.today
+            self.todayDictationCount = snapshot.todayDictationCount ?? 0
             self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.listDate) }.count
             self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
             self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.listDate)

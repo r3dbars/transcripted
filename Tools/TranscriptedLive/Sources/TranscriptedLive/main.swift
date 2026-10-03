@@ -20,6 +20,11 @@ Output: \(LiveOutput.defaultRoot.path)
 """
 
 var arguments = Array(CommandLine.arguments.dropFirst())
+// Whoever started us. The mod sets TRANSCRIPTED_LIVE_EXIT_WITH_PARENT=1, so a
+// helper whose Claude Code session went away stops between meetings instead
+// of idling on, reparented to launchd.
+let launchParent = getppid()
+let exitWithParent = ProcessInfo.processInfo.environment["TRANSCRIPTED_LIVE_EXIT_WITH_PARENT"] == "1"
 
 func option(_ name: String) -> String? {
     guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
@@ -78,7 +83,9 @@ let work = Task {
         if command == "watch" {
             let directory = option("--recordings").map { URL(fileURLWithPath: $0) }
                 ?? RecordingLocator.defaultRecordingsDirectory
-            try await runner.watch(recordingsDirectory: directory)
+            try await runner.watch(recordingsDirectory: directory) {
+                LiveRunner.parentIsGone(launchParent: launchParent, currentParent: getppid(), isEnabled: exitWithParent)
+            }
         } else {
             let speed = Double(option("--speed") ?? "1") ?? 1
             let title = option("--title")

@@ -23,7 +23,7 @@
 // ReDimNet2 builds' `len_<samples>` functions; weights shared) accepts exactly its
 // functions' lengths. Each call runs on the function whose input has that call's
 // length (`MLModelConfiguration.functionName`); each function is loaded on first use
-// and kept. Function names are read from the model, else from
+// (or by a prewarm) and kept. Function names are read from the model, else from
 // `CoreMLSpeakerEmbedderConfiguration.functionsByLength`. A single-function model
 // lists no functions and is loaded as before.
 // A window whose output is the wrong size, NaN/Inf, or all zeros counts as failed;
@@ -74,9 +74,10 @@ public struct CoreMLSpeakerEmbedderConfiguration: Sendable, Equatable {
     /// than two functions; nil for a single-function model.
     public var functionsByLength: [Int: String]?
     /// Multifunction model only: release every loaded function after this many
-    /// seconds without a call (they reload on the next call). A multifunction model
-    /// holds GPU memory per loaded function (ReDimNet2: about 125 MB each), and the
-    /// app only embeds in the minute after a meeting. nil keeps them loaded.
+    /// seconds without a call (they reload on the next call). A loaded function costs
+    /// a few MB; its GPU memory comes with its first prediction (ReDimNet2: about
+    /// 370 MB for the 8 s function, 470-540 MB with all four in use), and the app
+    /// only embeds in the minute after a meeting. nil keeps them loaded.
     public var idleReleaseSeconds: TimeInterval?
 
     public init(
@@ -250,7 +251,7 @@ public struct CoreMLSpeakerEmbeddingPlan: Sendable, Equatable {
 }
 
 @available(macOS 14.0, *)
-public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable {
+public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentLengthPrewarming, @unchecked Sendable {
     public static let sampleRate = 16_000
 
     public let dimension: Int
@@ -263,9 +264,12 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
 
     /// One model call: exactly one window's samples in, the raw output out.
     private let predict: @Sendable ([Float]) -> [Float]?
-    /// Multifunction model: loads the window-length function again after an idle
-    /// release. nil for a single-function model, which is never released.
+    /// Multifunction model: loads every function again after an idle release (load
+    /// only, no prediction). nil for a single-function model, which is never released.
     private let prewarmWindowFunction: (@Sendable () -> Void)?
+    /// Multifunction model: runs one throwaway call on each of these call lengths'
+    /// functions that hasn't predicted since it loaded. nil for a single-function model.
+    private let warmCallLengths: (@Sendable (Set<Int>) -> Void)?
 
     /// Loads `configuration.modelURL` and checks it against the configuration.
     public convenience init(configuration: CoreMLSpeakerEmbedderConfiguration) throws {
@@ -289,13 +293,14 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
                 windowSamples: configuration.windowSamples, hopSamples: configuration.hopSamples,
                 pooling: configuration.pooling, modelLengths: .enumerated(router.lengths))
             // Fail fast on the function most calls use: it must load and fit the
-            // configured input, output and size. The others load on first use.
+            // configured input, output and size. The others load on first use or prewarm.
             try router.preload(length: plan.windowSamples)
             try self.init(
                 identifier: configuration.identifier, dimension: configuration.dimension,
                 thresholds: configuration.thresholds, plan: plan, functionsByLength: functions,
                 predict: { router.predict($0) },
-                prewarm: { [windowSamples = plan.windowSamples] in _ = try? router.preload(length: windowSamples) })
+                prewarm: { router.preloadAll() },
+                warmCallLengths: { router.warm(lengths: $0) })
             AppLogger.speakers.info("Core ML speaker embedder loaded", [
                 "embedder": identifier, "functions": "\(functions.count)",
                 "dim": "\(dimension)", "minSamples": "\(plan.minSamples)", "maxSamples": "\(plan.maxSamples)",
@@ -352,7 +357,8 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         plan: CoreMLSpeakerEmbeddingPlan,
         functionsByLength: [Int: String]? = nil,
         predict: @escaping @Sendable ([Float]) -> [Float]?,
-        prewarm: (@Sendable () -> Void)? = nil
+        prewarm: (@Sendable () -> Void)? = nil,
+        warmCallLengths: (@Sendable (Set<Int>) -> Void)? = nil
     ) throws {
         guard Self.isValidIdentifier(identifier) else {
             throw CoreMLSpeakerEmbedderError("embedder id must be letters, digits, '.', '_' or '-'")
@@ -367,13 +373,36 @@ public final class CoreMLSpeakerSegmentEmbedder: SpeakerSegmentEmbedder, @unchec
         self.functionsByLength = functionsByLength
         self.predict = predict
         self.prewarmWindowFunction = prewarm
+        self.warmCallLengths = warmCallLengths
     }
 
-    /// Reloads the function most calls use if an idle release dropped it, so the
-    /// next meeting's first embed doesn't wait on it. Blocks while it loads; call
-    /// it off the main thread. It counts as a use for the idle timer.
+    /// Reloads every function an idle release dropped (load only: no prediction,
+    /// so no GPU memory yet), so the next meeting's embeds don't wait on loads.
+    /// Blocks while they load; call it off the main thread. It counts as a use for
+    /// the idle timer.
     public func prewarm() {
         prewarmWindowFunction?()
+    }
+
+    /// Runs one throwaway all-zero call on each function that embedding turns of
+    /// `sampleCounts` samples will use and that hasn't predicted since it loaded,
+    /// so the real calls run at steady speed. Blocks; call it off the main thread.
+    /// Never changes what `embed` returns.
+    public func prewarm(sampleCounts: [Int]) {
+        guard let warmCallLengths else { return }
+        let lengths = Self.callLengths(forSampleCounts: sampleCounts, plan: plan)
+        if !lengths.isEmpty { warmCallLengths(lengths) }
+    }
+
+    /// Every model call length `embed` uses for turns of these sample counts.
+    static func callLengths(forSampleCounts sampleCounts: [Int], plan: CoreMLSpeakerEmbeddingPlan) -> Set<Int> {
+        var lengths = Set<Int>()
+        for count in sampleCounts where count > 0 {
+            for (start, end) in windowBounds(sampleCount: count, window: plan.windowSamples, hop: plan.hopSamples) {
+                lengths.insert(plan.callLength(forSampleCount: end - start))
+            }
+        }
+        return lengths
     }
 
     public func embed(samples: [Float], sampleRate: Int) -> [Float]? {
@@ -519,32 +548,36 @@ final class CoreMLVoiceprintModel: @unchecked Sendable {
         }
     }
 
+    /// One pool per call: Core ML's autoreleased input and output arrays are freed
+    /// here, not when the whole meeting's re-embedding ends.
     func predict(_ window: [Float]) -> [Float]? {
         lock.lock()
         defer { lock.unlock() }
-        do {
-            let shape = Array(repeating: NSNumber(value: 1), count: inputRank - 1) + [NSNumber(value: window.count)]
-            let array = try MLMultiArray(shape: shape, dataType: inputType)
-            if inputType == .float16 {
-                let pointer = array.dataPointer.assumingMemoryBound(to: Float16.self)
-                for i in 0..<window.count { pointer[i] = Float16(window[i]) }
-            } else {
-                window.withUnsafeBytes { source in
-                    array.dataPointer.copyMemory(from: source.baseAddress!, byteCount: source.count)
+        return autoreleasepool { () -> [Float]? in
+            do {
+                let shape = Array(repeating: NSNumber(value: 1), count: inputRank - 1) + [NSNumber(value: window.count)]
+                let array = try MLMultiArray(shape: shape, dataType: inputType)
+                if inputType == .float16 {
+                    let pointer = array.dataPointer.assumingMemoryBound(to: Float16.self)
+                    for i in 0..<window.count { pointer[i] = Float16(window[i]) }
+                } else {
+                    window.withUnsafeBytes { source in
+                        array.dataPointer.copyMemory(from: source.baseAddress!, byteCount: source.count)
+                    }
                 }
-            }
-            let input = try MLDictionaryFeatureProvider(dictionary: [inputName: MLFeatureValue(multiArray: array)])
-            let out = try model.prediction(from: input)
-            guard let embedding = out.featureValue(for: outputName)?.multiArrayValue else {
-                AppLogger.speakers.error("Core ML speaker embedder: no embedding output")
+                let input = try MLDictionaryFeatureProvider(dictionary: [inputName: MLFeatureValue(multiArray: array)])
+                let out = try model.prediction(from: input)
+                guard let embedding = out.featureValue(for: outputName)?.multiArrayValue else {
+                    AppLogger.speakers.error("Core ML speaker embedder: no embedding output")
+                    return nil
+                }
+                return FluidOfflineWeSpeakerSegmentEmbedder.floats(embedding)
+            } catch {
+                AppLogger.speakers.error("Core ML speaker embedder: prediction failed", [
+                    "error": error.localizedDescription,
+                ])
                 return nil
             }
-            return FluidOfflineWeSpeakerSegmentEmbedder.floats(embedding)
-        } catch {
-            AppLogger.speakers.error("Core ML speaker embedder: prediction failed", [
-                "error": error.localizedDescription,
-            ])
-            return nil
         }
     }
 

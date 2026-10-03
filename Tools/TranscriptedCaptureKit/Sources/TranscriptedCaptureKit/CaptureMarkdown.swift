@@ -97,8 +97,11 @@ public enum CaptureMarkdown {
     private static func readPrefix(of url: URL, maxBytes: Int) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: maxBytes) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        // Pool the read so a library scan doesn't keep every prefix buffer alive.
+        return autoreleasepool(invoking: { () -> String? in
+            guard let data = try? handle.read(upToCount: maxBytes) else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        })
     }
 
     /// Whether a directory directly contains at least one regular (non-symlink)

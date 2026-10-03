@@ -25,7 +25,12 @@
 // MicActivityMonitor.swift for what each one used to do on a self-write event
 // versus what happens now that the write is suppressed once, upstream.
 //
-// Threading: CoreAudio calls the listener block on whatever dispatch queue we
+// Threading: the add itself runs on `HALListenerRegistrationQueue` (off
+// main), because at launch it is the app's first CoreAudio call and pays for
+// HAL client init (see DefaultInputDeviceMonitorSupport.swift).
+// `DefaultInputDeviceListenerRegistrar` tracks idle / registering / registered
+// so a pending add is never duplicated and a stop while pending removes the
+// same block. CoreAudio calls the listener block on whatever dispatch queue we
 // register it with. This monitor registers directly against
 // `DispatchQueue.main`. Ordinary external changes fan out immediately without
 // a redundant HAL lookup. A possible self-write echo schedules its potentially
@@ -57,11 +62,27 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
 
     typealias ObserverToken = DefaultInputDeviceObserverToken
 
-    private var listener: AudioObjectPropertyListenerBlock?
+    private lazy var registrar = DefaultInputDeviceListenerRegistrar<HALListenerBlockBox>(
+        add: { listener, completion in
+            HALListenerRegistrationQueue.addSystemObjectListener(
+                selector: kAudioHardwarePropertyDefaultInputDevice,
+                listener: listener,
+                completion: completion
+            )
+        },
+        remove: { listener in
+            var address = Self.defaultInputAddress
+            return AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                DispatchQueue.main,
+                listener.block
+            )
+        }
+    )
     private var registry = DefaultInputDeviceObserverRegistry()
     private var selfWriteTracker = DefaultInputDeviceSelfWriteTracker()
     private var notificationLookupDispatcher: DefaultInputDeviceNotificationLookupDispatcher?
-    private var monitorGeneration: UInt64 = 0
 
     private init() {}
 
@@ -77,8 +98,8 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     /// registration; this does not change delivery order for `addObserver`,
     /// which is documented there.
     func start() {
-        guard listener == nil else { return }
-        let generation = monitorGeneration
+        guard !registrar.isActive else { return }
+        let generation = registrar.generation
         let dispatcher = DefaultInputDeviceNotificationLookupDispatcher(
             label: "com.transcripted.default-input-notification",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
@@ -95,57 +116,51 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
             }
         )
         notificationLookupDispatcher = dispatcher
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.handlePropertyChanged()
+        // Built once; the same block object goes to the add and any remove.
+        let listener = HALListenerBlockBox { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.handlePropertyChanged() }
         }
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            block
-        )
-        guard status == noErr else {
-            dispatcher.close()
+        // Returns right away; the add runs off main. A change that lands
+        // before the add returns is caught by the subscribers' own startup
+        // reconcile, the same as a change just before registration today.
+        registrar.start(listener) { [weak self] status in
+            self?.registrationFailed(status: status, dispatcher: dispatcher)
+        }
+    }
+
+    private func registrationFailed(
+        status: OSStatus,
+        dispatcher: DefaultInputDeviceNotificationLookupDispatcher
+    ) {
+        dispatcher.close()
+        if notificationLookupDispatcher === dispatcher {
             notificationLookupDispatcher = nil
-            monitorGeneration &+= 1
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "default_input_device_monitor_listener_failed",
-                message: "Could not monitor system default input device changes",
-                context: ["status": "\(status)"]
-            )
-            return
         }
-        listener = block
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "default_input_device_monitor_listener_failed",
+            message: "Could not monitor system default input device changes",
+            context: ["status": "\(status)"]
+        )
     }
 
     /// Discards pending and late HAL results if the monitor is torn down.
-    /// A later `start()` installs a fresh dispatcher and generation.
+    /// A later `start()` installs a fresh dispatcher and generation. A stop
+    /// while the add is still pending lets the add finish, then removes it.
     func stop() {
-        guard let listener else { return }
-        var address = AudioObjectPropertyAddress(
+        guard registrar.stop() else { return }
+        notificationLookupDispatcher?.close()
+        notificationLookupDispatcher = nil
+        selfWriteTracker.cancelPendingWrite()
+    }
+
+    private static var defaultInputAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        let status = AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            DispatchQueue.main,
-            listener
-        )
-        guard status == noErr else { return }
-        self.listener = nil
-        monitorGeneration &+= 1
-        notificationLookupDispatcher?.close()
-        notificationLookupDispatcher = nil
-        selfWriteTracker.cancelPendingWrite()
     }
 
     /// Registers `handler` to run on the main actor for every default-input
@@ -225,7 +240,7 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
         request: DefaultInputDeviceNotificationRequest,
         generation: UInt64
     ) {
-        guard listener != nil, generation == monitorGeneration else { return }
+        guard registrar.isActive, generation == registrar.generation else { return }
         // Classify this callback's immutable marker at callback time, not the
         // current tracker marker or HAL completion time. A newer sanctioned
         // write must keep its own marker even while this read is blocked.

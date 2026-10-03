@@ -98,6 +98,10 @@ public enum DiagnosticsMetadataRedactor {
              "firstTokenMilliseconds", "firstPartialMilliseconds",
              // `personal-stream-hold`: how long the first prefix was held.
              "heldMilliseconds",
+             // `llama-completion-timing`: llama-server's prompt-cache counts
+             // from the first streamed frame (tokens reused vs re-processed).
+             // Whole token counts, no text.
+             "cache_n", "prompt_n",
              // Transcripted: `writing-day-files-rescrubbed`, file counts only.
              "scanned", "changed", "failures", "skipped":
             safe = matches(value, #"^(?:[0-9]+(?:\.[0-9]+)?|none|unknown)$"#)

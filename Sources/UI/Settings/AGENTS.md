@@ -91,9 +91,27 @@ settings-side agent connection flow.
   each `TodayTapeMark` carries its `hoverText`. The day card works out the
   hovered/picked mark once per draw (`TodayTapeSelection`), and the shell
   hands the page a minute-granular `now` from `TimelineView(.everyMinute)`
-  instead of a fresh `Date()` on every evaluation.
+  instead of a fresh `Date()` on every evaluation. The day card and week
+  cells are `Equatable` (day, pick, minute, region), so other shell
+  publishes skip them.
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
   page plus the ⌘F Home find-focus token.
+  It also holds `isWindowOpen` (true from `present()` until the window closes);
+  work for a window nobody can see is gated on it.
+- `SettingsMeetingRenderGate.swift` - the generic gate that coalesces a
+  chatty ObservableObject and publishes only on key change, plus the render
+  key and `HomeActivityPercent`.
+- `SettingsMeetingShellState.swift` - the meeting-session values the shell
+  shows. Anything new the shell reads from `meetingSession` in its body must
+  be added here or the window won't redraw.
+- `SettingsRecordingClock.swift` / `QuietRecordingElapsedLabel.swift` - Home's
+  1 Hz elapsed label as a leaf fed through the environment, so the tick
+  doesn't redraw the shell.
+- `SettingsClosedWindowPolicy.swift` - what a closed window still does; Today
+  snapshots are held until `present()`. The window controller owns
+  `TodayViewModel`.
+- `TodayWritingDayFileCache.swift` - parsed Writing day files reused by
+  mtime+size.
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the
   shell (start dictation/meeting, import audio, feedback, diagnostics).
 - `TranscriptedSettingsWindowController.swift` /
@@ -194,6 +212,10 @@ settings-side agent connection flow.
   speaker review may appear (waits for Stop while a meeting records).
 - `SpeakerVoiceRowPresentation.swift` - Foundation-pure play/pause, overflow
   menu, and name-suggestion policies for the voice-to-name rows.
+- `SpeakerMergeTargets.swift` / `SpeakerDuplicateNameMatching.swift` -
+  Foundation-pure merge-target index built once per Speakers snapshot
+  (`SpeakerMergeTargetIndex`, `SpeakerMergeTargetList`) and the duplicate-name
+  rule (`SpeakerDuplicateMatchPolicy`, `SpeakerDuplicateReason`).
 - `SpeakerNameAutocompleteField.swift` - SwiftUI wrapper over an
   `NSComboBox` name autocomplete for the Speakers screen.
 - `RetainedDataSourceComboBox.swift` - `NSComboBox` subclass that keeps its

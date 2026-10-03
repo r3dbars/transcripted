@@ -26,7 +26,7 @@ enum TelemetryContext {
         var result = properties
         for (key, value) in environment where result[key] == nil { result[key] = value }
         result["app_version"] = result["app_version"] ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
-        result["build_revision"] = result["build_revision"] ?? AnalyticsRuntimeConfiguration.buildRevision()
+        result["build_revision"] = result["build_revision"] ?? currentBuildRevision
         result["os_major"] = result["os_major"] ?? String(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
         let session = uuid(result["session_id"]) ?? uuid(result["dictation_session_id"]) ?? launchSessionID
         result["session_id"] = session
@@ -58,6 +58,13 @@ enum TelemetryContext {
         return result
     }
 
+    /// Process-constant: the build-metadata environment and Bundle.main's info
+    /// dictionary don't change after launch. Callers with an injected info
+    /// dictionary keep calling `AnalyticsRuntimeConfiguration` directly.
+    static let currentBuildRevision = AnalyticsRuntimeConfiguration.buildRevision(
+        environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment
+    )
+
     static func uuid(_ value: String?) -> String? { PayloadSanitizationCore.uuid(value) }
     static func category(_ value: String?) -> String? { PayloadSanitizationCore.category(value) }
 
@@ -71,4 +78,18 @@ enum TelemetryContext {
         if event.contains("recovery") || event.contains("engine") { return "recovery" }
         return "unknown"
     }
+}
+
+extension AnalyticsRuntimeConfiguration {
+    /// The two build-metadata environment overrides, read once. Copying
+    /// `ProcessInfo.processInfo.environment` costs ~20 us per call, and the
+    /// build channel and revision are looked up on every telemetry event.
+    static let processBuildMetadataEnvironment: [String: String] = {
+        let environment = ProcessInfo.processInfo.environment
+        var subset: [String: String] = [:]
+        for key in [buildChannelEnvironmentKey, buildRevisionEnvironmentKey] {
+            subset[key] = environment[key]
+        }
+        return subset
+    }()
 }

@@ -149,7 +149,7 @@ final class GhostInputController: IMKInputController {
     private var fallbackOwner: FallbackOwner?
     private var historyOwner: FallbackOwner?
     private var scheduleRevision = 0
-    private var lastScheduledContextTail = ""
+    private var contextTailSampler = GhostContextTailSampler(limit: GhostInputController.contextLimit)
     private var revealTask: Task<Void, Never>?
     private var modelTask: Task<Void, Never>?
     private var bufferedReveal: (text: String, ticket: InlineSuggestionTicket, provenance: GhostProvenance)?
@@ -160,7 +160,6 @@ final class GhostInputController: IMKInputController {
     /// not yet shown or closed. Every path that ends it says why, once.
     private var openOpportunity: (ticket: InlineSuggestionTicket, id: UUID)?
     private var screenMemoryTypingTask: Task<Void, Never>?
-    private var calmRevealByBundle = [String: Bool]()
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, event.type == .keyDown, let client = sender as? IMKTextInput else {
@@ -396,10 +395,12 @@ final class GhostInputController: IMKInputController {
         return true
     }
 
-    private func recordOutcomeShown(_ client: IMKTextInput) {
-        let field = fieldSnapshot(client)
-        guard !Self.isOutcomeExcluded(bundleIdentifier: field.bundleIdentifier) else { return }
-        let context = contextBeforeCaret(client, selection: field.selection)
+    private func recordOutcomeShown(_ client: IMKTextInput, shown: ShownFieldState?) {
+        let field = shown == nil ? fieldSnapshot(client) : nil
+        let bundleIdentifier = shown?.bundleIdentifier ?? field?.bundleIdentifier ?? ""
+        guard !Self.isOutcomeExcluded(bundleIdentifier: bundleIdentifier) else { return }
+        let precedingCharacter = shown.map { $0.precedingCharacter }
+            ?? field.flatMap { contextBeforeCaret(client, selection: $0.selection).last }
         // The receipt travels with the presentation that produced this
         // `.shown`; a mismatch can only mean a ghost the reducer showed
         // without passing through `present`, which does not exist today,
@@ -407,7 +408,7 @@ final class GhostInputController: IMKInputController {
         let provenance = presentedProvenance.flatMap { presented in
             presented.ticket == state.visibleTicket ? presented.provenance : nil
         } ?? GhostProvenance(
-            register: ContinuationRegister.from(bundleIdentifier: field.bundleIdentifier),
+            register: ContinuationRegister.from(bundleIdentifier: bundleIdentifier),
             source: .unknownLegacy
         )
         let answered = openOpportunity.flatMap { open in
@@ -421,7 +422,7 @@ final class GhostInputController: IMKInputController {
             source: provenance.source,
             candidateCharacters: state.visibleText.count,
             candidateWordCount: state.visibleText.split(whereSeparator: \Character.isWhitespace).count,
-            precedingCharacter: context.last,
+            precedingCharacter: precedingCharacter,
             excluded: false,
             receipt: provenance.receipt
         )
@@ -555,7 +556,7 @@ final class GhostInputController: IMKInputController {
     /// text attributes is synchronous cross-process work.
     private var cachedGhostStyle: [NSAttributedString.Key: Any]?
 
-    private func apply(_ effects: [InlineSuggestionState.Effect], to client: IMKTextInput) {
+    private func apply(_ effects: [InlineSuggestionState.Effect], to client: IMKTextInput, shown: ShownFieldState? = nil) {
         for effect in effects {
             switch effect {
             case .hide:
@@ -581,7 +582,7 @@ final class GhostInputController: IMKInputController {
                 scheduleSuggestion(for: client, afterUserTyped: grapheme)
             case .shown:
                 GhostStats.recordSuggestionShown()
-                recordOutcomeShown(client)
+                recordOutcomeShown(client, shown: shown)
             case .accepted:
                 GhostStats.recordSuggestionAccepted()
             }
@@ -836,6 +837,8 @@ final class GhostInputController: IMKInputController {
         let selection: NSRange
         let bundleIdentifier: String
     }
+    /// What `present` already read this turn, so `.shown` doesn't read it again.
+    typealias ShownFieldState = (bundleIdentifier: String, precedingCharacter: Character?)
 
     private func fieldSnapshot(_ client: IMKTextInput) -> FieldSnapshot {
         // Secure Event Input first, before any read. The readers below checked
@@ -883,8 +886,19 @@ final class GhostInputController: IMKInputController {
     /// use for the bundle identifier, and making it demand one would add a
     /// cross-process call per keystroke rather than remove one.
     private func contextBeforeCaret(_ client: IMKTextInput, selection: NSRange) -> String {
-        guard !IsSecureEventInputEnabled() else { return "" }
-        guard selection.location != NSNotFound, selection.length == 0 else { return "" }
+        contextBeforeCaret(client, hostText: hostContextBeforeCaret(client, selection: selection))
+    }
+
+    /// `nil` host text reads nothing; empty falls back to what this session typed.
+    private func contextBeforeCaret(_ client: IMKTextInput, hostText: String?) -> String {
+        guard let hostText, hostText.isEmpty else { return hostText ?? "" }
+        return fallbackOwner(for: client) == fallbackOwner ? typedFallback : ""
+    }
+
+    /// Host text only: `nil` under secure input or with no caret, "" when the host has none.
+    private func hostContextBeforeCaret(_ client: IMKTextInput, selection: NSRange) -> String? {
+        guard !IsSecureEventInputEnabled() else { return nil }
+        guard selection.location != NSNotFound, selection.length == 0 else { return nil }
         if selection.location > 0 {
             // Quantized start: once the field is past the limit, a window
             // that slides one character per keystroke moves every byte of
@@ -901,7 +915,7 @@ final class GhostInputController: IMKInputController {
                 return text
             }
         }
-        return fallbackOwner(for: client) == fallbackOwner ? typedFallback : ""
+        return ""
     }
 
     private func trailingTextAfterCaret(_ client: IMKTextInput) -> String {
@@ -934,13 +948,6 @@ final class GhostInputController: IMKInputController {
         afterUserTyped grapheme: String,
         chained: Bool = false
     ) {
-        // Same field, different conversation: tell Screen Memory so the
-        // next capture happens now-ish instead of serving the old thread.
-        let contextTail = String(contextBeforeCaret(client).suffix(Self.contextLimit))
-        if ContextResetDetector.isReset(previous: lastScheduledContextTail, current: contextTail) {
-            notifyScreenMemory(.contentReset)
-        }
-        lastScheduledContextTail = contextTail
         cancelPendingWork()
         scheduleRevision += 1
         let revision = scheduleRevision
@@ -951,8 +958,7 @@ final class GhostInputController: IMKInputController {
             chained: chained,
             calm: Self.calmRevealDelays
         )
-        guard scheduleRevision == revision,
-              (client.bundleIdentifier() ?? "") == expectedBundle else { return }
+        guard scheduleRevision == revision else { return }
         let revealNotBefore = Date().addingTimeInterval(
             Double(timing.revealDelayNanoseconds) / 1_000_000_000
         )
@@ -973,7 +979,7 @@ final class GhostInputController: IMKInputController {
                 if chained { Self.chainLogger.info("chain-bailed reason=superseded") }
                 return
             }
-            self.updateSuggestion(for: liveClient, revealNotBefore: revealNotBefore)
+            self.updateSuggestion(for: liveClient, bundleIdentifier: expectedBundle, revealNotBefore: revealNotBefore)
         }
     }
 
@@ -994,35 +1000,29 @@ final class GhostInputController: IMKInputController {
     /// ghost's end. Their longer pause prevents visible caret ping-pong while
     /// keeping native editors on the near-instant path.
     private func usesCalmReveal(for bundleIdentifier: String) -> Bool {
-        guard !bundleIdentifier.isEmpty else { return false }
-        if let cached = calmRevealByBundle[bundleIdentifier] { return cached }
-        let electronFramework = NSRunningApplication
-            .runningApplications(withBundleIdentifier: bundleIdentifier)
-            .first?.bundleURL?
-            .appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
-        let electron = electronFramework.map {
-            FileManager.default.fileExists(atPath: $0.path)
-        } ?? false
-        let calm = SuggestionRevealDelayPolicy.requiresCalmMarkedText(
-            bundleIdentifier: bundleIdentifier,
-            hasElectronFramework: electron
-        )
-        calmRevealByBundle[bundleIdentifier] = calm
-        return calm
+        GhostCalmRevealCache.shared.usesCalmReveal(for: bundleIdentifier)
     }
 
-    private func updateSuggestion(for client: IMKTextInput, revealNotBefore: Date) {
-        guard !stopForSecureInput(client) else { return }
-        let field = fieldSnapshot(client)
+    /// `bundleIdentifier` was just checked against the live client by the caller's Task.
+    private func updateSuggestion(for client: IMKTextInput, bundleIdentifier: String, revealNotBefore: Date) {
+        guard !stopForSecureInput(client) else { _ = contextTailSampler.record(nil); return }
+        let field = IsSecureEventInputEnabled()
+            ? FieldSnapshot(selection: Self.unset, bundleIdentifier: "")
+            : FieldSnapshot(selection: client.selectedRange(), bundleIdentifier: bundleIdentifier)
         let selection = field.selection
         guard selection.location != NSNotFound, selection.length == 0 else {
+            _ = contextTailSampler.record(nil)
             if isChainedSchedule { Self.chainLogger.info("chain-bailed reason=selection") }
             breakHistorySegment()
             dismiss(client)
             resetFallback()
             return
         }
-        let context = contextBeforeCaret(client, selection: field.selection)
+        let hostText = hostContextBeforeCaret(client, selection: selection)
+        // Same field, different conversation: tell Screen Memory so the next
+        // capture happens now-ish instead of serving the old thread.
+        if contextTailSampler.record(hostText) { notifyScreenMemory(.contentReset) }
+        let context = contextBeforeCaret(client, hostText: hostText)
         let trailingText = trailingTextAfterCaret(client, selection: field.selection)
         let requestTicket = ticket(context: context, field: field)
         // A model request is the unit the flight recorder explains. A
@@ -1301,7 +1301,7 @@ final class GhostInputController: IMKInputController {
         presentedProvenance = (requestTicket, provenance)
         let wasVisible = state.isVisible && state.visibleTicket == requestTicket
         let effects = state.reduce(.update(text, requestTicket))
-        apply(effects, to: liveClient)
+        apply(effects, to: liveClient, shown: (field.bundleIdentifier, currentContext.last))
         guard state.visibleTicket == requestTicket else { return }
         if wasVisible {
             // A ghost was already on screen for this ticket (the dictionary,

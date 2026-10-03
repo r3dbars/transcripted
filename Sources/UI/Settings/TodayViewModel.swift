@@ -35,6 +35,10 @@ final class TodayViewModel: ObservableObject {
     /// The last meeting scan, so the next one only re-reads files that changed
     /// instead of decoding the whole metadata cache (see `loadSearchIndex`).
     private var previousMeetingIndex: [String: RecentMeetingIndexEntry] = [:]
+    /// While the window is closed, a finished rebuild waits here instead of
+    /// publishing, so the hidden window doesn't re-render. The window
+    /// controller drives it (`windowDidClose` / `windowWillShow`).
+    private var windowHold = SettingsWindowSnapshotHold<TodaySnapshot>()
 
     /// How many latest captures the snapshot keeps for the return signal.
     nonisolated static let recentLimit = TodayRecentActivity.pageSize
@@ -70,6 +74,25 @@ final class TodayViewModel: ObservableObject {
 
     func setShown(_ shown: Bool) {
         isShown = shown
+    }
+
+    /// The window closed: keep rebuilding on library changes, but hold the
+    /// result instead of publishing it. Doesn't cancel anything.
+    func windowDidClose() {
+        windowHold.windowDidClose()
+    }
+
+    /// Called just before the window comes on screen: publishes a snapshot
+    /// built while it was closed, synchronously, so the first frame is
+    /// current. The open refresh still runs after.
+    func windowWillShow() {
+        guard let held = windowHold.windowWillShow() else { return }
+        publish(held)
+    }
+
+    private func publish(_ snapshot: TodaySnapshot) {
+        self.snapshot = snapshot
+        hasLoaded = true
     }
 
     /// `force` skips the throttle.
@@ -131,8 +154,9 @@ final class TodayViewModel: ObservableObject {
             self.refreshTask = nil
             guard !Task.isCancelled, let loaded else { return }
             self.previousMeetingIndex = loaded.meetingIndex
-            self.snapshot = loaded.snapshot
-            self.hasLoaded = true
+            if let shown = self.windowHold.deliver(loaded.snapshot) {
+                self.publish(shown)
+            }
         }
     }
 
@@ -253,9 +277,10 @@ final class TodayViewModel: ObservableObject {
         let folder = FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: folder,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
+        let cache = TodayWritingDayFileCache.shared
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
         parser.calendar = calendar
@@ -263,17 +288,25 @@ final class TodayViewModel: ObservableObject {
         parser.dateFormat = "yyyy-MM-dd"
         let firstDay = calendar.startOfDay(for: since)
         var result: [(fact: TodayWritingFact, file: URL)] = []
+        var scanned: [URL] = []
         for file in files {
             let name = file.lastPathComponent
             guard name.hasPrefix("Writing_"), name.hasSuffix(".md"),
                   let day = parser.date(from: String(name.dropFirst(8).dropLast(3))),
-                  day >= firstDay,
-                  let contents = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                  day >= firstDay else { continue }
+            scanned.append(file)
+            // Unchanged day files reuse their last parse.
+            guard let facts = cache.facts(
+                for: file,
+                signature: TodayWritingDayFileCache.signature(of: file),
+                read: { try? String(contentsOf: file, encoding: .utf8) }
+            ) else { continue }
             if Task.isCancelled { return [] }
-            result += TodayWritingParser.entries(fromDayFile: contents)
+            result += facts
                 .filter { $0.date >= since }
                 .map { ($0, file) }
         }
+        cache.retainOnly(scanned)
         return result
     }
 

@@ -114,6 +114,27 @@ final class LiveDictationCaptions: ObservableObject {
         takeStopped?.set(true)
     }
 
+    /// What the meeting transcript's prewarm needs to know: whether this
+    /// preview will load the same model, and whether that load is still
+    /// waiting on the dictation model. Reads stored state only, no disk.
+    var prewarmState: (preview: LiveTranscriptPrewarmPolicy.Preview, dictation: LiveTranscriptPrewarmPolicy.Dictation) {
+        guard let router else { return (.notAttached, .other) }
+        let preview: LiveTranscriptPrewarmPolicy.Preview
+        switch status {
+        case .off: preview = .off
+        case .preparing: preview = .preparing
+        case .ready: preview = .ready
+        case .unavailable: preview = .unavailable
+        }
+        if router.isRecordingModelLoaded { return (preview, .loaded) }
+        // The stored state, not `recordingModelDownloadState`, which asks
+        // the engine (and may touch disk).
+        switch router.modelDownloadState {
+        case .downloading, .loading: return (preview, .loading)
+        case .notLoaded, .cached, .ready, .failed: return (preview, .other)
+        }
+    }
+
     private var isIdle: Bool {
         guard let router else { return false }
         return router.isRecordingModelLoaded && !router.isRecording && !router.isTranscribing

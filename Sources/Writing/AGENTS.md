@@ -21,6 +21,8 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - `WritingController.swift` — the runtime host. `TranscriptedAppState` owns one, calls `startIfEnabled(log:)` at launch, `handleSystemWake()` on wake and `stop()` at quit; `TranscriptedApp` calls `noteTerminationRequest()`. It starts the keyboard socket (`GhostBrainServerHost`), the `llama-server` helper and its model, Screen Memory, Personal History and the keyboard installer. With only Save my writing on, the model, helper and Screen Memory stay off. The Writing tab calls `applyRunState()` after "Turn on writing" and after any feature toggle.
 - `WritingSetupState.swift` — whether setup finished, and `WritingActivation`: run once setup is done and at least one feature is on (or the dev-only `WritingDebugEnabled` default). Once setup is done, launch also reaps a helper a crash left running.
 - `WritingSettingsModel.swift` — the Writing tab's state (intro, setup draft, everyday view). One per controller (`shared(for:)`) so a setup in progress survives tab switches. It only reads and asks; every runtime change goes through `WritingController`.
+- `WritingRefreshTimers.swift` — the Writing tab's refresh timers, suspended while its window is closed or occluded and resumed on show; Foundation-only so a fast test drives it.
+- `WritingFrontWindowPoller.swift` / `WritingFrontWindowChangeDetector.swift` — Screen Memory's front-window poll: a `DispatchSourceTimer` on its own queue that hops to main only when the front window changes; the pure change rule is in the detector (Foundation-only, fast-tested).
 - `WritingDayFileWriter.swift` — Save my writing's host side: builds `WritingDayFileRecorder` against `<capture-library>/writing`, closes idle entries on a timer, flushes at quit, and posts a notification after each append so Home and Today refresh. Entries that close with nothing to scrub go on to Personal History.
 - `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for the tab's Today list. Never writes.
 - `WritingAnalytics.swift` — the two count-only Writing events, through `AnalyticsReporter.track`.
@@ -36,7 +38,7 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths. UI may use pure Core value types like `TildeModelChoice`.
 - **Off the main thread.** Front-window reads and helper probes don't block the main actor. Screen Memory never reads Transcripted's own windows.
 - **Screen Recording ask.** Meeting-only users never see it, and granting it must not relaunch the app during a meeting.
-- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `WritingSetupPresentation`, `WritingSidebarNewBadge`) stay Foundation-only (plus WritingCore value types). They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
+- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `WritingSetupPresentation`, `WritingSidebarNewBadge`, `WritingRefreshTimers`, `WritingFrontWindowChangeDetector`) stay Foundation-only (plus WritingCore value types). They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
 
 ## Tests
 

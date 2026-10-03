@@ -38,6 +38,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     static let maxFormatReconnects = 5
     private var callback: ((AVAudioPCMBuffer) -> Void)?
     private var timer: DispatchSourceTimer?
+    private var drainCadence = CoreAudioTapDrainCadence()
     private var running = false
     private var tearingDown = false
     private var generation: UInt64 = 0
@@ -87,7 +88,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var noFirstBufferCause: RecoveryTrigger?
     private var overflowReconnects = 0
     static let maxOverflowReconnects = 3
-    /// Keeps App Nap from coalescing the 10 ms drain timer while recording.
+    /// Keeps App Nap from coalescing the drain timer while recording.
     private var activity: NSObjectProtocol?
     private var formatListenerInstalled = false
     private var ioContext: UnsafeMutableRawPointer?
@@ -329,7 +330,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         lastFormatCheck = lastBuffer
         guard hardwareHooks == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(10), leeway: .milliseconds(2))
+        drainCadence.start(timer)
         timer.setEventHandler { [weak self] in self?.drainAndCheck() }
         self.timer = timer
         timer.resume()
@@ -399,7 +400,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             recover(.overflow)
             return
         }
-        if now - lastFormatCheck >= Self.formatPollSeconds {
+        if now - lastFormatCheck >= CoreAudioTapDrainCadence.formatPollSeconds {
             lastFormatCheck = now
             guard let current = try? readTapFormat(), current.isEqual(tapFormat) else {
                 reconnectAfterFormatChange()
@@ -407,6 +408,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
         }
         guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
+        drainCadence.settle(timer, hasDeliveredBuffer: lastTapBufferFrames != nil)
         // `clock` is system uptime, which stops while the Mac is asleep, so
         // only awake time counts: a sleep that never reaches a wake cannot
         // switch off stall recovery for the rest of the meeting.
@@ -504,17 +506,14 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         }
     }
 
-    /// Backstop for a late or missing format listener (deep review M11).
-    static let formatPollSeconds: TimeInterval = 0.05
-
     static func hostSeconds(_ hostTime: UInt64) -> TimeInterval? {
         hostTime == 0 ? nil : TimeInterval(AudioConvertHostTimeToNanos(hostTime)) / 1_000_000_000
     }
 
-    /// The silence a reconnect pads. Drain ticks only bracket the hole to
-    /// the nearest 10 ms tick and miss audio a rebuild threw away, so the
-    /// host-clock stamps of the last kept and first new sample win when the
-    /// HAL gave both and they are plausible (deep review M8).
+    /// The silence a reconnect pads. Drain ticks bracket the hole only to a tick
+    /// (~50 ms steady, so a `clockGap` pad can run that short) and miss audio a
+    /// rebuild threw away, so host-clock stamps of the last kept and first new
+    /// sample win when the HAL gave both and they're plausible (review M8).
     static func interruptionGap(
         clockGap: TimeInterval,
         lastDeliveredEnd: TimeInterval?,

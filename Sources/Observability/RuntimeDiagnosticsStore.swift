@@ -55,15 +55,59 @@ enum RuntimeDiagnosticsStore {
         return try? JSONDecoder().decode(RuntimeDiagnosticsMarker.self, from: data)
     }
 
+    /// Writes the marker as an owner-only (0600) file via temp file + rename,
+    /// the same durability as main's `.atomic` write (no fsync; a rename
+    /// already survives a process crash). The temp file is created 0600, so
+    /// there's no stat/chmod per save; the folder is created (0700) only when
+    /// it's missing.
     static func save(_ marker: RuntimeDiagnosticsMarker, to url: URL) {
         do {
-            try FileManager.default.createPrivateDirectory(at: url.deletingLastPathComponent())
             let data = try JSONEncoder().encode(marker)
-            try data.write(to: url, options: .atomic)
-            FileManager.default.restrictFileToOwnerOnly(at: url)
+            try writeOwnerOnlyAtomically(data, to: url)
         } catch {
             fputs("Runtime diagnostics marker write failed: \(error.localizedDescription)\n", stderr)
         }
+    }
+
+    private static func writeOwnerOnlyAtomically(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        let tempURL = directory.appendingPathComponent(
+            ".\(url.lastPathComponent).\(getpid()).\(UUID().uuidString).tmp",
+            isDirectory: false
+        )
+        let flags = O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
+        var descriptor = open(tempURL.path, flags, 0o600)
+        if descriptor < 0, errno == ENOENT {
+            try FileManager.default.createPrivateDirectory(at: directory)
+            descriptor = open(tempURL.path, flags, 0o600)
+        }
+        guard descriptor >= 0 else { throw POSIXError(posixCode(errno)) }
+
+        var failure: Int32 = 0
+        data.withUnsafeBytes { buffer in
+            guard var cursor = buffer.baseAddress else { return }
+            var remaining = buffer.count
+            while remaining > 0 {
+                let written = write(descriptor, cursor, remaining)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    failure = errno
+                    return
+                }
+                remaining -= written
+                cursor += written
+            }
+        }
+        if close(descriptor) != 0, failure == 0 { failure = errno }
+        if failure == 0, rename(tempURL.path, url.path) != 0 { failure = errno }
+        if failure != 0 {
+            unlink(tempURL.path)
+            throw POSIXError(posixCode(failure))
+        }
+    }
+
+    private static func posixCode(_ value: Int32) -> POSIXErrorCode {
+        POSIXErrorCode(rawValue: value) ?? .EIO
     }
 
     static func heartbeatAgeBucket(previousUpdate: Date, now: Date = Date()) -> String {

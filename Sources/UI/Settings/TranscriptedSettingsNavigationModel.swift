@@ -8,6 +8,9 @@ final class TranscriptedSettingsNavigationModel {
     var presentedPage: TranscriptedSettingsPage
     var presentationSource: String
     var presentationID = UUID()
+    /// True from `present()` until the window closes (not minimized or hidden).
+    /// Work done for a window nobody can see is gated on it.
+    var isWindowOpen = false
 
     /// Bumped by ⌘F (Find Meetings). Home reveals and focuses its find bar
     /// via `.task(id:)` on this token, which also fires on mount — so the

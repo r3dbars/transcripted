@@ -183,12 +183,13 @@ final class GhostKeyboardInstallerHost {
         return true
     }
 
-    /// Transcripted deviation from Tilde: this app's own seal is validated once
-    /// per launch. The strict nested check over the whole ~550 MB bundle costs
-    /// about 0.2 s on the main thread, and the running app's bundle can't
-    /// change until it relaunches. The keyboard bundles are still checked
-    /// every time.
-    private static let ownerTeamIdentifier: String? = strictSignatureTeamIdentifier(at: Bundle.main.bundleURL)
+    /// Transcripted deviation from Tilde: the owner Team ID comes from the
+    /// running app's own code signature (`OwnSigningTeam`), resolved once per
+    /// process. The strict static check over the whole ~770 MB bundle it
+    /// replaced cost about 0.2 s on the main thread before hotkeys
+    /// registered. Ad-hoc and unsigned builds still have no team and fail
+    /// closed. The keyboard bundles are still checked strictly every time.
+    private static var ownerTeamIdentifier: String? { OwnSigningTeam.current }
 
     /// Returns a non-empty Team ID only for a bundle whose complete code seal
     /// passes strict validation. Ad-hoc and unsigned bundles fail closed.

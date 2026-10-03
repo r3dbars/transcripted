@@ -2,10 +2,15 @@
 // Loads and runs FluidAudio's Nemotron 3 Diarization model for DiarizationService.
 //
 // `Nemotron3Diarizer` is a synchronous, non-Sendable, not-thread-safe class. This
-// runner owns exactly one and only ever touches it on a private serial queue, so
-// concurrent `diarizeOffline` calls queue up instead of racing on its streaming
-// state, and the long synchronous inference never blocks a Swift concurrency
-// thread.
+// runner keeps the loaded models and builds a fresh diarizer for each run, only
+// ever on a private serial queue, so concurrent `diarizeOffline` calls queue up
+// instead of racing, and the long synchronous inference never blocks a Swift
+// concurrency thread.
+//
+// The recording is fed through the diarizer's streaming API in 10 s slices rather
+// than `processComplete`, which holds a padded copy of the whole recording plus its
+// whole mel spectrogram (about +0.42 GB per hour of audio at the job's peak). Same
+// model calls on bit-identical chunk features, so the output is identical.
 
 import Foundation
 import CoreML
@@ -40,13 +45,22 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
     /// `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization/`.
     static let bundleDirectoryName = "nemotron-diarizer-models"
 
+    /// Samples appended to the streaming diarizer per call (10 s at 16 kHz). One
+    /// whole-buffer append would copy the recording into the frontend, so feed it
+    /// in slices.
+    static let feedSliceSamples = 160_000
+
     let presetName: String
-    private let diarizer: Nemotron3Diarizer
+    /// Loaded once; only touched on `queue`.
+    private let config: Nemotron3Config
+    private let models: Nemotron3Models
     private let queue = DispatchQueue(label: "com.transcripted.diarization.nemotron", qos: .userInitiated)
 
-    private init(presetName: String, diarizer: Nemotron3Diarizer) {
+    /// Internal so model-gated tests can hand in preloaded models.
+    init(presetName: String, config: Nemotron3Config, models: Nemotron3Models) {
         self.presetName = presetName
-        self.diarizer = diarizer
+        self.config = config
+        self.models = models
     }
 
     // MARK: - Configuration
@@ -97,10 +111,7 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
                 try await Nemotron3Models.loadFromHuggingFace(config: config, computeUnits: units)
             }
         }
-        return NemotronDiarizationRunner(
-            presetName: presetName,
-            diarizer: Nemotron3Diarizer(config: config, models: models)
-        )
+        return NemotronDiarizationRunner(presetName: presetName, config: config, models: models)
     }
 
     // MARK: - Inference
@@ -111,15 +122,34 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NemotronFrameProbabilities, Error>) in
             queue.async {
                 do {
-                    let output = try self.diarizer.processComplete(samples)
-                    let config = self.diarizer.config
+                    let config = self.config
+                    // Fresh per run: `reset()` keeps the frontend's buffers, and this
+                    // runner lives for the whole app session.
+                    let diarizer = Nemotron3Diarizer(config: config, models: self.models)
+                    let speakers = config.numSpeakers
+                    var probabilities = [Float]()
+                    // ~1 frame per 160 samples (10 ms); sized from the frame count,
+                    // never from samples.count.
+                    probabilities.reserveCapacity((samples.count / 160 + 2) * speakers)
+                    var start = 0
+                    while start < samples.count {
+                        let end = min(start + Self.feedSliceSamples, samples.count)
+                        diarizer.appendAudio(Array(samples[start..<end]))
+                        for result in try diarizer.processBufferedAudio() {
+                            probabilities.append(contentsOf: result.probabilities)
+                        }
+                        start = end
+                    }
+                    for result in try diarizer.finishStream() {
+                        probabilities.append(contentsOf: result.probabilities)
+                    }
                     // `outputFrameSeconds` is a Float 0.01; widen without the
                     // float32 rounding error so turn times land on exact 10 ms steps.
                     let frameSeconds = (Double(config.outputFrameSeconds) * 1_000_000).rounded() / 1_000_000
                     continuation.resume(returning: NemotronFrameProbabilities(
-                        probabilities: output.probabilities,
-                        frameCount: output.frameCount,
-                        numSpeakers: config.numSpeakers,
+                        probabilities: probabilities,
+                        frameCount: speakers > 0 ? probabilities.count / speakers : 0,
+                        numSpeakers: speakers,
                         frameSeconds: frameSeconds
                     ))
                 } catch {

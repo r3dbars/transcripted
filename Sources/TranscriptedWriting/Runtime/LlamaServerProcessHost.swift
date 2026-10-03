@@ -1,3 +1,6 @@
+#if canImport(TranscriptedWritingCore)
+import TranscriptedWritingCore
+#endif
 import Foundation
 import Security
 
@@ -75,23 +78,36 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     private var launchedAt = Date.distantPast
     private var restartPolicy = LlamaRestartPolicy()
     private var readinessObserver: (@Sendable (Bool) -> Void)?
+    /// Set only while a port-in-use retry is waiting on a listener the reap
+    /// rule refused. Lifecycle queue only.
+    private var blockedBy: BlockedPort?
+    private let portListeners: @Sendable (Int) -> [Int32]?
+    private let retryScheduler: (@Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void)?
+    private let physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
 
+    /// `portListeners` (default: `lsof`) and `retryScheduler` (default: a
+    /// timer on the lifecycle queue) are seams for tests only.
     init(
         port: Int,
         modelFileProvider: @escaping @Sendable () -> VerifiedModelFile? = { nil },
-        assetResolver: (@Sendable () -> Assets?)? = nil
+        assetResolver: (@Sendable () -> Assets?)? = nil,
+        portListeners: (@Sendable (Int) -> [Int32]?)? = nil,
+        retryScheduler: (@Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void)? = nil
     ) {
         precondition((1...65_535).contains(port))
         self.port = port
         self.assetResolver = assetResolver ?? {
             Self.resolveAssets(modelFileProvider: modelFileProvider)
         }
+        self.portListeners = portListeners ?? { Self.lsofListeners(port: $0) }
+        self.retryScheduler = retryScheduler
     }
 
     func start() {
         lifecycle.async { [weak self] in
             guard let self else { return }
             stopped = false
+            blockedBy = nil
             prepareLaunch()
         }
     }
@@ -107,6 +123,7 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         let child: Process? = lifecycle.sync {
             stopped = true
             preparing = false
+            blockedBy = nil
             healthTask?.cancel()
             healthTask = nil
             defer { process = nil }
@@ -143,7 +160,11 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     /// supplied only after ModelManager has verified the external bytes.
     private static func resolveAssets(modelFileProvider: @Sendable () -> VerifiedModelFile?) -> Assets? {
         let binary = bundledBinaryPath
-        guard validCurrentBundleSeal(),
+        let bundlePath = Bundle.main.bundlePath
+        guard sealPassMemo.check(
+            fingerprint: { BundleSealPassMemo.helperSealFingerprint(bundlePath: bundlePath) },
+            validate: validCurrentBundleSeal
+        ),
               FileManager.default.isExecutableFile(atPath: binary),
               let model = modelFileProvider() else { return nil }
         return Assets(binary: binary, model: "/dev/fd/0", modelInput: model.handle)
@@ -158,8 +179,12 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     /// launchd has adopted it, and only when it's the port's sole listener.
     /// Shells out to `lsof`/`ps`, so never call it on the main thread.
     static func reapOrphanedHelper(port: Int) {
-        _ = preparePort(for: bundledBinaryPath, port: port)
+        _ = preparePort(for: bundledBinaryPath, port: port, listeners: { lsofListeners(port: $0) })
     }
+
+    /// See `BundleSealPassMemo`: today's whole-bundle check, run again only
+    /// when the helper or the bundle's seal file changes.
+    private static let sealPassMemo = BundleSealPassMemo()
 
     private static func validCurrentBundleSeal() -> Bool {
         var code: SecStaticCode?
@@ -174,30 +199,59 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     private func prepareLaunch() {
         guard !stopped, process == nil, !preparing else { return }
         preparing = true
+        let blocked = blockedBy
+        let port = self.port
+        let listeners = portListeners
         preparation.async { [weak self] in
             guard let self else { return }
+            // The same listener the reap rule refused last time still holds
+            // the port, so the full path would refuse again. Skip the seal
+            // check, the model clone and lsof; the retry ladder is unchanged.
+            if let blocked, Self.stillBlockedNow(blocked, port: port) {
+                self.lifecycle.async { [weak self] in self?.finishBlockedRetry() }
+                return
+            }
             let assets = self.assetResolver()
-            let ready = assets.map { Self.preparePort(for: $0.binary, port: self.port) } ?? false
+            let result = assets.map {
+                Self.preparePort(for: $0.binary, port: port, listeners: listeners)
+            } ?? .unavailable
             self.lifecycle.async { [weak self] in
-                self?.finishPreparation(assets, ready: ready)
+                self?.finishPreparation(assets, result)
             }
         }
     }
 
-    private func finishPreparation(_ assets: Assets?, ready: Bool) {
+    private func finishPreparation(_ assets: Assets?, _ result: PortPreparation) {
         preparing = false
         guard !stopped, process == nil else { return }
         guard let assets else {
+            blockedBy = nil
             runtimeSnapshot = .failed(.assetsMissing)
             DiagnosticsLog.shared.record("llama-server-unavailable", metadata: ["reason": "assets-missing"])
             return
         }
-        guard ready else {
-            DiagnosticsLog.shared.record("llama-server-unavailable", metadata: ["reason": "port-in-use"])
-            scheduleRestart(reason: .portInUse, wasHealthy: false, uptime: 0)
-            return
+        switch result {
+        case .ready:
+            blockedBy = nil
+            launchPrepared(assets)
+        case let .blocked(pids):
+            blockedBy = BlockedPort(binary: assets.binary, pids: pids)
+            recordPortInUseAndRetry()
+        case .unavailable:
+            blockedBy = nil
+            recordPortInUseAndRetry()
         }
-        launchPrepared(assets)
+    }
+
+    private func finishBlockedRetry() {
+        preparing = false
+        guard !stopped, process == nil, blockedBy != nil else { return }
+        recordPortInUseAndRetry()
+    }
+
+    private func recordPortInUseAndRetry() {
+        DiagnosticsLog.shared.record("llama-server-unavailable", metadata: ["reason": "port-in-use"])
+        scheduleRestart(reason: .portInUse, wasHealthy: false, uptime: 0)
     }
 
     /// Runs only on `lifecycle`, so stop/restart cannot race child creation.
@@ -213,7 +267,8 @@ final class LlamaServerProcessHost: @unchecked Sendable {
             model: assets.model,
             port: port,
             apiKey: apiKey,
-            inheritedEnvironment: ProcessInfo.processInfo.environment
+            inheritedEnvironment: ProcessInfo.processInfo.environment,
+            physicalMemoryBytes: physicalMemoryBytes
         )
         let child = Process()
         child.executableURL = URL(fileURLWithPath: assets.binary)
@@ -250,26 +305,67 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     /// The key goes in the environment, never argv, so `ps` can't show it.
     /// `/health` stays public in llama-server, so the readiness probe works
     /// either way; the app sends the key there too.
+    ///
+    /// Perf divergences from Tilde (docs/writing-port-ledger.md, Deviations):
+    /// - `-np 1`: the app serves one request at a time (the keyboard cancels
+    ///   a superseded one), and `ScaffoldPrewarmer` and the engine's early
+    ///   stop rely on a single slot. The auto default of 4 slots with a
+    ///   unified KV cache pinned 3 idle recurrent states on Qwen (~150 MB) and
+    ///   sent an overlapping request to a cold slot (a full prefill). Any
+    ///   future second consumer of the helper needs its own design (its own
+    ///   slot via `id_slot`, or its own helper), not a bigger `-np`.
+    /// - `--cache-ram`: RAM-tiered, and left out at 64 GiB and up; see
+    ///   `promptCacheMiB(physicalMemoryBytes:)`.
+    /// - `--poll 0`: every layer runs on Metal, so the CPU pool only does the
+    ///   embedding lookup. The pinned build defaults to `--poll 50`, which
+    ///   keeps the idle workers spinning after every token (~90% of the
+    ///   helper's CPU per suggestion). 0 makes them sleep instead; output and
+    ///   latency don't change. Batch threads inherit it; if `-tb` is ever
+    ///   added, add `--poll-batch 0` with it. Don't lower `-t`.
     static func launchConfiguration(
         model: String,
         port: Int,
         apiKey: String,
-        inheritedEnvironment: [String: String]
+        inheritedEnvironment: [String: String],
+        physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> LaunchConfiguration {
         var environment = inheritedEnvironment
         environment[LlamaServerAccessKey.environmentVariable] = apiKey
+        let promptCache = promptCacheMiB(physicalMemoryBytes: physicalMemoryBytes)
+            .map { ["--cache-ram", String($0)] } ?? []
         return LaunchConfiguration(
             arguments: [
                 "-m", model,
                 "--host", "127.0.0.1",
                 "--port", String(port),
                 "-c", "4096",
+                "-np", "1",
                 "--swa-full",
                 "--cache-reuse", "256",
+            ] + promptCache + [
+                "--poll", "0",
                 "--no-webui",
             ],
             environment: environment
         )
+    }
+
+    /// The helper keeps prompts it moves out of its slot in a host RAM cache
+    /// so a return to an earlier context restores (0.08-0.6 s) instead of
+    /// re-prefilling (~1.2 s). The pinned build caps that cache at 8 GiB, and
+    /// macOS malloc keeps the freed blocks, so on Qwen (~180 MB per entry) the
+    /// helper could climb toward 8.5 GB over a day of context switches.
+    /// Tiered by RAM so small Macs avoid swap while big Macs keep today's
+    /// revisit speed: 64 GiB and up passes nothing (nil: the build's 8 GiB
+    /// default, same as before), 32 GiB and up gets 4096 MiB, anything less
+    /// 1024 MiB. Every cap holds at least 3 worst-case Qwen entries (~330 MiB
+    /// at 4,096 tokens); eviction is oldest first. Never 0 or -1 (off and
+    /// unlimited).
+    static func promptCacheMiB(physicalMemoryBytes: UInt64) -> Int? {
+        let gibibyte: UInt64 = 1 << 30
+        if physicalMemoryBytes >= 64 * gibibyte { return nil }
+        if physicalMemoryBytes >= 32 * gibibyte { return 4_096 }
+        return 1_024
     }
 
     private func handleExit(_ child: Process) {
@@ -292,8 +388,14 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         guard !stopped else { return }
         runtimeSnapshot = .retrying(reason)
         let delay = restartPolicy.delay(wasHealthy: wasHealthy, uptime: uptime)
-        lifecycle.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.prepareLaunch()
+        guard let retryScheduler else {
+            lifecycle.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.prepareLaunch()
+            }
+            return
+        }
+        retryScheduler(delay) { [weak self] in
+            self?.lifecycle.async { [weak self] in self?.prepareLaunch() }
         }
     }
 
@@ -448,29 +550,82 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         return false
     }
 
+    enum PortPreparation: Equatable {
+        case ready
+        /// The reap rule refused these listeners (lsof answered).
+        case blocked([Int32])
+        /// lsof failed or timed out, or a listener survived a reap.
+        case unavailable
+    }
+
+    /// The listeners the reap rule refused on the last attempt, and the
+    /// helper binary that attempt resolved.
+    struct BlockedPort: Equatable, Sendable {
+        let binary: String
+        let pids: [Int32]
+    }
+
+    /// True only while the full path would refuse again for the same reason:
+    /// every remembered pid still listens on the port (so a fresh lsof set
+    /// contains them all) and the reap rule, rerun with fresh path and parent
+    /// answers, still refuses them. Anything else takes the full path.
+    static func stillBlocked(
+        _ blocked: BlockedPort,
+        port: Int,
+        isListening: (Int32, Int) -> Bool,
+        executablePath: (Int32) -> String?,
+        parentProcess: (Int32) -> String?
+    ) -> Bool {
+        !blocked.pids.isEmpty
+            && blocked.pids.allSatisfy { isListening($0, port) }
+            && orphanToReap(
+                listeners: blocked.pids,
+                binary: blocked.binary,
+                executablePath: executablePath,
+                parentProcess: parentProcess
+            ) == nil
+    }
+
+    private static func stillBlockedNow(_ blocked: BlockedPort, port: Int) -> Bool {
+        stillBlocked(
+            blocked,
+            port: port,
+            isListening: { holdsListeningSocket(pid: $0, port: $1) },
+            executablePath: { processPath(pid: $0) },
+            parentProcess: { parentProcessID(of: $0) }
+        )
+    }
+
     /// Reap only a re-parented helper from this exact app asset. Any other
     /// listener is left untouched and keeps this runtime unavailable.
-    private static func preparePort(for binary: String, port: Int) -> Bool {
-        guard let output = command(
-            "/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
-        ) else { return false }
-        let listeners = output.split(whereSeparator: \Character.isNewline).compactMap { Int32($0) }
-        guard !listeners.isEmpty else { return true }
+    private static func preparePort(
+        for binary: String,
+        port: Int,
+        listeners lookUpListeners: (Int) -> [Int32]?
+    ) -> PortPreparation {
+        guard let listeners = lookUpListeners(port) else { return .unavailable }
+        guard !listeners.isEmpty else { return .ready }
         guard let pid = orphanToReap(
             listeners: listeners,
             binary: binary,
             executablePath: { processPath(pid: $0) },
-            parentProcess: {
-                command("/bin/ps", ["-o", "ppid=", "-p", String($0)])?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        ) else { return false }
+            parentProcess: { parentProcessID(of: $0) }
+        ) else { return .blocked(listeners) }
         kill(pid, SIGTERM)
         usleep(200_000)
-        guard let remaining = command(
-            "/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
-        ) else { return false }
-        return remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard let remaining = lookUpListeners(port) else { return .unavailable }
+        return remaining.isEmpty ? .ready : .unavailable
+    }
+
+    private static func lsofListeners(port: Int) -> [Int32]? {
+        command("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]).map {
+            $0.split(whereSeparator: \Character.isNewline).compactMap { Int32($0) }
+        }
+    }
+
+    private static func parentProcessID(of pid: Int32) -> String? {
+        command("/bin/ps", ["-o", "ppid=", "-p", String(pid)])?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The listener that may be killed, if any: the port's only listener,

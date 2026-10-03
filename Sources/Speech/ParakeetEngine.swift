@@ -144,6 +144,7 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     var asrManager: AsrManager?
+    var decoderLayerCountCache = ParakeetDecoderLayerCountCache()
     var modelVariant: ParakeetModelVariant = .v3
     var loadedModelVariant: ParakeetModelVariant?
     var modelCleanupTask: Task<Void, Never>?

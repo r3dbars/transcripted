@@ -45,8 +45,14 @@ final class WritingSettingsModel: ObservableObject {
     /// being transcribed. Set by the page from the settings shell.
     var isCaptureBusy: () -> Bool = { false }
     /// The Settings window, reported by the page. It stays alive when
-    /// closed, so the refresh timers idle unless it's showing.
-    weak var hostWindow: NSWindow?
+    /// closed, so the refresh timers idle unless it's showing, and stop
+    /// altogether while it's closed or covered (see `observeHostWindow`).
+    weak var hostWindow: NSWindow? {
+        didSet {
+            guard hostWindow !== oldValue, isPageMounted else { return }
+            observeHostWindow()
+        }
+    }
 
     private var isOnScreen: Bool {
         hostWindow?.writingIsShowingContent ?? true
@@ -81,15 +87,22 @@ final class WritingSettingsModel: ObservableObject {
     @Published private(set) var saveProblem = false
     @Published private(set) var today = WritingDayFileReader.Day.empty
     @Published private(set) var ledger = OutcomeLedgerSummary.empty
+    /// What `ledger` was computed from, so an unchanged ledger costs a
+    /// `fstat` instead of a full re-read. Set together with `ledger`.
+    private var ledgerStamp: OutcomeLedgerReader.Stamp?
     @Published private(set) var keyboardAcceptedToday = 0
     @Published private(set) var storage: WritingStorageUsage?
     @Published private(set) var installedApps: [Presentation.AppChoice] = []
     @Published private(set) var isDeleting = false
     @Published private(set) var deleteFailed = false
 
-    private var liveTimer: Timer?
-    private var statsTimer: Timer?
+    private let timers = WritingRefreshTimers(
+        liveInterval: WritingSettingsModel.liveRefreshInterval,
+        statsInterval: WritingSettingsModel.statsRefreshInterval
+    )
+    private var isPageMounted = false
     private var observers: [NSObjectProtocol] = []
+    private var windowObservers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
     private var todayLoadGeneration: UInt64 = 0
     private var statsLoadGeneration: UInt64 = 0
@@ -121,42 +134,88 @@ final class WritingSettingsModel: ObservableObject {
         reloadToday()
         refreshStats()
         refreshStorage()
+        isPageMounted = true
         startObserving()
+        observeHostWindow()
+        if isOnScreen { armTimers() }
     }
 
     func pageDisappeared() {
-        liveTimer?.invalidate()
-        liveTimer = nil
-        statsTimer?.invalidate()
-        statsTimer = nil
-        for observer in observers {
+        isPageMounted = false
+        timers.suspend()
+        for observer in observers + windowObservers {
             NotificationCenter.default.removeObserver(observer)
         }
         observers.removeAll()
+        windowObservers.removeAll()
         for observer in distributedObservers {
             DistributedNotificationCenter.default().removeObserver(observer)
         }
         distributedObservers.removeAll()
     }
 
-    private func startObserving() {
-        guard liveTimer == nil else { return }
-        let live = Timer(timeInterval: Self.liveRefreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+    /// Stops the 1 s and 5 s refreshes while the page stays mounted, for a
+    /// window that closed or is fully covered. Observers stay.
+    func suspendTimers() {
+        timers.suspend()
+    }
+
+    /// Restarts the refreshes after `suspendTimers`, once: a no-op while the
+    /// page isn't mounted or the timers already run. Reads the live state
+    /// right away so the first frame isn't a second stale.
+    func resumeTimers() {
+        guard isPageMounted, armTimers() else { return }
+        refreshLive()
+        refreshStats()
+    }
+
+    @discardableResult
+    private func armTimers() -> Bool {
+        timers.resume(
+            live: { [weak self] in
                 guard let self, self.isOnScreen else { return }
                 self.refreshLive()
-            }
-        }
-        let stats = Timer(timeInterval: Self.statsRefreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            },
+            stats: { [weak self] in
                 guard let self, self.isOnScreen else { return }
                 self.refreshStats()
             }
+        )
+    }
+
+    /// Closing the Settings window doesn't fire `onDisappear`, so the page
+    /// follows its window: closed or covered suspends the timers, shown or
+    /// made key again resumes them.
+    private func observeHostWindow() {
+        for observer in windowObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
-        RunLoop.main.add(live, forMode: .common)
-        RunLoop.main.add(stats, forMode: .common)
-        liveTimer = live
-        statsTimer = stats
+        windowObservers.removeAll()
+        guard let window = hostWindow else { return }
+        let center = NotificationCenter.default
+        windowObservers.append(center.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.suspendTimers() }
+        })
+        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification] {
+            windowObservers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if self.isOnScreen {
+                        self.resumeTimers()
+                    } else {
+                        self.suspendTimers()
+                    }
+                }
+            })
+        }
+    }
+
+    private func startObserving() {
+        guard observers.isEmpty, distributedObservers.isEmpty else { return }
 
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: .writingDayFileDidSave, object: nil, queue: .main) { [weak self] _ in
@@ -235,9 +294,11 @@ final class WritingSettingsModel: ObservableObject {
         statsLoadGeneration &+= 1
         let generation = statsLoadGeneration
         let url = TildeLocalOutcomeStores.eventURL()
+        let previous = ledgerStamp.map { (stamp: $0, summary: ledger) }
         Task { [weak self] in
-            let summary = await OutcomeLedgerReader.summary(url: url)
+            let (summary, stamp) = await OutcomeLedgerReader.summary(url: url, reusing: previous)
             guard let self, generation == self.statsLoadGeneration else { return }
+            self.ledgerStamp = stamp
             self.update(\.ledger, summary)
             self.update(\.keyboardAcceptedToday, TildeStats.todaySuggestionsAccepted())
         }

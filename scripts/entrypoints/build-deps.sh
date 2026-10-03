@@ -65,8 +65,10 @@ SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f1127953190017
 # so Writing's suggestions come from the same inference build as Tilde's.
 # Two pins: the release zip, and the helper's code bytes with Tilde's Developer
 # ID signature removed (Transcripted's build re-signs it; see the llama-server
-# row in docs/writing-port-ledger.md). Tilde doesn't record which llama.cpp
-# commit or flags built it; decision 9 in docs/writing-plan.md tracks that.
+# row in docs/writing-port-ledger.md). The bytes were rebuilt from llama.cpp
+# 2115b73 with a recorded recipe; docs/llama-server-provenance.md has it, plus
+# a verified owned build that parks the idle Metal residency heartbeat and is
+# waiting on a hosted release asset before these pins move.
 LLAMA_SERVER_TILDE_RELEASE="${LLAMA_SERVER_TILDE_RELEASE:-v0.1.0-beta.1}"
 LLAMA_SERVER_TILDE_ZIP_SHA256="${LLAMA_SERVER_TILDE_ZIP_SHA256:-12b7f14ae31abea7d5cecf236d2e4de3b0facad89fa580877dec391336b26a50}"
 LLAMA_SERVER_UNSIGNED_SHA256="${LLAMA_SERVER_UNSIGNED_SHA256:-3f6895ab8d077b02803761fb8cc254073d2c7b4006fbacbef4c844879333fffc}"

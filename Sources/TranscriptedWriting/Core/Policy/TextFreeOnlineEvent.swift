@@ -143,17 +143,46 @@ public struct TextFreeOnlineEvent: Codable, Equatable, Sendable {
 
     /// Decodes one live ledger line strictly: v3 schema only, no key outside
     /// `allowedKeys`, dates in ISO 8601.
+    ///
+    /// One parse per line: the checks run in the same order a separate
+    /// `JSONSerialization` pre-pass used to (object, then unknown key, then
+    /// schema, then fields), inside `ProductionLine`.
     public static func decodeProductionLine(_ data: Data) throws -> TextFreeOnlineEvent {
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw TextFreeOnlineEventError.malformedLine
+        try productionDecoder.decode(ProductionLine.self, from: data).event
+    }
+
+    /// Any top-level key, so `allKeys` sees keys outside `allowedKeys`. A
+    /// closed `CodingKeys` enum would silently drop them.
+    private struct AnyLineKey: CodingKey {
+        let stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    /// The strict envelope around one production line.
+    private struct ProductionLine: Decodable {
+        let event: TextFreeOnlineEvent
+
+        init(from decoder: Decoder) throws {
+            let container: KeyedDecodingContainer<AnyLineKey>
+            do {
+                container = try decoder.container(keyedBy: AnyLineKey.self)
+            } catch DecodingError.typeMismatch(_, _) {
+                throw TextFreeOnlineEventError.malformedLine
+            }
+            if let key = container.allKeys.map(\.stringValue)
+                .filter({ !TextFreeOnlineEvent.allowedKeys.contains($0) })
+                .sorted()
+                .first {
+                throw TextFreeOnlineEventError.unexpectedKey(key)
+            }
+            let schemaKey = AnyLineKey(stringValue: "schema")!
+            guard (try? container.decodeIfPresent(String.self, forKey: schemaKey)) == TextFreeOnlineEvent.schema else {
+                throw TextFreeOnlineEventError.unsupportedSchema
+            }
+            event = try TextFreeOnlineEvent(from: decoder)
         }
-        if let key = Set(object.keys).subtracting(allowedKeys).sorted().first {
-            throw TextFreeOnlineEventError.unexpectedKey(key)
-        }
-        guard object["schema"] as? String == schema else {
-            throw TextFreeOnlineEventError.unsupportedSchema
-        }
-        return try productionDecoder.decode(TextFreeOnlineEvent.self, from: data)
     }
 
     /// Stateless, so one instance serves every line of a ledger read.

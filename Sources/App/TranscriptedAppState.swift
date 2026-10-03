@@ -134,8 +134,15 @@ class TranscriptedAppState: ObservableObject {
         }
         // Writing runs once its setup is done and a feature is on (or behind
         // the debug default); the Writing tab starts and stops it after that.
+        // One main-actor turn later, so the launch task registers the
+        // hotkeys first: Writing's start installs the keyboard synchronously.
+        // This ordering assumes nothing above in initialize() awaits; the
+        // controller's own guards (terminated, wake) cover a quit in between.
         if !Self.isLaunchSmokeMode {
-            writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
+            }
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")

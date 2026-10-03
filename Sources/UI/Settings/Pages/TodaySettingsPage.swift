@@ -28,6 +28,12 @@ struct TodaySettingsPage: View {
         snapshot.tapeDays.first { $0.id == selectedDayID } ?? snapshot.tapeDays.last
     }
 
+    /// The region settings the cards' copy depends on, beyond `now` and the
+    /// data: a locale or time zone change re-renders on the next pass, as before.
+    private var formatKey: String {
+        Locale.current.identifier + "|" + TimeZone.current.identifier + "|" + "\(Calendar.current.identifier)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
             header
@@ -35,7 +41,18 @@ struct TodaySettingsPage: View {
             if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
                 emptyState
             } else if let selectedDay {
-                TodayDayCard(day: selectedDay, now: now, pickedMarkID: $pickedMarkID, onOpen: onOpenRecentItem)
+                // Equatable: the shell publishes up to 20 times a second
+                // during a capture, and the card only changes with its day,
+                // the picked mark, the minute, or the region.
+                TodayDayCard(
+                    day: selectedDay,
+                    now: now,
+                    pickedMarkID: pickedMarkID,
+                    onPick: { pickedMarkID = $0 },
+                    onOpen: onOpenRecentItem,
+                    formatKey: formatKey
+                )
+                .equatable()
                 sessionsSection(selectedDay)
             } else if !todayViewModel.hasLoaded {
                 Text("Loading…")
@@ -76,11 +93,12 @@ struct TodaySettingsPage: View {
                 if !snapshot.tapeDays.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(snapshot.tapeDays) { day in
-                            TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id) {
+                            TodayWeekCell(day: day, isSelected: day.id == selectedDay?.id, formatKey: formatKey) {
                                 withAnimation(.easeOut(duration: 0.15)) {
                                     selectedDayID = day.isToday ? nil : day.id
                                 }
                             }
+                            .equatable()
                         }
                     }
                     .frame(width: 330)
@@ -240,17 +258,29 @@ private struct TodaySentence: View {
 /// Days view. A meeting or a writing entry is a capsule, a dictation is a dot.
 /// Click a mark to pick it: it lights up, the rest dim, and the card under
 /// the lanes shows what it was. Prev and Next step through the day.
-private struct TodayDayCard: View {
+private struct TodayDayCard: View, Equatable {
     let day: TodayTapeDay
     let now: Date
     /// Owned by the page so a session click can pick a mark; it clears it
     /// when the day changes.
-    @Binding var pickedMarkID: String?
+    let pickedMarkID: String?
+    let onPick: (String?) -> Void
     let onOpen: (TodayRecentItem) -> Void
+    /// Locale, time zone and calendar, so a region change still re-renders.
+    let formatKey: String
 
     @State private var hoveredMarkID: String?
 
     private static let laneLabelWidth: CGFloat = 84
+
+    /// Closures and hover state stay out: hover is the card's own state and
+    /// re-renders it by itself.
+    nonisolated static func == (lhs: TodayDayCard, rhs: TodayDayCard) -> Bool {
+        lhs.day == rhs.day
+            && lhs.pickedMarkID == rhs.pickedMarkID
+            && TodayCopy.minuteKey(lhs.now) == TodayCopy.minuteKey(rhs.now)
+            && lhs.formatKey == rhs.formatKey
+    }
 
     var body: some View {
         // Worked out once per draw: every mark compares its id to it, and a
@@ -349,7 +379,7 @@ private struct TodayDayCard: View {
         let markWidth: CGFloat = mark.isDot ? 10 : max(8, width * CGFloat((mark.end ?? mark.start) - mark.start))
         let isHovered = hoveredMarkID == mark.id
         return Button {
-            withAnimation(.easeOut(duration: 0.12)) { pickedMarkID = mark.id }
+            withAnimation(.easeOut(duration: 0.12)) { onPick(mark.id) }
         } label: {
             Capsule()
                 .fill(color)
@@ -411,12 +441,12 @@ private struct TodayDayCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 2) {
                 arrowButton("chevron.left", label: "Previous") {
-                    if let index, index > 0 { pickedMarkID = marks[index - 1].id }
+                    if let index, index > 0 { onPick(marks[index - 1].id) }
                 }
                 .disabled(index == nil || index == 0)
                 .accessibilityIdentifier("transcripted.today.preview.prev")
                 arrowButton("chevron.right", label: "Next") {
-                    if let index, index + 1 < marks.count { pickedMarkID = marks[index + 1].id }
+                    if let index, index + 1 < marks.count { onPick(marks[index + 1].id) }
                 }
                 .disabled(index == nil || index == marks.count - 1)
                 .accessibilityIdentifier("transcripted.today.preview.next")
@@ -505,12 +535,19 @@ private enum TodayPreviewCopy {
 }
 
 /// One day in the week strip: weekday, date, and one mini line per stream.
-private struct TodayWeekCell: View {
+private struct TodayWeekCell: View, Equatable {
     let day: TodayTapeDay
     let isSelected: Bool
+    /// Locale, time zone and calendar, so a region change still re-renders.
+    let formatKey: String
     let select: () -> Void
 
     @State private var isHovering = false
+
+    /// The select closure stays out; it only sets the page's picked day.
+    nonisolated static func == (lhs: TodayWeekCell, rhs: TodayWeekCell) -> Bool {
+        lhs.day == rhs.day && lhs.isSelected == rhs.isSelected && lhs.formatKey == rhs.formatKey
+    }
 
     var body: some View {
         Button(action: select) {

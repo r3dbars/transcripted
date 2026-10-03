@@ -8,7 +8,7 @@ import type { Actions, Els, Phase, Tab, TranscriptLine, ViewModel } from './ui'
  * transcripted-live: the meeting Transcripted is recording, live in Claude Code.
  *
  * The `transcripted-live` helper transcribes the recording on-device and writes
- * two files this mod polls once a second:
+ * two files this mod polls every POLL_MS (400 ms):
  *   session.json            state, audio clock, the in-progress ("ghost") text
  *   meetings/<id>.jsonl     one finished utterance per line: { t, speaker, text }
  *
@@ -164,7 +164,11 @@ const MCP_SERVER = 'plugin_transcripted-live_transcripted'
 const STOP_CONFIRM_MS = 4_000
 /** How often to ask again whether Transcripted takes stop requests while a call is live. */
 const STOP_PROBE_MS = 10_000
-/** A helper that has not written its session file for this long is not running. */
+/**
+ * A helper that has not written its session file for this long is not running.
+ * An idle helper rewrites session.json about every 4 s (LiveOutput.heartbeatSeconds
+ * in the helper); keep this, and STALE_MS, well above that.
+ */
 const HELPER_ALIVE_MS = 10_000
 /** After a helper exits, wait this long before starting another. */
 const HELPER_RESTART_MS = 5_000
@@ -922,7 +926,8 @@ function superviseHelper($: EngineInterface, s: LiveState, now: number, tick: nu
     try {
       const child = $.process.spawn({
         argv: [s.helperBinary, 'watch'],
-        env: { TRANSCRIPTED_DISABLE_FILE_LOGGER: '1' },
+        // EXIT_WITH_PARENT: the helper stops between meetings if this session goes away.
+        env: { TRANSCRIPTED_DISABLE_FILE_LOGGER: '1', TRANSCRIPTED_LIVE_EXIT_WITH_PARENT: '1' },
       })
       for await (const { text } of child) {
         // The helper prints transcript lines; never copy its output anywhere.

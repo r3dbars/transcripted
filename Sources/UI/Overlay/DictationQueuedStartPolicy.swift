@@ -10,8 +10,6 @@ import Foundation
 enum DictationQueuedStartPolicy {
     /// How long a remembered press waits for the last take to finish.
     static let waitSeconds: Double = 2
-    /// How often the wait checks whether the last take has finished.
-    static let pollIntervalNanos: UInt64 = 50_000_000
 
     /// Shown in the transcribing pill while the press waits, so it doesn't
     /// look ignored.
@@ -82,6 +80,59 @@ extension DictationQueuedStartPolicy {
         if showsDropMessage(requested: showMessage, isDictating: isDictating) {
             steps.showStillFinishing()
         }
+    }
+}
+
+/// The wait behind a remembered press. It used to check every 50 ms; now it
+/// checks when the last take's state changes (the controller's `isDictating`
+/// or the router's `isTranscribing`), plus once when the wait's budget runs
+/// out. Decisions and the 2 s budget are unchanged.
+@MainActor
+enum DictationQueuedStartWait {
+    struct Steps {
+        /// The decision for this many seconds waited, or nil when the press
+        /// (or its controller) is gone.
+        var evaluate: @MainActor (_ secondsWaited: Double) -> DictationQueuedStartPolicy.Decision?
+        /// Calls `wake` on every change of the last take's state; returns the
+        /// cancel. `wake` may run inside a `@Published` willSet, so it must
+        /// only wake, never read state: the check runs on a later turn.
+        var watchChanges: @MainActor (_ wake: @escaping @Sendable () -> Void) -> @MainActor () -> Void
+        /// Seconds on the clock `requestedAt` is on (`systemUptime`).
+        var now: @MainActor () -> Double
+        var requestedAt: Double
+        /// Sleeps up to this many nanoseconds. It may return early (or on
+        /// cancel); the wait re-checks and re-arms when time is left.
+        var sleep: @Sendable (_ nanoseconds: UInt64) async -> Void
+    }
+
+    /// Waits until the decision is no longer `.keepWaiting` and returns it,
+    /// or returns nil when the task is cancelled or the press is gone.
+    static func run(_ steps: Steps) async -> DictationQueuedStartPolicy.Decision? {
+        let (wakes, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let stopWatching = steps.watchChanges { wake.yield() }
+        var deadline: Task<Void, Never>?
+        defer {
+            stopWatching()
+            deadline?.cancel()
+            wake.finish()
+        }
+        var iterator = wakes.makeAsyncIterator()
+        while !Task.isCancelled {
+            let waited = steps.now() - steps.requestedAt
+            guard let decision = steps.evaluate(waited) else { return nil }
+            guard decision == .keepWaiting else { return decision }
+            // Re-armed every pass: a sleep that ends early just re-checks.
+            deadline?.cancel()
+            let remaining = max(0, DictationQueuedStartPolicy.waitSeconds - waited)
+            let nanos = UInt64((remaining * 1_000_000_000).rounded(.up))
+            let sleep = steps.sleep
+            deadline = Task {
+                await sleep(nanos)
+                if !Task.isCancelled { wake.yield() }
+            }
+            guard await iterator.next(isolation: #isolation) != nil else { return nil }
+        }
+        return nil
     }
 }
 

@@ -32,6 +32,28 @@ struct PersistentDictationInputSystem {
     var report: (Report) -> Void
     /// Wait between deferred maintenance checks.
     var refreshDelay: () async -> Void
+    /// Runs a HAL listener add, then hands its result back on the main actor.
+    /// Live: the add runs on `HALListenerRegistrationQueue` (after the shared
+    /// monitor's default-input add, which is queued first), so the launch-time
+    /// HAL client init never blocks main. Fakes run both steps inline.
+    var registerListener: (
+        _ work: @escaping @Sendable () -> AudioObjectPropertyListenerBlock?,
+        _ completion: @escaping @MainActor (AudioObjectPropertyListenerBlock?) -> Void
+    ) -> Void = { work, completion in
+        let listener = work()
+        MainActor.assumeIsolated { completion(listener) }
+    }
+}
+
+/// Carries the device-list add onto the registration queue. Live, `add` is a
+/// static function with no captured state and `handler` only runs on main
+/// (the HAL listener hops there); fakes run the add inline on main. So nothing
+/// in here is touched from two threads at once.
+private struct DeviceListListenerAdd: @unchecked Sendable {
+    let add: (_ handler: @escaping @MainActor () -> Void) -> AudioObjectPropertyListenerBlock?
+    let handler: @MainActor () -> Void
+
+    func callAsFunction() -> AudioObjectPropertyListenerBlock? { add(handler) }
 }
 
 /// Applies the recommended non-Bluetooth microphone once per app lifetime when
@@ -49,6 +71,10 @@ final class PersistentDictationInputController {
     private var preferenceObserver: NSObjectProtocol?
     private var defaultInputObserverToken: DefaultInputDeviceObserverToken?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
+    private var deviceListRegistrationPending = false
+    /// Bumped on every stop, so a device-list add that finishes after
+    /// `stopMonitoring()` is undone instead of adopted.
+    private var deviceListRegistrationGeneration: UInt64 = 0
     private var externalInputActivityTask: Task<Bool?, Never>?
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
@@ -99,8 +125,10 @@ final class PersistentDictationInputController {
             }
         }
         installDefaultInputListener()
+        // The first reconcile is scheduled once the device-list add returns
+        // (see deviceListRegistrationFinished), so no reconcile or Mac-wide
+        // input write runs before both listeners are live.
         installDeviceListListener()
-        scheduleTopologyRefresh()
     }
 
     func stopAndRestore() async {
@@ -170,10 +198,28 @@ final class PersistentDictationInputController {
     }
 
     private func installDeviceListListener() {
-        guard deviceListListener == nil else { return }
-        if let listener = system.addDeviceListListener({ [weak self] in
+        guard deviceListListener == nil, !deviceListRegistrationPending else { return }
+        deviceListRegistrationPending = true
+        let generation = deviceListRegistrationGeneration
+        let add = DeviceListListenerAdd(add: system.addDeviceListListener) { [weak self] in
             self?.scheduleTopologyRefresh(deviceListChanged: true)
-        }) {
+        }
+        system.registerListener({ add() }) { [weak self] listener in
+            self?.deviceListRegistrationFinished(listener, generation: generation)
+        }
+    }
+
+    private func deviceListRegistrationFinished(
+        _ listener: AudioObjectPropertyListenerBlock?,
+        generation: UInt64
+    ) {
+        guard generation == deviceListRegistrationGeneration else {
+            // stopMonitoring() ran while the add was pending: undo it.
+            if let listener { system.removeDeviceListListener(listener) }
+            return
+        }
+        deviceListRegistrationPending = false
+        if let listener {
             deviceListListener = listener
         } else {
             report(
@@ -182,9 +228,16 @@ final class PersistentDictationInputController {
                 message: "Could not monitor microphone connections for the faster-start preference"
             )
         }
+        // The default-input add was queued ahead of this one, so both
+        // listeners are live now. A change that landed during registration is
+        // picked up by this first pass.
+        guard preferenceObserver != nil else { return }
+        scheduleTopologyRefresh()
     }
 
     private func removeDeviceListListener() {
+        deviceListRegistrationGeneration &+= 1
+        deviceListRegistrationPending = false
         guard let deviceListListener else { return }
         system.removeDeviceListListener(deviceListListener)
         self.deviceListListener = nil
