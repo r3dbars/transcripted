@@ -238,20 +238,9 @@ final class WritingController {
     private var activeModel: TildeModelChoice?
     private var log: (String) -> Void = { _ in }
     private var frontmostAppObserver: NSObjectProtocol?
-    // Backstop for `frontmostAppObserver`: NSWorkspace only tells us when a
-    // DIFFERENT app becomes frontmost, never when the focused window changes
-    // within the SAME app (e.g. Cmd+`, clicking a different document window,
-    // a new tab-window). This timer polls the true frontmost window's
-    // identity — no new permission needed, `CGWindowListCopyWindowInfo`'s
-    // layer/pid/window-number fields are unrestricted — and fires the same
-    // window-changed trigger on any change, cross- or same-app alike.
-    private var windowIdentityPollTimer: Timer? { didSet { windowIdentityPollTimer?.tolerance = 0.5 } } // same 1 s cadence; slack lets macOS coalesce the wakeup
-    private var lastFrontWindowIdentity: FrontWindowIdentity?
-    /// Bumped on every start and stop, so a read that comes back after the
-    /// poll stopped or restarted is dropped.
-    private var frontWindowPollGeneration: UInt64 = 0
-    private var isFirstFrontWindowPoll = false
-    private var isReadingFrontWindow = false
+    // Backstop for `frontmostAppObserver`, which misses same-app window
+    // changes; see `WritingFrontWindowPoller`.
+    private var frontWindowPoller: WritingFrontWindowPoller?
     /// Model preparation at start, or a model switch. At most one runs.
     private var modelTask: Task<Void, Never>?
     private var modelTaskID: UUID?
@@ -966,8 +955,8 @@ final class WritingController {
     /// The window-change trigger: macOS already tells every app when a
     /// different app becomes frontmost, so Screen Memory needs no IME/socket
     /// changes to observe it — `NSWorkspace` gives it directly. This alone
-    /// misses same-app window changes (see `windowIdentityPollTimer`'s doc
-    /// comment), so a lightweight poll backs it up.
+    /// misses same-app window changes (see `WritingFrontWindowPoller`), so a
+    /// lightweight poll backs it up.
     private func startObservingAppActivation() {
         guard frontmostAppObserver == nil, let runtime else { return }
         let prewarmer = runtime.scaffoldPrewarmer
@@ -997,49 +986,23 @@ final class WritingController {
     }
 
     private func startPollingFrontWindow() {
-        guard windowIdentityPollTimer == nil else { return }
-        frontWindowPollGeneration &+= 1
-        let generation = frontWindowPollGeneration
-        // The first poll records the baseline; it never fires the trigger.
-        isFirstFrontWindowPoll = true
-        windowIdentityPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.pollFrontWindowIdentityForScreenMemory(generation: generation) }
+        guard frontWindowPoller == nil else { return }
+        frontWindowPoller = WritingFrontWindowPoller { [weak self] identity in
+            self?.frontWindowDidChange(to: identity)
         }
-        Task { await pollFrontWindowIdentityForScreenMemory(generation: generation) }
     }
 
     private func stopPollingFrontWindow() {
-        windowIdentityPollTimer?.invalidate()
-        windowIdentityPollTimer = nil
-        lastFrontWindowIdentity = nil
-        frontWindowPollGeneration &+= 1
+        frontWindowPoller?.stop()
+        frontWindowPoller = nil
     }
 
-    /// Fires the window-changed trigger whenever the true frontmost window
-    /// (by process + `CGWindowID`) differs from the last poll — this catches
-    /// a same-app window switch that `NSWorkspace` cannot see. The service's
-    /// central cadence gate coalesces overlapping triggers before capture.
-    ///
-    /// The window read runs on `frontWindowReadQueue`, never on main: it
-    /// calls `CGWindowListCopyWindowInfo` and `NSRunningApplication
-    /// .bundleIdentifier`, and that bundle ID read froze the main thread for
-    /// 5+ s on one Mac (see `RunningApplicationsReader`). While a read is
-    /// still out, later ticks skip instead of queueing up behind it.
-    private func pollFrontWindowIdentityForScreenMemory(generation: UInt64) async {
-        guard generation == frontWindowPollGeneration, !isReadingFrontWindow else { return }
-        isReadingFrontWindow = true
-        let identity = await Self.readFrontWindowIdentityOffMain()
-        isReadingFrontWindow = false
-        // Polling stopped (or restarted) while the read was out.
-        guard generation == frontWindowPollGeneration else { return }
-        if isFirstFrontWindowPoll {
-            isFirstFrontWindowPoll = false
-            lastFrontWindowIdentity = identity
-            return
-        }
+    /// Fires the window-changed trigger when the true frontmost window (by
+    /// process + `CGWindowID`) changes, which catches a same-app window
+    /// switch that `NSWorkspace` can't see. The service's central cadence
+    /// gate coalesces overlapping triggers before capture.
+    private func frontWindowDidChange(to identity: WritingFrontWindowIdentity?) {
         guard let screenCaptureService = runtime?.screenCaptureService else { return }
-        guard identity != lastFrontWindowIdentity else { return }
-        lastFrontWindowIdentity = identity
         Task {
             let target = identity.map { Self.typingTarget(from: $0, sessionIdentifier: "") }
             guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else { return }
@@ -1047,63 +1010,16 @@ final class WritingController {
         }
     }
 
-    struct FrontWindowIdentity: Equatable, Sendable {
-        let ownerProcessIdentifier: pid_t
-        let windowNumber: CGWindowID
-        let bundleIdentifier: String?
-    }
-
-    /// The true frontmost on-screen window, system-wide, identified by owning
-    /// process + window number — `CGWindowListCopyWindowInfo` documents its
-    /// result as front-to-back ordered, so the first normal-layer (`0`)
-    /// window found is frontmost. Deliberately does not request window
-    /// names/titles: this only needs an identity to detect change, and
-    /// nothing here reads or stores what the window is titled.
-    private nonisolated static func readFrontWindowIdentityOffMain() async -> FrontWindowIdentity? {
-        await withCheckedContinuation { continuation in
-            frontWindowReadQueue.async {
-                continuation.resume(returning: currentFrontWindowIdentity())
-            }
-        }
-    }
-
-    /// Serial, and Writing's own: a stuck LaunchServices reply here can't
-    /// hold up meeting detection's reads on `RunningApplicationsReader`, or
-    /// tie up Swift's shared thread pool.
-    private nonisolated static let frontWindowReadQueue = DispatchQueue(
-        label: "com.transcripted.writing.front-window",
-        qos: .utility
-    )
-
-    private nonisolated static func currentFrontWindowIdentity() -> FrontWindowIdentity? {
-        guard let list = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else { return nil }
-        for info in list {
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
-            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-                  let windowNumber = info[kCGWindowNumber as String] as? CGWindowID
-            else { continue }
-            return FrontWindowIdentity(
-                ownerProcessIdentifier: pid,
-                windowNumber: windowNumber,
-                bundleIdentifier: NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
-            )
-        }
-        return nil
-    }
-
     private nonisolated static func currentTypingTarget(
         sessionIdentifier: String
     ) -> TypingTargetIdentity? {
-        currentFrontWindowIdentity().map {
+        WritingFrontWindowPoller.readFrontWindowIdentity().map {
             typingTarget(from: $0, sessionIdentifier: sessionIdentifier)
         }
     }
 
     private nonisolated static func typingTarget(
-        from identity: FrontWindowIdentity,
+        from identity: WritingFrontWindowIdentity,
         sessionIdentifier: String
     ) -> TypingTargetIdentity {
         TypingTargetIdentity(
