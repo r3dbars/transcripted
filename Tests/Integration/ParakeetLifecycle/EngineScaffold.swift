@@ -12,6 +12,7 @@ import FluidAudio
     var isTranscribing = false
     var hasActiveASRWork = false
     var asrManager: AsrManager?
+    var decoderLayerCountCache = ParakeetDecoderLayerCountCache()
     var modelVariant: ParakeetModelVariant = .v3
     var loadedModelVariant: ParakeetModelVariant?
     var modelCleanupTask: Task<Void, Never>?

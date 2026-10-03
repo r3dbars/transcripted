@@ -441,24 +441,39 @@ struct ParakeetRecordedTranscriptionOwnership {
 /// returns. `ParakeetEngine.stopRecording` uses this so duplicate stops await
 /// one tap removal and buffer drain, and config recovery can see a stop for
 /// its whole lifetime (`audioStopInProgress`).
+///
+/// The first caller runs the work inline, on its own task, so a stop costs no
+/// extra main-actor hop to start and none to resume the caller after the
+/// work returns. That task's cancellation is visible to the work, so stop
+/// work must never check cancellation (today it doesn't: the drain awaits a
+/// detached task and checked continuations). Joiners wait on a continuation
+/// and resume, in arrival order, right after the work returns.
 @MainActor
 final class ParakeetSingleFlightLifecycle {
-    private var task: Task<Void, Never>?
+    /// Non-nil while a run is in flight; holds the callers that joined it.
+    private var waiters: [CheckedContinuation<Void, Never>]?
 
     var isInProgress: Bool {
-        task != nil
+        waiters != nil
     }
 
-    func run(_ work: @escaping @MainActor () async -> Void) async {
-        if let task {
-            await task.value
+    func run(_ work: @MainActor () async -> Void) async {
+        if waiters != nil {
+            await withCheckedContinuation { continuation in
+                if waiters == nil {
+                    continuation.resume()
+                } else {
+                    waiters?.append(continuation)
+                }
+            }
             return
         }
-        let task = Task { @MainActor in
-            await work()
+        waiters = []
+        await work()
+        let joined = waiters ?? []
+        waiters = nil
+        for waiter in joined {
+            waiter.resume()
         }
-        self.task = task
-        await task.value
-        self.task = nil
     }
 }

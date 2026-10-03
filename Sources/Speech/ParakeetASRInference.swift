@@ -50,6 +50,20 @@ extension ParakeetEngine {
         finishDeferredModelTeardownIfIdle()
     }
 
+    /// The decoder layer count for `manager`. Read from the cache when
+    /// `manager` is still the engine's live manager, so the common path skips
+    /// an actor round trip before the encoder; otherwise one actor read.
+    private func decoderLayerCount(for manager: AsrManager) async -> Int {
+        if manager === asrManager, let cached = decoderLayerCountCache.count(for: manager) {
+            return cached
+        }
+        let count = await manager.decoderLayerCount
+        if manager === asrManager {
+            decoderLayerCountCache.store(count, for: manager)
+        }
+        return count
+    }
+
     func runASRInference(
         manager: AsrManager,
         samples: [Float]
@@ -71,7 +85,7 @@ extension ParakeetEngine {
             // segment gets a fresh state so concurrent mic/system segments can never
             // contaminate each other's decoder context (0.7.9 kept per-source state
             // internally, keyed by the removed `source:` parameter).
-            let decoderLayers = await manager.decoderLayerCount
+            let decoderLayers = await decoderLayerCount(for: manager)
             try Task.checkCancellation()
             var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
             let result = try await manager.transcribe(samples, decoderState: &decoderState)
@@ -194,7 +208,7 @@ extension ParakeetEngine {
         let tokens: [TimedTranscriptToken]?
         do {
             try Task.checkCancellation()
-            let decoderLayers = await manager.decoderLayerCount
+            let decoderLayers = await decoderLayerCount(for: manager)
             try Task.checkCancellation()
             var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
             let result = try await manager.transcribe(samples, decoderState: &decoderState)

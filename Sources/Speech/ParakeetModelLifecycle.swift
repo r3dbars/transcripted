@@ -385,12 +385,15 @@ extension ParakeetEngine {
                 }
                 throw error
             }
+            // Read once per loaded model so each inference skips the actor hop.
+            let decoderLayers = await manager.decoderLayerCount
             guard isCurrent(token) else {
                 await manager.cleanup()
                 return
             }
 
             asrManager = manager
+            decoderLayerCountCache.store(decoderLayers, for: manager)
             loadedModelVariant = token.variant
             asrManagerReady = true
             modelDownloadState = .ready
@@ -604,6 +607,7 @@ extension ParakeetEngine {
               ) == .cleanupNow else { return }
         let manager = asrManager
         asrManager = nil
+        decoderLayerCountCache.clear()
         let previousCleanup = modelCleanupTask
         modelCleanupTask = Task {
             await previousCleanup?.value

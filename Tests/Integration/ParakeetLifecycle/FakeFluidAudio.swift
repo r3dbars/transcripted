@@ -77,6 +77,7 @@ public struct ASRConfig: Sendable {
 public actor AsrManager {
     private var version: AsrModelVersion = .v3
     public init(config: ASRConfig) {}
+    public var decoderLayerCount: Int { 2 }
     public func loadModels(_ models: AsrModels) async throws {
         version = models.version
         try await FakeFluidAudio.shared.suspend("manager-\(version.rawValue)")
