@@ -2,8 +2,9 @@
 // Makes other apps' audio sound muffled while the dictation mic is open.
 //
 // How: a private process tap on the default output device (every process
-// but ours) with `.mutedWhenTapped`, so the apps go quiet only while we are
-// reading the tap. Apps playing to other devices are not tapped at all.
+// but ours). It starts unmuted and switches to `.mutedWhenTapped` once our
+// copy is audible (see scheduleHandoff), so the apps go quiet only while we
+// are reading the tap. Apps playing to other devices are not tapped at all.
 // The tap and the current output device share one private aggregate; its
 // IOProc reads the tap, runs DictationMuffleFilter, and writes the result
 // straight to the output. One device clock, no ring buffer, a single IO cycle
@@ -34,11 +35,16 @@ import TranscriptedCore
 
 private final class DictationMuffleRenderContext {
     let muffled = Atomic<Bool>(true)
+    /// False until the start handoff: our copy stays silent while the
+    /// original still plays unmuted.
+    let audible = Atomic<Bool>(false)
+    /// Set by the IO thread once the tap delivers real (nonzero) audio.
+    let tapFlowing = Atomic<Bool>(false)
     let filter: UnsafeMutablePointer<DictationMuffleFilter>
 
     init(sampleRate: Double) {
         filter = .allocate(capacity: 1)
-        filter.initialize(to: DictationMuffleFilter(sampleRate: sampleRate))
+        filter.initialize(to: DictationMuffleFilter(sampleRate: sampleRate, startSilent: true))
     }
 
     deinit {
@@ -61,6 +67,15 @@ final class DictationAudioMuffler: @unchecked Sendable {
     private var rateListener: AudioObjectPropertyListenerBlock?
     private var rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
     private var releaseGeneration = 0
+    /// When tccd last said System Audio Recording is allowed. The preflight
+    /// is an XPC round trip per call, so a grant is trusted for a while
+    /// instead of re-asked every take. A revoked grant is still safe: the tap
+    /// then delivers no audio, and the handoff tears down instead of muting.
+    private var systemAudioAuthorizedAt: DispatchTime?
+    private static let authorizationTrustNanoseconds: UInt64 = 10 * 60 * 1_000_000_000
+    private var buildGeneration = 0
+    private var tapDescription: CATapDescription?
+    private var originalsMuted = false
 
     private static let nominalSampleRateAddress = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyNominalSampleRate,
@@ -84,18 +99,18 @@ final class DictationAudioMuffler: @unchecked Sendable {
         dictatingFromSharedMeetingMic: Bool,
         voiceProcessingRequested: Bool
     ) {
+        let requestedAt = DispatchTime.now()
         queue.async {
             let decision = DictationMufflePolicy.decision(
                 enabled: enabled,
-                systemAudioAuthorized: enabled
-                    && TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized,
+                systemAudioAuthorized: enabled && self.systemAudioAuthorized(),
                 meetingRecording: meetingRecording,
                 dictatingFromSharedMeetingMic: dictatingFromSharedMeetingMic,
                 voiceProcessingRequested: voiceProcessingRequested,
                 automatedLaunch: AutomatedLaunchEnvironment.isActive()
             )
             guard decision == .muffle else { return }
-            self.engageOnQueue()
+            self.engageOnQueue(requestedAt: requestedAt)
         }
     }
 
@@ -106,16 +121,40 @@ final class DictationAudioMuffler: @unchecked Sendable {
 
     // MARK: - Queue
 
-    private func engageOnQueue() {
+    private func systemAudioAuthorized() -> Bool {
+        let now = DispatchTime.now()
+        if let systemAudioAuthorizedAt,
+           now.uptimeNanoseconds &- systemAudioAuthorizedAt.uptimeNanoseconds < Self.authorizationTrustNanoseconds {
+            return true
+        }
+        let authorized = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
+        systemAudioAuthorizedAt = authorized ? now : nil
+        return authorized
+    }
+
+    private func engageOnQueue(requestedAt: DispatchTime) {
         releaseGeneration += 1
         if let context, device != kAudioObjectUnknown {
             context.takeUnretainedValue().muffled.store(true, ordering: .relaxed)
+            if !originalsMuted {
+                // Re-engaged before the first handoff finished: run it again.
+                scheduleHandoff(build: buildGeneration, startedAt: DispatchTime.now(), timing: nil)
+            }
             return
         }
         guard Self.anotherProcessIsPlayingAudio(excluding: getpid()) else { return }
         do {
+            let buildStart = DispatchTime.now()
             try build()
-            AppLogger.transcription.info("DICTATION | muffling other audio")
+            let started = DispatchTime.now()
+            scheduleHandoff(
+                build: buildGeneration,
+                startedAt: started,
+                timing: EngageTiming(
+                    queuedMs: Self.milliseconds(from: requestedAt, to: buildStart),
+                    buildMs: Self.milliseconds(from: buildStart, to: started)
+                )
+            )
         } catch let failure as BuildFailure {
             teardown()
             AppLogger.transcription.info("DICTATION | muffle skipped", ["reason": failure.reason])
@@ -125,10 +164,22 @@ final class DictationAudioMuffler: @unchecked Sendable {
     }
 
     private func releaseOnQueue() {
-        guard let context, device != kAudioObjectUnknown else { return }
-        context.takeUnretainedValue().muffled.store(false, ordering: .relaxed)
+        // Both the mic closing and the session ending call release; only the
+        // first one schedules anything.
+        guard let context, device != kAudioObjectUnknown,
+              context.takeUnretainedValue().muffled.exchange(false, ordering: .relaxed) else { return }
         releaseGeneration += 1
         let generation = releaseGeneration
+        if !originalsMuted {
+            // Released before the handoff finished: the originals never went
+            // quiet, so just fade our copy out from on top of them.
+            context.takeUnretainedValue().audible.store(false, ordering: .relaxed)
+            queue.asyncAfter(deadline: .now() + DictationMuffleFilter.handoffFadeSeconds + 0.03) { [weak self] in
+                guard let self, self.releaseGeneration == generation else { return }
+                self.teardown()
+            }
+            return
+        }
         // Let the filter fade back to full range before the apps unmute, so the
         // handoff is a crossfade and not a jump.
         queue.asyncAfter(deadline: .now() + DictationMuffleFilter.rampSeconds + 0.08) { [weak self] in
@@ -141,7 +192,84 @@ final class DictationAudioMuffler: @unchecked Sendable {
         let reason: String
     }
 
+    /// The start handoff that avoids a dropout. `.mutedWhenTapped` would
+    /// silence the originals the instant the IOProc starts, while our copy
+    /// reaches the speaker a few milliseconds later through the tap, and that
+    /// gap is an audible skip. So the tap starts unmuted, we wait for it to
+    /// deliver real audio, fade our copy in over the still-playing original,
+    /// and only then switch the tap to muted. The overlap lasts about one
+    /// fade and is not audible; a gap is.
+    /// Local log only: where engage time goes (policy + TCC + scan before the
+    /// build, then tap/aggregate/start, then the wait for tap audio).
+    private struct EngageTiming {
+        let queuedMs: Int
+        let buildMs: Int
+    }
+
+    private static func milliseconds(from start: DispatchTime, to end: DispatchTime) -> Int {
+        Int((end.uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000)
+    }
+
+    private func scheduleHandoff(build: Int, startedAt: DispatchTime, timing: EngageTiming?) {
+        queue.asyncAfter(deadline: .now() + 0.004) { [weak self] in
+            guard let self, self.buildGeneration == build, let context = self.context else { return }
+            let renderContext = context.takeUnretainedValue()
+            guard renderContext.muffled.load(ordering: .relaxed) else { return }
+            let waitedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds
+            guard renderContext.tapFlowing.load(ordering: .relaxed) else {
+                if waitedNanoseconds < 400_000_000 {
+                    self.scheduleHandoff(build: build, startedAt: startedAt, timing: timing)
+                    return
+                }
+                // No audio from the tap: a quiet passage, or the grant was
+                // revoked. Muting now could silence the apps, so stand down.
+                self.systemAudioAuthorizedAt = nil
+                self.releaseGeneration += 1
+                self.teardown()
+                AppLogger.transcription.info("DICTATION | muffle skipped", [
+                    "reason": "tap_silent",
+                    "queued_ms": timing.map { String($0.queuedMs) } ?? "-",
+                    "build_ms": timing.map { String($0.buildMs) } ?? "-"
+                ])
+                return
+            }
+            renderContext.audible.store(true, ordering: .relaxed)
+            self.queue.asyncAfter(deadline: .now() + DictationMuffleFilter.handoffFadeSeconds + 0.012) { [weak self] in
+                guard let self, self.buildGeneration == build, let context = self.context else { return }
+                guard context.takeUnretainedValue().muffled.load(ordering: .relaxed) else { return }
+                guard self.muteOriginals() else {
+                    self.releaseGeneration += 1
+                    self.teardown()
+                    AppLogger.transcription.info("DICTATION | muffle stopped", ["reason": "mute_failed"])
+                    return
+                }
+                AppLogger.transcription.info("DICTATION | muffling other audio", [
+                    "queued_ms": timing.map { String($0.queuedMs) } ?? "-",
+                    "build_ms": timing.map { String($0.buildMs) } ?? "-",
+                    "handoff_ms": String(waitedNanoseconds / 1_000_000)
+                ])
+            }
+        }
+    }
+
+    private func muteOriginals() -> Bool {
+        guard let tapDescription, tap != kAudioObjectUnknown else { return false }
+        tapDescription.muteBehavior = .mutedWhenTapped
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyDescription,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var reference = tapDescription
+        let status = withUnsafeMutablePointer(to: &reference) { pointer in
+            AudioObjectSetPropertyData(tap, &address, 0, nil, UInt32(MemoryLayout<CATapDescription>.size), pointer)
+        }
+        originalsMuted = status == noErr
+        return originalsMuted
+    }
+
     private func build() throws {
+        buildGeneration += 1
         // Listen before reading the default output, so a switch that lands
         // while this builds still tears the build down once it finishes.
         installOutputListener()
@@ -182,11 +310,14 @@ final class DictationAudioMuffler: @unchecked Sendable {
         let description = CATapDescription(excludingProcesses: [process], deviceUID: outputUID, stream: 0)
         description.uuid = UUID()
         description.isPrivate = true
-        description.muteBehavior = .mutedWhenTapped
+        // Unmuted at first; scheduleHandoff switches it to muted once our
+        // copy is playing.
+        description.muteBehavior = .unmuted
         guard AudioHardwareCreateProcessTap(description, &tap) == noErr, tap != kAudioObjectUnknown else {
             tap = AudioObjectID(kAudioObjectUnknown)
             throw BuildFailure(reason: "tap")
         }
+        tapDescription = description
 
         let properties: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Transcripted Dictation Muffle",
@@ -212,7 +343,11 @@ final class DictationAudioMuffler: @unchecked Sendable {
             guard let clientData else { return noErr }
             let context = Unmanaged<DictationMuffleRenderContext>.fromOpaque(clientData).takeUnretainedValue()
             let target: Float = context.muffled.load(ordering: .relaxed) ? 1 : 0
-            context.filter.pointee.render(input: input, output: output, target: target)
+            let gain: Float = context.audible.load(ordering: .relaxed) ? 1 : 0
+            let sawSignal = context.filter.pointee.render(input: input, output: output, target: target, gainTarget: gain)
+            if sawSignal, !context.tapFlowing.load(ordering: .relaxed) {
+                context.tapFlowing.store(true, ordering: .relaxed)
+            }
             return noErr
         }, context.toOpaque(), &proc)
         guard status == noErr, proc != nil else {
@@ -231,6 +366,9 @@ final class DictationAudioMuffler: @unchecked Sendable {
     /// then the aggregate, then the tap. If HAL refuses to destroy the IOProc,
     /// leak the context rather than free memory the IO thread may still read.
     private func teardown() {
+        buildGeneration += 1
+        tapDescription = nil
+        originalsMuted = false
         removeOutputListener()
         removeRateListener()
         if let proc, device != kAudioObjectUnknown {
