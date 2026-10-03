@@ -113,7 +113,7 @@ final class WritingController {
     /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
     /// and the source stays off.
     private(set) var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
-    /// Whether selecting the keyboard on the first setup worked, if it ran.
+    /// Whether selecting the keyboard worked on the last enable, if it ran.
     private(set) var keyboardSelectSucceeded: Bool?
 
     var isQwenEligible: Bool {
@@ -655,13 +655,12 @@ final class WritingController {
     }
 
     /// The Writing tab's keyboard step: install or update, register, try to
-    /// enable, and select when it's enabled, every time it's asked (the
-    /// launch path tries the enable and select only on the first setup).
-    /// macOS 26 ignores the enable, so until the user adds the keyboard in
-    /// Keyboard settings this ends not selected. `openSettingsOnFailure` is
-    /// only for the tab's "Open Keyboard Settings" button: nothing else opens
-    /// System Settings. `true` once the keyboard is the selected input
-    /// source.
+    /// enable, and select when it's enabled, every time it's asked. Launch
+    /// never enables (`installKeyboard`). On macOS 26 the enable
+    /// opens Keyboard settings over an "Allow ... to enable" box, so until
+    /// the user allows or adds the keyboard this ends not selected.
+    /// `openSettingsOnFailure` is only for the tab's "Open Keyboard Settings"
+    /// button. `true` once the keyboard is the selected input source.
     @discardableResult
     func turnOnKeyboard(openSettingsOnFailure: Bool = false) -> Bool {
         guard installKeyboardRecordingFirstInstall() else {
@@ -913,27 +912,12 @@ final class WritingController {
 
     // MARK: - Keyboard
 
-    /// Install or update, register, and until the keyboard was selected
-    /// once, try the enable and select. Every result lands in the state
-    /// above and the app log. Never opens System Settings: the Writing tab
-    /// shows the guidance and its button does that.
+    /// Install or update and register, never enable. On macOS 26 the enable
+    /// opens Keyboard settings over an "access anything you type" box, so
+    /// someone who chose Don't Allow got it back on every launch. Only
+    /// `turnOnKeyboard` (Turn on writing, the keyboard step) enables.
     private func installKeyboard() {
-        guard installKeyboardRecordingFirstInstall(),
-              !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
-        enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
-    }
-
-    private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool) {
-        let selected = enableAndSelectKeyboard()
-        // Text Input Sources can take a moment to list a just-registered or
-        // just-enabled source. One retry; after that, the next start.
-        if !selected, retryAfterDelay {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(1))
-                guard let self, self.isRunning else { return }
-                self.enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: false)
-            }
-        }
+        _ = installKeyboardRecordingFirstInstall()
     }
 
     // MARK: - Screen Memory observation

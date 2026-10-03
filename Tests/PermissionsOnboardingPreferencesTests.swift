@@ -165,4 +165,95 @@ func testPermissionsOnboardingPreferences() {
             "a smoke always starts on the welcome screen, even with a stale resume step"
         )
     }
+
+    runSuite("Closing setup after the microphone was answered stops setup coming back") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.close-answered.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: false)
+        assertTrue(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: true,
+                userDefaults: defaults,
+                isAutomatedLaunch: false
+            ),
+            "someone who answered the mic and declined the rest can close setup for good"
+        )
+    }
+
+    runSuite("Closing setup before the microphone was asked keeps the resume point") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.close-unanswered.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PermissionsOnboardingPreferences.recordStepReached(1, userDefaults: defaults, isAutomatedLaunch: false)
+        assertFalse(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: false,
+                userDefaults: defaults,
+                isAutomatedLaunch: false
+            ),
+            "macOS hasn't asked for the mic yet, so setup should come back to ask"
+        )
+        assertEqual(
+            PermissionsOnboardingPreferences.resumeStepIndex(userDefaults: defaults, isAutomatedLaunch: false),
+            1,
+            "an unfinished setup still resumes on Permissions"
+        )
+    }
+
+    runSuite("Closing setup before reaching Permissions keeps setup even when the Mac already answered the mic") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.close-welcome.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: true,
+                userDefaults: defaults,
+                isAutomatedLaunch: false
+            ),
+            "a reinstall keeps the Mac's mic answer; closing on Welcome must not skip the Permissions step"
+        )
+
+        defaults.set(true, forKey: PermissionsOnboardingPreferences.forceKey)
+        assertFalse(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: true,
+                userDefaults: defaults,
+                isAutomatedLaunch: false
+            ),
+            "closing a forced rerun on Welcome keeps the rerun forced"
+        )
+        assertTrue(
+            defaults.bool(forKey: PermissionsOnboardingPreferences.forceKey),
+            "the forced rerun flag survives the close"
+        )
+    }
+
+    runSuite("Closing setup never finishes it on automated launches or twice") {
+        let suiteName = "PermissionsOnboardingPreferencesTests.close-guards.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: true,
+                userDefaults: defaults,
+                isAutomatedLaunch: true
+            ),
+            "a smoke closing the window must not mark the real account's setup done"
+        )
+
+        PermissionsOnboardingPreferences.markCompleted(userDefaults: defaults)
+        assertFalse(
+            PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+                microphoneAnswered: true,
+                userDefaults: defaults,
+                isAutomatedLaunch: false
+            ),
+            "Done already finished setup; its own window close must not finish it again"
+        )
+    }
 }

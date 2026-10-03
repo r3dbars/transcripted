@@ -103,9 +103,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     )
     lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
         makeView: { [unowned self] in self.makeOnboardingView() },
-        onPresent: { [weak self] entrypoint in
-            self?.trackOnboardingShown(entrypoint: entrypoint)
-        }
+        onPresent: { [weak self] entrypoint in self?.trackOnboardingShown(entrypoint: entrypoint) },
+        onClose: { [weak self] in self?.finishOnboardingIfClosedAfterMicrophoneAnswer() }
     )
     lazy var menuPanelController = MenuBarPanelController(
         appState: appState,

@@ -123,14 +123,21 @@ extension TranscriptedAppDelegate {
         }
     }
 
+    /// The window's close button after the microphone was answered counts as
+    /// finishing setup (see `closingWindowFinishesSetup`). No menu pops open
+    /// and no login item is added: the person closed setup, and only the Done
+    /// screen tells them about opening at login.
+    func finishOnboardingIfClosedAfterMicrophoneAnswer() {
+        let microphoneAnswered = TranscriptedPermissionAccess.isGranted(.microphone)
+            || TranscriptedPermissionAccess.microphoneAccessBlocked()
+        guard PermissionsOnboardingPreferences.closingWindowFinishesSetup(
+            microphoneAnswered: microphoneAnswered
+        ) else { return }
+        recordOnboardingCompletion(applyLoginItemDefault: false)
+    }
+
     private func finishOnboarding() {
-        PermissionsOnboardingPreferences.markCompleted()
-        CrashReporter.applySessionTrackingPreference()
-        // Meeting detection only works while the app runs; register the login
-        // item by default now that onboarding gives the macOS notice context.
-        // One-time, and an explicit Settings choice always wins.
-        try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
-        appState.recoverHotkeysAfterPermissionChange()
+        recordOnboardingCompletion(applyLoginItemDefault: true)
         onboardingWindowController.dismiss()
         closePopover()
 
@@ -139,6 +146,18 @@ extension TranscriptedAppDelegate {
             guard let self else { return }
             self.showMainPopover(relativeTo: button, popover: popover, entrypoint: "onboarding_completed")
         }
+    }
+
+    private func recordOnboardingCompletion(applyLoginItemDefault: Bool) {
+        PermissionsOnboardingPreferences.markCompleted()
+        CrashReporter.applySessionTrackingPreference()
+        // Meeting detection only works while the app runs; register the login
+        // item by default now that onboarding gives the macOS notice context.
+        // One-time, and an explicit Settings choice always wins.
+        if applyLoginItemDefault {
+            try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
+        }
+        appState.recoverHotkeysAfterPermissionChange()
     }
 
     func showMainPopover(

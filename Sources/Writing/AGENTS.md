@@ -38,6 +38,7 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths. UI may use pure Core value types like `TildeModelChoice`.
 - **Off the main thread.** Front-window reads and helper probes don't block the main actor. Screen Memory never reads Transcripted's own windows.
 - **Screen Recording ask.** Meeting-only users never see it, and granting it must not relaunch the app during a meeting.
+- **No permission asks at launch.** `TISEnableInputSource` opens Keyboard settings over an "access anything you type" box, so only "Turn on writing" and the keyboard step may call it (`turnOnKeyboard`), and Turn on writing's one retry skips it once macOS showed that box (`WritingKeyboardSetupRetry`). Starting Writing (`installKeyboard`) installs and registers the keyboard, nothing more; Screen Recording is asked only from setup or its Allow button.
 - **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `WritingSetupPresentation`, `WritingSidebarNewBadge`, `WritingRefreshTimers`, `WritingFrontWindowChangeDetector`) stay Foundation-only (plus WritingCore value types). They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
 
 ## Tests

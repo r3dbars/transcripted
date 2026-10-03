@@ -22,6 +22,27 @@ enum PermissionsOnboardingPreferences {
         userDefaults.removeObject(forKey: resumeStepIndexKey)
     }
 
+    /// Closing the setup window is an answer too. Once this setup has shown
+    /// the Permissions step and macOS has asked for the microphone (either
+    /// way), closing finishes setup like Done or Skip. Otherwise someone who
+    /// declined the optional permissions got the Permissions step back on
+    /// every launch and every menu bar click, with no way into dictation or
+    /// imports. Closing earlier keeps the resume point, so a reinstall that
+    /// kept the Mac's microphone answer, or a forced rerun, still shows the
+    /// Permissions step.
+    ///
+    /// Automated launches never finish setup here: they share the real
+    /// account's UserDefaults.
+    static func closingWindowFinishesSetup(
+        microphoneAnswered: Bool,
+        userDefaults: UserDefaults = .standard,
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
+    ) -> Bool {
+        guard !isAutomatedLaunch, !hasCompleted(userDefaults: userDefaults) else { return false }
+        let reachedPermissions = userDefaults.integer(forKey: resumeStepIndexKey) >= maxResumeStepIndex
+        return reachedPermissions && microphoneAnswered
+    }
+
     /// Where setup opens. macOS quits and reopens the app after some
     /// permission prompts, and people close the window mid-setup; both used to
     /// send them back to the welcome screen to click through again.

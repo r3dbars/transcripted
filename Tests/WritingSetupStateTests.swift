@@ -56,6 +56,21 @@ func testWritingSetupState() {
         )
     }
 
+    runSuite("Turn on writing retries the keyboard only before macOS has shown its allow box") {
+        assertTrue(
+            WritingKeyboardSetupRetry.retriesAfterTurnOn(keyboardSelected: false, enableReachedMacOS: false),
+            "a keyboard Text Input Sources hadn't listed yet gets one more try"
+        )
+        assertFalse(
+            WritingKeyboardSetupRetry.retriesAfterTurnOn(keyboardSelected: false, enableReachedMacOS: true),
+            "once macOS showed \"Allow ... to enable\", a retry would bring it back right after Don't Allow"
+        )
+        assertFalse(
+            WritingKeyboardSetupRetry.retriesAfterTurnOn(keyboardSelected: true, enableReachedMacOS: false),
+            "a selected keyboard needs nothing more"
+        )
+    }
+
     runSuite("Writing setup completion is remembered in the given suite") {
         let suiteName = "WritingSetupStateTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

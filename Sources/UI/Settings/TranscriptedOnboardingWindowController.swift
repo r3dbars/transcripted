@@ -2,17 +2,20 @@ import SwiftUI
 import AppKit
 
 @MainActor
-final class TranscriptedOnboardingWindowController: NSWindowController {
+final class TranscriptedOnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let makeView: () -> PermissionsOnboardingView
     private let onPresent: (String) -> Void
+    private let onClose: () -> Void
     private let hostingController: NSHostingController<PermissionsOnboardingView>
 
     init(
         makeView: @escaping () -> PermissionsOnboardingView,
-        onPresent: @escaping (String) -> Void = { _ in }
+        onPresent: @escaping (String) -> Void = { _ in },
+        onClose: @escaping () -> Void = {}
     ) {
         self.makeView = makeView
         self.onPresent = onPresent
+        self.onClose = onClose
         self.hostingController = NSHostingController(
             rootView: makeView()
         )
@@ -41,6 +44,11 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
 
         super.init(window: window)
+        window.delegate = self
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose()
     }
 
     @available(*, unavailable)

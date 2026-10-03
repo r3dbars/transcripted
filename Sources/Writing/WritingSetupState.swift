@@ -42,6 +42,17 @@ enum WritingActivation {
     }
 }
 
+/// "Turn on writing" tries the keyboard once more a second later, for when
+/// Text Input Sources hadn't listed the just-registered keyboard yet. When
+/// the enable already reached macOS (it came back still off), macOS is
+/// showing its "Allow ... to enable" box over Keyboard settings, and a retry
+/// would bring that box straight back after Don't Allow.
+enum WritingKeyboardSetupRetry {
+    static func retriesAfterTurnOn(keyboardSelected: Bool, enableReachedMacOS: Bool) -> Bool {
+        !keyboardSelected && !enableReachedMacOS
+    }
+}
+
 /// Which frontmost-window watchers run while Writing runs. Save-only users
 /// get neither: nothing of theirs uses the frontmost app or window.
 enum WritingFrontWindowWatch {

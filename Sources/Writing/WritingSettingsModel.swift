@@ -459,7 +459,10 @@ final class WritingSettingsModel: ObservableObject {
 
         isEditingSetup = false
         screen = .everyday
-        if !keyboardSelected {
+        if WritingKeyboardSetupRetry.retriesAfterTurnOn(
+            keyboardSelected: keyboardSelected,
+            enableReachedMacOS: controller.keyboardEnableResult == .needsUserToAdd
+        ) {
             // Text Input Sources can take a moment to list a just-registered
             // keyboard. One retry; after that the guidance stays up.
             Task { [weak self] in
