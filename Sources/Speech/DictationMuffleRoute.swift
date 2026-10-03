@@ -127,7 +127,7 @@ final class DictationMuffleRoute {
 
     private let output: AudioObjectID
     private let queue: DispatchQueue
-    private let onLost: (String) -> Void
+    private let onLost: @Sendable (String) -> Void
     private var sampleRate: Double = 48_000
     private var delayCorrectionFrames = 0
 
@@ -152,7 +152,7 @@ final class DictationMuffleRoute {
     /// does anything but forward to the muffler's queue.
     private static let listenerQueue = DispatchQueue(label: "com.transcripted.dictation-muffle.listeners", qos: .utility)
 
-    private init(plan: Plan, queue: DispatchQueue, onLost: @escaping (String) -> Void) {
+    private init(plan: Plan, queue: DispatchQueue, onLost: @escaping @Sendable (String) -> Void) {
         bluetooth = plan.bluetooth
         processCount = plan.processes.count
         output = plan.output
@@ -165,7 +165,7 @@ final class DictationMuffleRoute {
     static func open(
         _ plan: Plan,
         queue: DispatchQueue,
-        onLost: @escaping (String) -> Void
+        onLost: @escaping @Sendable (String) -> Void
     ) throws -> DictationMuffleRoute {
         let route = DictationMuffleRoute(plan: plan, queue: queue, onLost: onLost)
         do {
