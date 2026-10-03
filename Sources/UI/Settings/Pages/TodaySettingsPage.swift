@@ -96,7 +96,7 @@ struct TodaySettingsPage: View {
     /// The picked day in sessions, oldest first. Opening one picks its
     /// latest mark on the tape; picking a mark opens its session.
     private func sessionsSection(_ day: TodayTapeDay) -> some View {
-        let sessions = TodaySessionBuilder.sessions(day.allMarks.map(\.item))
+        let sessions = day.sessions
         return VStack(spacing: 2) {
             ForEach(sessions) { session in
                 TodaySessionRow(
@@ -252,18 +252,10 @@ private struct TodayDayCard: View {
 
     private static let laneLabelWidth: CGFloat = 84
 
-    /// The picked mark, or the day's latest one.
-    private var picked: TodayTapeMark? {
-        let marks = day.allMarks
-        return marks.first { $0.id == pickedMarkID } ?? marks.max { $0.item.date < $1.item.date }
-    }
-
-    /// What the preview shows: the hovered mark, else the picked one.
-    private var shown: TodayTapeMark? {
-        day.allMarks.first { $0.id == hoveredMarkID } ?? picked
-    }
-
     var body: some View {
+        // Worked out once per draw: every mark compares its id to it, and a
+        // busy day has hundreds of marks.
+        let selection = TodayTapeSelection(day: day, pickedID: pickedMarkID, hoveredID: hoveredMarkID)
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("YOUR DAY")
@@ -283,9 +275,9 @@ private struct TodayDayCard: View {
             }
 
             VStack(alignment: .leading, spacing: 9) {
-                lane("Meetings", kind: .meeting, marks: day.meetings)
-                lane("Dictation", kind: .dictation, marks: day.dictations)
-                lane("Writing", kind: .writing, marks: day.writing)
+                lane("Meetings", kind: .meeting, marks: day.meetings, shownID: selection.shown?.id)
+                lane("Dictation", kind: .dictation, marks: day.dictations, shownID: selection.shown?.id)
+                lane("Writing", kind: .writing, marks: day.writing, shownID: selection.shown?.id)
                 HStack(spacing: 0) {
                     ForEach(TodayTapeBuilder.hourLabels, id: \.self) { hour in
                         Text(hour)
@@ -298,8 +290,8 @@ private struct TodayDayCard: View {
             }
 
             Group {
-                if let shown {
-                    preview(shown)
+                if let shown = selection.shown {
+                    preview(shown, index: selection.shownIndex)
                 } else {
                     Text(day.isToday ? "Nothing saved yet today." : "Nothing saved this day.")
                         .font(LibraryTokens.meta)
@@ -321,7 +313,7 @@ private struct TodayDayCard: View {
         .accessibilityIdentifier("transcripted.today.day-tape")
     }
 
-    private func lane(_ title: String, kind: TodayRecentItem.Kind, marks: [TodayTapeMark]) -> some View {
+    private func lane(_ title: String, kind: TodayRecentItem.Kind, marks: [TodayTapeMark], shownID: String?) -> some View {
         HStack(spacing: 12) {
             HStack(spacing: 7) {
                 Circle().fill(kind.streamColor).frame(width: 7, height: 7)
@@ -337,7 +329,7 @@ private struct TodayDayCard: View {
                         .fill(Color.primary.opacity(0.08))
                         .frame(height: 2)
                     ForEach(marks) { mark in
-                        markView(mark, color: kind.streamColor, width: geo.size.width)
+                        markView(mark, color: kind.streamColor, width: geo.size.width, isPicked: mark.id == shownID)
                     }
                     if day.isToday {
                         Rectangle()
@@ -353,9 +345,8 @@ private struct TodayDayCard: View {
         }
     }
 
-    private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat) -> some View {
+    private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat, isPicked: Bool) -> some View {
         let markWidth: CGFloat = mark.isDot ? 10 : max(8, width * CGFloat((mark.end ?? mark.start) - mark.start))
-        let isPicked = shown?.id == mark.id
         let isHovered = hoveredMarkID == mark.id
         return Button {
             withAnimation(.easeOut(duration: 0.12)) { pickedMarkID = mark.id }
@@ -383,17 +374,16 @@ private struct TodayDayCard: View {
                 hoveredMarkID = nil
             }
         }
-        .help(TodayTapeBuilder.markDescription(mark, now: now))
-        .accessibilityLabel(TodayTapeBuilder.markDescription(mark, now: now))
+        .help(mark.hoverText)
+        .accessibilityLabel(mark.hoverText)
         .accessibilityHint("Shows it below the timeline")
         .accessibilityAddTraits(isPicked ? .isSelected : [])
         .accessibilityIdentifier("transcripted.today.tape.mark")
     }
 
-    private func preview(_ mark: TodayTapeMark) -> some View {
+    private func preview(_ mark: TodayTapeMark, index: Int?) -> some View {
         let item = mark.item
         let marks = day.allMarks
-        let index = marks.firstIndex { $0.id == mark.id }
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: item.kind.systemImage)
                 .font(.system(size: 13))
