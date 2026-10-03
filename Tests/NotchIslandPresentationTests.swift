@@ -488,6 +488,59 @@ func testNotchIslandPresentation() {
         assertEqual(NotchIslandPresentation.meetingUpdate(from: base, to: nil), .full, "the meeting went away")
         assertEqual(NotchIslandPresentation.meetingUpdate(from: nil, to: base), .full, "a meeting arrived")
     }
+
+    runSuite("Only the spoken dictation's hover drop-down is kept between hovers") {
+        assertTrue(NotchIslandDrop.dictationTarget(appName: "Notes", showsPreview: true).staysBuiltBetweenHovers,
+                   "the streaming take's drop-down stays built")
+        assertTrue(NotchIslandDrop.dictationTarget(appName: nil, showsPreview: false).staysBuiltBetweenHovers,
+                   "so does a take with no app and no live words")
+        assertTrue(NotchIslandDrop.dictationTarget(appName: "Notes", showsPreview: false, isWriting: false).staysBuiltBetweenHovers,
+                   "isWriting: false spelled out")
+        assertFalse(NotchIslandDrop.dictationTarget(appName: "Notes", showsPreview: true, isWriting: true).staysBuiltBetweenHovers,
+                    "once the take is being written it isn't kept")
+        assertFalse(NotchIslandDrop.dictationTarget(appName: nil, showsPreview: false, isWriting: true).staysBuiltBetweenHovers,
+                    "being written, with nothing else either")
+
+        let prompt = NotchIslandMeetingContent.Prompt(
+            title: "Meeting detected",
+            detail: "Zoom",
+            countdown: "10",
+            primaryTitle: "Record",
+            secondaryTitle: "Not now",
+            tertiaryTitle: nil
+        )
+        let others: [(String, NotchIslandDrop)] = [
+            ("dictationLoading", .dictationLoading(title: "Warming up", detail: "Starts when ready.")),
+            ("dictationMessage", .dictationMessage(NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again"))),
+            ("dictationMessage notice", .dictationMessage(NotchIslandDictationContent.Message(tone: .notice, text: "Copied", actionTitle: nil))),
+            ("justInserted", .justInserted(text: "Hello there", words: 2)),
+            ("meetingPreparing", .meetingPreparing(title: "Starting", detail: "Getting the mic ready.")),
+            ("meetingControls", .meetingControls(callAudioNote: nil, systemAudioUnverified: false)),
+            ("meetingControls with note", .meetingControls(callAudioNote: .off, systemAudioUnverified: true, showsTranscript: true)),
+            ("meetingPrompt", .meetingPrompt(prompt)),
+            ("meetingSaved", .meetingSaved(title: "Standup")),
+            ("meetingSaved untitled", .meetingSaved(title: nil)),
+            ("meetingError", .meetingError(title: "Couldn't save", message: "Disk full.", canOpen: true)),
+            ("meetingError system audio", .meetingError(title: "No call audio", message: "Allow it.", canOpen: false, grantsSystemAudio: true)),
+            ("callPrompt", .callPrompt(title: "Zoom call", detail: "Record this meeting?")),
+            ("speakerReview", .speakerReview(NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: "Standup", stage: .naming))),
+            ("speakerReview done", .speakerReview(NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: nil, stage: .done(leftForLater: 2)))),
+            ("meetingCallAudioAsk", .meetingCallAudioAsk),
+        ]
+        for (label, drop) in others {
+            assertFalse(drop.staysBuiltBetweenHovers, "\(label) is rebuilt like any other drop-down")
+        }
+
+        // Through the layout: hovering a listening take gives the kept drop-down,
+        // hovering the same take while it's written does not.
+        var content = listening()
+        content.showsLivePreview = true
+        assertEqual(notchLayout(dictation: content, expanded: true).drop?.staysBuiltBetweenHovers, true,
+                    "a hovered take that's still being spoken is kept")
+        content.phase = .writing
+        assertEqual(notchLayout(dictation: content, expanded: true).drop?.staysBuiltBetweenHovers, false,
+                    "a hovered take that's being written is not")
+    }
 }
 
 private func notchLayout(

@@ -158,19 +158,14 @@ class FloatingOverlayController {
         self.sttRouter = sttRouter
         LiveDictationCaptions.shared.attach(router: sttRouter)
 
-        // Combine subscriptions: push live engine data to the island
-        sttRouter.audioLevels.$level
-            .receive(on: RunLoop.main)
-            .sink { [weak self] level in
-                guard let self else { return }
-                let presentation = DictationMeterPolicy.presentation(
-                    isListening: self.state == .listening,
-                    sttIsRecording: sttRouter.isRecording,
-                    rawLevel: level
-                )
-                if self.isIslandMode {
-                    self.island?.updateDictationLevel(presentation.level)
-                }
+        // Meter readings arrive on the main actor as they're published, with
+        // no second hop, so the island never gets them in bunches.
+        sttRouter.audioLevels.readings
+            .sink { [weak self] reading in
+                guard let self, self.isIslandMode else { return }
+                self.island?.updateDictationLevel(DictationMeterPolicy.presentation(
+                    isListening: self.state == .listening, sttIsRecording: sttRouter.isRecording, reading: reading
+                ))
             }
             .store(in: &subscriptions)
 

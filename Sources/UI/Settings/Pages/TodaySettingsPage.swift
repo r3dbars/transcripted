@@ -283,13 +283,9 @@ private struct TodayDayCard: View, Equatable {
     }
 
     var body: some View {
-        let marks = day.allMarks
-        // What the preview shows: the hovered mark, else the picked one,
-        // else the day's latest.
-        let shown = marks.first { $0.id == hoveredMarkID }
-            ?? marks.first { $0.id == pickedMarkID }
-            ?? marks.max { $0.item.date < $1.item.date }
-        let shownID = shown?.id
+        // Worked out once per draw: every mark compares its id to it, and a
+        // busy day has hundreds of marks.
+        let selection = TodayTapeSelection(day: day, pickedID: pickedMarkID, hoveredID: hoveredMarkID)
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("YOUR DAY")
@@ -309,9 +305,9 @@ private struct TodayDayCard: View, Equatable {
             }
 
             VStack(alignment: .leading, spacing: 9) {
-                lane("Meetings", kind: .meeting, marks: day.meetings, shownID: shownID)
-                lane("Dictation", kind: .dictation, marks: day.dictations, shownID: shownID)
-                lane("Writing", kind: .writing, marks: day.writing, shownID: shownID)
+                lane("Meetings", kind: .meeting, marks: day.meetings, shownID: selection.shown?.id)
+                lane("Dictation", kind: .dictation, marks: day.dictations, shownID: selection.shown?.id)
+                lane("Writing", kind: .writing, marks: day.writing, shownID: selection.shown?.id)
                 HStack(spacing: 0) {
                     ForEach(TodayTapeBuilder.hourLabels, id: \.self) { hour in
                         Text(hour)
@@ -324,8 +320,8 @@ private struct TodayDayCard: View, Equatable {
             }
 
             Group {
-                if let shown {
-                    preview(shown, marks: marks)
+                if let shown = selection.shown {
+                    preview(shown, index: selection.shownIndex)
                 } else {
                     Text(day.isToday ? "Nothing saved yet today." : "Nothing saved this day.")
                         .font(LibraryTokens.meta)
@@ -363,7 +359,7 @@ private struct TodayDayCard: View, Equatable {
                         .fill(Color.primary.opacity(0.08))
                         .frame(height: 2)
                     ForEach(marks) { mark in
-                        markView(mark, color: kind.streamColor, width: geo.size.width, shownID: shownID)
+                        markView(mark, color: kind.streamColor, width: geo.size.width, isPicked: mark.id == shownID)
                     }
                     if day.isToday {
                         Rectangle()
@@ -379,9 +375,8 @@ private struct TodayDayCard: View, Equatable {
         }
     }
 
-    private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat, shownID: String?) -> some View {
+    private func markView(_ mark: TodayTapeMark, color: Color, width: CGFloat, isPicked: Bool) -> some View {
         let markWidth: CGFloat = mark.isDot ? 10 : max(8, width * CGFloat((mark.end ?? mark.start) - mark.start))
-        let isPicked = shownID == mark.id
         let isHovered = hoveredMarkID == mark.id
         return Button {
             withAnimation(.easeOut(duration: 0.12)) { onPick(mark.id) }
@@ -409,16 +404,16 @@ private struct TodayDayCard: View, Equatable {
                 hoveredMarkID = nil
             }
         }
-        .help(TodayTapeBuilder.markDescription(mark, now: now))
-        .accessibilityLabel(TodayTapeBuilder.markDescription(mark, now: now))
+        .help(mark.hoverText)
+        .accessibilityLabel(mark.hoverText)
         .accessibilityHint("Shows it below the timeline")
         .accessibilityAddTraits(isPicked ? .isSelected : [])
         .accessibilityIdentifier("transcripted.today.tape.mark")
     }
 
-    private func preview(_ mark: TodayTapeMark, marks: [TodayTapeMark]) -> some View {
+    private func preview(_ mark: TodayTapeMark, index: Int?) -> some View {
         let item = mark.item
-        let index = marks.firstIndex { $0.id == mark.id }
+        let marks = day.allMarks
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: item.kind.systemImage)
                 .font(.system(size: 13))

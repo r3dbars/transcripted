@@ -59,7 +59,10 @@ struct ModelFileHasherTests {
         defer { try? handle.close() }
         let before = Self.physicalFootprint()
         let result = try ModelFileHasher.sha256Hex(from: handle)
-        let grown = Self.physicalFootprint() &- before
+        let after = Self.physicalFootprint()
+        // Parallel suites can free memory meanwhile; a shrink is zero growth,
+        // not an unsigned wrap.
+        let grown = after > before ? after - before : 0
         #expect(result == digest)
         // Without a pool per chunk, all 192 chunks are still alive here
         // (footprint grows by ~192 MB). With it, growth stays a few MB.

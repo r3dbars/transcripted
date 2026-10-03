@@ -86,6 +86,14 @@ settings-side agent connection flow.
   dictation clicks open Dictations. The tape copies the Context app's Days
   view (week cells with mini lines, full day below, 6 AM to midnight) and
   its stream colors (`LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`).
+  A busy day has hundreds of marks, so per-mark work is done once per
+  snapshot, off main: `TodayTapeDay` stores `allMarks` and `sessions`, and
+  each `TodayTapeMark` carries its `hoverText`. The day card works out the
+  hovered/picked mark once per draw (`TodayTapeSelection`), and the shell
+  hands the page a minute-granular `now` from `TimelineView(.everyMinute)`
+  instead of a fresh `Date()` on every evaluation. The day card and week
+  cells are `Equatable` (day, pick, minute, region), so other shell
+  publishes skip them.
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected/presented
   page plus the ⌘F Home find-focus token.
   It also holds `isWindowOpen` (true from `present()` until the window closes);

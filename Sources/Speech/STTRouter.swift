@@ -8,7 +8,12 @@ import TranscriptedCore
 
 @MainActor
 class STTRouter: ObservableObject {
-    let parakeetEngine = ParakeetEngine()
+    /// The dictation waveform's live meter reading. Kept off this router's
+    /// objectWillChange: it ticks ~25-30 times a second while recording, and
+    /// the Settings window observes the whole router (see
+    /// DictationAudioLevels). The engine that records publishes into it.
+    let audioLevels: DictationAudioLevels
+    let parakeetEngine: ParakeetEngine
     private let whisperEngine = WhisperEngine()
     private let appleSpeechEngine = AppleSpeechEngine()
 
@@ -19,9 +24,6 @@ class STTRouter: ObservableObject {
     @Published private(set) var appleSpeechLanguageDownload: AppleSpeechLanguageDownload?
     @Published var isRecording = false
     @Published var isTranscribing = false
-    /// Dictation mic level for the island meter. A `let`, not `@Published`,
-    /// so a level tick doesn't re-render views that observe the router.
-    let audioLevels = DictationAudioLevels()
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
@@ -81,11 +83,11 @@ class STTRouter: ObservableObject {
     }
 
     init() {
+        let audioLevels = DictationAudioLevels()
+        self.audioLevels = audioLevels
+        parakeetEngine = ParakeetEngine(audioLevels: audioLevels)
         parakeetEngine.$isRecording.assign(to: &$isRecording)
         parakeetEngine.$isTranscribing.assign(to: &$isTranscribing)
-        parakeetEngine.$audioLevel
-            .sink { [audioLevels] in audioLevels.update($0) }
-            .store(in: &cancellables)
         parakeetEngine.$recordingInterrupted.assign(to: &$recordingInterrupted)
         parakeetEngine.$isRecovering.assign(to: &$isRecovering)
         parakeetEngine.$inputFormatReady.assign(to: &$inputFormatReady)

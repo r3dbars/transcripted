@@ -25,7 +25,7 @@
 	<key>LSUIElement</key>
 	<false/>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
+	<string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac, and to muffle other audio while you dictate if you turn that on.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
 	<key>NSMicrophoneUsageDescription</key>

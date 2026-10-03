@@ -53,7 +53,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// the keyboard back once naming ends.
     private var keyboardReturnApp: NSRunningApplication?
     private var recentInsert: NotchIslandRecentInsert?
-    private var targetApp: NSRunningApplication?
+    private(set) var targetApp: NSRunningApplication?
     private var listeningSince: Date?
     private var live = NotchIslandLiveValues()
 
@@ -68,7 +68,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     private(set) var islandView: NotchIslandView?
     /// The screen the island is on, kept while it is up so it never jumps.
     private var screen: NotchIslandScreenInfo?
-    private var isShown = false
+    private(set) var isShown = false
+    /// Steps the dictation waveform while a dictation listens on screen
+    /// (NotchIslandController+DictationBars.swift).
+    let dictationBarsClock = NotchIslandFrameClock()
+    /// The target app's icon, drawn once per take (+DictationDrop.swift).
+    let targetAppIconCache = NotchIslandAppIconCache()
     /// Where the finished island sits on screen (the panel can be larger
     /// while the shape springs).
     private var targetFrame: NSRect?
@@ -172,16 +177,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         guard content != dictation || targetApp !== self.targetApp else { return }
         dictation = content
         self.targetApp = content == nil ? nil : targetApp
+        releaseKeptDictationDropIfTakeEnded()
         if ended, recentInsert != nil {
             scheduleRecentInsertExpiry()
         }
         render()
         updateTicker()
-    }
-
-    func updateDictationLevel(_ level: Float) {
-        guard isShown, dictation?.phase == .listening else { return }
-        islandView?.pushDictationLevel(level)
     }
 
     /// The dictation landed. The island lingers on it after the "Pasted"
@@ -385,7 +386,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         panel.applyScreenSharingPreference()
         let screen = currentScreen()
         live.dictationElapsed = listeningSince.map { Date().timeIntervalSince($0) } ?? 0
-        islandView.targetAppIcon = targetApp?.icon
         islandView.apply(layout, live: live)
         var edgeProgress: Double?
         if layout.showsEdgeProgress, case .transcribing(let progress?, _)? = meeting?.phase {
@@ -399,7 +399,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             screen: screen,
             leftContent: widths.left,
             rightContent: widths.right,
-            dropHeight: islandView.dropHeight
+            dropHeight: islandView.measureDropHeight()
         )
         let frame = NotchIslandGeometry.frame(screen: screen, size: size)
 
@@ -553,6 +553,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         hoverTask = nil
         tickTask?.cancel()
         tickTask = nil
+        dictationBarsClock.stop()
+        islandView?.releaseKeptDictationDrop()
         expanded = false
         isHovered = false
         guard isShown, let panel, let islandView else { return }
@@ -602,6 +604,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         view.onAction = { [weak self] action in self?.handleAction(action) }
         view.onBackgroundClick = { [weak self] in self?.handleBackgroundClick() }
         view.menuProvider = { [weak self] in self?.meetingMenuProvider?() }
+        view.targetAppIconProvider = { [weak self] in self?.targetAppIcon() }
         panel.contentView = view
         self.panel = panel
         self.islandView = view
@@ -658,6 +661,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     }
 
     private func updateTicker() {
+        updateDictationBarsClock()
         guard isShown, dictation?.phase == .listening else {
             tickTask?.cancel()
             tickTask = nil

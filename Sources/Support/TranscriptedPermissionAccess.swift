@@ -336,8 +336,8 @@ enum TranscriptedPermissionAccess {
             setSystemAudioRecordingGranted(false)
         case .notDetermined:
             // Reset in System Settings (or never asked). Nothing is known.
-            UserDefaults.standard.removeIfPresent(forKey: systemAudioRecordingKnownKey)
-            UserDefaults.standard.removeIfPresent(forKey: systemAudioRecordingGrantedKey)
+            UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingKnownKey)
+            UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingGrantedKey)
         case .unavailable:
             break
         }
