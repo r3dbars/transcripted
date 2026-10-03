@@ -26,6 +26,8 @@ final class ParakeetPinnedDictationRecording: @unchecked Sendable {
     let capture: PinnedMicrophoneCapture
     let selection: DictationInputDeviceSelection
     let delivery = ParakeetAudioStartCancellationState()
+    /// Meters every buffer of this recording for the island's waveform.
+    let levelWindow = DictationAudioLevelWindow()
     let channelCount: Int
     let sampleRate: Double
     /// Reset once the capture's start returns, so waiting for the start
@@ -212,10 +214,11 @@ extension ParakeetEngine {
             sampleRate: prepared.format.sampleRate
         )
         let delivery = recording.delivery
+        let levelWindow = recording.levelWindow
         // Both closures are formed here, on the main actor, like the engine
         // tap's; the capture calls them from its own queue.
         let bufferCallback: (AVAudioPCMBuffer) -> Void = { [weak self] buffer in
-            self?.admitPinnedDictationBuffer(buffer, delivery: delivery)
+            self?.admitPinnedDictationBuffer(buffer, delivery: delivery, levelWindow: levelWindow)
         }
         let eventHandler: (PinnedMicrophoneCaptureEvent) -> Void = { [weak self, weak recording] event in
             Task { @MainActor in
@@ -352,10 +355,11 @@ extension ParakeetEngine {
 
     /// Runs on the capture's queue. Same admission as the engine tap in
     /// `installTapAndStartEngine`: rate-aware append, capacity trim, first
-    /// sample and truncation events, and throttled level metering.
+    /// sample and truncation events, and level metering of every buffer.
     func admitPinnedDictationBuffer(
         _ buffer: AVAudioPCMBuffer,
-        delivery: ParakeetAudioStartCancellationState
+        delivery: ParakeetAudioStartCancellationState,
+        levelWindow: DictationAudioLevelWindow
     ) {
         guard delivery.canDeliverSamples,
               let monoSamples = MicrophoneDownmix.monoSamples(from: buffer) else { return }
@@ -427,13 +431,12 @@ extension ParakeetEngine {
             }
         }
 
-        let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
-        lastLevelUpdate = now
-        let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
+        // Every buffer counts toward the waveform; a reading comes about 25
+        // times a second and takes one hop to the main actor.
+        guard let reading = levelWindow.add(buffer) else { return }
         Task { @MainActor [weak self] in
             guard delivery.canDeliverSamples else { return }
-            self?.audioLevel = normalized
+            self?.audioLevels.update(reading)
         }
     }
 

@@ -262,4 +262,179 @@ func testTodayPresentation() {
         assertEqual(dayStats?.todayWritingApps.map(\.appName), ["Slack", "Notes"], "the day's apps by words")
         assertEqual(TodayCopy.weekdayLong(for: date(20), locale: locale, calendar: calendar), "Sunday", "long weekday")
     }
+
+    // A small mixed week shared by the day-card suites below. Thursday the
+    // 24th is today; Tuesday the 22nd only has two captures from before 6 AM.
+    func tapeItem(_ kind: TodayRecentItem.Kind, _ id: String, _ at: Date, _ seconds: Int? = nil) -> TodayRecentItem {
+        TodayRecentItem(kind: kind, id: id, title: id, date: at, durationSeconds: seconds, transcriptURL: nil,
+                        appName: kind == .writing ? "Notes" : nil, words: kind == .meeting ? nil : 12)
+    }
+    let tapeCaptures: [TodayRecentItem] = [
+        // Before 6 AM both clamp to the left edge (start 0). By date "z-early"
+        // comes first and it's a meeting (listed first), so only the id puts
+        // "a-early" ahead of it.
+        tapeItem(.meeting, "z-early", date(24, 2), 10 * 60),
+        tapeItem(.dictation, "a-early", date(24, 5)),
+        tapeItem(.meeting, "m-0900", date(24, 9), 60 * 60),
+        tapeItem(.dictation, "d-0930", date(24, 9, 30)),
+        tapeItem(.writing, "w-1000", date(24, 10), 120),
+        tapeItem(.dictation, "d-1200", date(24, 12)),
+        tapeItem(.meeting, "m-1400", date(24, 14), 42 * 60),
+        tapeItem(.writing, "w-1600", date(24, 16), 60),
+        tapeItem(.dictation, "tue-z", date(22, 2)),
+        tapeItem(.writing, "tue-a", date(22, 5), 60),
+        tapeItem(.meeting, "mon-sync", date(21, 13, 10), 30 * 60),
+    ]
+    let tapeWeek = TodayTapeBuilder.days(captures: tapeCaptures, now: now, calendar: calendar, locale: locale)
+    func tapeDay(_ day: Int) -> TodayTapeDay? {
+        tapeWeek.first { calendar.isDate($0.day, inSameDayAs: date(day)) }
+    }
+
+    runSuite("A built day keeps its marks in time order, ties by id") {
+        guard let today = tapeDay(24) else {
+            assertTrue(false, "today is in the week")
+            return
+        }
+        assertEqual(
+            today.allMarks.map(\.id),
+            ["a-early", "z-early", "m-0900", "d-0930", "w-1000", "d-1200", "m-1400", "w-1600"],
+            "every lane interleaved by start; the two pre-6 AM marks tie at 0 and sort by id"
+        )
+        let lanes = today.meetings + today.dictations + today.writing
+        assertEqual(today.allMarks.count, lanes.count, "no mark is dropped or doubled")
+        assertEqual(Set(today.allMarks.map(\.id)), Set(lanes.map(\.id)), "allMarks is exactly the three lanes")
+        for mark in today.allMarks {
+            assertTrue(lanes.contains(mark), "\(mark.id) in allMarks is the same mark as in its lane")
+        }
+        let starts = today.allMarks.map(\.start)
+        assertEqual(starts, starts.sorted(), "starts never go backwards")
+
+        assertEqual(tapeDay(22)?.allMarks.map(\.id) ?? ["missing day"], ["tue-a", "tue-z"], "an earlier day ties by id too")
+        assertEqual(tapeDay(21)?.allMarks.map(\.id) ?? ["missing day"], ["mon-sync"], "a one-mark day")
+        assertEqual(tapeDay(20)?.allMarks.map(\.id) ?? ["missing day"], [String](), "an empty day has no marks")
+    }
+
+    runSuite("Each mark carries its hover line, made with the day") {
+        var checked = 0
+        for day in tapeWeek {
+            for mark in day.allMarks {
+                assertEqual(
+                    mark.hoverText,
+                    TodayTapeBuilder.markDescription(mark, now: now, locale: locale, calendar: calendar),
+                    "\(mark.id) carries the same hover line the builder describes"
+                )
+                checked += 1
+            }
+        }
+        assertEqual(checked, tapeCaptures.count, "today's and earlier days' marks were all checked")
+
+        // The locale handed to days(...) is the one the hover line uses: a
+        // 24-hour locale writes 2 PM differently from en_US_POSIX.
+        let german = Locale(identifier: "de_DE")
+        let germanWeek = TodayTapeBuilder.days(captures: tapeCaptures, now: now, calendar: calendar, locale: german)
+        let germanMeeting = germanWeek.last?.meetings.first { $0.id == "m-1400" }
+        assertNotNil(germanMeeting, "the 2 PM meeting is on today's tape")
+        if let germanMeeting {
+            assertEqual(
+                germanMeeting.hoverText,
+                TodayTapeBuilder.markDescription(germanMeeting, now: now, locale: german, calendar: calendar),
+                "the hover line follows the locale the day was built with"
+            )
+        }
+        let tuesdayMark = tapeDay(22)?.allMarks.first
+        assertTrue(tuesdayMark.map { !$0.hoverText.isEmpty } ?? false, "an earlier day's mark has a hover line")
+    }
+
+    runSuite("The day card shows the hovered mark, else the picked one, else the day's latest") {
+        guard let today = tapeDay(24), let tuesday = tapeDay(22), let sunday = tapeDay(20) else {
+            assertTrue(false, "the week has the days the suite needs")
+            return
+        }
+
+        let idle = TodayTapeSelection(day: today, pickedID: nil, hoveredID: nil)
+        assertEqual(idle.picked?.id, "w-1600", "nothing picked: the day's latest capture")
+        assertEqual(idle.shown?.id, "w-1600", "nothing hovered: shows the picked (latest) one")
+
+        let picked = TodayTapeSelection(day: today, pickedID: "m-0900", hoveredID: nil)
+        assertEqual(picked.picked?.id, "m-0900", "a picked mark is picked")
+        assertEqual(picked.shown?.id, "m-0900", "and shown")
+
+        let hovering = TodayTapeSelection(day: today, pickedID: "m-0900", hoveredID: "d-1200")
+        assertEqual(hovering.shown?.id, "d-1200", "a hover wins for what's shown")
+        assertEqual(hovering.picked?.id, "m-0900", "while the pick stays put")
+
+        let hoverWithoutPick = TodayTapeSelection(day: today, pickedID: nil, hoveredID: "z-early")
+        assertEqual(hoverWithoutPick.shown?.id, "z-early", "a hover with nothing picked")
+        assertEqual(hoverWithoutPick.picked?.id, "w-1600", "picked still falls back to the latest")
+
+        let stalePick = TodayTapeSelection(day: today, pickedID: "not-on-this-day", hoveredID: nil)
+        assertEqual(stalePick.picked?.id, "w-1600", "an unknown pick falls back to the latest")
+        assertEqual(stalePick.shown?.id, "w-1600", "and that's what's shown")
+
+        let staleHover = TodayTapeSelection(day: today, pickedID: "m-0900", hoveredID: "gone")
+        assertEqual(staleHover.shown?.id, "m-0900", "an unknown hover shows the pick")
+
+        // Both Tuesday marks clamp to start 0, so allMarks puts "tue-a" (5 AM)
+        // first by id. The latest by capture time is "tue-a"; "tue-z" (2 AM)
+        // must not win just because it sorts last on the tape.
+        let tuesdayIdle = TodayTapeSelection(day: tuesday, pickedID: nil, hoveredID: nil)
+        assertEqual(tuesdayIdle.picked?.id, "tue-a", "latest means the latest capture time, not the last mark on the tape")
+        assertEqual(tuesdayIdle.shown?.id, "tue-a", "and it's shown")
+
+        let emptyInputs: [(String?, String?)] = [(nil, nil), ("x", nil), (nil, "y"), ("x", "y")]
+        for (pickedID, hoveredID) in emptyInputs {
+            let empty = TodayTapeSelection(day: sunday, pickedID: pickedID, hoveredID: hoveredID)
+            let label = "\(String(describing: pickedID)), \(String(describing: hoveredID))"
+            assertNil(empty.picked, "an empty day picks nothing (\(label))")
+            assertNil(empty.shown, "an empty day shows nothing (\(label))")
+            assertNil(empty.shownIndex, "an empty day has no position (\(label))")
+        }
+        assertEqual(
+            TodayTapeSelection(day: today, pickedID: "d-0930", hoveredID: nil),
+            TodayTapeSelection(day: today, pickedID: "d-0930", hoveredID: nil),
+            "the same inputs make the same selection"
+        )
+    }
+
+    runSuite("Prev and Next step through the day in time order") {
+        guard let today = tapeDay(24) else {
+            assertTrue(false, "today is in the week")
+            return
+        }
+        for (index, mark) in today.allMarks.enumerated() {
+            assertEqual(
+                TodayTapeSelection(day: today, pickedID: mark.id, hoveredID: nil).shownIndex, index,
+                "picking \(mark.id) puts the card at its place in the day"
+            )
+            assertEqual(
+                TodayTapeSelection(day: today, pickedID: "m-0900", hoveredID: mark.id).shownIndex, index,
+                "hovering \(mark.id) moves the position with what's shown"
+            )
+        }
+        let idle = TodayTapeSelection(day: today, pickedID: nil, hoveredID: nil)
+        assertEqual(idle.shownIndex, today.allMarks.count - 1, "the latest capture sits at the end of today's tape")
+
+        // Walk Prev from the latest to the first, then Next back, the way the card does.
+        let tapeOrder = today.allMarks.map(\.id)
+        var walkedBack: [String] = []
+        var selection = idle
+        while let index = selection.shownIndex, tapeOrder.indices.contains(index), walkedBack.count <= tapeOrder.count {
+            walkedBack.append(tapeOrder[index])
+            guard index > 0 else { break }
+            selection = TodayTapeSelection(day: today, pickedID: tapeOrder[index - 1], hoveredID: nil)
+        }
+        assertEqual(walkedBack, Array(tapeOrder.reversed()), "Prev visits every mark, newest to oldest")
+        var walkedForward: [String] = []
+        while let index = selection.shownIndex, tapeOrder.indices.contains(index), walkedForward.count <= tapeOrder.count {
+            walkedForward.append(tapeOrder[index])
+            guard index + 1 < tapeOrder.count else { break }
+            selection = TodayTapeSelection(day: today, pickedID: tapeOrder[index + 1], hoveredID: nil)
+        }
+        assertEqual(walkedForward, tapeOrder, "Next walks forward in time order")
+
+        if let tuesday = tapeDay(22) {
+            let tuesdayIdle = TodayTapeSelection(day: tuesday, pickedID: nil, hoveredID: nil)
+            assertEqual(tuesdayIdle.shownIndex, 0, "the latest capture can sit before a tie that sorts after it")
+        }
+    }
 }

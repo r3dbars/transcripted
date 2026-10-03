@@ -24,6 +24,11 @@ final class NotchIslandButton: NSButton {
     private let buttonHeight: CGFloat
     private let horizontalPadding: CGFloat
 
+    /// The app icon's side in a button `height` tall.
+    static func appIconSide(forHeight height: CGFloat = 32) -> CGFloat {
+        (height * 0.6).rounded()
+    }
+
     /// `appIcon` puts a small app icon before the title, drawn in its own
     /// colors ("Insert into Slack").
     init(title: String, style: Style, height: CGFloat = 32, fontSize: CGFloat = 13, symbolName: String? = nil, appIcon: NSImage? = nil) {
@@ -48,11 +53,12 @@ final class NotchIslandButton: NSButton {
             imageHugsTitle = true
             contentTintColor = foreground
         } else if let appIcon {
-            let side = (height * 0.6).rounded()
-            self.image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-                appIcon.draw(in: rect)
-                return true
-            }
+            // The island hands in the icon already drawn at this size, once
+            // per take (NotchIslandAppIconCache); anything else is drawn now.
+            let side = Self.appIconSide(forHeight: height)
+            self.image = appIcon.size == NSSize(width: side, height: side)
+                ? appIcon
+                : NotchIslandAppIconCache.bitmap(of: appIcon, side: side, colorSpace: NSScreen.main?.colorSpace ?? .sRGB)
             imagePosition = .imageLeading
             imageHugsTitle = true
         }
