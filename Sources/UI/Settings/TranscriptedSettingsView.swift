@@ -9,7 +9,11 @@ struct TranscriptedSettingsView: View {
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject var sttRouter: STTRouter
-    @ObservedObject var meetingSession: MeetingSessionController
+    /// Not observed (it publishes every tick): `meetingRender` redraws only
+    /// on what the shell shows, `recordingClock` feeds Home's elapsed label.
+    let meetingSession: MeetingSessionController
+    @StateObject private var meetingRender: SettingsShellMeetingRenderGate
+    @State private var recordingClock: SettingsRecordingClock
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
 
     let actions: TranscriptedSettingsActions
@@ -79,7 +83,7 @@ struct TranscriptedSettingsView: View {
     @State var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject var homeViewModel = HomeViewModel()
-    @StateObject var todayViewModel = TodayViewModel()
+    @ObservedObject var todayViewModel: TodayViewModel
     @State var homeCopiedRowID: String?
     @State var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State var homeDeleteFailure: HomeDeleteFailure?
@@ -109,15 +113,23 @@ struct TranscriptedSettingsView: View {
         appState: TranscriptedAppState,
         navigation: TranscriptedSettingsNavigationModel,
         speakerPeopleModel: SpeakerPeopleSettingsViewModel,
+        todayViewModel: TodayViewModel,
         actions: TranscriptedSettingsActions
     ) {
         self.navigation = navigation
         self.speakerPeopleModel = speakerPeopleModel
+        self.todayViewModel = todayViewModel
         self.actions = actions
         self.appLogger = appState.logger
         self.writingController = appState.writingController
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
-        _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
+        let meetingSession = appState.meetingSession
+        self.meetingSession = meetingSession
+        _meetingRender = StateObject(wrappedValue: SettingsShellMeetingRenderGate(
+            session: meetingSession,
+            navigation: navigation
+        ))
+        _recordingClock = State(initialValue: SettingsRecordingClock(durations: meetingSession.$recordingDuration))
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
     }
 
@@ -134,6 +146,7 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(LibraryTokens.contentBackground.ignoresSafeArea())
+        .environment(recordingClock)
         .sheet(item: $homeFeedbackTarget) { target in
             HomeFeedbackSheet(
                 target: target,
@@ -254,12 +267,7 @@ struct TranscriptedSettingsView: View {
             refreshPermissions()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshPermissions()
-            refreshRecentCaptures()
-            refreshShortcutState()
-            // Coming back from Login Items should clear a stale approval or
-            // failure line.
-            refreshLaunchAtLoginState()
+            refreshAfterAppActivation()
         }
         .onDisappear {
             homeDashboardRefreshTask?.cancel()

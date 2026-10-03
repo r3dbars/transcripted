@@ -314,8 +314,8 @@ enum TranscriptedPermissionAccess {
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {
-        UserDefaults.standard.set(true, forKey: systemAudioRecordingKnownKey)
-        UserDefaults.standard.set(granted, forKey: systemAudioRecordingGrantedKey)
+        UserDefaults.standard.setIfChanged(true, forKey: systemAudioRecordingKnownKey)
+        UserDefaults.standard.setIfChanged(granted, forKey: systemAudioRecordingGrantedKey)
     }
 
     /// Reads macOS's recorded System Audio Recording decision and folds it
@@ -336,8 +336,8 @@ enum TranscriptedPermissionAccess {
             setSystemAudioRecordingGranted(false)
         case .notDetermined:
             // Reset in System Settings (or never asked). Nothing is known.
-            UserDefaults.standard.removeObject(forKey: systemAudioRecordingKnownKey)
-            UserDefaults.standard.removeObject(forKey: systemAudioRecordingGrantedKey)
+            UserDefaults.standard.removeIfPresent(forKey: systemAudioRecordingKnownKey)
+            UserDefaults.standard.removeIfPresent(forKey: systemAudioRecordingGrantedKey)
         case .unavailable:
             break
         }
