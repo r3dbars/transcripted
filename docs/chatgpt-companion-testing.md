@@ -59,3 +59,7 @@ The UI now has a compact recording bar with elapsed time, a concise sharing row,
 Verified with the real helper and an invented native fixture in the Codex in-app browser: recording/share controls, light/dark rendering, narrow content without horizontal overflow, scroll-position preservation across polling, Jump to latest, and saved-passage navigation. This does not establish fresh live-meeting transcription or actual host UI verification for this new version. All 234 MCP tests, package validation, the panel handshake replay, source pins, and installed startup checks passed.
 
 Use `--long-transcript` with `Tools/TranscriptedMCP/test-support/companion_preview.py` for overflow-reader checks. The fixture never connects to the real native recording.
+
+## Idle stdio transport (0.1.7)
+
+0.1.7 swaps the helper's stdio transport for an event-driven one (`BlockingStdioTransport`): same wire bytes, no idle polling. Running servers keep the old binary until their client restarts.
