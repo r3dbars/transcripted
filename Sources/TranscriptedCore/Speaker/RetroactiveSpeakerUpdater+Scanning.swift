@@ -63,7 +63,8 @@ extension TranscriptSaver {
         var buffer = Data()
 
         while buffer.count < maxScanBytes {
-            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else {
+            guard let chunk = autoreleasepool(invoking: { try? handle.read(upToCount: chunkSize) }),
+                  !chunk.isEmpty else {
                 return .needsFullRead
             }
             buffer.append(chunk)

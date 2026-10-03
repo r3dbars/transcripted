@@ -312,17 +312,18 @@ enum HomeMeetingDeletion {
         defer { try? handle.close() }
 
         var hasher = SHA256()
-        while true {
-            let data: Data?
-            do {
-                data = try handle.read(upToCount: 1024 * 1024)
-            } catch {
-                return nil
-            }
-            guard let data, !data.isEmpty else {
-                break
-            }
-            hasher.update(data: data)
+        // Pool each chunk so the 1 MB reads don't pile up until the loop ends.
+        // A read error still fails the digest (nil), never a partial hash.
+        do {
+            while try autoreleasepool(invoking: { () throws -> Bool in
+                guard let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty else {
+                    return false
+                }
+                hasher.update(data: data)
+                return true
+            }) {}
+        } catch {
+            return nil
         }
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
