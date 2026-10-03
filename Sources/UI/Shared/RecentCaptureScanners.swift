@@ -303,6 +303,18 @@ struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]
     let dictationCounts: DictationTranscriptCounts
+    /// Set only for a `.todayOnly` load: entries in today's day file. A
+    /// `.todayOnly` load leaves `dictationCounts` all zeros.
+    var todayDictationCount: Int? = nil
+}
+
+/// How much of the dictation library a recent-captures load counts.
+enum DictationCountScope: Sendable {
+    case none
+    /// Today's day file only (Home's "N today"): one file, however large the library.
+    case todayOnly
+    /// Every day file: totals, today, and words.
+    case fullLibrary
 }
 
 enum RecentCaptureLoader {
@@ -310,6 +322,24 @@ enum RecentCaptureLoader {
         dictationLimit: Int,
         meetingLimit: Int,
         includeDictationCounts: Bool = false,
+        meetingDirectory: URL? = nil,
+        dictationDirectory: URL? = nil,
+        today: Date = Date()
+    ) async -> RecentCaptureSnapshot {
+        await load(
+            dictationLimit: dictationLimit,
+            meetingLimit: meetingLimit,
+            dictationCountScope: includeDictationCounts ? .fullLibrary : .none,
+            meetingDirectory: meetingDirectory,
+            dictationDirectory: dictationDirectory,
+            today: today
+        )
+    }
+
+    static func load(
+        dictationLimit: Int,
+        meetingLimit: Int,
+        dictationCountScope: DictationCountScope,
         meetingDirectory: URL? = nil,
         dictationDirectory: URL? = nil,
         today: Date = Date()
@@ -347,14 +377,18 @@ enum RecentCaptureLoader {
                         limit: dictationLimit,
                         directory: dictationDirectory
                     )
-                    async let dictationCounts = includeDictationCounts
+                    async let dictationCounts = dictationCountScope == .fullLibrary
                         ? DictationTranscriptStore.savedDictationCounts(directory: dictationDirectory, today: today)
                         : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+                    async let todayDictationCount: Int? = dictationCountScope == .todayOnly
+                        ? DictationTranscriptStore.savedDictationCount(forDayOf: today, directory: dictationDirectory)
+                        : nil
 
                     let snapshot = await RecentCaptureSnapshot(
                         meetings: meetings,
                         dictations: dictations,
-                        dictationCounts: dictationCounts
+                        dictationCounts: dictationCounts,
+                        todayDictationCount: todayDictationCount
                     )
                     guard !Task.isCancelled, !taskBox.isCancelled else {
                         taskBox.finish(with: emptySnapshot())

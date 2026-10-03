@@ -40,16 +40,10 @@ enum DictationTranscriptStore {
     private static let dictationDayPrefix = "Dictations_"
     private static let statsCache = DictationFileStatsCache()
 
-    private static let iso8601Formatters: [ISO8601DateFormatter] = {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-
-        return [fractional, standard]
-    }()
-    private static let iso8601FormatterQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.iso8601Formatters")
+    // Sendable value types, so no lock and no shared ICU formatter: a parse
+    // costs well under a microsecond instead of ~40 us behind a serial queue.
+    private static let fractionalCreatedAtStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let plainCreatedAtStyle = Date.ISO8601FormatStyle()
 
     @discardableResult
     static func save(
@@ -118,6 +112,28 @@ enum DictationTranscriptStore {
         statsCache.prune(keeping: scannedPaths)
 
         return DictationTranscriptCounts(total: total, today: todayCount, totalWords: totalWords)
+    }
+
+    /// Entries in the day file for `today` alone: one stat and, on a cache
+    /// miss, one parse. Same count as `savedDictationCounts(...).today`
+    /// without reading every other day file. Reads through the shared stats
+    /// cache and never prunes it (it sees only one file).
+    static func savedDictationCount(forDayOf today: Date = Date(), directory: URL? = nil) -> Int {
+        let folder = directory ?? DictationStoragePaths.transcriptsFolder
+        let todayURL = DictationTranscriptWriter.dailyFileURL(for: today, in: folder)
+        // Match what the directory listing in `savedDictationCounts` would
+        // count: the on-disk name must be exactly today's (case-insensitive
+        // volumes would otherwise resolve a ".MD" file) and not hidden.
+        guard isDictationDayFile(todayURL),
+              let values = try? todayURL.resourceValues(forKeys: [.nameKey, .isHiddenKey]),
+              values.name == todayURL.lastPathComponent,
+              values.isHidden != true,
+              let signature = DictationFileStatsCache.Signature(url: todayURL) else {
+            return 0
+        }
+        return statsCache.stats(for: signature) {
+            fileStats(in: todayURL)
+        }.entries
     }
 
     /// Entry and word counts per day file on or after `since`, keyed by the
@@ -568,7 +584,9 @@ enum DictationTranscriptStore {
     )
 
     private static func isEntryHeading(_ line: String) -> Bool {
-        guard let regex = entryHeadingRegex else { return false }
+        // Every match starts with "## ", so this cheap check skips the regex
+        // for the body and metadata lines that make up most of a day file.
+        guard line.hasPrefix("## "), let regex = entryHeadingRegex else { return false }
         let range = NSRange(line.startIndex..<line.endIndex, in: line)
         return regex.firstMatch(in: line, range: range) != nil
     }
@@ -678,13 +696,15 @@ enum DictationTranscriptStore {
             return nil
         }
 
-        return iso8601FormatterQueue.sync { () -> Date? in
-            for formatter in iso8601Formatters {
-                if let parsed = formatter.date(from: value) {
-                    return parsed
-                }
-            }
+        guard let parsed = (try? fractionalCreatedAtStyle.parse(value))
+            ?? (try? plainCreatedAtStyle.parse(value)) else {
             return nil
         }
+        // FormatStyle can land a fraction of a microsecond off the
+        // millisecond. ISO8601DateFormatter truncated to the millisecond, so
+        // snap down the same way (the small nudge absorbs that error) to keep
+        // createdAt, entry ids and legacy delete matching bit-identical.
+        let milliseconds = (parsed.timeIntervalSince1970 * 1_000 + 0.001).rounded(.down)
+        return Date(timeIntervalSince1970: milliseconds / 1_000)
     }
 }
