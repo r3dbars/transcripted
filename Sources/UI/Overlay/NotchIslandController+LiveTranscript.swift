@@ -13,7 +13,14 @@ extension NotchIslandController {
     func updateLiveTranscript(_ log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status) {
         // Nothing to show yet: don't build the panel for it.
         if islandView == nil, log.isEmpty, status == .off { return }
-        ensureLiveTranscriptView().apply(log, status: status)
+        if Self.showsLiveTranscript(meeting) {
+            ensureLiveTranscriptView().apply(log, status: status)
+        } else {
+            // Never builds one back: once the recording ends the view is
+            // released, and a hidden one only keeps the latest state.
+            releaseLiveTranscriptViewIfRecordingEnded()
+            islandView?.liveTranscriptView?.apply(log, status: status)
+        }
         // The setting was flipped mid-meeting: swap lanes and transcript.
         if var meeting, meeting.showsLiveTranscript != Self.showsLiveTranscript(meeting) {
             meeting.showsLiveTranscript = Self.showsLiveTranscript(meeting)
@@ -31,6 +38,15 @@ extension NotchIslandController {
         let captions = LiveMeetingCaptions.shared
         view.apply(captions.log, status: captions.status)
         return view
+    }
+
+    /// The recording is over, so the drop-down can't show the transcript
+    /// again this meeting: free the view and its text storage. Copy all
+    /// reads `LiveMeetingCaptions`, not the view, and the next meeting
+    /// builds a fresh view before its first drop-down.
+    func releaseLiveTranscriptViewIfRecordingEnded() {
+        guard meeting?.isRecording != true else { return }
+        islandView?.liveTranscriptView = nil
     }
 
     static func showsLiveTranscript(_ meeting: NotchIslandMeetingContent?) -> Bool {

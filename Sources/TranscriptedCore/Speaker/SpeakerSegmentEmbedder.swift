@@ -33,6 +33,16 @@ public protocol SpeakerSegmentEmbedder: Sendable {
     /// Cosine thresholds calibrated for this model's geometry, consumed by the
     /// speaker identity stack (cross-call matching + within-meeting clustering).
     var thresholds: SpeakerEmbeddingThresholds { get }
+
+    /// Gets the model back into memory if the embedder released it while idle, so
+    /// the next `embed` doesn't pay for the load. May block; never call it on the
+    /// main thread. Never changes what `embed` returns.
+    func prewarm()
+}
+
+public extension SpeakerSegmentEmbedder {
+    /// Default: nothing to reload.
+    func prewarm() {}
 }
 
 /// An embedder that can use the audio around a segment as context (the pyannote

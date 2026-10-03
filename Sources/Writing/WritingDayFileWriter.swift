@@ -21,6 +21,7 @@ extension Notification.Name {
 final class WritingDayFileWriter {
     /// How often an entry idle for 2 minutes is looked for.
     private static let idleSweepInterval: TimeInterval = 15
+    private static let idleSweepTolerance: TimeInterval = 3
 
     /// `<capture-library>/writing`, from the storage-path helper that owns the
     /// capture-library folder names. The pure form doesn't create the folder;
@@ -73,9 +74,13 @@ final class WritingDayFileWriter {
     func start() {
         guard idleTimer == nil else { return }
         let recorder = recorder
-        idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleSweepInterval, repeats: true) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.idleSweepInterval, repeats: true) { _ in
             DispatchQueue.global(qos: .utility).async { recorder.closeIdleEntries() }
         }
+        // Lets macOS coalesce the sweep with other wakeups. The 2-minute idle
+        // deadline is the recorder's; this only moves when it's checked.
+        timer.tolerance = Self.idleSweepTolerance
+        idleTimer = timer
         rescrubOlderDayFilesIfNeeded()
     }
 

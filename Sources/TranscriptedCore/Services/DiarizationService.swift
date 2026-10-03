@@ -348,6 +348,9 @@ public class DiarizationService: ObservableObject {
         sampleRate: Int,
         clusteringThreshold: Double?
     ) async throws -> [SpeakerSegment] {
+        // Start loading the voiceprint model now so it's warm for re-embedding
+        // after a short diarization (it still idle-releases after 60 s).
+        prewarmVoiceprintInBackground()
         if await MainActor.run(body: { self.activeBackend }) == .nemotron {
             return try await diarizeWithNemotron(samples: samples, sampleRate: sampleRate)
         }
@@ -403,6 +406,15 @@ public class DiarizationService: ObservableObject {
         logSpeakerSummaries(finalSegments)
 
         return finalSegments
+    }
+
+    /// Reloads an idle-released injected voiceprint on a utility queue. A plain
+    /// queue, not a task: the load blocks its thread for up to a second or so.
+    /// Only the injected embedder releases while idle; the diarizer's own
+    /// models stay loaded.
+    nonisolated public func prewarmVoiceprintInBackground() {
+        guard let embedder = segmentEmbedder else { return }
+        DispatchQueue.global(qos: .utility).async { embedder.prewarm() }
     }
 
     nonisolated static func isVendorNoSpeechResult(_ error: Error) -> Bool {
