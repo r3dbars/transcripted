@@ -5,7 +5,7 @@
 Writing's autocomplete and Save my writing logic, ported from Tilde at `f36f6562` (`docs/writing-port-ledger.md` maps every file). Two layers:
 
 - `Core/` — pure policy, Foundation only: suggestion state, activation and reveal policies, the prompt builder (`RawContinuationPrompt`), output cleaning, decision reasons, the socket wire format (`GhostBrainWire`), scene and Screen Memory policies, Personal History events and the personal predictor, `SecretRules` and `WritingSecretScrubber`. No AppKit, IMKit, processes, sockets or files.
-- `Runtime/` — Tilde's app half minus its UI: the owner-only socket and peer auth (`GhostBrainServerHost`), the `llama-server` child (`LlamaServerProcessHost`, `LlamaCompletionEngine`, `ScaffoldPrewarmer`, `WritingHelperWakeRecovery`), model download and Tilde-model adoption (`ModelManager`, `WritingModelAdoption`), Screen Memory (`ScreenMemory/`), Personal History (`PersonalHistory/`), Save my writing (`SaveMyWriting/`), outcome-ledger readers (`Stats/`), the keyboard installer and Input Sources calls, settings, and the diagnostics log.
+- `Runtime/` — Tilde's app half minus its UI: the owner-only socket and peer auth (`GhostBrainServerHost`), the `llama-server` child (`LlamaServerProcessHost`, `LlamaCompletionEngine`, `ScaffoldPrewarmer`, `WritingHelperWakeRecovery`), model download and Tilde-model adoption (`ModelManager`, `ModelFileHasher` for chunked hashing that never holds the file in memory, `WritingModelAdoption`), Screen Memory (`ScreenMemory/`), Personal History (`PersonalHistory/`), Save my writing (`SaveMyWriting/`), outcome-ledger readers (`Stats/`), the keyboard installer and Input Sources calls, settings, and the diagnostics log.
 
 ## Modules
 
