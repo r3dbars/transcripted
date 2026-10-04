@@ -51,6 +51,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `bash Tests/BuildDependencies/ArchiveInputsTests.sh` — exercises library-only archive guards and matching native/Xcode parser-module exports without compiling/downloading dependencies; actual builds also validate archive symbols
 - `bash Tests/BuildDependencies/CLIManifestTests.sh` — evaluates the actual CLI manifest with inert dependency fixtures to reject silent audio-mode fallback and incomplete module exports
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression
+- `scripts/dev/verify-change.sh` — app-level checks picked from what changed (paste-back, imported meeting, UI smoke, launch p95 under 400 ms), all in isolated state; writes `.build/verify/summary.md`. Driven by the `verify` skill in `.claude/skills/verify/`
+  - Usage: `bash scripts/dev/verify-change.sh --list`, then without `--list`
 - `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report; runs the deps build right before the first check that links prebuilt deps (adding it when `deps-libs/` is missing), and names every failed or blocked check before the overall verdict
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
