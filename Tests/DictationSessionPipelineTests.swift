@@ -220,19 +220,20 @@ func testDictationSessionPipeline() async {
             assertEqual(
                 host.events.all.contains("discard checkpoint"),
                 !quitMarkedIt,
-                quitMarkedIt ? "Quit's preservation mark keeps the WAV for launch recovery" : "a WAV nobody claimed is deleted"
+                quitMarkedIt ? "Quit's preservation mark keeps the WAV" : "a WAV nobody claimed is deleted"
             )
         }
     }
 
-    await runSuite("A model that never loads ends the take and offers the saved recording") {
+    await runSuite("A model that never loads ends the take and offers the saved recording, whatever its length") {
         let host = PipelineFakeHost()
         host.modelWaitOutcome = .unavailable
         let result = await host.runStopUntilTranscribed(taskSessionID: host.currentDictationSessionID, host.stopSteps())
 
         assertEqual(result.outcome, .ended)
         assertEqual(host.messages.last?.message, DictationPostStopModelWaitPolicy.modelUnavailableMessage(recordingSaved: true))
-        assertEqual(host.messages.last?.actionTitle, "Transcribe It", "the saved recording is one press away")
+        assertEqual(host.messages.last?.actionTitle, "Transcribe It", "the wait said the recording was safe, so it's one press away")
+        assertFalse(host.events.all.contains("discard explicit=true"), "a recording the user was told is safe is never dropped here")
         assertFalse(host.isDictating)
         assertEqual(host.events.all.last, "clear model_unavailable")
         assertFalse(host.events.all.contains { $0.hasPrefix("transcribe ") })
@@ -295,20 +296,45 @@ func testDictationSessionPipeline() async {
         assertFalse(host.events.all.contains("discard explicit=true"), "the audio in memory is the only copy")
     }
 
-    runSuite("A saved recording is offered again; audio the model heard nothing in keeps its launch reminder") {
+    runSuite("A long take's saved recording is offered through Transcribe It and kept") {
+        for reason in [DictationEmptyTranscriptionReason.audioNeedsRecovery, .modelFailure] {
+            let host = PipelineFakeHost()
+            host.stoppedAudioRecovery = host.recovery()
+            host.finishEmptyTake(taskSessionID: host.currentDictationSessionID, host.emptySteps(reason, heldFor: 45))
+            assertEqual(host.messages.last?.actionTitle, "Transcribe It", "\(reason.rawValue): a long take is one press from a transcript")
+            assertFalse(host.events.all.contains("discard explicit=true"), "\(reason.rawValue): its audio stays while offered")
+            assertFalse(host.isDictating)
+        }
         let needsRecovery = PipelineFakeHost()
-        let recovery = needsRecovery.recovery()
-        needsRecovery.stoppedAudioRecovery = recovery
+        needsRecovery.stoppedAudioRecovery = needsRecovery.recovery()
+        needsRecovery.finishEmptyTake(taskSessionID: needsRecovery.currentDictationSessionID, needsRecovery.emptySteps(.audioNeedsRecovery, heldFor: 45))
+        assertTrue(needsRecovery.messages.last?.message.contains("did not become text") == true,
+                   "the long-take copy explains the button")
+    }
+
+    runSuite("A short take's saved recording is dropped with a plain try-again message") {
+        let needsRecovery = PipelineFakeHost()
+        needsRecovery.stoppedAudioRecovery = needsRecovery.recovery()
         needsRecovery.finishEmptyTake(taskSessionID: needsRecovery.currentDictationSessionID, needsRecovery.emptySteps(.audioNeedsRecovery, heldFor: 5))
-        assertEqual(needsRecovery.messages.last?.actionTitle, "Transcribe It")
-        assertEqual(needsRecovery.savedAudioPromptURL, recovery.url)
-        assertFalse(needsRecovery.events.all.contains("discard explicit=true"))
+        assertEqual(needsRecovery.messages.last?.message, "Didn't catch that. Try again.")
+        assertNil(needsRecovery.messages.last?.actionTitle, "no Transcribe It, so nothing to come back to")
+        assertEqual(needsRecovery.events.all.last, "discard explicit=true", "the WAV is deleted as the take ends")
 
         let modelFailed = PipelineFakeHost()
         modelFailed.stoppedAudioRecovery = modelFailed.recovery()
         modelFailed.finishEmptyTake(taskSessionID: modelFailed.currentDictationSessionID, modelFailed.emptySteps(.modelFailure, heldFor: 5))
-        assertEqual(modelFailed.messages.last?.actionTitle, "Transcribe It")
-        assertNil(modelFailed.savedAudioPromptURL, "a model failure keeps its reminder through the normal launch scan")
+        assertNil(modelFailed.messages.last?.actionTitle)
+        assertEqual(modelFailed.events.all.last, "discard explicit=true")
+    }
+
+    runSuite("A short take whose audio is still in memory keeps its WAV") {
+        let host = PipelineFakeHost()
+        host.stoppedAudioRecovery = host.recovery()
+        host.dictationHasRecoverableRecording = true
+        host.finishEmptyTake(taskSessionID: host.currentDictationSessionID, host.emptySteps(.modelFailure, heldFor: 5))
+        assertNil(host.messages.last?.actionTitle, "still no Transcribe It for a short take")
+        assertFalse(host.events.all.contains("discard explicit=true"),
+                    "deleting the WAV would leave memory-only audio that refuses the next take")
     }
 
     await runSuite("Paste Anyway pastes the held-back text and saves it with the kept audio") {
@@ -445,7 +471,6 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     var stoppedAudioRecoveryPreservationSessionID: UUID?
     var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
-    var savedAudioPromptURL: URL?
     var dictationHasRecoverableRecording = false
     var currentStoppedAudioRecoveryWAVExists = false
 

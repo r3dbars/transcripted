@@ -1,8 +1,9 @@
 // MeetingStoppedAudioCheckpointPolicy.swift
 // A stopped dictation take that was too long can be imported as a meeting.
-// Its restart checkpoint (the WAV under dictation-audio-recovery) is retired
-// only once the meeting transcript is saved. A failed job keeps it so the
-// take can still be recovered, and a discarded job leaves it alone.
+// Its checkpoint (the WAV under dictation-audio-recovery) is retired only
+// once the meeting transcript is saved. A failed or discarded job leaves it
+// alone (the importer works from its own copy); the next launch's
+// DictationStoppedAudioRecoveryStore.purgeLeftovers removes it.
 
 import Foundation
 

@@ -5,27 +5,27 @@
 /// The dictation side of launch. `DictationSessionController` conforms.
 @MainActor
 protocol AppLaunchDictationHost: AnyObject {
-    /// Offers to finish a dictation whose audio was saved at Stop but never
-    /// transcribed (the app quit or crashed in between).
-    func presentPendingStoppedAudioRecoveryIfNeeded()
+    /// Deletes dictation audio saved by an earlier run (a failed take, or
+    /// one the app quit or crashed during). Launch never asks about it.
+    func purgeLeftoverStoppedAudio()
 }
 
 @MainActor
 enum AppLaunchSteps {
     enum Step: String, CaseIterable {
-        case pendingStoppedAudioRecovery = "pending_stopped_audio_recovery"
+        case leftoverStoppedAudioCleanup = "leftover_stopped_audio_cleanup"
     }
 
     /// Steps run after the dictation overlay is set up, in order.
-    static let afterOverlaySetup: [Step] = [.pendingStoppedAudioRecovery]
+    static let afterOverlaySetup: [Step] = [.leftoverStoppedAudioCleanup]
 
     /// Runs `afterOverlaySetup` and returns the steps it ran.
     @discardableResult
     static func runAfterOverlaySetup(dictation: AppLaunchDictationHost) -> [Step] {
         for step in afterOverlaySetup {
             switch step {
-            case .pendingStoppedAudioRecovery:
-                dictation.presentPendingStoppedAudioRecoveryIfNeeded()
+            case .leftoverStoppedAudioCleanup:
+                dictation.purgeLeftoverStoppedAudio()
             }
         }
         return afterOverlaySetup

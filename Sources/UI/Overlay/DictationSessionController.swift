@@ -86,12 +86,11 @@ class DictationSessionController: ObservableObject {
     var overlayController: FloatingOverlayController? {
         didSet {
             oldValue?.onActionableMessageDiscarded = nil
-            oldValue?.onActionableMessageClosedByUser = nil
             textPaster.discardPasteRetry()
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self else { return }
                 guard self.isDictating else {
-                    self.overlayController?.dismissErrorClosedByUser()
+                    self.overlayController?.dismissError()
                     return
                 }
                 self.cancelDictation()
@@ -102,12 +101,6 @@ class DictationSessionController: ObservableObject {
             }
             overlayController?.onActionableMessageDiscarded = { [weak self] in
                 self?.textPaster.discardPasteRetry()
-                // Replaced or timed out: the user didn't say no, so launch
-                // may still remind them.
-                self?.savedAudioPromptURL = nil
-            }
-            overlayController?.onActionableMessageClosedByUser = { [weak self] in
-                self?.stopRemindingAboutSavedAudioPrompt()
             }
             // Any Esc, including the first of "press again to discard",
             // takes back a start that is waiting on this take.
@@ -147,10 +140,6 @@ class DictationSessionController: ObservableObject {
     var currentDictationShortcutMode: DictationShortcutMode?
     var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     var stoppedAudioRecoveryPreservationSessionID: UUID?
-    /// The saved recording the overlay is currently offering to transcribe.
-    /// If the user closes that message (X or Esc), the recording is marked so
-    /// launch stops asking about it. The file itself is never deleted here.
-    var savedAudioPromptURL: URL?
     var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
     /// A start-shortcut press that landed while the last take was still
@@ -415,7 +404,7 @@ class DictationSessionController: ObservableObject {
         if !preserveStoppedAudio {
             discardStoppedAudioRecovery(explicitDiscard: true)
             // The "discarded" cue only when something was actually thrown away;
-            // a quit that keeps the audio for recovery stays silent.
+            // a quit that keeps the audio stays silent.
             AppSoundPlayer.shared.play(.dictationCancelled)
         }
         overlayController.hideWithCancelAnimation()

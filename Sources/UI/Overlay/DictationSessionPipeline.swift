@@ -63,7 +63,6 @@ protocol DictationSessionPipelineHost: AnyObject {
     var stoppedAudioRecovery: DictationStoppedAudioRecovery? { get set }
     var stoppedAudioRecoveryPreservationSessionID: UUID? { get set }
     var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal? { get }
-    var savedAudioPromptURL: URL? { get set }
     var dictationHasRecoverableRecording: Bool { get }
     var currentStoppedAudioRecoveryWAVExists: Bool { get }
     func stopDictationAndPaste(trigger: DictationTrigger, shortcutMode: DictationShortcutMode?, autoPaste: Bool)
@@ -362,6 +361,8 @@ extension DictationSessionPipelineHost {
             return (.abandoned, marks)
         case .unavailable:
             steps.reportModelUnavailable()
+            // The wait told the user their recording was safe, so its saved
+            // audio is offered whatever the take's length.
             if let recovery = stoppedAudioRecovery, recovery.sessionID == taskSessionID {
                 let savedAudioAction = savedDictationAudioAction(for: recovery.url)
                 steps.showMessage(
@@ -447,13 +448,15 @@ extension DictationSessionPipelineHost {
             reason: reason,
             pressDuration: steps.stopRequestedAt - steps.sessionStartedAt,
             hasHeldBackText: steps.heldBackText() != nil,
-            hasSavedRecording: stoppedAudioRecovery != nil
+            hasSavedRecording: stoppedAudioRecovery != nil,
+            audioStillInMemory: dictationHasRecoverableRecording
         )
         steps.report(decision)
         let message = DictationNoSpeechPresentationPolicy.message(
             trigger: currentDictationTrigger.rawValue,
             reason: reason,
-            shortcutMode: currentDictationShortcutMode
+            shortcutMode: currentDictationShortcutMode,
+            savedRecordingOffered: decision.action == .offerSavedRecording
         )
         switch decision.action {
         case .closeLikeCancel:
@@ -479,15 +482,10 @@ extension DictationSessionPipelineHost {
                     showError: { steps.showMessage($0, nil, nil) }
                 )
             )
-        case .offerSavedRecording(let remindAtLaunch):
+        case .offerSavedRecording:
             guard let recovery = stoppedAudioRecovery else { break }
             let savedAudioAction = savedDictationAudioAction(for: recovery.url)
             steps.showMessage(message, savedAudioAction.title, savedAudioAction.action)
-            // Only for audio the model heard nothing in. A model
-            // failure keeps its launch reminder even if closed.
-            if remindAtLaunch {
-                savedAudioPromptURL = recovery.url
-            }
         case .offerCheckpointRetry:
             // The captured audio has no durable WAV. If native RAM
             // remains, offer the guarded no-paste checkpoint retry

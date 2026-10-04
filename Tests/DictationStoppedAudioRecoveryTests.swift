@@ -4,8 +4,8 @@ import Foundation
 // retain/remove, WAV persistence/cleanup, the commit policy) against real temp directories,
 // and the prepared Stop snapshot and external-engine lease through their compiled seams
 // (PreparedRecordingConsumer, ExternalEngineTranscription) with fakes. Imported restart
-// checkpoints retire through MeetingStoppedAudioCheckpointPolicy. The launch scan for pending
-// stopped audio is tested in AppLaunchStepsTests.
+// checkpoints retire through MeetingStoppedAudioCheckpointPolicy. That launch runs the leftover
+// cleanup is tested in AppLaunchStepsTests; what it deletes is tested here.
 
 func testDictationStoppedAudioRecoveryRetryRegistry() {
     runSuite("stopped dictation recovery survives a failed retry until success") {
@@ -65,7 +65,7 @@ func testDictationStoppedAudioRecovery() async {
             let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
             assertEqual(permissions, 0o600, "recovery audio should be owner-only")
             let discovered = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1, directory: directory)
-            assertEqual(discovered, [recovery], "durable metadata should make recovery discoverable after store recreation")
+            assertEqual(discovered, [recovery], "durable metadata lets the importer find the recording by its file")
         } catch {
             assertTrue(false, "recovery WAV should persist: \(error)")
         }
@@ -111,7 +111,7 @@ func testDictationStoppedAudioRecovery() async {
                 assertFalse(FileManager.default.fileExists(atPath: recovery!.url.path), "cleaned recovery audio should be deleted")
                 assertTrue(
                     DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).isEmpty,
-                    "cleanup should remove restart-discovery metadata"
+                    "cleanup should remove the recording's metadata too"
                 )
             } catch {
                 assertTrue(false, "recovery cleanup should succeed: \(error)")
@@ -119,35 +119,104 @@ func testDictationStoppedAudioRecovery() async {
         }
     }
 
-    runSuite("Closing a saved recording's prompt stops the launch reminder but keeps the audio") {
-        let directory = makeRecoveryTestDirectory("dismissed")
+    runSuite("Launch cleanup deletes recordings from an earlier run and keeps this run's") {
+        let directory = makeRecoveryTestDirectory("purge")
         defer { try? FileManager.default.removeItem(at: directory) }
+        let launchedAt = Date(timeIntervalSinceReferenceDate: 1_000)
         do {
-            let closed = try DictationStoppedAudioRecoveryStore.persist(
-                samples16k: [0, 0, 0], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 2), directory: directory
+            let earlier = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0.1, -0.1], sessionID: UUID(),
+                createdAt: Date(timeIntervalSinceReferenceDate: 500), directory: directory
             )!
-            let other = try DictationStoppedAudioRecoveryStore.persist(
-                samples16k: [0.1, -0.1, 0.1], sessionID: UUID(), createdAt: Date(timeIntervalSince1970: 1), directory: directory
+            let thisRun = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0.2, -0.2], sessionID: UUID(),
+                createdAt: Date(timeIntervalSinceReferenceDate: 2_000), directory: directory
             )!
-            assertTrue(DictationStoppedAudioRecoveryStore.markDismissed(audioURL: closed.url), "an existing recording can be marked")
-            assertEqual(
-                DictationStoppedAudioRecoveryStore.pendingRecoveries(excludingDismissed: true, directory: directory).map(\.url),
-                [other.url],
-                "the launch reminder skips the closed recording and still offers the other one"
-            )
-            assertEqual(
-                Set(DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).map(\.url)),
-                Set([closed.url, other.url]),
-                "importers still find the closed recording, so Transcribe It can clean it up later"
-            )
-            assertTrue(FileManager.default.fileExists(atPath: closed.url.path), "closing the prompt never deletes audio")
+
+            let removed = DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: launchedAt, directory: directory)
+
+            assertEqual(removed, 1, "only the earlier run's recording is removed")
+            assertFalse(FileManager.default.fileExists(atPath: earlier.url.path), "the earlier run's WAV is deleted")
             assertFalse(
-                DictationStoppedAudioRecoveryStore.markDismissed(audioURL: directory.appendingPathComponent("missing.wav")),
-                "a recording without metadata reports nothing marked"
+                FileManager.default.fileExists(atPath: earlier.url.deletingPathExtension().appendingPathExtension("json").path),
+                "and its metadata"
+            )
+            assertTrue(FileManager.default.fileExists(atPath: thisRun.url.path), "a take saved after launch is never touched")
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory),
+                [thisRun],
+                "this run's recording is still findable by the importer"
+            )
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: launchedAt, directory: directory),
+                0,
+                "a second launch cleanup has nothing left to remove"
             )
         } catch {
-            assertTrue(false, "marking a recovery dismissed should succeed: \(error)")
+            assertTrue(false, "recovery audio should persist: \(error)")
         }
+    }
+
+    runSuite("Launch cleanup removes half-written leftovers and nothing outside its own files") {
+        let parent = makeRecoveryTestDirectory("purge-scope")
+        let directory = parent.appendingPathComponent("dictation-audio-recovery", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let fileManager = FileManager.default
+        let earlier = Date(timeIntervalSinceReferenceDate: 500)
+        let later = Date(timeIntervalSinceReferenceDate: 2_000)
+        let launchedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        func write(_ name: String, in folder: URL, modified: Date, contents: String = "x") throws -> URL {
+            let url = folder.appendingPathComponent(name)
+            try Data(contents.utf8).write(to: url)
+            try fileManager.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+            return url
+        }
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            // A WAV whose metadata was never written: crash between the two writes.
+            let orphanEarlier = try write("dictation_orphan-old.wav", in: directory, modified: earlier)
+            // The same, but written after launch: this run's take mid-save.
+            let orphanThisRun = try write("dictation_orphan-new.wav", in: directory, modified: later)
+            // Unreadable metadata from an earlier run, with its WAV.
+            let brokenMetadata = try write("dictation_broken.json", in: directory, modified: earlier, contents: "{")
+            let brokenAudio = try write("dictation_broken.wav", in: directory, modified: earlier)
+            // Metadata that names a file outside the folder.
+            let outside = try write("dictation_outside.wav", in: parent, modified: earlier)
+            let escaping = try write(
+                "dictation_escaping.json",
+                in: directory,
+                modified: earlier,
+                contents: #"{"version":1,"sessionID":"00000000-0000-0000-0000-000000000009","createdAt":500,"audioFilename":"../dictation_outside.wav"}"#
+            )
+            // Not the store's files.
+            let unrelated = try write("notes.wav", in: directory, modified: earlier)
+            let nestedFolder = directory.appendingPathComponent("dictation_folder.wav", isDirectory: true)
+            try fileManager.createDirectory(at: nestedFolder, withIntermediateDirectories: true)
+
+            let removed = DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: launchedAt, directory: directory)
+
+            assertEqual(removed, 3, "the orphan WAV, the broken pair, and the escaping metadata each count once")
+            assertFalse(fileManager.fileExists(atPath: orphanEarlier.path), "an earlier run's WAV without metadata is deleted")
+            assertTrue(fileManager.fileExists(atPath: orphanThisRun.path), "a WAV written after launch is kept even without metadata")
+            assertFalse(fileManager.fileExists(atPath: brokenMetadata.path), "unreadable earlier metadata is deleted")
+            assertFalse(fileManager.fileExists(atPath: brokenAudio.path), "with the WAV of the same name")
+            assertFalse(fileManager.fileExists(atPath: escaping.path), "metadata pointing outside the folder is itself removed")
+            assertTrue(fileManager.fileExists(atPath: outside.path), "but the file it names outside the folder is never deleted")
+            assertTrue(fileManager.fileExists(atPath: unrelated.path), "files without the dictation_ prefix are left alone")
+            assertTrue(fileManager.fileExists(atPath: nestedFolder.path), "folders are never deleted")
+        } catch {
+            assertTrue(false, "purge scope fixtures should be written: \(error)")
+        }
+    }
+
+    runSuite("Launch cleanup with no recovery folder does nothing") {
+        let missing = makeRecoveryTestDirectory("purge-missing")
+        assertEqual(
+            DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: Date(timeIntervalSinceReferenceDate: 1_000), directory: missing),
+            0,
+            "a Mac that never saved a dictation WAV has nothing to clean"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: missing.path), "the cleanup never creates the folder")
     }
 
     runSuite("Dictation stopped audio recovery limits after newest-first ordering") {
@@ -239,7 +308,7 @@ func testDictationStoppedAudioRecovery() async {
                 assertEqual(
                     FileManager.default.fileExists(atPath: recovery!.url.path),
                     !saved,
-                    saved ? "a saved transcript retires its WAV" : "a failed save keeps the WAV so the take can still be recovered"
+                    saved ? "a saved transcript retires its WAV" : "a failed save keeps the WAV (the next launch's cleanup removes it)"
                 )
             } catch {
                 assertTrue(false, "recovery audio should persist: \(error)")
@@ -264,12 +333,12 @@ func testDictationStoppedAudioRecovery() async {
                 assertEqual(
                     FileManager.default.fileExists(atPath: recovery!.url.path),
                     !saved,
-                    saved ? "a saved meeting transcript retires the WAV" : "an unsaved meeting keeps the WAV for recovery"
+                    saved ? "a saved meeting transcript retires the WAV" : "an unsaved meeting leaves the WAV alone"
                 )
                 assertEqual(
                     DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory).count,
                     saved ? 0 : 1,
-                    "launch recovery stops offering a retired checkpoint (\(end))"
+                    "the importer no longer finds a retired checkpoint (\(end))"
                 )
             } catch {
                 assertTrue(false, "recovery audio should persist: \(error)")

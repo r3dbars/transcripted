@@ -51,9 +51,6 @@ enum DictationStoppedAudioRecoveryStore {
         let sessionID: UUID
         let createdAt: Date
         let audioFilename: String
-        /// Set when the user closed the "Transcribe It" message for this
-        /// recording. The launch reminder skips it; the file stays on disk.
-        var dismissed: Bool? = nil
     }
 
     static var defaultDirectory: URL {
@@ -87,7 +84,6 @@ enum DictationStoppedAudioRecoveryStore {
 
     static func pendingRecoveries(
         limit: Int = 10,
-        excludingDismissed: Bool = false,
         directory: URL? = nil,
         fileManager: FileManager = .default
     ) -> [DictationStoppedAudioRecovery] {
@@ -102,8 +98,7 @@ enum DictationStoppedAudioRecoveryStore {
         var recoveries: [DictationStoppedAudioRecovery] = []
         for case let metadataURL as URL in enumerator where metadataURL.pathExtension == "json" {
             guard let metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL)),
-                  metadata.version == 1,
-                  !(excludingDismissed && metadata.dismissed == true) else { continue }
+                  metadata.version == 1 else { continue }
             let audioURL = folder.appendingPathComponent(metadata.audioFilename, isDirectory: false)
             guard fileManager.fileExists(atPath: audioURL.path) else { continue }
             recoveries.append(DictationStoppedAudioRecovery(
@@ -152,7 +147,7 @@ enum DictationStoppedAudioRecoveryStore {
     }
 
     /// Retires a take's checkpoint once its transcript is saved. A failed
-    /// save keeps the WAV, so the take can still be transcribed later.
+    /// save keeps the WAV; the next launch's `purgeLeftovers` removes it.
     @discardableResult
     static func retire(
         _ recovery: DictationStoppedAudioRecovery?,
@@ -162,21 +157,78 @@ enum DictationStoppedAudioRecoveryStore {
         cleanup(recovery, transcriptPersisted: result.saved != nil, fileManager: fileManager)
     }
 
-    /// Stops the launch reminder for one saved recording without deleting it.
-    /// The user closed its "Transcribe It" message, so asking again on every
-    /// launch is a nag; the WAV stays where it is. Returns `true` when marked.
+    /// Deletes every recording saved before `cutoff`, with its metadata.
+    /// Launch runs this with the launch time: nothing offers a saved
+    /// recording after its own take ends, so a WAV from an earlier run (a
+    /// failed take nobody transcribed, or one left by Quit or a crash) is
+    /// just private audio sitting on disk. Files from this run are newer
+    /// than `cutoff` and stay. Only `dictation_*.wav` and `dictation_*.json`
+    /// directly inside `directory` are touched. Returns how many recordings
+    /// were removed.
     @discardableResult
-    static func markDismissed(audioURL: URL, fileManager: FileManager = .default) -> Bool {
-        let url = metadataURL(for: audioURL)
-        guard var metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: url)),
-              metadata.version == 1 else { return false }
-        metadata.dismissed = true
-        do {
-            try write(metadata, to: url, fileManager: fileManager)
-            return true
-        } catch {
-            return false
+    static func purgeLeftovers(
+        createdBefore cutoff: Date,
+        directory: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> Int {
+        let folder = (directory ?? defaultDirectory).standardizedFileURL
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        // Both sides resolved the same way, so /var vs /private/var can't
+        // make a file look like it lives somewhere else.
+        func resolvedPath(_ url: URL) -> String {
+            url.resolvingSymlinksInPath().standardizedFileURL.path
         }
+        let folderPath = resolvedPath(folder)
+        func isOwnedFile(_ url: URL, extension pathExtension: String) -> Bool {
+            url.lastPathComponent.hasPrefix("dictation_")
+                && url.pathExtension == pathExtension
+                && resolvedPath(url.deletingLastPathComponent()) == folderPath
+                && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+        func modifiedBeforeCutoff(_ url: URL) -> Bool {
+            guard let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                return false
+            }
+            return modified < cutoff
+        }
+
+        var removed = 0
+        var claimedAudio: Set<String> = []
+        for metadataURL in contents where isOwnedFile(metadataURL, extension: "json") {
+            let audioURL: URL?
+            let isOld: Bool
+            if let metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL)) {
+                let candidate = folder.appendingPathComponent(metadata.audioFilename, isDirectory: false)
+                audioURL = isOwnedFile(candidate, extension: "wav") ? candidate : nil
+                isOld = metadata.createdAt < cutoff
+            } else {
+                // Unreadable metadata from an older or broken write. Its
+                // WAV, if any, has the same name.
+                let sibling = metadataURL.deletingPathExtension().appendingPathExtension("wav")
+                audioURL = isOwnedFile(sibling, extension: "wav") ? sibling : nil
+                isOld = modifiedBeforeCutoff(metadataURL)
+            }
+            if let audioURL { claimedAudio.insert(audioURL.lastPathComponent) }
+            guard isOld else { continue }
+            if let audioURL { try? fileManager.removeItem(at: audioURL) }
+            try? fileManager.removeItem(at: metadataURL)
+            removed += 1
+        }
+        // A WAV without metadata: the app stopped between the two writes.
+        // Its file date says which run it came from.
+        for audioURL in contents where isOwnedFile(audioURL, extension: "wav")
+            && !claimedAudio.contains(audioURL.lastPathComponent)
+            && !fileManager.fileExists(atPath: metadataURL(for: audioURL).path)
+            && modifiedBeforeCutoff(audioURL) {
+            try? fileManager.removeItem(at: audioURL)
+            removed += 1
+        }
+        return removed
     }
 
     private static func writeMetadata(
