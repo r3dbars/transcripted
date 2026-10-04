@@ -18,6 +18,7 @@ struct PeopleSettingsPage: View {
                 onStartMeeting: onStartMeeting
             )
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.people")
     }
 }

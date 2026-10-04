@@ -48,6 +48,7 @@ struct DictationsSettingsPage: View {
         .onDisappear {
             expandedEntryID = nil
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.dictations")
     }
 
