@@ -5,7 +5,7 @@ description: Check that a Transcripted change actually works in the app, not jus
 
 # Verify a change in the app
 
-`bash check.sh` proves the code builds and the tests pass. That doesn't prove the change does what Justin asked. This skill does the checks he'd otherwise do by hand: dictate something, import a meeting, open the screen, see if launch got slower.
+`bash check.sh` proves the code builds and the tests pass. That doesn't prove the change does what Justin asked. This skill does the checks he'd otherwise do by hand: paste something, import a meeting, open the screen, see if launch got slower.
 
 ## When to run it
 
@@ -23,19 +23,21 @@ After you finish a code change and `bash check.sh` passes, and before you say it
 
 | Check | Runs when you touch | Pass means |
 |---|---|---|
-| dictation | `Sources/Speech`, `Dictation`, `Capture`, `Accessibility` | dictated text lands in a slow fake text field |
-| meetings | `Sources/Meeting`, `TranscriptedCore` | an imported recording saves a valid meeting Markdown file and its audio |
-| ui | `Sources/UI`, `App`, `Writing` | the built app opens onboarding, the menu bar, Home and Settings |
-| speed | launch-path code | 10 cold launches, p95 under 400 ms |
+| paste | the paste-back files in `Sources/Support` (`Clipboard*`, `FocusedTextPaste*`) | text lands in a slow fake text field |
+| meetings | `Sources/Meeting`, `TranscriptedCore`, `Reliability` | the built app imports a spoken recording through its real picker and saves a valid meeting (needs local models) |
+| ui | `Sources/UI`, `App`, `Accessibility`, Writing and the keyboard | the built app opens onboarding, the menu bar, Home and Settings |
+| speed | launch-path code | all 20 cold launches report, and p95 stays under 400 ms |
 
 Everything runs in a throwaway home folder. None of it touches Justin's real recordings or settings.
+
+No script can prove dictation itself (mic to text); that's the live check below. Any changed source file no check covers shows up under "Not covered by any check" in the summary. Check those by hand and say what you did.
 
 Force a check with `--only ui,speed`, or run all of them with `--all`.
 
 ## Extra steps the script can't do
 
-- **UI changes: look at it.** After the ui check passes, open the screen you changed in the built app (`build/Transcripted.app`) and take a screenshot with computer use. Check it against what was asked: layout, wording, light and dark mode. Attach the screenshot. If Justin's copy of Transcripted is running, the ui check is skipped. Don't quit his app; tell him it needs quitting for this check.
-- **Audio changes: hand off to Justin.** If the summary says "Needs a live check by Justin", say so plainly in your reply. Real mics and AirPods can't be faked. He runs `bash check.sh hardware` and dictates once with the built-in mic and once with AirPods.
+- **UI changes: look at it.** After the ui check passes, open the screen you changed in the built app (`build/Transcripted.app`) and take a screenshot with computer use. Check it against what was asked: layout, wording, light and dark mode. Attach the screenshot. If any Transcripted is running, the ui and meetings checks skip. Don't quit it; tell Justin those two need it closed.
+- **Audio and dictation changes: hand off to Justin.** If the summary says "Needs a live check by Justin", say so plainly in your reply. Real mics and AirPods can't be faked. He runs `bash check.sh hardware` and dictates once with the built-in mic and once with AirPods.
 - **Speed failures: rerun once.** One slow run can be a busy machine (other sessions benchmarking, a build running). If it fails twice, it's real.
 
 ## Rules

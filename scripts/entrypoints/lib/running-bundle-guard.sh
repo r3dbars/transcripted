@@ -24,7 +24,9 @@ refuse_if_bundle_running() {
         pgrep -f "$contents_dir" || true
         for pid in $(pgrep -f "(^|[[:space:]])(\./)?${bundle#./}/Contents/" || true); do
             cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
-            [ "$cwd" = "$here" ] && echo "$pid"
+            # if, not &&: a false test as the last command of the loop fails the
+            # pipeline, and build.sh runs under set -e.
+            if [ "$cwd" = "$here" ]; then echo "$pid"; fi
         done
     } | sort -u)"
     [ -z "$running_pids" ] && return 0
