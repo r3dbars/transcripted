@@ -49,6 +49,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 freeUpSpaceRow
                 supportFilesRow
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.storage")
 
             // Two independent status lines: a lingering migration status must
@@ -84,6 +85,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 .padding(.leading, 4)
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.storage")
         .onAppear {
             if modelCacheSnapshot == nil, !modelCacheLoading {

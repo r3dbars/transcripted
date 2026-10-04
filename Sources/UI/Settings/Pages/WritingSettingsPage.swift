@@ -45,6 +45,7 @@ struct WritingSettingsPage: View {
         .onDisappear {
             model.pageDisappeared()
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.writing")
     }
 }
