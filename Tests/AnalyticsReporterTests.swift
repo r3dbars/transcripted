@@ -13,6 +13,8 @@ func testAnalyticsReporter() {
         fixture.reporter.trackEvent("app_launched", properties: ["email": "private@example.com", "$set": "private words"])
         assertTrue(waitUntil { loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 }, "capture is buffered")
         let capture = loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first!
+        assertEqual(capture.personProperties?["first_observed_at"], first, "correctly named trait preserves historical observed day")
+        assertEqual(capture.personProperties?["observation_basis"], "first_observed_not_install", "backfilled date never claims installation")
         assertEqual(capture.distinctID, existing, "PostHog uses the install UUID")
         assertEqual(capture.personProperties?["analytics_opt_in"], "true", "opted-in trait is present")
         assertNil(capture.personProperties?["email"], "person never has an email")

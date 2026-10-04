@@ -565,6 +565,8 @@ APP_SOURCES=(
     "Sources/Observability/CrashReporterPrivacyOptions.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
+    "Sources/Observability/RetentionTelemetry.swift"
+    "Sources/Observability/ProductUsageTelemetry.swift"
     "Sources/Observability/AgentSetupLifecycleTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"

@@ -582,7 +582,7 @@ extension TranscriptedSettingsView {
                     set: { newValue in
                         anonymousAnalyticsEnabled = newValue
                         if newValue {
-                            AnalyticsPreferences.setEnabled(true)
+                            RetentionTelemetry.setAnalyticsEnabled(true)
                             trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
                         } else {
                             // Opt-out must track first, while still enabled — but
@@ -593,7 +593,7 @@ extension TranscriptedSettingsView {
                             // exists for actually leaves.
                             trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
                             AnalyticsReporter.drainPendingTrackCalls()
-                            AnalyticsPreferences.setEnabled(false)
+                            RetentionTelemetry.setAnalyticsEnabled(false)
                         }
                         diagnosticsActionStatus = nil
                     }

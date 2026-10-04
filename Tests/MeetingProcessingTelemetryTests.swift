@@ -3,6 +3,37 @@ import Foundation
 func testMeetingProcessingTelemetry() {
     let machineClass = ["mac_chip": "m2_pro", "memory_gb_bucket": "16gb"]
 
+    runSuite("A saved meeting keeps its task identity without borrowing another recording") {
+        let savedTask = UUID()
+        let recordedSession = UUID()
+        let context = [
+            "session_id": recordedSession.uuidString,
+            "correlation_id": recordedSession.uuidString,
+            "meeting_title": "Private meeting",
+        ]
+        let matching = MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+            savedTaskID: savedTask, queuedTaskID: savedTask, captureDiagnostics: context
+        )
+        assertEqual(matching, ["save_id": savedTask.uuidString, "session_id": recordedSession.uuidString,
+                               "correlation_id": recordedSession.uuidString],
+                    "only scoped random identifiers leave the captured diagnostics")
+        let unrelated = MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+            savedTaskID: savedTask, queuedTaskID: UUID(), captureDiagnostics: context
+        )
+        assertEqual(unrelated, ["save_id": savedTask.uuidString], "another task's capture context cannot be attached")
+        let retried = MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+            savedTaskID: savedTask, queuedTaskID: nil, captureDiagnostics: nil
+        )
+        assertEqual(retried, unrelated, "a retry preserves save identity even without original recording context")
+        assertEqual(MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+            savedTaskID: nil, queuedTaskID: savedTask, captureDiagnostics: context
+        ), [:], "missing saved ownership cannot invent correlation from the running task")
+        assertEqual(MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+            savedTaskID: savedTask, queuedTaskID: savedTask,
+            captureDiagnostics: ["session_id": "private text", "correlation_id": "private text"]
+        ), ["save_id": savedTask.uuidString], "malformed correlation is never forwarded")
+    }
+
     runSuite("Meeting processing timings become rounded PostHog properties") {
         let properties = MeetingProcessingTelemetry.properties(
             for: MeetingProcessingTelemetry.Timings(
