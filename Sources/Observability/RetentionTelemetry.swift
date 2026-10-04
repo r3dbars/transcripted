@@ -42,8 +42,11 @@ enum RetentionTelemetry {
     static func clearObservation(userDefaults: UserDefaults) {
         lock.lock()
         defer { lock.unlock() }
-        userDefaults.removeObject(forKey: onboardingStartedKey)
-        userDefaults.removeObject(forKey: onboardingCompletedKey)
+        // Defaults notifications can queue another disabled-state clear.
+        // Do not mutate absent keys, or the observer can keep scheduling itself.
+        for key in [onboardingStartedKey, onboardingCompletedKey] where userDefaults.object(forKey: key) != nil {
+            userDefaults.removeObject(forKey: key)
+        }
         // Keep already-observed milestone flags: toggling diagnostics must not
         // manufacture a new first value. Never backfill activity during opt-out.
     }

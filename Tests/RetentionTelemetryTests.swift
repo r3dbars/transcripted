@@ -53,6 +53,18 @@ func testRetentionTelemetry() {
         assertNil(RetentionTelemetry.firstValueProperties(artifactKind: .dictation, now: start, userDefaults: defaults, isAutomatedLaunch: false), "toggle does not regenerate a first value")
     }
 
+    runSuite("Repeated opt-out clearing stops mutating preferences once the baselines are gone") {
+        let name = "RetentionClearingTests-\(UUID().uuidString)"
+        let recordingDefaults = RetentionRecordingDefaults(suiteName: name)!
+        defer { recordingDefaults.removePersistentDomain(forName: name) }
+        recordingDefaults.set(start, forKey: RetentionTelemetry.onboardingStartedKey)
+        recordingDefaults.set(start, forKey: RetentionTelemetry.onboardingCompletedKey)
+        RetentionTelemetry.clearObservation(userDefaults: recordingDefaults)
+        assertEqual(recordingDefaults.removals, 2, "both observed baselines are removed")
+        RetentionTelemetry.clearObservation(userDefaults: recordingDefaults)
+        assertEqual(recordingDefaults.removals, 2, "observer reentry must not produce more defaults notifications")
+    }
+
     runSuite("Duplicate capture completion cannot count as the second saved artifact") {
         reset()
         let capture = UUID().uuidString
@@ -74,5 +86,13 @@ func testRetentionTelemetry() {
             assertEqual(safe, ["save_id": id], "only random correlation leaves the sanitizer")
             assertNil(AnalyticsPayloadSanitizer.sanitizeProperties(["save_id": "private-contents"], allowedKeys: policy.allowedProperties)["save_id"], "free-form save IDs are dropped")
         }
+    }
+}
+
+private final class RetentionRecordingDefaults: UserDefaults {
+    var removals = 0
+    override func removeObject(forKey defaultName: String) {
+        removals += 1
+        super.removeObject(forKey: defaultName)
     }
 }
