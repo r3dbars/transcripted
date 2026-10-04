@@ -24,8 +24,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var detectedAgents: Set<AgentMCPAgent> = []
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
-    // Raw error text for the connect-row failure, kept out of the user-visible
-    // message and offered behind "Copy Details".
+    // Raw connect-row error text, kept out of the message and behind "Copy Details".
     @State private var rowFailureDetails: [AgentMCPAgent: String] = [:]
     @State private var configRepairNotices: [AgentMCPAgent: String] = [:]
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
@@ -47,6 +46,7 @@ struct AgentConnectionSettingsPage: View {
             agentListSection
             advancedSection
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.agent")
         .onAppear(perform: refreshAgentStates)
     }

@@ -28,6 +28,7 @@ struct AboutSettingsPage: View {
             versionGroup
             supportGroup
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.about")
     }
 
@@ -81,6 +82,7 @@ struct AboutSettingsPage: View {
                     .fixedSize()
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.about")
         }
     }

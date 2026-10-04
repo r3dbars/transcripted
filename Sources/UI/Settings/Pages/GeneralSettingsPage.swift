@@ -95,6 +95,7 @@ struct GeneralSettingsPage<
 
                 shortcutEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.dictation")
 
             SettingsCardLabel(text: "Microphone")
@@ -102,6 +103,7 @@ struct GeneralSettingsPage<
             SettingsCard {
                 bluetoothMicEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.bluetooth-microphone")
 
             SettingsCardLabel(text: "Send after dictation")
@@ -109,6 +111,7 @@ struct GeneralSettingsPage<
             SettingsCard {
                 autoSendEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.send-after-dictation")
 
             SettingsCardLabel(text: "Meetings")
@@ -129,6 +132,7 @@ struct GeneralSettingsPage<
 
                 micProcessingEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.meetings")
 
             SettingsCardLabel(text: "Speakers")
@@ -136,6 +140,7 @@ struct GeneralSettingsPage<
             SettingsCard {
                 speakerEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.speakers")
 
             SettingsCardLabel(text: "Transcription")
@@ -173,6 +178,7 @@ struct GeneralSettingsPage<
                     onImportAudioFile()
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.transcription")
             .id("transcripted.settings.section.transcription")
 
@@ -229,6 +235,7 @@ struct GeneralSettingsPage<
                     showsDivider: false
                 )
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.app")
 
             SettingsCardLabel(text: "Permissions")
@@ -236,6 +243,7 @@ struct GeneralSettingsPage<
             SettingsCard {
                 permissionsEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.permissions")
             .id("transcripted.settings.section.permissions")
 
@@ -244,8 +252,10 @@ struct GeneralSettingsPage<
             SettingsCard {
                 reportingEditor()
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.privacy")
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.general")
     }
 }
