@@ -56,6 +56,30 @@ func testWritingSetupPresentation() {
         assertEqual(Copy.IntroPage2.setUp, "Set up writing")
     }
 
+    runSuite("Delete model warns that it turns Autocomplete off and the model downloads again") {
+        let bytes: Int64 = 3_430_000_000
+        let size = WritingStorageUsage.formatted(bytes)
+        let on = Copy.deleteModelConfirmMessage(autocompleteOn: true, modelBytes: bytes)
+        assertTrue(on.contains(size), "says how much it frees: \(on)")
+        assertTrue(on.contains("turns Autocomplete off"), "warns before Autocomplete stops: \(on)")
+        assertTrue(on.contains("downloads the model again"), "warns about the re-download: \(on)")
+        assertTrue(on.contains("saved writing and learning data stay"), "says writing is kept: \(on)")
+
+        let off = Copy.deleteModelConfirmMessage(autocompleteOn: false, modelBytes: bytes)
+        assertTrue(off.contains(size), "says how much it frees: \(off)")
+        assertFalse(off.contains("turns Autocomplete off"), "Autocomplete is already off: \(off)")
+        assertTrue(off.contains("downloads the model again"), "warns about the re-download: \(off)")
+
+        let unknown = Copy.deleteModelConfirmMessage(autocompleteOn: true, modelBytes: 0)
+        assertFalse(unknown.contains("frees"), "no size claim before the size is known: \(unknown)")
+        assertTrue(unknown.contains("turns Autocomplete off"), "still warns: \(unknown)")
+    }
+
+    runSuite("Delete all writing says the model stays") {
+        assertTrue(Copy.deleteConfirmMessage.contains("model stays"))
+        assertTrue(Copy.deleteConfirmMessage.contains(Copy.deleteModel))
+    }
+
     runSuite("Writing copy says what you wrote, never what you typed") {
         let allCopy = [
             Copy.IntroPage1.headline, Copy.IntroPage1.body,

@@ -449,8 +449,23 @@ enum WritingSetupPresentation {
     static let resume = "Resume"
     static let deleteAll = "Delete all writing"
     static let deleteConfirmTitle = "Delete all writing?"
-    static let deleteConfirmMessage = "This deletes your saved writing files and what autocomplete learned from them, and turns off Save my writing. It can't be undone."
+    static let deleteConfirmMessage = "This deletes your saved writing files and what autocomplete learned from them, and turns off Save my writing. It can't be undone. The autocomplete model stays; Delete model removes it."
     static let deleteFailed = "Some writing couldn't be deleted. Try again."
+    static let deleteModel = "Delete model"
+    static let deleteModelConfirmTitle = "Delete the writing model?"
+    static let deleteModelFailed = "Some model files couldn't be deleted. Try again."
+
+    /// Delete model's confirmation. Autocomplete can't run without the
+    /// model, so when it's on the delete turns it off, and the user hears
+    /// that before anything goes.
+    static func deleteModelConfirmMessage(autocompleteOn: Bool, modelBytes: Int64) -> String {
+        let frees = modelBytes > 0 ? "This frees \(WritingStorageUsage.formatted(modelBytes)). " : ""
+        let keeps = "Your saved writing and learning data stay."
+        if autocompleteOn {
+            return "\(frees)Autocomplete needs the model, so this turns Autocomplete off. Turning it back on downloads the model again. \(keeps)"
+        }
+        return "\(frees)\(keeps) Turning on Autocomplete later downloads the model again."
+    }
     static let allowScreenRecording = "Allow Screen Recording"
     static let openScreenRecordingSettings = "Open Screen Recording settings"
     static let screenRecordingReopenLine = "After you allow it, macOS may ask to reopen Transcripted."

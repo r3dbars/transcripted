@@ -130,6 +130,8 @@ final class WritingController {
     }
 
     var runtimeState: LlamaRuntimeSnapshot? { runtime?.llamaServerHost.snapshot }
+    /// The current model's store, while Writing runs.
+    var modelManager: ModelManager? { runtime?.models.manager }
 
     var screenRecordingGranted: Bool { ScreenRecordingPermission.isGranted() }
 
@@ -223,7 +225,7 @@ final class WritingController {
         let dayFiles: WritingDayFileWriter
     }
 
-    private let modelRoot: URL
+    let modelRoot: URL
     /// `<capture-library>/writing`, for the day files and Delete all writing.
     private let writingDirectory: @Sendable () -> URL
     private let keyboardInstaller = GhostKeyboardInstallerHost()
@@ -236,7 +238,7 @@ final class WritingController {
     /// The model the runtime is built for. Differs from `selectedModel` only
     /// while a switch is between persisting and rebuilding.
     private var activeModel: TildeModelChoice?
-    private var log: (String) -> Void = { _ in }
+    private(set) var log: (String) -> Void = { _ in }
     private var frontmostAppObserver: NSObjectProtocol?
     // Backstop for `frontmostAppObserver`, which misses same-app window
     // changes; see `WritingFrontWindowPoller`.
@@ -906,6 +908,21 @@ final class WritingController {
         await Task.detached(priority: .userInitiated) { host.stop() }.value
     }
 
+    /// Delete model, Autocomplete already saved off: ends model work and
+    /// waits for the helper to exit. `applyRunState()` settles the rest.
+    func stopModelWork() async {
+        let previous = modelTask
+        modelTask?.cancel()
+        modelTask = nil
+        modelTaskID = nil
+        wakeTask?.cancel()
+        wakeTask = nil
+        autocompleteRuntimeActive = false
+        runtime?.models.manager.cancel()
+        await previous?.value
+        await stopHelper()
+    }
+
     fileprivate func startHelper() {
         guard isRunning, autocompleteRuntimeActive else { return }
         runtime?.llamaServerHost.start()
@@ -1180,23 +1197,6 @@ final class WritingController {
         case let .retrying(reason): "retrying (\(reason))"
         case let .failed(reason): "failed (\(reason))"
         }
-    }
-}
-
-/// The model store the helper launches from. A model switch swaps it while
-/// the one `LlamaServerProcessHost` stays, so the host's model provider
-/// reads through here.
-private final class WritingModelManagerBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var current: ModelManager
-
-    init(_ manager: ModelManager) {
-        current = manager
-    }
-
-    var manager: ModelManager {
-        get { lock.withLock { current } }
-        set { lock.withLock { current = newValue } }
     }
 }
 
