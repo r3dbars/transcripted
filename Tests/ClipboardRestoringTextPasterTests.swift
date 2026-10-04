@@ -860,7 +860,8 @@ func testClipboardRestoringTextPaster() async {
                     postCount += 1
                     observedTextAtPost = pasteboard.string(forType: .string)
                     return true
-                }
+                },
+                confirmationSource: { NeutralFocusConfirmationSource() }
             )
 
             assertEqual(
@@ -892,6 +893,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0.01
             )
 
@@ -923,6 +925,7 @@ func testClipboardRestoringTextPaster() async {
                     pasteboard.clearContents()
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
 
@@ -960,6 +963,7 @@ func testClipboardRestoringTextPaster() async {
                     pasteboard.setString("synthetic user copy", forType: .string)
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
 
@@ -1001,6 +1005,7 @@ func testClipboardRestoringTextPaster() async {
                     pasteboard.writePasteboardItems([richItem])
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
 
@@ -1043,6 +1048,7 @@ func testClipboardRestoringTextPaster() async {
                     }
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
 
@@ -1083,6 +1089,7 @@ func testClipboardRestoringTextPaster() async {
                     }
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
 
@@ -1128,6 +1135,7 @@ func testClipboardRestoringTextPaster() async {
                     pasteboard.writeObjects([userItem])
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0.01
             )
 
@@ -1167,7 +1175,8 @@ func testClipboardRestoringTextPaster() async {
                     postCount += 1
                     observedTextAtPost = pasteboard.string(forType: .string)
                     return true
-                }
+                },
+                confirmationSource: { NeutralFocusConfirmationSource() }
             )
 
             assertEqual(
@@ -1824,6 +1833,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.2
@@ -1968,6 +1978,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: TranscriptedConstants.clipboardRestoreFallbackDelay
             )
@@ -2028,6 +2039,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 140_000_000
             )
@@ -2139,6 +2151,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 300_000_000
             )
@@ -2208,6 +2221,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 fallbackRestoreDelay: fallbackRestoreDelay
             )
         }
@@ -2579,6 +2593,7 @@ func testClipboardRestoringTextPaster() async {
                     marked = pasteboard.types?.contains(ClipboardRestoringTextPaster.transientPasteboardType) == true
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
             let markedAfter = pasteboard.types?.contains(ClipboardRestoringTextPaster.transientPasteboardType) == true
@@ -2607,6 +2622,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
         }
@@ -2686,6 +2702,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
         }
@@ -2730,6 +2747,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
         }
@@ -2849,6 +2867,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
             pasteboard.clearContents()
@@ -2936,6 +2955,7 @@ func testClipboardRestoringTextPaster() async {
                     pasteboard.writeObjects([userItem])
                     return true
                 },
+                confirmationSource: { NeutralFocusConfirmationSource() },
                 pasteConfirmationWait: 0
             )
             _ = paster.paste(
@@ -2962,7 +2982,9 @@ func testClipboardRestoringTextPaster() async {
 
 @MainActor
 /// A focus that can't observe a paste and makes no claim about taking text:
-/// what a Mac with nothing focused (a CI runner) looks like.
+/// what a Mac with nothing focused (a CI runner) looks like. Suites that reach
+/// the confirmation wait pass this; without it `paste` reads the real focused
+/// element, so whatever window is in front on a busy dev Mac decides the outcome.
 private final class NeutralFocusConfirmationSource: ClipboardPasteConfirmationSource {
     var canObservePaste: Bool { false }
 
