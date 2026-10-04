@@ -56,7 +56,8 @@ library moves:
   ported; accepted text is saved only by Save my writing), and the encrypted
   `Personal History/`
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
-  excluded from backup
+  excluded from backup. The Writing tab's **Delete model** empties this folder
+  (never Delete all writing); it refuses the folder if it's a symlink
 - diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`,
   rolled to `writing-diagnostics.log.1` at 4 MB (one old generation kept)
 

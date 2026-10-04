@@ -195,8 +195,11 @@ Shaped like the Dictations page:
 - Today's saved writing, newest first, in the same row style as dictations.
 - "N suggestions accepted today".
 - Actions: **Edit setup**, **Pause for 1 hour**, **Delete all writing**, a
-  storage meter, and the model switch. Pause stops suggestions, saving and
-  screen reading for the hour (Tilde's pause only stopped suggestions).
+  storage meter with **Delete model**, and the model switch. Pause stops
+  suggestions, saving and screen reading for the hour (Tilde's pause only
+  stopped suggestions). Delete all writing keeps the model; Delete model
+  removes every downloaded model and turns Autocomplete off first if it's
+  on, saying so and that turning it back on downloads the model again.
 - The intro has a quiet **Not now** that leaves Writing off and clears the
   sidebar's `New` badge.
 
