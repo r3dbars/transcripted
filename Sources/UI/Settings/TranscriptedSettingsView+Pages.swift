@@ -600,6 +600,7 @@ extension TranscriptedSettingsView {
             captureLibraryChoicePromptBinding: captureLibraryChoicePromptBinding,
             pendingCaptureLibraryChoice: pendingCaptureLibraryChoice,
             audioRetentionWindow: audioRetentionWindow,
+            dictationAudioKeepWindow: dictationAudioKeepWindow,
             modelCacheSnapshot: modelCacheSnapshot,
             modelCacheLoading: modelCacheLoading,
             modelCacheCleanupInProgress: modelCacheCleanupInProgress,
@@ -636,6 +637,9 @@ extension TranscriptedSettingsView {
             },
             onApplyAudioRetentionWindow: { window in
                 applyAudioRetentionWindow(window)
+            },
+            onApplyDictationAudioKeepWindow: { window in
+                applyDictationAudioKeepWindow(window)
             },
             failureDetailsButton: { details in
                 settingsFailureDetailsButton(details)

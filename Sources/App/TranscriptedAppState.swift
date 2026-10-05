@@ -461,6 +461,9 @@ class TranscriptedAppState: ObservableObject {
         guard audioStorageMaintenanceTask == nil else { return }
 
         audioStorageMaintenanceTask = Task.detached(priority: .utility) {
+            // Kept dictation audio past its window (Settings → Storage). Launch
+            // harnesses run under a temp HOME, so this never reaches a real library.
+            DictationAudioArchive.prune(window: AudioStoragePreferences.dictationAudioKeepWindow())
             let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder
             )
