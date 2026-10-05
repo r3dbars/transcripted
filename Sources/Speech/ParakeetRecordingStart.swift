@@ -635,6 +635,7 @@ extension ParakeetEngine {
                 )
             }
             lastAudioStartFailureReportAt = nil
+            lastWorkCircuitOpenReportAt = nil
             break
         }
 
