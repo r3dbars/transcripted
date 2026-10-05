@@ -31,6 +31,7 @@
 
 - The physical dictation trigger routes into `DictationSessionController`
 - Dictation has separate hands-free toggle and push-to-talk bindings; the physical shortcut action identifies the mode passed to `DictationSessionController`
+- "Tap to keep listening" (`HotkeyPreferences.pushToTalkTapKeepsListening`, on by default) makes the Push to Talk key do both, like Handy's Auto mode: hold it and the release stops and pastes; tap it (under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier pressed while held) and the take flips to hands-free, so the next press stops it and that press's release is swallowed. The detector tells a tap from a hold on the tap thread (`.tapRelease`), not on the main actor, so a busy main thread can't stretch a tap into a hold. Off, Push to Talk behaves exactly as before
 - `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Fn for push-to-talk, right Option for hands-free dictation, Option-M for meetings, Option-Shift-V for paste-last-dictation, and supporting modifier-only or keyed chords
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
@@ -59,6 +60,7 @@ Manual checks:
 - hands-free dictation hotkey starts and stops dictation
 - right Option then M (or typing é with right Option+E) does not leave a dictation running
 - push-to-talk starts dictation on press and stops/pastes on release
+- with Tap to keep listening on, a quick Fn tap keeps listening and the next Fn press pastes; Fn+arrow never latches
 - paste-last-dictation uses its configured shortcut without depending on dictation shortcuts being enabled
 - meeting hotkey toggles meeting capture
 - the configured physical dictation trigger starts/stops dictation in the expected shortcut mode

@@ -30,6 +30,28 @@ struct DelayedModifierShortcutPress: Equatable {
     let action: PhysicalShortcutAction
 }
 
+/// Times a held Push to Talk key so its release can say tap or hold
+/// (`DictationHoldKeyTapPolicy`). Fed from the detector's tap thread, so a
+/// busy main actor can't stretch a tap into a hold or shrink a hold to a tap.
+struct PushToTalkTapTracker {
+    private var pressUptime: TimeInterval = 0
+    private var otherKeyPressed = false
+
+    mutating func pressed(at uptime: TimeInterval) {
+        pressUptime = uptime
+        otherKeyPressed = false
+    }
+
+    /// Another key or modifier went down while it was held (Fn+arrow).
+    mutating func otherKeyWentDown() {
+        otherKeyPressed = true
+    }
+
+    func isTap(releasedAt uptime: TimeInterval) -> Bool {
+        DictationHoldKeyTapPolicy.isTap(heldSeconds: uptime - pressUptime, otherKeyPressed: otherKeyPressed)
+    }
+}
+
 /// Follows a hands-free modifier that fired on press while other shortcuts
 /// share it (Right Option vs Option+M) until it's let go, so a key that goes
 /// down in between turns that press into a combo and its dictation is dropped.

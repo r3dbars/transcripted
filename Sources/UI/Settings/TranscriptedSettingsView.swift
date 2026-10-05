@@ -24,6 +24,7 @@ struct TranscriptedSettingsView: View {
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
     @State var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+    @State var pushToTalkTapKeepsListening = HotkeyPreferences.pushToTalkTapKeepsListening()
     @State var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State var launchAtLogin = LaunchAtLoginController.currentState
     @State var launchAtLoginReadGeneration = 0

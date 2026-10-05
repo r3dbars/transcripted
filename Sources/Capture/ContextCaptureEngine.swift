@@ -25,14 +25,14 @@ private func shouldAcceptHotkeyAction(
 }
 
 @MainActor
-private func dictationSessionStateName(_ session: DictationSessionController?) -> String {
+func dictationSessionStateName(_ session: DictationSessionController?) -> String {
     guard let session else { return "idle" }
     if session.isDictating { return "dictating" }
     return "idle"
 }
 
 @MainActor
-private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
+func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
     guard let state else { return "unknown" }
     switch state {
     case .idle: return "idle"
@@ -51,6 +51,9 @@ private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) 
 private enum PhysicalShortcutPhase {
     case press
     case release
+    /// A Push to Talk release after a quick press with no other key in
+    /// between (`DictationHoldKeyTapPolicy`).
+    case tapRelease
     /// Another key went down while a hands-free modifier that fired on press
     /// was still held, so that press was the start of a combo.
     case comboInterrupted
@@ -74,7 +77,13 @@ private final class PhysicalShortcutDetector {
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
     private var tapThread: Thread?
-    private var activePushToTalkKeyCode: UInt32?
+    private var activePushToTalkKeyCode: UInt32? {
+        didSet {
+            guard activePushToTalkKeyCode != nil, activePushToTalkKeyCode != oldValue else { return }
+            pushToTalkTap.pressed(at: ProcessInfo.processInfo.systemUptime)
+        }
+    }
+    private var pushToTalkTap = PushToTalkTapTracker()
     private var consumedKeyCodes: Set<UInt32> = []
     private var pendingModifierShortcut: PendingModifierShortcut?
     private var pendingModifierGeneration: UInt64 = 0
@@ -249,6 +258,9 @@ private final class PhysicalShortcutDetector {
             if handsFreeComboTracker.keyDown() {
                 onShortcut?(.dictationHandsFree, .comboInterrupted)
             }
+            if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
+                pushToTalkTap.otherKeyWentDown()
+            }
             lastTypedKeyDownUptime = ProcessInfo.processInfo.systemUptime
             if isRepeat, consumedKeyCodes.contains(keyCode) {
                 return nil
@@ -284,7 +296,7 @@ private final class PhysicalShortcutDetector {
             if activePushToTalkKeyCode == keyCode {
                 activePushToTalkKeyCode = nil
                 consumedKeyCodes.remove(keyCode)
-                onShortcut?(.dictationPushToTalk, .release)
+                onShortcut?(.dictationPushToTalk, pushToTalkReleasePhase())
                 return nil
             }
 
@@ -295,6 +307,9 @@ private final class PhysicalShortcutDetector {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
+            if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
+                pushToTalkTap.otherKeyWentDown()
+            }
             if handsFreeComboTracker.flagsChanged(
                 keyCode: keyCode,
                 modifiers: modifiers,
@@ -316,7 +331,7 @@ private final class PhysicalShortcutDetector {
             if activePushToTalkKeyCode == keyCode,
                matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
                 activePushToTalkKeyCode = nil
-                onShortcut?(.dictationPushToTalk, .release)
+                onShortcut?(.dictationPushToTalk, pushToTalkReleasePhase())
                 return nil
             }
 
@@ -417,6 +432,9 @@ private final class PhysicalShortcutDetector {
 
         let workItem: DispatchWorkItem?
         if action == .dictationPushToTalk {
+            // Read on this thread now: the work item runs on main, which can
+            // be late, and a late stamp would make a hold look like a tap.
+            let pressUptime = ProcessInfo.processInfo.systemUptime
             let delayedWorkItem = DispatchWorkItem { [weak self] in
                 guard let self else { return }
 
@@ -433,6 +451,7 @@ private final class PhysicalShortcutDetector {
                 }
                 guard shouldActivate else { return }
                 self.activePushToTalkKeyCode = keyCode
+                self.pushToTalkTap.pressed(at: pressUptime)
                 // Keep press delivery inside the same lock-protected transition as
                 // ownership. Otherwise a release can enqueue before this press.
                 self.onShortcut?(action, .press)
@@ -452,6 +471,10 @@ private final class PhysicalShortcutDetector {
     private func cancelPendingModifierShortcut() {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
+    }
+
+    private func pushToTalkReleasePhase() -> PhysicalShortcutPhase {
+        pushToTalkTap.isTap(releasedAt: ProcessInfo.processInfo.systemUptime) ? .tapRelease : .release
     }
 
     private func reconcileActivePushToTalkAfterTapDisabled() {
@@ -496,6 +519,9 @@ class ContextCaptureEngine: ObservableObject {
     /// The dictation the last hands-free press started, so a combo that
     /// follows while the key is held can drop it.
     private var handsFreePressStartedSessionID: UUID?
+    /// The held Push to Talk press stopped a hands-free take, so its release
+    /// has nothing left to do.
+    var pushToTalkPressStoppedTake = false
     private let physicalShortcutDetector = PhysicalShortcutDetector()
     private var physicalTriggerError: String?
 
@@ -526,7 +552,7 @@ class ContextCaptureEngine: ObservableObject {
     /// shortcut callbacks hop from the CGEventTap thread through a queued
     /// MainActor Task, so a stray press can land after `unregisterHotkey()`
     /// (e.g. during wake recovery) — this flag makes that late arrival a no-op.
-    private var isHotkeyRoutingActive = false
+    var isHotkeyRoutingActive = false
 
     /// Closure invoked when the meeting physical trigger fires. Wired by TranscriptedAppDelegate
     /// to `MeetingSessionController.toggleMeeting()` (or equivalent). Nil when
@@ -688,7 +714,9 @@ class ContextCaptureEngine: ObservableObject {
         case (.dictationPushToTalk, .press):
             handlePhysicalDictationPushToTalkPress()
         case (.dictationPushToTalk, .release):
-            handlePhysicalDictationPushToTalkRelease()
+            handlePhysicalDictationPushToTalkRelease(wasTap: false)
+        case (.dictationPushToTalk, .tapRelease):
+            handlePhysicalDictationPushToTalkRelease(wasTap: true)
         case (.dictationHandsFree, .press):
             handlePhysicalDictationHandsFreePress()
         case (.dictationHandsFree, .comboInterrupted):
@@ -698,6 +726,8 @@ class ContextCaptureEngine: ObservableObject {
         case (.pasteLastDictation, .press):
             handlePhysicalPasteLastDictationPress()
         case (.dictationHandsFree, .release), (.meeting, .release), (.pasteLastDictation, .release):
+            break
+        case (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease), (.pasteLastDictation, .tapRelease):
             break
         case (.dictationPushToTalk, .comboInterrupted), (.meeting, .comboInterrupted), (.pasteLastDictation, .comboInterrupted):
             break
@@ -752,48 +782,6 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    private func handlePhysicalDictationPushToTalkPress() {
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        guard let session = sessionController else { return }
-        DiagnosticsTrail.record(
-            logger: session.appState?.logger,
-            engine: "capture",
-            event: "dictation_push_to_talk_pressed",
-            message: "Dictation push-to-talk trigger pressed",
-            context: [
-                "trigger": "physical_key",
-                "source_app_name": frontApp?.localizedName ?? "",
-                "source_app_bundle_id": frontApp?.bundleIdentifier ?? "",
-                "session_state": dictationSessionStateName(session),
-                "overlay_state": overlayStateName(session.overlayController?.state)
-            ]
-        )
-
-        // A press while the last take is still transcribing starts the next
-        // one when it finishes, instead of being dropped.
-        dictationHotkeyRouter(session: session, sourceApp: frontApp).pushToTalkPressed()
-    }
-
-    private func handlePhysicalDictationPushToTalkRelease() {
-        guard let session = sessionController else { return }
-
-        DiagnosticsTrail.record(
-            logger: session.appState?.logger,
-            engine: "capture",
-            event: "dictation_push_to_talk_released",
-            message: "Dictation push-to-talk trigger released",
-            context: [
-                "trigger": "physical_key",
-                "session_state": dictationSessionStateName(session),
-                "overlay_state": overlayStateName(session.overlayController?.state)
-            ]
-        )
-
-        // Let go before the remembered press could start: nothing was
-        // recorded, so say the last one is still finishing.
-        dictationHotkeyRouter(session: session, sourceApp: nil).pushToTalkReleased()
-    }
-
     private func handlePhysicalMeetingPress() {
         guard shouldAcceptHotkeyAction(.meeting) else {
             EventReporter.shared.capture(
@@ -840,49 +828,5 @@ class ContextCaptureEngine: ObservableObject {
         }
         physicalShortcutDetector.remove()
         isHotkeyRoutingActive = false
-    }
-
-    private func routeHandsFreeToggle(sourceApp: NSRunningApplication?) {
-        let trigger = DictationTrigger.physicalKey
-        guard isHotkeyRoutingActive, let session = sessionController else { return }
-        DiagnosticsTrail.record(
-            logger: session.appState?.logger,
-            engine: "capture",
-            event: "dictation_toggle_requested",
-            message: "Dictation toggle requested",
-            context: [
-                "trigger": trigger.rawValue,
-                "source_app_name": sourceApp?.localizedName ?? "",
-                "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
-                "session_state": dictationSessionStateName(session),
-                "overlay_state": overlayStateName(session.overlayController?.state)
-            ]
-        )
-        dictationHotkeyRouter(session: session, sourceApp: sourceApp).handsFreePressed()
-    }
-
-    /// The session commands behind the physical dictation keys. The routing
-    /// itself (and which shortcut each command names) is `DictationHotkeyRouter`.
-    private func dictationHotkeyRouter(
-        session: DictationSessionController,
-        sourceApp: NSRunningApplication?
-    ) -> DictationHotkeyRouter {
-        DictationHotkeyRouter(
-            isDictating: { session.isDictating },
-            rememberStartPressIfFinishing: { trigger, shortcutMode in
-                session.rememberStartPressIfFinishing(
-                    sourceApp: sourceApp,
-                    trigger: trigger,
-                    shortcutMode: shortcutMode
-                )
-            },
-            dropQueuedPushToTalkStart: { session.dropQueuedPushToTalkStart() },
-            start: { trigger, shortcutMode in
-                session.startDictation(sourceApp: sourceApp, trigger: trigger, shortcutMode: shortcutMode)
-            },
-            stop: { trigger, shortcutMode in
-                session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)
-            }
-        )
     }
 }

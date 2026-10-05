@@ -17,6 +17,20 @@ enum DictationTrigger: String {
     case unknown = "unknown"
 }
 
+/// When a Push to Talk press counts as a tap rather than a hold. With
+/// "Tap to keep listening" on, a tap keeps the take going hands-free, so the
+/// one key does both (Handy calls this Auto). Under the threshold is well
+/// above a real tap (tens of milliseconds, see #1743) and below a deliberate
+/// hold. A key typed while it was held makes it a chord (Fn+arrow), never a
+/// tap.
+enum DictationHoldKeyTapPolicy {
+    static let tapThresholdSeconds: TimeInterval = 0.3
+
+    static func isTap(heldSeconds: TimeInterval, otherKeyPressed: Bool) -> Bool {
+        !otherKeyPressed && heldSeconds >= 0 && heldSeconds < tapThresholdSeconds
+    }
+}
+
 /// Turns the physical dictation keys into dictation session commands.
 ///
 /// Every command carries the key action that caused it, so start and stop
@@ -31,14 +45,48 @@ struct DictationHotkeyRouter {
     var dropQueuedPushToTalkStart: @MainActor () -> Bool
     var start: @MainActor (DictationTrigger, DictationShortcutMode) -> Void
     var stop: @MainActor (DictationTrigger, DictationShortcutMode) -> Void
+    /// "Tap to keep listening" is on for the Push to Talk key.
+    var tapKeepsListening: @MainActor () -> Bool = { false }
+    /// A hands-free take is recording (not finishing), so a Push to Talk
+    /// press can stop it.
+    var isHandsFreeTakeListening: @MainActor () -> Bool = { false }
+    var stopHandsFreeTake: @MainActor () -> Void = {}
+    /// Takes back a start a tap kept waiting on the last take. False when
+    /// there's none.
+    var dropQueuedTapKeptStart: @MainActor () -> Bool = { false }
+    /// Turns the Push to Talk take (running, or waiting on the last one) into
+    /// a hands-free one. False when there's none to keep.
+    var keepPushToTalkTakeListening: @MainActor () -> Bool = { false }
 
-    func pushToTalkPressed() {
-        if rememberStartPressIfFinishing(.physicalKey, .pushToTalk) { return }
-        guard !isDictating() else { return }
-        start(.physicalKey, .pushToTalk)
+    /// What a Push to Talk press did, so its release can follow suit.
+    enum PushToTalkPress: Equatable {
+        case startedOrIgnored
+        /// The press stopped a hands-free take (or took back its waiting
+        /// start); its release does nothing.
+        case stoppedHandsFreeTake
     }
 
-    func pushToTalkReleased() {
+    @discardableResult
+    func pushToTalkPressed() -> PushToTalkPress {
+        // A tap kept the last take going: this press ends it, like the
+        // hands-free key would. Same for a kept start still waiting.
+        if tapKeepsListening() {
+            if isHandsFreeTakeListening() {
+                stopHandsFreeTake()
+                return .stoppedHandsFreeTake
+            }
+            if dropQueuedTapKeptStart() { return .stoppedHandsFreeTake }
+        }
+        if rememberStartPressIfFinishing(.physicalKey, .pushToTalk) { return .startedOrIgnored }
+        guard !isDictating() else { return .startedOrIgnored }
+        start(.physicalKey, .pushToTalk)
+        return .startedOrIgnored
+    }
+
+    /// `wasTap`: let go quickly with no other key in between
+    /// (`DictationHoldKeyTapPolicy`).
+    func pushToTalkReleased(wasTap: Bool = false) {
+        if wasTap, tapKeepsListening(), keepPushToTalkTakeListening() { return }
         if dropQueuedPushToTalkStart() { return }
         guard isDictating() else { return }
         stop(.physicalKey, .pushToTalk)

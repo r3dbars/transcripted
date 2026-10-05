@@ -1,6 +1,7 @@
 // DictationQueuedStartPolicyTests.swift
 // A dictation press while the last take is still finishing waits for it
-// (up to a short limit) instead of being refused.
+// (up to a short limit) instead of being refused. Also how the hotkey router
+// turns Push to Talk taps and holds into session commands.
 
 import Foundation
 
@@ -64,6 +65,77 @@ func testDictationQueuedStartPolicy() async {
         session.isDictating = true
         session.router.pushToTalkReleased()
         assertEqual(session.events, ["drop queued push_to_talk"], "the release drops the waiting start and doesn't stop the take still finishing")
+    }
+
+    runSuite("A quick press with no other key is a tap; a hold or a chord isn't") {
+        assertTrue(DictationHoldKeyTapPolicy.isTap(heldSeconds: 0.08, otherKeyPressed: false), "a real tap")
+        assertFalse(DictationHoldKeyTapPolicy.isTap(heldSeconds: 0.08, otherKeyPressed: true), "Fn+arrow is a chord, not a tap")
+        assertFalse(DictationHoldKeyTapPolicy.isTap(heldSeconds: 1.2, otherKeyPressed: false), "a deliberate hold")
+        assertFalse(
+            DictationHoldKeyTapPolicy.isTap(heldSeconds: DictationHoldKeyTapPolicy.tapThresholdSeconds, otherKeyPressed: false),
+            "at the threshold it's a hold"
+        )
+    }
+
+    runSuite("The key tracker times each press on its own") {
+        var tracker = PushToTalkTapTracker()
+        tracker.pressed(at: 100)
+        assertTrue(tracker.isTap(releasedAt: 100.1), "a quick press and release")
+        tracker.otherKeyWentDown()
+        assertFalse(tracker.isTap(releasedAt: 100.1), "an arrow went down while Fn was held")
+        tracker.pressed(at: 200)
+        assertTrue(tracker.isTap(releasedAt: 200.05), "the next press starts clean")
+        assertFalse(tracker.isTap(releasedAt: 201), "a held press")
+    }
+
+    runSuite("Tapping Push to Talk keeps listening; tapping again pastes") {
+        let session = HotkeySessionFake()
+        session.tapKeepsListening = true
+        session.router.pushToTalkPressed()
+        session.isDictating = true
+        session.router.pushToTalkReleased(wasTap: true)
+        assertEqual(
+            session.events,
+            ["start physical_key push_to_talk", "keep listening"],
+            "a tap starts a take and keeps it going instead of stopping it"
+        )
+        assertEqual(session.router.pushToTalkPressed(), .stoppedHandsFreeTake, "the next press ends the kept take")
+        assertEqual(session.events.last, "stop physical_key hands_free", "it stops like the hands-free key does")
+    }
+
+    runSuite("Holding Push to Talk still stops on release") {
+        let session = HotkeySessionFake()
+        session.tapKeepsListening = true
+        session.isDictating = true
+        session.router.pushToTalkReleased(wasTap: false)
+        assertEqual(session.events, ["stop physical_key push_to_talk"], "a hold stops and pastes on release")
+    }
+
+    runSuite("With tap to keep listening off, a tap stops like before") {
+        let session = HotkeySessionFake()
+        session.isDictating = true
+        session.router.pushToTalkReleased(wasTap: true)
+        assertEqual(session.events, ["stop physical_key push_to_talk"], "the old push-to-talk behavior is unchanged")
+        session.isHandsFreeListening = true
+        session.router.pushToTalkPressed()
+        assertEqual(session.events.count, 1, "a press during a hands-free take doesn't stop it when the option is off")
+    }
+
+    runSuite("Tapping Push to Talk again takes back a kept start still waiting") {
+        let session = HotkeySessionFake()
+        session.tapKeepsListening = true
+        session.hasQueuedTapKept = true
+        assertEqual(session.router.pushToTalkPressed(), .stoppedHandsFreeTake, "the press cancels, so its release does nothing")
+        assertEqual(session.events, ["drop queued tap-kept"], "no take starts once the last one finishes")
+    }
+
+    runSuite("A tap with no Push to Talk take to keep falls back to the release") {
+        let session = HotkeySessionFake()
+        session.tapKeepsListening = true
+        session.keeps = false
+        session.hasQueuedPushToTalk = true
+        session.router.pushToTalkReleased(wasTap: true)
+        assertEqual(session.events, ["drop queued push_to_talk"], "nothing kept, so the usual release runs")
     }
 
     await runSuite("Quit drops a waiting start and stops new ones from queueing") {
@@ -207,6 +279,10 @@ private final class HotkeySessionFake {
     var isDictating = false
     var remembers = false
     var hasQueuedPushToTalk = false
+    var tapKeepsListening = false
+    var isHandsFreeListening = false
+    var keeps = true
+    var hasQueuedTapKept = false
     private(set) var events: [String] = []
 
     var router: DictationHotkeyRouter {
@@ -223,7 +299,22 @@ private final class HotkeySessionFake {
                 return true
             },
             start: { trigger, mode in self.events.append("start \(trigger.rawValue) \(mode.rawValue)") },
-            stop: { trigger, mode in self.events.append("stop \(trigger.rawValue) \(mode.rawValue)") }
+            stop: { trigger, mode in self.events.append("stop \(trigger.rawValue) \(mode.rawValue)") },
+            tapKeepsListening: { self.tapKeepsListening },
+            isHandsFreeTakeListening: { self.isHandsFreeListening },
+            stopHandsFreeTake: { self.events.append("stop physical_key hands_free") },
+            dropQueuedTapKeptStart: {
+                guard self.hasQueuedTapKept else { return false }
+                self.hasQueuedTapKept = false
+                self.events.append("drop queued tap-kept")
+                return true
+            },
+            keepPushToTalkTakeListening: {
+                guard self.keeps else { return false }
+                self.isHandsFreeListening = true
+                self.events.append("keep listening")
+                return true
+            }
         )
     }
 }

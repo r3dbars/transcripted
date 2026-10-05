@@ -68,6 +68,7 @@ enum HotkeyPreferences {
     private static let meetingModifiersKey   = "hotkey-meeting-modifiers"
     private static let dictationShortcutModeKey = "hotkey-dictation-shortcut-mode"
     private static let dictationShortcutsEnabledKey = "hotkey-dictation-shortcuts-enabled"
+    private static let pushToTalkTapKeepsListeningKey = "hotkey-push-to-talk-tap-keeps-listening"
 
     // MARK: - Read
 
@@ -112,6 +113,16 @@ enum HotkeyPreferences {
         return userDefaults.bool(forKey: dictationShortcutsEnabledKey)
     }
 
+    /// Whether a quick tap of the Push to Talk key keeps listening
+    /// hands-free, so one key holds or toggles (default: true).
+    static func pushToTalkTapKeepsListening(userDefaults: UserDefaults = .standard) -> Bool {
+        guard userDefaults.object(forKey: pushToTalkTapKeepsListeningKey) != nil else {
+            return true
+        }
+
+        return userDefaults.bool(forKey: pushToTalkTapKeepsListeningKey)
+    }
+
     // MARK: - Write
 
     static func save(dictation binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
@@ -142,6 +153,11 @@ enum HotkeyPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
+    static func setPushToTalkTapKeepsListening(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(enabled, forKey: pushToTalkTapKeepsListeningKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
         ud.removeObject(forKey: dictationKeyCodeKey)
@@ -150,6 +166,7 @@ enum HotkeyPreferences {
         ud.removeObject(forKey: meetingModifiersKey)
         ud.removeObject(forKey: dictationShortcutModeKey)
         ud.removeObject(forKey: dictationShortcutsEnabledKey)
+        ud.removeObject(forKey: pushToTalkTapKeepsListeningKey)
         ud.removeObject(forKey: rightOptionDictationKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
