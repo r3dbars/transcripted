@@ -196,8 +196,10 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - Usage: `python3 scripts/dev/latency-percentiles.py`
 - `scripts/dev/bench-launch-latency.sh` — launch-to-interactive over N isolated launches, reporting p50/p90/p95/p99 instead of the single sample `build.sh` takes
   - Usage: `bash scripts/dev/bench-launch-latency.sh --samples 20`
-- `scripts/dev/bench-all.sh` — runs the launch, Home-loader, and real-usage benchmarks together and writes JSON under `build/benchmarks/<label>/`
-  - Usage: `bash scripts/dev/bench-all.sh`
+- `scripts/dev/bench-all.sh` — runs the warm and cold launch, Home-loader, and real-usage benchmarks together (plus dictation stop-to-text with `--dictation-stop N`) and writes JSON and a flat `summary.json` under `build/benchmarks/<label>/`
+  - Usage: `bash scripts/dev/bench-all.sh --label before-<change>`
+- `scripts/dev/bench-compare.py` — before/after table for two `bench-all.sh` runs; changes under 5% or 5 ms read "same"
+  - Usage: `python3 scripts/dev/bench-compare.py build/benchmarks/<before> build/benchmarks/<after>`
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Production-path usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant production`
   - Encoder comparison: add `--encoder-compute cpu-and-gpu` or `--encoder-compute all`; production remains on FluidAudio's default unless this benchmark-only override is present
