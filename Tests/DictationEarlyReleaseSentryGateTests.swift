@@ -91,7 +91,22 @@ func testDictationEarlyReleaseSentryGate() {
         assertTrue(unknownMode.forwardsToSentry, "a release with no known mode is shown mic-not-ready, so it forwards")
     }
 
-    runSuite("Turning Sentry off for one call never turns it on for events Sentry doesn't allow") {
+    runSuite("Every other caller keeps the old Sentry routing") {
+        let allowlisted = ObservabilityEventCapturePlan.make(
+            level: DictationEarlyReleaseCancelReport.level,
+            engine: DictationEarlyReleaseCancelReport.engine,
+            event: DictationEarlyReleaseCancelReport.event,
+            message: DictationEarlyReleaseCancelReport.message,
+            context: nil,
+            engineState: nil,
+            infoDictionary: nil,
+            timestamp: "2026-10-05T12:00:00.000Z",
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
+        )
+        assertNotNil(allowlisted.sentryPolicy, "an allowlisted .error is counted")
+        assertTrue(allowlisted.forwardsToSentry, "and with the default flag it still goes to Sentry")
+
         let notAllowlisted = ObservabilityEventCapturePlan.make(
             level: .error,
             engine: "dictation",
