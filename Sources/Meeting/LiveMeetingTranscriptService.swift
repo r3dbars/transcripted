@@ -34,6 +34,7 @@ final class LiveMeetingTranscriptService {
     private var mayInfer: (() -> Bool)?
     private var lastErrorCode: String?
     private var captionsYield: (@MainActor @Sendable () -> Bool)?
+    private var captionsCaptureSystemAudio = true
     /// `captionsYield`'s answer, kept current on main for the caption tracks'
     /// drain loops so they never hop to the main actor to ask.
     nonisolated private let captionsYieldFlag = LiveMeetingCaptionYield()
@@ -74,6 +75,7 @@ final class LiveMeetingTranscriptService {
 
     func beginCapture(sessionID: UUID, router: STTRouter, model: TranscriptionModelChoice,
                       languageSelection: TranscriptionLanguageSelection,
+                      capturesSystemAudio: Bool,
                       deliveryEnabled: @escaping (Bool, UInt64) -> Void, deliveryDrops: @escaping () -> Int,
                       mayInfer: @escaping () -> Bool,
                       shouldCaptionsYield: @escaping @MainActor @Sendable () -> Bool = { false }) {
@@ -85,6 +87,7 @@ final class LiveMeetingTranscriptService {
         self.sessionID = sessionID
         self.router = router
         self.model = model
+        captionsCaptureSystemAudio = capturesSystemAudio
         if case .explicit(let code) = languageSelection {
             language = TranscriptionLanguageContext(selection: languageSelection, languageCode: code, resolution: .explicit)
         } else {
@@ -122,7 +125,8 @@ final class LiveMeetingTranscriptService {
         let captions = LiveMeetingCaptions.shared
         let wanted = state == "recording" && NotchIslandPreferences.showsLiveTranscript()
         if wanted, let sessionID, captionsYield != nil {
-            captions.start(sessionID: sessionID, shouldYield: captionsYieldFlag)
+            captions.start(sessionID: sessionID, capturesSystemAudio: captionsCaptureSystemAudio,
+                           shouldYield: captionsYieldFlag)
         } else if !wanted {
             captions.stop()
         }
