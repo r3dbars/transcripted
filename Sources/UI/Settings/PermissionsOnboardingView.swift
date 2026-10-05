@@ -106,6 +106,8 @@ struct PermissionsOnboardingView: View {
         .onAppear {
             if flowStartedAt == nil {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
+                RetentionTelemetry.observeOnboarding(previouslyCompleted:
+                    UserDefaults.standard.bool(forKey: PermissionsOnboardingPreferences.completionKey))
             }
             checkAllPermissions(trackChanges: false)
             trackCurrentStepViewed()
@@ -226,7 +228,6 @@ struct PermissionsOnboardingView: View {
             currentStepIndex += 1
         }
     }
-
     private func skipMicrophone() {
         guard navigation.canSkipMicrophone else { return }
         AnalyticsReporter.track(
@@ -242,7 +243,6 @@ struct PermissionsOnboardingView: View {
         skippedMicrophone = true
         goNext()
     }
-
     private func goNextOrComplete() {
         guard !primaryButtonDisabled else { return }
         trackPrimaryCTAClicked()
@@ -280,22 +280,22 @@ struct PermissionsOnboardingView: View {
         systemAudioRequestTask?.cancel()
         systemAudioRequestTask = nil
     }
-
     private func completeOnboarding() {
         guard canFinishSetup else { return }
         stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
     }
-
     private func trackCompletionIfNeeded() {
         guard !didTrackCompletion else { return }
         didTrackCompletion = true
-
+        RetentionTelemetry.completeOnboarding()
         AnalyticsReporter.track(
             "onboarding_completed",
             properties: FirstRunExperience.onboardingCompletionAnalyticsProperties(
                 completionPath: .meetings,
+                microphoneGranted: micGranted,
+                microphoneSkipped: skippedMicrophone,
                 systemAudioGranted: systemAudioGranted,
                 calendarGranted: calendarGranted,
                 meetingPromptsEnabled: true,

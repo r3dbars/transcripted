@@ -90,12 +90,31 @@ extension MeetingSessionController {
                 "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
                 "trigger": transcriptionTrigger.rawValue,
             ]
+            // Saved-task ownership is captured before async metadata reads or
+            // queue advancement. A different meeting may already be recording.
+            savedTranscriptProperties.merge(
+                MeetingProcessingTelemetry.savedArtifactIdentityProperties(
+                    savedTaskID: taskManager.lastSavedTranscriptTaskId,
+                    queuedTaskID: completedJobID,
+                    captureDiagnostics: activeTranscriptionCaptureDiagnostics
+                ),
+                uniquingKeysWith: { _, new in new }
+            )
             if let timings = taskManager.lastPipelineTimings {
                 savedTranscriptProperties.merge(
                     MeetingProcessingTelemetry.properties(for: Self.processingTelemetryTimings(timings)),
                     uniquingKeysWith: { current, _ in current }
                 )
             }
+            // Activation belongs to the confirmed save, not to a later metadata
+            // read: a dictation can save while this meeting waits for restyling.
+            ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+                artifactKind: .meeting,
+                surface: .meetingSave,
+                trigger: transcriptionTrigger.rawValue,
+                correlationID: savedTranscriptProperties["correlation_id"],
+                saveID: savedTranscriptProperties["save_id"]
+            )
             trackSavedTranscriptAnalyticsInBackground(
                 baseProperties: savedTranscriptProperties,
                 promptTelemetryProperties: promptTelemetryProperties,

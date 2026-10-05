@@ -5,7 +5,7 @@ enum AnalyticsPayloadSanitizer {
     // Analytics drops exactly the shared base fragments; see
     // `PayloadSanitizationCore.baseSensitiveKeyFragments`.
     private static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments
-    private static let uuidValuedKeys: Set<String> = ["session_id", "correlation_id", "install_uuid"]
+    private static let uuidValuedKeys: Set<String> = ["session_id", "correlation_id", "install_uuid", "save_id"]
     private static let categoryValuedKeys: Set<String> = [
         "failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger",
         "quality_reason", "capture_outcome", "finalization_reason", "review_mode", "mic_backend",

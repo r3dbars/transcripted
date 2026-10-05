@@ -70,7 +70,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         navigationModel.isWindowOpen = true
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page
-        navigationModel.selectedPage = page
+        navigationModel.select(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
         navigationModel.presentationSource = source
         navigationModel.presentationID = UUID()
         AnalyticsReporter.track(

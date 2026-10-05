@@ -129,6 +129,10 @@ struct DictationsSettingsPage: View {
         withAnimation(.snappy(duration: 0.2)) {
             expandedEntryID = (expandedEntryID == entry.id) ? nil : entry.id
         }
+        if expandedEntryID == entry.id {
+            ProductUsageTelemetry.trackResult(kind: .dictation, action: .preview, surface: .dictations,
+                                              succeeded: true, artifactDate: entry.createdAt)
+        }
     }
 
     private func collapse() {
