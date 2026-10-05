@@ -279,7 +279,7 @@ enum DictationStoppedAudioRecoveryStore {
         // Convert into one contiguous Int16 block, then append it in a single
         // call. The per-sample `append(_:to:)` helper pays a `withUnsafeBytes`
         // closure plus a `Sequence` append for every sample, which dominated
-        // this function: at the 5-minute dictation cap that is 4.8M round trips.
+        // this function: at a 5-minute take that is 4.8M round trips.
         // The arithmetic below is byte-for-byte the old expression — the NaN
         // guard, the clamp, `Float(Int16.max)`, and bare `.rounded()`
         // (schoolbook, half-away-from-zero) are all load-bearing for that.
