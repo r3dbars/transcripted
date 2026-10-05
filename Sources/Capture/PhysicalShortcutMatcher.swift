@@ -108,8 +108,9 @@ enum PhysicalShortcutMatcher {
     /// with Option+E) rather than a dictation tap.
     static let typingWindowForModifierCombos: TimeInterval = 1.0
 
-    /// Whether a hands-free modifier that other shortcuts also use in combos
-    /// (Right Option vs Option+M) fires on press instead of on release.
+    /// Whether a hands-free or Push to Talk modifier that other shortcuts
+    /// also use in combos (Right Option vs Option+M) fires on press instead
+    /// of on release (hands-free) or after the chord delay (Push to Talk).
     /// Waiting for release costs the whole time the key is held, so a start
     /// fires on press unless a key was typed just before. If a combo key does
     /// follow while it's held, the detector reports `.comboInterrupted` and

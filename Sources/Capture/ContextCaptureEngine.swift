@@ -17,7 +17,7 @@ import CoreGraphics
 // (see HotkeyActionDebouncer and PhysicalShortcutAction.hotkeyDebounceID).
 private var hotkeyActionDebouncer = HotkeyActionDebouncer()
 
-private func shouldAcceptHotkeyAction(
+func shouldAcceptHotkeyAction(
     _ action: PhysicalShortcutAction,
     now: TimeInterval = ProcessInfo.processInfo.systemUptime
 ) -> Bool {
@@ -91,6 +91,10 @@ private final class PhysicalShortcutDetector {
     /// Option+M) and that fired on press, followed until it's released so a
     /// key that goes down meanwhile reports `.comboInterrupted`.
     private var handsFreeComboTracker = HandsFreeModifierComboTracker()
+    /// The same for a Push to Talk modifier that other shortcuts share and
+    /// that fired on press: a key that goes down while it's held makes the
+    /// press a combo (`.comboInterrupted`) instead of a hold.
+    private var pushToTalkComboTracker = HandsFreeModifierComboTracker()
     /// When a key was last typed, so a hands-free modifier pressed mid-typing
     /// still waits for release (see `firesSharedModifierOnPress`).
     private var lastTypedKeyDownUptime: TimeInterval = -.infinity
@@ -223,6 +227,7 @@ private final class PhysicalShortcutDetector {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
         handsFreeComboTracker.reset()
+        pushToTalkComboTracker.reset()
         activePushToTalkKeyCode = nil
         consumedKeyCodes.removeAll()
     }
@@ -257,6 +262,12 @@ private final class PhysicalShortcutDetector {
             // go down (see HandsFreeModifierComboTracker).
             if handsFreeComboTracker.keyDown() {
                 onShortcut?(.dictationHandsFree, .comboInterrupted)
+            }
+            if pushToTalkComboTracker.keyDown() {
+                // Option+M or Right Option+E: not a hold. Its release passes
+                // through, as when the chord delay was still pending.
+                activePushToTalkKeyCode = nil
+                onShortcut?(.dictationPushToTalk, .comboInterrupted)
             }
             if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
                 pushToTalkTap.otherKeyWentDown()
@@ -310,6 +321,13 @@ private final class PhysicalShortcutDetector {
             if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
                 pushToTalkTap.otherKeyWentDown()
             }
+            // Only ends the tracking. The release itself still goes to the
+            // Push to Talk release below.
+            _ = pushToTalkComboTracker.flagsChanged(
+                keyCode: keyCode,
+                modifiers: modifiers,
+                isHandsFreeRelease: matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+            )
             if handsFreeComboTracker.flagsChanged(
                 keyCode: keyCode,
                 modifiers: modifiers,
@@ -346,7 +364,21 @@ private final class PhysicalShortcutDetector {
             switch shortcut.action {
             case .dictationPushToTalk:
                 guard activePushToTalkKeyCode == nil else { return nil }
-                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                let sharesModifier = hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action)
+                if sharesModifier, PhysicalShortcutMatcher.firesSharedModifierOnPress(
+                    secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime,
+                    isDictating: isDictating
+                ) {
+                    // Start on press, like the hands-free key: waiting out the
+                    // chord delay added 0.14 s to every hold of the default
+                    // Right Option key. A combo key while it's held drops the
+                    // start (`.comboInterrupted`). Mid-typing, or when this
+                    // press would stop a take, it still waits.
+                    cancelPendingModifierShortcut()
+                    activePushToTalkKeyCode = keyCode
+                    pushToTalkComboTracker.firedOnPress(keyCode: keyCode, sharesModifier: true)
+                    onShortcut?(.dictationPushToTalk, .press)
+                } else if sharesModifier {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationPushToTalk)
                 } else {
                     activePushToTalkKeyCode = keyCode
@@ -494,6 +526,7 @@ private final class PhysicalShortcutDetector {
         cancelPendingModifierShortcut()
         // Its release may have been missed while the tap was off.
         handsFreeComboTracker.reset()
+        pushToTalkComboTracker.reset()
 
         let reconciled = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
             activePushToTalkKeyCode: activePushToTalkKeyCode,
@@ -529,9 +562,10 @@ private final class PhysicalShortcutDetector {
 class ContextCaptureEngine: ObservableObject {
     private var hotkeyChangeObserver: NSObjectProtocol?
     private var accessibilityRetryTask: Task<Void, Never>?
-    /// The dictation the last hands-free press started, so a combo that
-    /// follows while the key is held can drop it.
-    private var handsFreePressStartedSessionID: UUID?
+    /// The dictation the last hands-free or shared-modifier Push to Talk
+    /// press started, so a combo that follows while the key is held can drop it.
+    var handsFreePressStartedSessionID: UUID?
+    var pushToTalkPressStartedSessionID: UUID?
     /// The held Push to Talk press stopped a hands-free take, so its release
     /// has nothing left to do.
     var pushToTalkPressStoppedTake = false
@@ -739,45 +773,11 @@ class ContextCaptureEngine: ObservableObject {
             break
         case (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease), (.pasteLastDictation, .tapRelease):
             break
-        case (.dictationPushToTalk, .comboInterrupted), (.meeting, .comboInterrupted), (.pasteLastDictation, .comboInterrupted):
+        case (.dictationPushToTalk, .comboInterrupted):
+            handlePhysicalDictationPushToTalkComboInterrupted()
+        case (.meeting, .comboInterrupted), (.pasteLastDictation, .comboInterrupted):
             break
         }
-    }
-
-    private func handlePhysicalDictationHandsFreePress() {
-        handsFreePressStartedSessionID = nil
-        guard shouldAcceptHotkeyAction(.dictationHandsFree) else {
-            DiagnosticsTrail.record(
-                logger: sessionController?.appState?.logger,
-                level: .info,
-                engine: "capture",
-                event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat hands-free dictation trigger",
-                context: [
-                    "hotkey_id": "dictation_hands_free",
-                    "session_state": dictationSessionStateName(sessionController),
-                    "overlay_state": overlayStateName(sessionController?.overlayController?.state)
-                ]
-            )
-            return
-        }
-
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let wasDictating = sessionController?.isDictating ?? false
-        routeHandsFreeToggle(sourceApp: frontApp)
-        if !wasDictating {
-            handsFreePressStartedSessionID = sessionController?.activeDictationSessionID
-        }
-    }
-
-    /// The hands-free press turned out to be a combo (Option+M, or typing é),
-    /// so drop the dictation it started, or the start it queued behind a take
-    /// that was still finishing, quietly. A press that stopped a dictation
-    /// waited for release, so it never gets here.
-    private func handlePhysicalDictationHandsFreeComboInterrupted() {
-        let sessionID = handsFreePressStartedSessionID
-        handsFreePressStartedSessionID = nil
-        sessionController?.abandonDictationStartForModifierCombo(sessionID: sessionID)
     }
 
     /// Keeps the detector's copy of "is a dictation running" current, so a

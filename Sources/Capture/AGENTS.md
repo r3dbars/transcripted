@@ -35,6 +35,7 @@
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
 - Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
+- A Push to Talk key on a modifier other shortcuts also use (the default Right Option vs Option-M) fires on press too, through `pushToTalkComboTracker`, unless a key was typed in the last second or the press would stop a take; then it waits out the 0.14 s chord delay. A combo key while it's held sends `.comboInterrupted` and the start is dropped the same way.
 - A modifier-only hands-free key (Tap to toggle) fires on press, and `HandsFreeModifierComboTracker` follows every one until release, so Fn+arrow drops the start. One that other shortcuts also use (right Option vs Option-M) also fires on press, so the hold isn't added to every start. If a key was typed in the last second it waits for release instead, and if another key goes down while it's held the detector sends `.comboInterrupted` and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). `HandsFreeModifierComboTracker` follows the held key from the tap's own events. Don't gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running
 - Accessibility-backed trigger registration failures surface through `hotkeyError` so the menubar can explain why dictation trigger capture is unavailable
 
@@ -59,7 +60,7 @@ Manual checks:
 - with Tap to toggle, the dictation key starts and stops dictation
 - right Option then M (or typing é with right Option+E) does not leave a dictation running
 - push-to-talk starts dictation on press and stops/pastes on release
-- with Hold or tap, a quick Right Option tap keeps listening and the next press pastes; a hold starts after the 0.14 s chord delay and pastes on release; Option+M and Right Option+E never start dictation
+- with Hold or tap, a quick Right Option tap keeps listening and the next press pastes; a hold starts on press and pastes on release; Option+M and Right Option+E leave no dictation running (a start is dropped quietly), and within a second of typing the press waits out the 0.14 s chord delay instead
 - meeting hotkey toggles meeting capture
 - the configured physical dictation trigger starts/stops dictation in the expected shortcut mode
 - rapid repeat presses are ignored cleanly
