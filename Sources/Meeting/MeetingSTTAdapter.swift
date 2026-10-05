@@ -217,6 +217,9 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     ) async throws -> [String]? {
         guard Self.packingEnabled, segments.count > 1 else { return nil }
         let model = activeJobModel ?? preparedModel ?? router.selectedModel
+        if model.isWhisper {
+            return try await transcribeWhisperBatch(segments, source: source, model: model, language: language)
+        }
         let layout = SpeechSegmentPacking.layout(segments)
         let start = ProcessInfo.processInfo.systemUptime
         let recordCall = {
@@ -242,6 +245,39 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         recordCall()
         return SpeechSegmentPacking.split(tokens: tokens, ranges: layout.ranges)
             .map { $0.isEmpty ? $0 : CustomDictionaryTextProcessor.apply(to: $0) }
+    }
+
+    /// Whisper's batch: the segments run side by side rather than packed into
+    /// one window, so the text per segment is what one-by-one calls return.
+    private func transcribeWhisperBatch(
+        _ segments: [[Float]],
+        source: AudioSource,
+        model: TranscriptionModelChoice,
+        language: TranscriptionLanguageContext
+    ) async throws -> [String]? {
+        let start = ProcessInfo.processInfo.systemUptime
+        let recordCall = {
+            MeetingPipelineTimings.current?.addSpeechToTextCall(
+                seconds: ProcessInfo.processInfo.systemUptime - start,
+                inputSeconds: Double(segments.reduce(0) { $0 + $1.count }) / 16_000,
+                model: model.rawValue
+            )
+        }
+        let texts: [String]?
+        do {
+            texts = try await router.transcribeWhisperMeetingSegments(
+                segments,
+                source: source,
+                model: model,
+                language: language
+            )
+        } catch {
+            // A batch that throws still spent its time before the fallback.
+            recordCall()
+            throw error
+        }
+        if texts != nil { recordCall() }
+        return texts
     }
 
     /// Packing is on unless `TRANSCRIPTED_MEETING_STT_PACKING=0`, which turns

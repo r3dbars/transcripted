@@ -115,15 +115,7 @@ final class WhisperEngine: ObservableObject {
         do {
             let results = try await whisperKit.transcribe(
                 audioArray: samples,
-                decodeOptions: DecodingOptions(
-                    task: .transcribe,
-                    language: languageCode,
-                    temperature: 0,
-                    detectLanguage: languageCode == nil,
-                    skipSpecialTokens: true,
-                    withoutTimestamps: true,
-                    concurrentWorkerCount: 1
-                )
+                decodeOptions: Self.decodeOptions(languageCode: languageCode, concurrentWorkerCount: 1)
             )
             try Task.checkCancellation()
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -168,6 +160,107 @@ final class WhisperEngine: ObservableObject {
             )
             throw error
         }
+    }
+
+    /// Segments WhisperKit decodes side by side in a meeting batch. Its own
+    /// CLI default; each worker holds one decoder's state while it runs.
+    static let meetingBatchWorkerCount = 4
+
+    /// Transcribes meeting segments side by side through WhisperKit's batch
+    /// API and returns one text per segment, in order. Every segment gets the
+    /// same decode options as `transcribeSamples`, and WhisperKit decodes each
+    /// one on its own, so a segment's text is the same as a one-by-one call;
+    /// only the wall time changes. Throws if any segment fails, and the
+    /// pipeline then transcribes the batch one by one.
+    func transcribeMeetingSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        model: TranscriptionModelChoice,
+        languageCode: String?
+    ) async throws -> [String] {
+        try Task.checkCancellation()
+        guard model.isWhisper else {
+            throw NSError(domain: "WhisperEngine", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "\(model.title) is not a Whisper model."
+            ])
+        }
+        if !isModelLoaded(for: model) {
+            await initialize(model: model)
+        }
+        try Task.checkCancellation()
+        guard let whisperKit, isModelLoaded(for: model) else {
+            throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "\(model.title) is not loaded."
+            ])
+        }
+
+        // Same short-segment rule as `transcribeSamples`: those come back
+        // empty without a model call.
+        let eligible = segments.indices.filter {
+            TranscriptedConstants.hasMinimumParakeetAudioSamples(segments[$0].count)
+        }
+        var texts = Array(repeating: "", count: segments.count)
+        guard !eligible.isEmpty else { return texts }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let results = await whisperKit.transcribeWithResults(
+            audioArrays: eligible.map { segments[$0] },
+            decodeOptions: Self.decodeOptions(
+                languageCode: languageCode,
+                concurrentWorkerCount: Self.meetingBatchWorkerCount
+            )
+        )
+        try Task.checkCancellation()
+        guard results.count == eligible.count else {
+            throw NSError(domain: "WhisperEngine", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Whisper returned \(results.count) results for \(eligible.count) segments."
+            ])
+        }
+        for (index, result) in zip(eligible, results) {
+            switch result {
+            case .success(let segmentResults):
+                texts[index] = SegmentedEngineTranscript(segmentTexts: segmentResults.map(\.text)).text
+            case .failure(let error):
+                if error is CancellationError { throw CancellationError() }
+                throw error
+            }
+        }
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let audioDuration = eligible.reduce(0.0) {
+            $0 + Double(segments[$1].count) / TranscriptedConstants.parakeetSampleRate
+        }
+        AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(eligible.count) meeting segments side by side in \(String(format: "%.2f", elapsed))s")
+        EventReporter.shared.capture(
+            level: .info,
+            engine: model.engineName,
+            event: "meeting_segment_transcribed",
+            message: "Whisper batch transcribed in \(String(format: "%.2f", elapsed))s",
+            context: [
+                "model": model.rawValue,
+                "elapsed_s": String(format: "%.3f", elapsed),
+                "audio_duration_s": String(format: "%.2f", audioDuration),
+                "rtf": String(format: "%.3f", audioDuration > 0 ? elapsed / audioDuration : 0),
+                "segments": "\(eligible.count)",
+                "source": source == .microphone ? "microphone" : "system",
+            ]
+        )
+        return texts
+    }
+
+    /// Decode options every transcription uses. `concurrentWorkerCount` only
+    /// sets how many audio arrays a batch call runs at once; with no chunking
+    /// strategy it doesn't change how one array is decoded.
+    private static func decodeOptions(languageCode: String?, concurrentWorkerCount: Int) -> DecodingOptions {
+        DecodingOptions(
+            task: .transcribe,
+            language: languageCode,
+            temperature: 0,
+            detectLanguage: languageCode == nil,
+            skipSpecialTokens: true,
+            withoutTimestamps: true,
+            concurrentWorkerCount: concurrentWorkerCount
+        )
     }
 
     /// Detection is local, bounded, and job-scoped. Never store its result on

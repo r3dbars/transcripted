@@ -604,16 +604,42 @@ class STTRouter: ObservableObject {
         }
     }
 
-    /// Packed input limit for meeting segments, or nil when `model` can't
-    /// split a packed call back into segments. Parakeet runs a fixed 15 s
-    /// window; one encoder frame (80 ms) of headroom keeps a pack inside it.
+    /// Batch limit for meeting segments, or nil when `model` transcribes them
+    /// one call each. Parakeet packs a batch into its fixed 15 s window; one
+    /// encoder frame (80 ms) of headroom keeps a pack inside it. Whisper
+    /// decodes a batch's segments side by side instead, so its limit is one
+    /// 30 s window per worker.
     func packedSegmentWindowSamples(for model: TranscriptionModelChoice) -> Int? {
         switch model {
         case .parakeetTDTv2, .parakeetTDTv3:
             return ASRConstants.maxModelSamples - ASRConstants.samplesPerEncoderFrame
-        case .parakeetUltraExperimental, .whisperLargeV3Turbo, .whisperLargeV3, .appleSpeech:
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            return Self.whisperWindowSamples * WhisperEngine.meetingBatchWorkerCount
+        case .parakeetUltraExperimental, .appleSpeech:
             return nil
         }
+    }
+
+    /// Whisper's fixed input window: 30 s at 16 kHz.
+    private static let whisperWindowSamples = 480_000
+
+    /// Transcribes a batch of meeting segments side by side with Whisper, one
+    /// text per segment; nil when `model` isn't Whisper (the caller falls back).
+    func transcribeWhisperMeetingSegments(
+        _ segments: [[Float]],
+        source: AudioSource,
+        model: TranscriptionModelChoice,
+        language: TranscriptionLanguageContext?
+    ) async throws -> [String]? {
+        let resolvedModel = beginForegroundUse(of: model)
+        defer { endForegroundUse(of: resolvedModel) }
+        guard resolvedModel.isWhisper else { return nil }
+        return try await whisperEngine.transcribeMeetingSegments(
+            segments,
+            source: source,
+            model: resolvedModel,
+            languageCode: language?.languageCode
+        )
     }
 
     /// One call over packed meeting segments, returning timed tokens; nil
@@ -625,7 +651,10 @@ class STTRouter: ObservableObject {
     ) async throws -> [TimedTranscriptToken]? {
         let resolvedModel = beginForegroundUse(of: model)
         defer { endForegroundUse(of: resolvedModel) }
-        guard packedSegmentWindowSamples(for: resolvedModel) != nil else { return nil }
+        // Whisper batches go through `transcribeWhisperMeetingSegments`;
+        // only Parakeet can split one packed call back into segments.
+        guard resolvedModel.parakeetVariant != nil,
+              packedSegmentWindowSamples(for: resolvedModel) != nil else { return nil }
         if let language, case .explicit = language.selection { return nil }
         if !isModelLoaded(for: resolvedModel) {
             await initializeModel(resolvedModel)
