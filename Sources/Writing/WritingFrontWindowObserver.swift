@@ -14,6 +14,12 @@ final class WritingFrontWindowObserver {
     private var autocompleteActive = false
     private var appObserver: NSObjectProtocol?
     private var poller: WritingFrontWindowPoller?
+    /// Bumped when observation stops, so a window read still out then is
+    /// dropped.
+    private var observationEpoch = 0
+    /// The latest off-main window read; each new one waits for it, so
+    /// window changes apply in the order the activations happened.
+    private var windowRead: Task<Void, Never>?
 
     init(prewarmer: ScaffoldPrewarmer, screenCaptureService: ScreenCaptureService) {
         self.prewarmer = prewarmer
@@ -74,7 +80,7 @@ final class WritingFrontWindowObserver {
                 let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 self.prewarmer.noteFrontmostApp(bundleIdentifier: activated?.bundleIdentifier)
                 guard WritingController.settings().screenMemoryEnabled else { return }
-                self.noteWindowChanged(target: WritingController.currentTypingTarget(sessionIdentifier: ""))
+                self.noteFrontWindowAfterActivation()
             }
         }
     }
@@ -83,6 +89,24 @@ final class WritingFrontWindowObserver {
         guard let appObserver else { return }
         NSWorkspace.shared.notificationCenter.removeObserver(appObserver)
         self.appObserver = nil
+        observationEpoch &+= 1
+        windowRead = nil
+    }
+
+    /// Reads the front window off main (`WritingFrontWindowPoller
+    /// .readFrontWindow`), then tells the capture service on main, in the
+    /// order activations arrived. Dropped if observation stopped meanwhile.
+    private func noteFrontWindowAfterActivation() {
+        let epoch = observationEpoch
+        let previous = windowRead
+        windowRead = Task { [weak self] in
+            await previous?.value
+            let identity = await WritingFrontWindowPoller.readFrontWindow()
+            guard let self, self.appObserver != nil, self.observationEpoch == epoch else { return }
+            self.noteWindowChanged(
+                target: identity.map { WritingController.typingTarget(from: $0, sessionIdentifier: "") }
+            )
+        }
     }
 
     private func noteWindowChanged(target: TypingTargetIdentity?) {

@@ -86,6 +86,19 @@ final class WritingFrontWindowPoller: @unchecked Sendable {
         onChange(identity)
     }
 
+    /// The app-activation observer's front-window read, on `readQueue`.
+    /// `CGWindowListCopyWindowInfo` and the owner's bundle ID can each block
+    /// for seconds (the window server froze main 5 s+ inside this read:
+    /// Sentry APPLE-MACOS-3M), so the observer never makes it on main. The
+    /// serial queue answers reads in the order they were asked.
+    static func readFrontWindow() async -> WritingFrontWindowIdentity? {
+        await withCheckedContinuation { continuation in
+            readQueue.async {
+                continuation.resume(returning: readFrontWindowIdentity())
+            }
+        }
+    }
+
     /// `CGWindowListCopyWindowInfo` documents its result as front-to-back
     /// ordered, so the first normal-layer (`0`) window is frontmost.
     /// Deliberately doesn't use window names or titles: this only needs an
