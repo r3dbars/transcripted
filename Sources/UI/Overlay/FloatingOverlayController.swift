@@ -49,7 +49,7 @@ class FloatingOverlayController {
     enum MessageTone {
         case error
         case notice
-        /// The text was saved, just not pasted (the 5-minute cap). Good news,
+        /// The text was saved, just not pasted (the 15-minute cap). Good news,
         /// so no warning triangle and no shake.
         case saved
     }

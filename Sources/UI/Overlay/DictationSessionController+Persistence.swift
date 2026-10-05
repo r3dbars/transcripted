@@ -5,7 +5,7 @@ import AppKit
 
 extension DictationSessionController {
     /// Finalize a dictation by saving it to the daily Markdown file without
-    /// pasting into the focused app or auto-sending. Used by the 5-minute
+    /// pasting into the focused app or auto-sending. Used by the 15-minute
     /// session cap so a walked-away session is recovered instead of discarded.
     func finalizeWithoutPaste(
         text: String,
@@ -60,7 +60,7 @@ extension DictationSessionController {
             "dictation_completed",
             properties: dictationAnalyticsProperties(extra: completionProperties)
         )
-        // Hitting the 5-minute cap still saved the text: a notice, not an
+        // Hitting the 15-minute cap still saved the text: a notice, not an
         // error with a warning triangle and a shake.
         switch DictationSessionCapSavePolicy.presentation(saveFailureMessage: saveFailureMessage) {
         case .error(let message):

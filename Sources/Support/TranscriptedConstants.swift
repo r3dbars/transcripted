@@ -10,13 +10,16 @@ enum TranscriptedConstants {
 
     /// Max duration for a dictation listening session before the auto-save cap
     /// fires. Shared by the session timeout and audio buffer sizing so the two
-    /// cannot drift apart.
-    static let dictationSessionMaxDuration: TimeInterval = 5 * 60
+    /// cannot drift apart. Was 5 minutes until people cut off mid-thought
+    /// asked for room to talk longer (2026-10-05); the cap is only a backstop
+    /// for a take left running, and it still saves the text when it fires.
+    static let dictationSessionMaxDuration: TimeInterval = 15 * 60
 
     /// Audio buffer capacity in seconds — the dictation session cap plus
-    /// headroom for the stop path, so the cap never truncates audio without
-    /// reserving a half-hour worst case (~345MB of Float samples at 48kHz)
-    /// that persists for the process lifetime.
+    /// headroom for the stop path, so the cap never truncates audio. Samples
+    /// live in per-segment arrays that are freed when the take is cleared, so
+    /// a long take's memory (~185MB of Float samples at 48kHz for 16 minutes)
+    /// is only held while that take is recording and transcribing.
     static let audioBufferCapacitySeconds = Int(dictationSessionMaxDuration) + 60
 
     /// Audio tap buffer size (AVAudioEngine installTap)
