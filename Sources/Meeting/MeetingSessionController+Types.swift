@@ -61,6 +61,19 @@ extension MeetingSessionController {
         /// `isMicOnlyByChoice`, false when "Turn It On" got no macOS answer
         /// and the tap still ran.
         let skippedSystemAudioTap: Bool
+        /// macOS said System Audio Recording access was on for this
+        /// recording. Read only when no system audio was heard.
+        let systemAudioAccessConfirmedByMacOS: Bool
+
+        /// What the saved file says about system audio. Telemetry ignores
+        /// the macOS answer so it keeps counting silent system tracks.
+        func systemSignalEvidence(observed: Bool, forTelemetry: Bool = false) -> Bool? {
+            MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+                observed: observed,
+                micOnlyByChoice: isMicOnlyByChoice,
+                accessConfirmedByMacOS: !forTelemetry && systemAudioAccessConfirmedByMacOS
+            )
+        }
     }
 
     /// How long the person was recording, Record to Stop. The duration timer
