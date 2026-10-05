@@ -87,7 +87,8 @@ permissions:
 # per commit would let main runs pile up in parallel and take the hosted macOS
 # slots PRs need.)
 concurrency:
-  group: swift-ci-${{ github.ref }}
+  # Staged updates serialize together without waiting behind the full bench.
+  group: swift-ci-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.staged_update_source_sha != '' && '-staged-update' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
