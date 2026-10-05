@@ -15,6 +15,12 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Added
+- The Dictations page has new cards: a bar on top with play, time, length,
+  words, and app (delivery problems in amber), and the text below in italics,
+  four lines with Show more. Press play to hear a kept take right there; a
+  small scrubber slides out of the play button. The ⋯ menu has Transcribe
+  again (re-runs the local model on the kept audio and replaces that entry's
+  text), Show in Finder, and Delete with Undo.
 - Dictations now keep their audio for 30 days, so a later update can play a
   take back or transcribe it again. Change it in Settings → Storage → Keep
   dictation audio (Don't keep, 7 days, 30 days, Forever); picking a shorter

@@ -439,6 +439,8 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptPersistence.swift"
     "Sources/Dictation/DictationEntryTextRewrite.swift"
     "Sources/Dictation/DictationRetranscription.swift"
+    "Sources/UI/Settings/DictationCardPresentation.swift"
+    "Sources/UI/Settings/DictationPlaybackController.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/PinnedDictationSpeedPath.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"

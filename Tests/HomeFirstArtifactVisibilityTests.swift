@@ -1,13 +1,11 @@
 // Source-text pins: this test reads Sources/UI/Settings/{HomeView,TranscriptedSettingsView,
-// QuietDictationLibrary,QuietHomeLibrary,Pages/HomeSettingsPage}.swift
+// QuietHomeLibrary,Pages/HomeSettingsPage}.swift
 // as text rather than rendering them, because each is a SwiftUI view
 // wired to live app state this Foundation-only runner can't construct —
 // TranscriptedSettingsView holds @ObservedObject STTRouter/MeetingSessionController/SparkleUpdaterController,
 // and HomeSettingsPage carries an @ObservedObject HomeViewModel plus CaptureUndoManager.shared and real
 // domain closures; HomeViewModel's own init is cheap, but its data only loads once the shell calls
-// refresh() from navigation state. What's pinned: the dictation row's "Open file" action/title/identifier, the
-// "saved only" failed-paste-back copy, QuietDictationRow's tap-to-open wiring, the shared "Open Markdown"
-// menu wording, and QuietWorkingRow's presence and terminal-state icon behavior on Home —
+// refresh() from navigation state. What's pinned: the shared "Open Markdown" menu wording, and QuietWorkingRow's presence and terminal-state icon behavior on Home —
 // plus a negative check that older vague copy doesn't come back. If you rename these views or move this
 // wording, update the literal strings here; they're standing in for a real UX regression check.
 
@@ -23,10 +21,6 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
             encoding: .utf8
         )) ?? ""
-        let dictationLibrarySource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/QuietDictationLibrary.swift"),
-            encoding: .utf8
-        )) ?? ""
         let quietHomeLibrarySource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/QuietHomeLibrary.swift"),
             encoding: .utf8
@@ -39,26 +33,9 @@ func testHomeFirstArtifactVisibility() {
             encoding: .utf8
         )) ?? ""
 
-        // Quiet-library redesign: dictations are individual rows
-        // (QuietDictationRow); the saved Markdown artifact is surfaced by
-        // opening the row into its inline expansion (QuietDictationExpansion),
-        // whose footer offers an explicit Open file action.
-        assertTrue(
-            dictationLibrarySource.contains(#"title: "Open file","#)
-                && dictationLibrarySource.contains("action: onOpenFile")
-                && dictationLibrarySource.contains(#""transcripted.dictations.expansion.open""#),
-            "successful dictations should show that a Markdown artifact was saved"
-        )
-        assertTrue(
-            dictationLibrarySource.contains(#"case .failed, .savedWithoutPaste:"#)
-                && dictationLibrarySource.contains(#"return "saved only""#),
-            "failed paste-back should still tell users the Markdown was saved"
-        )
-        assertTrue(
-            dictationLibrarySource.contains("struct QuietDictationRow: View")
-                && dictationLibrarySource.contains(".onTapGesture(perform: onOpen)"),
-            "the saved Markdown label should open the dictation file"
-        )
+        // The Dictations cards (2026-10) dropped the row's "Open file" and
+        // tap-to-open pins; the "saved only" wording is a promise test now
+        // (DictationCardPresentationTests), and Show in Finder reveals the file.
         assertTrue(
             settingsSource.contains(#"HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text")"#),
             "dictation row menu should use the same Open Markdown language as meeting previews"

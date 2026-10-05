@@ -1,21 +1,14 @@
 import AppKit
 import SwiftUI
 
-// Quiet-library Dictations components (2026-08 redesign).
+// Dictations page cards (2026-10 redesign, after Handy's history page).
 //
 // The daily `Dictations_YYYY-MM-DD.md` file stays the storage shape (see
-// `Sources/Dictation/AGENTS.md`), but the list is presented and interacted
-// with per entry, not per file: one row per dictation, title-first, with the
-// time right-aligned. Hover reveals Copy + an overflow menu; clicking a row
-// opens a raised inline expansion with the full text — mirrors
-// `Sources/UI/Settings/QuietHomeLibrary.swift`'s meeting row/expansion pair.
+// `Sources/Dictation/AGENTS.md`); the page shows one card per entry. The bar
+// on top carries play, time, length, words, app, and any delivery problem
+// (`DictationPlaybackBar.swift`); the dictated text sits below in italics,
+// clamped to four lines with Show more. Copy and ⋯ fade in on hover.
 
-// MARK: - Formatting
-
-/// Foundation-pure text helpers for the per-entry dictation rows. `SavedDictationEntry`
-/// already carries per-entry text/timestamp/source-app data (parsed by
-/// `DictationTranscriptStore` from the day file's entry grammar), so this only
-/// derives small display strings from it — it does not re-parse Markdown.
 /// Stable `CaptureUndoManager` ids for dictation entries. The prefix keeps
 /// dictation offers distinguishable from meeting offers (whose ids are raw
 /// transcript paths) so each surface renders only its own orphaned offers.
@@ -31,9 +24,12 @@ enum DictationUndoID {
     }
 }
 
+/// Small display strings derived from a saved entry (it does not re-parse
+/// Markdown). The card's metadata line is `DictationCardFormatting`.
 enum QuietDictationLibraryFormatting {
-    /// The first line of the dictated text, used as the collapsed row's title.
-    /// Falls back to the entry's generated title if the body is empty.
+    /// The first line of the dictated text, used for undo previews and the
+    /// Writing page's rows. Falls back to the entry's generated title if the
+    /// body is empty.
     static func firstLine(of text: String, fallback: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = trimmed.isEmpty ? fallback : trimmed
@@ -49,203 +45,147 @@ enum QuietDictationLibraryFormatting {
     }
 
     static func wordCount(of text: String) -> Int {
-        text.split(whereSeparator: \.isWhitespace).count
-    }
-
-    /// The paste-destination clause for an entry's meta line. Only claims a
-    /// destination app when the entry's own `delivery`/`sourceAppName` say so
-    /// — never invented for `.copied`/`.failed`/`.savedWithoutPaste`.
-    static func deliveryDescription(delivery: DictationDelivery, sourceAppName: String) -> String {
-        switch delivery {
-        case .pasted:
-            return "pasted into \(sourceAppName)"
-        case .copied:
-            return "copied to clipboard"
-        case .failed, .savedWithoutPaste:
-            return "saved only"
-        }
-    }
-
-    static func metaLine(for entry: SavedDictationEntry, time: String) -> String {
-        let words = wordCount(of: entry.text)
-        let wordsText = words == 1 ? "1 word" : "\(words) words"
-        let delivery = deliveryDescription(delivery: entry.delivery, sourceAppName: entry.sourceAppName)
-        return [time, wordsText, delivery].joined(separator: "  \u{00B7}  ")
+        DictationCardFormatting.wordCount(of: text)
     }
 }
 
-// MARK: - Row
+// MARK: - Card
 
-/// Title-first dictation row. The first line of the dictated text always
-/// shows, truncated to one line, regular weight; the captured time stays
-/// right-aligned and always visible. Copy + the overflow menu fade in only
-/// on hover.
-struct QuietDictationRow: View {
+/// One saved dictation. The bar sits on top; the text below is italic,
+/// clamped to four lines, with a tiny Show more toggle when it runs longer.
+struct QuietDictationCard: View {
     let entry: SavedDictationEntry
     let isCopied: Bool
-    let onOpen: () -> Void
-    let onCopy: () -> Void
+    /// Kept-audio facts once loaded; nil while unknown.
+    let audioInfo: DictationAudioInfoStore.Info?
+    let isTranscribingAgain: Bool
+    @ObservedObject var playback: DictationPlaybackController
     let menuItems: [HomeRowMenuItem]
+    let onTogglePlayback: () -> Void
+    let onCopy: () -> Void
+    let onLoadAudioInfo: () async -> Void
+    let onShowMore: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    @State private var isExpanded = false
+    @State private var clampedHeight: CGFloat = 0
+    @State private var fullHeight: CGFloat = 0
 
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title))
-                .font(LibraryTokens.body)
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .accessibilityIdentifier("transcripted.dictations.row.title")
+    private var text: String {
+        entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-            Spacer(minLength: 12)
+    private var isLong: Bool {
+        fullHeight > clampedHeight + 1
+    }
 
-            // Always present so the row keeps one constant height; hover only
-            // fades the actions in and tints the background — no size change.
-            HomeRowActionButtons(
-                isCopied: isCopied,
-                onCopy: onCopy,
-                menuItems: menuItems,
-                copyAutomationIdentifier: "transcripted.dictations.row.copy"
-            )
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
-            .accessibilityHidden(!isHovering)
-
-            Text(timeString)
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink3)
-                .fixedSize()
-        }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 10)
-        .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
-                .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
+    private var metadata: [DictationCardFormatting.MetadataItem] {
+        DictationCardFormatting.metadata(
+            time: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt),
+            length: audioInfo?.duration,
+            wordCount: DictationCardFormatting.wordCount(of: entry.text),
+            appName: entry.sourceAppName,
+            delivery: entry.delivery
         )
-        .padding(.horizontal, -10)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
-        }
-        .onTapGesture(perform: onOpen)
-        .help("Open dictation")
-        .accessibilityIdentifier("transcripted.dictations.row")
     }
-
-    private var timeString: String {
-        HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt)
-    }
-}
-
-// MARK: - Inline expansion
-
-/// The opened dictation: full text, a quiet meta line, and footer actions —
-/// revealed in place within the list, raised on `LibraryTokens.raisedFill`.
-struct QuietDictationExpansion: View {
-    let entry: SavedDictationEntry
-    let isCopied: Bool
-    let onCopy: () -> Void
-    let onOpenFile: () -> Void
-    let onCollapse: () -> Void
-    let menuItems: [HomeRowMenuItem]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(entry.text.trimmingCharacters(in: .whitespacesAndNewlines))
-                .font(LibraryTokens.body)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .accessibilityIdentifier("transcripted.dictations.expansion.text")
+            DictationCardBar(
+                entryID: entry.id,
+                metadata: metadata,
+                hasAudio: audioInfo?.isAvailable == true,
+                isCheckingAudio: entry.audioRelativePath != nil && audioInfo == nil,
+                isTranscribingAgain: isTranscribingAgain,
+                showsActions: isHovering || playback.isActive(entry.id),
+                isCopied: isCopied,
+                menuItems: menuItems,
+                playback: playback,
+                onTogglePlayback: onTogglePlayback,
+                onCopy: onCopy
+            )
 
-            Text(metaLine)
-                .font(.system(size: 11.5))
-                .foregroundStyle(LibraryTokens.ink3)
-                .padding(.top, 8)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onCollapse)
-                .help("Collapse dictation")
-
-            HStack(spacing: 16) {
-                quietAction(
-                    title: isCopied ? "Copied" : "Copy",
-                    symbol: isCopied ? "checkmark" : "square.on.square",
-                    tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
-                    action: onCopy
-                )
-                .accessibilityIdentifier("transcripted.dictations.expansion.copy")
-
-                quietAction(
-                    title: "Open file",
-                    symbol: "arrow.down.doc",
-                    tint: LibraryTokens.ink2,
-                    action: onOpenFile
-                )
-                .accessibilityIdentifier("transcripted.dictations.expansion.open")
-
-                Spacer()
-
-                if !menuItems.isEmpty {
-                    HomeRowMoreMenuButton(
-                        items: menuItems,
-                        automationIdentifier: "transcripted.dictations.expansion.more"
-                    )
-                    .frame(width: 24, height: 24)
-                }
+            if !text.isEmpty {
+                bodyText
+                    .padding(.top, 8)
             }
-            .padding(.top, 12)
-            .overlay(alignment: .top) {
-                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+
+            if isLong || isExpanded {
+                showMoreButton
                     .padding(.top, 6)
             }
-
-            // Hidden control so Esc collapses the expansion, matching
-            // QuietMeetingExpansion's escape affordance.
-            Button(action: onCollapse) { EmptyView() }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-                .accessibilityHidden(true)
         }
-        .padding(18)
+        .padding(EdgeInsets(top: 10, leading: 14, bottom: 12, trailing: 14))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        // Swallow taps inside the card so the page-level background tap
-        // catcher (click-away collapse) doesn't fire for clicks on the
-        // expansion's own non-interactive areas — same trick as
-        // `QuietMeetingExpansion`.
-        .onTapGesture {}
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                 .fill(LibraryTokens.raisedFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
+                .stroke(isHovering ? Color.primary.opacity(0.16) : LibraryTokens.raisedStroke, lineWidth: 1)
         )
-        .padding(.vertical, 6)
-        .accessibilityIdentifier("transcripted.dictations.expansion")
+        .padding(.vertical, 4)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+        }
+        .task(id: entry.id) {
+            await onLoadAudioInfo()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("transcripted.dictations.row")
     }
 
-    private var metaLine: String {
-        QuietDictationLibraryFormatting.metaLine(
-            for: entry,
-            time: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt)
-        )
-    }
-
-    private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
-                Text(title)
-                    .font(LibraryTokens.meta)
+    private var bodyText: some View {
+        styledText
+            .lineLimit(isExpanded ? nil : 4)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                if !isExpanded { clampedHeight = height }
             }
-            .foregroundStyle(tint)
+            // An unclamped copy, never shown, says whether four lines cut
+            // anything off.
+            .background(alignment: .topLeading) {
+                styledText
+                    .fixedSize(horizontal: false, vertical: true)
+                    .hidden()
+                    .accessibilityHidden(true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        fullHeight = height
+                    }
+            }
+            .accessibilityIdentifier("transcripted.dictations.row.text")
+    }
+
+    private var styledText: some View {
+        Text(text)
+            .font(.system(size: 13.5).italic())
+            .foregroundStyle(.secondary)
+            .lineSpacing(5)
+    }
+
+    private var showMoreButton: some View {
+        Button {
+            let expanding = !isExpanded
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+                isExpanded = expanding
+            }
+            if expanding { onShowMore() }
+        } label: {
+            HStack(spacing: 3) {
+                Text(isExpanded ? "Show less" : "Show more")
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8.5, weight: .semibold))
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(LibraryTokens.ink3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("transcripted.dictations.row.showMore")
     }
 }
