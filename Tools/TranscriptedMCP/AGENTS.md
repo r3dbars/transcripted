@@ -177,6 +177,7 @@ Local, on-device semantic search complements FTS so paraphrase queries hit (e.g.
 
 - Embeddings come from Apple's `NaturalLanguage` `NLEmbedding.sentenceEmbedding` — **no bundled model, no download, negligible app-size impact**. Backend is pluggable via `EmbeddingProvider`, so a bundled CoreML model can replace it later without touching the store or search path.
 - `EmbeddingStore` embeds new/changed rows after each reconcile (lazily, keyed by `rowid`), re-embeds everything on a model-id/dimension change, and runs a streaming cosine scan with the same speaker/date filters as FTS.
+- Backfill pages at most 100 missing rows by increasing rowid and holds new vectors only for the current batch; later batches reuse `embedding_cache`. Each table pass fixes its upper rowid first, advances past nil-provider results, and checks cancellation between provider calls/batches. Reads are finalized and provider work finishes before short write transactions, so lexical work stays independent. New lexical rows beyond that boundary wait for the next pass.
 - `search` / `search_context` accept `mode`: `hybrid` (default — FTS + semantic fused with reciprocal-rank fusion, a strict superset of FTS recall), `lexical`, or `semantic`.
 - All modes degrade gracefully: if the embedding backend is unavailable (e.g. missing OS language assets), the store is never created and every mode runs lexical-only.
 - NLEmbedding's similarity floor is high, so `semantic` alone is best-effort; `hybrid` is rank-based and stays robust because exact FTS hits anchor precision.
@@ -237,6 +238,7 @@ The in-app Claude Desktop installer copies that helper into:
 - transport is stdio, not HTTP
 - don't switch back to the SDK's `StdioTransport`: 0.12 sets O_NONBLOCK on the client's fds and polls stdin every 10 ms forever (~0.5% of a core and ~200 context switches/s per idle server), and sleeps 10 ms per full pipe on large replies. `BlockingStdioTransport` sleeps in read(2)/poll(2) instead. Running servers keep the old binary until their client restarts.
 - the index dir also holds `mcp_index.embed.lock` (a per-pass cross-process lock around `reconcileEmbeddings`) and an additive `embedding_cache` table (content-keyed vector reuse, 72 h TTL, cleared on model change; old helpers ignore it)
+- embed-lock timeout/open failure defers semantic backfill until a later reconcile; it never runs an unlocked competing pass or unlinks a live lock. Exited holders release the kernel lock automatically. Until its first model reconciliation succeeds, a fresh store keeps semantic queries on the lexical fallback.
 - direct file reads are path-validated and reject traversal or symlink escapes
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
