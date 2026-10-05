@@ -29,6 +29,27 @@ Dictation artifacts live under:
 folder. There is no extra `transcripts/` subdirectory in the current app
 layout.
 
+Kept dictation audio lives in `<capture-library>/dictations/audio/`, one file
+per take named from its session UUID: `<uuid>.m4a`, or `<uuid>.wav` until
+background compression finishes (or if it failed). Files are 0600 in a 0700
+folder. The day file's `Audio:` line stores the path relative to the dictations
+folder (`audio/<uuid>.m4a`), so it survives a library move; Move and Copy carry
+`dictations/audio/*.m4a|*.wav` like the day files (audio named by a day file
+that stays behind on a name collision stays behind with it). Deleting a
+dictation in Home deletes its kept audio once the undo window closes.
+`DictationAudioArchive` (`Sources/Dictation/DictationAudioArchive.swift`) owns
+keep, resolve, compress, and prune. How long audio stays is Settings → Storage →
+Keep dictation audio (`dictation-audio-keep` in `AudioStoragePreferences`:
+Don't keep, 7 days, 30 days (default), Forever); pruning runs at launch and
+when the setting changes, and only touches regular files with those names,
+never symlinks.
+
+Until the transcript saves, a take's audio stays in the private recovery folder
+`~/Library/Application Support/Transcripted/state/dictation-audio-recovery/`
+(app state, not the library). After a successful save it moves into
+`dictations/audio/` when audio is kept, or is deleted when it isn't. A failed
+save leaves it in recovery.
+
 ## Writing
 
 Saved writing lives under:
@@ -94,7 +115,7 @@ App-owned meeting state is stored separately under:
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - queued import journals: `~/Library/Application Support/Transcripted/state/imported_transcription_queue/`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
-- stopped dictation audio: `~/Library/Application Support/Transcripted/state/dictation-audio-recovery/` (a private WAV plus `.json` written when a dictation stops, deleted once its text is saved; a short failed take's WAV is usually dropped with the error, while a take of 30 s or more keeps it behind a Transcribe It button; whatever is left is deleted at the next launch)
+- stopped dictation audio: `~/Library/Application Support/Transcripted/state/dictation-audio-recovery/` (a private WAV plus `.json` written when a dictation stops, deleted once its text is saved; a short failed take's WAV is usually dropped with the error, while a take of 30 s or more keeps it behind a Transcribe It button. At the next launch a leftover under 30 s is deleted; one of 30 s or more, or one whose length can't be read, stays here quietly with nothing asking about it)
 - dictionary-fix backups: `~/Library/Application Support/Transcripted/state/dictionary-fix-backups/` (one folder per "Fix them" from the Corrections list: the original text of each meeting it changed plus a `receipt.json`; kept 3 days so Undo survives a relaunch, pruned at launch, and dropped when the meeting is deleted from Home). Backups follow the meeting's file name, so renaming a fixed meeting drops its Undo at the next launch; the prune is skipped while the meetings folder is missing (for example on an unmounted drive)
 
 Claude Desktop integration installs the bundled read-only MCP helper under:

@@ -4,14 +4,14 @@ import CoreGraphics
 import Foundation
 
 func testPhysicalDictationTriggerPreferences() {
-    runSuite("PhysicalDictationTriggerPreferences defaults to Fn, Right Option, Option-Shift-V, and Option M") {
+    runSuite("PhysicalDictationTriggerPreferences defaults to Right Option, Option-Shift-V, and Option M") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
-            "fresh installs should use Fn for push-to-talk"
+            "fresh installs should use Right Option for the dictation key"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
@@ -30,8 +30,8 @@ func testPhysicalDictationTriggerPreferences() {
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
-            "Fn",
-            "push-to-talk default should display as Fn"
+            "Right ⌥",
+            "the dictation key default should display as Right Option, not Fn (which opens emoji)"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
@@ -275,6 +275,45 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
+    runSuite("One dictation key: a custom hands-free key carries over as Tap to toggle") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
+        PhysicalDictationTriggerPreferences.saveHandsFree(f5, userDefaults: defaults)
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults), f5, "their key becomes the dictation key")
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .tapToToggle, "and it still toggles")
+
+        PhysicalDictationTriggerPreferences.savePushToTalk(PhysicalDictationTriggerPreferences.defaultPushToTalkBinding, userDefaults: defaults)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "it runs once, so a later choice sticks"
+        )
+    }
+
+    runSuite("One dictation key: defaults and a set hold key are left alone") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "a fresh install keeps Fn"
+        )
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "with Hold or tap")
+
+        let (custom, customSuite) = makePhysicalTriggerDefaults()
+        defer { custom.removePersistentDomain(forName: customSuite) }
+        let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
+        PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
+        PhysicalDictationTriggerPreferences.saveHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), userDefaults: custom)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "a chosen hold key wins")
+    }
+
     runSuite("PhysicalDictationTriggerPreferences records modifier-only keys from flagsChanged") {
         let fn = PhysicalDictationTriggerPreferences.bindingForFlagsChanged(
             keyCode: UInt32(kVK_Function),
@@ -493,7 +532,8 @@ func testPhysicalDictationTriggerPreferences() {
         let allowed: [(String, PhysicalDictationTriggerBinding)] = [
             ("default paste-last ⌥⇧V", PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
             ("default meeting ⌥M", PhysicalDictationTriggerPreferences.defaultMeetingBinding),
-            ("default push-to-talk Fn", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("default dictation key Right ⌥", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("Fn", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))),
             ("default hands-free Right ⌥", PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
             ("bare F5", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))),
             ("⌥⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | option)),
@@ -563,12 +603,12 @@ func testPhysicalDictationTriggerPreferences() {
 
     runSuite("PhysicalDictationTriggerPreferences refuses a key another shortcut already uses") {
         let others: [(name: String, binding: PhysicalDictationTriggerBinding)] = [
-            (name: "Push to Talk", binding: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            (name: "Push to Talk", binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))),
             (name: "Meetings", binding: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
         ]
 
         let fnReason = PhysicalDictationTriggerPreferences.duplicateReason(
-            for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            for: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function)),
             otherShortcuts: others
         )
         assertEqual(fnReason, "Fn is already used for Push to Talk. Choose a different key.", "a shared modifier key should name the shortcut that has it")

@@ -22,8 +22,9 @@ import Foundation
 ///    checkpoint retry instead of calling it empty speech.
 /// 7. Otherwise: just say why.
 ///
-/// Nothing here outlives the message: launch deletes any recording left
-/// from an earlier run (`DictationStoppedAudioRecoveryStore.purgeLeftovers`).
+/// Nothing offers a recording after its message closes. Launch deletes a
+/// short one left from an earlier run and keeps a long one on disk quietly
+/// (`DictationStoppedAudioRecoveryStore.purgeLeftovers`).
 enum DictationEmptyTranscriptPolicy {
     enum Action: Equatable {
         case closeLikeCancel

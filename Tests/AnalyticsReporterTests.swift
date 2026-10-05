@@ -13,6 +13,8 @@ func testAnalyticsReporter() {
         fixture.reporter.trackEvent("app_launched", properties: ["email": "private@example.com", "$set": "private words"])
         assertTrue(waitUntil { loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 }, "capture is buffered")
         let capture = loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first!
+        assertEqual(capture.personProperties?["first_observed_at"], first, "correctly named trait preserves historical observed day")
+        assertEqual(capture.personProperties?["observation_basis"], "first_observed_not_install", "backfilled date never claims installation")
         assertEqual(capture.distinctID, existing, "PostHog uses the install UUID")
         assertEqual(capture.personProperties?["analytics_opt_in"], "true", "opted-in trait is present")
         assertNil(capture.personProperties?["email"], "person never has an email")
@@ -62,6 +64,47 @@ func testAnalyticsReporter() {
         fixture.reporter.enqueueUsageDigests(includeCurrentDay: true)
         assertNil(fixture.userDefaults.data(forKey: UsageHealthStore.storageKey), "opt-out clears rollups")
         assertFalse(FileManager.default.fileExists(atPath: fixture.bufferURL.path), "opt-out clears unsent digests and person traits")
+    }
+
+    runSuite("App active day is sent once per local day and stops after opt-out") {
+        let calendar = Calendar.current
+        let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: Date(timeIntervalSince1970: 1_800_000_000))!
+        let clock = AnalyticsTestClock(noon)
+        let fixture = makeAnalyticsReporterFixture(
+            responses: Array(repeating: .networkFailure, count: 8),
+            clock: { clock.now }
+        )
+        defer { fixture.cleanup() }
+        func activeDays() -> [PendingAnalyticsCapture] {
+            fixture.reporter.persistPendingCapturesNow()
+            return loadBufferedAnalyticsCaptures(from: fixture.bufferURL).filter { $0.event == "app_active_day" }
+        }
+
+        fixture.reporter.runMinuteTick()
+        fixture.reporter.runMinuteTick()
+        assertTrue(waitUntil { activeDays().count == 1 }, "two timer ticks on the same day send one event")
+        assertEqual(activeDays().first?.distinctID, InstallIdentity.id(userDefaults: fixture.userDefaults), "event joins the anonymous install")
+
+        clock.now = calendar.date(byAdding: .day, value: 1, to: noon)!
+        fixture.reporter.runMinuteTick()
+        assertTrue(waitUntil { activeDays().count == 2 }, "the next local day sends a second event")
+
+        let storedDay = fixture.userDefaults.string(forKey: AnalyticsReporter.activeDayStorageKey)
+        AnalyticsPreferences.setEnabled(false, userDefaults: fixture.userDefaults)
+        clock.now = calendar.date(byAdding: .day, value: 2, to: noon)!
+        fixture.reporter.trackActiveDayIfNeeded()
+        assertEqual(fixture.userDefaults.string(forKey: AnalyticsReporter.activeDayStorageKey), storedDay, "opted-out days are not recorded")
+    }
+
+    runSuite("Undelivered app active day events outlive the 24-hour retry window") {
+        let store = AnalyticsDeliveryBufferStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("unused-\(UUID().uuidString).json"))
+        let now = Date(timeIntervalSince1970: 10 * 24 * 60 * 60)
+        let threeDaysAgo = now.timeIntervalSince1970 - 3 * 24 * 60 * 60
+        let kept = store.cappedRecords([
+            makePendingAnalyticsCapture(id: "active", event: "app_active_day", enqueuedAt: threeDaysAgo),
+            makePendingAnalyticsCapture(id: "launch", event: "app_launched", enqueuedAt: threeDaysAgo),
+        ], now: now)
+        assertEqual(kept.map(\.id), ["active"], "an offline day's active ping is still retried; ordinary events expire")
     }
 
     runSuite("AnalyticsRuntimeConfiguration prefers Transcripted overrides before legacy Draft") {
@@ -755,6 +798,16 @@ private enum AnalyticsReporterTestResponse {
     case networkFailure
 }
 
+private final class AnalyticsTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date
+    init(_ value: Date) { self.value = value }
+    var now: Date {
+        get { lock.lock(); defer { lock.unlock() }; return value }
+        set { lock.lock(); value = newValue; lock.unlock() }
+    }
+}
+
 private func makeAnalyticsReporterFixture(
     responses: [AnalyticsReporterTestResponse],
     captureHost: String = "https://posthog.example.com",
@@ -764,7 +817,8 @@ private func makeAnalyticsReporterFixture(
     analyticsEnabled: (() -> Bool)? = nil,
     observePreferenceChanges: Bool = false,
     autostart: Bool = true,
-    includeUsageStore: Bool = false
+    includeUsageStore: Bool = false,
+    clock: (() -> Date)? = nil
 ) -> AnalyticsReporterFixture {
     AnalyticsReporterTestURLProtocol.reset(responses: responses)
 
@@ -794,7 +848,7 @@ private func makeAnalyticsReporterFixture(
                 session: session,
                 bufferStore: store,
                 userDefaults: defaults,
-                currentDate: { now },
+                currentDate: clock ?? { now },
                 retryDelay: retryDelay,
                 persistDebounceInterval: persistDebounceInterval,
                 analyticsEnabled: analyticsEnabled,

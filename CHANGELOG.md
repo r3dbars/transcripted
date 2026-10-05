@@ -15,6 +15,13 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Added
+- Dictations now keep their audio for 30 days, so a later update can play a
+  take back or transcribe it again. Change it in Settings → Storage → Keep
+  dictation audio (Don't keep, 7 days, 30 days, Forever); picking a shorter
+  window asks before deleting audio you already have. The text is always kept.
+  Audio lives next to your dictations in `dictations/audio/` as compressed
+  `.m4a` files, each day file entry points at its take with a new `Audio:`
+  line, and moving the capture library brings the audio along.
 - Keyboard shortcuts in the macOS menu bar for the top daily actions: Start
   Dictation (⌘D), Start / Stop Meeting Recording (⌘R), Transcribe Audio File
   (⌘O), jump to Home/Dictations/Speakers/Agent (⌘1–⌘4), and Find Speaker (⌘F,
@@ -25,8 +32,10 @@ force-installed by Sparkle so existing users recover from a regression.
 - Transcripted no longer asks about a failed dictation every time it opens.
   When a dictation under 30 seconds doesn't become text, it just says "Didn't
   catch that. Try again." and the recording is deleted; a longer one still
-  offers Transcribe It right then. Recordings left over from earlier runs are
-  deleted at launch instead of piling up.
+  offers Transcribe It right then. At launch, short recordings left over from
+  earlier runs are deleted instead of piling up; ones 30 seconds or longer
+  (including a long take cut off by Quit or a crash) stay on disk quietly, with
+  no prompt.
 - Dictation and meetings are ready as soon as Transcripted opens. The voice
   model and the meeting speaker models now load quietly in the background at
   launch (and again after a model switch or wake) instead of on first use, so

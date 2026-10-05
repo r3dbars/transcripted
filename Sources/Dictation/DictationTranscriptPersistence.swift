@@ -80,13 +80,13 @@ enum DictationSessionCapSavePolicy {
         case error(String)
     }
 
-    static func presentation(saveFailureMessage: String?, pasteLastShortcut: String) -> Presentation {
+    static func presentation(saveFailureMessage: String?) -> Presentation {
         if let saveFailureMessage {
             return .error(saveFailureMessage)
         }
-        // The menu has no Paste Last row, so name the shortcut that reaches it.
+        // There's no paste-last shortcut any more; Dictations keeps the text.
         return .savedNotice(
-            message: "Saved to Markdown. Paste it now, or press \(pasteLastShortcut) later.",
+            message: "Saved to Markdown. Paste it now, or find it later in Dictations.",
             actionTitle: "Paste It"
         )
     }

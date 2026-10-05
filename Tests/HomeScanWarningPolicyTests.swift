@@ -69,4 +69,22 @@ func testHomeScanWarningPolicy() {
         assertEqual(card.retryTitle, "Retry", "the card must keep a clear Retry target")
         assertEqual(card.revealTitle, "Reveal in Finder", "the card must keep a Reveal-in-Finder target")
     }
+
+    runSuite("The capture scan returns its warning alongside rows without a second diagnosis") {
+        let root = temporaryRoot()
+        defer { try? fm.removeItem(at: root) }
+        let missing = root.appendingPathComponent("missing", isDirectory: true)
+        let damaged = root.appendingPathComponent("file", isDirectory: false)
+        fm.createFile(atPath: damaged.path, contents: Data("not a folder".utf8))
+        for (directory, expected) in [
+            (root, RecentMeetingsScanDiagnosis.ok),
+            (missing, .missingFolder),
+            (damaged, .damagedPath(reason: .notADirectory)),
+        ] {
+            let result = RecentMeetingsScanner.loadRecentWithDiagnosis(limit: 10, directory: directory, cache: nil)
+            assertEqual(result.diagnosis, expected)
+            assertTrue(result.items.isEmpty)
+        }
+    }
+
 }

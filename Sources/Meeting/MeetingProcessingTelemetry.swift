@@ -42,6 +42,26 @@ enum MeetingProcessingTelemetry {
         return properties.merging(machineClass, uniquingKeysWith: { current, _ in current })
     }
 
+    /// Jobs are assigned a random UUID when enqueued. Core retains that UUID
+    /// through failed-save retries and restyling; it is not the Markdown id.
+    /// Recording correlation is valid only for the queued task that owns it.
+    static func savedArtifactIdentityProperties(
+        savedTaskID: UUID?,
+        queuedTaskID: UUID?,
+        captureDiagnostics: [String: String]?
+    ) -> [String: String] {
+        guard let savedTaskID else { return [:] }
+        var properties = ["save_id": savedTaskID.uuidString]
+        guard savedTaskID == queuedTaskID else { return properties }
+        if let correlationID = captureDiagnostics?["correlation_id"].flatMap(UUID.init(uuidString:)) {
+            properties["correlation_id"] = correlationID.uuidString
+        }
+        if let sessionID = captureDiagnostics?["session_id"].flatMap(UUID.init(uuidString:)) {
+            properties["session_id"] = sessionID.uuidString
+        }
+        return properties
+    }
+
     private static func milliseconds(_ seconds: Double) -> String {
         guard seconds.isFinite else { return "0" }
         return MachineClassTelemetry.roundedMilliseconds(Int((seconds * 1_000).rounded()))

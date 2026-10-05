@@ -6,11 +6,15 @@ final class FileWatcher: @unchecked Sendable {
     private var pendingScan: DispatchWorkItem?
     private let directory: URL
     private let onChange: () -> Void
+    /// Runs on every timer tick after the change scan, even when nothing
+    /// changed, for retries that must not wait for a file write.
+    private let onPeriodicTick: (() -> Void)?
     private var knownModTimes: [String: TimeInterval] = [:]
     private let watchQueue = DispatchQueue(label: "com.transcripted.mcp.watcher", qos: .utility)
 
-    init(directory: URL, onChange: @escaping () -> Void) {
+    init(directory: URL, onPeriodicTick: (() -> Void)? = nil, onChange: @escaping () -> Void) {
         self.directory = directory
+        self.onPeriodicTick = onPeriodicTick
         self.onChange = onChange
     }
 
@@ -58,10 +62,15 @@ final class FileWatcher: @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: watchQueue)
         timer.schedule(deadline: .now() + 300, repeating: 300) // 5 minutes
         timer.setEventHandler { [weak self] in
-            self?.scanForChanges()
+            self?.periodicTick()
         }
         timer.resume()
         self.timer = timer
+    }
+
+    func periodicTick() {
+        scanForChanges()
+        onPeriodicTick?()
     }
 
     func scanForChanges() {

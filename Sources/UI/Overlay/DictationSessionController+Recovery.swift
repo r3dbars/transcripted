@@ -4,10 +4,11 @@
 import AppKit
 
 extension DictationSessionController {
-    /// Launch: delete dictation audio left from an earlier run. A saved
-    /// recording is only offered while its own take's message is up, so
-    /// anything older is private audio nobody will ask for. Runs off the main
-    /// actor; files written after this call (this run's takes) are kept.
+    /// Launch: delete short dictation audio left from an earlier run. A saved
+    /// recording is only offered while its own take's message is up, so a
+    /// short leftover is private audio nobody will ask for. One of 30 s or
+    /// more stays on disk with no prompt. Runs off the main actor; files
+    /// written after this call (this run's takes) are kept.
     /// Skipped for a second copy run with the single-instance guard off: the
     /// first copy may be offering one of these files right now.
     func purgeLeftoverStoppedAudio() {
@@ -23,7 +24,7 @@ extension DictationSessionController {
         Task { @MainActor in
             let removed = await purge.value
             guard removed > 0 else { return }
-            logger?.log("DICTATION | removed \(removed) saved recording(s) left from an earlier run")
+            logger?.log("DICTATION | removed \(removed) short saved recording(s) left from an earlier run")
         }
     }
 

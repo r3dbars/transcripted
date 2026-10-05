@@ -339,13 +339,13 @@ final class EmbeddingCacheTests: XCTestCase {
         XCTAssertEqual(try semanticDictationTexts(index, query: newText).first, newText)
     }
 
-    func testStoppedLockHolderDoesNotBlockTheEmbeddingPassForever() throws {
+    func testContendedLockDefersEmbeddingAndNextPassRecovers() throws {
         let provider = HashingCountingProvider()
         let index = try TranscriptIndex(indexDir: indexDir)
         let store = try EmbeddingStore(
             dbPath: indexDir.appendingPathComponent("mcp_index.sqlite"),
             provider: provider,
-            embedLockTimeout: 0.3
+            embedLockTimeout: 0
         )
         try writeDictationDay(baseTexts, bump: 0)
         try index.reconcile(meetingsDir: library, dictationsDir: library, updateEmbeddings: false)
@@ -356,18 +356,75 @@ final class EmbeddingCacheTests: XCTestCase {
         let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         XCTAssertGreaterThanOrEqual(lockFD, 0)
         XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
-        defer {
-            flock(lockFD, LOCK_UN)
-            close(lockFD)
-        }
+        defer { close(lockFD) }
 
-        let passDone = expectation(description: "embedding pass gave up waiting and ran unlocked")
-        DispatchQueue.global(qos: .utility).async {
-            store.reconcileEmbeddings()
-            passDone.fulfill()
+        store.reconcileEmbeddings()
+        XCTAssertEqual(provider.embedCalls, 0, "a timeout must not duplicate the live holder's work")
+        XCTAssertNil(store.semanticSearchDictationEntriesIfAvailable(query: baseTexts[0], dateFrom: nil, dateTo: nil),
+                     "a deferred first pass has not validated the stored model identity")
+        let lexical = try index.searchContext(query: "legal", speaker: nil, kind: .dictation,
+                                             dateFrom: nil, dateTo: nil, maxItems: 20, mode: .lexical)
+        XCTAssertFalse(lexical.results.isEmpty)
+
+        flock(lockFD, LOCK_UN)
+        store.reconcileEmbeddings()
+        XCTAssertEqual(provider.embedCalls, baseTexts.count, "releasing the holder permits a later pass")
+        assertEveryRowCarriesProviderVector(provider)
+    }
+
+    func testDeferredStartupPassReconcilesOnQuietTimerTickOnceLockFrees() throws {
+        let provider = HashingCountingProvider()
+        let index = try TranscriptIndex(indexDir: indexDir)
+        let store = try EmbeddingStore(
+            dbPath: indexDir.appendingPathComponent("mcp_index.sqlite"),
+            provider: provider,
+            embedLockTimeout: 0
+        )
+        try writeDictationDay(baseTexts, bump: 0)
+        try index.reconcile(meetingsDir: library, dictationsDir: library, updateEmbeddings: false)
+
+        var changeCount = 0
+        let watcher = FileWatcher(
+            directory: library,
+            onPeriodicTick: { store.reconcileEmbeddingsIfModelPending() }
+        ) {
+            changeCount += 1
         }
-        wait(for: [passDone], timeout: 10)
-        XCTAssertEqual(provider.embedCalls, baseTexts.count, "the unlocked pass still embedded every new row")
+        watcher.scanForChanges()
+        XCTAssertEqual(changeCount, 1, "first scan records the library as it is")
+
+        // Another server holds the embed lock through this server's startup pass.
+        let lockPath = indexDir.appendingPathComponent("mcp_index.embed.lock").path
+        let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        XCTAssertGreaterThanOrEqual(lockFD, 0)
+        XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
+        defer { close(lockFD) }
+
+        store.deferSemanticSearchUntilReconciled()
+        store.reconcileEmbeddings()
+        store.finishDeferredStartupReconciliation()
+        XCTAssertTrue(store.needsModelReconciliation)
+        XCTAssertNil(store.semanticSearchDictationEntriesIfAvailable(query: baseTexts[0], dateFrom: nil, dateTo: nil))
+
+        // A tick while the lock is still held defers again without embedding.
+        watcher.periodicTick()
+        XCTAssertEqual(provider.embedCalls, 0, "a held lock must not duplicate the holder's work")
+        XCTAssertTrue(store.needsModelReconciliation)
+
+        // The holder finishes; nothing on disk changed, yet the next tick recovers.
+        flock(lockFD, LOCK_UN)
+        watcher.periodicTick()
+        XCTAssertEqual(changeCount, 1, "the library stayed quiet")
+        XCTAssertFalse(store.needsModelReconciliation)
+        XCTAssertEqual(provider.embedCalls, baseTexts.count)
+        let semantic = store.semanticSearchDictationEntriesIfAvailable(query: baseTexts[0], dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(semantic?.first?.snippets.first?.text, baseTexts[0])
+
+        // Once reconciled, later ticks are no-ops. (The search above embedded
+        // its query through the same provider, so count from here.)
+        let callsAfterSearch = provider.embedCalls
+        watcher.periodicTick()
+        XCTAssertEqual(provider.embedCalls, callsAfterSearch)
     }
 
     // MARK: - TTL garbage collection

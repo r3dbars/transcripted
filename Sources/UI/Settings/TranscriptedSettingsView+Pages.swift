@@ -34,7 +34,7 @@ extension TranscriptedSettingsView {
         return HStack(spacing: 4) {
             Button {
                 trackSettingsAction("open_settings_area", page: navigation.selectedPage)
-                navigation.selectedPage = .general
+                navigation.select(.general, source: .sidebar)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12, weight: .medium))
@@ -166,7 +166,7 @@ extension TranscriptedSettingsView {
                 page: page,
                 isSelected: navigation.selectedPage == page
             ) {
-                navigation.selectedPage = page
+                navigation.select(page, source: .sidebar)
             }
         }
     }
@@ -225,12 +225,12 @@ extension TranscriptedSettingsView {
                     case .meeting:
                         trackSettingsAction("today_open_recent_meeting", page: .today)
                         if let transcriptURL = item.transcriptURL {
-                            navigation.selectedPage = .home
+                            navigation.select(.home, source: .settingsAction)
                             navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
                         }
                     case .dictation:
                         trackSettingsAction("today_open_recent_dictation", page: .today)
-                        navigation.selectedPage = .dictations
+                        navigation.select(.dictations, source: .settingsAction)
                     case .writing:
                         // No Writing page on main yet: open the day's file.
                         if let dayFile = item.transcriptURL {
@@ -240,11 +240,11 @@ extension TranscriptedSettingsView {
                 },
                 onShowMeetings: {
                     trackSettingsAction("today_show_meetings", page: .today)
-                    navigation.selectedPage = .home
+                    navigation.select(.home, source: .settingsAction)
                 },
                 onShowDictations: {
                     trackSettingsAction("today_show_dictations", page: .today)
-                    navigation.selectedPage = .dictations
+                    navigation.select(.dictations, source: .settingsAction)
                 },
                 onStartMeeting: {
                     trackSettingsAction("empty_start_meeting", page: .today)
@@ -486,7 +486,8 @@ extension TranscriptedSettingsView {
                 let didOpen = openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound,
+                    onComplete: { ProductUsageTelemetry.trackResult(kind: .dictation, action: .openMarkdown, surface: .dictations, succeeded: $0, artifactDate: entry.createdAt) }
                 )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .dictation,
@@ -538,6 +539,8 @@ extension TranscriptedSettingsView {
                     refreshRecentCaptures(force: true)
                 },
                 finalize: {
+                    // The delete is permanent now, so its kept audio goes too.
+                    DictationAudioArchive.deleteKeptAudio(for: entry)
                     refreshRecentCaptures(force: true)
                 }
             )
@@ -556,16 +559,16 @@ extension TranscriptedSettingsView {
             // Failed meetings live inline in the day list now; the link just
             // makes sure the user is on Home where those rows are.
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
-            navigation.selectedPage = .home
+            navigation.select(.home, source: .settingsAction)
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
-            navigation.selectedPage = .general
+            navigation.select(.general, source: .settingsAction)
             settingsScrollTargetID = "transcripted.settings.section.permissions"
         case .models:
             trackSettingsAction("open_needs_attention_models", page: .home)
-            navigation.selectedPage = .general
+            navigation.select(.general, source: .settingsAction)
             settingsScrollTargetID = "transcripted.settings.section.transcription"
         }
     }
@@ -574,7 +577,7 @@ extension TranscriptedSettingsView {
         trackSettingsAction(actionName, page: navigation.selectedPage)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        navigation.selectedPage = .people
+        navigation.select(.people, source: .settingsAction)
         requestSpeakerInboxFocus()
     }
 
@@ -599,6 +602,7 @@ extension TranscriptedSettingsView {
             captureLibraryChoicePromptBinding: captureLibraryChoicePromptBinding,
             pendingCaptureLibraryChoice: pendingCaptureLibraryChoice,
             audioRetentionWindow: audioRetentionWindow,
+            dictationAudioKeepWindow: dictationAudioKeepWindow,
             modelCacheSnapshot: modelCacheSnapshot,
             modelCacheLoading: modelCacheLoading,
             modelCacheCleanupInProgress: modelCacheCleanupInProgress,
@@ -635,6 +639,9 @@ extension TranscriptedSettingsView {
             },
             onApplyAudioRetentionWindow: { window in
                 applyAudioRetentionWindow(window)
+            },
+            onApplyDictationAudioKeepWindow: { window in
+                applyDictationAudioKeepWindow(window)
             },
             failureDetailsButton: { details in
                 settingsFailureDetailsButton(details)

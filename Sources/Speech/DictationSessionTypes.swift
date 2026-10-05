@@ -74,6 +74,19 @@ final class DictationSession: ObservableObject {
         let recoveryStartAttempts: Int
         let forcedReadinessRecoveries: Int
         let cleanupPlan: DictationRecordingStartFailureCleanupPlan
+        // Capture before failed-start cleanup invalidates the graph's format
+        // and a subsequent device refresh can replace the route diagnostics.
+        let inputFormatReady: Bool
+        let routeContext: [String: String]
+
+        var message: String {
+            DictationMicrophoneTimeoutPresentationPolicy.message(
+                deviceName: "",
+                startAttempts: startAttempts,
+                inputFormatReady: inputFormatReady,
+                routeContext: routeContext
+            )
+        }
     }
 
     /// Outcome of `waitForModelAndStart`. `.aborted` mirrors the original

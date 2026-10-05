@@ -22,13 +22,15 @@ final class EmbeddingStore: @unchecked Sendable {
     private let admissionCondition = NSCondition()
     private var deferredStartupReconciliation = false
     private var reconciliationActive = false
+    // A first pass deferred by the embed lock must not search old-model vectors.
+    private var hasReconciledModel = false
     private var activeSemanticSearches = 0
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let provider: EmbeddingProvider
     private let dbPath: URL
     private let embedLockPath: URL
-    /// How long a pass waits for another server's embed lock before running
-    /// unlocked. Bounded so a stopped (SIGTSTP) holder can't stall it forever.
+    /// A contended pass defers after this interval; it never duplicates a live
+    /// holder's work. The next reconcile retries, and process exit releases flock.
     private let embedLockTimeout: TimeInterval
     /// Mixed into every `embedding_cache` key so vectors from a different model,
     /// dimension or OS model revision are never reused.
@@ -38,6 +40,13 @@ final class EmbeddingStore: @unchecked Sendable {
     /// A cache hit only rewrites `last_used` when it is at least this stale, so
     /// a steady stream of hits doesn't turn into a stream of writes.
     private let cacheTouchInterval: TimeInterval = 60 * 60
+    struct BackfillBatchMetrics: Sendable {
+        let rowCount: Int
+        let newVectorCount: Int
+        let cachedVectorCount: Int
+    }
+    private let onBackfillBatch: (@Sendable (BackfillBatchMetrics) -> Void)?
+    private let backfillBatchSize = 100
 
     /// Minimum cosine similarity for a row to count as a semantic match.
     /// NLEmbedding sentence vectors have a fairly high similarity floor (even
@@ -55,7 +64,8 @@ final class EmbeddingStore: @unchecked Sendable {
         provider: EmbeddingProvider,
         cacheTTL: TimeInterval = 72 * 60 * 60,
         embedLockTimeout: TimeInterval = 30,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        onBackfillBatch: (@Sendable (BackfillBatchMetrics) -> Void)? = nil
     ) throws {
         self.dbPath = dbPath
         self.embedLockTimeout = embedLockTimeout
@@ -65,6 +75,7 @@ final class EmbeddingStore: @unchecked Sendable {
         self.cacheNamespace = Data(Self.cacheNamespace(for: provider).utf8)
         self.cacheTTL = cacheTTL
         self.now = now
+        self.onBackfillBatch = onBackfillBatch
         try queue.sync {
             if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
                 throw MCPIndexError.databaseOpenFailed(dbErrorLocked())
@@ -139,8 +150,8 @@ final class EmbeddingStore: @unchecked Sendable {
     /// Embed any indexed rows that don't yet have a vector, drop orphaned
     /// vectors, and re-embed everything if the model identity changed. Safe to
     /// call after every lexical reconcile; it only does work for new/changed rows.
-    func reconcileEmbeddings() {
-        guard provider.isAvailable else { return }
+    func reconcileEmbeddings(isCancelled: () -> Bool = { Task.isCancelled }) {
+        guard provider.isAvailable, !isCancelled() else { return }
 
         // Every MCP client runs its own server on this index. Serialize the
         // embedding pass across them so one server embeds a new row and the rest
@@ -148,15 +159,18 @@ final class EmbeddingStore: @unchecked Sendable {
         // `reconciliationActive` is set, so semantic search keeps answering here
         // while another process embeds. Never taken while holding the lexical
         // reconcile lock (TranscriptIndex.reconcile releases it first). If the
-        // lock file can't be opened, or the holder doesn't let go within
-        // `embedLockTimeout` (a stopped process), run unlocked as before.
-        let embedLockDescriptor = Self.acquireEmbedLock(at: embedLockPath, timeout: embedLockTimeout)
+        // lock can't be acquired, leave semantic backfill for the next pass;
+        // lexical reads and writes remain available. Never unlink a live lock.
+        guard let embedLockDescriptor = Self.acquireEmbedLock(
+            at: embedLockPath, timeout: embedLockTimeout, isCancelled: isCancelled
+        ) else { return }
         defer { Self.releaseEmbedLock(embedLockDescriptor) }
 
         admissionCondition.lock()
         while reconciliationActive {
             admissionCondition.wait()
         }
+        guard !isCancelled() else { admissionCondition.unlock(); return }
         reconciliationActive = true
         while activeSemanticSearches > 0 {
             admissionCondition.wait()
@@ -170,42 +184,51 @@ final class EmbeddingStore: @unchecked Sendable {
             admissionCondition.unlock()
         }
         queue.sync {
+            guard !isCancelled() else { return }
             invalidateOnModelChangeLocked()
+            admissionCondition.lock()
+            hasReconciledModel = true
+            admissionCondition.unlock()
             // Drop vectors whose backing rows are gone (reindex churns rowids).
             execLocked("DELETE FROM utterance_vectors WHERE rowid NOT IN (SELECT rowid FROM utterances)")
             execLocked("DELETE FROM dictation_entry_vectors WHERE rowid NOT IN (SELECT rowid FROM dictation_entries)")
 
-            embedMissingLocked(
-                selectSQL: """
-                    SELECT u.rowid, u.text FROM utterances u
-                    LEFT JOIN utterance_vectors v ON v.rowid = u.rowid
-                    WHERE v.rowid IS NULL
-                """,
-                insertSQL: "INSERT OR REPLACE INTO utterance_vectors (rowid, vec) VALUES (?, ?)"
-            )
-            embedMissingLocked(
-                selectSQL: """
-                    SELECT e.rowid, e.text FROM dictation_entries e
-                    LEFT JOIN dictation_entry_vectors v ON v.rowid = e.rowid
-                    WHERE v.rowid IS NULL
-                """,
-                insertSQL: "INSERT OR REPLACE INTO dictation_entry_vectors (rowid, vec) VALUES (?, ?)"
-            )
-            pruneEmbeddingCacheLocked()
+            embedMissingLocked(table: "utterances", vectors: "utterance_vectors", isCancelled: isCancelled)
+            embedMissingLocked(table: "dictation_entries", vectors: "dictation_entry_vectors", isCancelled: isCancelled)
+            if !isCancelled() { pruneEmbeddingCacheLocked() }
         }
+    }
+
+    /// True while no pass has validated the stored model yet (the first one was
+    /// deferred by the embed lock, a lock-open failure, or cancellation).
+    /// Semantic search stays lexical-only until then.
+    var needsModelReconciliation: Bool {
+        admissionCondition.lock()
+        defer { admissionCondition.unlock() }
+        return provider.isAvailable && !hasReconciledModel
+    }
+
+    /// Periodic retry for a deferred first pass. A quiet library never trips the
+    /// watcher's change scan, so without this a deferred server would stay
+    /// lexical-only. No-op once a pass has reconciled; a still-held lock defers
+    /// again instead of duplicating the holder's work.
+    func reconcileEmbeddingsIfModelPending(isCancelled: () -> Bool = { Task.isCancelled }) {
+        guard needsModelReconciliation else { return }
+        reconcileEmbeddings(isCancelled: isCancelled)
     }
 
     // MARK: - Cross-process embed lock
 
     /// Polls a non-blocking lock about every 100 ms until `timeout`. EINTR
     /// retries; any other error, or the deadline, closes the descriptor and
-    /// returns nil so the caller runs unlocked.
-    private static func acquireEmbedLock(at lockPath: URL, timeout: TimeInterval) -> Int32? {
+    /// returns nil so the caller defers the pass. Cancellation is cooperative.
+    private static func acquireEmbedLock(at lockPath: URL, timeout: TimeInterval, isCancelled: () -> Bool) -> Int32? {
         let descriptor = open(lockPath.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { return nil }
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
         while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
             let failure = errno
+            if isCancelled() { close(descriptor); return nil }
             if failure == EINTR { continue }
             guard failure == EWOULDBLOCK, DispatchTime.now().uptimeNanoseconds < deadline else {
                 close(descriptor)
@@ -317,28 +340,52 @@ final class EmbeddingStore: @unchecked Sendable {
         sqlite3_finalize(upsert)
     }
 
-    private func embedMissingLocked(selectSQL: String, insertSQL: String) {
-        // Collect (rowid, text) first so the read cursor isn't open while we write.
-        var pending: [(rowid: Int64, text: String)] = []
-        var selectStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK {
+    private func embedMissingLocked(table: String, vectors: String, isCancelled: () -> Bool) {
+        guard !isCancelled() else { return }
+        // Lexical rowids are AUTOINCREMENT. Freeze the upper bound so imports
+        // arriving during a pass are left for the next reconcile.
+        var boundStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT MAX(rowid) FROM \(table)", -1, &boundStmt, nil) == SQLITE_OK else {
+            sqlite3_finalize(boundStmt)
+            return
+        }
+        let upperBound = sqlite3_step(boundStmt) == SQLITE_ROW ? sqlite3_column_int64(boundStmt, 0) : 0
+        sqlite3_finalize(boundStmt)
+        var lastRowID: Int64 = 0
+        let selectSQL = """
+            SELECT t.rowid, t.text FROM \(table) t
+            LEFT JOIN \(vectors) v ON v.rowid = t.rowid
+            WHERE v.rowid IS NULL AND t.rowid > ? AND t.rowid <= ?
+            ORDER BY t.rowid LIMIT ?
+            """
+        let insertSQL = """
+            INSERT OR REPLACE INTO \(vectors) (rowid, vec)
+            SELECT ?, ? WHERE EXISTS (SELECT 1 FROM \(table) WHERE rowid = ?)
+            """
+        var inserted = 0
+        var providerEmbedded = 0
+        while lastRowID < upperBound, !isCancelled() {
+            // Finalize the bounded read before provider calls or writes. Nothing
+            // retains previous pages' strings or vectors; later reuse is on disk.
+            var batch: [(rowid: Int64, text: String, key: Data)] = []
+            var selectStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(selectStmt)
+                break
+            }
+            sqlite3_bind_int64(selectStmt, 1, lastRowID)
+            sqlite3_bind_int64(selectStmt, 2, upperBound)
+            sqlite3_bind_int(selectStmt, 3, Int32(backfillBatchSize))
             while sqlite3_step(selectStmt) == SQLITE_ROW {
                 let rowid = sqlite3_column_int64(selectStmt, 0)
                 let text = sqlite3_column_text(selectStmt, 1).map { String(cString: $0) } ?? ""
-                pending.append((rowid, text))
+                batch.append((rowid, text, cacheKey(for: text)))
             }
-        }
-        sqlite3_finalize(selectStmt)
-        guard !pending.isEmpty else { return }
-
-        var inserted = 0
-        var providerEmbedded = 0
-        var embeddedThisPass: [Data: Data] = [:]
-        for batchStart in stride(from: 0, to: pending.count, by: 100) {
-            let batchEnd = min(batchStart + 100, pending.count)
-            let batch = pending[batchStart..<batchEnd].map { item in
-                (rowid: item.rowid, text: item.text, key: cacheKey(for: item.text))
-            }
+            sqlite3_finalize(selectStmt)
+            guard let finalRow = batch.last else { break }
+            // Advance even when every provider result is nil or every write fails.
+            lastRowID = finalRow.rowid
+            var embeddedThisBatch: [Data: Data] = [:]
             let cached = lookupCachedVectorsLocked(batch.map { $0.key })
             let timestamp = nowSeconds()
             let staleBefore = timestamp - Int64(cacheTouchInterval)
@@ -346,21 +393,22 @@ final class EmbeddingStore: @unchecked Sendable {
             // Vector computation is the slow part and happens before the
             // transaction, so lexical watcher updates can continue while a large
             // semantic backlog is processed. Cache hits and texts already
-            // embedded earlier in this pass skip the provider entirely.
+            // embedded earlier in this batch skip the provider entirely.
             var rows: [(rowid: Int64, blob: Data)] = []
             var newCacheRows: [(key: Data, blob: Data)] = []
             var touchedKeys: Set<Data> = []
             for item in batch {
+                guard !isCancelled() else { return }
                 if let hit = cached[item.key] {
                     rows.append((item.rowid, hit.vec))
                     if hit.lastUsed < staleBefore { touchedKeys.insert(item.key) }
-                } else if let blob = embeddedThisPass[item.key] {
+                } else if let blob = embeddedThisBatch[item.key] {
                     rows.append((item.rowid, blob))
                 } else if let vector = provider.embed(item.text) {
                     providerEmbedded += 1
                     let blob = VectorMath.blob(from: vector)
                     rows.append((item.rowid, blob))
-                    embeddedThisPass[item.key] = blob
+                    embeddedThisBatch[item.key] = blob
                     // Never cache a vector of the wrong size; lookups would
                     // reject it anyway.
                     if blob.count == provider.dimension * MemoryLayout<Float>.stride {
@@ -368,18 +416,26 @@ final class EmbeddingStore: @unchecked Sendable {
                     }
                 }
             }
+            guard !isCancelled() else { return }
+            onBackfillBatch?(BackfillBatchMetrics(
+                rowCount: batch.count, newVectorCount: embeddedThisBatch.count, cachedVectorCount: cached.count
+            ))
             guard !rows.isEmpty else { continue }
 
             // Keep the database write lock short.
-            sqlite3_exec(db, "BEGIN", nil, nil, nil)
+            guard sqlite3_exec(db, "BEGIN", nil, nil, nil) == SQLITE_OK else { return }
             for (rowid, blob) in rows {
                 var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else { continue }
+                guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else {
+                    sqlite3_finalize(stmt)
+                    continue
+                }
                 sqlite3_bind_int64(stmt, 1, rowid)
                 _ = blob.withUnsafeBytes { raw in
                     sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(blob.count), SQLITE_TRANSIENT)
                 }
-                if sqlite3_step(stmt) == SQLITE_DONE { inserted += 1 }
+                sqlite3_bind_int64(stmt, 3, rowid)
+                if sqlite3_step(stmt) == SQLITE_DONE { inserted += Int(sqlite3_changes(db)) }
                 sqlite3_finalize(stmt)
             }
             for (key, blob) in newCacheRows {
@@ -398,7 +454,10 @@ final class EmbeddingStore: @unchecked Sendable {
                     timestamp: timestamp
                 )
             }
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if sqlite3_exec(db, "COMMIT", nil, nil, nil) != SQLITE_OK {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return
+            }
         }
         if inserted > 0 {
             // count_bucket is rows the provider had to embed; reused_bucket is
@@ -438,6 +497,7 @@ final class EmbeddingStore: @unchecked Sendable {
     private func withSemanticSearchAdmission<T>(_ body: () -> T) -> T? {
         admissionCondition.lock()
         guard provider.isAvailable,
+              hasReconciledModel,
               !deferredStartupReconciliation,
               !reconciliationActive else {
             admissionCondition.unlock()

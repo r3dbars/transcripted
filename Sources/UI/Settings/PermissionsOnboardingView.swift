@@ -106,6 +106,8 @@ struct PermissionsOnboardingView: View {
         .onAppear {
             if flowStartedAt == nil {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
+                RetentionTelemetry.observeOnboarding(previouslyCompleted:
+                    UserDefaults.standard.bool(forKey: PermissionsOnboardingPreferences.completionKey))
             }
             checkAllPermissions(trackChanges: false)
             trackCurrentStepViewed()
@@ -186,11 +188,11 @@ struct PermissionsOnboardingView: View {
     private static var dictationShortcutDisplay: String? {
         guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
         return PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
     }
 
-    /// Fn is the default push-to-talk key, and on a Mac where the macOS Fn
+    /// If someone picked Fn as the dictation key, on a Mac where the macOS Fn
     /// setting was never changed it also opens emoji or switches input. Say
     /// so here, so the menu bar's warning isn't the first people hear of it.
     private static var functionKeyWarning: String? {
@@ -226,7 +228,6 @@ struct PermissionsOnboardingView: View {
             currentStepIndex += 1
         }
     }
-
     private func skipMicrophone() {
         guard navigation.canSkipMicrophone else { return }
         AnalyticsReporter.track(
@@ -242,7 +243,6 @@ struct PermissionsOnboardingView: View {
         skippedMicrophone = true
         goNext()
     }
-
     private func goNextOrComplete() {
         guard !primaryButtonDisabled else { return }
         trackPrimaryCTAClicked()
@@ -280,22 +280,22 @@ struct PermissionsOnboardingView: View {
         systemAudioRequestTask?.cancel()
         systemAudioRequestTask = nil
     }
-
     private func completeOnboarding() {
         guard canFinishSetup else { return }
         stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
     }
-
     private func trackCompletionIfNeeded() {
         guard !didTrackCompletion else { return }
         didTrackCompletion = true
-
+        RetentionTelemetry.completeOnboarding()
         AnalyticsReporter.track(
             "onboarding_completed",
             properties: FirstRunExperience.onboardingCompletionAnalyticsProperties(
                 completionPath: .meetings,
+                microphoneGranted: micGranted,
+                microphoneSkipped: skippedMicrophone,
                 systemAudioGranted: systemAudioGranted,
                 calendarGranted: calendarGranted,
                 meetingPromptsEnabled: true,
@@ -907,7 +907,7 @@ private struct DoneStage: View {
                 ShortcutRow(
                     label: "Dictate",
                     shortcut: dictationShortcutDisplay,
-                    detail: "Tap to start, tap again to stop and paste."
+                    detail: HotkeyPreferences.dictationKeyBehavior().summary
                 )
                 Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
             }

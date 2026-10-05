@@ -24,6 +24,8 @@ struct TranscriptedSettingsView: View {
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
     @State var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+    @State var dictationKeyBehavior = HotkeyPreferences.dictationKeyBehavior()
+    @StateObject var shortcutRecorder = ShortcutRecorderModel()
     @State var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State var launchAtLogin = LaunchAtLoginController.currentState
     @State var launchAtLoginReadGeneration = 0
@@ -83,6 +85,7 @@ struct TranscriptedSettingsView: View {
     @State var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
+    @State var dictationAudioKeepWindow = AudioStoragePreferences.dictationAudioKeepWindow()
     @StateObject var homeViewModel = HomeViewModel()
     @ObservedObject var todayViewModel: TodayViewModel
     @State var homeCopiedRowID: String?
@@ -204,6 +207,7 @@ struct TranscriptedSettingsView: View {
                 discoveredPage: navigation.presentedPage
             )
         }
+        .onChange(of: navigation.isWindowOpen) { _, _ in updateLibraryVisibility() }
         .onChange(of: navigation.selectedPage) { oldPage, page in
             if oldPage == .people && page != .people {
                 SpeakerClipPlayback.stop()
@@ -223,13 +227,13 @@ struct TranscriptedSettingsView: View {
             )
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
             if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
                 speakerPeopleModel.refresh()
             }
         }
         .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
             speakerPeopleModel.refresh()
         }
         .onReceive(meetingSession.$artifactRecoveryAlert) { alert in
@@ -237,7 +241,7 @@ struct TranscriptedSettingsView: View {
             handleMeetingArtifactRecoveryAlert(alert)
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -293,23 +297,20 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction("copy_dictation", page: .home)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(entry.text, forType: .string)
-        flashCopied(rowID: entry.id)
+        let copied = ProductUsageTelemetry.copy(kind: .dictation, surface: .dictations, artifactDate: entry.createdAt) {
+            pasteboard.setString(entry.text, forType: .string)
+        }
+        if copied { flashCopied(rowID: entry.id) }
     }
 
     func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
-        // Resolution + the transcript read (and bundle assembly) touch disk and
-        // can be sizeable for long meetings, so do them off the main thread and
-        // hop back only to write the clipboard / update UI state.
+        // Read and assemble off main; write the clipboard on main.
         Task { @MainActor in
             let result = await Self.loadCopyMeetingText(for: item)
             switch result {
             case .missingFile:
-                // Resolution failed so a row whose path drifted (restyle/rename
-                // after scanning) still copies, and a genuinely missing file
-                // surfaces an error instead of silently no-op'ing on the empty
-                // clipboard.
+                ProductUsageTelemetry.trackResult(kind: .meeting, action: .copy, surface: .meetings, succeeded: false, artifactDate: item.date)
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .whatDidIPromise,
                     surface: .homeRow,
@@ -333,6 +334,7 @@ struct TranscriptedSettingsView: View {
                     }
                 )
             case .readFailure:
+                ProductUsageTelemetry.trackResult(kind: .meeting, action: .copy, surface: .meetings, succeeded: false, artifactDate: item.date)
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .whatDidIPromise,
                     surface: .homeRow,
@@ -358,22 +360,25 @@ struct TranscriptedSettingsView: View {
             case .success(let text, let usedBundle):
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
+                let copied = ProductUsageTelemetry.copy(kind: .meeting, surface: .meetings, artifactDate: item.date) {
+                    pasteboard.setString(text, forType: .string)
+                }
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .whatDidIPromise,
                     surface: .homeRow,
                     artifactKind: .meeting,
-                    artifactDate: item.date
+                    artifactDate: item.date,
+                    result: copied ? .success : .failed
                 )
                 ActivationTelemetry.trackAgentPromptAction(
                     promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
                     actionKind: .copied,
                     agentTarget: .localAgent,
                     surface: .homeRow,
-                    result: usedBundle ? .success : .fallbackCopied,
+                    result: copied ? (usedBundle ? .success : .fallbackCopied) : .failed,
                     artifactKind: .meeting
                 )
-                flashCopied(rowID: item.id)
+                if copied { flashCopied(rowID: item.id) }
             }
         }
     }
@@ -390,10 +395,7 @@ struct TranscriptedSettingsView: View {
             return
         }
 
-        // The recorded input paths can drift after scanning (a plain move keeps
-        // the extension; the resolver re-finds it). The system track is required,
-        // so a missing/unresolvable one surfaces an error instead of a silent
-        // beep; the optional mic track is resolved when present.
+        // Re-resolve paths that may have moved since scanning.
         let micURL = input.micURL.flatMap { OwnFileResolver.resolveExistingFile(candidateURLs: [$0]) }
         guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
@@ -446,6 +448,7 @@ struct TranscriptedSettingsView: View {
             switch readResult {
             case .success(let markdown, let content):
                 homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown, content: content)
+                ProductUsageTelemetry.trackResult(kind: .meeting, action: .preview, surface: .meetings, succeeded: true, artifactDate: item.date)
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
                     actionKind: .preview,
@@ -461,6 +464,7 @@ struct TranscriptedSettingsView: View {
                 )
             case .failure(let message):
                 homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: "", readError: message)
+                ProductUsageTelemetry.trackResult(kind: .meeting, action: .preview, surface: .meetings, succeeded: false, artifactDate: item.date)
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
                     actionKind: .preview,
@@ -490,8 +494,7 @@ struct TranscriptedSettingsView: View {
 
     static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
         await Task.detached(priority: .userInitiated) {
-            // Follow a drifted transcript (restyle/rename after scanning) so the
-            // preview still loads instead of falling straight to a read error.
+            // Follow transcripts renamed since scanning.
             let resolved = OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
             do {
                 let markdown = try String(contentsOf: resolved, encoding: .utf8)
@@ -577,7 +580,8 @@ struct TranscriptedSettingsView: View {
                 let didOpen = openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound,
+                    onComplete: { ProductUsageTelemetry.trackResult(kind: .dictation, action: .openMarkdown, surface: .rowMenu, succeeded: $0, artifactDate: entry.createdAt) }
                 )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .dictation,

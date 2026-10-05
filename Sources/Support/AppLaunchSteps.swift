@@ -5,8 +5,9 @@
 /// The dictation side of launch. `DictationSessionController` conforms.
 @MainActor
 protocol AppLaunchDictationHost: AnyObject {
-    /// Deletes dictation audio saved by an earlier run (a failed take, or
-    /// one the app quit or crashed during). Launch never asks about it.
+    /// Deletes short (under 30 s) dictation audio saved by an earlier run (a
+    /// failed take, or one cut off by Quit or a crash) and keeps longer ones.
+    /// Launch never asks about any of it.
     func purgeLeftoverStoppedAudio()
 }
 

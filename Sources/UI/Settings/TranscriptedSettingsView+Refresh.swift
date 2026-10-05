@@ -186,6 +186,7 @@ extension TranscriptedSettingsView {
         keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+        dictationKeyBehavior = HotkeyPreferences.dictationKeyBehavior()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -353,6 +354,15 @@ extension TranscriptedSettingsView {
         }
     }
 
+    func applyDictationAudioKeepWindow(_ window: DictationAudioKeepWindow) {
+        dictationAudioKeepWindow = window
+        trackSettingsAction("dictation_audio_keep_changed", page: .general)
+        AudioStoragePreferences.setDictationAudioKeepWindow(window)
+        Task.detached(priority: .utility) {
+            DictationAudioArchive.prune(window: window)
+        }
+    }
+
     /// App activation. A closed window skips the sweep (about 9 TCC reads on
     /// main per popover open); opening it runs the full `refreshState()`.
     func refreshAfterAppActivation() {
@@ -365,17 +375,29 @@ extension TranscriptedSettingsView {
         if work.launchAtLogin { refreshLaunchAtLoginState() }
     }
 
-    /// `reloadDashboard` is false only for app activation with the window
-    /// closed; library changes always reload Home and Dictations.
-    func refreshRecentCaptures(force: Bool = false, reloadDashboard: Bool = true) {
+    func updateLibraryVisibility() {
+        homeViewModel.setShown(
+            navigation.isWindowOpen
+                && SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) == .homeDashboard
+        )
+    }
+
+    /// Retained hidden pages invalidate lazily; presenting the window refreshes
+    /// them once, while their last snapshot remains available for the first frame.
+    func refreshRecentCaptures(
+        force: Bool = false, reloadDashboard: Bool = true, isLibraryChange: Bool = false
+    ) {
+        updateLibraryVisibility()
+        guard navigation.isWindowOpen else { return }
         if navigation.selectedPage == .today {
-            // Runs closed too: Today holds the result until the window shows.
             todayViewModel.refresh(force: force)
         }
         guard reloadDashboard else { return }
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
-            refreshHomeDashboard(force: force)
+            // Saves cannot be dropped by the activation throttle. The model
+            // coalesces them and retains one trailing read of the latest files.
+            refreshHomeDashboard(force: force || isLibraryChange)
         case .none:
             break
         }
@@ -409,6 +431,7 @@ extension TranscriptedSettingsView {
 
     func refreshShortcutState() {
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+        dictationKeyBehavior = HotkeyPreferences.dictationKeyBehavior()
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )

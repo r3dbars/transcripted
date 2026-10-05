@@ -151,6 +151,9 @@ class DictationSessionController: ObservableObject {
         let shortcutMode: DictationShortcutMode
         let isRetry: Bool
         let requestedAt: TimeInterval
+        /// A Push to Talk tap turned this start hands-free, so the next
+        /// Push to Talk press takes it back.
+        var keptByTap = false
     }
     var queuedDictationStart: QueuedDictationStart?
     var queuedDictationStartTask: Task<Void, Never>?

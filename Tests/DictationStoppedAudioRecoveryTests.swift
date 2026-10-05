@@ -165,31 +165,35 @@ func testDictationStoppedAudioRecovery() async {
         let earlier = Date(timeIntervalSinceReferenceDate: 500)
         let later = Date(timeIntervalSinceReferenceDate: 2_000)
         let launchedAt = Date(timeIntervalSinceReferenceDate: 1_000)
-        func write(_ name: String, in folder: URL, modified: Date, contents: String = "x") throws -> URL {
+        let shortAudio = recoveryTestWAV(seconds: 2)
+        func write(_ name: String, in folder: URL, modified: Date, contents: Data) throws -> URL {
             let url = folder.appendingPathComponent(name)
-            try Data(contents.utf8).write(to: url)
+            try contents.write(to: url)
             try fileManager.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
             return url
+        }
+        func writeText(_ name: String, in folder: URL, modified: Date, contents: String) throws -> URL {
+            try write(name, in: folder, modified: modified, contents: Data(contents.utf8))
         }
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             // A WAV whose metadata was never written: crash between the two writes.
-            let orphanEarlier = try write("dictation_orphan-old.wav", in: directory, modified: earlier)
+            let orphanEarlier = try write("dictation_orphan-old.wav", in: directory, modified: earlier, contents: shortAudio)
             // The same, but written after launch: this run's take mid-save.
-            let orphanThisRun = try write("dictation_orphan-new.wav", in: directory, modified: later)
+            let orphanThisRun = try write("dictation_orphan-new.wav", in: directory, modified: later, contents: shortAudio)
             // Unreadable metadata from an earlier run, with its WAV.
-            let brokenMetadata = try write("dictation_broken.json", in: directory, modified: earlier, contents: "{")
-            let brokenAudio = try write("dictation_broken.wav", in: directory, modified: earlier)
+            let brokenMetadata = try writeText("dictation_broken.json", in: directory, modified: earlier, contents: "{")
+            let brokenAudio = try write("dictation_broken.wav", in: directory, modified: earlier, contents: shortAudio)
             // Metadata that names a file outside the folder.
-            let outside = try write("dictation_outside.wav", in: parent, modified: earlier)
-            let escaping = try write(
+            let outside = try write("dictation_outside.wav", in: parent, modified: earlier, contents: shortAudio)
+            let escaping = try writeText(
                 "dictation_escaping.json",
                 in: directory,
                 modified: earlier,
                 contents: #"{"version":1,"sessionID":"00000000-0000-0000-0000-000000000009","createdAt":500,"audioFilename":"../dictation_outside.wav"}"#
             )
             // Not the store's files.
-            let unrelated = try write("notes.wav", in: directory, modified: earlier)
+            let unrelated = try write("notes.wav", in: directory, modified: earlier, contents: shortAudio)
             let nestedFolder = directory.appendingPathComponent("dictation_folder.wav", isDirectory: true)
             try fileManager.createDirectory(at: nestedFolder, withIntermediateDirectories: true)
 
@@ -206,6 +210,87 @@ func testDictationStoppedAudioRecovery() async {
             assertTrue(fileManager.fileExists(atPath: nestedFolder.path), "folders are never deleted")
         } catch {
             assertTrue(false, "purge scope fixtures should be written: \(error)")
+        }
+    }
+
+    runSuite("Launch cleanup keeps leftovers of 30 s or more and ones it can't measure") {
+        let directory = makeRecoveryTestDirectory("purge-length")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileManager = FileManager.default
+        let earlier = Date(timeIntervalSinceReferenceDate: 500)
+        let launchedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        let sampleRate = Int(DictationStoppedAudioRecoveryStore.sampleRate)
+        let threshold = DictationFailedTakePolicy.minimumLengthToKeep
+        func persist(seconds: TimeInterval) throws -> DictationStoppedAudioRecovery {
+            try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [Float](repeating: 0.1, count: Int(seconds * Double(sampleRate))),
+                sessionID: UUID(),
+                createdAt: earlier,
+                directory: directory
+            )!
+        }
+        func metadataExists(_ recovery: DictationStoppedAudioRecovery) -> Bool {
+            fileManager.fileExists(atPath: recovery.url.deletingPathExtension().appendingPathExtension("json").path)
+        }
+        func write(_ name: String, contents: Data) throws -> URL {
+            let url = directory.appendingPathComponent(name)
+            try contents.write(to: url)
+            try fileManager.setAttributes([.modificationDate: earlier], ofItemAtPath: url.path)
+            return url
+        }
+        do {
+            let atThreshold = try persist(seconds: threshold)
+            let long = try persist(seconds: 95)
+            let justUnder = try persist(seconds: threshold - 0.1)
+            // A WAV left without metadata (crash between the two writes).
+            let orphanLong = try write("dictation_orphan-long.wav", contents: recoveryTestWAV(seconds: 45))
+            let orphanShort = try write("dictation_orphan-short.wav", contents: recoveryTestWAV(seconds: 3))
+            // Files whose length can't be read: not a WAV, and a header cut off mid-way.
+            let orphanUnreadable = try write("dictation_orphan-unreadable.wav", contents: Data("not audio".utf8))
+            // A long WAV whose header never got its data count filled in.
+            var unfilledHeader = recoveryTestWAV(seconds: 40)
+            unfilledHeader.replaceSubrange(40..<44, with: Data(count: 4))
+            let orphanUnfilled = try write("dictation_orphan-unfilled.wav", contents: unfilledHeader)
+            let unreadable = try persist(seconds: 2)
+            try Data(recoveryTestWAV(seconds: 2).prefix(20)).write(to: unreadable.url)
+
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.recordedDuration(ofWAVAt: long.url),
+                95,
+                "the length comes from the WAV the store wrote"
+            )
+            assertNil(
+                DictationStoppedAudioRecoveryStore.recordedDuration(ofWAVAt: orphanUnreadable),
+                "a file that isn't a WAV has no length"
+            )
+
+            let removed = DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: launchedAt, directory: directory)
+
+            assertEqual(removed, 2, "only the two takes under 30 s are removed")
+            assertFalse(fileManager.fileExists(atPath: justUnder.url.path), "a take just under 30 s is deleted")
+            assertFalse(metadataExists(justUnder), "with its metadata")
+            assertFalse(fileManager.fileExists(atPath: orphanShort.path), "a short WAV without metadata is deleted")
+            assertTrue(fileManager.fileExists(atPath: atThreshold.url.path), "a take of exactly 30 s stays on disk")
+            assertTrue(metadataExists(atThreshold), "with its metadata, so the importer can still find it")
+            assertTrue(fileManager.fileExists(atPath: long.url.path), "a long take from an earlier run stays on disk")
+            assertTrue(metadataExists(long), "and keeps its metadata")
+            assertTrue(fileManager.fileExists(atPath: orphanLong.path), "a long WAV without metadata stays")
+            assertTrue(fileManager.fileExists(atPath: orphanUnfilled.path), "a long WAV is measured by its bytes, not a stale header count")
+            assertTrue(fileManager.fileExists(atPath: orphanUnreadable.path), "a WAV of unknown length is never deleted")
+            assertTrue(fileManager.fileExists(atPath: unreadable.url.path), "nor one whose header is cut off")
+            assertTrue(metadataExists(unreadable), "and its metadata stays with it")
+            assertEqual(
+                Set(DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: Int.max, directory: directory).map(\.sessionID)),
+                Set([atThreshold.sessionID, long.sessionID, unreadable.sessionID]),
+                "kept takes are still findable by the importer"
+            )
+            assertEqual(
+                DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: launchedAt, directory: directory),
+                0,
+                "a later launch keeps the same long takes and removes nothing"
+            )
+        } catch {
+            assertTrue(false, "length fixtures should be written: \(error)")
         }
     }
 
@@ -485,6 +570,30 @@ private final class FakePreparedRecordingTimeline: PreparedRecordingTimeline {
 private func makeRecoveryTestDirectory(_ suffix: String) -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("DictationStoppedAudioRecoveryTests-\(suffix)-\(UUID().uuidString)", isDirectory: true)
+}
+
+/// A 16 kHz mono 16-bit WAV of silence, shaped like the store's own files.
+private func recoveryTestWAV(seconds: Double) -> Data {
+    let sampleRate: UInt32 = 16_000
+    let dataByteCount = UInt32(seconds * Double(sampleRate)) * 2
+    var data = Data()
+    func append<T: FixedWidthInteger>(_ value: T) {
+        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+    data.append(contentsOf: "RIFF".utf8)
+    append(UInt32(36) + dataByteCount)
+    data.append(contentsOf: "WAVEfmt ".utf8)
+    append(UInt32(16))
+    append(UInt16(1))
+    append(UInt16(1))
+    append(sampleRate)
+    append(sampleRate * 2)
+    append(UInt16(2))
+    append(UInt16(16))
+    data.append(contentsOf: "data".utf8)
+    append(dataByteCount)
+    data.append(Data(count: Int(dataByteCount)))
+    return data
 }
 
 private func readUInt16LE(_ data: Data, offset: Int) -> UInt16 {

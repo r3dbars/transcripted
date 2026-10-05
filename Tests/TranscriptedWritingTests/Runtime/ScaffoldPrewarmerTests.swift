@@ -45,8 +45,84 @@ struct ScaffoldPrewarmerTests {
             baseURL: URL(string: "http://127.0.0.1:17891")!,
             quietPeriod: 2,
             now: { clock.now },
-            perform: recorder.perform
+            perform: { await recorder.perform($0) }
         )
+    }
+
+    private actor HeldPerformer {
+        nonisolated let arrivals = AsyncStream<Int>.makeStream()
+        nonisolated let cancellations = AsyncStream<Int>.makeStream()
+        private var nextID = 0
+        private var pending: [Int: CheckedContinuation<Bool, Never>] = [:]
+        var count: Int { nextID }
+
+        func perform(_ request: URLRequest) async -> Bool {
+            let id = nextID
+            nextID += 1
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    pending[id] = continuation
+                    arrivals.continuation.yield(id)
+                }
+            } onCancel: {
+                self.cancellations.continuation.yield(id)
+            }
+        }
+
+        func release(_ id: Int) {
+            pending.removeValue(forKey: id)?.resume(returning: true)
+        }
+    }
+
+    @Test("A pause cancels its warm-up, refuses new work, and an old result cannot clear resumed work")
+    func pauseCancelsAndResumes() async throws {
+        let performer = HeldPerformer()
+        var arrivals = performer.arrivals.stream.makeAsyncIterator()
+        var cancellations = performer.cancellations.stream.makeAsyncIterator()
+        let prewarmer = ScaffoldPrewarmer(
+            baseURL: URL(string: "http://127.0.0.1:17891")!, perform: { await performer.perform($0) }
+        )
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.TextEdit")
+        prewarmer.noteHelperReady()
+        let old = try #require(await arrivals.next())
+        let cancelledTask = prewarmer.setEnabled(false)
+        #expect(await cancellations.next() == old)
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.mail")
+        prewarmer.noteHelperReady()
+        #expect(await performer.count == 1)
+
+        prewarmer.setEnabled(true)
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.mail")
+        let resumed = try #require(await arrivals.next())
+        await performer.release(old)
+        await cancelledTask?.value
+        // A late result from the cancelled warm-up must not permit another
+        // request alongside the resumed one.
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.MobileSMS")
+        #expect(await performer.count == 2)
+        await performer.release(resumed)
+        await prewarmer.settle()
+    }
+
+    @Test("Resuming preserves a completed warm cache and respects the current app scope")
+    func resumePreservesCacheAndAppAdmission() async {
+        let recorder = Recorder()
+        let prewarmer = ScaffoldPrewarmer(
+            baseURL: URL(string: "http://127.0.0.1:17891")!,
+            allowsApp: { $0 != "com.apple.mail" }, perform: { await recorder.perform($0) }
+        )
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.TextEdit")
+        prewarmer.noteHelperReady()
+        await prewarmer.settle()
+        prewarmer.setEnabled(false)
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.mail")
+        prewarmer.setEnabled(true)
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.mail")
+        await prewarmer.settle()
+        #expect(recorder.count == 1)
+        prewarmer.noteFrontmostApp(bundleIdentifier: "com.apple.TextEdit")
+        await prewarmer.settle()
+        #expect(recorder.count == 1)
     }
 
     @Test("A ready helper warms the frontmost app's scaffold with a one-token cached request")

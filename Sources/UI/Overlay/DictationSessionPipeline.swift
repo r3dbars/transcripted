@@ -476,7 +476,10 @@ extension DictationSessionPipelineHost {
                 pasteHeldBackTextAction(
                     heldText,
                     recovery: stoppedAudioRecovery,
-                    saveContext: dictationContext(extra: [:]),
+                    saveContext: dictationContext(extra: [
+                        "duration_bucket": AnalyticsReporter.durationBucket(seconds: steps.stopRequestedAt - steps.sessionStartedAt),
+                        "word_count_bucket": AnalyticsReporter.wordCountBucket(heldText.split(whereSeparator: \.isWhitespace).count),
+                    ]),
                     taskSessionID: taskSessionID,
                     showPasted: steps.showPasted,
                     showError: { steps.showMessage($0, nil, nil) }

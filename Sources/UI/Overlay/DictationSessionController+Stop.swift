@@ -423,7 +423,7 @@ extension DictationSessionController {
             stopTiming.pasteBreakdown = self.textPaster.lastPasteTiming
             // Capture ownership before suspending. The writer may outlive cancellation.
             let recovery = self.stoppedAudioRecovery
-            let saveContext = self.dictationContext()
+            let saveContext = self.dictationSaveContext(text: text)
             stopTiming.finalizationStartedAt = CFAbsoluteTimeGetCurrent()
             let finalization = await DictationStopFinalizer.finalize(
                 order: DictationStopFinalizationPolicy.order,
@@ -440,9 +440,9 @@ extension DictationSessionController {
                     return result
                 },
                 saveSynchronously: {
-                    let result = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
-                    DictationStoppedAudioRecoveryStore.retire(recovery, afterSaving: result)
-                    return result
+                    self.persistDictationTranscript(
+                        text: text, delivery: pasteOutcome.delivery, recovery: recovery, context: saveContext
+                    )
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
@@ -560,26 +560,6 @@ extension DictationSessionController {
                     extra: dictationCompletedExtra
                 )
             )
-            if let saved = saveResult.saved {
-                ActivationTelemetry.trackDictationArtifactSaved(
-                    saved: saved,
-                    delivery: pasteOutcome.delivery.rawValue,
-                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                    trigger: currentDictationTrigger.rawValue,
-                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
-                )
-                ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
-                    artifactKind: .dictation,
-                    surface: .dictationSave,
-                    trigger: currentDictationTrigger.rawValue,
-                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
-                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
-                )
-                self.trackOnboardingFirstDictationSavedIfNeeded(
-                    delivery: pasteOutcome.delivery,
-                    wordCount: wordCount
-                )
-            }
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
         }
     }

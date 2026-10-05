@@ -81,6 +81,10 @@ enum MeetingTranscriptStyler {
     }
 
     static func displayTranscriptPreview(at url: URL) -> StyledMeetingTranscript? {
+        readDisplayPreview(at: url)?.styled
+    }
+
+    static func readDisplayPreview(at url: URL) -> (styled: StyledMeetingTranscript, frontmatter: TranscriptFrontmatterDocument)? {
         let frontmatter: TranscriptFrontmatterDocument?
         do {
             frontmatter = try TranscriptFrontmatter.readDocument(
@@ -101,11 +105,17 @@ enum MeetingTranscriptStyler {
 
         guard let frontmatter,
               isMeetingTranscript(frontmatter) else { return nil }
+        // An explicit saved title is also buildTitle's first choice. Avoid
+        // parsing preview transcript turns that cannot change that result.
+        if let title = frontmatter.values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return (StyledMeetingTranscript(url: url, title: title), frontmatter)
+        }
         guard let document = parseDocument(frontmatter, fallbackURL: url) else {
-            return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
+            return (StyledMeetingTranscript(url: url, title: fallbackTitle(for: url)), frontmatter)
         }
 
-        return StyledMeetingTranscript(url: url, title: buildTitle(for: document))
+        return (StyledMeetingTranscript(url: url, title: buildTitle(for: document)), frontmatter)
     }
 
     private static func styledTranscript(

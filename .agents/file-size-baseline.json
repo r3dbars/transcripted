@@ -3,7 +3,7 @@
   "limit": 800,
   "files": {
     "Sources/App/TranscriptedApp.swift": 830,
-    "Sources/Capture/ContextCaptureEngine.swift": 888,
+    "Sources/Capture/ContextCaptureEngine.swift": 842,
     "Sources/Meeting/MeetingAudioStorageManager.swift": 1229,
     "Sources/Meeting/MeetingImportedAudioPreparer.swift": 1052,
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,
@@ -26,7 +26,6 @@
     "Sources/TranscriptedWriting/Core/PersonalHistory/PersonalVocabularyShadow.swift": 1159,
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1459,
     "Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift": 1212,
-    "Sources/TranscriptedWriting/Runtime/ModelManager.swift": 928,
     "Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryStore.swift": 870,
     "Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift": 920,
     "Sources/UI/Overlay/MeetingOverlayController.swift": 1297,
@@ -36,9 +35,8 @@
     "Sources/UI/Settings/PermissionsOnboardingView.swift": 948,
     "Sources/UI/Settings/QuietHomeLibrary.swift": 1012,
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894,
-    "Sources/Writing/WritingController.swift": 1218,
+    "Sources/Writing/WritingController.swift": 1162,
     "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/AutoResearch.swift": 820,
-    "Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift": 803,
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/ToolHandlers.swift": 874,
     "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift": 1018
   }

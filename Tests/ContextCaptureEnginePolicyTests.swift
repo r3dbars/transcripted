@@ -205,25 +205,43 @@ func testContextCaptureEnginePolicy() {
     // lookups plus migration fallbacks) per keystroke, which added latency to
     // all typing on the machine and raised the tapDisabledByTimeout risk.
 
-    runSuite("Binding snapshot — dictation shortcuts on: push-to-talk, hands-free, meeting, paste") {
+    runSuite("Binding snapshot — dictation shortcuts on: one dictation key and meetings") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
             bindings.map(\.action),
-            [.dictationPushToTalk, .dictationHandsFree, .meeting, .pasteLastDictation],
-            "dictation shortcuts come first so they win shared-key ties"
+            [.dictationPushToTalk, .meeting],
+            "the dictation key comes first so it wins shared-key ties; no hands-free or paste-last key"
         )
         assertEqual(bindings.map(\.binding), [
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
         ], "a fresh install snapshots the default bindings")
     }
 
-    runSuite("Binding snapshot — dictation shortcuts off still keeps meeting and paste") {
+    runSuite("Binding snapshot — Tap to toggle runs the dictation key as a toggle") {
+        let (defaults, suiteName) = makeContextCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: defaults)
+
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        assertEqual(bindings.first?.action, .dictationHandsFree, "each press starts or stops")
+        assertEqual(
+            bindings.first?.binding,
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "it's still the one dictation key"
+        )
+        HotkeyPreferences.setDictationKeyBehavior(.holdOnly, userDefaults: defaults)
+        assertEqual(
+            PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults).first?.action,
+            .dictationPushToTalk,
+            "Hold only is plain Push to Talk"
+        )
+    }
+
+    runSuite("Binding snapshot — dictation shortcuts off still keeps meetings") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
@@ -231,8 +249,8 @@ func testContextCaptureEnginePolicy() {
         let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
             bindings.map(\.action),
-            [.meeting, .pasteLastDictation],
-            "turning dictation shortcuts off must not take the meeting or paste shortcuts with it"
+            [.meeting],
+            "turning dictation shortcuts off must not take the meeting shortcut with it"
         )
     }
 
@@ -243,8 +261,8 @@ func testContextCaptureEnginePolicy() {
         let before = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
         let after = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
-        assertEqual(before.count, 4, "first snapshot has all four shortcuts")
-        assertEqual(after.count, 2, "a rebuild after a preference change picks up the new state")
+        assertEqual(before.count, 2, "first snapshot has both shortcuts")
+        assertEqual(after.count, 1, "a rebuild after a preference change picks up the new state")
     }
 
     runSuite("Accessibility retry — only a missing grant waits for the grant") {
@@ -327,7 +345,7 @@ func testContextCaptureEnginePolicy() {
     // when dictation shortcuts are enabled, prepends push-to-talk and
     // hands-free. Pin the defaults a fresh install hands the snapshot.
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — engine binding snapshot sees Fn / Right Option / Option-M / Option-Shift-V") {
+    runSuite("PhysicalDictationTriggerPreferences fresh install — engine binding snapshot sees Right Option / Option-M / Option-Shift-V") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -336,7 +354,7 @@ func testContextCaptureEnginePolicy() {
         let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults)
         let pasteLastDictation = PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults)
 
-        assertEqual(pushToTalk.keyCode, UInt32(kVK_Function), "push-to-talk default keyCode should be Fn")
+        assertEqual(pushToTalk.keyCode, UInt32(kVK_RightOption), "the dictation key default should be Right Option")
         assertEqual(pushToTalk.modifiers, 0, "push-to-talk default should have no modifiers")
         assertEqual(handsFree.keyCode, UInt32(kVK_RightOption), "hands-free default keyCode should be Right Option")
         assertEqual(handsFree.modifiers, 0, "hands-free default should have no modifiers")
@@ -515,11 +533,11 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Fn and Right Option") {
+    runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Right Option") {
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
-            "Fn",
-            "push-to-talk default should render as Fn for dictationShortcutDisplay"
+            "Right ⌥",
+            "the dictation key default should render as Right Option for dictationShortcutDisplay"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),

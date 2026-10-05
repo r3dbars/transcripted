@@ -96,6 +96,8 @@ enum FirstRunExperience {
 
     static func onboardingCompletionAnalyticsProperties(
         completionPath: FirstRunCompletionPath,
+        microphoneGranted: Bool = false,
+        microphoneSkipped: Bool = false,
         systemAudioGranted: Bool,
         calendarGranted: Bool,
         meetingPromptsEnabled: Bool,
@@ -105,6 +107,8 @@ enum FirstRunExperience {
         elapsedSeconds: Double?
     ) -> [String: String] {
         var properties: [String: String] = [
+            "microphone_skipped": booleanString(microphoneSkipped),
+            "dictation_ready": booleanString(microphoneGranted),
             "anonymous_usage_enabled": booleanString(anonymousUsageEnabled),
             "calendar_status": calendarStatus(
                 calendarGranted: calendarGranted,

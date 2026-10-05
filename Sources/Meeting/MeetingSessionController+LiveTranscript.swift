@@ -12,6 +12,7 @@ extension MeetingSessionController {
         LiveMeetingTranscriptService.shared.beginCapture(
             sessionID: identity, router: sttRouter, model: recordingSTTModel,
             languageSelection: recordingLanguageSelection,
+            capturesSystemAudio: capture.currentRecordingCapturesSystemAudio,
             deliveryEnabled: { [weak capture = capture] enabled, epoch in capture?.setLivePCMDeliveryEnabled(enabled, previewEpoch: epoch) },
             deliveryDrops: { [weak capture = capture] in capture?.livePCMDroppedBufferCount ?? 0 },
             mayInfer: { [weak self] in

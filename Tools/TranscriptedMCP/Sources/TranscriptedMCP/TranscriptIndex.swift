@@ -282,6 +282,12 @@ final class TranscriptIndex: @unchecked Sendable {
         embeddingStore?.reconcileEmbeddings()
     }
 
+    /// Retries a semantic pass that never validated the model (see
+    /// `EmbeddingStore.reconcileEmbeddingsIfModelPending`).
+    func reconcileEmbeddingsIfModelPending() {
+        embeddingStore?.reconcileEmbeddingsIfModelPending()
+    }
+
     private func getIndexedModDates() throws -> [String: TimeInterval] {
         var result: [String: TimeInterval] = [:]
         var stmt: OpaquePointer?

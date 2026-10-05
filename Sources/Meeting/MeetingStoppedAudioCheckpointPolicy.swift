@@ -2,8 +2,9 @@
 // A stopped dictation take that was too long can be imported as a meeting.
 // Its checkpoint (the WAV under dictation-audio-recovery) is retired only
 // once the meeting transcript is saved. A failed or discarded job leaves it
-// alone (the importer works from its own copy); the next launch's
-// DictationStoppedAudioRecoveryStore.purgeLeftovers removes it.
+// alone (the importer works from its own copy). The next launch's
+// DictationStoppedAudioRecoveryStore.purgeLeftovers keeps it when it holds
+// 30 s or more of audio and deletes it when shorter.
 
 import Foundation
 

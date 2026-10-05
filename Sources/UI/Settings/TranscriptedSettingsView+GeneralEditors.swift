@@ -205,53 +205,6 @@ extension TranscriptedSettingsView {
         SpeakerEmbedderPreferences.setPreferredChoice(choice)
     }
 
-    private var generalShortcutSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeneralToggleRow(
-                title: "Keyboard shortcuts",
-                isOn: persistedSettingsBinding(
-                    $dictationShortcutsEnabled,
-                    persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
-                    track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
-                ),
-                help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
-                info: GeneralInfo(
-                    title: "Keyboard shortcuts",
-                    message: "Push-to-talk and hands-free keys can start dictation. Off still lets you start from the app, and meeting controls keep working."
-                ),
-                automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
-            )
-
-            HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                .frame(height: HotkeyRecorderContainer.preferredHeight)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-            if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(dictationTriggerSystemWarning)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Button("Open Keyboard Settings") {
-                            trackSettingsAction("open_keyboard_settings", page: .general)
-                            PhysicalDictationTriggerPreferences.openKeyboardSettings()
-                        }
-                        .buttonStyle(.link)
-                        .accessibilityIdentifier("transcripted.settings.general.keyboard-shortcuts.open-keyboard-settings")
-                    }
-                }
-                .font(.caption)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
-            }
-        }
-    }
-
     /// Which mic rows show; the rules live in `MicrophoneSettingsPolicy`.
     private var microphoneSettingsRows: MicrophoneSettingsRows {
         MicrophoneSettingsPolicy.rows(
@@ -582,7 +535,7 @@ extension TranscriptedSettingsView {
                     set: { newValue in
                         anonymousAnalyticsEnabled = newValue
                         if newValue {
-                            AnalyticsPreferences.setEnabled(true)
+                            RetentionTelemetry.setAnalyticsEnabled(true)
                             trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
                         } else {
                             // Opt-out must track first, while still enabled — but
@@ -593,7 +546,7 @@ extension TranscriptedSettingsView {
                             // exists for actually leaves.
                             trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
                             AnalyticsReporter.drainPendingTrackCalls()
-                            AnalyticsPreferences.setEnabled(false)
+                            RetentionTelemetry.setAnalyticsEnabled(false)
                         }
                         diagnosticsActionStatus = nil
                     }
