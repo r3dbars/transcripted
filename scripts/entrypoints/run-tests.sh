@@ -552,6 +552,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift"
     "Sources/UI/MenuBar/MenuBarUtilityActionsView.swift"
     "Sources/UI/MenuBar/MenuBarKeyViewLoop.swift"
+    "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift"
     "Sources/UI/Shared/AccessibilityDisplayPolicy.swift"
     "Sources/UI/Settings/TranscriptedSettingsSidebar.swift"
     "Sources/UI/Shared/MeetingPillFinishPresentation.swift"

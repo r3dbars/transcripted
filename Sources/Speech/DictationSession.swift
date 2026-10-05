@@ -363,7 +363,9 @@ extension DictationSession {
                 readinessRefreshes: readinessRefreshes,
                 recoveryStartAttempts: recoveryStartAttempts,
                 forcedReadinessRecoveries: forcedReadinessRecoveries,
-                cleanupPlan: cleanupPlan
+                cleanupPlan: cleanupPlan,
+                inputFormatReady: appState.sttRouter.inputFormatReady,
+                routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
             )
         )
     }

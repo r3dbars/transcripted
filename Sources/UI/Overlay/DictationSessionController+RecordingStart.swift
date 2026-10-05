@@ -309,12 +309,7 @@ extension DictationSessionController {
                 await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
             }
             overlayController.showError(
-                microphoneTimeoutMessage(
-                    deviceName: appState.sttRouter.inputDeviceName,
-                    startAttempts: info.startAttempts,
-                    inputFormatReady: appState.sttRouter.inputFormatReady,
-                    routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
-                ),
+                info.message,
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
