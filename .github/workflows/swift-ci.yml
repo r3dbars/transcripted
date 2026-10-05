@@ -498,6 +498,7 @@ jobs:
     timeout-minutes: 180
     env:
       SOURCE_SHA: ${{ inputs.full_bench_source_sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
       TZ: America/Chicago
 
     steps:
@@ -508,25 +509,43 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Full bench requires a full lowercase commit SHA.'; exit 1; }
           [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Full bench requires hosted Apple Silicon.'; exit 1; }
 
+      - name: Checkout reviewed validation harness
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: validation-harness
+          persist-credentials: false
+
       - name: Checkout exact bench source
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.full_bench_source_sha }}
           fetch-depth: 0
+          path: candidate
           persist-credentials: false
 
       - name: Verify source identity and prerequisites
+        working-directory: candidate
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C ../validation-harness rev-parse HEAD)" = "$WORKFLOW_SHA"
+          test -z "$(git status --porcelain)"
           python3 scripts/ops/native-smoke-isolation.py
           swiftc --version
           xcodebuild -version
           bash build-deps.sh
 
+      - name: Check fixture setup failure guards
+        run: python3 validation-harness/Tests/BuildDependencies/HostedQAArtifactsTests.py
+
+      - name: Reproduce missing artifacts and seed synthetic default layout
+        run: python3 validation-harness/scripts/ci/prepare-hosted-qa-artifacts.py --candidate-root candidate
+
       - name: Run literal full QA bench
         id: full-bench
+        working-directory: candidate
         shell: bash
         # Do not skip builds, launch smokes, or timing-sensitive tests. Failures
         # remain failures; this job does not retry until green.
@@ -546,7 +565,10 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           python3 - <<'PY'
-          import csv, json, os, pathlib, re
+          import csv, importlib.util, json, os, pathlib, re
+          spec = importlib.util.spec_from_file_location("qa_setup", "validation-harness/scripts/ci/prepare-hosted-qa-artifacts.py")
+          qa_setup = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(qa_setup)
           expected = {
               '00-preflight', '01-build', '02-fast-tests', '03-e2e-smoke',
               '04-slow-pasteback-smoke', '10-integration-smoke', '11-core-swift-test',
@@ -582,6 +604,13 @@ jobs:
               'remaining_proof': ['signed release artifact', 'real meeting apps and Bluetooth', 'pasteback feel', 'installed upgrade', 'live Sentry'],
               'release_verdict': 'HOLD: separate release and human gates still apply',
           }
+          validation_log = results.parent / 'logs/21-qa-validate-all.log'
+          if validation_log.exists():
+              try:
+                  receipt['artifact_validation'] = qa_setup.bounded_report(validation_log.read_text())
+              except (qa_setup.UnsafeEvidence, OSError, UnicodeError):
+                  raise SystemExit('Artifact validation diagnostics could not be bounded safely.')
+          receipt['artifact_data'] = 'Synthetic default artifact setup is required; see qa-artifact-setup-receipt.json complete field'
           output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'full-qa-bench-receipt.json'
           output.write_text(json.dumps(receipt, indent=2) + '\n')
           print(json.dumps(receipt, indent=2))
@@ -594,7 +623,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: full-qa-bench-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/full-qa-bench-receipt.json
+          path: |
+            ${{ runner.temp }}/full-qa-bench-receipt.json
+            ${{ runner.temp }}/qa-artifact-setup-receipt.json
           if-no-files-found: error
           retention-days: 7
           # Raw logs, generated captures, app bundles, and private artifact
