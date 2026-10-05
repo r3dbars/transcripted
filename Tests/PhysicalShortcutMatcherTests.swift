@@ -314,6 +314,34 @@ func testPhysicalShortcutMatcher() {
         assertFalse(tracker.keyDown(), "with no Option chord bound, Right Option plus a key is just dictation plus typing")
     }
 
+    runSuite("Push to Talk: a combo key right after Right Option drops the start") {
+        var window = PushToTalkModifierComboWindow()
+        window.firedOnPress(keyCode: rightOption, at: 100, window: 0.14)
+        assertTrue(window.keyDown(at: 100.05), "Option+M inside the chord window is a combo, not a hold")
+        assertFalse(window.keyDown(at: 100.06), "it reports once per press")
+    }
+
+    runSuite("Push to Talk: a key later in a hold never drops the take") {
+        var window = PushToTalkModifierComboWindow()
+        window.firedOnPress(keyCode: rightOption, at: 100, window: 0.14)
+        assertFalse(window.keyDown(at: 160), "Esc, an arrow or Return a minute into a hold is typing, not a combo")
+        assertFalse(window.keyDown(at: 160.01), "and nothing after it is either")
+    }
+
+    runSuite("Push to Talk: after the key is let go, typing is not a combo") {
+        var window = PushToTalkModifierComboWindow()
+        window.firedOnPress(keyCode: rightOption, at: 100, window: 0.14)
+        window.flagsChanged(keyCode: rightOption, modifiers: 0, isPushToTalkRelease: true)
+        assertFalse(window.keyDown(at: 100.05), "a quick tap then a key is a tap plus typing")
+    }
+
+    runSuite("Push to Talk: a key after the event tap was disabled doesn't drop the take") {
+        var window = PushToTalkModifierComboWindow()
+        window.firedOnPress(keyCode: rightOption, at: 100, window: 0.14)
+        window.reset()
+        assertFalse(window.keyDown(at: 100.05), "the release may have been missed while the tap was off")
+    }
+
     runSuite("A key after the event tap was disabled doesn't drop the dictation") {
         var tracker = HandsFreeModifierComboTracker()
         tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
