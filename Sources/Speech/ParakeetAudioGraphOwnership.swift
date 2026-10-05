@@ -258,6 +258,14 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
         queue = DispatchQueue(label: "\(label).0", qos: .utility)
     }
 
+    /// The error `run` would fail with right now because the hard circuit is
+    /// open, or nil while it admits work. It closes when a stuck call returns.
+    func circuitOpenError(operation: String) -> ParakeetSystemInputWorkError? {
+        let activeTimeouts = lock.withLock { activeTimedOutWorkerCount }
+        guard activeTimeouts >= Self.maximumTimedOutWorkers else { return nil }
+        return .circuitOpen(operation: operation, activeTimeouts: activeTimeouts)
+    }
+
     func run<T>(
         operation: String,
         timeoutNanoseconds: UInt64,
