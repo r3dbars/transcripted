@@ -77,7 +77,7 @@ extension ParakeetEngine {
         // Apple voice processing only exists on the AVAudioEngine path.
         let voiceProcessingRequested = DictationVoiceProcessingRoutePolicy.isRequested(
             savedPreference: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
-            callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning
+            callAppRunning: CallAppMicrophoneSharingMonitor.shared.callAppRunning()
         )
         return !voiceProcessingRequested
     }
