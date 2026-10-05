@@ -6,7 +6,7 @@
 
 - dictation start/stop
 - meeting start/stop
-- configurable physical-key triggers. Defaults: Fn = the one dictation key (hold to talk, tap to keep listening), Option-M = meeting. The paste-last-dictation shortcut is no longer registered (`configuredBindings`); its stored binding and `.pasteLastDictation` routing remain but never fire (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
+- configurable physical-key triggers. Defaults: Right Option = the one dictation key (not Fn, which also opens emoji) (hold to talk, tap to keep listening), Option-M = meeting. The paste-last-dictation shortcut is no longer registered (`configuredBindings`); its stored binding and `.pasteLastDictation` routing remain but never fire (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
 
 ## Module
 
@@ -31,7 +31,7 @@
 - The physical dictation trigger routes into `DictationSessionController`
 - Dictation has one key (the stored Push to Talk binding). `HotkeyPreferences.dictationKeyBehavior` decides its action in `PhysicalShortcutMatcher.configuredBindings`: Hold or tap (default) and Hold only register it as `.dictationPushToTalk`; Tap to toggle registers it as `.dictationHandsFree`. The old hands-free binding is still stored but no longer registered. The physical shortcut action identifies the mode passed to `DictationSessionController`
 - Hold or tap makes the dictation key do both, like Handy's Auto mode: hold it and the release stops and pastes; tap it (under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier pressed while held) and the take flips to hands-free, so the next press stops it and that press's release is swallowed. The detector tells a tap from a hold on the tap thread (`.tapRelease`), not on the main actor, so a busy main thread can't stretch a tap into a hold. Hold only is plain Push to Talk
-- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Fn for dictation and Option-M for meetings, and supporting modifier-only or keyed chords
+- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Right Option for dictation and Option-M for meetings, and supporting modifier-only or keyed chords
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
 - Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
@@ -59,7 +59,7 @@ Manual checks:
 - with Tap to toggle, the dictation key starts and stops dictation
 - right Option then M (or typing é with right Option+E) does not leave a dictation running
 - push-to-talk starts dictation on press and stops/pastes on release
-- with Hold or tap, a quick Fn tap keeps listening and the next Fn press pastes; Fn+arrow never latches
+- with Hold or tap, a quick Right Option tap keeps listening and the next press pastes; a hold starts after the 0.14 s chord delay and pastes on release; Option+M and Right Option+E never start dictation
 - meeting hotkey toggles meeting capture
 - the configured physical dictation trigger starts/stops dictation in the expected shortcut mode
 - rapid repeat presses are ignored cleanly

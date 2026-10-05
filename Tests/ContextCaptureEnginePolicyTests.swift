@@ -345,7 +345,7 @@ func testContextCaptureEnginePolicy() {
     // when dictation shortcuts are enabled, prepends push-to-talk and
     // hands-free. Pin the defaults a fresh install hands the snapshot.
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — engine binding snapshot sees Fn / Right Option / Option-M / Option-Shift-V") {
+    runSuite("PhysicalDictationTriggerPreferences fresh install — engine binding snapshot sees Right Option / Option-M / Option-Shift-V") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -354,7 +354,7 @@ func testContextCaptureEnginePolicy() {
         let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults)
         let pasteLastDictation = PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults)
 
-        assertEqual(pushToTalk.keyCode, UInt32(kVK_Function), "push-to-talk default keyCode should be Fn")
+        assertEqual(pushToTalk.keyCode, UInt32(kVK_RightOption), "the dictation key default should be Right Option")
         assertEqual(pushToTalk.modifiers, 0, "push-to-talk default should have no modifiers")
         assertEqual(handsFree.keyCode, UInt32(kVK_RightOption), "hands-free default keyCode should be Right Option")
         assertEqual(handsFree.modifiers, 0, "hands-free default should have no modifiers")
@@ -533,11 +533,11 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Fn and Right Option") {
+    runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Right Option") {
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
-            "Fn",
-            "push-to-talk default should render as Fn for dictationShortcutDisplay"
+            "Right ⌥",
+            "the dictation key default should render as Right Option for dictationShortcutDisplay"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),

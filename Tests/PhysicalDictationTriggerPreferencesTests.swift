@@ -4,14 +4,14 @@ import CoreGraphics
 import Foundation
 
 func testPhysicalDictationTriggerPreferences() {
-    runSuite("PhysicalDictationTriggerPreferences defaults to Fn, Right Option, Option-Shift-V, and Option M") {
+    runSuite("PhysicalDictationTriggerPreferences defaults to Right Option, Option-Shift-V, and Option M") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
-            "fresh installs should use Fn for push-to-talk"
+            "fresh installs should use Right Option for the dictation key"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
@@ -30,8 +30,8 @@ func testPhysicalDictationTriggerPreferences() {
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
-            "Fn",
-            "push-to-talk default should display as Fn"
+            "Right ⌥",
+            "the dictation key default should display as Right Option, not Fn (which opens emoji)"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
@@ -532,7 +532,8 @@ func testPhysicalDictationTriggerPreferences() {
         let allowed: [(String, PhysicalDictationTriggerBinding)] = [
             ("default paste-last ⌥⇧V", PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
             ("default meeting ⌥M", PhysicalDictationTriggerPreferences.defaultMeetingBinding),
-            ("default push-to-talk Fn", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("default dictation key Right ⌥", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            ("Fn", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))),
             ("default hands-free Right ⌥", PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
             ("bare F5", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))),
             ("⌥⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | option)),
@@ -602,12 +603,12 @@ func testPhysicalDictationTriggerPreferences() {
 
     runSuite("PhysicalDictationTriggerPreferences refuses a key another shortcut already uses") {
         let others: [(name: String, binding: PhysicalDictationTriggerBinding)] = [
-            (name: "Push to Talk", binding: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            (name: "Push to Talk", binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))),
             (name: "Meetings", binding: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
         ]
 
         let fnReason = PhysicalDictationTriggerPreferences.duplicateReason(
-            for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            for: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function)),
             otherShortcuts: others
         )
         assertEqual(fnReason, "Fn is already used for Push to Talk. Choose a different key.", "a shared modifier key should name the shortcut that has it")

@@ -62,7 +62,9 @@ enum FunctionKeySystemAction: Equatable {
 }
 
 enum PhysicalDictationTriggerPreferences {
-    static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+    /// The one dictation key. Right Option, not Fn: Fn also opens emoji or
+    /// switches input unless macOS is set to Do Nothing.
+    static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),

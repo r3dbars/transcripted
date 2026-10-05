@@ -192,7 +192,7 @@ struct PermissionsOnboardingView: View {
         )
     }
 
-    /// Fn is the default push-to-talk key, and on a Mac where the macOS Fn
+    /// If someone picked Fn as the dictation key, on a Mac where the macOS Fn
     /// setting was never changed it also opens emoji or switches input. Say
     /// so here, so the menu bar's warning isn't the first people hear of it.
     private static var functionKeyWarning: String? {
