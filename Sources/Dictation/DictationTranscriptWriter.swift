@@ -76,7 +76,8 @@ enum DictationTranscriptWriter {
         sourceApp: NSRunningApplication?,
         delivery: DictationDelivery,
         createdAt: Date = Date(),
-        directory: URL? = nil
+        directory: URL? = nil,
+        audioRelativePath: String? = nil
     ) throws -> SavedDictationTranscript {
         try save(
             text: text,
@@ -84,7 +85,8 @@ enum DictationTranscriptWriter {
             sourceBundleID: sourceApp?.bundleIdentifier,
             delivery: delivery,
             createdAt: createdAt,
-            directory: directory
+            directory: directory,
+            audioRelativePath: audioRelativePath
         )
     }
 
@@ -95,7 +97,8 @@ enum DictationTranscriptWriter {
         sourceBundleID: String?,
         delivery: DictationDelivery,
         createdAt: Date = Date(),
-        directory: URL? = nil
+        directory: URL? = nil,
+        audioRelativePath: String? = nil
     ) throws -> SavedDictationTranscript {
         try DictationTranscriptMutationLock.withLock {
             try saveLocked(
@@ -104,7 +107,8 @@ enum DictationTranscriptWriter {
                 sourceBundleID: sourceBundleID,
                 delivery: delivery,
                 createdAt: createdAt,
-                directory: directory
+                directory: directory,
+                audioRelativePath: audioRelativePath
             )
         }
     }
@@ -115,7 +119,8 @@ enum DictationTranscriptWriter {
         sourceBundleID: String?,
         delivery: DictationDelivery,
         createdAt: Date,
-        directory: URL?
+        directory: URL?,
+        audioRelativePath: String?
     ) throws -> SavedDictationTranscript {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = buildTitle(from: normalizedText, createdAt: createdAt)
@@ -139,7 +144,8 @@ enum DictationTranscriptWriter {
             sourceBundleID: sourceBundleID,
             delivery: delivery,
             wordCount: wordCount,
-            characterCount: characterCount
+            characterCount: characterCount,
+            audioRelativePath: audioRelativePath
         )
 
         if hasExistingContent(at: url) {
@@ -187,10 +193,13 @@ enum DictationTranscriptWriter {
         sourceBundleID: String,
         delivery: DictationDelivery,
         wordCount: Int,
-        characterCount: Int
+        characterCount: Int,
+        audioRelativePath: String?
     ) -> String {
         let headingTitle = title.replacingOccurrences(of: "\n", with: " ")
         let bundleLine = sourceBundleID.isEmpty ? "" : "\nBundle ID: `\(sourceBundleID)`"
+        // Relative to the dictations folder; the file may age out later.
+        let audioLine = audioRelativePath.map { "\nAudio: `\($0)`" } ?? ""
 
         return """
         ## \(sectionTimeFormatter.string(from: createdAt)) - \(headingTitle)
@@ -200,7 +209,7 @@ enum DictationTranscriptWriter {
         Source app: \(sourceAppName)\(bundleLine)
         Delivery: \(delivery.rawValue)
         Words: \(wordCount)
-        Characters: \(characterCount)
+        Characters: \(characterCount)\(audioLine)
 
         \(text)
         """

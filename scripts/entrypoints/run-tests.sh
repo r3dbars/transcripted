@@ -428,6 +428,7 @@ APP_SOURCES=(
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoppedAudioRecovery.swift"
+    "Sources/Dictation/DictationAudioArchive.swift"
     "Sources/Dictation/DictationStopCheckpoint.swift"
     "Sources/Dictation/DictationPostStopModelWait.swift"
     "Sources/Dictation/DictationEmptyTranscriptPolicy.swift"

@@ -354,6 +354,15 @@ extension TranscriptedSettingsView {
         }
     }
 
+    func applyDictationAudioKeepWindow(_ window: DictationAudioKeepWindow) {
+        dictationAudioKeepWindow = window
+        trackSettingsAction("dictation_audio_keep_changed", page: .general)
+        AudioStoragePreferences.setDictationAudioKeepWindow(window)
+        Task.detached(priority: .utility) {
+            DictationAudioArchive.prune(window: window)
+        }
+    }
+
     /// App activation. A closed window skips the sweep (about 9 TCC reads on
     /// main per popover open); opening it runs the full `refreshState()`.
     func refreshAfterAppActivation() {
