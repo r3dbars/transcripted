@@ -24,8 +24,8 @@ enum LaunchTimingTelemetry {
         }
     }
 
-    /// The icon reaches the menu bar when the current launch turn commits,
-    /// so the mark lands on the next main-queue turn, not at creation.
+    /// The icon can't draw until the launch turn on the main thread ends, so
+    /// the mark lands on the next main-queue turn, not at creation.
     @MainActor static func markStatusItemShownAfterThisTurn() {
         DispatchQueue.main.async {
             markStatusItemShown()
