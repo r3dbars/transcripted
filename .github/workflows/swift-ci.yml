@@ -61,6 +61,11 @@ on:
         type: string
         required: false
         default: ""
+      staged_update_source_sha:
+        description: Run only the staged signed 1.1.68-to-1.1.69 updater proof against its verified full promotion SHA
+        type: string
+        required: false
+        default: ""
       run_hardware_smokes:
         description: >-
           Run the real mic / system-audio smokes on a self-hosted Apple Silicon
@@ -98,7 +103,7 @@ jobs:
   # actions: read lets it count jobs already queued for the Mac. Runs stuck
   # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
   pick-runner:
-    if: github.event_name != 'workflow_dispatch' || inputs.full_bench_source_sha == ''
+    if: github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -332,7 +337,7 @@ jobs:
   # ---------------------------------------------------------------------------
   app-build:
     runs-on: macos-26
-    if: github.event_name != 'workflow_dispatch' || inputs.full_bench_source_sha == ''
+    if: github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '')
     timeout-minutes: 120
 
     steps:
@@ -404,7 +409,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-test:
     needs: [pick-runner, checks, spm-tests, app-build]
-    if: always() && (github.event_name != 'workflow_dispatch' || inputs.full_bench_source_sha == '')
+    if: always() && (github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == ''))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -439,7 +444,7 @@ jobs:
   # `run_hardware_smokes` input: true runs the real smokes on a self-hosted
   # runner, false prints the manual commands. Neither can block a PR.
   hardware-smokes:
-    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && inputs.run_hardware_smokes
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '' && inputs.run_hardware_smokes
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
 
@@ -461,7 +466,7 @@ jobs:
   # `run_hardware_smokes` to true once a runner exists and `hardware-smokes`
   # above replaces this with a real gate.
   hardware-smokes-manual-instructions:
-    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && !inputs.run_hardware_smokes
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '' && !inputs.run_hardware_smokes
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -487,7 +492,7 @@ jobs:
   # Uses an immutable source SHA and never routes work to the owner's runner.
   # This rebuilds a developer app; signed-artifact and human proof stay separate.
   full-qa-bench:
-    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha != '' && inputs.staged_update_source_sha == '' && !inputs.run_hardware_smokes
     runs-on: macos-26
     timeout-minutes: 180
     env:
@@ -593,3 +598,77 @@ jobs:
           retention-days: 7
           # Raw logs, generated captures, app bundles, and private artifact
           # validation output are deliberately not uploaded.
+
+  reject-conflicting-validation-modes:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.full_bench_source_sha != '' && inputs.staged_update_source_sha != '') ||
+       (inputs.run_hardware_smokes && (inputs.full_bench_source_sha != '' || inputs.staged_update_source_sha != '')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require one validation mode
+        run: |
+          echo '::error::Choose exactly one hosted validation mode, with run_hardware_smokes=false.'
+          exit 1
+
+  # Exercise the signed 1.1.68 -> 1.1.69 updater against a local staging feed.
+  # Harness code is pinned to this workflow, independently of the candidate.
+  staged-update-proof:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.staged_update_source_sha != '' &&
+      inputs.full_bench_source_sha == '' && !inputs.run_hardware_smokes
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      SOURCE_SHA: ${{ inputs.staged_update_source_sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+
+    steps:
+      - name: Validate fixed candidate and hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = e42ad0f759612e0080f2d11bb5de12fda6b590bd || { echo '::error::This updater proof is scoped to the verified 1.1.69 promotion SHA.'; exit 1; }
+          [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Updater proof requires hosted Apple Silicon.'; exit 1; }
+
+      - name: Checkout reviewed updater harness
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout exact updater candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.staged_update_source_sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Verify both checkout identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$WORKFLOW_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git -C candidate status --porcelain)"
+          python3 candidate/scripts/ops/native-smoke-isolation.py
+
+      - name: Verify harness failure guards
+        shell: bash
+        run: python3 harness/Tests/BuildDependencies/StagedSparkleUpdateTests.py
+
+      - name: Exercise signed full and delta updates
+        shell: bash
+        run: python3 harness/scripts/release/test-staged-sparkle-update.py --candidate-root candidate --output "$RUNNER_TEMP/staged-update-proof"
+
+      - name: Upload bounded updater receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staged-update-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staged-update-proof/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          # Do not upload downloaded apps, staging feeds, raw logs, or captures.
