@@ -1,6 +1,6 @@
 import Foundation
 
-/// The clock behind the 5-minute dictation cap: sleep until the last 30
+/// The clock behind the 15-minute dictation cap: sleep until the last 30
 /// seconds, then tick every second so the listening pill counts down live
 /// (announcing to VoiceOver once, the first time the countdown shows), and
 /// return when the cap is reached or the timer is cancelled.
@@ -48,7 +48,7 @@ enum DictationSessionCapTimer {
     }
 }
 
-/// What happens to a take when the 5-minute cap fires. The cap finalizes the
+/// What happens to a take when the 15-minute cap fires. The cap finalizes the
 /// take through the normal stop pipeline (it never discards the buffer), and
 /// pastes only when the app the take started in is still frontmost.
 enum DictationSessionCapFinish: Equatable {
