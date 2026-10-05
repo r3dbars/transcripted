@@ -134,8 +134,9 @@ class TranscriptedAppState: ObservableObject {
         }
         // Writing runs once its setup is done and a feature is on (or behind
         // the debug default); the Writing tab starts and stops it after that.
-        // One main-actor turn later, so the launch task registers the
-        // hotkeys first: Writing's start installs the keyboard synchronously.
+        // One main-actor turn later, so the hotkeys (registered in the
+        // launch turn) come first: Writing's start installs the keyboard
+        // synchronously.
         // This ordering assumes nothing above in initialize() awaits; the
         // controller's own guards (terminated, wake) cover a quit in between.
         if !Self.isLaunchSmokeMode {
