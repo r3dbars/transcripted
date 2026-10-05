@@ -24,6 +24,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog (sends nothing when `AutomatedLaunchEnvironment` is active)
+- `AnalyticsActiveDay.swift` — `app_active_day`, one anonymous "app is running" event per local day from the reporter's minute timer, so idle installs can be told apart from quit or deleted ones
 - `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`; also holds `AnalyticsEventForwardingPolicy`, the short table of local `EventReporter` events (today only the pinned dictation mic's `pinned_microphone_*` lifecycle) that `EventReporter.capture` also tracks in PostHog with bounded, rebuilt properties
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
 - `AgentSetupLifecycleTelemetry.swift` — bounded connect lifecycle telemetry for agent setup, verification, retries, and repair outcomes

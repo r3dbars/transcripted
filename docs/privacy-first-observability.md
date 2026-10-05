@@ -90,6 +90,7 @@ allowlist.
 - `usage_digest`
 - `reliability_failure_observed`
 - `app_launched`
+- `app_active_day`
 - `app_unclean_shutdown_detected`
 - `app_session_stall_detected`
 - `support_diagnostic_event_sent`
@@ -428,6 +429,16 @@ and for an unsent current day on normal quit. A quit snapshot has
 in lifecycle events and the local ledger but does not generate a second digest.
 `digest_day` identifies the activity's local date; timestamps identify delivery.
 Calendar arithmetic handles local midnight and DST rather than adding 24 hours.
+
+`app_active_day` is sent at most once per local day from the same minute timer
+while the app is running and anonymous usage is on. It has no properties of its
+own; it carries the same shared defaults, telemetry context and install traits
+as `app_launched`. Like `usage_digest`, an undelivered copy stays in the retry
+buffer for 14 days instead of 24 hours, so an offline day is not lost. It exists so retention analysis can tell an installed-but-idle app from
+one that was quit or deleted: digests only cover days with captures, and
+`app_launched` only fires at launch. The only stored value is the last sent day
+key (`analyticsLastActiveDay`); automated launches have no API key and send
+nothing.
 
 Digest fields `meetings_started`, `meetings_completed`, `dictations_completed`,
 and values inside `failures_by_kind` / `capture_quality_counts` use the shared
