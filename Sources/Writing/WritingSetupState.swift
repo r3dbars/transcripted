@@ -71,7 +71,7 @@ final class WritingPauseWakeup {
     private var deadline: Date?
     private var generation = 0
 
-    func schedule(until: Date?, onExpiry: @escaping @MainActor () -> Void) {
+    func schedule(until: Date?, onExpiry: @escaping @MainActor @Sendable () -> Void) {
         guard until != deadline else { return }
         generation &+= 1
         let expectedGeneration = generation
