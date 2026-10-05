@@ -81,14 +81,38 @@ enum LaunchTimingTelemetry {
     /// launch timing (no start, the clock moved backwards, or over 10 minutes).
     static func elapsedMilliseconds(from start: Date?, to end: Date) -> Int? {
         guard let start else { return nil }
-        let milliseconds = end.timeIntervalSince(start) * 1_000
+        return boundedMilliseconds(seconds: end.timeIntervalSince(start))
+    }
+
+    static func boundedMilliseconds(seconds: TimeInterval) -> Int? {
+        let milliseconds = seconds * 1_000
         guard milliseconds >= 0, milliseconds < 600_000 else { return nil }
         return Int(milliseconds.rounded())
     }
 
-    static func millisecondsSinceProcessStart(now: Date = Date()) -> Int? {
-        elapsedMilliseconds(from: processStartDate, to: now)
+    static func millisecondsSinceProcessStart() -> Int? {
+        guard let anchor = clockAnchor else { return nil }
+        let uptimeNow = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        let sinceAnchor = (Double(uptimeNow) - Double(anchor.uptimeNanoseconds)) / 1_000_000_000
+        return boundedMilliseconds(seconds: anchor.ageSeconds + sinceAnchor)
     }
+
+    private struct ClockAnchor: Sendable {
+        let ageSeconds: TimeInterval
+        let uptimeNanoseconds: UInt64
+    }
+
+    /// The process's age, read from the wall clock once at the first mark and
+    /// carried forward on the uptime clock. A clock change during launch (time
+    /// sync often steps it right after login) can't skew later marks, and
+    /// sleep partway through launch doesn't count.
+    private static let clockAnchor: ClockAnchor? = {
+        guard let processStartDate else { return nil }
+        return ClockAnchor(
+            ageSeconds: Date().timeIntervalSince(processStartDate),
+            uptimeNanoseconds: clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        )
+    }()
 
     /// When the kernel started this process, so launch marks include the
     /// time before any app code ran (dyld, framework loading, delegate init).
