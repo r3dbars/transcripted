@@ -44,8 +44,6 @@ struct TranscriptedSettingsView: View {
     @StateObject var pastMeetingsModel = DictionaryPastMeetingsModel()
     @State var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
-    @State var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
-    @State var showSpeakerEmbedderSwitchConfirm = false
     @State var showClearCorrectionsConfirm = false
     @State var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()

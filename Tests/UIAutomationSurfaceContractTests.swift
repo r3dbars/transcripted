@@ -520,7 +520,6 @@ func testUIAutomationSurfaceContract() async {
             "transcripted.settings.general.model",
             "transcripted.settings.general.corrections",
             "transcripted.settings.general.people-in-room",
-            "transcripted.settings.general.call-matching",
             "transcripted.settings.general.crash-reports",
             "transcripted.settings.general.usage-stats",
             "transcripted.settings.storage.capture-library",

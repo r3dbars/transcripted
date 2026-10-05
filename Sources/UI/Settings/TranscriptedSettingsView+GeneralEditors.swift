@@ -146,15 +146,10 @@ extension TranscriptedSettingsView {
         }
     }
 
-    // Speaker matching: who's-who behavior for meetings. Outcome-framed (no
-    // model jargon). "Better matching on calls" is the ReDimNet2 voiceprint, on by
-    // default since the voiceprint bake-off; off is the previous WeSpeaker model.
-    // Gated on the model actually being available; switching is non-destructive
-    // (each model keeps its own speaker memory) with a one-time confirmation.
+    // Speaker matching: who's-who behavior for meetings. The call-audio voiceprint
+    // (ReDimNet2) is always on now, so the only choice left here is the room split.
     private var generalSpeakerMatchingEditor: some View {
-        let modelAvailable = SpeakerEmbedderFactory.reDimNet2ModelURL() != nil
-        let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             GeneralToggleRow(
                 title: "People in the room",
                 isOn: persistedSettingsBinding(
@@ -167,42 +162,10 @@ extension TranscriptedSettingsView {
                     title: "People in the room",
                     message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies when the meeting is transcribed."
                 ),
-                automationIdentifier: "transcripted.settings.general.people-in-room"
-            )
-
-            GeneralToggleRow(
-                title: "Better matching on calls",
-                isOn: Binding(
-                    get: { modelAvailable && preferredSpeakerEmbedder == .reDimNet2 },
-                    set: { wantOn in
-                        if !wantOn && namedCount > 0 {
-                            showSpeakerEmbedderSwitchConfirm = true
-                        } else {
-                            applySpeakerEmbedder(wantOn ? .reDimNet2 : .weSpeaker)
-                        }
-                    }
-                ),
-                help: modelAvailable ? "Recognizes more people on Zoom, Meet, and phone audio. Changes take effect after you restart Transcripted." : "Not available in this build.",
-                info: GeneralInfo(
-                    title: "Better matching on calls",
-                    message: "Uses a newer voice model that tells people apart more reliably on call audio. Your saved people carry over when it turns on. Turning it off goes back to the previous model with your people as they were. Changes take effect after you restart Transcripted."
-                ),
-                automationIdentifier: "transcripted.settings.general.call-matching",
+                automationIdentifier: "transcripted.settings.general.people-in-room",
                 showsDivider: false
             )
-            .disabled(!modelAvailable)
-            .alert("Turn off better matching on calls?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
-                Button("Turn Off") { applySpeakerEmbedder(.weSpeaker) }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("Transcripted goes back to the previous voice model and your people as they were before the switch. Anyone you named since stays saved with the new model and comes back if you turn this on again. Takes effect after you restart Transcripted.")
-            }
         }
-    }
-
-    private func applySpeakerEmbedder(_ choice: SpeakerEmbedderChoice) {
-        preferredSpeakerEmbedder = choice
-        SpeakerEmbedderPreferences.setPreferredChoice(choice)
     }
 
     /// Which mic rows show; the rules live in `MicrophoneSettingsPolicy`.
