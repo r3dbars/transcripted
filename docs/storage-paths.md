@@ -29,6 +29,27 @@ Dictation artifacts live under:
 folder. There is no extra `transcripts/` subdirectory in the current app
 layout.
 
+Kept dictation audio lives in `<capture-library>/dictations/audio/`, one file
+per take named from its session UUID: `<uuid>.m4a`, or `<uuid>.wav` until
+background compression finishes (or if it failed). Files are 0600 in a 0700
+folder. The day file's `Audio:` line stores the path relative to the dictations
+folder (`audio/<uuid>.m4a`), so it survives a library move; Move and Copy carry
+`dictations/audio/*.m4a|*.wav` like the day files (audio named by a day file
+that stays behind on a name collision stays behind with it). Deleting a
+dictation in Home deletes its kept audio once the undo window closes.
+`DictationAudioArchive` (`Sources/Dictation/DictationAudioArchive.swift`) owns
+keep, resolve, compress, and prune. How long audio stays is Settings → Storage →
+Keep dictation audio (`dictation-audio-keep` in `AudioStoragePreferences`:
+Don't keep, 7 days, 30 days (default), Forever); pruning runs at launch and
+when the setting changes, and only touches regular files with those names,
+never symlinks.
+
+Until the transcript saves, a take's audio stays in the private recovery folder
+`~/Library/Application Support/Transcripted/state/dictation-audio-recovery/`
+(app state, not the library). After a successful save it moves into
+`dictations/audio/` when audio is kept, or is deleted when it isn't. A failed
+save leaves it in recovery.
+
 ## Writing
 
 Saved writing lives under:

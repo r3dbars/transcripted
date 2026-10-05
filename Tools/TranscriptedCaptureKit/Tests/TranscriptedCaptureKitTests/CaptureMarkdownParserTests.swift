@@ -590,6 +590,53 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertEqual(parsed.wordCount, 14)
     }
 
+    func testDictationEntryReadsItsKeptAudioPathAndOlderEntriesHaveNone() throws {
+        let markdown = """
+        ---
+        title: "Dictations for 2026-10-05"
+        date: 2026-10-05
+        capture_type: dictation_day
+        format_version: 1
+        ---
+
+        # Dictations for 2026-10-05
+
+        ## 9:15 AM - Older note
+
+        Entry ID: `dictation-1`
+        Captured: 2026-10-05T09:15:00.000Z
+        Source app: Slack
+        Delivery: pasted
+        Words: 2
+        Characters: 10
+
+        Older note
+
+        ## 9:20 AM - Note with audio
+
+        Entry ID: `dictation-2`
+        Captured: 2026-10-05T09:20:00.000Z
+        Source app: Notes
+        Delivery: pasted
+        Words: 3
+        Characters: 15
+        Audio: `audio/8c1f3a52-6a1e-4c55-9f0b-2d3b1c4e5f60.m4a`
+
+        Note with audio
+        """
+        let url = URL(fileURLWithPath: "/tmp/Dictations_2026-10-05.md")
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseDictationDay(from: markdown, markdownURL: url))
+
+        XCTAssertEqual(parsed.entries.map(\.id), ["dictation-1", "dictation-2"])
+        XCTAssertNil(parsed.entries[0].audioRelativePath, "an entry without an Audio line has no kept audio")
+        XCTAssertEqual(
+            parsed.entries[1].audioRelativePath,
+            "audio/8c1f3a52-6a1e-4c55-9f0b-2d3b1c4e5f60.m4a"
+        )
+        XCTAssertEqual(parsed.entries[1].text, "Note with audio", "the Audio line is metadata, not body text")
+        XCTAssertEqual(parsed.entries[1].characterCount, 15)
+    }
+
     func testParseDictationDayWithoutFrontmatterReturnsNil() {
         let url = URL(fileURLWithPath: "/tmp/Dictations_2026-04-07.md")
         XCTAssertNil(CaptureMarkdownParser.parseDictationDay(from: "# No frontmatter", markdownURL: url))

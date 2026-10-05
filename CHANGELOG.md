@@ -15,6 +15,13 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Added
+- Dictations now keep their audio for 30 days, so a later update can play a
+  take back or transcribe it again. Change it in Settings → Storage → Keep
+  dictation audio (Don't keep, 7 days, 30 days, Forever); picking a shorter
+  window asks before deleting audio you already have. The text is always kept.
+  Audio lives next to your dictations in `dictations/audio/` as compressed
+  `.m4a` files, each day file entry points at its take with a new `Audio:`
+  line, and moving the capture library brings the audio along.
 - Keyboard shortcuts in the macOS menu bar for the top daily actions: Start
   Dictation (⌘D), Start / Stop Meeting Recording (⌘R), Transcribe Audio File
   (⌘O), jump to Home/Dictations/Speakers/Agent (⌘1–⌘4), and Find Speaker (⌘F,
