@@ -108,6 +108,9 @@ allowlist.
 - `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
 - `activation_artifact_action_clicked`
+- `activation_first_value_saved`
+- `product_navigation`
+- `saved_result_action`
 - `activation_first_artifact_saved`
 - `activation_second_artifact_saved`
 - `activation_habit_loop_actioned`
@@ -471,3 +474,71 @@ PostHog's [capture API](https://posthog.com/docs/api/capture) and
 provide the wire contract for `$set` and event-based anonymous install profiles.
 
 Every capture disables GeoIP enrichment with `$geoip_disable=true`. Request transport IP handling is a server setting: PostHog's [Discard IP data setting](https://posthog.com/tutorials/web-redact-properties#hiding-customer-ip-address) should be verified separately; a client-side `ip: false` option does not provide that guarantee.
+
+## Retention measurement contract
+
+The app preserves the anonymous install UUID and existing diagnostics defaults.
+`first_observed_at` is the same UTC day as the legacy `first_launch_at` trait;
+`observation_basis=first_observed_not_install` makes the upgrade backfill explicit.
+Neither date proves original installation. Old events are not rewritten.
+
+`onboarding_completed` remains setup completion, including microphone skip.
+`microphone_skipped` records that choice; `dictation_ready` reports microphone
+permission at completion, not model readiness or a successful take. Existing
+`meeting_recording_ready` reports system-audio permission, not capture success.
+
+`activation_first_value_saved` is once per observed workflow kind (dictation or
+meeting) since this measurement was introduced. `measurement_basis` is
+`observed_onboarding` only when unfinished onboarding was observed with analytics
+on and no previously observed saved artifact; otherwise `existing_or_unobserved`.
+It never means a verified new install. Local dates supply coarse
+`onboarding_to_value_bucket` and `setup_to_value_bucket` (`lt_1m`, `1_5m`, `5_30m`,
+`30_60m`, `1_24h`, `1_7d`, `7d_plus`, or `unknown`).
+No exact timestamps for these local baselines leave the device. Opt-out clears
+baselines; existing milestone flags survive so toggles do not invent activation.
+A missing baseline, replayed setup, or reversed clock yields unknown timing.
+Legacy first/second artifact events remain available; duplicate completion of
+the first known save cannot advance the second-artifact milestone.
+
+Count value from `dictation_artifact_saved` and `meeting_transcript_saved`.
+`dictation_completed` is a processing/delivery outcome and is not a durable-save
+proxy. Dictation save publication emits even if the UI was cancelled or a newer
+take started; it uses the saving session's snapshot. Meeting first-value state
+is claimed at the confirmed save, before the asynchronous metadata read.
+
+`save_id` is the reviewed high-cardinality exception: an existing random UUID,
+scoped to a saved operation. Dictation uses its random session UUID, meeting
+uses the task UUID that survives failed-job retries. It is UUID-validated and
+appears only on save/milestone events. It is never a filename, timestamp entry
+ID, title, text hash, hardware ID, or identity stitch. Deduplicate save outcomes
+by anonymous install, workflow, and `save_id`. Capture `correlation_id` remains
+separate: a queued meeting copies the originating capture context only when
+saved-task ownership matches. Imported/restarted jobs may lack that link;
+never treat the reporter's fallback correlation as proof of capture linkage.
+No persistent per-artifact ID is added for reuse actions.
+
+For weekly/monthly return, reuse the existing timestamped successful-save events
+and anonymous install UUID. Keep meetings, dictation, and either-workflow cohorts
+separate, split release/local/missing build channels, and include only mature
+W1–4/M2–6 windows in denominators. A reused artifact can be a separate return
+measure (`saved_result_action` success); app launch and automatic presentation
+are not useful-return outcomes. Do not mix newly observed onboarding cohorts
+with existing/unobserved installs or imply older data had `save_id`. Offline
+queues, opt-out gaps, reinstalls, and restyle-delayed meeting events limit exact
+counts and boundary timing; event receipt is not continuous observation.
+
+`product_navigation` records explicit sidebar/control selections and window
+presentations with canonical `destination`/`previous_destination` plus bounded
+`source` and `initiation=user|automatic|unknown`. Use `initiation=user` for
+intentional navigation. Legacy `home` is unchanged: menu `home` opens Today,
+page `home` means Meetings. Rendering callbacks still feed the legacy series,
+not the new deliberate-navigation series.
+
+`saved_result_action` records `copy`, `preview`, or `open_markdown` with bounded
+kind/surface/result and artifact-age bucket. Copy success means the clipboard
+accepted the write; preview success means content loaded; external open success
+means macOS accepted the handoff, not that the user read it. A retry is a new
+attempt with its own terminal outcome. There is no saved-result export action
+in the current UI, so no export event is claimed. Agent/MCP use retains its
+existing bounded query events. No content, paths, titles, names, app/window
+text, keystrokes, replay, or new person identity enters this contract.

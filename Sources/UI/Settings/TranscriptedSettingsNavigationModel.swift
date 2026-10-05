@@ -34,6 +34,14 @@ final class TranscriptedSettingsNavigationModel {
         homeRevealMeetingToken += 1
     }
 
+    /// Call from a control or window presentation with its known source, never from render callbacks.
+    func select(_ page: TranscriptedSettingsPage, source: ProductUsageTelemetry.NavigationSource) {
+        ProductUsageTelemetry.trackNavigation(
+            destination: page.telemetryDestination, previous: selectedPage.telemetryDestination, source: source
+        )
+        selectedPage = page
+    }
+
     init(selectedPage: TranscriptedSettingsPage = .today) {
         self.selectedPage = selectedPage
         self.presentedPage = selectedPage

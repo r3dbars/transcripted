@@ -15,7 +15,7 @@ extension DictationSessionController {
     ) async {
         lastCompletedText = text
         let recovery = stoppedAudioRecovery
-        let saveContext = dictationContext()
+        let saveContext = dictationSaveContext(text: text)
         let delivery = DictationSessionCapSavePolicy.delivery
         let saveTask = startPersistingDictationTranscript(text: text, delivery: delivery, recovery: recovery)
         let saveResult = await saveTask.value
@@ -85,22 +85,6 @@ extension DictationSessionController {
                     }
                 }
             )
-            if let saved = saveResult.saved {
-                ActivationTelemetry.trackDictationArtifactSaved(
-                    saved: saved,
-                    delivery: delivery.rawValue,
-                    durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
-                    trigger: currentDictationTrigger.rawValue,
-                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
-                )
-            }
-            ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
-                artifactKind: .dictation,
-                surface: .dictationSave,
-                trigger: currentDictationTrigger.rawValue,
-                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
-                durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds)
-            )
         }
         isDictating = false
         appState.runtimeDiagnostics.clearSession(
@@ -110,14 +94,18 @@ extension DictationSessionController {
     }
 
     @discardableResult
-    func persistDictationTranscript(text: String, delivery: DictationDelivery) -> DictationTranscriptPersistenceResult {
+    func persistDictationTranscript(
+        text: String,
+        delivery: DictationDelivery,
+        context: [String: String]
+    ) -> DictationTranscriptPersistenceResult {
         let result = DictationTranscriptPersistenceResult.measure {
             try DictationTranscriptWriter.save(
                 text: text, sourceAppName: sessionSourceApp?.localizedName ?? "Unknown",
                 sourceBundleID: sessionSourceApp?.bundleIdentifier, delivery: delivery
             )
         }
-        publishDictationTranscriptPersistence(result, delivery: delivery, context: dictationContext())
+        publishDictationTranscriptPersistence(result, delivery: delivery, context: context)
         return result
     }
 
@@ -164,10 +152,43 @@ extension DictationSessionController {
         // Artifact notifications are global; diagnostics must retain the saving session's context.
         if let saved = result.saved {
             recordDictationTranscriptSaved(saved, delivery: delivery, context: context)
+            // A committed artifact is useful even after cancellation or a new take.
+            // Read the saving session's snapshot, never the controller's current session.
+            let durationBucket = context["duration_bucket"] ?? "unknown"
+            let wordCountBucket = context["word_count_bucket"] ?? "unknown"
+            let trigger = context["trigger"] ?? DictationTrigger.unknown.rawValue
+            let correlationID = context["correlation_id"]
+            let artifactExists = ActivationTelemetry.trackDictationArtifactSaved(
+                saved: saved,
+                delivery: delivery.rawValue,
+                durationBucket: durationBucket,
+                trigger: trigger,
+                wordCountBucket: wordCountBucket,
+                correlationID: correlationID
+            )
+            if artifactExists {
+                ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+                    artifactKind: .dictation,
+                    surface: .dictationSave,
+                    trigger: trigger,
+                    wordCountBucket: wordCountBucket,
+                    durationBucket: durationBucket,
+                    correlationID: correlationID,
+                    savedAt: Date(timeIntervalSinceReferenceDate: result.finishedAt)
+                )
+                trackOnboardingFirstDictationSavedIfNeeded(delivery: delivery, wordCountBucket: wordCountBucket)
+            }
             NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
         } else if let error = result.failureError {
             recordDictationTranscriptSaveFailed(error, context: context)
         }
+    }
+
+    func dictationSaveContext(text: String) -> [String: String] {
+        dictationContext(extra: [
+            "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+            "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
+        ])
     }
 
     private func recordDictationTranscriptSaved(
@@ -187,7 +208,7 @@ extension DictationSessionController {
 
     func trackOnboardingFirstDictationSavedIfNeeded(
         delivery: DictationDelivery,
-        wordCount: Int
+        wordCountBucket: String
     ) {
         guard PermissionsOnboardingPreferences.markFirstDictationSavedTrackedIfNeeded() else { return }
 
@@ -198,7 +219,7 @@ extension DictationSessionController {
                 // The 3-step onboarding (2026-08) has no dictation-test step;
                 // "done" is the stable stage a first dictation follows.
                 "step_id": "done",
-                "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+                "word_count_bucket": wordCountBucket,
             ]
         )
     }

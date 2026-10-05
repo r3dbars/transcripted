@@ -43,6 +43,8 @@ enum InstallIdentity {
             "install_channel": AnalyticsRuntimeConfiguration.buildChannel(),
             // For upgrades this is the first observed day with this instrumentation.
             "first_launch_at": firstLaunchDay(userDefaults: userDefaults, now: now),
+            "first_observed_at": firstLaunchDay(userDefaults: userDefaults, now: now),
+            "observation_basis": "first_observed_not_install",
         ]
     }
 }

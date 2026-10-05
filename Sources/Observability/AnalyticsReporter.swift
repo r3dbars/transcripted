@@ -574,7 +574,6 @@ final class AnalyticsReporter {
         }
     }
 
-    // Config is read once from env/plist/overrides file and cached for the app lifetime.
     private let apiKey: String?
     private let usageStore: UsageHealthStore?
     private let captureHost: String?
@@ -731,6 +730,7 @@ final class AnalyticsReporter {
     }
 
     private func clearPendingCaptures() {
+        RetentionTelemetry.clearObservation(userDefaults: userDefaults)
         usageStore?.clear()
         syncOnDeliveryQueue {
             self.inFlightCaptureIDs.removeAll()
