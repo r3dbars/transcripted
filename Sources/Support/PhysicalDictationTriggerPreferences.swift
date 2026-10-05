@@ -62,7 +62,9 @@ enum FunctionKeySystemAction: Equatable {
 }
 
 enum PhysicalDictationTriggerPreferences {
-    static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+    /// The one dictation key. Right Option, not Fn: Fn also opens emoji or
+    /// switches input unless macOS is set to Do Nothing.
+    static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
@@ -84,6 +86,7 @@ enum PhysicalDictationTriggerPreferences {
     private static let meetingModifiersKey = "meetingTrigger-modifiers"
     private static let pasteLastDictationKeyCodeKey = "pasteLastDictationTrigger-keyCode"
     private static let pasteLastDictationModifiersKey = "pasteLastDictationTrigger-modifiers"
+    private static let oneDictationKeyMigratedKey = "dictationOneKeyMigrated"
     private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
     private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
 
@@ -184,6 +187,25 @@ enum PhysicalDictationTriggerPreferences {
         userDefaults.set(Int(binding.keyCode), forKey: keyCodeKey)
         userDefaults.set(Int(binding.modifiers), forKey: modifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
+    /// Dictation used to have a hold key and a separate hands-free key; now
+    /// it has one key with a behavior. Someone who set a custom hands-free
+    /// key and never touched the hold key keeps their key, as Tap to toggle,
+    /// instead of silently getting Fn. Runs once.
+    static func migrateToOneDictationKeyIfNeeded(userDefaults: UserDefaults = .standard) {
+        guard !userDefaults.bool(forKey: oneDictationKeyMigratedKey) else { return }
+        userDefaults.set(true, forKey: oneDictationKeyMigratedKey)
+        guard storedBinding(
+            keyCodeKey: pushToTalkKeyCodeKey,
+            modifiersKey: pushToTalkModifiersKey,
+            userDefaults: userDefaults
+        ) == nil else { return }
+        let handsFree = handsFreeBinding(userDefaults: userDefaults)
+        guard handsFree != defaultHandsFreeBinding,
+              pushToTalkBinding(userDefaults: userDefaults) == defaultPushToTalkBinding else { return }
+        savePushToTalk(handsFree, userDefaults: userDefaults)
+        HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: userDefaults)
     }
 
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {

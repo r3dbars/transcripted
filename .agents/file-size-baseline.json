@@ -3,7 +3,7 @@
   "limit": 800,
   "files": {
     "Sources/App/TranscriptedApp.swift": 830,
-    "Sources/Capture/ContextCaptureEngine.swift": 888,
+    "Sources/Capture/ContextCaptureEngine.swift": 842,
     "Sources/Meeting/MeetingAudioStorageManager.swift": 1229,
     "Sources/Meeting/MeetingImportedAudioPreparer.swift": 1052,
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,

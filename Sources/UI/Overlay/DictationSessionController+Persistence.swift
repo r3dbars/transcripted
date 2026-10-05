@@ -62,13 +62,7 @@ extension DictationSessionController {
         )
         // Hitting the 5-minute cap still saved the text: a notice, not an
         // error with a warning triangle and a shake.
-        let pasteLastShortcut = PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
-        )
-        switch DictationSessionCapSavePolicy.presentation(
-            saveFailureMessage: saveFailureMessage,
-            pasteLastShortcut: pasteLastShortcut
-        ) {
+        switch DictationSessionCapSavePolicy.presentation(saveFailureMessage: saveFailureMessage) {
         case .error(let message):
             overlayController.showError(message)
         case .savedNotice(let message, let actionTitle):

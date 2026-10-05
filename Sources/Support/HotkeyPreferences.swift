@@ -35,6 +35,32 @@ enum DictationShortcutMode: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// What the one dictation key does, like Handy's Shortcut Behavior.
+enum DictationKeyBehavior: String, CaseIterable, Identifiable, Hashable {
+    /// Hold to talk; a quick tap keeps listening until the next press.
+    case holdOrTap = "hold_or_tap"
+    case holdOnly = "hold_only"
+    case tapToToggle = "tap_to_toggle"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .holdOrTap: return "Hold or tap"
+        case .holdOnly: return "Hold only"
+        case .tapToToggle: return "Tap to toggle"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .holdOrTap: return "Hold to talk, or tap to keep listening and tap again to paste."
+        case .holdOnly: return "Records while you hold the key, then pastes when you let go."
+        case .tapToToggle: return "Tap to start, tap again to stop and paste."
+        }
+    }
+}
+
 enum HotkeyPreferences {
 
     // MARK: - Defaults
@@ -68,6 +94,8 @@ enum HotkeyPreferences {
     private static let meetingModifiersKey   = "hotkey-meeting-modifiers"
     private static let dictationShortcutModeKey = "hotkey-dictation-shortcut-mode"
     private static let dictationShortcutsEnabledKey = "hotkey-dictation-shortcuts-enabled"
+    private static let dictationKeyBehaviorKey = "hotkey-dictation-key-behavior"
+    static let defaultDictationKeyBehavior: DictationKeyBehavior = .holdOrTap
 
     // MARK: - Read
 
@@ -112,6 +140,17 @@ enum HotkeyPreferences {
         return userDefaults.bool(forKey: dictationShortcutsEnabledKey)
     }
 
+    static func dictationKeyBehavior(userDefaults: UserDefaults = .standard) -> DictationKeyBehavior {
+        guard
+            let rawValue = userDefaults.string(forKey: dictationKeyBehaviorKey),
+            let behavior = DictationKeyBehavior(rawValue: rawValue)
+        else {
+            return defaultDictationKeyBehavior
+        }
+
+        return behavior
+    }
+
     // MARK: - Write
 
     static func save(dictation binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
@@ -142,6 +181,11 @@ enum HotkeyPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
+    static func setDictationKeyBehavior(_ behavior: DictationKeyBehavior, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(behavior.rawValue, forKey: dictationKeyBehaviorKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
         ud.removeObject(forKey: dictationKeyCodeKey)
@@ -150,6 +194,7 @@ enum HotkeyPreferences {
         ud.removeObject(forKey: meetingModifiersKey)
         ud.removeObject(forKey: dictationShortcutModeKey)
         ud.removeObject(forKey: dictationShortcutsEnabledKey)
+        ud.removeObject(forKey: dictationKeyBehaviorKey)
         ud.removeObject(forKey: rightOptionDictationKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }

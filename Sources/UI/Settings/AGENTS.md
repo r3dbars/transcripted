@@ -175,7 +175,7 @@ settings-side agent connection flow.
   `SettingsActionFailureCopy.swift` (Settings actions).
 - `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` -
   meeting-only language picker and Mac-selected-mic toggle rows.
-- `HotkeyRecorderAppKitView.swift` - AppKit shortcut recorder.
+- `ShortcutSettingsRows.swift` - shortcut rows (dictation key, behavior, meetings, paste last) and `ShortcutRecorderModel`, which records a new shortcut in place.
 - `OnboardingAbandonmentReasonPolicy.swift` - maps an onboarding exit to its
   telemetry abandonment reason.
 - `PermissionsOnboardingView.swift` - first-run onboarding: three quiet steps; permission refresh is event-driven and never uses a repeating ScreenCaptureKit probe
