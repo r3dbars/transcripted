@@ -1,46 +1,45 @@
 // DictationSessionController+Recovery.swift
-// Saved-audio prompts, Quit admission, Retry Saving, and recording interruptions.
+// Saved-audio cleanup, Quit admission, Retry Saving, and recording interruptions.
 
 import AppKit
 
 extension DictationSessionController {
-    func presentPendingStoppedAudioRecoveryIfNeeded() {
-        guard !isDictating,
-              let overlayController,
-              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1, excludingDismissed: true).first else { return }
-        let savedAudioAction = savedDictationAudioAction(for: recovery.url)
-        overlayController.showError(
-            "A saved dictation recording never became text. Transcribe it now, and it shows up in Meetings.",
-            actionTitle: savedAudioAction.title,
-            action: savedAudioAction.action
-        )
-        savedAudioPromptURL = recovery.url
+    /// Launch: delete short dictation audio left from an earlier run. A saved
+    /// recording is only offered while its own take's message is up, so a
+    /// short leftover is private audio nobody will ask for. One of 30 s or
+    /// more stays on disk with no prompt. Runs off the main actor; files
+    /// written after this call (this run's takes) are kept.
+    /// Skipped for a second copy run with the single-instance guard off: the
+    /// first copy may be offering one of these files right now.
+    func purgeLeftoverStoppedAudio() {
+        let logger = appState?.logger
+        guard !SingleInstanceGuard.isDisabledByEnvironment else {
+            logger?.log("DICTATION | leftover saved recordings kept: single-instance guard is off")
+            return
+        }
+        let cutoff = Date()
+        let purge = Task.detached(priority: .utility) {
+            DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore: cutoff)
+        }
+        Task { @MainActor in
+            let removed = await purge.value
+            guard removed > 0 else { return }
+            logger?.log("DICTATION | removed \(removed) short saved recording(s) left from an earlier run")
+        }
     }
 
-    /// The user closed a "Transcribe It" message (X or Esc) without pressing
-    /// it. Launch stops asking about that recording, so an empty take doesn't
-    /// come back every time. Nothing is deleted.
-    func stopRemindingAboutSavedAudioPrompt() {
-        guard let url = savedAudioPromptURL else { return }
-        savedAudioPromptURL = nil
-        let marked = DictationStoppedAudioRecoveryStore.markDismissed(audioURL: url)
-        appState?.logger.log("DICTATION | saved recording prompt closed; launch reminder \(marked ? "off" : "unchanged"), audio kept")
-    }
-
-    /// The button on a message about a saved dictation recording. The
+    /// The button on a message about a long take's saved recording. The
     /// messages used to point at Capture → Transcribe Audio File, a menu that
     /// only shows while Transcripted is frontmost. Transcribe It runs that
     /// same import on the saved file, and the meeting importer cleans the
     /// recording up once its transcript is saved.
     func savedDictationAudioAction(for url: URL) -> (title: String, action: () -> Void) {
         guard let onTranscribeSavedAudio else {
-            return ("Show Audio", { [weak self] in
-                self?.savedAudioPromptURL = nil
+            return ("Show Audio", {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             })
         }
         return (DictationSavedAudioActionCopy.transcribeTitle, { [weak self] in
-            self?.savedAudioPromptURL = nil
             self?.overlayController?.hideWithConfirmAnimation()
             onTranscribeSavedAudio(url)
         })
@@ -178,20 +177,17 @@ extension DictationSessionController {
                             },
                             hasRecoverableRecording: { self.appState?.sttRouter.hasRecoverableRecording == true },
                             audioGone: {
-                                self.presentPendingStoppedAudioRecoveryIfNeeded()
-                                if DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).isEmpty {
-                                    self.overlayController?.showError(
-                                        "The captured audio is no longer available. Start a new dictation.",
-                                        actionTitle: "Try Again",
-                                        action: { [weak self] in
-                                            guard let self else { return }
-                                            self.retryDictation(
-                                                sourceApp: self.sessionSourceApp,
-                                                anchorRect: self.sessionAnchorRect
-                                            )
-                                        }
-                                    )
-                                }
+                                self.overlayController?.showError(
+                                    "The captured audio is no longer available. Start a new dictation.",
+                                    actionTitle: "Try Again",
+                                    action: { [weak self] in
+                                        guard let self else { return }
+                                        self.retryDictation(
+                                            sourceApp: self.sessionSourceApp,
+                                            anchorRect: self.sessionAnchorRect
+                                        )
+                                    }
+                                )
                             },
                             resetStopFence: { self.stopFinalizationGate.reset() },
                             readmit: {

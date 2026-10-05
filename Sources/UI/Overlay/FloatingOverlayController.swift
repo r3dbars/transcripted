@@ -103,9 +103,6 @@ class FloatingOverlayController {
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
     var onActionableMessageDiscarded: (() -> Void)?
-    /// A message with a button was closed by the user (X or Esc) without the
-    /// button being pressed. Fires before `onActionableMessageDiscarded`.
-    var onActionableMessageClosedByUser: (() -> Void)?
     /// Every Esc during an active session, before the discard decision.
     var onEscapeKeyDuringSession: (() -> Void)?
 
@@ -257,7 +254,7 @@ class FloatingOverlayController {
             clearActionableErrorWithoutHiding()
             handler?()
         case .dictationDismissMessage:
-            dismissErrorClosedByUser()
+            dismissError()
         default:
             break
         }
@@ -544,16 +541,6 @@ class FloatingOverlayController {
         isVisible && island?.isPointerOverIsland == true
     }
 
-    /// `dismissError()` for an explicit user close (X or Esc), as opposed to
-    /// a timeout or a newer message.
-    func dismissErrorClosedByUser() {
-        guard state == .drafting, !errorMessage.isEmpty else { return }
-        if errorActionHandler != nil {
-            onActionableMessageClosedByUser?()
-        }
-        dismissError()
-    }
-
     func dismissError() {
         guard state == .drafting, !errorMessage.isEmpty else { return }
         clearNotPasted()
@@ -701,7 +688,7 @@ class FloatingOverlayController {
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
                 if self.state == .drafting, !self.errorMessage.isEmpty {
-                    self.dismissErrorClosedByUser()
+                    self.dismissError()
                     return
                 }
                 self.handleEscapeDuringSession()
