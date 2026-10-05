@@ -84,7 +84,7 @@ Rules:
 - each button shows its shortcut only when it fits; the full title stays the
   accessibility label
 - setup or failure detail moves to the button's tooltip
-- `Paste Last Dictation` has no row; its shortcut (default ⌥⇧V) still works
+- `Paste Last Dictation` has no row and no shortcut; a take that didn't paste says so on screen with Paste again
 
 ### Utility rows
 
@@ -120,7 +120,6 @@ Contents:
 
 - one dictation key recorder, with its behavior (Hold or tap, Hold only, Tap to toggle)
 - meeting shortcut recorder
-- paste-last-dictation shortcut recorder
 - send-after-paste app allowlist
 
 This page should not own privacy, storage, or analytics controls.

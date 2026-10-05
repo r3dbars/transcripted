@@ -1,6 +1,6 @@
 // ShortcutSettingsRows.swift
-// General page shortcut rows: the one dictation key, its behavior, the
-// meeting shortcut, and paste last dictation. Each key row records a new
+// General page shortcut rows: the one dictation key, its behavior, and the
+// meeting shortcut. Each key row records a new
 // shortcut in place (press the key you want) and has its own reset.
 
 import AppKit
@@ -11,13 +11,11 @@ import SwiftUI
 enum ShortcutRecordingTarget: CaseIterable {
     case dictation
     case meeting
-    case pasteLastDictation
 
     var name: String {
         switch self {
         case .dictation: return "Dictation key"
         case .meeting: return "Meetings"
-        case .pasteLastDictation: return "Paste last dictation"
         }
     }
 
@@ -25,7 +23,6 @@ enum ShortcutRecordingTarget: CaseIterable {
         switch self {
         case .dictation: return PhysicalDictationTriggerPreferences.pushToTalkBinding()
         case .meeting: return PhysicalDictationTriggerPreferences.meetingBinding()
-        case .pasteLastDictation: return PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
         }
     }
 
@@ -33,7 +30,6 @@ enum ShortcutRecordingTarget: CaseIterable {
         switch self {
         case .dictation: return PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
         case .meeting: return PhysicalDictationTriggerPreferences.defaultMeetingBinding
-        case .pasteLastDictation: return PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
         }
     }
 
@@ -41,7 +37,6 @@ enum ShortcutRecordingTarget: CaseIterable {
         switch self {
         case .dictation: PhysicalDictationTriggerPreferences.savePushToTalk(binding)
         case .meeting: PhysicalDictationTriggerPreferences.saveMeeting(binding)
-        case .pasteLastDictation: PhysicalDictationTriggerPreferences.savePasteLastDictation(binding)
         }
     }
 }

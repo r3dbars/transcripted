@@ -205,20 +205,19 @@ func testContextCaptureEnginePolicy() {
     // lookups plus migration fallbacks) per keystroke, which added latency to
     // all typing on the machine and raised the tapDisabledByTimeout risk.
 
-    runSuite("Binding snapshot — dictation shortcuts on: one dictation key, meeting, paste") {
+    runSuite("Binding snapshot — dictation shortcuts on: one dictation key and meetings") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
             bindings.map(\.action),
-            [.dictationPushToTalk, .meeting, .pasteLastDictation],
-            "the dictation key comes first so it wins shared-key ties; there's no second hands-free key"
+            [.dictationPushToTalk, .meeting],
+            "the dictation key comes first so it wins shared-key ties; no hands-free or paste-last key"
         )
         assertEqual(bindings.map(\.binding), [
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
         ], "a fresh install snapshots the default bindings")
     }
 
@@ -242,7 +241,7 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("Binding snapshot — dictation shortcuts off still keeps meeting and paste") {
+    runSuite("Binding snapshot — dictation shortcuts off still keeps meetings") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
@@ -250,8 +249,8 @@ func testContextCaptureEnginePolicy() {
         let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
             bindings.map(\.action),
-            [.meeting, .pasteLastDictation],
-            "turning dictation shortcuts off must not take the meeting or paste shortcuts with it"
+            [.meeting],
+            "turning dictation shortcuts off must not take the meeting shortcut with it"
         )
     }
 
@@ -262,8 +261,8 @@ func testContextCaptureEnginePolicy() {
         let before = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
         let after = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
-        assertEqual(before.count, 3, "first snapshot has all three shortcuts")
-        assertEqual(after.count, 2, "a rebuild after a preference change picks up the new state")
+        assertEqual(before.count, 2, "first snapshot has both shortcuts")
+        assertEqual(after.count, 1, "a rebuild after a preference change picks up the new state")
     }
 
     runSuite("Accessibility retry — only a missing grant waits for the grant") {

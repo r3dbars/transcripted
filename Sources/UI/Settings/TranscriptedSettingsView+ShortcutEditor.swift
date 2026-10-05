@@ -1,6 +1,6 @@
 // TranscriptedSettingsView+ShortcutEditor.swift
 // General page: the keyboard shortcuts switch and the shortcut recorder
-// (dictation key, its behavior, meetings, paste last).
+// (dictation key, its behavior, meetings).
 
 import SwiftUI
 
@@ -51,16 +51,6 @@ extension TranscriptedSettingsView {
                     message: "Starts or stops recording a meeting from anywhere."
                 ),
                 automationIdentifier: "transcripted.settings.general.meeting-shortcut",
-                recorder: shortcutRecorder
-            )
-
-            ShortcutKeyRow(
-                target: .pasteLastDictation,
-                info: GeneralInfo(
-                    title: "Paste last dictation",
-                    message: "Pastes your last dictation again, in case it didn't land."
-                ),
-                automationIdentifier: "transcripted.settings.general.paste-last-shortcut",
                 showsDivider: false,
                 recorder: shortcutRecorder
             )

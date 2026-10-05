@@ -237,19 +237,17 @@ struct HotkeyActionDebouncer {
 }
 
 extension PhysicalShortcutMatcher {
-    /// The binding snapshot the event tap matches against. Meeting and
-    /// paste-last-dictation are always there; the dictation key
-    /// comes first, only while dictation shortcuts are on. Built once per
+    /// The binding snapshot the event tap matches against. Meetings is
+    /// always there; the dictation key comes first, only while dictation
+    /// shortcuts are on. Built once per
     /// (re)configure, never per keystroke.
     static func configuredBindings(userDefaults: UserDefaults = .standard) -> [PhysicalShortcutBinding] {
+        // No paste-last-dictation shortcut: it was dropped from Settings,
+        // and a global chord nobody can see or change shouldn't stay live.
         var bindings = [
             PhysicalShortcutBinding(
                 action: .meeting,
                 binding: PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
-            ),
-            PhysicalShortcutBinding(
-                action: .pasteLastDictation,
-                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: userDefaults)
             )
         ]
 
