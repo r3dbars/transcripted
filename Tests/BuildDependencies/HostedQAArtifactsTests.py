@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Offline fixture/evidence guards; never invoke Swift or touch account state."""
+import ctypes
+import ctypes.util
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import sqlite3
+import stat
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -66,9 +71,13 @@ class HostedQAArtifactsTests(unittest.TestCase):
 
     def test_complete_synthetic_positive_proof(self):
         keys = ['health/meetings-dir', 'health/state-dir', 'health/logs-dir', 'database/speakers-integrity',
-                'database/stats-integrity', 'logs/jsonl-valid'] + ['transcript/yaml-present'] * 3
+                'database/stats-integrity', 'database/speakers-wal-mode', 'database/speakers-schema',
+                'database/stats-schema-recordings', 'database/stats-schema-daily', 'logs/jsonl-valid'] + ['transcript/yaml-present'] * 3
         value = setup.bounded_report(report([(key, 'PASS') for key in keys]))
         setup.require_seeded(value, 0)
+        downgraded = setup.bounded_report(report([(key, 'WARN' if key == 'database/speakers-wal-mode' else 'PASS') for key in keys]))
+        with self.assertRaises(setup.UnsafeEvidence):
+            setup.require_seeded(downgraded, 0)
         with self.assertRaises(setup.UnsafeEvidence):
             setup.require_seeded(value, 1)
 
@@ -81,7 +90,8 @@ class HostedQAArtifactsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); fixtures = root / 'fixtures'; fixtures.mkdir()
             (fixtures / 'Logs').mkdir()
-            for name in ['Call_a.md', 'Call_b.md', 'Call_c.md', 'speakers.sqlite', 'stats.sqlite', 'Logs/app.jsonl']:
+            for name in ['Call_a.md', 'Call_b.md', 'Call_c.md', 'speakers.sqlite', 'speakers.sqlite-wal', 'speakers.sqlite-shm',
+                         'stats.sqlite', 'stats.sqlite-wal', 'stats.sqlite-shm', 'Logs/app.jsonl']:
                 (fixtures / name).write_text('synthetic ' + name)
             destination = root / 'destination'
             setup.seed_layout(fixtures, destination)
@@ -90,6 +100,70 @@ class HostedQAArtifactsTests(unittest.TestCase):
             self.assertEqual((destination / 'logs/app.jsonl').read_bytes(), (fixtures / 'Logs/app.jsonl').read_bytes())
             with self.assertRaises(setup.UnsafeEvidence):
                 setup.seed_layout(fixtures, destination)
+
+    def test_closed_wal_family_survives_readonly_integrity_schema_and_rows(self):
+        # Use the platform SQLite library, like the Swift generator. PERSIST_WAL
+        # retains valid companion files after a successful sqlite3_close.
+        lib = ctypes.CDLL(ctypes.util.find_library('sqlite3'))
+        lib.sqlite3_open.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
+        lib.sqlite3_exec.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        lib.sqlite3_file_control.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
+        lib.sqlite3_close.argtypes = [ctypes.c_void_p]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); fixtures = root / 'fixtures'; fixtures.mkdir()
+            (fixtures / 'Logs').mkdir()
+            (fixtures / 'Logs/app.jsonl').write_text('synthetic log')
+            for name in ['Call_a.md', 'Call_b.md', 'Call_c.md']:
+                (fixtures / name).write_text('synthetic transcript')
+            for name in ['speakers.sqlite', 'stats.sqlite']:
+                handle = ctypes.c_void_p()
+                self.assertEqual(lib.sqlite3_open(str(fixtures / name).encode(), ctypes.byref(handle)), 0)
+                try:
+                    sql = b"PRAGMA journal_mode=WAL; CREATE TABLE samples(id INTEGER PRIMARY KEY, value TEXT); INSERT INTO samples VALUES(1, 'synthetic'), (2, 'second');"
+                    self.assertEqual(lib.sqlite3_exec(handle, sql, None, None, None), 0)
+                    persistent = ctypes.c_int(1)
+                    self.assertEqual(lib.sqlite3_file_control(handle, b'main', 10, ctypes.byref(persistent)), 0)
+                finally:
+                    self.assertEqual(lib.sqlite3_close(handle), 0)
+                for suffix in ['', '-wal', '-shm']:
+                    self.assertTrue((fixtures / (name + suffix)).is_file())
+                with sqlite3.connect((fixtures / name).as_uri() + '?mode=ro', uri=True) as reader:
+                    self.assertEqual(reader.execute('PRAGMA integrity_check').fetchone(), ('ok',))
+                    self.assertEqual(reader.execute('SELECT COUNT(*) FROM samples').fetchone(), (2,))
+                reader.close()
+            destination = root / 'complete'
+            setup.seed_layout(fixtures, destination)
+            for name in ['speakers.sqlite', 'stats.sqlite']:
+                for suffix in ['', '-wal', '-shm']:
+                    path = destination / 'state' / (name + suffix)
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                with sqlite3.connect((destination / 'state' / name).as_uri() + '?mode=ro', uri=True) as reader:
+                    self.assertEqual(reader.execute('PRAGMA integrity_check').fetchone(), ('ok',))
+                    self.assertEqual(reader.execute('PRAGMA journal_mode').fetchone(), ('wal',))
+                    self.assertEqual([r[1] for r in reader.execute('PRAGMA table_info(samples)')], ['id', 'value'])
+                    self.assertEqual(reader.execute('SELECT * FROM samples ORDER BY id').fetchall(), [(1, 'synthetic'), (2, 'second')])
+                reader.close()
+            # Reproduce the original transport: identical main bytes without
+            # companions fail read-only queries on the supported macOS runner.
+            if setup.platform.system() == 'Darwin':
+                incomplete = root / 'incomplete'; incomplete.mkdir()
+                shutil.copy2(fixtures / 'speakers.sqlite', incomplete / 'speakers.sqlite')
+                reader = sqlite3.connect((incomplete / 'speakers.sqlite').as_uri() + '?mode=ro', uri=True)
+                try:
+                    with self.assertRaises(sqlite3.OperationalError):
+                        reader.execute('PRAGMA integrity_check').fetchone()
+                finally:
+                    reader.close()
+            # A missing or redirected companion must stop before creating output.
+            companion = fixtures / 'stats.sqlite-shm'
+            companion.unlink()
+            with self.assertRaises(setup.UnsafeEvidence):
+                setup.seed_layout(fixtures, root / 'missing')
+            self.assertFalse((root / 'missing').exists())
+            companion.symlink_to(fixtures / 'speakers.sqlite-shm')
+            with self.assertRaises(setup.UnsafeEvidence):
+                setup.seed_layout(fixtures, root / 'linked')
+            self.assertFalse((root / 'linked').exists())
 
     def test_missing_fixture_and_symlink_destination_fail_before_copy(self):
         with tempfile.TemporaryDirectory() as temporary:

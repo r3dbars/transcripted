@@ -142,7 +142,9 @@ def require_missing(report, code):
 def require_seeded(report, code):
     passed = {row['check']: row['count'] for row in report['checks'] if row['status'] == 'PASS'}
     required = {'health/meetings-dir', 'health/state-dir', 'health/logs-dir',
-                'database/speakers-integrity', 'database/stats-integrity', 'logs/jsonl-valid'}
+                'database/speakers-integrity', 'database/speakers-wal-mode',
+                'database/speakers-schema', 'database/stats-integrity',
+                'database/stats-schema-recordings', 'database/stats-schema-daily', 'logs/jsonl-valid'}
     if (code != 0 or report['summary']['failed'] or not required <= passed.keys()
             or passed.get('transcript/yaml-present') != 3):
         raise UnsafeEvidence('Synthetic default layout did not validate completely.')
@@ -156,7 +158,12 @@ def absent(path):
 def seed_layout(fixtures, destination):
     absent(destination)
     transcripts = sorted(fixtures.glob('Call_*.md'))
-    sources = transcripts + [fixtures / 'speakers.sqlite', fixtures / 'stats.sqlite', fixtures / 'Logs/app.jsonl']
+    # The exited generator leaves quiescent WAL databases. Read-only SQLite
+    # on macOS needs their companion files even when WAL is already empty.
+    database_files = [fixtures / (name + suffix)
+                      for name in ['speakers.sqlite', 'stats.sqlite']
+                      for suffix in ['', '-wal', '-shm']]
+    sources = transcripts + database_files + [fixtures / 'Logs/app.jsonl']
     if len(transcripts) != 3 or any(not p.is_file() or p.is_symlink() for p in sources):
         raise UnsafeEvidence('Generated fixture layout is incomplete or unsafe.')
     destination.mkdir(parents=True, mode=0o700)
@@ -164,8 +171,10 @@ def seed_layout(fixtures, destination):
         (destination / folder).mkdir(parents=True, mode=0o700)
     for source in transcripts:
         shutil.copy2(source, destination / 'captures/meetings' / source.name)
-    for name in ['speakers.sqlite', 'stats.sqlite']:
-        shutil.copy2(fixtures / name, destination / 'state' / name)
+    for source in database_files:
+        copied = destination / 'state' / source.name
+        shutil.copy2(source, copied)
+        copied.chmod(0o600)
     shutil.copy2(fixtures / 'Logs/app.jsonl', destination / 'logs/app.jsonl')
 
 

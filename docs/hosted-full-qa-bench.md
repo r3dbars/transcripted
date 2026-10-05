@@ -24,6 +24,11 @@ failure stops preparation.
 It then invokes the candidate's existing `generate-fixtures` command in a new
 owned temporary directory and copies its three synthetic transcripts, speaker
 and statistics databases, and synthetic log into the complete default layout.
+The generator must exit first. Each quiescent SQLite family includes the main
+file, WAL and shared-memory companions; copied database files use mode 0600.
+On macOS, copying the main file alone can break read-only queries even when
+its bytes are complete and the WAL is empty. The regression test checks actual
+SQLite integrity, schema, rows and WAL mode after a clean source close.
 The unchanged validator must pass against those artifacts before the bench
 starts. An empty directory is insufficient. This setup does not prove real
 saved customer artifacts, recordings, Bluetooth, or human pasteback behavior.
