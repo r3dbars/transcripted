@@ -54,11 +54,43 @@ enum WritingFrontWindowWatch {
         var pollsFrontWindow: Bool
     }
 
-    static func plan(running: Bool, autocompleteActive: Bool, screenMemoryEnabled: Bool) -> Plan {
-        let autocomplete = running && autocompleteActive
+    static func plan(running: Bool, autocompleteActive: Bool, screenMemoryEnabled: Bool, paused: Bool = false) -> Plan {
+        let autocomplete = running && autocompleteActive && !paused
         return Plan(
             observesAppActivation: autocomplete,
             pollsFrontWindow: autocomplete && screenMemoryEnabled
         )
     }
+}
+
+/// One expiry wakeup while paused, instead of polling the pause setting.
+/// A repeated update keeps the same timer; resume/stop invalidates it.
+@MainActor
+final class WritingPauseWakeup {
+    private(set) var timer: Timer?
+    private var deadline: Date?
+    private var generation = 0
+
+    func schedule(until: Date?, onExpiry: @escaping @MainActor () -> Void) {
+        guard until != deadline else { return }
+        generation &+= 1
+        let expectedGeneration = generation
+        timer?.invalidate()
+        timer = nil
+        deadline = until
+        guard let until else { return }
+        let timer = Timer(fire: until, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == expectedGeneration else { return }
+                self.generation &+= 1
+                self.timer = nil
+                self.deadline = nil
+                onExpiry()
+            }
+        }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    isolated deinit { timer?.invalidate() }
 }

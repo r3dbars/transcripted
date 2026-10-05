@@ -27,25 +27,46 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
     private let quietPeriod: TimeInterval
     private let now: @Sendable () -> TimeInterval
     private let perform: Perform
+    private let allowsApp: @Sendable (String?) -> Bool
     private let lock = NSLock()
+    private var enabled: Bool
     private var helperReady = false
+    private var currentApp: String?
     private var currentRegister: ContinuationRegister?
     private var warmedRegister: ContinuationRegister?
     private var lastCompletionAt: TimeInterval = -.greatestFiniteMagnitude
-    private var inflight: Task<Void, Never>?
+    private var inflight: (id: UUID, task: Task<Void, Never>)?
 
     init(
         baseURL: URL,
         accessKey: LlamaServerAccessKey? = nil,
         quietPeriod: TimeInterval = 2.0,
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        enabled: Bool = true,
+        allowsApp: @escaping @Sendable (String?) -> Bool = { _ in true },
         perform: Perform? = nil
     ) {
         self.baseURL = baseURL
         self.accessKey = accessKey
         self.quietPeriod = quietPeriod
         self.now = now
+        self.enabled = enabled
+        self.allowsApp = allowsApp
         self.perform = perform ?? Self.performOverLoopback
+    }
+
+    /// Pause/background admission changes leave the helper and cache intact.
+    /// The owner supplies the current app before requesting another warm-up.
+    @discardableResult
+    func setEnabled(_ enabled: Bool) -> Task<Void, Never>? {
+        let task = lock.withLock { () -> Task<Void, Never>? in
+            self.enabled = enabled
+            guard !enabled else { return nil }
+            defer { inflight = nil }
+            return inflight?.task
+        }
+        task?.cancel()
+        return task
     }
 
     /// A helper just became ready. Its cache is empty whatever was warmed
@@ -63,7 +84,7 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
             helperReady = false
             warmedRegister = nil
             defer { inflight = nil }
-            return inflight
+            return inflight?.task
         }
         task?.cancel()
     }
@@ -71,9 +92,14 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
     /// The frontmost app changed. Its register decides which scaffold the
     /// next real request will need.
     func noteFrontmostApp(bundleIdentifier: String?) {
-        lock.withLock {
+        let task = lock.withLock { () -> Task<Void, Never>? in
+            currentApp = bundleIdentifier
             currentRegister = ContinuationRegister.from(bundleIdentifier: bundleIdentifier)
+            guard !allowsApp(bundleIdentifier) else { return nil }
+            defer { inflight = nil }
+            return inflight?.task
         }
+        task?.cancel()
         warmIfNeeded()
     }
 
@@ -88,48 +114,57 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
         let task: Task<Void, Never>? = lock.withLock {
             lastCompletionAt = now()
             defer { inflight = nil }
-            return inflight
+            return inflight?.task
         }
         task?.cancel()
     }
 
     /// Awaits any in-flight warm-up; tests only.
     func settle() async {
-        let task = lock.withLock { inflight }
+        let task = lock.withLock { inflight?.task }
         await task?.value
     }
 
     private func warmIfNeeded() {
-        let planned: (register: ContinuationRegister, request: URLRequest)? = lock.withLock {
-            guard helperReady,
+        lock.withLock {
+            guard enabled, helperReady, allowsApp(currentApp),
                   inflight == nil,
                   let register = currentRegister,
                   register != warmedRegister,
                   now() - lastCompletionAt >= quietPeriod
-            else { return nil }
-            guard let request = try? warmRequest(for: register) else { return nil }
-            return (register, request)
-        }
-        guard let planned else { return }
-        let task = Task { [weak self] in
-            guard let self else { return }
-            let succeeded = await self.perform(planned.request)
-            guard !Task.isCancelled else { return }
-            self.lock.withLock {
-                if succeeded, self.helperReady { self.warmedRegister = planned.register }
-                self.inflight = nil
+            else { return }
+            guard let request = try? warmRequest(for: register) else { return }
+            let identifier = UUID()
+            // Register while holding the lock, before the task can finish or
+            // a pause can miss it. Old completions never clear a newer task.
+            let task = Task { [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                let admitted = self.lock.withLock {
+                    guard self.inflight?.id == identifier else { return false }
+                    guard self.enabled, self.allowsApp(self.currentApp) else {
+                        self.inflight = nil
+                        return false
+                    }
+                    return true
+                }
+                guard admitted else { return }
+                let succeeded = await self.perform(request)
+                let completed = self.lock.withLock {
+                    guard self.inflight?.id == identifier else { return false }
+                    self.inflight = nil
+                    guard !Task.isCancelled else { return false }
+                    if succeeded, self.helperReady { self.warmedRegister = register }
+                    return true
+                }
+                if completed {
+                    DiagnosticsLog.shared.record(
+                        "scaffold-prewarm",
+                        metadata: ["outcome": succeeded ? "warmed" : "failed"]
+                    )
+                }
             }
-            DiagnosticsLog.shared.record(
-                "scaffold-prewarm",
-                metadata: ["outcome": succeeded ? "warmed" : "failed"]
-            )
+            inflight = (identifier, task)
         }
-        let raced = lock.withLock { () -> Bool in
-            guard inflight == nil else { return true }
-            inflight = task
-            return false
-        }
-        if raced { task.cancel() }
     }
 
     private func warmRequest(for register: ContinuationRegister) throws -> URLRequest {
