@@ -321,6 +321,10 @@ Details:
 - The day header is written once, when the file is created; later saves append
   sections only. Header keys are flat; `format_version` follows the same
   convention as meetings.
+- Two edits rewrite a day file in place: Delete removes one section, and
+  Transcribe again replaces one section's heading title, `Words:`,
+  `Characters:`, and body. `Entry ID:`, `Captured:`, the source app,
+  `Delivery:`, and `Audio:` never change, so readers can key on the Entry ID.
 - Section heading: `## <h:mm a> - <title>` where the title is the first ~7
   words of the text (or `Dictation <MMM d> at <h:mm a>` for very short text).
 - Metadata lines, in order: `Entry ID:` (backticked), `Captured:` (ISO 8601
