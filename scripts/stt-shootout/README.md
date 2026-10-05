@@ -75,6 +75,7 @@ Pick some with `--engines a,b,c` or drop some with `--skip a,b`.
 | `whisper-cpp-turbo` | Whisper large-v3-turbo | whisper.cpp with Metal (pywhispercpp) |
 | `granite-speech` | IBM Granite Speech 4.0 1B | mlx-audio (GPU), 30 s pieces |
 | `nemotron-streaming` | NVIDIA Nemotron streaming 0.6B | mlx-audio (GPU), English only |
+| `phonon-2` | Fermion Phonon-2 (Parakeet V3 shrunk to 164 MB) | fermion-research + MLX (GPU), English only |
 
 `parakeet-v3` and `parakeet-ultra` never touch the app's own model files: the
 shootout makes an APFS clone (no extra disk) under `~/stt-shootout/models/app-cli/`

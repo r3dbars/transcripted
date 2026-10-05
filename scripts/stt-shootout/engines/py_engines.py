@@ -309,6 +309,23 @@ class NemotronStreaming(MlxAudio):
         return self.model.generate(mx.array(audio), chunk_duration=30.0).text
 
 
+class Phonon2:
+    """Fermion Research Phonon-2: Parakeet TDT 0.6b v3 squeezed to ~2 bits per
+    weight (164 MB), on the GPU via MLX. Its own package cuts audio over 35 s
+    into 25-35 s windows at pauses. The download lands under FERMION_CACHE_DIR,
+    which the shootout points inside its own folder."""
+
+    def load(self) -> None:
+        import fermion
+
+        self.model = fermion.load_speech("phonon-2", quiet=True)
+        self.details = {"model": "FermionResearch/Phonon-2", "package": "fermion-research"}
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        text, _decode_seconds, _audio_seconds = self.model.transcribe_array(audio)
+        return text
+
+
 ENGINES: dict[str, type] = {
     "fake": Fake,
     "whisper-turbo": MlxWhisper,
@@ -322,6 +339,7 @@ ENGINES: dict[str, type] = {
     "whisper-cpp-turbo": WhisperCpp,
     "granite-speech": GraniteSpeech,
     "nemotron-streaming": NemotronStreaming,
+    "phonon-2": Phonon2,
 }
 
 

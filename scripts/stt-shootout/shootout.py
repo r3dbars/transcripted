@@ -209,6 +209,16 @@ ENGINES: list[Engine] = [
         english_only=True,
         notes="mlx-community/nemotron-3.5-asr-streaming-0.6b via mlx-audio, 30 s chunks.",
     ),
+    Engine(
+        "phonon-2",
+        "Fermion Phonon-2 (164 MB Parakeet, MLX)",
+        "python",
+        deps=["fermion-research==0.2.9", "mlx", "mlx-audio==0.4.6", "mlx-lm", "soundfile", "scipy", "zstandard",
+              "numpy"],
+        english_only=True,
+        notes="FermionResearch/Phonon-2: Parakeet TDT 0.6b v3 shrunk to ~2 bits per weight, through its own "
+              "fermion-research package on the GPU via MLX. English only.",
+    ),
 ]
 ENGINES_BY_NAME = {e.name: e for e in ENGINES}
 
@@ -695,6 +705,7 @@ def child_env(base: Path) -> dict:
         "HF_HOME": str(base / "hf"),
         "STT_SHOOTOUT_MODELS": str(base / "models"),
         "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
+        "FERMION_CACHE_DIR": str(base / "models" / "fermion"),
     }
 
 
