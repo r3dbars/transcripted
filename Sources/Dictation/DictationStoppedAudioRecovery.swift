@@ -152,14 +152,70 @@ enum DictationStoppedAudioRecoveryStore {
     }
 
     /// Retires a take's checkpoint once its transcript is saved. A failed
-    /// save keeps the WAV, so the take can still be transcribed later.
+    /// save keeps the WAV, so the take can still be transcribed later. When
+    /// the saved entry recorded an `Audio:` path, the WAV moves into the
+    /// dictation audio archive (and gets compressed in the background)
+    /// instead of being deleted; if that move fails, it is deleted as before.
     @discardableResult
     static func retire(
         _ recovery: DictationStoppedAudioRecovery?,
         afterSaving result: DictationTranscriptPersistenceResult,
-        fileManager: FileManager = .default
+        keptAudioRelativePath: String? = nil,
+        dictationsFolder: URL? = nil,
+        fileManager: FileManager = .default,
+        compressKeptAudio: (URL) -> Void = DictationAudioArchive.compressInBackground
     ) -> Bool {
-        cleanup(recovery, transcriptPersisted: result.saved != nil, fileManager: fileManager)
+        if result.saved != nil, let recovery, let keptAudioRelativePath,
+           let keptURL = DictationAudioArchive.keep(
+               recovery: recovery,
+               relativePath: keptAudioRelativePath,
+               dictationsFolder: dictationsFolder,
+               fileManager: fileManager
+           ) {
+            compressKeptAudio(keptURL)
+            return true
+        }
+        return cleanup(recovery, transcriptPersisted: result.saved != nil, fileManager: fileManager)
+    }
+
+    /// The one save rule for a finished take, shared by the async and the
+    /// synchronous save paths: decide whether this take's audio is kept,
+    /// save the transcript (with its `Audio:` path when kept), then retire
+    /// the checkpoint. `save` receives the path to record, or nil.
+    static func saveTranscriptAndRetire(
+        recovery: DictationStoppedAudioRecovery?,
+        keepWindow: DictationAudioKeepWindow,
+        dictationsFolder: URL? = nil,
+        fileManager: FileManager = .default,
+        compressKeptAudio: (URL) -> Void = DictationAudioArchive.compressInBackground,
+        save: (_ audioRelativePath: String?) throws -> SavedDictationTranscript
+    ) -> DictationTranscriptPersistenceResult {
+        let audioRelativePath = DictationAudioArchive.plannedRelativePath(
+            for: recovery,
+            window: keepWindow,
+            fileManager: fileManager
+        )
+        let result = DictationTranscriptPersistenceResult.measure {
+            try save(audioRelativePath)
+        }
+        retire(
+            recovery,
+            afterSaving: result,
+            keptAudioRelativePath: audioRelativePath,
+            dictationsFolder: dictationsFolder,
+            fileManager: fileManager,
+            compressKeptAudio: compressKeptAudio
+        )
+        return result
+    }
+
+    /// Drops the restart-discovery metadata for a checkpoint WAV (used once
+    /// the WAV has moved into the dictation audio archive).
+    static func removeMetadata(forAudioURL audioURL: URL, fileManager: FileManager = .default) {
+        let url = metadataURL(for: audioURL)
+        if fileManager.fileExists(atPath: url.path) {
+            try? fileManager.removeItem(at: url)
+        }
     }
 
     /// Stops the launch reminder for one saved recording without deleting it.

@@ -21,6 +21,10 @@ struct SavedDictationEntry: Identifiable, Sendable {
     let delivery: DictationDelivery
     let sourceAppName: String
     let sourceAppBundleID: String?
+    /// The `Audio:` line: kept audio relative to the dictations folder
+    /// (`audio/<uuid>.m4a`). Nil for entries saved without kept audio. The
+    /// file may have aged out; resolve it with `DictationAudioArchive`.
+    var audioRelativePath: String? = nil
 
     var id: String {
         if let entryID, !entryID.isEmpty {
@@ -51,14 +55,16 @@ enum DictationTranscriptStore {
         sourceApp: NSRunningApplication?,
         delivery: DictationDelivery,
         createdAt: Date = Date(),
-        directory: URL? = nil
+        directory: URL? = nil,
+        audioRelativePath: String? = nil
     ) throws -> SavedDictationTranscript {
         let saved = try DictationTranscriptWriter.save(
             text: text,
             sourceApp: sourceApp,
             delivery: delivery,
             createdAt: createdAt,
-            directory: directory
+            directory: directory,
+            audioRelativePath: audioRelativePath
         )
         NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
         return saved
@@ -603,6 +609,7 @@ enum DictationTranscriptStore {
         var sourceAppName = "Unknown"
         var sourceAppBundleID: String?
         var delivery = DictationDelivery.failed
+        var audioRelativePath: String?
         var bodyLines: [String] = []
         var inBody = false
         var sawMetadata = false
@@ -646,6 +653,11 @@ enum DictationTranscriptStore {
                 delivery = DictationDelivery(rawValue: rawDelivery) ?? .failed
             } else if trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
                 sawMetadata = true
+            } else if trimmed.hasPrefix("Audio:") {
+                sawMetadata = true
+                let value = metadataValue(from: trimmed, prefix: "Audio:")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                audioRelativePath = value.isEmpty ? nil : value
             } else if !sawMetadata {
                 inBody = true
                 bodyLines.append(line)
@@ -666,7 +678,8 @@ enum DictationTranscriptStore {
             createdAt: createdAt,
             delivery: delivery,
             sourceAppName: sourceAppName,
-            sourceAppBundleID: sourceAppBundleID
+            sourceAppBundleID: sourceAppBundleID,
+            audioRelativePath: audioRelativePath
         )
     }
 
