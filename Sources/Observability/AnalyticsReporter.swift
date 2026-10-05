@@ -574,7 +574,6 @@ final class AnalyticsReporter {
         }
     }
 
-    // Config is read once from env/plist/overrides file and cached for the app lifetime.
     let apiKey: String?
     private let usageStore: UsageHealthStore?
     let captureHost: String?
