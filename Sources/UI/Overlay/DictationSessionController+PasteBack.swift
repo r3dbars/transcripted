@@ -70,7 +70,8 @@ extension DictationSessionController {
         )
         let outcome = textPaster.paste(
             text,
-            target: sessionPasteTarget
+            target: sessionPasteTarget,
+            endWaitOnLikelyPaste: autoSendRequestDecision.pasteMayEndWaitOnLikelyPaste
         )
         recordPasteAttemptOutcome(outcome, attempt: "initial")
         return outcome

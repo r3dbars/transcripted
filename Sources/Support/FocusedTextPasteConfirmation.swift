@@ -172,6 +172,31 @@ enum FocusedTextPasteConfirmationPolicy {
         return clipboardReadAt - pasteDispatchedAt <= window
     }
 
+    /// Whether a target that can confirm over Accessibility may still end the
+    /// confirmation wait on its quick clipboard read. Only when the caller says
+    /// nothing after the paste needs a confirmed one (a dictation with Auto
+    /// Enter not expected), and only for a read that makes the paste a likely
+    /// one anyway: right after Cmd+V, into a focus that could take text.
+    static func endsWaitOnLikelyPaste(
+        callerAllows: Bool,
+        focusRefutesPaste: Bool,
+        pasteDispatchedAt: CFAbsoluteTime,
+        clipboardReadAt: CFAbsoluteTime?
+    ) -> Bool {
+        guard callerAllows, !focusRefutesPaste else { return false }
+        return didObserveLikelyPaste(pasteDispatchedAt: pasteDispatchedAt, clipboardReadAt: clipboardReadAt)
+    }
+
+    /// The restore delay after a likely paste. When the wait ended early on the
+    /// read, the part of the wait it skipped is added back, so the user's
+    /// clipboard never comes back sooner than it would after a full wait.
+    static func likelyPasteRestoreDelay(fallbackDelay: UInt64, unusedWait: TimeInterval) -> UInt64 {
+        guard unusedWait.isFinite, unusedWait > 0 else { return fallbackDelay }
+        let extra = UInt64((min(unusedWait, 60) * 1_000_000_000).rounded())
+        let (delay, overflowed) = fallbackDelay.addingReportingOverflow(extra)
+        return overflowed ? .max : delay
+    }
+
     private static func normalizedForConfirmation(_ text: String) -> String {
         text.precomposedStringWithCompatibilityMapping
             .replacingOccurrences(of: "\u{2018}", with: "'")
