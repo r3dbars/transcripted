@@ -513,6 +513,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let button = statusItem?.button {
             configureStatusItemButton(button)
         }
+        LaunchTimingTelemetry.markStatusItemShownAfterThisTurn()
         bindStatusItemUpdateBadge()
         bindStatusItemRecordingIndicator()
 
@@ -542,7 +543,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         presentInitialOnboardingIfNeeded()
         if LaunchWindowPolicy.shouldOpenMainWindow(
             launchedAsLoginItem: launchedAsLoginItem,
-            secondsSinceLogin: Self.secondsSinceConsoleLogin(),
+            secondsSinceLogin: Self.secondsSinceConsoleLoginNotingLaunch(launchedAsLoginItem: launchedAsLoginItem),
             onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
             isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
         ) {
@@ -553,6 +554,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         Task { @MainActor in
             await appState.initialize()
             appState.contextCapture.registerHotkey()
+            LaunchTimingTelemetry.markHotkeysRegistered()
             await writeFirstRunReliabilityReportIfRequested()
         }
         CompanionConnectionService.shared.configure(meetingSession: appState.meetingSession)
