@@ -118,6 +118,41 @@ func testDictationAudioArchive() async {
         }
     }
 
+    runSuite("Once a dictation's delete is final, its kept audio goes, and only its own") {
+        let root = makeRoot("delete")
+        defer { try? fm.removeItem(at: root) }
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        let mine = UUID().uuidString.lowercased()
+        let other = UUID().uuidString.lowercased()
+        let audio = DictationAudioArchive.audioFolder(in: root)
+        write("m4a", to: audio.appendingPathComponent("\(mine).m4a"))
+        write("wav", to: audio.appendingPathComponent("\(mine).wav"))
+        write("m4a", to: audio.appendingPathComponent("\(other).m4a"))
+        _ = try? DictationTranscriptStore.save(
+            text: "the one to delete", sourceApp: nil, delivery: .pasted,
+            createdAt: base, directory: root, audioRelativePath: "audio/\(mine).m4a"
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "the one to keep", sourceApp: nil, delivery: .pasted,
+            createdAt: base.addingTimeInterval(60), directory: root, audioRelativePath: "audio/\(other).m4a"
+        )
+        guard let doomed = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: root)
+            .first(where: { $0.text == "the one to delete" }) else { return assertTrue(false, "entry saved") }
+
+        assertTrue((try? DictationTranscriptStore.deleteEntryReversibly(doomed)) != nil)
+        assertEqual(
+            ((try? fm.contentsOfDirectory(atPath: audio.path)) ?? []).count,
+            3,
+            "the undo window keeps the audio so Undo can bring the entry back whole"
+        )
+        DictationAudioArchive.deleteKeptAudio(for: doomed)
+        assertEqual(
+            Set((try? fm.contentsOfDirectory(atPath: audio.path)) ?? []),
+            ["\(other).m4a"],
+            "the deleted entry's M4A and WAV are gone; the other take's audio stays"
+        )
+    }
+
     // MARK: Keep and resolve
 
     runSuite("Keeping a take moves its WAV into the audio folder and drops the recovery reminder") {
@@ -463,6 +498,43 @@ func testDictationAudioArchive() async {
         assertNotNil(
             DictationAudioArchive.resolveURL(relativePath: "audio/\(id).m4a", dictationsFolder: destinationDictations),
             "the day file's relative Audio path resolves in the new library"
+        )
+    }
+
+    runSuite("Moving the library leaves audio behind when its day file stays behind") {
+        let source = makeRoot("collide-from")
+        let destination = makeRoot("collide-to")
+        defer {
+            try? fm.removeItem(at: source)
+            try? fm.removeItem(at: destination)
+        }
+        let staying = UUID().uuidString.lowercased()
+        let moving = UUID().uuidString.lowercased()
+        let sourceDictations = source.appendingPathComponent("dictations", isDirectory: true)
+        let sourceAudio = DictationAudioArchive.audioFolder(in: sourceDictations)
+        write("## 9:15 AM - note\n\nEntry ID: `dictation-1`\nAudio: `audio/\(staying).m4a`\n\nnote\n",
+              to: sourceDictations.appendingPathComponent("Dictations_2026-10-05.md"))
+        write("## 9:15 AM - note\n\nEntry ID: `dictation-2`\nAudio: `audio/\(moving).m4a`\n\nnote\n",
+              to: sourceDictations.appendingPathComponent("Dictations_2026-10-06.md"))
+        write("other day", to: destination.appendingPathComponent("dictations/Dictations_2026-10-05.md"))
+        write("aac", to: sourceAudio.appendingPathComponent("\(staying).m4a"))
+        write("aac", to: sourceAudio.appendingPathComponent("\(moving).m4a"))
+
+        let planner = CaptureLibraryMigrationPlanner()
+        let plan = planner.makePlan(from: source, to: destination)
+        let copied = (try? planner.copy(plan))?.copiedItems ?? []
+        _ = planner.removeOriginals(of: copied)
+
+        assertNotNil(
+            DictationAudioArchive.resolveURL(relativePath: "audio/\(staying).m4a", dictationsFolder: sourceDictations),
+            "audio named by the day file that stayed behind is still next to it"
+        )
+        assertNotNil(
+            DictationAudioArchive.resolveURL(
+                relativePath: "audio/\(moving).m4a",
+                dictationsFolder: destination.appendingPathComponent("dictations", isDirectory: true)
+            ),
+            "audio named by a moved day file moved with it"
         )
     }
 }

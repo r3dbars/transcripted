@@ -539,6 +539,8 @@ extension TranscriptedSettingsView {
                     refreshRecentCaptures(force: true)
                 },
                 finalize: {
+                    // The delete is permanent now, so its kept audio goes too.
+                    DictationAudioArchive.deleteKeptAudio(for: entry)
                     refreshRecentCaptures(force: true)
                 }
             )

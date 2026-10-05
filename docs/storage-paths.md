@@ -34,7 +34,9 @@ per take named from its session UUID: `<uuid>.m4a`, or `<uuid>.wav` until
 background compression finishes (or if it failed). Files are 0600 in a 0700
 folder. The day file's `Audio:` line stores the path relative to the dictations
 folder (`audio/<uuid>.m4a`), so it survives a library move; Move and Copy carry
-`dictations/audio/*.m4a|*.wav` like the day files.
+`dictations/audio/*.m4a|*.wav` like the day files (audio named by a day file
+that stays behind on a name collision stays behind with it). Deleting a
+dictation in Home deletes its kept audio once the undo window closes.
 `DictationAudioArchive` (`Sources/Dictation/DictationAudioArchive.swift`) owns
 keep, resolve, compress, and prune. How long audio stays is Settings → Storage →
 Keep dictation audio (`dictation-audio-keep` in `AudioStoragePreferences`:

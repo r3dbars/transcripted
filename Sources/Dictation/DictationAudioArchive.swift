@@ -175,6 +175,42 @@ enum DictationAudioArchive {
         return nil
     }
 
+    // MARK: - Delete
+
+    /// Deletes one take's kept audio (M4A and WAV) when its dictation is
+    /// deleted for good. `dictationsFolder` is the folder holding the entry's
+    /// day file. Returns how many files it removed.
+    @discardableResult
+    static func deleteKeptAudio(
+        relativePath: String,
+        dictationsFolder: URL,
+        fileManager: FileManager = .default
+    ) -> Int {
+        guard let stem = takeStem(fromRelativePath: relativePath) else { return 0 }
+        let audioFolder = audioFolder(in: dictationsFolder)
+        guard isPlainDirectory(audioFolder, fileManager: fileManager) else { return 0 }
+        var removed = 0
+        for ext in ["m4a", "wav"] {
+            let url = audioFolder.appendingPathComponent("\(stem).\(ext)", isDirectory: false)
+            if isRegularFile(url, fileManager: fileManager), (try? fileManager.removeItem(at: url)) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// Deletes a deleted dictation entry's kept audio, if it had any. The
+    /// audio sits next to the entry's day file, in `audio/`.
+    @discardableResult
+    static func deleteKeptAudio(for entry: SavedDictationEntry, fileManager: FileManager = .default) -> Int {
+        guard let audioRelativePath = entry.audioRelativePath else { return 0 }
+        return deleteKeptAudio(
+            relativePath: audioRelativePath,
+            dictationsFolder: entry.url.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+    }
+
     // MARK: - Prune
 
     /// Deletes kept audio older than the window: everything for `off`,

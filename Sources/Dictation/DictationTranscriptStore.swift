@@ -350,7 +350,9 @@ enum DictationTranscriptStore {
     }
 
     /// Removes a single dictation entry by matching on its stable saved entry ID.
-    /// If the day file has no remaining entries, the file is deleted.
+    /// If the day file has no remaining entries, the file is deleted. Kept
+    /// audio is the caller's to remove (`DictationAudioArchive.deleteKeptAudio(for:)`);
+    /// this file stays free of the archive so the storage smokes compile it alone.
     static func deleteEntry(_ entry: SavedDictationEntry) throws {
         try DictationTranscriptMutationLock.withLock {
             let url = entry.url
