@@ -90,15 +90,15 @@ func testDictationSessionCap() {
     runSuite("A cap save is good news with a Paste It action, and a failed save is an error") {
         assertEqual(DictationSessionCapSavePolicy.delivery, .savedWithoutPaste, "the cap saves to Markdown as saved-without-paste")
         assertEqual(
-            DictationSessionCapSavePolicy.presentation(saveFailureMessage: nil, pasteLastShortcut: "⌃⌥V"),
+            DictationSessionCapSavePolicy.presentation(saveFailureMessage: nil),
             .savedNotice(
-                message: "Saved to Markdown. Paste it now, or press ⌃⌥V later.",
+                message: "Saved to Markdown. Paste it now, or find it later in Dictations.",
                 actionTitle: "Paste It"
             ),
-            "a saved cap take is a notice naming the Paste Last shortcut, not a warning"
+            "a saved cap take is a notice that says where the words are, not a warning"
         )
         assertEqual(
-            DictationSessionCapSavePolicy.presentation(saveFailureMessage: "Couldn't save.", pasteLastShortcut: "⌃⌥V"),
+            DictationSessionCapSavePolicy.presentation(saveFailureMessage: "Couldn't save."),
             .error("Couldn't save."),
             "a failed save must not claim the words are saved"
         )

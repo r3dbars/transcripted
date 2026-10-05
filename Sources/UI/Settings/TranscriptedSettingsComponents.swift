@@ -485,19 +485,3 @@ struct PermissionStatusRow: View {
         .accessibilityIdentifier("transcripted.settings.permissions.systemAudioRecording.migration")
     }
 }
-
-struct HotkeyRecorderContainer: NSViewRepresentable {
-    var dictationShortcutsEnabled = true
-    static let preferredHeight: CGFloat = 140
-
-    func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
-        let view = HotkeyRecorderAppKitView(frame: .zero)
-        view.dictationShortcutsEnabled = dictationShortcutsEnabled
-        return view
-    }
-
-    func updateNSView(_ nsView: HotkeyRecorderAppKitView, context: Context) {
-        nsView.dictationShortcutsEnabled = dictationShortcutsEnabled
-        nsView.refreshDisplay()
-    }
-}
