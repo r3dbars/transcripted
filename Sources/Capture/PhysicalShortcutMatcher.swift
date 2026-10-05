@@ -30,6 +30,28 @@ struct DelayedModifierShortcutPress: Equatable {
     let action: PhysicalShortcutAction
 }
 
+/// Times a held Push to Talk key so its release can say tap or hold
+/// (`DictationHoldKeyTapPolicy`). Fed from the detector's tap thread, so a
+/// busy main actor can't stretch a tap into a hold or shrink a hold to a tap.
+struct PushToTalkTapTracker {
+    private var pressUptime: TimeInterval = 0
+    private var otherKeyPressed = false
+
+    mutating func pressed(at uptime: TimeInterval) {
+        pressUptime = uptime
+        otherKeyPressed = false
+    }
+
+    /// Another key or modifier went down while it was held (Fn+arrow).
+    mutating func otherKeyWentDown() {
+        otherKeyPressed = true
+    }
+
+    func isTap(releasedAt uptime: TimeInterval) -> Bool {
+        DictationHoldKeyTapPolicy.isTap(heldSeconds: uptime - pressUptime, otherKeyPressed: otherKeyPressed)
+    }
+}
+
 /// Follows a hands-free modifier that fired on press while other shortcuts
 /// share it (Right Option vs Option+M) until it's let go, so a key that goes
 /// down in between turns that press into a combo and its dictation is dropped.
@@ -215,19 +237,17 @@ struct HotkeyActionDebouncer {
 }
 
 extension PhysicalShortcutMatcher {
-    /// The binding snapshot the event tap matches against. Meeting and
-    /// paste-last-dictation are always there; the two dictation shortcuts
-    /// come first only while dictation shortcuts are on. Built once per
+    /// The binding snapshot the event tap matches against. Meetings is
+    /// always there; the dictation key comes first, only while dictation
+    /// shortcuts are on. Built once per
     /// (re)configure, never per keystroke.
     static func configuredBindings(userDefaults: UserDefaults = .standard) -> [PhysicalShortcutBinding] {
+        // No paste-last-dictation shortcut: it was dropped from Settings,
+        // and a global chord nobody can see or change shouldn't stay live.
         var bindings = [
             PhysicalShortcutBinding(
                 action: .meeting,
                 binding: PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
-            ),
-            PhysicalShortcutBinding(
-                action: .pasteLastDictation,
-                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: userDefaults)
             )
         ]
 
@@ -235,19 +255,16 @@ extension PhysicalShortcutMatcher {
             return bindings
         }
 
+        // One dictation key. Tap to toggle runs it through the hands-free
+        // path; the other behaviors are Push to Talk, where Hold or tap
+        // keeps listening after a quick tap (DictationHotkeyRouter).
+        let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
         bindings.insert(
             PhysicalShortcutBinding(
-                action: .dictationPushToTalk,
+                action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
                 binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
             ),
             at: 0
-        )
-        bindings.insert(
-            PhysicalShortcutBinding(
-                action: .dictationHandsFree,
-                binding: PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: userDefaults)
-            ),
-            at: 1
         )
         return bindings
     }

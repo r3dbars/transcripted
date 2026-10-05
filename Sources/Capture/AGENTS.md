@@ -5,9 +5,8 @@
 `Sources/Capture/` owns the active global-trigger layer for:
 
 - dictation start/stop
-- paste-last-dictation
 - meeting start/stop
-- configurable physical-key triggers. Defaults: hold Fn = push-to-talk dictation, right Option = hands-free dictation, Option-M = meeting, Option-Shift-V = paste last dictation (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
+- configurable physical-key triggers. Defaults: Right Option = the one dictation key (not Fn, which also opens emoji) (hold to talk, tap to keep listening), Option-M = meeting. The paste-last-dictation shortcut is no longer registered (`configuredBindings`); its stored binding and `.pasteLastDictation` routing remain but never fire (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
 
 ## Module
 
@@ -30,12 +29,13 @@
 ## Current Hotkey Flow
 
 - The physical dictation trigger routes into `DictationSessionController`
-- Dictation has separate hands-free toggle and push-to-talk bindings; the physical shortcut action identifies the mode passed to `DictationSessionController`
-- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Fn for push-to-talk, right Option for hands-free dictation, Option-M for meetings, Option-Shift-V for paste-last-dictation, and supporting modifier-only or keyed chords
+- Dictation has one key (the stored Push to Talk binding). `HotkeyPreferences.dictationKeyBehavior` decides its action in `PhysicalShortcutMatcher.configuredBindings`: Hold or tap (default) and Hold only register it as `.dictationPushToTalk`; Tap to toggle registers it as `.dictationHandsFree`. The old hands-free binding is still stored but no longer registered. The physical shortcut action identifies the mode passed to `DictationSessionController`
+- Hold or tap makes the dictation key do both, like Handy's Auto mode: hold it and the release stops and pastes; tap it (under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier pressed while held) and the take flips to hands-free, so the next press stops it and that press's release is swallowed. The detector tells a tap from a hold on the tap thread (`.tapRelease`), not on the main actor, so a busy main thread can't stretch a tap into a hold. Hold only is plain Push to Talk
+- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Right Option for dictation and Option-M for meetings, and supporting modifier-only or keyed chords
 - The configured meeting physical trigger routes meeting toggles through the
   app-provided meeting closure
 - Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
-- A modifier-only hands-free key that other shortcuts also use (right Option vs Option-M) fires on press, so the hold isn't added to every start. If a key was typed in the last second it waits for release instead, and if another key goes down while it's held the detector sends `.comboInterrupted` and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). `HandsFreeModifierComboTracker` follows the held key from the tap's own events. Don't gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running
+- A modifier-only hands-free key (Tap to toggle) fires on press, and `HandsFreeModifierComboTracker` follows every one until release, so Fn+arrow drops the start. One that other shortcuts also use (right Option vs Option-M) also fires on press, so the hold isn't added to every start. If a key was typed in the last second it waits for release instead, and if another key goes down while it's held the detector sends `.comboInterrupted` and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). `HandsFreeModifierComboTracker` follows the held key from the tap's own events. Don't gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running
 - Accessibility-backed trigger registration failures surface through `hotkeyError` so the menubar can explain why dictation trigger capture is unavailable
 
 ## Guardrails
@@ -56,10 +56,10 @@ bash run-tests.sh
 
 Manual checks:
 
-- hands-free dictation hotkey starts and stops dictation
+- with Tap to toggle, the dictation key starts and stops dictation
 - right Option then M (or typing é with right Option+E) does not leave a dictation running
 - push-to-talk starts dictation on press and stops/pastes on release
-- paste-last-dictation uses its configured shortcut without depending on dictation shortcuts being enabled
+- with Hold or tap, a quick Right Option tap keeps listening and the next press pastes; a hold starts after the 0.14 s chord delay and pastes on release; Option+M and Right Option+E never start dictation
 - meeting hotkey toggles meeting capture
 - the configured physical dictation trigger starts/stops dictation in the expected shortcut mode
 - rapid repeat presses are ignored cleanly

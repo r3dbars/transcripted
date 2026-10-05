@@ -168,6 +168,81 @@ extension DictationSessionController {
         return true
     }
 
+    // MARK: - Tap to keep listening
+
+    /// A hands-free take is still recording, not finishing, so a Push to
+    /// Talk press can stop it.
+    var isHandsFreeTakeListening: Bool {
+        currentDictationShortcutMode == .handsFree && isTakeStillListening
+    }
+
+    /// Recording (or opening the mic), and no stop admitted yet. The overlay
+    /// stays `.listening` for a moment after a stop is admitted, so
+    /// `isPreviousDictationFinishing` alone isn't enough.
+    private var isTakeStillListening: Bool {
+        isDictating
+            && stopFinalizationGate.admittedSessionID != currentDictationSessionID
+            && !isPreviousDictationFinishing
+    }
+
+    /// A Push to Talk press ends a hands-free take. Pressed again before the
+    /// mic even opened, it was a double tap: drop it quietly rather than say
+    /// the mic wasn't ready (#1743).
+    func stopHandsFreeTakeFromPushToTalkPress() {
+        if let appState, let overlayController,
+           DictationRecordingStartLifecyclePolicy.stopDecision(
+               isLoadingOverlay: overlayController.state == .loading,
+               isListeningOverlay: overlayController.state == .listening,
+               hasStartupTask: startupTask != nil,
+               hasRecordingStartTask: recordingStartRetryTask != nil,
+               sttIsRecording: appState.sttRouter.isRecording
+           ) == .cancelPendingStart {
+            cancelDictation()
+            return
+        }
+        stopDictationAndPaste(trigger: .physicalKey, shortcutMode: .handsFree)
+    }
+
+    /// A Push to Talk press takes back a start a tap kept waiting on the last
+    /// take, the way a second hands-free press does. One the hands-free key
+    /// queued stays. True when there was one to drop.
+    func dropQueuedTapKeptStart() -> Bool {
+        guard queuedDictationStart?.keptByTap == true else { return false }
+        dropQueuedDictationStart(showMessage: false)
+        return true
+    }
+
+    /// The Push to Talk key was tapped, not held: keep its take going
+    /// hands-free, so the next press stops it. Covers a take still opening
+    /// the mic and a press remembered behind the last take. Returns false
+    /// when there's no Push to Talk take to keep.
+    func keepPushToTalkTakeListening() -> Bool {
+        if let queued = queuedDictationStart, queued.shortcutMode == .pushToTalk {
+            queuedDictationStart = QueuedDictationStart(
+                sourceApp: queued.sourceApp,
+                trigger: queued.trigger,
+                shortcutMode: .handsFree,
+                isRetry: queued.isRetry,
+                requestedAt: queued.requestedAt,
+                keptByTap: true
+            )
+            return true
+        }
+        guard currentDictationShortcutMode == .pushToTalk, isTakeStillListening else { return false }
+        currentDictationShortcutMode = .handsFree
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_tap_kept_listening",
+            message: "Push to Talk key was tapped, so the take keeps listening hands-free",
+            context: dictationContext(
+                extra: ["trigger": currentDictationTrigger.rawValue]
+            )
+        )
+        return true
+    }
+
     /// A push-to-talk key let go before its remembered press could start.
     /// Returns true when there was one to drop.
     @discardableResult
