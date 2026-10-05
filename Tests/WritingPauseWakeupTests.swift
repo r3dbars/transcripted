@@ -1,8 +1,8 @@
 import Foundation
 
 @MainActor
-func testWritingPauseWakeup() {
-    runSuite("A Writing pause owns one expiry wakeup and explicit resume cancels it") {
+func testWritingPauseWakeup() async {
+    await runSuite("A Writing pause owns one expiry wakeup and explicit resume cancels it") {
         let wakeup = WritingPauseWakeup()
         let deadline = Date().addingTimeInterval(3_600)
         var resumes = 0
@@ -26,7 +26,7 @@ func testWritingPauseWakeup() {
         assertEqual(resumes, 1)
     }
 
-    runSuite("Extending a pause cancels its former expiry action") {
+    await runSuite("Extending a pause cancels its former expiry action") {
         let wakeup = WritingPauseWakeup()
         let deadline = Date().addingTimeInterval(3_600)
         var resumes = 0
