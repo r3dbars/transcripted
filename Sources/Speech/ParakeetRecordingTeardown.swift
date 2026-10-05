@@ -234,10 +234,11 @@ extension ParakeetEngine: ParakeetStopRecordingHost {
     var hasSharedMeetingMicClaim: Bool { sharedMeetingMicClaim != nil }
     var isSharedMeetingMicResumeInProgress: Bool { sharedMeetingMicTransition.isResumeInProgress }
     var hasPinnedDictationRecording: Bool { pinnedDictationRecording != nil }
-    /// The recorder the current take uses, for stop timing (`pinned_ioproc`
-    /// or `engine`). Read it before the stop clears the pinned recording.
+    /// The recorder the current take uses, for stop timing (`pinned_ioproc`,
+    /// `shared_meeting_mic` or `engine`). Read it before the stop clears them.
     var dictationMicBackendName: String {
-        hasPinnedDictationRecording ? PinnedMicrophoneCapture.diagnosticBackendName : "engine"
+        if hasPinnedDictationRecording { return PinnedMicrophoneCapture.diagnosticBackendName }
+        return hasSharedMeetingMicClaim ? "shared_meeting_mic" : "engine"
     }
 
     var activeConfigRecoveryGeneration: UInt64? {
