@@ -199,6 +199,24 @@ final class EmbeddingStore: @unchecked Sendable {
         }
     }
 
+    /// True while no pass has validated the stored model yet (the first one was
+    /// deferred by the embed lock, a lock-open failure, or cancellation).
+    /// Semantic search stays lexical-only until then.
+    var needsModelReconciliation: Bool {
+        admissionCondition.lock()
+        defer { admissionCondition.unlock() }
+        return provider.isAvailable && !hasReconciledModel
+    }
+
+    /// Periodic retry for a deferred first pass. A quiet library never trips the
+    /// watcher's change scan, so without this a deferred server would stay
+    /// lexical-only. No-op once a pass has reconciled; a still-held lock defers
+    /// again instead of duplicating the holder's work.
+    func reconcileEmbeddingsIfModelPending(isCancelled: () -> Bool = { Task.isCancelled }) {
+        guard needsModelReconciliation else { return }
+        reconcileEmbeddings(isCancelled: isCancelled)
+    }
+
     // MARK: - Cross-process embed lock
 
     /// Polls a non-blocking lock about every 100 ms until `timeout`. EINTR

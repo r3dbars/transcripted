@@ -66,8 +66,13 @@ struct TranscriptedMCP {
             throw error
         }
 
-        let watchers = directories.watchedDirectories.map { directory in
-            FileWatcher(directory: directory) {
+        let watchers = directories.watchedDirectories.enumerated().map { offset, directory in
+            // One watcher retries a deferred semantic pass on its timer, so a
+            // quiet library still leaves lexical-only mode once the lock frees.
+            FileWatcher(
+                directory: directory,
+                onPeriodicTick: offset == 0 ? { index.reconcileEmbeddingsIfModelPending() } : nil
+            ) {
                 do {
                     try index.reconcile(
                         meetingDirs: directories.meetingDirs,

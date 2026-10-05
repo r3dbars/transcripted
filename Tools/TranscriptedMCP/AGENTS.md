@@ -238,7 +238,7 @@ The in-app Claude Desktop installer copies that helper into:
 - transport is stdio, not HTTP
 - don't switch back to the SDK's `StdioTransport`: 0.12 sets O_NONBLOCK on the client's fds and polls stdin every 10 ms forever (~0.5% of a core and ~200 context switches/s per idle server), and sleeps 10 ms per full pipe on large replies. `BlockingStdioTransport` sleeps in read(2)/poll(2) instead. Running servers keep the old binary until their client restarts.
 - the index dir also holds `mcp_index.embed.lock` (a per-pass cross-process lock around `reconcileEmbeddings`) and an additive `embedding_cache` table (content-keyed vector reuse, 72 h TTL, cleared on model change; old helpers ignore it)
-- embed-lock timeout/open failure defers semantic backfill until a later reconcile; it never runs an unlocked competing pass or unlinks a live lock. Exited holders release the kernel lock automatically. Until its first model reconciliation succeeds, a fresh store keeps semantic queries on the lexical fallback.
+- embed-lock timeout/open failure defers semantic backfill until a later reconcile (or, while the model has never been reconciled, the first watcher's 5-minute timer tick, so a quiet library still recovers); it never runs an unlocked competing pass or unlinks a live lock. Exited holders release the kernel lock automatically. Until its first model reconciliation succeeds, a fresh store keeps semantic queries on the lexical fallback.
 - direct file reads are path-validated and reject traversal or symlink escapes
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
