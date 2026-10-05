@@ -69,6 +69,7 @@ so tiny transient states do not get duplicated inside controllers.
 - `MenuBar/MenuBarMeetingCapturePhase.swift` — Foundation-pure starting/recording/saving phase of a live meeting capture, used by the popover header and the meeting row
 - `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access); the macOS Fn key conflict is kept out of the menu and shown in Settings > Shortcuts instead
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
+- `MenuBar/MenuBarPopoverPresentation.swift` — shows the transient status popover and focuses its own window without app-wide activation; left and right clicks share one toggle action
 - `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (Paste Last Dictation keeps its shortcut but has no row)
 - `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate", "Done"); the full title stays the accessibility label
 - `MenuBar/MenuBarShortcutLabel.swift` — Foundation-pure shortcut text for those buttons: the full shortcut, then the first key of a pair ("Fn / Right ⌥" → "Fn") when the pair doesn't fit
@@ -100,7 +101,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/HomeMeetingAudioPlayer.swift` — meeting-audio player and speaker color palette shared by the Home expansion
 - `Settings/MeetingLanguageSettingRow.swift` — meeting/import language picker row (separate from dictation settings)
 - `Settings/MeetingMicrophoneSettingRow.swift` — "Use Mac-selected microphone" toggle row for meetings
-- `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
+- `Settings/ShortcutSettingsRows.swift` — Settings rows for the one dictation key, its behavior, meetings, and paste last; `ShortcutRecorderModel` records a new shortcut in place
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/RetainedDataSourceComboBox.swift` — `NSComboBox` subclass that owns its data source (AppKit only holds `dataSource` unretained), used by both speaker name boxes so a freed source can't crash the box mid-keystroke (Sentry APPLE-MACOS-2H)

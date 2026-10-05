@@ -13,6 +13,49 @@ import Foundation
 
 @MainActor
 func testDictationSessionDecision() async {
+    runSuite("Mic timeout keeps the failed start's readiness after engine cleanup") {
+        var readiness = ParakeetRecoveryState()
+        let timeout = DictationSession.TimedOutInfo(
+            startAttempts: 2,
+            readinessRefreshes: 1,
+            recoveryStartAttempts: 0,
+            forcedReadinessRecoveries: 0,
+            cleanupPlan: DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout"),
+            inputFormatReady: readiness.inputFormatReady,
+            routeContext: [:]
+        )
+
+        // Failed-start cleanup resets the graph and marks its format unready.
+        // That new state must not rewrite what went wrong in the finished take.
+        readiness.reset()
+        readiness.markFormatUnready()
+        assertFalse(readiness.inputFormatReady, "the replacement graph has not been validated")
+        assertEqual(timeout.message, "Mic didn't start. Try again or choose another input.",
+                    "a ready input that failed to start must not be reported as a missing selection")
+    }
+
+    runSuite("Mic timeout keeps its failed route when a newer route replaces it") {
+        var route = [
+            "selection_overrode_default": "true",
+            "selection_reason": "preferredBuiltInForBluetoothHeadset",
+            "default_input_class": "bluetooth",
+            "default_output_class": "bluetooth",
+            "selected_input_class": "built_in"
+        ]
+        let timeout = DictationSession.TimedOutInfo(
+            startAttempts: 0,
+            readinessRefreshes: 4,
+            recoveryStartAttempts: 1,
+            forcedReadinessRecoveries: 0,
+            cleanupPlan: DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout"),
+            inputFormatReady: false,
+            routeContext: route
+        )
+        route.removeAll()
+        assertEqual(timeout.message, "Built-in mic unavailable. Choose another input.",
+                    "the error must describe the route that timed out, not later cached diagnostics")
+    }
+
     runSuite("DictationSession.StartPathDecision — loaded model starts immediately") {
         let decision = DictationSession.StartPathDecision.decide(
             isRecordingModelLoaded: true,

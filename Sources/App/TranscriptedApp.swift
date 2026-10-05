@@ -746,11 +746,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.imagePosition = .imageOnly
         button.identifier = NSUserInterfaceItemIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
         button.setAccessibilityIdentifier(MenuBarAutomationID.statusItemButton.rawValue)
-        button.action = #selector(togglePopover)
-        button.target = self
-        // Right-click opens the same popover as a left-click; there is no
-        // separate right-click menu. Buttons only send left-ups by default.
-        _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        MenuBarPopoverPresentation.installToggleAction(on: button, target: self, action: #selector(togglePopover))
 
         installStatusItemUpdateBadge(on: button)
     }
