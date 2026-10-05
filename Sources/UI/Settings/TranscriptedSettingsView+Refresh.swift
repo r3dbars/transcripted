@@ -186,7 +186,7 @@ extension TranscriptedSettingsView {
         keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
-        pushToTalkTapKeepsListening = HotkeyPreferences.pushToTalkTapKeepsListening()
+        dictationKeyBehavior = HotkeyPreferences.dictationKeyBehavior()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -410,7 +410,7 @@ extension TranscriptedSettingsView {
 
     func refreshShortcutState() {
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
-        pushToTalkTapKeepsListening = HotkeyPreferences.pushToTalkTapKeepsListening()
+        dictationKeyBehavior = HotkeyPreferences.dictationKeyBehavior()
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )

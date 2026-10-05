@@ -17,9 +17,9 @@ enum DictationTrigger: String {
     case unknown = "unknown"
 }
 
-/// When a Push to Talk press counts as a tap rather than a hold. With
-/// "Tap to keep listening" on, a tap keeps the take going hands-free, so the
-/// one key does both (Handy calls this Auto). Under the threshold is well
+/// When a Push to Talk press counts as a tap rather than a hold. With the
+/// dictation key set to Hold or tap, a tap keeps the take going hands-free,
+/// so the one key does both (Handy calls this Auto). Under the threshold is well
 /// above a real tap (tens of milliseconds, see #1743) and below a deliberate
 /// hold. A key typed while it was held makes it a chord (Fn+arrow), never a
 /// tap.
@@ -45,7 +45,7 @@ struct DictationHotkeyRouter {
     var dropQueuedPushToTalkStart: @MainActor () -> Bool
     var start: @MainActor (DictationTrigger, DictationShortcutMode) -> Void
     var stop: @MainActor (DictationTrigger, DictationShortcutMode) -> Void
-    /// "Tap to keep listening" is on for the Push to Talk key.
+    /// The dictation key's behavior is Hold or tap.
     var tapKeepsListening: @MainActor () -> Bool = { false }
     /// A hands-free take is recording (not finishing), so a Push to Talk
     /// press can stop it.

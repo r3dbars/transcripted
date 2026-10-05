@@ -205,22 +205,41 @@ func testContextCaptureEnginePolicy() {
     // lookups plus migration fallbacks) per keystroke, which added latency to
     // all typing on the machine and raised the tapDisabledByTimeout risk.
 
-    runSuite("Binding snapshot — dictation shortcuts on: push-to-talk, hands-free, meeting, paste") {
+    runSuite("Binding snapshot — dictation shortcuts on: one dictation key, meeting, paste") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         assertEqual(
             bindings.map(\.action),
-            [.dictationPushToTalk, .dictationHandsFree, .meeting, .pasteLastDictation],
-            "dictation shortcuts come first so they win shared-key ties"
+            [.dictationPushToTalk, .meeting, .pasteLastDictation],
+            "the dictation key comes first so it wins shared-key ties; there's no second hands-free key"
         )
         assertEqual(bindings.map(\.binding), [
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
         ], "a fresh install snapshots the default bindings")
+    }
+
+    runSuite("Binding snapshot — Tap to toggle runs the dictation key as a toggle") {
+        let (defaults, suiteName) = makeContextCaptureDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: defaults)
+
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        assertEqual(bindings.first?.action, .dictationHandsFree, "each press starts or stops")
+        assertEqual(
+            bindings.first?.binding,
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "it's still the one dictation key"
+        )
+        HotkeyPreferences.setDictationKeyBehavior(.holdOnly, userDefaults: defaults)
+        assertEqual(
+            PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults).first?.action,
+            .dictationPushToTalk,
+            "Hold only is plain Push to Talk"
+        )
     }
 
     runSuite("Binding snapshot — dictation shortcuts off still keeps meeting and paste") {
@@ -243,7 +262,7 @@ func testContextCaptureEnginePolicy() {
         let before = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
         defaults.set(false, forKey: "hotkey-dictation-shortcuts-enabled")
         let after = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
-        assertEqual(before.count, 4, "first snapshot has all four shortcuts")
+        assertEqual(before.count, 3, "first snapshot has all three shortcuts")
         assertEqual(after.count, 2, "a rebuild after a preference change picks up the new state")
     }
 

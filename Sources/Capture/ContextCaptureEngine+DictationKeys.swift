@@ -96,7 +96,7 @@ extension ContextCaptureEngine {
             stop: { trigger, shortcutMode in
                 session.stopDictationAndPaste(trigger: trigger, shortcutMode: shortcutMode)
             },
-            tapKeepsListening: { HotkeyPreferences.pushToTalkTapKeepsListening() },
+            tapKeepsListening: { HotkeyPreferences.dictationKeyBehavior() == .holdOrTap },
             isHandsFreeTakeListening: { session.isHandsFreeTakeListening },
             stopHandsFreeTake: { session.stopHandsFreeTakeFromPushToTalkPress() },
             dropQueuedTapKeptStart: { session.dropQueuedTapKeptStart() },

@@ -100,7 +100,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/HomeMeetingAudioPlayer.swift` — meeting-audio player and speaker color palette shared by the Home expansion
 - `Settings/MeetingLanguageSettingRow.swift` — meeting/import language picker row (separate from dictation settings)
 - `Settings/MeetingMicrophoneSettingRow.swift` — "Use Mac-selected microphone" toggle row for meetings
-- `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
+- `Settings/ShortcutSettingsRows.swift` — Settings rows for the one dictation key, its behavior, meetings, and paste last; `ShortcutRecorderModel` records a new shortcut in place
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough; permission refresh is event-driven so an idle window never creates recurring ScreenCaptureKit probes
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/RetainedDataSourceComboBox.swift` — `NSComboBox` subclass that owns its data source (AppKit only holds `dataSource` unretained), used by both speaker name boxes so a freed source can't crash the box mid-keystroke (Sentry APPLE-MACOS-2H)

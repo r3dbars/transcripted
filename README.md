@@ -169,8 +169,8 @@ model instead.
    Recording** so it can hear the other side of the call. Allow
    **Accessibility** so the keyboard shortcuts work and dictation can paste
    into other apps. **Calendar** is optional, for meeting reminders.
-4. Click the menu bar icon and choose **Record**, or tap **Right Option** to
-   dictate.
+4. Click the menu bar icon and choose **Record**, or hold **Fn** to dictate
+   (tap it instead to keep listening, then tap again to paste).
 
 ### Homebrew
 

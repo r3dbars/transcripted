@@ -186,7 +186,7 @@ struct PermissionsOnboardingView: View {
     private static var dictationShortcutDisplay: String? {
         guard HotkeyPreferences.dictationShortcutsEnabled() else { return nil }
         return PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
     }
 
@@ -907,7 +907,7 @@ private struct DoneStage: View {
                 ShortcutRow(
                     label: "Dictate",
                     shortcut: dictationShortcutDisplay,
-                    detail: "Tap to start, tap again to stop and paste."
+                    detail: HotkeyPreferences.dictationKeyBehavior().summary
                 )
                 Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
             }

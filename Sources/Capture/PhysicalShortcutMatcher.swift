@@ -238,8 +238,8 @@ struct HotkeyActionDebouncer {
 
 extension PhysicalShortcutMatcher {
     /// The binding snapshot the event tap matches against. Meeting and
-    /// paste-last-dictation are always there; the two dictation shortcuts
-    /// come first only while dictation shortcuts are on. Built once per
+    /// paste-last-dictation are always there; the dictation key
+    /// comes first, only while dictation shortcuts are on. Built once per
     /// (re)configure, never per keystroke.
     static func configuredBindings(userDefaults: UserDefaults = .standard) -> [PhysicalShortcutBinding] {
         var bindings = [
@@ -257,19 +257,16 @@ extension PhysicalShortcutMatcher {
             return bindings
         }
 
+        // One dictation key. Tap to toggle runs it through the hands-free
+        // path; the other behaviors are Push to Talk, where Hold or tap
+        // keeps listening after a quick tap (DictationHotkeyRouter).
+        let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
         bindings.insert(
             PhysicalShortcutBinding(
-                action: .dictationPushToTalk,
+                action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
                 binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
             ),
             at: 0
-        )
-        bindings.insert(
-            PhysicalShortcutBinding(
-                action: .dictationHandsFree,
-                binding: PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: userDefaults)
-            ),
-            at: 1
         )
         return bindings
     }

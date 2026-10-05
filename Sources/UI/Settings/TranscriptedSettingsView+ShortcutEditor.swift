@@ -1,6 +1,6 @@
 // TranscriptedSettingsView+ShortcutEditor.swift
-// General page: the keyboard shortcuts switch, the shortcut recorder, and
-// Tap to keep listening for the Push to Talk key.
+// General page: the keyboard shortcuts switch and the shortcut recorder
+// (dictation key, its behavior, meetings, paste last).
 
 import SwiftUI
 
@@ -17,58 +17,83 @@ extension TranscriptedSettingsView {
                 help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
                 info: GeneralInfo(
                     title: "Keyboard shortcuts",
-                    message: "Push-to-talk and hands-free keys can start dictation. Off still lets you start from the app, and meeting controls keep working."
+                    message: "One dictation key: hold it to talk, or tap it to keep listening, depending on Behavior. Off still lets you start from the app, and meeting controls keep working."
                 ),
                 automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
             )
 
-            HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                .frame(height: HotkeyRecorderContainer.preferredHeight)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
             if dictationShortcutsEnabled {
-                GeneralToggleRow(
-                    title: "Tap to keep listening",
-                    isOn: persistedSettingsBinding(
-                        $pushToTalkTapKeepsListening,
-                        persist: { HotkeyPreferences.setPushToTalkTapKeepsListening($0) },
-                        track: { trackSettingsToggle("push_to_talk_tap_keeps_listening", enabled: $0, page: .general) }
-                    ),
-                    help: pushToTalkTapKeepsListening
-                        ? "Hold Push to Talk to record, or tap it to keep going until you tap again."
-                        : "Push to Talk records only while you hold it.",
+                ShortcutKeyRow(
+                    target: .dictation,
                     info: GeneralInfo(
-                        title: "Tap to keep listening",
-                        message: "One key does both. Hold the Push to Talk key and it records until you let go. Tap it quickly and it keeps listening hands-free, then tap it again to paste. Off, a tap does nothing and only holding records."
+                        title: "Dictation key",
+                        message: "The one key for dictation. Click it, then press the key you want. Modifier keys like Fn or Right Option work on their own."
                     ),
-                    automationIdentifier: "transcripted.settings.general.push-to-talk-tap",
-                    showsDivider: false
-                )
-            }
-
-            if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(dictationTriggerSystemWarning)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Button("Open Keyboard Settings") {
-                            trackSettingsAction("open_keyboard_settings", page: .general)
-                            PhysicalDictationTriggerPreferences.openKeyboardSettings()
-                        }
-                        .buttonStyle(.link)
-                        .accessibilityIdentifier("transcripted.settings.general.keyboard-shortcuts.open-keyboard-settings")
+                    automationIdentifier: "transcripted.settings.general.dictation-key",
+                    recorder: shortcutRecorder
+                ) {
+                    if let dictationTriggerSystemWarning {
+                        dictationKeyWarning(dictationTriggerSystemWarning)
                     }
                 }
-                .font(.caption)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
+
+                DictationKeyBehaviorRow(behavior: persistedSettingsBinding(
+                    $dictationKeyBehavior,
+                    persist: { HotkeyPreferences.setDictationKeyBehavior($0) },
+                    track: { trackSettingsAction("change_dictation_key_behavior_\($0.rawValue)", page: .general) }
+                ))
+            }
+
+            ShortcutKeyRow(
+                target: .meeting,
+                info: GeneralInfo(
+                    title: "Meetings",
+                    message: "Starts or stops recording a meeting from anywhere."
+                ),
+                automationIdentifier: "transcripted.settings.general.meeting-shortcut",
+                recorder: shortcutRecorder
+            )
+
+            ShortcutKeyRow(
+                target: .pasteLastDictation,
+                info: GeneralInfo(
+                    title: "Paste last dictation",
+                    message: "Pastes your last dictation again, in case it didn't land."
+                ),
+                automationIdentifier: "transcripted.settings.general.paste-last-shortcut",
+                showsDivider: false,
+                recorder: shortcutRecorder
+            )
+        }
+        .onDisappear { shortcutRecorder.stopRecording() }
+        .onChange(of: dictationShortcutsEnabled) { _, enabled in
+            // The dictation row just hid; don't keep listening for its key.
+            if !enabled, shortcutRecorder.recordingTarget == .dictation {
+                shortcutRecorder.stopRecording()
             }
         }
+    }
+
+    /// Fn's macOS action fires along with dictation until it's set to Do
+    /// Nothing; said right under the key it's about.
+    private func dictationKeyWarning(_ warning: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(warning)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Open Keyboard Settings") {
+                    trackSettingsAction("open_keyboard_settings", page: .general)
+                    PhysicalDictationTriggerPreferences.openKeyboardSettings()
+                }
+                .buttonStyle(.link)
+                .accessibilityIdentifier("transcripted.settings.general.keyboard-shortcuts.open-keyboard-settings")
+            }
+        }
+        .font(.caption)
     }
 }

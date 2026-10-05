@@ -118,9 +118,9 @@ Own all keyboard-trigger setup and send-after-paste rules.
 
 Contents:
 
-- dictation shortcut recorder
+- one dictation key recorder, with its behavior (Hold or tap, Hold only, Tap to toggle)
 - meeting shortcut recorder
-- right Option dictation toggle
+- paste-last-dictation shortcut recorder
 - send-after-paste app allowlist
 
 This page should not own privacy, storage, or analytics controls.

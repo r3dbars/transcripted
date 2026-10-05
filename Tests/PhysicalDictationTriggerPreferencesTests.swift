@@ -275,6 +275,45 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
+    runSuite("One dictation key: a custom hands-free key carries over as Tap to toggle") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
+        PhysicalDictationTriggerPreferences.saveHandsFree(f5, userDefaults: defaults)
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults), f5, "their key becomes the dictation key")
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .tapToToggle, "and it still toggles")
+
+        PhysicalDictationTriggerPreferences.savePushToTalk(PhysicalDictationTriggerPreferences.defaultPushToTalkBinding, userDefaults: defaults)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "it runs once, so a later choice sticks"
+        )
+    }
+
+    runSuite("One dictation key: defaults and a set hold key are left alone") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "a fresh install keeps Fn"
+        )
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "with Hold or tap")
+
+        let (custom, customSuite) = makePhysicalTriggerDefaults()
+        defer { custom.removePersistentDomain(forName: customSuite) }
+        let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
+        PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
+        PhysicalDictationTriggerPreferences.saveHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), userDefaults: custom)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "a chosen hold key wins")
+    }
+
     runSuite("PhysicalDictationTriggerPreferences records modifier-only keys from flagsChanged") {
         let fn = PhysicalDictationTriggerPreferences.bindingForFlagsChanged(
             keyCode: UInt32(kVK_Function),

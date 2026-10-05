@@ -322,7 +322,11 @@ private final class PhysicalShortcutDetector {
                let pending = pendingModifierShortcut,
                matchesRelease(for: pending.press.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
                 cancelPendingModifierShortcut()
-                if pending.press.action != .dictationPushToTalk {
+                if pending.press.action == .dictationPushToTalk {
+                    // Let go inside the chord delay with no other key: a tap.
+                    onShortcut?(.dictationPushToTalk, .press)
+                    onShortcut?(.dictationPushToTalk, .tapRelease)
+                } else {
                     onShortcut?(pending.press.action, .press)
                 }
                 return nil
@@ -360,7 +364,11 @@ private final class PhysicalShortcutDetector {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationHandsFree)
                 } else {
                     cancelPendingModifierShortcut()
-                    handsFreeComboTracker.firedOnPress(keyCode: keyCode, sharesModifier: sharesModifier)
+                    // A press that starts a take is always followed, not just
+                    // a shared modifier: with Tap to toggle on Fn, Fn+arrow
+                    // must not leave a take running. A press that stops one
+                    // isn't (see handlePhysicalDictationHandsFreeComboInterrupted).
+                    handsFreeComboTracker.firedOnPress(keyCode: keyCode, sharesModifier: sharesModifier || !isDictating)
                     onShortcut?(.dictationHandsFree, .press)
                 }
             case .meeting:
@@ -441,10 +449,15 @@ private final class PhysicalShortcutDetector {
                 self.stateLock.lock()
                 defer { self.stateLock.unlock() }
                 let currentPress = self.pendingModifierShortcut?.press
+                // Still pending means still held with no other key: a release
+                // or a keyDown cancels it. Not the session key state: this
+                // tap consumed the modifier's flagsChanged, so that state
+                // never saw it go down, and a shared modifier (Right Option
+                // vs Option+M) never started dictation.
                 let shouldActivate = PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                     current: currentPress,
                     expected: press,
-                    keyState: Self.sessionKeyState
+                    isPhysicallyDown: true
                 )
                 if currentPress == press {
                     self.pendingModifierShortcut = nil
@@ -572,10 +585,11 @@ class ContextCaptureEngine: ObservableObject {
         // such as wake recovery.
         isHotkeyRoutingActive = true
 
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded()
         refreshShortcutDisplays()
         configurePhysicalShortcutDetector()
 
-        // Listen for preference changes (from HotkeyRecorderView)
+        // Listen for preference changes (from the Settings shortcut rows)
         hotkeyChangeObserver = NotificationCenter.default.addObserver(
             forName: .hotkeysDidChange,
             object: nil,
@@ -610,13 +624,9 @@ class ContextCaptureEngine: ObservableObject {
             return ""
         }
 
-        let pushToTalk = PhysicalDictationTriggerPreferences.displayString(
+        return PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
-        let handsFree = PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
-        )
-        return "\(pushToTalk) / \(handsFree)"
     }
 
     func refreshShortcutStatus() {
