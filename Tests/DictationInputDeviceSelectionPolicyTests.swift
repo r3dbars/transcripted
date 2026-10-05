@@ -486,6 +486,25 @@ func testDictationInputDeviceSelectionPolicy() {
             "an unreadable route counts as a headset"
         )
 
+        assertTrue(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: headsetOnly, speedPathIsOff: { _ in false }),
+            "a headset the engine records gets a fresh engine on forced recovery, as a relaunch would"
+        )
+        assertFalse(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: skipsHeadset, speedPathIsOff: { _ in false }),
+            "a skipped headset is recorded by the recorder, so its engine is left alone"
+        )
+        for selection in [macDefault, usbDefault, pickedOverMac, virtualDefault] {
+            assertFalse(
+                PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: selection, speedPathIsOff: { _ in false }),
+                "off a Bluetooth input, forced recovery keeps its old behavior (\(selection.selectedInput.name))"
+            )
+        }
+        assertFalse(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: nil),
+            "an unreadable route replaces nothing"
+        )
+
         assertFalse(
             PinnedDictationInputPolicy.skipsEngineWarmup(for: macDefault, afterEngineFallback: true),
             "after a fallback the engine is warmed again, so a repeat fallback isn't a cold start"

@@ -16,7 +16,10 @@ struct DictationMicrophoneLoadingPresentationPolicy {
         inputFormatReady: Bool,
         startAttempts: Int
     ) -> Copy {
-        let shouldShowSwitching = (isRecovering || !inputFormatReady) && elapsed >= switchingCopyDelay
+        // Only a live route recovery is a switch. Readiness deferred by idle
+        // route chatter (AirPods do this after nearly every take) is a normal
+        // start, so it keeps "Starting microphone" however long it takes.
+        let shouldShowSwitching = isRecovering && elapsed >= switchingCopyDelay
         let title = shouldShowSwitching ? "Switching microphone" : "Starting microphone"
         let detail = shouldShowSwitching
             ? "Connecting to the new audio device."

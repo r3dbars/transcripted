@@ -102,14 +102,27 @@ extension ParakeetEngine {
     /// press after a wake or route change waited on an engine it never used.
     /// An unreadable route counts as a headset.
     func pinnedDictationSkipsEngineWarmup() async -> Bool {
+        await pinnedDictationWarmupDecision().skipsEngineWarmup
+    }
+
+    /// The warmup decision plus whether the engine will record a Bluetooth
+    /// macOS input (`PinnedDictationInputPolicy.engineRecordsBluetoothInput`),
+    /// judged on one selection read. An unreadable route skips warmup and
+    /// replaces nothing.
+    func pinnedDictationWarmupDecision() async -> (skipsEngineWarmup: Bool, engineRecordsBluetoothInput: Bool) {
         let warmup = pinnedDictationWarmup
-        let skipsEngineWarmup = try? await Self.systemInputWorkCoordinator.run(
+        let decision = try? await Self.systemInputWorkCoordinator.run(
             operation: "pinned_dictation_warmup_decision",
             timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
-        ) { () -> Bool in
-            warmup.skipsEngineWarmup(for: try? Self.pinnedDictationInputSelection())
+        ) { () -> (Bool, Bool) in
+            let selection = try? Self.pinnedDictationInputSelection()
+            return (
+                warmup.skipsEngineWarmup(for: selection),
+                PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: selection)
+            )
         }
-        return skipsEngineWarmup ?? true
+        guard let decision else { return (true, false) }
+        return (decision.0, decision.1)
     }
 
     /// `pinnedDictationFellBackToEngine` (stored on ParakeetEngine) seen

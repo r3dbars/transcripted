@@ -175,9 +175,16 @@ extension ParakeetEngine {
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
         if usesPinnedDictationMicrophone() {
-            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            let decision = await pinnedDictationWarmupDecision()
             guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
-            if skipsEngineWarmup {
+            if decision.skipsEngineWarmup {
+                if decision.engineRecordsBluetoothInput {
+                    // Starts on this headset keep failing against an engine
+                    // bound to the old route. Swap in a fresh one, as a
+                    // relaunch would; nothing opens the headset until the
+                    // next key press.
+                    abandonBlockedAudioEngine(reason: reason)
+                }
                 markPinnedDictationInputReady()
                 return
             }
