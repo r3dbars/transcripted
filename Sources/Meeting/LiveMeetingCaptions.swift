@@ -99,7 +99,7 @@ final class LiveMeetingCaptions: ObservableObject {
     /// Starts transcribing this recording. Clears the last meeting's text.
     /// `shouldYield` is read by the tracks' drain loops on their own tasks;
     /// the caller keeps it current on the main actor.
-    func start(sessionID: UUID, shouldYield: LiveMeetingCaptionYield) {
+    func start(sessionID: UUID, capturesSystemAudio: Bool, shouldYield: LiveMeetingCaptionYield) {
         guard self.sessionID != sessionID || status == .off else { return }
         prewarmTask?.cancel()
         prewarmTask = nil
@@ -113,7 +113,9 @@ final class LiveMeetingCaptions: ObservableObject {
             lastLogSessionID = sessionID
         }
         status = .preparing
-        let tracks = LiveMeetingCaptionTracks()
+        let tracks = LiveMeetingCaptionTracks(capturesSystemAudio: capturesSystemAudio) {
+            LiveMeetingCaptionTrack()
+        }
         lastSequence = [:]
         // Audio queues while the models load, up to the tracks' bound.
         current.tracks.withLock { $0 = tracks }
@@ -124,7 +126,12 @@ final class LiveMeetingCaptions: ObservableObject {
             await teardown?.value
             // One at a time: both tracks share one model download.
             let micLoad: LiveMeetingCaptionTrack.LoadResult = Task.isCancelled ? .failed : await tracks.microphone.load()
-            let systemLoad: LiveMeetingCaptionTrack.LoadResult = Task.isCancelled ? .failed : await tracks.system.load()
+            let systemLoad: LiveMeetingCaptionTrack.LoadResult
+            if let system = tracks.system {
+                systemLoad = Task.isCancelled ? .failed : await system.load()
+            } else {
+                systemLoad = .ready
+            }
             guard let self, self.generation == generation, !Task.isCancelled else { return }
             guard micLoad == .ready, systemLoad == .ready else {
                 self.status = .unavailable
@@ -134,7 +141,7 @@ final class LiveMeetingCaptions: ObservableObject {
             await tracks.microphone.start(shouldYield: yield) { [weak self] event, sequence in
                 await self?.apply(event, sequence: sequence, track: .microphone, generation: generation)
             }
-            await tracks.system.start(shouldYield: yield) { [weak self] event, sequence in
+            await tracks.system?.start(shouldYield: yield) { [weak self] event, sequence in
                 await self?.apply(event, sequence: sequence, track: .system, generation: generation)
             }
             self.status = .listening
@@ -168,7 +175,7 @@ final class LiveMeetingCaptions: ObservableObject {
             await teardown?.value
             await loading?.value
             await tracks.microphone.stop()
-            await tracks.system.stop()
+            await tracks.system?.stop()
         }
     }
 
@@ -182,12 +189,8 @@ final class LiveMeetingCaptions: ObservableObject {
     }
 }
 
-/// This meeting's two recognizers. A fresh pair per meeting, so a stop's
-/// cleanup can never reach the next meeting's models.
-struct LiveMeetingCaptionTracks: Sendable {
-    let microphone = LiveMeetingCaptionTrack()
-    let system = LiveMeetingCaptionTrack()
-}
+/// Fresh recognizers per meeting, only for its actual capture sources.
+fileprivate typealias LiveMeetingCaptionTracks = LiveMeetingCaptionTrackSet<LiveMeetingCaptionTrack>
 
 /// Whether the live transcript should pause for a dictation. Set on the main
 /// actor when the router's recording or transcribing state changes, read by
@@ -204,7 +207,7 @@ final class LiveMeetingCaptionYield: Sendable {
 /// queue. Holds the current meeting's tracks, or nil when nothing runs, so
 /// an idle app holds no buffers or models.
 final class LiveMeetingCaptionInlet: Sendable {
-    let tracks = Mutex<LiveMeetingCaptionTracks?>(nil)
+    fileprivate let tracks = Mutex<LiveMeetingCaptionTracks?>(nil)
 
     /// Called on Core's live-PCM delivery queue, never a CoreAudio callback.
     /// `samples` are 16 kHz mono.
@@ -212,7 +215,7 @@ final class LiveMeetingCaptionInlet: Sendable {
         guard !samples.isEmpty, let current = tracks.withLock({ $0 }) else { return }
         switch track {
         case .microphone: current.microphone.queue.append(samples)
-        case .system: current.system.queue.append(samples)
+        case .system: current.system?.queue.append(samples)
         }
     }
 }

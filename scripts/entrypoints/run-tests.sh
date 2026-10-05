@@ -533,6 +533,8 @@ APP_SOURCES=(
     "Sources/Meeting/LiveDictationPreview.swift"
     "Sources/Meeting/LiveMeetingCaptionLog.swift"
     "Sources/Meeting/LiveMeetingCaptionSampleQueue.swift"
+    "Sources/Meeting/LiveMeetingCaptionTrackSet.swift"
+    "Sources/Meeting/LiveMeetingCaptionTrack.swift"
     "Sources/Meeting/LiveMeetingAudioDownmix.swift"
     "Sources/Meeting/MeetingQuickSummaryExtractor.swift"
     "Sources/Meeting/MeetingQuickSummaryWriter.swift"

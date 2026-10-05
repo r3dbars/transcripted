@@ -274,18 +274,10 @@ final class LiveDictationCaptions: ObservableObject {
         // What was still being heard stays, settled, through the release.
         preview.commit(preview.tentative)
         let previous = lifecycle
-        let finalPassRunning = finalPassRunning
         lifecycle = Task(priority: .utility) { [track] in
             await previous?.value
-            // Resetting allocates the recognizer's caches again; do it after
-            // the final pass, not during it. The pass may not have started
-            // yet, so give it a moment to.
-            try? await Task.sleep(for: .milliseconds(300))
-            var waited = 0
-            while finalPassRunning.value, waited < 100 {
-                try? await Task.sleep(for: .milliseconds(50))
-                waited += 1
-            }
+            // Pause only stops feeding. The next take resets the recognizer
+            // after its final-pass yield gate permits inference again.
             await track.pause()
         }
     }
