@@ -414,6 +414,10 @@ func testDictationInputDeviceSelectionPolicy() {
             availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: false
         )
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
+        assertTrue(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: followsMacOS, speedPathIsOff: { _ in false }),
+            "following macOS onto the headset gets a fresh engine on forced recovery"
+        )
     }
 
     runSuite("Engine warmup is skipped whenever the recorder records, and never runs on a Bluetooth macOS input") {

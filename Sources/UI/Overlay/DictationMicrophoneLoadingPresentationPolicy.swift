@@ -13,7 +13,7 @@ struct DictationMicrophoneLoadingPresentationPolicy {
         elapsed: TimeInterval,
         deviceName: String,
         isRecovering: Bool,
-        inputFormatReady: Bool,
+        inputFormatReady: Bool, // kept for call sites; no longer changes the copy
         startAttempts: Int
     ) -> Copy {
         // Only a live route recovery is a switch. Readiness deferred by idle

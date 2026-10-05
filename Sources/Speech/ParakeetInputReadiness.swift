@@ -175,6 +175,10 @@ extension ParakeetEngine {
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
         if usesPinnedDictationMicrophone() {
+            // Hold the readiness wait while the route is read, so a start
+            // can't slip in on the stale engine before it is replaced.
+            // `markPinnedDictationInputReady` clears this on the skip path.
+            markFormatUnreadyAndPublish()
             let decision = await pinnedDictationWarmupDecision()
             guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
             if decision.skipsEngineWarmup {
