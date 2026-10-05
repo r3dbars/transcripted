@@ -32,11 +32,12 @@ extension ContextCaptureEngine {
     }
 
     /// A Push to Talk press on a shared modifier fired on press, then a combo
-    /// key went down while it was held (Option+M, or é typed with Right
+    /// key went down inside the chord window (Option+M, or é typed with Right
     /// Option+E). Drop the dictation it started, or the start it queued
-    /// behind a take that was still finishing, quietly, as the hands-free key
-    /// does. A press that would stop a take waited out the chord delay, so it
-    /// never gets here.
+    /// behind a take that was still finishing, as the hands-free key does. A
+    /// press that would stop a take waits out the chord delay instead; if the
+    /// detector's copy of isDictating was stale and it stopped one anyway,
+    /// there's nothing to drop.
     func handlePhysicalDictationPushToTalkComboInterrupted() {
         let sessionID = pushToTalkPressStartedSessionID
         pushToTalkPressStartedSessionID = nil

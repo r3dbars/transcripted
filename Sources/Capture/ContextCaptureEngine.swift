@@ -55,7 +55,7 @@ private enum PhysicalShortcutPhase {
     /// between (`DictationHoldKeyTapPolicy`).
     case tapRelease
     /// Another key went down while a hands-free modifier that fired on press
-    /// was still held, so that press was the start of a combo.
+    /// was held, or inside a shared Push to Talk modifier's chord window.
     case comboInterrupted
 }
 
@@ -91,10 +91,9 @@ private final class PhysicalShortcutDetector {
     /// Option+M) and that fired on press, followed until it's released so a
     /// key that goes down meanwhile reports `.comboInterrupted`.
     private var handsFreeComboTracker = HandsFreeModifierComboTracker()
-    /// The same for a Push to Talk modifier that other shortcuts share and
-    /// that fired on press: a key that goes down while it's held makes the
-    /// press a combo (`.comboInterrupted`) instead of a hold.
-    private var pushToTalkComboTracker = HandsFreeModifierComboTracker()
+    /// The same for a Push to Talk modifier that fired on press, but only a
+    /// key inside the chord window makes it a combo.
+    private var pushToTalkComboWindow = PushToTalkModifierComboWindow()
     /// When a key was last typed, so a hands-free modifier pressed mid-typing
     /// still waits for release (see `firesSharedModifierOnPress`).
     private var lastTypedKeyDownUptime: TimeInterval = -.infinity
@@ -227,7 +226,7 @@ private final class PhysicalShortcutDetector {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
         handsFreeComboTracker.reset()
-        pushToTalkComboTracker.reset()
+        pushToTalkComboWindow.reset()
         activePushToTalkKeyCode = nil
         consumedKeyCodes.removeAll()
     }
@@ -263,7 +262,7 @@ private final class PhysicalShortcutDetector {
             if handsFreeComboTracker.keyDown() {
                 onShortcut?(.dictationHandsFree, .comboInterrupted)
             }
-            if pushToTalkComboTracker.keyDown() {
+            if pushToTalkComboWindow.keyDown(at: ProcessInfo.processInfo.systemUptime) {
                 // Option+M or Right Option+E: not a hold. Its release passes
                 // through, as when the chord delay was still pending.
                 activePushToTalkKeyCode = nil
@@ -321,12 +320,10 @@ private final class PhysicalShortcutDetector {
             if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
                 pushToTalkTap.otherKeyWentDown()
             }
-            // Only ends the tracking. The release itself still goes to the
-            // Push to Talk release below.
-            _ = pushToTalkComboTracker.flagsChanged(
+            pushToTalkComboWindow.flagsChanged(
                 keyCode: keyCode,
                 modifiers: modifiers,
-                isHandsFreeRelease: matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+                isPushToTalkRelease: matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
             )
             if handsFreeComboTracker.flagsChanged(
                 keyCode: keyCode,
@@ -369,14 +366,17 @@ private final class PhysicalShortcutDetector {
                     secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime,
                     isDictating: isDictating
                 ) {
-                    // Start on press, like the hands-free key: waiting out the
-                    // chord delay added 0.14 s to every hold of the default
-                    // Right Option key. A combo key while it's held drops the
-                    // start (`.comboInterrupted`). Mid-typing, or when this
-                    // press would stop a take, it still waits.
+                    // Start on press: waiting out the chord delay added 0.14 s
+                    // to every hold of the default Right Option key. A combo
+                    // key inside that window drops the start. Mid-typing, or
+                    // when this press would stop a take, it still waits.
                     cancelPendingModifierShortcut()
                     activePushToTalkKeyCode = keyCode
-                    pushToTalkComboTracker.firedOnPress(keyCode: keyCode, sharesModifier: true)
+                    pushToTalkComboWindow.firedOnPress(
+                        keyCode: keyCode,
+                        at: ProcessInfo.processInfo.systemUptime,
+                        window: Self.modifierChordDelay
+                    )
                     onShortcut?(.dictationPushToTalk, .press)
                 } else if sharesModifier {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationPushToTalk)
@@ -526,7 +526,7 @@ private final class PhysicalShortcutDetector {
         cancelPendingModifierShortcut()
         // Its release may have been missed while the tap was off.
         handsFreeComboTracker.reset()
-        pushToTalkComboTracker.reset()
+        pushToTalkComboWindow.reset()
 
         let reconciled = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
             activePushToTalkKeyCode: activePushToTalkKeyCode,

@@ -102,6 +102,37 @@ struct HandsFreeModifierComboTracker {
     }
 }
 
+/// A Push to Talk modifier that other shortcuts share (Right Option vs
+/// Option+M) fires on press, so a combo key can only arrive after the start.
+/// Only a key inside the chord window counts as a combo; that's the window a
+/// delayed press used to wait out. Any later key is typing during a hold and
+/// must never drop the take.
+struct PushToTalkModifierComboWindow {
+    private var tracker = HandsFreeModifierComboTracker()
+    private var deadline: TimeInterval = -.infinity
+
+    mutating func firedOnPress(keyCode: UInt32, at uptime: TimeInterval, window: TimeInterval) {
+        tracker.firedOnPress(keyCode: keyCode, sharesModifier: true)
+        deadline = uptime + window
+    }
+
+    /// A non-modifier key went down. True when it makes the press a combo.
+    /// Either way the press stops being followed.
+    mutating func keyDown(at uptime: TimeInterval) -> Bool {
+        tracker.keyDown() && uptime <= deadline
+    }
+
+    /// A modifier changed; ends the tracking on the key's own release. The
+    /// release itself still belongs to Push to Talk.
+    mutating func flagsChanged(keyCode: UInt32, modifiers: UInt32, isPushToTalkRelease: Bool) {
+        _ = tracker.flagsChanged(keyCode: keyCode, modifiers: modifiers, isHandsFreeRelease: isPushToTalkRelease)
+    }
+
+    mutating func reset() {
+        tracker.reset()
+    }
+}
+
 enum PhysicalShortcutMatcher {
     /// A typed key this recent means the user is mid-typing, where a
     /// hands-free modifier press is likely the start of a combo (typing é
