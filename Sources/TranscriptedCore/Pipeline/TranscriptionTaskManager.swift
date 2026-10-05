@@ -54,8 +54,8 @@ public class TranscriptionTaskManager: ObservableObject {
         case committed(audio: ActiveTaskAudio?)
 
         /// `cancelAll()` marked this task's outcome as intentionally
-        /// cancelled. Audio (if any) was already synchronously discarded by
-        /// `cancelAll()` before this state was entered.
+        /// cancelled. Audio (if any) was already synchronously discarded or
+        /// handed to a retry row by `cancelAll()` before this state was entered.
         case cancelling
 
         /// `cancelAll()` raced a task whose side effects had *already*
@@ -226,7 +226,7 @@ public class TranscriptionTaskManager: ObservableObject {
     /// still need the background-work quit warning while inference is running.
     /// Conversely, `cancelAll()` leaves non-cooperative model work in
     /// `activeTasks` for single-flight occupancy, but marks it intentionally
-    /// cancelled after discarding any owned scratch audio. That cancelled
+    /// cancelled after discarding or handing off any owned scratch audio. That cancelled
     /// occupancy must not revive a misleading save-audio prompt.
     public var hasActiveTranscriptionWorkRequiringQuitConfirmation: Bool {
         activeTasks.keys.contains { !(tasks[$0]?.isCancelling ?? false) }
@@ -436,14 +436,36 @@ public class TranscriptionTaskManager: ObservableObject {
         return true
     }
 
-    public func cancelAll() {
+    /// Cancels every running job. With `recordedAudioRetryMessage`, a recorded
+    /// meeting that hasn't saved its transcript keeps its audio as a retry row
+    /// with that message, the way queued meetings are kept; without it (and
+    /// for imported audio, whose scratch copy is all that's removed) the
+    /// cancelled job's scratch audio is deleted.
+    public func cancelAll(recordedAudioRetryMessage: String? = nil) {
         for (taskId, task) in activeTasks {
             // Read commit state before overwriting it below: `cancelAll()` unconditionally
             // marks every occupied task cancelled, even one that already committed its
             // transcript — that combination is real (see `.cancellingCommitted`), not a bug.
             let wasCommitted = tasks[taskId]?.isCommitted ?? false
             task.cancel()
-            if let audio = tasks[taskId]?.audio {
+            if let audio = tasks[taskId]?.audio,
+               let recordedAudioRetryMessage,
+               audio.importedRecoverySession == nil,
+               !wasCommitted {
+                // Same hand-off as quitting mid-transcription: the retry row owns
+                // the audio from here, so the task no longer does.
+                addFailedTranscriptionRetainingAvailableAudio(
+                    micAudioURL: audio.micURL,
+                    systemAudioURL: audio.systemURL,
+                    errorMessage: recordedAudioRetryMessage,
+                    taskId: taskId,
+                    meetingTitle: audio.meetingTitle,
+                    recordingDate: audio.recordingDate,
+                    splitLocalSpeakers: audio.splitLocalSpeakers,
+                    languageSelection: audio.languageSelection,
+                    micOnlyByChoice: audio.micOnlyByChoice
+                )
+            } else if let audio = tasks[taskId]?.audio {
                 if audio.importedRecoverySession?.prepareForScratchCleanup() != false {
                     let removedMic = removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
                     let removedSystem = removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
@@ -458,7 +480,7 @@ public class TranscriptionTaskManager: ObservableObject {
         // Keep cancelled tasks in the occupancy map and counters until their task bodies exit.
         // CoreML calls are not guaranteed to observe cancellation immediately; clearing
         // these signals here would let a new pipeline enter the same single-instance models.
-        // Audio ownership is cleared above because cancellation deliberately discarded it;
+        // Audio ownership is cleared above because cancellation discarded it or a retry row owns it;
         // finishCancelledTaskIfNeeded removes each task from the occupancy map on exit.
         //
         // Also drop any detached `.preservedForShutdown` markers left over from a previous
