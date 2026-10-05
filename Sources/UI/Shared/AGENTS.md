@@ -16,7 +16,9 @@ Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `c
 
 ## Entry points
 
-- `RecentCaptureScanners.swift` (`RecentMeetingsScanner`) feeds Home and the Meetings search.
+- `RecentCaptureScanners.swift` holds capture values and loading; `RecentMeetingsScanner.swift`
+  feeds Home and Meetings search. Today uses its bounded metadata path; partial
+  Today rows never populate the full speaker-search cache.
 - `HomeMeetingDeletion.swift`, `HomeMeetingRename.swift`, `CaptureUndo.swift` are the only paths that delete, rename or restore a saved meeting from the UI.
 - `MeetingAudioPlayback.swift` is retained meeting-audio playback (a product-surface rule in the root `AGENTS.md`).
 

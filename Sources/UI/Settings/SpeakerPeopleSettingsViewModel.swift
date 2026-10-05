@@ -50,7 +50,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
-    private var refreshGeneration = SupersessionEpoch()
+    private var snapshotPublication = RefreshPublicationOrder()
+    private var refreshState = CoalescedRefreshState()
+    private let snapshotQueue = DispatchQueue(label: "Transcripted.SpeakerPeople.snapshot", qos: .userInitiated)
+    private let duplicateCache = SpeakerDuplicateSnapshotCache()
 
     private struct Snapshot {
         let profiles: [SpeakerProfile]
@@ -197,20 +200,32 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         searchFocusRequestToken += 1
     }
 
+    func setShown(_ shown: Bool) {
+        refreshState.isEnabled = shown
+    }
+
     func refresh() {
-        let generation = refreshGeneration.begin()
+        guard refreshState.request() else { return }
+        startRefresh()
+    }
+
+    private func startRefresh() {
+        let revision = snapshotPublication.beginRead()
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let duplicateCache = self.duplicateCache
+        snapshotQueue.async { [weak self] in
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
+                legacyClipsDirectory: legacyClipsDirectory,
+                duplicateCache: duplicateCache
             )
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.refreshGeneration.finishIfCurrent(generation) else { return }
-                self.applySnapshot(snapshot)
+                guard let self else { return }
+                self.applySnapshot(snapshot, revision: revision)
+                if self.refreshState.finished() { self.startRefresh() }
             }
         }
     }
@@ -658,24 +673,29 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
+        let duplicateCache = self.duplicateCache
+        let snapshotQueue = self.snapshotQueue
+        let revision = snapshotPublication.beginRead()
         Task.immediate { @MainActor [weak self] in
             let (didSucceed, snapshot) = await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                snapshotQueue.async {
                     let didSucceed = edit()
                     let snapshot = Self.snapshot(
                         from: speakerDatabase,
                         preferredClipsDirectory: preferredClipsDirectory,
-                        legacyClipsDirectory: legacyClipsDirectory
+                        legacyClipsDirectory: legacyClipsDirectory,
+                        duplicateCache: duplicateCache
                     )
                     continuation.resume(returning: (didSucceed, snapshot))
                 }
             }
-            self?.applySnapshot(snapshot)
+            self?.applySnapshot(snapshot, revision: revision)
             completion?(didSucceed)
         }
     }
 
-    private func applySnapshot(_ snapshot: Snapshot) {
+    private func applySnapshot(_ snapshot: Snapshot, revision: UInt64) {
+        guard snapshotPublication.accept(revision) else { return }
         duplicateCandidates = snapshot.duplicateCandidates
         duplicateProfileIDs = snapshot.duplicateProfileIDs
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
@@ -690,7 +710,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     nonisolated private static func snapshot(
         from speakerDatabase: SpeakerDatabase,
         preferredClipsDirectory: URL,
-        legacyClipsDirectory: URL
+        legacyClipsDirectory: URL,
+        duplicateCache: SpeakerDuplicateSnapshotCache
     ) -> Snapshot {
         let profiles = sortedProfiles(from: speakerDatabase)
         // Look up each visible speaker's newest still-undoable merge directly (indexed
@@ -705,7 +726,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             from: profiles,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory,
-            undoableMergesByTargetID: undoableMergesByTargetID
+            undoableMergesByTargetID: undoableMergesByTargetID,
+            duplicateCache: duplicateCache
         )
     }
 
@@ -713,9 +735,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         from profiles: [SpeakerProfile],
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
-        undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
+        undoableMergesByTargetID: [UUID: SpeakerMergeRecord],
+        duplicateCache: SpeakerDuplicateSnapshotCache
     ) -> Snapshot {
-        let duplicateCandidates = duplicateCandidates(from: profiles)
+        let duplicateCandidates = duplicateCache.candidates(from: profiles, build: duplicateCandidates)
         var duplicateCountsByProfileID: [UUID: Int] = [:]
         var duplicatePeerIDsByProfileID: [UUID: Set<UUID>] = [:]
 

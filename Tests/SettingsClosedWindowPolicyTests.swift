@@ -1,14 +1,14 @@
 import Foundation
 
 /// A closed Settings window stops paying for work nobody can see, and
-/// reopening still shows current data in the first frame.
+/// reopening performs one explicit refresh without hidden scans.
 func testSettingsClosedWindowPolicy() {
-    runSuite("Closed window - app activation skips the permission sweep but keeps Today fresh") {
+    runSuite("Closed window - app activation skips permissions and library scans") {
         let closed = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: false)
         assertFalse(closed.permissions, "no TCC reads for a closed window")
         assertFalse(closed.shortcuts, "no shortcut re-read for a closed window")
         assertFalse(closed.launchAtLogin, "no login-item read for a closed window")
-        assertTrue(closed.recentCaptures, "Today still rebuilds (held until the window shows)")
+        assertFalse(closed.recentCaptures, "presenting the window refreshes Today once instead")
         assertFalse(closed.dashboard, "activation doesn't reload Home and Dictations for a closed window")
 
         let open = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: true)

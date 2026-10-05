@@ -6,6 +6,15 @@ import Foundation
 
 @MainActor
 func testWritingRefreshTimers() {
+    runSuite("Only saves to the displayed Writing day invalidate its preview") {
+        let today = URL(fileURLWithPath: "/tmp/writing-fixture/Writing_2026-10-05.md")
+        let old = URL(fileURLWithPath: "/tmp/writing-fixture/Writing_2026-10-04.md")
+        assertTrue(WritingDayRefreshPolicy.shouldReload(savedURL: today, todayURL: today))
+        assertFalse(WritingDayRefreshPolicy.shouldReload(savedURL: old, todayURL: today), "old-day rescrubs do not reread today")
+        assertTrue(WritingDayRefreshPolicy.shouldReload(savedURL: nil, todayURL: today), "unknown producers retain conservative refresh")
+        assertTrue(WritingDayRefreshPolicy.shouldReload(savedURL: old, todayURL: old), "the day is supplied at notification time, including midnight")
+    }
+
     runSuite("Writing refresh timers suspend and resume as one pair") {
         let timers = WritingRefreshTimers(liveInterval: 1, statsInterval: 5)
         assertFalse(timers.isRunning, "nothing runs before the page arms them")

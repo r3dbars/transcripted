@@ -9,8 +9,7 @@ enum SettingsClosedWindowRefreshPolicy {
         var permissions: Bool
         var shortcuts: Bool
         var launchAtLogin: Bool
-        /// Today keeps its snapshot fresh either way (held, not shown, while
-        /// closed).
+        /// Opening the window refreshes Today; activation while closed does no I/O.
         var recentCaptures: Bool
         /// Whether activation also reloads Home and Dictations. Skipped while
         /// closed; opening the window forces that reload anyway.
@@ -24,13 +23,11 @@ enum SettingsClosedWindowRefreshPolicy {
             permissions: isWindowOpen,
             shortcuts: isWindowOpen,
             launchAtLogin: isWindowOpen,
-            recentCaptures: true,
+            recentCaptures: isWindowOpen,
             dashboard: isWindowOpen
         )
     }
-    // Library changes (a meeting or dictation save) reload the dashboard
-    // whether the window is open or closed, as on main, so a reopen or a
-    // reveal finds the new row already there. Only app activation skips it.
+
 }
 
 /// Holds the newest value while the window is closed instead of publishing

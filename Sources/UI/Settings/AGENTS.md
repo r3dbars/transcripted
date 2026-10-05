@@ -69,7 +69,7 @@ settings-side agent connection flow.
 - `TodayPresentation.swift` / `TodayViewModel.swift` /
   `Pages/TodaySettingsPage.swift` - the Today page. The header sentence, the
   rolling seven-day tape, and the sessions list all come from local capture
-  files: the cached meeting index (`RecentMeetingsScanner.loadSearchIndex`),
+  files: the bounded meeting metadata index (`RecentMeetingsScanner.loadTodayIndex`),
   the dictation day files (`DictationTranscriptStore.savedDictationDayCounts`),
   and Save my writing's `Writing_<date>.md` files (`TodayWritingParser`).
   Picking a day in the week strip retitles the header and swaps in that
@@ -108,8 +108,9 @@ settings-side agent connection flow.
   1 Hz elapsed label as a leaf fed through the environment, so the tick
   doesn't redraw the shell.
 - `SettingsClosedWindowPolicy.swift` - what a closed window still does; Today
-  snapshots are held until `present()`. The window controller owns
-  `TodayViewModel`.
+  an in-flight Today snapshot can be held until `present()`, but hidden saves
+  do not start new scans. Reopening explicitly marks the snapshot as updating
+  until the current read finishes. The window controller owns `TodayViewModel`.
 - `TodayWritingDayFileCache.swift` - parsed Writing day files reused by
   mtime+size.
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the
@@ -143,6 +144,9 @@ settings-side agent connection flow.
   `RecentMeetingsScanner.loadSearchIndex`, reuses unchanged rows on rebuild,
   and resolves audio only for the matches it shows. Timed by the Home
   recent-captures benchmark.
+- `SpeakerDuplicateDetection.swift` - unchanged duplicate candidate policy with
+  a whole-profile cache shared by serialized speaker snapshots. Only unchanged
+  profiles reuse the all-pairs result; clips, review rows and undo state reload.
 - `HomeViewModel.swift` - the Home view model: refresh, paging, the
   scan-warning latch, the search index and its debounce, `groupByDay`, and
   the activation return-proxy.

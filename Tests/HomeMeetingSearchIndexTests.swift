@@ -245,6 +245,71 @@ func testHomeMeetingSearchIndex() async {
             assertEqual(fromPrevious.map(\.item.title), ["Cached planning"], "the previous index serves the row with no cache")
         }
     }
+
+    await runSuite("Today metadata keeps recording facts without populating a partial speaker-search cache") {
+        await withSearchIndexMeetingsFolder { folder in
+            let url = folder.appendingPathComponent("long.md")
+            try? writeSearchIndexMeeting(title: "Résumé planning", minutesAgo: 30, speaker: "Speaker 2", to: url)
+            let original = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let long = original + String(repeating: "\nA long transcript paragraph.\n", count: 3_000)
+                + "\n[59:59] [System/José Núñez] Late speaker.\n"
+            try? long.write(to: url, atomically: true, encoding: .utf8)
+            let cache = RecentMeetingMetadataCache(databaseURL: nil)
+            let summary = RecentMeetingsScanner.loadTodayIndex(directory: folder, cache: cache) ?? []
+            assertEqual(summary.count, 1)
+            assertEqual(summary.first?.item.title, "Résumé planning")
+            assertTrue(summary.first?.item.speakerNames.isEmpty == true, "Today does not traverse the transcript for names")
+            guard let entry = summary.first else { return }
+            assertNil(cache.lookup(path: entry.path, stamp: entry.stamp), "partial summaries cannot masquerade as search rows")
+
+            let full = RecentMeetingsScanner.loadSearchIndex(directory: folder, cache: cache) ?? []
+            assertEqual(full.first?.item.speakerNames, ["José Núñez"], "Home still reads named speakers beyond the preview limit")
+            assertEqual(full.first?.item.title, entry.item.title)
+            assertEqual(full.first?.item.date, entry.item.date)
+            assertEqual(full.first?.item.startDate, entry.item.startDate)
+            assertEqual(full.first?.item.endDate, entry.item.endDate)
+            assertEqual(full.first?.item.transcriptURL, entry.item.transcriptURL)
+            let index = HomeMeetingSearchIndex(scanned: full)
+            assertEqual(index.search(query: "resume JOSE nunez", limit: 50).items.count, 1,
+                        "case, diacritic, and cross-field token semantics remain intact")
+
+            let warm = RecentMeetingsScanner.loadTodayIndex(directory: folder, cache: cache) ?? []
+            assertEqual(warm.first?.item.date, entry.item.date, "full-cache reuse preserves Today recording time")
+        }
+    }
+
+    await runSuite("Today metadata retains old latest meetings and reconciles changed or removed files") {
+        await withSearchIndexMeetingsFolder { folder in
+            let older = folder.appendingPathComponent("old.md")
+            let newer = folder.appendingPathComponent("new.md")
+            try? writeSearchIndexMeeting(title: "Older", minutesAgo: 100_000, speaker: "Dana", to: older)
+            try? writeSearchIndexMeeting(title: "Latest", minutesAgo: 50_000, speaker: "Casey", to: newer)
+            let first = RecentMeetingsScanner.loadTodayIndex(directory: folder, cache: nil) ?? []
+            assertEqual(first.map(\.item.title), ["Latest", "Older"], "old captures remain available to the return signal")
+            let previous = Dictionary(uniqueKeysWithValues: first.map { ($0.path, $0) })
+            try? writeSearchIndexMeeting(title: "Changed latest title", minutesAgo: 1, speaker: "Casey", to: newer)
+            try? FileManager.default.removeItem(at: older)
+            let second = RecentMeetingsScanner.loadTodayIndex(directory: folder, cache: nil, previous: previous) ?? []
+            assertEqual(second.map(\.item.title), ["Changed latest title"], "reveal cannot reuse a deleted or changed row")
+            assertTrue((second.first?.item.date ?? .distantPast) > (first.first?.item.date ?? .distantPast))
+        }
+    }
+
+
+    await runSuite("Today preview preserves fallback titles for legacy untitled meetings") {
+        await withSearchIndexMeetingsFolder { folder in
+            let url = folder.appendingPathComponent("legacy.md")
+            try? writeSearchIndexMeeting(title: "Temporary title", minutesAgo: 5, speaker: "Dana", to: url)
+            let text = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+                .replacingOccurrences(of: "title: \"Temporary title\"", with: "title: \"   \"")
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+            let today = RecentMeetingsScanner.loadTodayIndex(directory: folder, cache: nil) ?? []
+            let full = RecentMeetingsScanner.loadSearchIndex(directory: folder, cache: nil) ?? []
+            assertEqual(today.first?.item.title, "Meeting with Dana", "no explicit title still uses the preview's speaker-derived fallback")
+            assertEqual(today.first?.item.title, full.first?.item.title)
+        }
+    }
+
 }
 
 private func searchIndexSampleItem(

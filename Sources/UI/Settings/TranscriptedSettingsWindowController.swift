@@ -68,6 +68,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
         navigationModel.isWindowOpen = true
+        speakerPeopleModel.setShown(true)
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page
         navigationModel.select(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
@@ -112,6 +113,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         // Not a cancel: Home's search, playback and Today's data stay as they
         // are, so reopening shows the same window. Hidden work is gated on this.
         navigationModel.isWindowOpen = false
+        speakerPeopleModel.setShown(false)
         todayViewModel.windowDidClose()
     }
 }

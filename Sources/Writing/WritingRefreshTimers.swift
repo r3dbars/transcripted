@@ -53,3 +53,12 @@ final class WritingRefreshTimers {
         statsTimer = nil
     }
 }
+
+/// Rescrubbing an old day file cannot change the current day's preview.
+/// Missing payloads remain a conservative invalidation for older producers.
+enum WritingDayRefreshPolicy {
+    static func shouldReload(savedURL: URL?, todayURL: URL) -> Bool {
+        guard let savedURL else { return true }
+        return savedURL.standardizedFileURL == todayURL.standardizedFileURL
+    }
+}

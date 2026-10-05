@@ -366,17 +366,29 @@ extension TranscriptedSettingsView {
         if work.launchAtLogin { refreshLaunchAtLoginState() }
     }
 
-    /// `reloadDashboard` is false only for app activation with the window
-    /// closed; library changes always reload Home and Dictations.
-    func refreshRecentCaptures(force: Bool = false, reloadDashboard: Bool = true) {
+    func updateLibraryVisibility() {
+        homeViewModel.setShown(
+            navigation.isWindowOpen
+                && SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) == .homeDashboard
+        )
+    }
+
+    /// Retained hidden pages invalidate lazily; presenting the window refreshes
+    /// them once, while their last snapshot remains available for the first frame.
+    func refreshRecentCaptures(
+        force: Bool = false, reloadDashboard: Bool = true, isLibraryChange: Bool = false
+    ) {
+        updateLibraryVisibility()
+        guard navigation.isWindowOpen else { return }
         if navigation.selectedPage == .today {
-            // Runs closed too: Today holds the result until the window shows.
             todayViewModel.refresh(force: force)
         }
         guard reloadDashboard else { return }
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
-            refreshHomeDashboard(force: force)
+            // Saves cannot be dropped by the activation throttle. The model
+            // coalesces them and retains one trailing read of the latest files.
+            refreshHomeDashboard(force: force || isLibraryChange)
         case .none:
             break
         }

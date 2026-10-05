@@ -14,14 +14,15 @@ struct TodaySnapshot: Sendable {
 }
 
 /// Loads the Today snapshot off the main thread. Sources are the same local
-/// libraries Meetings and Dictations use: the cached meeting index
-/// (`RecentMeetingsScanner.loadSearchIndex`), the dictation day files, and
+/// libraries Meetings and Dictations use: bounded meeting metadata
+/// (`RecentMeetingsScanner.loadTodayIndex`), the dictation day files, and
 /// Save my writing's day files.
 /// Nothing leaves the Mac.
 @MainActor
 final class TodayViewModel: ObservableObject {
     @Published private(set) var snapshot: TodaySnapshot = .empty
     @Published private(set) var hasLoaded = false
+    @Published private(set) var isRefreshing = false
 
     private var refreshTask: Task<Void, Never>?
     private var trailingRefreshTask: Task<Void, Never>?
@@ -32,8 +33,7 @@ final class TodayViewModel: ObservableObject {
     /// Only the shown page reacts to library changes; the settings view
     /// refreshes it again when it comes back.
     private var isShown = false
-    /// The last meeting scan, so the next one only re-reads files that changed
-    /// instead of decoding the whole metadata cache (see `loadSearchIndex`).
+    /// The last bounded metadata scan, so unchanged files need no content read.
     private var previousMeetingIndex: [String: RecentMeetingIndexEntry] = [:]
     /// While the window is closed, a finished rebuild waits here instead of
     /// publishing, so the hidden window doesn't re-render. The window
@@ -76,28 +76,37 @@ final class TodayViewModel: ObservableObject {
         isShown = shown
     }
 
-    /// The window closed: keep rebuilding on library changes, but hold the
-    /// result instead of publishing it. Doesn't cancel anything.
+    /// Finish an existing read, but do not start more scans for a hidden page.
     func windowDidClose() {
         windowHold.windowDidClose()
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = nil
     }
 
-    /// Called just before the window comes on screen: publishes a snapshot
-    /// built while it was closed, synchronously, so the first frame is
-    /// current. The open refresh still runs after.
+    /// Reuse any read that finished after close, then represent the reveal
+    /// refresh before the first frame. Presentation starts the current read.
     func windowWillShow() {
-        guard let held = windowHold.windowWillShow() else { return }
-        publish(held)
+        if let held = windowHold.windowWillShow() { publish(held) }
+        // Set before the retained view becomes visible: an old empty snapshot
+        // must not announce "Nothing captured" while the reveal read is pending.
+        isRefreshing = true
     }
 
     private func publish(_ snapshot: TodaySnapshot) {
         self.snapshot = snapshot
         hasLoaded = true
+        isRefreshing = trailingRefreshTask != nil
     }
 
-    /// `force` skips the throttle.
+    /// `force` skips the time throttle, never the single in-flight read.
+    /// Presentation explicitly refreshes again, so hidden notifications need no scan.
     func refresh(force: Bool = false) {
+        guard windowHold.isWindowOpen else { return }
         let now = Date()
+        if refreshTask != nil {
+            scheduleTrailingRefresh(after: Self.minimumRefreshInterval)
+            return
+        }
         if !force, let delay = passiveRefreshDelay(now: now) {
             scheduleTrailingRefresh(after: delay)
             return
@@ -111,6 +120,7 @@ final class TodayViewModel: ObservableObject {
         trailingRefreshTask?.cancel()
         trailingRefreshTask = nil
         refreshGeneration.invalidate()
+        isRefreshing = false
         isShown = false
     }
 
@@ -136,6 +146,7 @@ final class TodayViewModel: ObservableObject {
         trailingRefreshTask = nil
         refreshTask?.cancel()
         lastRefreshStartedAt = now
+        isRefreshing = true
         let generation = refreshGeneration.begin()
         let limit = Self.recentLimit
         let previous = previousMeetingIndex
@@ -152,7 +163,10 @@ final class TodayViewModel: ObservableObject {
             }
             guard self.refreshGeneration.finishIfCurrent(generation) else { return }
             self.refreshTask = nil
-            guard !Task.isCancelled, let loaded else { return }
+            guard !Task.isCancelled, let loaded else {
+                self.isRefreshing = false
+                return
+            }
             self.previousMeetingIndex = loaded.meetingIndex
             if let shown = self.windowHold.deliver(loaded.snapshot) {
                 self.publish(shown)
@@ -166,13 +180,13 @@ final class TodayViewModel: ObservableObject {
         previousMeetingIndex: [String: RecentMeetingIndexEntry]
     ) -> (snapshot: TodaySnapshot, meetingIndex: [String: RecentMeetingIndexEntry])? {
         let calendar = Calendar.current
-        guard let meetingIndex = RecentMeetingsScanner.loadSearchIndex(previous: previousMeetingIndex) else { return nil }
+        guard let meetingIndex = RecentMeetingsScanner.loadTodayIndex(previous: previousMeetingIndex) else { return nil }
         if Task.isCancelled { return nil }
         let meetingIndexByPath = Dictionary(
             meetingIndex.map { ($0.path, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let meetings = meetingIndex.map(\.item).sorted { $0.date > $1.date }
+        let meetings = meetingIndex.map(\.item)
 
         let meetingFacts = meetings.map { item in
             TodayMeetingFact(date: item.date, durationSeconds: durationSeconds(of: item))

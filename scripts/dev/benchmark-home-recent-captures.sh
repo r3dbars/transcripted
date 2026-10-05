@@ -29,6 +29,7 @@ swiftc \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift" \
   "$ROOT_DIR/Sources/UI/Shared/MeetingAudioArchiveResolver.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentCaptureScanners.swift" \
+  "$ROOT_DIR/Sources/UI/Shared/RecentMeetingsScanner.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentMeetingMetadataCache.swift" \
   "$ROOT_DIR/Sources/UI/Settings/HomePresentation.swift" \
   "$ROOT_DIR/Sources/UI/Settings/HomeSearchMatching.swift" \

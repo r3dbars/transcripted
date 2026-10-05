@@ -109,6 +109,7 @@ final class WritingSettingsModel: ObservableObject {
     private var windowObservers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
     private var todayLoadGeneration: UInt64 = 0
+    private var todayRefresh = CoalescedRefreshState(isEnabled: false)
     private var statsLoadGeneration: UInt64 = 0
     private var hasLoadedInstalledApps = false
 
@@ -133,12 +134,13 @@ final class WritingSettingsModel: ObservableObject {
         if !controller.setupCompleted, screen == .everyday {
             screen = .intro(page: 1)
         }
+        isPageMounted = true
+        todayRefresh.isEnabled = isOnScreen
         refreshLive()
         refreshKeyboard()
         reloadToday()
         refreshStats()
         refreshStorage()
-        isPageMounted = true
         startObserving()
         observeHostWindow()
         if isOnScreen { armTimers() }
@@ -146,6 +148,7 @@ final class WritingSettingsModel: ObservableObject {
 
     func pageDisappeared() {
         isPageMounted = false
+        todayRefresh.isEnabled = false
         timers.suspend()
         for observer in observers + windowObservers {
             NotificationCenter.default.removeObserver(observer)
@@ -161,6 +164,7 @@ final class WritingSettingsModel: ObservableObject {
     /// Stops the 1 s and 5 s refreshes while the page stays mounted, for a
     /// window that closed or is fully covered. Observers stay.
     func suspendTimers() {
+        todayRefresh.isEnabled = false
         timers.suspend()
     }
 
@@ -168,7 +172,9 @@ final class WritingSettingsModel: ObservableObject {
     /// page isn't mounted or the timers already run. Reads the live state
     /// right away so the first frame isn't a second stale.
     func resumeTimers() {
-        guard isPageMounted, armTimers() else { return }
+        guard isPageMounted, isOnScreen, armTimers() else { return }
+        todayRefresh.isEnabled = true
+        reloadToday()
         refreshLive()
         refreshStats()
     }
@@ -222,8 +228,14 @@ final class WritingSettingsModel: ObservableObject {
         guard observers.isEmpty, distributedObservers.isEmpty else { return }
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: .writingDayFileDidSave, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.reloadToday() }
+        observers.append(center.addObserver(forName: .writingDayFileDidSave, object: nil, queue: .main) { [weak self] note in
+            let savedURL = note.object as? URL
+            Task { @MainActor in
+                guard let self,
+                      WritingDayRefreshPolicy.shouldReload(savedURL: savedURL, todayURL: self.todayFileURL) else { return }
+                self.todayRefresh.isEnabled = self.isPageMounted && self.isOnScreen
+                self.reloadToday()
+            }
         })
         observers.append(center.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -309,6 +321,11 @@ final class WritingSettingsModel: ObservableObject {
     }
 
     func reloadToday() {
+        guard todayRefresh.request() else { return }
+        startTodayLoad()
+    }
+
+    private func startTodayLoad() {
         todayLoadGeneration &+= 1
         let generation = todayLoadGeneration
         let directory = WritingDayFileWriter.defaultDirectory
@@ -318,8 +335,11 @@ final class WritingSettingsModel: ObservableObject {
                     url: directory().appendingPathComponent(WritingDayFileReader.fileName(for: Date()))
                 )
             }.value
-            guard let self, generation == self.todayLoadGeneration else { return }
-            self.update(\.today, day)
+            guard let self else { return }
+            if generation == self.todayLoadGeneration, self.todayRefresh.isEnabled {
+                self.update(\.today, day)
+            }
+            if self.todayRefresh.finished() { self.startTodayLoad() }
         }
     }
 
