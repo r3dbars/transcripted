@@ -1,5 +1,5 @@
 // DictationSessionCapTests.swift
-// Guards the 5-minute dictation session cap: a session that hits the cap is
+// Guards the 15-minute dictation session cap: a session that hits the cap is
 // finalized and saved (not discarded), pastes only when the original target is
 // still active, and offers a recovery paste action otherwise.
 //

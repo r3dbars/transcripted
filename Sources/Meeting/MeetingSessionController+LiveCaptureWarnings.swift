@@ -334,6 +334,16 @@ extension MeetingSessionController {
         return confirmed
     }
 
+    /// The same answer for the saved file, read at stop. Only asked when no
+    /// system audio was heard and the user didn't choose mic only. Not
+    /// `systemAudioAccessConfirmedByMacOS()`, which only reads macOS while
+    /// recording; by stop the state has moved on.
+    func systemAudioAccessConfirmedAtStop() -> Bool {
+        guard !capture.hasObservedSystemAudioSignal, !activeRecordingIsMicOnlyByChoice else { return false }
+        return activeRecordingSystemAudioAccessConfirmed
+            ?? (TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized)
+    }
+
     func recordUnheardPlaybackWarning() {
         DiagnosticsTrail.record(
             level: .warning,

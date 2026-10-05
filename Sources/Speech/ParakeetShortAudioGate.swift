@@ -19,8 +19,9 @@ enum DictationEmptyTranscriptionReason: String, Equatable {
     case recordingTooShort = "recording_too_short"
     case modelFailure = "model_failure"
     // Capture has measurable speech-like activity, but ASR (including its
-    // focused retry) returned no words. This is not proof that speech occurred;
-    // it is a reason to retain the WAV for a user-controlled import/retry.
+    // focused retry) returned no words. This is not proof that speech occurred,
+    // so it isn't called silence; a long take keeps its WAV for a
+    // user-controlled import (DictationFailedTakePolicy).
     case audioNeedsRecovery = "audio_needs_recovery"
     // A multilingual model returned text in a writing system none of this
     // person's languages use (DictationLanguageScriptPolicy). Not pasted
@@ -131,7 +132,7 @@ enum DictationEmptyInferencePolicy {
 
     /// Why an external engine (Whisper, Apple Speech) produced no dictation,
     /// or nil when it returned words. Empty text over usable captured audio
-    /// keeps the recording; only quiet audio counts as no speech.
+    /// needs recovery; only quiet audio counts as no speech.
     static func externalEngineEmptyReason(text: String, samples16k: [Float]) -> DictationEmptyTranscriptionReason? {
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let analysis = DictationAudioRecovery.analyze(
@@ -141,8 +142,8 @@ enum DictationEmptyInferencePolicy {
         return reason(hasUsableSpeechSignal: analysis.hasUsableSpeechSignal)
     }
 
-    /// A thrown external-engine error is a model failure, which keeps the
-    /// stopped audio. Cancellation is not a failure and reports nothing.
+    /// A thrown external-engine error is a model failure (a long take keeps
+    /// its stopped audio). Cancellation is not a failure and reports nothing.
     static func externalEngineFailureReason(for error: Error, taskCancelled: Bool) -> DictationEmptyTranscriptionReason? {
         if taskCancelled || error is CancellationError { return nil }
         return .modelFailure
