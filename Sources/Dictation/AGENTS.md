@@ -9,7 +9,7 @@
 `Dictation` in `.agents/modules.json`.
 
 - **Owns:** saving finished dictations to the day files, the stop checkpoint and stopped-audio recovery, stop and finalize policies, the session cap clock, dictation storage paths.
-- **Public surface:** `DictationTranscriptStore`, `DictationTranscriptWriter`, `DictationTranscriptPersistenceResult`, `SavedDictation*`, `DictationStoppedAudioRecovery*`, `DictationStopFinalizationPolicy`, `DictationStoragePaths`.
+- **Public surface:** `DictationTranscriptStore`, `DictationTranscriptWriter`, `DictationTranscriptPersistenceResult`, `SavedDictation*`, `DictationStoppedAudioRecovery*`, `DictationAudioArchive`, `DictationStopFinalizationPolicy`, `DictationStoragePaths`.
 - **May depend on:** Speech, Support, Observability, Core `core-vocab`.
 - **Grandfathered crossing:** `DictationSessionCapTimer.swift` names `DictationSessionCapWarningPolicy` from `UI/Overlay`; moving that policy file here fixes it after #1946.
 - **Entry points:** `DictationTranscriptStore.save(...)`, `DictationStopCheckpoint`.
@@ -20,7 +20,8 @@
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationSessionCapTimer.swift` — the clock behind the 15-minute cap: sleep until the last 30 seconds, then tick every second so the pill counts down (telling VoiceOver once, the first time the countdown shows), and return at the cap or on cancel. `DictationSessionController.installSessionTimeout` runs it on the real uptime clock and then finalizes the take; `Tests/DictationSessionCapTimerTests.swift` runs it on a fake clock
-- `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session (`retire(_:afterSaving:)` is the one rule for a finished take: delete the WAV only when its transcript saved)
+- `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session. `saveTranscriptAndRetire` is the one rule for a finished take, shared by the async and synchronous saves: decide whether audio is kept (Settings → Storage → Keep dictation audio), save the transcript with its `Audio:` path when kept, then `retire(_:afterSaving:keptAudioRelativePath:)` moves the WAV into the archive (or deletes it when not kept). A failed save always leaves the WAV in recovery
+- `DictationAudioArchive.swift` — kept dictation audio in `<capture-library>/dictations/audio/<uuid>.m4a|.wav`: `keep` moves a saved take's recovery WAV in and drops its recovery metadata, `compress` turns it into an M4A in the background (the WAV is deleted only after a checked M4A is in place), `resolveURL` maps a day file's relative `Audio:` path to the M4A, else the WAV, else nil, `prune` deletes files older than the keep window, and `deleteKeptAudio(for:)` removes a deleted entry's audio once Home's undo window closes (the store's delete functions leave audio alone so the storage smokes compile them without the archive). Everything checks names and refuses symlinks and paths outside the audio folder
 - `DictationStoppedAudioCheckpointSignal.swift` — marks checkpoint completion, with bounded cancellation-aware waits for Quit and retry admission; completion alone does not prove persistence
 - `DictationStopCheckpoint.swift` — the first stage of stopping a dictation: stop the mic, play the stop click, then write the private recovery WAV off the main actor before anything waits on the model, re-checking the session after each step. `DictationSessionController` runs it with the real router, sound and store; `Tests/DictationStopCheckpointTests.swift` runs it with fakes
 - `DictationPostStopModelWait.swift` — the second stage of stopping: after the checkpoint, wait for the voice model if it isn't loaded (kick a load nobody started, join one in flight, give up on a failed load right away, stop at the budget). Unlike the start path's wait it never retries a failed load, because the audio is already saved. Clock and router are injected; `Tests/DictationPostStopModelWaitTests.swift` runs it on a fake clock
@@ -40,6 +41,7 @@
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
 4. `DictationStopFinalizationPolicy.order` decides whether the session saves before or after the optional Auto Enter keystroke. The current default starts the save before Auto Enter, then awaits the save result.
 5. `DictationTranscriptStore.save(...)` appends a new section to that day's markdown file, with mutations serialized through `DictationTranscriptMutationLock`.
+6. The checkpoint WAV is retired: kept in `dictations/audio/` (default, 30 days) or deleted, per the Keep dictation audio setting. Pruning runs at launch and when the setting changes.
 
 ## Storage
 
@@ -48,6 +50,7 @@
 - transcript folder: same as the dictation root
 - file shape: one `Dictations_YYYY-MM-DD.md` file per day, with multiple timestamped sections
 - stopped-audio recovery: `~/Library/Application Support/Transcripted/state/dictation-audio-recovery/`
+- kept audio: `<capture-library>/dictations/audio/<uuid>.m4a` (or `.wav` before compression); the entry's `Audio:` line holds the relative path. It may have aged out, so callers resolve through `DictationAudioArchive.resolveURL` and treat nil as normal
 
 Stopped-audio recovery is intentionally bounded and local. Launch scans at most
 one pending metadata record for presentation, then `Show Audio` reveals the WAV
@@ -82,10 +85,12 @@ Each section captures:
 - delivery outcome
 - timestamp
 - word count and character count
+- the kept audio's relative path (`Audio:`), when audio is kept
 - final dictated text
 
 ## Test coverage
 
+- `Tests/DictationAudioArchiveTests.swift`
 - `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationSessionCapTimerTests.swift`
 - `Tests/DictationStoppedAudioRecoveryTests.swift`

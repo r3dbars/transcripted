@@ -9,6 +9,8 @@ struct CaptureLibraryMigrationItem: Equatable {
         case meetingTranscript
         case meetingAudioDirectory
         case dictationTranscript
+        /// A kept take's audio, `dictations/audio/<uuid>.m4a|.wav`.
+        case dictationAudioFile
         case writingTranscript
     }
 
@@ -136,6 +138,21 @@ struct CaptureLibraryMigrationPlanner {
         let destinationDictations = dictationsDirectory(in: destination)
         for dayFile in markdownFiles(in: dictationsDirectory(in: source)) {
             plan(.dictationTranscript, from: dayFile, into: destinationDictations)
+        }
+
+        // Day files point at kept audio by a path relative to the dictations
+        // folder, so the audio moves with them. Audio named by a day file that
+        // stays behind (a name collision) stays behind too, so Move never
+        // trashes audio its own entries still point at.
+        let stayingAudioNames = Set(
+            skippedExisting
+                .filter { $0.kind == .dictationTranscript }
+                .flatMap { keptAudioFileNames(referencedBy: $0.sourceURL) }
+        )
+        let destinationDictationAudio = audioDirectory(in: destinationDictations)
+        for audioFile in keptDictationAudioFiles(in: audioDirectory(in: dictationsDirectory(in: source)))
+        where !stayingAudioNames.contains(audioFile.deletingPathExtension().lastPathComponent.lowercased()) {
+            plan(.dictationAudioFile, from: audioFile, into: destinationDictationAudio)
         }
 
         // Writing day files follow the dictation rules exactly: same collision
@@ -304,6 +321,30 @@ struct CaptureLibraryMigrationPlanner {
     private func markdownFiles(in directory: URL) -> [URL] {
         directoryContents(of: directory)
             .filter { $0.pathExtension.lowercased() == "md" && !isDirectory($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Lowercased file stems from a day file's ``Audio: `audio/<stem>.m4a` `` lines.
+    private func keptAudioFileNames(referencedBy dayFile: URL) -> [String] {
+        guard let content = try? String(contentsOf: dayFile, encoding: .utf8) else { return [] }
+        return content.components(separatedBy: "\n").compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("Audio:") else { return nil }
+            let value = trimmed.dropFirst("Audio:".count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "` "))
+            let name = (value as NSString).lastPathComponent
+            return (name as NSString).deletingPathExtension.lowercased()
+        }
+    }
+
+    private func keptDictationAudioFiles(in audioDirectory: URL) -> [URL] {
+        directoryContents(of: audioDirectory)
+            .filter { url in
+                let ext = url.pathExtension.lowercased()
+                guard ext == "m4a" || ext == "wav",
+                      let attributes = try? fileManager.attributesOfItem(atPath: url.path) else { return false }
+                return attributes[.type] as? FileAttributeType == .typeRegular
+            }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 

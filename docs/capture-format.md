@@ -325,8 +325,16 @@ Details:
   words of the text (or `Dictation <MMM d> at <h:mm a>` for very short text).
 - Metadata lines, in order: `Entry ID:` (backticked), `Captured:` (ISO 8601
   with fractional seconds), `Source app:`, optional `Bundle ID:` (backticked,
-  omitted when unknown), `Delivery:`, `Words:`, `Characters:`. Older files may
-  carry `Timestamp:` instead of `Captured:`.
+  omitted when unknown), `Delivery:`, `Words:`, `Characters:`, optional
+  `Audio:` (backticked). Older files may carry `Timestamp:` instead of
+  `Captured:`.
+- `Audio:` is present only when the take's audio was kept (Settings → Storage →
+  Keep dictation audio). Its value is a path relative to the dictations folder,
+  `audio/<session-uuid>.m4a`. The file may be the `.wav` sibling while
+  compression is pending, and it may be gone entirely once it ages out of the
+  keep window or the user switched to Don't keep: readers must treat a missing
+  file as normal and never resolve the path outside `dictations/audio/`.
+  Additive within `format_version: 1`; older readers skip the line.
 - `Delivery` values: `pasted`, `copied`, `failed`, `saved_without_paste`.
 - The dictated text follows after a blank line and runs to the next `## `
   heading or end of file.
@@ -448,5 +456,7 @@ Details:
   as optional `formatVersion` / `transcriptStyle` fields on
   `ParsedMeetingCapture` and `formatVersion` on `ParsedDictationDayCapture`
   and `ParsedWritingDayCapture` (`CaptureMarkdownParser.parseWritingDay`).
+  A dictation entry's `Audio:` line is `audioRelativePath` on
+  `ParsedDictationDayCapture.Entry` (nil when absent).
   Detect writing day files via `capture_type: writing_day` or the `Writing_`
   prefix, and check for them before the "frontmatter means meeting" fallback.

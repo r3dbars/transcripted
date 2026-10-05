@@ -87,16 +87,24 @@ extension DictationSessionController {
         )
     }
 
+    /// The synchronous save: writes the transcript, retires (or keeps) the
+    /// take's audio, then publishes. Same keep rule as the async save.
     @discardableResult
     func persistDictationTranscript(
         text: String,
         delivery: DictationDelivery,
+        recovery: DictationStoppedAudioRecovery?,
         context: [String: String]
     ) -> DictationTranscriptPersistenceResult {
-        let result = DictationTranscriptPersistenceResult.measure {
+        let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
+        let sourceBundleID = sessionSourceApp?.bundleIdentifier
+        let result = DictationStoppedAudioRecoveryStore.saveTranscriptAndRetire(
+            recovery: recovery,
+            keepWindow: AudioStoragePreferences.dictationAudioKeepWindow()
+        ) { audioRelativePath in
             try DictationTranscriptWriter.save(
-                text: text, sourceAppName: sessionSourceApp?.localizedName ?? "Unknown",
-                sourceBundleID: sessionSourceApp?.bundleIdentifier, delivery: delivery
+                text: text, sourceAppName: sourceAppName, sourceBundleID: sourceBundleID,
+                delivery: delivery, audioRelativePath: audioRelativePath
             )
         }
         publishDictationTranscriptPersistence(result, delivery: delivery, context: context)
@@ -122,19 +130,22 @@ extension DictationSessionController {
     ) -> Task<DictationTranscriptPersistenceResult, Never> {
         let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
         let sourceBundleID = sessionSourceApp?.bundleIdentifier
+        let keepWindow = AudioStoragePreferences.dictationAudioKeepWindow()
 
         return Task.detached(priority: .utility) {
-            let result = DictationTranscriptPersistenceResult.measure {
+            // Retire (or keep) only this writer's checkpoint, even if a new session has started.
+            DictationStoppedAudioRecoveryStore.saveTranscriptAndRetire(
+                recovery: recovery,
+                keepWindow: keepWindow
+            ) { audioRelativePath in
                 try DictationTranscriptWriter.save(
                     text: text,
                     sourceAppName: sourceAppName,
                     sourceBundleID: sourceBundleID,
-                    delivery: delivery
+                    delivery: delivery,
+                    audioRelativePath: audioRelativePath
                 )
             }
-            // Clean only this writer's checkpoint, even if a new session has started.
-            DictationStoppedAudioRecoveryStore.retire(recovery, afterSaving: result)
-            return result
         }
     }
 
