@@ -2,8 +2,8 @@ import Foundation
 import SwiftUI
 
 /// The Storage portion of the combined settings page (2026-08 card restyle):
-/// four always-visible card rows — capture library, delete-audio window,
-/// free-up-space, and a support-files reveal. Row explanations live in ⓘ
+/// five always-visible card rows — capture library, delete-audio window,
+/// keep-dictation-audio window, free-up-space, and a support-files reveal. Row explanations live in ⓘ
 /// popovers. Local confirmation state lives here; persisted state and
 /// filesystem work route through injected callbacks.
 struct StorageSettingsPage<FailureDetailsButton: View>: View {
@@ -16,6 +16,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let pendingCaptureLibraryChoice: PendingCaptureLibraryChoice?
 
     let audioRetentionWindow: AudioRetentionWindow
+    let dictationAudioKeepWindow: DictationAudioKeepWindow
 
     let modelCacheSnapshot: ModelCacheSnapshot?
     let modelCacheLoading: Bool
@@ -35,9 +36,11 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let onLoadModelCacheSnapshot: () -> Void
     let onRefreshModelCacheSnapshot: () -> Void
     let onApplyAudioRetentionWindow: (AudioRetentionWindow) -> Void
+    let onApplyDictationAudioKeepWindow: (DictationAudioKeepWindow) -> Void
     let failureDetailsButton: (String?) -> FailureDetailsButton
 
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
+    @State private var pendingDictationAudioKeepWindow: DictationAudioKeepWindow?
     @State private var showReclaimableCacheCleanupConfirmation = false
 
     var body: some View {
@@ -46,6 +49,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             SettingsCard {
                 libraryRow
                 deleteAudioRow
+                keepDictationAudioRow
                 freeUpSpaceRow
                 supportFilesRow
             }
@@ -118,6 +122,18 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 primaryButton: .cancel(),
                 secondaryButton: .destructive(Text("Delete Old Audio")) {
                     onApplyAudioRetentionWindow(window)
+                }
+            )
+        }
+        .alert(item: $pendingDictationAudioKeepWindow) { window in
+            Alert(
+                title: Text(window == .off ? "Delete kept dictation audio?" : "Delete old dictation audio?"),
+                message: Text(window == .off
+                    ? "Your dictation text stays. All kept dictation audio is deleted now, and new dictations won't keep any."
+                    : "Your dictation text stays. Dictation audio older than \(window.title) is deleted now, and again automatically from then on."),
+                primaryButton: .cancel(),
+                secondaryButton: .destructive(Text("Delete Audio")) {
+                    onApplyDictationAudioKeepWindow(window)
                 }
             )
         }
@@ -204,6 +220,26 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
     }
 
+    private var keepDictationAudioRow: some View {
+        SettingsControlRow(
+            title: "Keep dictation audio",
+            info: GeneralInfo(
+                title: "Keep dictation audio",
+                message: "Lets you play back and re-transcribe dictations. Text is always kept."
+            ),
+            automationIdentifier: "transcripted.settings.storage.keep-dictation-audio"
+        ) {
+            Picker("Keep dictation audio", selection: dictationAudioKeepWindowBinding) {
+                ForEach(DictationAudioKeepWindow.allCases) { window in
+                    Text(window.title).tag(window)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+        }
+    }
+
     private var freeUpSpaceRow: some View {
         SettingsControlRow(
             title: "Free up space",
@@ -274,6 +310,24 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     onApplyAudioRetentionWindow(window)
                 } else {
                     pendingAudioRetentionWindow = window
+                }
+            }
+        )
+    }
+}
+
+private extension StorageSettingsPage {
+    /// A shorter window (or Don't keep) can delete audio already kept, so it
+    /// asks first, like the meeting row.
+    var dictationAudioKeepWindowBinding: Binding<DictationAudioKeepWindow> {
+        Binding(
+            get: { dictationAudioKeepWindow },
+            set: { window in
+                guard window != dictationAudioKeepWindow else { return }
+                if dictationAudioKeepWindow.deletesKeptAudio(switchingTo: window) {
+                    pendingDictationAudioKeepWindow = window
+                } else {
+                    onApplyDictationAudioKeepWindow(window)
                 }
             }
         )

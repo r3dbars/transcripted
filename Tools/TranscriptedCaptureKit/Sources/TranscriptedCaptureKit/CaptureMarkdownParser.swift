@@ -47,63 +47,6 @@ public struct ParsedMeetingCapture {
     public let utterances: [Utterance]
 }
 
-/// Parsed dictation day file.
-public struct ParsedDictationDayCapture {
-    public struct Entry {
-        public let id: String
-        public let createdAt: String
-        public let title: String
-        public let text: String
-        public let sourceAppName: String
-        public let sourceAppBundleId: String?
-        public let delivery: String
-        public let wordCount: Int
-        public let characterCount: Int
-    }
-
-    public let captureType: String
-    public let date: String
-    /// `format_version` frontmatter when present. Absent means the day file
-    /// predates capture-format versioning and parses as version 1.
-    public let formatVersion: Int?
-    public let markdownFilename: String
-    public let entryCount: Int
-    public let wordCount: Int
-    /// Sorted ascending by `createdAt`.
-    public let entries: [Entry]
-}
-
-/// Parsed writing day file (`<capture-library>/writing/Writing_<YYYY-MM-dd>.md`).
-/// Same day-file shape as dictations, with `Accepted words:` in place of
-/// `Delivery:`. See docs/capture-format.md and the phase 3 format contract.
-public struct ParsedWritingDayCapture {
-    public struct Entry {
-        public let id: String
-        /// `Captured:` value: ISO 8601 UTC of the entry's first keystroke.
-        public let createdAt: String
-        public let title: String
-        public let text: String
-        public let sourceAppName: String
-        /// Nil when the `Bundle ID:` line is absent (the writer omits it when unknown).
-        public let sourceAppBundleId: String?
-        public let wordCount: Int
-        public let characterCount: Int
-        /// Words that came from accepted suggestions. 0 when the line is absent.
-        public let acceptedWordCount: Int
-    }
-
-    public let captureType: String
-    public let date: String
-    /// `format_version` frontmatter when present. Absent means version 1.
-    public let formatVersion: Int?
-    public let markdownFilename: String
-    public let entryCount: Int
-    public let wordCount: Int
-    public let acceptedWordCount: Int
-    /// Sorted ascending by `createdAt`.
-    public let entries: [Entry]
-}
-
 /// Shared parser for Transcripted capture Markdown (meeting transcripts,
 /// dictation day files, and writing day files). Single source of truth for
 /// TranscriptedCLI and TranscriptedMCP.
@@ -573,6 +516,7 @@ public enum CaptureMarkdownParser {
         var recognizesDelivery: Bool { self == .dictation }
         var recognizesLegacyTimestamp: Bool { self == .dictation }
         var recognizesAcceptedWords: Bool { self == .writing }
+        var recognizesAudio: Bool { self == .dictation }
     }
 
     /// One `## ` section of a day file, before per-kind defaults are applied.
@@ -587,6 +531,7 @@ public enum CaptureMarkdownParser {
         var wordCount = 0
         var characterCount = 0
         var acceptedWordCount = 0
+        var audioRelativePath: String?
         var text = ""
 
         /// The heading without its `## ` marker, used when the title is empty.
@@ -675,6 +620,11 @@ public enum CaptureMarkdownParser {
                 } else if flavor.recognizesAcceptedWords, trimmed.hasPrefix("Accepted words:") {
                     sawMetadata = true
                     parsed.acceptedWordCount = Int(value(of: trimmed, key: "Accepted words:")) ?? 0
+                } else if flavor.recognizesAudio, trimmed.hasPrefix("Audio:") {
+                    sawMetadata = true
+                    let audio = value(of: trimmed, key: "Audio:")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                    parsed.audioRelativePath = audio.isEmpty ? nil : audio
                 } else if flavor.recognizesLegacyTimestamp, trimmed.hasPrefix("Timestamp:") {
                     sawMetadata = true
                     // Backward compatibility with pre-refactor dictation markdown.
@@ -703,7 +653,8 @@ public enum CaptureMarkdownParser {
                 sourceAppBundleId: section.sourceAppBundleId,
                 delivery: section.delivery ?? "failed",
                 wordCount: section.wordCount == 0 ? section.text.split(whereSeparator: \.isWhitespace).count : section.wordCount,
-                characterCount: section.characterCount == 0 ? section.text.count : section.characterCount
+                characterCount: section.characterCount == 0 ? section.text.count : section.characterCount,
+                audioRelativePath: section.audioRelativePath
             )
         }
         .sorted { $0.createdAt < $1.createdAt }

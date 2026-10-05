@@ -83,6 +83,7 @@ struct TranscriptedSettingsView: View {
     @State var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
+    @State var dictationAudioKeepWindow = AudioStoragePreferences.dictationAudioKeepWindow()
     @StateObject var homeViewModel = HomeViewModel()
     @ObservedObject var todayViewModel: TodayViewModel
     @State var homeCopiedRowID: String?

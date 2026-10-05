@@ -440,9 +440,9 @@ extension DictationSessionController {
                     return result
                 },
                 saveSynchronously: {
-                    let result = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery, context: saveContext)
-                    DictationStoppedAudioRecoveryStore.retire(recovery, afterSaving: result)
-                    return result
+                    self.persistDictationTranscript(
+                        text: text, delivery: pasteOutcome.delivery, recovery: recovery, context: saveContext
+                    )
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
