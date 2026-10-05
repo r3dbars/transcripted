@@ -144,7 +144,7 @@ struct AnalyticsDeliveryBufferStore {
         let cutoff = now.timeIntervalSince1970 - ttl
         let digestCutoff = now.timeIntervalSince1970 - 14 * 24 * 60 * 60
         var capped = records
-            .filter { $0.enqueuedAt >= ($0.event == "usage_digest" ? digestCutoff : cutoff) }
+            .filter { $0.enqueuedAt >= (["usage_digest", "app_active_day"].contains($0.event) ? digestCutoff : cutoff) }
             .sorted { lhs, rhs in
                 if lhs.enqueuedAt == rhs.enqueuedAt {
                     return lhs.id < rhs.id
@@ -550,7 +550,7 @@ final class AnalyticsReporter {
             let timer = DispatchSource.makeTimerSource(queue: deliveryQueue)
             timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(10)) // leeway lets macOS coalesce the wakeup
             timer.setEventHandler { [weak self] in
-                self?.enqueueUsageDigests(includeCurrentDay: false)
+                self?.runMinuteTick()
                 self?.flushPendingCapturesLocked()
             }
             digestTimer = timer
@@ -574,18 +574,18 @@ final class AnalyticsReporter {
         }
     }
 
-    private let apiKey: String?
+    let apiKey: String?
     private let usageStore: UsageHealthStore?
-    private let captureHost: String?
+    let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
     private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
-    private let userDefaults: UserDefaults
-    private let currentDate: () -> Date
+    let userDefaults: UserDefaults
+    let currentDate: () -> Date
     private let retryDelay: (Int) -> TimeInterval
     private let persistDebounceInterval: TimeInterval
-    private let analyticsEnabled: () -> Bool
+    let analyticsEnabled: () -> Bool
     private static let deliveryQueueSpecificKey = DispatchSpecificKey<Bool>()
     private let deliveryQueue = DispatchQueue(label: "com.transcripted.analytics.delivery-buffer")
     private var inFlightCaptureIDs: Set<String> = []
@@ -777,7 +777,7 @@ final class AnalyticsReporter {
         return saved
     }
 
-    private func syncOnDeliveryQueue(_ work: () -> Void) {
+    func syncOnDeliveryQueue(_ work: () -> Void) {
         if DispatchQueue.getSpecific(key: Self.deliveryQueueSpecificKey) == true {
             work()
         } else {
