@@ -5,6 +5,8 @@ enum ActivationTelemetry {
     static let secondArtifactSavedTrackedKey = "activationSecondArtifactSavedTracked"
     static let firstArtifactKindKey = "activationFirstArtifactKind"
     static let firstArtifactSavedAtKey = "activationFirstArtifactSavedAt"
+    private static let firstCorrelationKey = "activationFirstArtifactCorrelation"
+    private static let saveLock = NSLock()
 
     enum ArtifactKind: String {
         case dictation
@@ -189,16 +191,26 @@ enum ActivationTelemetry {
 
     static func recordArtifactSave(
         artifactKind: ArtifactKind,
+        correlationID: String? = nil,
+        saveID: String? = nil,
         savedAt: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> (firstArtifact: Bool, secondArtifact: (firstKind: ArtifactKind, daysSinceFirstBucket: String)?) {
+        saveLock.lock()
+        defer { saveLock.unlock() }
+        let correlation = (saveID ?? correlationID).flatMap { UUID(uuidString: $0)?.uuidString }
         if !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) {
+            if let correlation { userDefaults.set(correlation, forKey: firstCorrelationKey) }
             userDefaults.set(artifactKind.rawValue, forKey: firstArtifactKindKey)
             userDefaults.set(savedAt, forKey: firstArtifactSavedAtKey)
             userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
             return (true, nil)
         }
 
+        // A repeated completion for the same capture is not a second artifact.
+        if let correlation, correlation == userDefaults.string(forKey: firstCorrelationKey) {
+            return (false, nil)
+        }
         guard !userDefaults.bool(forKey: secondArtifactSavedTrackedKey) else {
             return (false, nil)
         }
@@ -220,15 +232,31 @@ enum ActivationTelemetry {
         trigger: String,
         wordCountBucket: String? = nil,
         durationBucket: String? = nil,
+        correlationID: String? = nil,
+        saveID: String? = nil,
         savedAt: Date = Date(),
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        track: (String, [String: String]) -> Void = { AnalyticsReporter.track($0, properties: $1) }
     ) -> Bool {
         guard AnalyticsPreferences.isEnabled(userDefaults: userDefaults) else {
             return false
         }
 
+        if var properties = RetentionTelemetry.firstValueProperties(
+            artifactKind: artifactKind, now: savedAt, userDefaults: userDefaults
+        ) {
+            properties["surface"] = surface.rawValue
+            properties["trigger"] = trigger
+            if let correlationID = TelemetryContext.uuid(correlationID) {
+                properties["correlation_id"] = correlationID
+            }
+            if let saveID = TelemetryContext.uuid(saveID ?? correlationID) { properties["save_id"] = saveID }
+            track("activation_first_value_saved", properties)
+        }
         let saveState = recordArtifactSave(
             artifactKind: artifactKind,
+            correlationID: correlationID,
+            saveID: saveID,
             savedAt: savedAt,
             userDefaults: userDefaults
         )
@@ -246,21 +274,24 @@ enum ActivationTelemetry {
                 properties["duration_bucket"] = durationBucket
             }
 
-            AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
+            if let correlationID = TelemetryContext.uuid(correlationID) {
+                properties["correlation_id"] = correlationID
+            }
+            if let saveID = TelemetryContext.uuid(saveID ?? correlationID) { properties["save_id"] = saveID }
+            track("activation_first_artifact_saved", properties)
             return true
         }
 
         if let secondArtifact = saveState.secondArtifact {
-            AnalyticsReporter.track(
-                "activation_second_artifact_saved",
-                properties: [
-                    "days_since_first_bucket": secondArtifact.daysSinceFirstBucket,
-                    "first_artifact_kind": secondArtifact.firstKind.rawValue,
-                    "second_artifact_kind": artifactKind.rawValue,
-                    "surface": surface.rawValue,
-                    "trigger": trigger,
-                ]
-            )
+            var properties = [
+                "days_since_first_bucket": secondArtifact.daysSinceFirstBucket,
+                "first_artifact_kind": secondArtifact.firstKind.rawValue,
+                "second_artifact_kind": artifactKind.rawValue,
+                "surface": surface.rawValue,
+                "trigger": trigger,
+            ]
+            if let saveID = TelemetryContext.uuid(saveID ?? correlationID) { properties["save_id"] = saveID }
+            track("activation_second_artifact_saved", properties)
         }
 
         return false
@@ -291,20 +322,23 @@ enum ActivationTelemetry {
         durationBucket: String,
         surface: Surface = .dictationSave,
         trigger: String,
-        wordCountBucket: String
+        wordCountBucket: String,
+        correlationID: String? = nil,
+        saveID: String? = nil
     ) -> Bool {
         guard savedDictationArtifactExists(saved) else { return false }
 
+        var properties = dictationArtifactSavedProperties(
+            delivery: delivery, durationBucket: durationBucket, saveOutcome: "success",
+            surface: surface, trigger: trigger, wordCountBucket: wordCountBucket
+        )
+        if let correlationID = TelemetryContext.uuid(correlationID) {
+            properties["correlation_id"] = correlationID
+        }
+        if let saveID = TelemetryContext.uuid(saveID ?? correlationID) { properties["save_id"] = saveID }
         AnalyticsReporter.track(
             "dictation_artifact_saved",
-            properties: dictationArtifactSavedProperties(
-                delivery: delivery,
-                durationBucket: durationBucket,
-                saveOutcome: "success",
-                surface: surface,
-                trigger: trigger,
-                wordCountBucket: wordCountBucket
-            )
+            properties: properties
         )
         return true
     }

@@ -9,7 +9,7 @@ Transcripted is a macOS 26+, Apple Silicon menubar app: dictation with paste-bac
 1. `python3 scripts/dev/agent-context.py <changed paths>` prints the owner docs, the rules to keep true, and the checks for your change. Run it before you plan, not after you've edited. Add `--symptom "short description"` when you don't know where something lives; it's faster than grepping `Sources/`.
 2. Read the nearest `AGENTS.md` in the folder you're changing (`Sources/<area>/AGENTS.md`, `Tools/<package>/AGENTS.md`). That's where subsystem detail lives. The Meeting, Core, UI and Speech ones run 30-50 KB, so read the top sections, then grep for the file you need rather than reading several whole. `python3 scripts/dev/check-module-boundaries.py --explain <file>` names the file's module, what it may depend on, and its doc.
 3. `docs/repo-layout.md` is the map: folders, commands, docs, and hotspot files.
-4. Before you hand off: `bash check.sh`.
+4. Before you hand off: `bash check.sh`, then the `verify` skill (`bash scripts/dev/verify-change.sh`) to prove the change works in the app, not just in tests.
 
 A fresh worktree has no prebuilt deps (`deps-libs/`, `deps-modules/`). Run `bash build-deps.sh` once before `build.sh` or `swift test`; `bash check.sh` adds that step when they're missing.
 

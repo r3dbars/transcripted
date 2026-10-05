@@ -330,15 +330,22 @@ func testDictationSessionPipeline() async {
         assertEqual(host.savedRecoveries, [recovery], "saving retires this take's own WAV")
     }
 
-    runSuite("Paste Anyway after a new take started doesn't touch that take's pill") {
+    await runSuite("Paste Anyway after a new take started publishes the original save and leaves the new pill alone") {
         let host = PipelineFakeHost()
         host.heldBackText = "hola"
+        let savedSessionID = host.currentDictationSessionID
         host.finishEmptyTake(taskSessionID: host.currentDictationSessionID, host.emptySteps(.otherLanguage, heldFor: 5))
         host.currentDictationSessionID = UUID()
         host.isDictating = true
         host.messages.last?.action?()
         assertTrue(host.events.all.contains("paste hola"))
         assertFalse(host.events.all.contains("pasted"), "the new take owns the pill")
+        await host.waitForEvent("publish pasted")
+        assertEqual(host.publishedSaveContexts.last?["correlation_id"], savedSessionID.uuidString,
+                    "a delayed user action keeps the saving take's correlation, not the new take's")
+        assertEqual(host.publishedSaveContexts.last?["duration_bucket"], AnalyticsReporter.durationBucket(seconds: 5),
+                    "duration is frozen when the recording ends, not when Paste Anyway is clicked")
+        assertEqual(host.publishedSaveContexts.last?["word_count_bucket"], AnalyticsReporter.wordCountBucket(1))
     }
 
     // MARK: Quit
@@ -456,6 +463,7 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     var holdCheckpointWrite = false
     var modelWaitOutcome: DictationPostStopModelWait.Outcome = .alreadyLoaded
     var heldBackText: String?
+    var publishedSaveContexts: [[String: String]] = []
     private let checkpointGate = DispatchSemaphore(value: 0)
 
     static func backgroundHotkeyStart() -> PipelineFakeHost {
@@ -628,10 +636,13 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
         delivery: DictationDelivery,
         context: [String: String]
     ) {
+        publishedSaveContexts.append(context)
         events.append("publish \(delivery.rawValue)")
     }
 
-    func dictationContext(extra: [String: String]) -> [String: String] { extra }
+    func dictationContext(extra: [String: String]) -> [String: String] {
+        extra.merging(["correlation_id": currentDictationSessionID.uuidString]) { _, new in new }
+    }
 }
 
 private struct PipelineFakeError: Error {}

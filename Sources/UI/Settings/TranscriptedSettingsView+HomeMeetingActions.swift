@@ -452,7 +452,8 @@ extension TranscriptedSettingsView {
     func openOwnFile(
         candidateURLs: [URL],
         failureTitle: String,
-        failureMessage: String
+        failureMessage: String,
+        onComplete: @escaping (Bool) -> Void = { _ in }
     ) -> Bool {
         guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
             presentHomeActionFailure(
@@ -462,13 +463,17 @@ extension TranscriptedSettingsView {
                     _ = openOwnFile(
                         candidateURLs: candidateURLs,
                         failureTitle: failureTitle,
-                        failureMessage: failureMessage
+                        failureMessage: failureMessage,
+                        onComplete: onComplete
                     )
                 }
             )
+            onComplete(false)
             return false
         }
-        return NSWorkspace.shared.open(url)
+        let didOpen = NSWorkspace.shared.open(url)
+        onComplete(didOpen)
+        return didOpen
     }
 
     func presentHomeDeleteFailure(

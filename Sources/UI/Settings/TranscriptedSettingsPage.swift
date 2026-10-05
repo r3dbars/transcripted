@@ -31,6 +31,18 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
+    var telemetryDestination: ProductUsageTelemetry.Destination {
+        switch self {
+        case .today: return .today
+        case .home: return .meetings
+        case .dictations: return .dictations
+        case .writing: return .writing
+        case .general: return .settings
+        case .people: return .speakers
+        case .connectAgent: return .agent
+        }
+    }
+
     var title: String {
         switch self {
         case .today: return "Today"

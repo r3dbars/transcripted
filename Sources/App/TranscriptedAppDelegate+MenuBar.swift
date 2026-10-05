@@ -151,8 +151,7 @@ extension TranscriptedAppDelegate {
         trackMenuBarOpened(entrypoint: entrypoint)
         popover.contentViewController = menuPanelController
         popover.contentSize = menuPanelController.preferredContentSize
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
+        MenuBarPopoverPresentation.show(popover, relativeTo: button)
     }
 
     private func trackMenuBarOpened(entrypoint: String) {

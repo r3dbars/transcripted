@@ -172,9 +172,9 @@ func testAnalyticsEventPolicy() {
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "duration_bucket", "result", "surface", "trigger", "word_count_bucket"], "artifact actions should stay bucketed")
-        assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
-        assertEqual(dictationArtifact?.allowedProperties ?? Set<String>(), ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"], "dictation saved-artifact events should stay bucketed and enum-only")
-        assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
+        assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "save_id", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(dictationArtifact?.allowedProperties ?? Set<String>(), ["delivery", "duration_bucket", "save_id", "save_outcome", "surface", "trigger", "word_count_bucket"], "dictation saved-artifact events should stay bucketed and enum-only")
+        assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "save_id", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(lifecycle?.allowedProperties ?? Set<String>(), ["agent_target", "duration_bucket", "failure_kind", "outcome", "prior_status", "repair_kind", "setup_kind", "stage", "surface"], "setup lifecycle should stay enum-only plus coarse duration buckets")

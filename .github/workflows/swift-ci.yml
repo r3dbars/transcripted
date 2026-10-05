@@ -56,6 +56,16 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      full_bench_source_sha:
+        description: Run only the hosted full QA bench against this trusted full commit SHA; leave empty for normal Swift CI
+        type: string
+        required: false
+        default: ""
+      staged_update_source_sha:
+        description: Run only the staged signed 1.1.68-to-1.1.69 updater proof against its verified full promotion SHA
+        type: string
+        required: false
+        default: ""
       run_hardware_smokes:
         description: >-
           Run the real mic / system-audio smokes on a self-hosted Apple Silicon
@@ -77,7 +87,8 @@ permissions:
 # per commit would let main runs pile up in parallel and take the hosted macOS
 # slots PRs need.)
 concurrency:
-  group: swift-ci-${{ github.ref }}
+  # Staged updates serialize together without waiting behind the full bench.
+  group: swift-ci-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.staged_update_source_sha != '' && '-staged-update' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -93,6 +104,7 @@ jobs:
   # actions: read lets it count jobs already queued for the Mac. Runs stuck
   # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
   pick-runner:
+    if: github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -326,6 +338,7 @@ jobs:
   # ---------------------------------------------------------------------------
   app-build:
     runs-on: macos-26
+    if: github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '')
     timeout-minutes: 120
 
     steps:
@@ -397,7 +410,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-test:
     needs: [pick-runner, checks, spm-tests, app-build]
-    if: always()
+    if: always() && (github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == ''))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -432,7 +445,7 @@ jobs:
   # `run_hardware_smokes` input: true runs the real smokes on a self-hosted
   # runner, false prints the manual commands. Neither can block a PR.
   hardware-smokes:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_hardware_smokes
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '' && inputs.run_hardware_smokes
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
 
@@ -454,7 +467,7 @@ jobs:
   # `run_hardware_smokes` to true once a runner exists and `hardware-smokes`
   # above replaces this with a real gate.
   hardware-smokes-manual-instructions:
-    if: github.event_name == 'workflow_dispatch' && !inputs.run_hardware_smokes
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '' && !inputs.run_hardware_smokes
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -475,3 +488,222 @@ jobs:
           echo "grant its agent Microphone + System Audio Recording in System"
           echo "Settings > Privacy & Security, then re-dispatch this workflow"
           echo "with run_hardware_smokes = true."
+
+  # A separate dispatch mode for the literal release-impacting QA contract.
+  # Uses an immutable source SHA and never routes work to the owner's runner.
+  # This rebuilds a developer app; signed-artifact and human proof stay separate.
+  full-qa-bench:
+    if: github.event_name == 'workflow_dispatch' && inputs.full_bench_source_sha != '' && inputs.staged_update_source_sha == '' && !inputs.run_hardware_smokes
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      SOURCE_SHA: ${{ inputs.full_bench_source_sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+      TZ: America/Chicago
+
+    steps:
+      - name: Validate immutable source and hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Full bench requires a full lowercase commit SHA.'; exit 1; }
+          [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Full bench requires hosted Apple Silicon.'; exit 1; }
+
+      - name: Checkout reviewed validation harness
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: validation-harness
+          persist-credentials: false
+
+      - name: Checkout exact bench source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.full_bench_source_sha }}
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+
+      - name: Verify checkout identities and toolchain
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C ../validation-harness rev-parse HEAD)" = "$WORKFLOW_SHA"
+          test -z "$(git status --porcelain)"
+          python3 scripts/ops/native-smoke-isolation.py
+          swiftc --version
+          xcodebuild -version
+
+      - name: Check fixture setup failure guards
+        run: python3 validation-harness/Tests/BuildDependencies/HostedQAArtifactsTests.py
+
+      - name: Build full bench dependencies
+        working-directory: candidate
+        run: bash build-deps.sh
+
+      - name: Reproduce missing artifacts and seed synthetic default layout
+        run: python3 validation-harness/scripts/ci/prepare-hosted-qa-artifacts.py --candidate-root candidate
+
+      - name: Run literal full QA bench
+        id: full-bench
+        working-directory: candidate
+        shell: bash
+        # Do not skip builds, launch smokes, or timing-sensitive tests. Failures
+        # remain failures; this job does not retry until green.
+        run: |
+          set +e
+          bash scripts/ops/transcripted-qa-bench.sh --mode full --out-root "$RUNNER_TEMP/full-qa-bench" --run-id hosted
+          result=$?
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit "$result"
+
+      - name: Write bounded bench receipt
+        if: always()
+        shell: bash
+        env:
+          BENCH_EXIT: ${{ steps.full-bench.outputs.exit_code }}
+          BENCH_OUTCOME: ${{ steps.full-bench.outcome }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import csv, importlib.util, json, os, pathlib, re
+          spec = importlib.util.spec_from_file_location("qa_setup", "validation-harness/scripts/ci/prepare-hosted-qa-artifacts.py")
+          qa_setup = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(qa_setup)
+          expected = {
+              '00-preflight', '01-build', '02-fast-tests', '03-e2e-smoke',
+              '04-slow-pasteback-smoke', '10-integration-smoke', '11-core-swift-test',
+              '12-qa-cli-tests', '13-qa-round-trip', '14-qa-stress-small',
+              '15-imported-audio-smoke', '21-qa-validate-all', '30-audio-synthetic',
+              '60-release-health', '62-posthog-product-tasks',
+          }
+          source = os.environ['SOURCE_SHA']
+          if not re.fullmatch('[0-9a-f]{40}', source):
+              raise SystemExit('Invalid source SHA; no receipt created.')
+          rows, seen = [], set()
+          results = pathlib.Path(os.environ['RUNNER_TEMP']) / 'full-qa-bench/hosted/results.tsv'
+          try:
+              lines = results.read_text().splitlines() if results.exists() else []
+          except (OSError, UnicodeError):
+              raise SystemExit('Bench results could not be read safely.')
+          for row in csv.reader(lines, delimiter='\t'):
+              if len(row) != 6 or row[0] not in expected or row[0] in seen or row[2] not in {'PASS', 'FAIL', 'WARN', 'SKIP'}:
+                  raise SystemExit('Unexpected bench result shape; refusing to publish raw data.')
+              if not all(re.fullmatch('[0-9]{1,9}', row[index]) for index in (3, 4)):
+                  raise SystemExit('Invalid numeric bench result; refusing to publish raw data.')
+              seen.add(row[0])
+              rows.append({'step': row[0], 'status': row[2], 'exit_code': int(row[3]), 'seconds': int(row[4])})
+          exit_code = os.environ.get('BENCH_EXIT', '')
+          if exit_code and not re.fullmatch('[0-9]{1,3}', exit_code):
+              raise SystemExit('Invalid bench exit code.')
+          receipt = {
+              'source_sha': source, 'workflow_sha': os.environ['WORKFLOW_SHA'],
+              'bench_exit_code': int(exit_code) if exit_code else None,
+              'bench_outcome': os.environ['BENCH_OUTCOME'],
+              'all_expected_steps_recorded': seen == expected, 'steps': rows,
+              'proof': 'Literal full bench on a rebuilt developer app; release-health uses committed fixtures.',
+              'remaining_proof': ['signed release artifact', 'real meeting apps and Bluetooth', 'pasteback feel', 'installed upgrade', 'live Sentry'],
+              'release_verdict': 'HOLD: separate release and human gates still apply',
+          }
+          validation_log = results.parent / 'logs/21-qa-validate-all.log'
+          if validation_log.exists():
+              try:
+                  receipt['artifact_validation'] = qa_setup.bounded_report(validation_log.read_text())
+              except (qa_setup.UnsafeEvidence, OSError, UnicodeError):
+                  raise SystemExit('Artifact validation diagnostics could not be bounded safely.')
+          receipt['artifact_data'] = 'Synthetic default artifact setup is required; see qa-artifact-setup-receipt.json complete field'
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'full-qa-bench-receipt.json'
+          output.write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt, indent=2))
+          if seen != expected:
+              raise SystemExit('Full bench evidence is incomplete.')
+          PY
+
+      - name: Upload bounded bench receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-qa-bench-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/full-qa-bench-receipt.json
+            ${{ runner.temp }}/qa-artifact-setup-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          # Raw logs, generated captures, app bundles, and private artifact
+          # validation output are deliberately not uploaded.
+
+  reject-conflicting-validation-modes:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.full_bench_source_sha != '' && inputs.staged_update_source_sha != '') ||
+       (inputs.run_hardware_smokes && (inputs.full_bench_source_sha != '' || inputs.staged_update_source_sha != '')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require one validation mode
+        run: |
+          echo '::error::Choose exactly one hosted validation mode, with run_hardware_smokes=false.'
+          exit 1
+
+  # Exercise the signed 1.1.68 -> 1.1.69 updater against a local staging feed.
+  # Harness code is pinned to this workflow, independently of the candidate.
+  staged-update-proof:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.staged_update_source_sha != '' &&
+      inputs.full_bench_source_sha == '' && !inputs.run_hardware_smokes
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      SOURCE_SHA: ${{ inputs.staged_update_source_sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+
+    steps:
+      - name: Validate fixed candidate and hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = e42ad0f759612e0080f2d11bb5de12fda6b590bd || { echo '::error::This updater proof is scoped to the verified 1.1.69 promotion SHA.'; exit 1; }
+          [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Updater proof requires hosted Apple Silicon.'; exit 1; }
+
+      - name: Checkout reviewed updater harness
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout exact updater candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.staged_update_source_sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Verify both checkout identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$WORKFLOW_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git -C candidate status --porcelain)"
+          python3 candidate/scripts/ops/native-smoke-isolation.py
+
+      - name: Verify harness failure guards
+        shell: bash
+        run: python3 harness/Tests/BuildDependencies/StagedSparkleUpdateTests.py
+
+      - name: Exercise signed full and delta updates
+        shell: bash
+        run: python3 harness/scripts/release/test-staged-sparkle-update.py --candidate-root candidate --output "$RUNNER_TEMP/staged-update-proof"
+
+      - name: Upload bounded updater receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staged-update-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staged-update-proof/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          # Do not upload downloaded apps, staging feeds, raw logs, or captures.

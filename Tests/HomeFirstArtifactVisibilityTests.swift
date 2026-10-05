@@ -87,7 +87,7 @@ func testHomeFirstArtifactVisibility() {
         assertTrue(
             settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")
                 && settingsSource.contains(#"promptKind: usedBundle ? .meetingBundle : .meetingMarkdown"#)
-                && settingsSource.contains(#"result: usedBundle ? .success : .fallbackCopied"#),
+                && settingsSource.contains(#"result: copied ? (usedBundle ? .success : .fallbackCopied) : .failed"#),
             "meeting preview Copy for agent should prefer the portable meeting bundle over raw Markdown"
         )
         assertFalse(
