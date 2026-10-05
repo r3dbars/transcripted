@@ -222,6 +222,7 @@ state
 step_id
 step_index
 stop_timed_out
+stop_to_paste_dispatch_latency_ms
 stop_to_paste_latency_ms
 stt_calls
 stt_input_seconds

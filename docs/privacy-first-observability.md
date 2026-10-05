@@ -281,7 +281,9 @@ For each new or changed event:
 - dictation speed is the other reviewed raw-number case: `dictation_started`
   carries `start_latency_ms`, and `dictation_stop_latency_measured` carries
   `first_sound_latency_ms` (key press to first audio buffer),
-  `decode_latency_ms`, and `stop_to_paste_latency_ms`, all rounded to 10 ms
+  `decode_latency_ms`, `stop_to_paste_latency_ms`, and
+  `stop_to_paste_dispatch_latency_ms` (stop to Cmd+V sent, before the paste
+  confirmation wait), all rounded to 10 ms
   by `MachineClassTelemetry.roundedMilliseconds`. Both events, and
   `dictation_start_requested` so the attempt funnel stays comparable, also carry
   `stt_model` (the `TranscriptionModelChoice` raw value), `mac_chip` (chip
