@@ -56,6 +56,21 @@ func testWritingSetupState() {
         )
     }
 
+    runSuite("Paused Writing observes no app activations or windows and resumes its previous policy") {
+        for screenMemory in [false, true] {
+            assertEqual(
+                WritingFrontWindowWatch.plan(running: true, autocompleteActive: true,
+                                            screenMemoryEnabled: screenMemory, paused: true),
+                .init(observesAppActivation: false, pollsFrontWindow: false)
+            )
+            assertEqual(
+                WritingFrontWindowWatch.plan(running: true, autocompleteActive: true,
+                                            screenMemoryEnabled: screenMemory, paused: false),
+                .init(observesAppActivation: true, pollsFrontWindow: screenMemory)
+            )
+        }
+    }
+
     runSuite("Writing setup completion is remembered in the given suite") {
         let suiteName = "WritingSetupStateTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

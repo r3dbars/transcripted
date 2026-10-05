@@ -20,6 +20,8 @@ Two modules in `.agents/modules.json`, both covered by this page:
 - `scripts/entrypoints/lib/bundle-input-method.sh` compiles `Core/` again, together with `Sources/TranscriptedKeyboard/`, into the keyboard bundle. A Core change ships in two binaries.
 - `Package.swift` declares `TranscriptedWritingCore` and `TranscriptedWritingRuntime` so the ported tests run under `swift test`. They take no deps flags.
 
+`ModelDescriptor.swift` holds the model asset/transport value types. `ModelSettlement` gives each `ModelManager` lifecycle generation an event-driven completion: cancelling one waiter leaves the download alone, while manager cancellation releases its generation's waiters without waiting for transport cleanup. `ScaffoldPrewarmer` keeps task identity across pause/resume so cancelled work cannot clear a newer request.
+
 ## Rules
 
 - **Library boundary.** The app reaches the runtime only through `Sources/Writing/`. Paths, preferences and analytics are injected by that bridge; nothing here reads app types or Transcripted's storage helpers.
