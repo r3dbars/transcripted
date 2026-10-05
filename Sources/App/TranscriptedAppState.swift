@@ -74,22 +74,21 @@ class TranscriptedAppState: ObservableObject {
         isInitialized = true
 
         if !Self.isLaunchSmokeMode {
-            do {
-                try LaunchAtLoginController.applySavedOptOutAtStartup()
-            } catch {
-                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
-                    message: error.localizedDescription)
-            }
-
-            // Covers existing installs that finished onboarding before the default
-            // existed; fresh installs get it from the onboarding-completion hook.
-            do {
-                try LaunchAtLoginController.applyDefaultEnableIfNeeded(
-                    onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
-                )
-            } catch {
-                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
-                    message: error.localizedDescription)
+            // The saved opt-out, then the default enable, which covers existing
+            // installs that finished onboarding before the default existed (fresh
+            // installs get it from the onboarding-completion hook). The XPC calls
+            // run off the main thread; nothing below waits on them.
+            let onboardingCompleted = PermissionsOnboardingPreferences.hasCompleted()
+            Task { @MainActor in
+                let result = await LaunchAtLoginController.applyStartupState(onboardingCompleted: onboardingCompleted)
+                if let message = result.optOutFailure {
+                    EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
+                        message: message)
+                }
+                if let message = result.defaultEnableFailure {
+                    EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                        message: message)
+                }
             }
         }
 
