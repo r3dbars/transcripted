@@ -6,7 +6,6 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
-import sqlite3
 import stat
 import tempfile
 import unittest
@@ -104,11 +103,44 @@ class HostedQAArtifactsTests(unittest.TestCase):
     def test_closed_wal_family_survives_readonly_integrity_schema_and_rows(self):
         # Use the platform SQLite library, like the Swift generator. PERSIST_WAL
         # retains valid companion files after a successful sqlite3_close.
-        lib = ctypes.CDLL(ctypes.util.find_library('sqlite3'))
+        library = '/usr/lib/libsqlite3.dylib' if setup.platform.system() == 'Darwin' else ctypes.util.find_library('sqlite3')
+        lib = ctypes.CDLL(library)
         lib.sqlite3_open.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
         lib.sqlite3_exec.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
         lib.sqlite3_file_control.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
         lib.sqlite3_close.argtypes = [ctypes.c_void_p]
+        lib.sqlite3_open_v2.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_char_p]
+        lib.sqlite3_prepare_v2.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+        lib.sqlite3_step.argtypes = [ctypes.c_void_p]
+        lib.sqlite3_column_count.argtypes = [ctypes.c_void_p]
+        lib.sqlite3_column_text.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.sqlite3_column_text.restype = ctypes.c_char_p
+        lib.sqlite3_finalize.argtypes = [ctypes.c_void_p]
+
+        def readonly_query(path, sql):
+            # Match Swift SQLiteReader: system SQLite, OPEN_READONLY, prepare,
+            # step and finalize. Python's sqlite3 may use a different library
+            # with different handling of missing WAL companions on hosted Macs.
+            handle = ctypes.c_void_p()
+            self.assertEqual(lib.sqlite3_open_v2(str(path).encode(), ctypes.byref(handle), 1, None), 0)
+            statement = ctypes.c_void_p()
+            try:
+                code = lib.sqlite3_prepare_v2(handle, sql.encode(), -1, ctypes.byref(statement), None)
+                if code != 0:
+                    raise RuntimeError(f'System SQLite prepare failed with code {code}')
+                rows = []
+                while True:
+                    code = lib.sqlite3_step(statement)
+                    if code == 101:  # SQLITE_DONE
+                        return rows
+                    if code != 100:  # SQLITE_ROW
+                        raise RuntimeError(f'System SQLite step failed with code {code}')
+                    row = [lib.sqlite3_column_text(statement, column) for column in range(lib.sqlite3_column_count(statement))]
+                    rows.append(tuple(value.decode() if value is not None else None for value in row))
+            finally:
+                if statement:
+                    lib.sqlite3_finalize(statement)
+                self.assertEqual(lib.sqlite3_close(handle), 0)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); fixtures = root / 'fixtures'; fixtures.mkdir()
             (fixtures / 'Logs').mkdir()
@@ -127,33 +159,26 @@ class HostedQAArtifactsTests(unittest.TestCase):
                     self.assertEqual(lib.sqlite3_close(handle), 0)
                 for suffix in ['', '-wal', '-shm']:
                     self.assertTrue((fixtures / (name + suffix)).is_file())
-                with sqlite3.connect((fixtures / name).as_uri() + '?mode=ro', uri=True) as reader:
-                    self.assertEqual(reader.execute('PRAGMA integrity_check').fetchone(), ('ok',))
-                    self.assertEqual(reader.execute('SELECT COUNT(*) FROM samples').fetchone(), (2,))
-                reader.close()
+                self.assertEqual(readonly_query(fixtures / name, 'PRAGMA integrity_check'), [('ok',)])
+                self.assertEqual(readonly_query(fixtures / name, 'SELECT COUNT(*) FROM samples'), [('2',)])
             destination = root / 'complete'
             setup.seed_layout(fixtures, destination)
             for name in ['speakers.sqlite', 'stats.sqlite']:
                 for suffix in ['', '-wal', '-shm']:
                     path = destination / 'state' / (name + suffix)
                     self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-                with sqlite3.connect((destination / 'state' / name).as_uri() + '?mode=ro', uri=True) as reader:
-                    self.assertEqual(reader.execute('PRAGMA integrity_check').fetchone(), ('ok',))
-                    self.assertEqual(reader.execute('PRAGMA journal_mode').fetchone(), ('wal',))
-                    self.assertEqual([r[1] for r in reader.execute('PRAGMA table_info(samples)')], ['id', 'value'])
-                    self.assertEqual(reader.execute('SELECT * FROM samples ORDER BY id').fetchall(), [(1, 'synthetic'), (2, 'second')])
-                reader.close()
+                database = destination / 'state' / name
+                self.assertEqual(readonly_query(database, 'PRAGMA integrity_check'), [('ok',)])
+                self.assertEqual(readonly_query(database, 'PRAGMA journal_mode'), [('wal',)])
+                self.assertEqual([r[1] for r in readonly_query(database, 'PRAGMA table_info(samples)')], ['id', 'value'])
+                self.assertEqual(readonly_query(database, 'SELECT * FROM samples ORDER BY id'), [('1', 'synthetic'), ('2', 'second')])
             # Reproduce the original transport: identical main bytes without
             # companions fail read-only queries on the supported macOS runner.
             if setup.platform.system() == 'Darwin':
                 incomplete = root / 'incomplete'; incomplete.mkdir()
                 shutil.copy2(fixtures / 'speakers.sqlite', incomplete / 'speakers.sqlite')
-                reader = sqlite3.connect((incomplete / 'speakers.sqlite').as_uri() + '?mode=ro', uri=True)
-                try:
-                    with self.assertRaises(sqlite3.OperationalError):
-                        reader.execute('PRAGMA integrity_check').fetchone()
-                finally:
-                    reader.close()
+                with self.assertRaisesRegex(RuntimeError, 'System SQLite prepare failed with code 14'):
+                    readonly_query(incomplete / 'speakers.sqlite', 'PRAGMA integrity_check')
             # A missing or redirected companion must stop before creating output.
             companion = fixtures / 'stats.sqlite-shm'
             companion.unlink()

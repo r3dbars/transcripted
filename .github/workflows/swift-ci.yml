@@ -524,7 +524,7 @@ jobs:
           path: candidate
           persist-credentials: false
 
-      - name: Verify source identity and prerequisites
+      - name: Verify checkout identities and toolchain
         working-directory: candidate
         shell: bash
         run: |
@@ -535,10 +535,13 @@ jobs:
           python3 scripts/ops/native-smoke-isolation.py
           swiftc --version
           xcodebuild -version
-          bash build-deps.sh
 
       - name: Check fixture setup failure guards
         run: python3 validation-harness/Tests/BuildDependencies/HostedQAArtifactsTests.py
+
+      - name: Build full bench dependencies
+        working-directory: candidate
+        run: bash build-deps.sh
 
       - name: Reproduce missing artifacts and seed synthetic default layout
         run: python3 validation-harness/scripts/ci/prepare-hosted-qa-artifacts.py --candidate-root candidate
