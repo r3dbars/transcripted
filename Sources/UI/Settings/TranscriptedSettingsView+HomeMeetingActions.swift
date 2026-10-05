@@ -685,11 +685,27 @@ extension TranscriptedSettingsView {
             : nil
         let savedSource = searchResults
             ?? homeViewModel.meetingDaySections.flatMap { $0.items }
-        let savedMeetings = savedSource
-            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
+        // This runs on every body pass of the window. With no query every row
+        // matches, so skip building each row's date words; otherwise split the
+        // query once instead of once per row.
+        let tokens = HomeMeetingListFilter.tokens(in: query)
+        let savedMeetings = (tokens.isEmpty
+            ? savedSource
+            : savedSource.filter {
+                HomeMeetingListFilter.matches(
+                    tokens: tokens,
+                    haystack: HomeMeetingListFilter.haystack(for: HomeMeetingListFilter.searchFields(for: $0))
+                )
+            })
             .map(HomeMeetingListItem.saved)
-        let failedMeetings = meetingSession.failedMeetings
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        let failedMeetings = (tokens.isEmpty
+            ? meetingSession.failedMeetings
+            : meetingSession.failedMeetings.filter {
+                HomeMeetingListFilter.matches(
+                    tokens: tokens,
+                    haystack: HomeMeetingListFilter.haystack(for: Self.searchFields(for: $0))
+                )
+            })
             .map(HomeMeetingListItem.failed)
         let items = (savedMeetings + failedMeetings)
             .sorted { $0.date > $1.date }
