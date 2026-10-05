@@ -18,8 +18,10 @@ enum TranscriptedConstants {
     /// Audio buffer capacity in seconds — the dictation session cap plus
     /// headroom for the stop path, so the cap never truncates audio. Samples
     /// live in per-segment arrays that are freed when the take is cleared, so
-    /// a long take's memory (~185MB of Float samples at 48kHz for 16 minutes)
-    /// is only held while that take is recording and transcribing.
+    /// a long take's memory is only held while that take records and
+    /// transcribes. Worst case at 48kHz: ~185MB of raw Float samples for 16
+    /// minutes, peaking around 350-450MB at stop with array growth, the 16kHz
+    /// resample and the recovery WAV copy (double that on a 96kHz input).
     static let audioBufferCapacitySeconds = Int(dictationSessionMaxDuration) + 60
 
     /// Audio tap buffer size (AVAudioEngine installTap)
