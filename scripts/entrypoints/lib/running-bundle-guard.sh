@@ -16,9 +16,18 @@ refuse_if_bundle_running() {
     # (./build/Transcripted.app/...). The relative pattern is anchored to the
     # start of an argument so another worktree's absolute path doesn't match.
     contents_dir="$(cd "$bundle" && pwd -P)/Contents/"
+    # A relative match only counts when the process runs from this folder: another
+    # worktree's build passes build/Transcripted.app/... to swiftc as a relative path.
+    local here pid cwd
+    here="$(pwd -P)"
     running_pids="$( {
         pgrep -f "$contents_dir" || true
-        pgrep -f "(^|[[:space:]])(\./)?${bundle#./}/Contents/" || true
+        for pid in $(pgrep -f "(^|[[:space:]])(\./)?${bundle#./}/Contents/" || true); do
+            cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
+            # if, not &&: a false test as the last command of the loop fails the
+            # pipeline, and build.sh runs under set -e.
+            if [ "$cwd" = "$here" ]; then echo "$pid"; fi
+        done
     } | sort -u)"
     [ -z "$running_pids" ] && return 0
 

@@ -82,6 +82,7 @@ default_system_output_volume_changed
 default_system_output_volume_dropped
 default_system_output_volume_during
 delivery
+destination
 diarize_ms
 dictation_ready
 dictations_completed
@@ -106,6 +107,7 @@ had_suggestion
 has_target
 hfp_suspected
 import_stage
+initiation
 input_channels
 input_device_class
 input_rate_hz
@@ -116,6 +118,7 @@ is_retry
 last_event
 location_type
 mac_chip
+measurement_basis
 meeting_dry_run_completed
 meeting_recording_ready
 meetings_completed
@@ -131,6 +134,7 @@ mic_recovering
 mic_signal
 mic_status
 mic_stream_present
+microphone_skipped
 missing_permission
 model_choice
 model_state
@@ -152,6 +156,7 @@ pause_reason
 permission_kind
 permission_state
 previous_clean_shutdown
+previous_destination
 previous_version
 prior_artifact_kind
 prior_ready_state
@@ -189,6 +194,7 @@ route_stability_warning
 runtime
 sample_flow_started
 save_enabled
+save_id
 save_outcome
 screen_permission_granted
 second_artifact_kind

@@ -22,6 +22,8 @@ func testFirstRunExperience() {
     runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — keeps completion payload coarse") {
         let properties = FirstRunExperience.onboardingCompletionAnalyticsProperties(
             completionPath: .meetings,
+            microphoneGranted: false,
+            microphoneSkipped: true,
             systemAudioGranted: true,
             calendarGranted: false,
             meetingPromptsEnabled: true,
@@ -31,6 +33,8 @@ func testFirstRunExperience() {
             elapsedSeconds: 75
         )
 
+        assertEqual(properties["microphone_skipped"], "true", "setup completion may include microphone skip")
+        assertEqual(properties["dictation_ready"], "false", "completing setup is not proof of dictation readiness")
         assertEqual(properties["completion_flow"], "meetings", "completion flow should stay a coarse enum")
         assertEqual(properties["meeting_recording_ready"], "true", "completion should preserve meeting readiness")
         assertEqual(properties["calendar_status"], "not_granted", "calendar status should avoid raw event details")
