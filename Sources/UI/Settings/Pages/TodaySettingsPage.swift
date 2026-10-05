@@ -38,7 +38,11 @@ struct TodaySettingsPage: View {
         VStack(alignment: .leading, spacing: 26) {
             header
 
-            if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
+            if !stats.hasAnyCapture && snapshot.recent.isEmpty && todayViewModel.isRefreshing {
+                Text("Loading…")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+            } else if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
                 emptyState
             } else if let selectedDay {
                 // Equatable: the shell publishes up to 20 times a second
@@ -105,7 +109,14 @@ struct TodaySettingsPage: View {
                 }
             }
             // Its own full-width line: next to the week strip it got clipped.
-            TodaySentence(stats: headerStats, isToday: isToday)
+            if todayViewModel.isRefreshing {
+                Text("Updating saved captures…")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .accessibilityIdentifier("transcripted.today.refreshing")
+            } else {
+                TodaySentence(stats: headerStats, isToday: isToday)
+            }
         }
     }
 

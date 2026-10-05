@@ -29,6 +29,9 @@ final class HomeViewModel: ObservableObject {
     private var scanWarningDismissed = false
 
     private var refreshTask: Task<Void, Never>?
+    private var refreshState = CoalescedRefreshState(isEnabled: false)
+    private var pendingLoadIsInitial = false
+    private var pendingLoadIsSilent = true
     private var refreshGeneration = SupersessionEpoch()
     private var dictationLimit = 10
     private var meetingLimit = 10
@@ -54,6 +57,16 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    func setShown(_ shown: Bool) {
+        if shown && !refreshState.isEnabled { isLoading = true }
+        refreshState.isEnabled = shown
+        if !shown {
+            meetingSearchTask?.cancel()
+            meetingSearchGeneration.invalidate()
+            isSearchingMeetings = false
+        }
+    }
+
     /// Silent re-resolution of the currently visible captures after the on-disk
     /// artifacts changed underneath the cache. Keeps the current paging window and
     /// avoids flipping the loading spinners so a passive background refresh does
@@ -69,7 +82,6 @@ final class HomeViewModel: ObservableObject {
     private let initialMeetingLimit = 10
 
     func refresh() {
-        refreshTask?.cancel()
         dictationLimit = initialDictationLimit
         meetingLimit = initialMeetingLimit
         scanWarningDismissed = false
@@ -159,7 +171,7 @@ final class HomeViewModel: ObservableObject {
     /// away if a search is showing, otherwise on the next search.
     private func invalidateMeetingSearchIndex() {
         meetingSearchIndexIsStale = true
-        if !meetingSearchQuery.isEmpty {
+        if refreshState.isEnabled, !meetingSearchQuery.isEmpty {
             runMeetingSearch(debounce: false)
         }
     }
@@ -176,6 +188,7 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
+        guard refreshState.isEnabled else { return }
         let generation = meetingSearchGeneration.begin()
         let limit = meetingSearchLimit
         let existingIndex = meetingSearchIndex
@@ -232,10 +245,18 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadCurrentLimits(isInitialLoad: Bool, isSilent: Bool = false) {
-        refreshTask?.cancel()
+        pendingLoadIsInitial = pendingLoadIsInitial || isInitialLoad
+        pendingLoadIsSilent = pendingLoadIsSilent && isSilent
+        guard refreshState.request() else { return }
+        startCurrentLimitsLoad()
+    }
+
+    private func startCurrentLimitsLoad() {
         let generation = refreshGeneration.begin()
-        isLoading = isInitialLoad && !isSilent
-        isLoadingMore = !isInitialLoad && !isSilent
+        isLoading = pendingLoadIsInitial && !pendingLoadIsSilent
+        isLoadingMore = !pendingLoadIsInitial && !pendingLoadIsSilent
+        pendingLoadIsInitial = false
+        pendingLoadIsSilent = true
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
         refreshTask = Task { @MainActor in
@@ -244,15 +265,16 @@ final class HomeViewModel: ObservableObject {
                 meetingLimit: requestedMeetingLimit + 1,
                 dictationCountScope: .todayOnly
             )
-            let diagnosis = await Task.detached(priority: .utility) {
-                RecentMeetingsScanner.diagnose()
-            }.value
+            defer {
+                self.refreshTask = nil
+                if self.refreshState.finished() { self.startCurrentLimitsLoad() }
+            }
             guard !Task.isCancelled, self.refreshGeneration.finishIfCurrent(generation) else {
                 return
             }
             self.scanWarning = self.scanWarningDismissed
                 ? nil
-                : HomeScanWarningPolicy.card(for: diagnosis)
+                : HomeScanWarningPolicy.card(for: snapshot.meetingScanDiagnosis)
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
@@ -272,6 +294,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func cancel() {
+        setShown(false)
         refreshTask?.cancel()
         refreshTask = nil
         refreshGeneration.invalidate()

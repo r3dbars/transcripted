@@ -204,6 +204,9 @@ struct TranscriptedSettingsView: View {
                 discoveredPage: navigation.presentedPage
             )
         }
+        .onChange(of: navigation.isWindowOpen) { _, _ in
+            updateLibraryVisibility()
+        }
         .onChange(of: navigation.selectedPage) { oldPage, page in
             if oldPage == .people && page != .people {
                 SpeakerClipPlayback.stop()
@@ -223,13 +226,13 @@ struct TranscriptedSettingsView: View {
             )
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
             if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
                 speakerPeopleModel.refresh()
             }
         }
         .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
             speakerPeopleModel.refresh()
         }
         .onReceive(meetingSession.$artifactRecoveryAlert) { alert in
@@ -237,7 +240,7 @@ struct TranscriptedSettingsView: View {
             handleMeetingArtifactRecoveryAlert(alert)
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
-            refreshRecentCaptures(force: true)
+            refreshRecentCaptures(isLibraryChange: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
