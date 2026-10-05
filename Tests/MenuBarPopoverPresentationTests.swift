@@ -35,13 +35,12 @@ func testMenuBarPopoverPresentation() async {
     }
 
     runSuite("Left and right status clicks retain the same popover toggle action") {
-        let button = NSButton(frame: .zero)
+        let button = MenuBarToggleButton(frame: .zero)
         let target = MenuBarPopoverToggleTarget()
         let action = #selector(MenuBarPopoverToggleTarget.toggle)
         MenuBarPopoverPresentation.installToggleAction(on: button, target: target, action: action)
 
-        let configuredEvents = NSEvent.EventTypeMask(rawValue: UInt64(button.sendAction(on: [])))
-        assertEqual(configuredEvents, [.leftMouseUp, .rightMouseUp], "both clicks open the same menu, without firing on mouse down")
+        assertEqual(button.requestedEvents, [.leftMouseUp, .rightMouseUp], "both clicks open the same menu, without firing on mouse down")
         assertTrue(button.target === target, "both clicks retain the same target")
         assertEqual(button.action, action, "both clicks retain the same toggle action")
     }
@@ -107,4 +106,17 @@ private final class MenuBarRecordingPopover: NSPopover {
 @MainActor
 private final class MenuBarPopoverToggleTarget: NSObject {
     @objc func toggle() {}
+}
+
+@MainActor
+private final class MenuBarToggleButton: NSButton {
+    var requestedEvents: NSEvent.EventTypeMask = []
+
+    // A plain NSButton filters right-click delivery differently from the
+    // status bar button. Record the requested mask without creating a real
+    // status item in the user's menu bar.
+    override func sendAction(on mask: NSEvent.EventTypeMask) -> Int {
+        requestedEvents = mask
+        return 0
+    }
 }
