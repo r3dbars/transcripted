@@ -295,4 +295,16 @@ func testMeetingRecordingStartGate() async {
         assertEqual(MeetingCaptureHealthTelemetry.finalizedOutcome("complete", nil), "complete",
             "telemetry doesn't count a mic-only choice as unverified")
     }
+
+    runSuite("Quiet Mac — no 'unverified' flag when macOS confirmed system audio access") {
+        assertNil(MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+            observed: false, micOnlyByChoice: false, accessConfirmedByMacOS: true),
+            "a silent system track with access on is a quiet Mac, so the saved meeting makes no claim")
+        assertEqual(MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+            observed: false, micOnlyByChoice: false, accessConfirmedByMacOS: false), false,
+            "without macOS confirming access, silence still reads as unverified")
+        assertEqual(MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
+            observed: true, micOnlyByChoice: false, accessConfirmedByMacOS: true), true,
+            "heard system audio is still verified")
+    }
 }
