@@ -420,9 +420,11 @@ final class EmbeddingCacheTests: XCTestCase {
         let semantic = store.semanticSearchDictationEntriesIfAvailable(query: baseTexts[0], dateFrom: nil, dateTo: nil)
         XCTAssertEqual(semantic?.first?.snippets.first?.text, baseTexts[0])
 
-        // Once reconciled, later ticks are no-ops.
+        // Once reconciled, later ticks are no-ops. (The search above embedded
+        // its query through the same provider, so count from here.)
+        let callsAfterSearch = provider.embedCalls
         watcher.periodicTick()
-        XCTAssertEqual(provider.embedCalls, baseTexts.count)
+        XCTAssertEqual(provider.embedCalls, callsAfterSearch)
     }
 
     // MARK: - TTL garbage collection
