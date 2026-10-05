@@ -33,6 +33,19 @@ func testCoalescedRefreshState() {
         assertFalse(state.finished())
     }
 
+    runSuite("Reveal starts a held change only when one is pending") {
+        var state = CoalescedRefreshState(isEnabled: false)
+        state.isEnabled = true
+        assertFalse(state.startPending(), "nothing held, nothing to read")
+        state.isEnabled = false
+        assertFalse(state.request(), "save while hidden")
+        state.isEnabled = true
+        assertTrue(state.startPending(), "reveal reads the held save without a new request")
+        assertFalse(state.request(), "a reveal refresh right after joins the running read")
+        assertTrue(state.finished(), "and gets one trailing read")
+        assertFalse(state.finished())
+    }
+
     runSuite("Delayed edit and refresh completions cannot roll back a newer speaker snapshot") {
         var order = RefreshPublicationOrder()
         let beforeEdit = order.beginRead()

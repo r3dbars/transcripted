@@ -58,8 +58,12 @@ final class HomeViewModel: ObservableObject {
     }
 
     func setShown(_ shown: Bool) {
-        if shown && !refreshState.isEnabled { isLoading = true }
+        let revealed = shown && !refreshState.isEnabled
         refreshState.isEnabled = shown
+        // A change held while Home was hidden reads now. The view's reveal
+        // refresh can be throttled, so it can't be the only thing that starts
+        // it, and nothing claims a load is running unless one starts.
+        if revealed, refreshState.startPending() { startCurrentLimitsLoad() }
         if !shown {
             meetingSearchTask?.cancel()
             meetingSearchGeneration.invalidate()

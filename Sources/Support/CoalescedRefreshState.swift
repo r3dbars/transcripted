@@ -21,6 +21,11 @@ struct CoalescedRefreshState: Sendable {
         return takePending()
     }
 
+    /// Starts a change held while disabled, without adding a new request.
+    mutating func startPending() -> Bool {
+        takePending()
+    }
+
     private mutating func takePending() -> Bool {
         guard isEnabled, !isRunning, isPending else { return false }
         isPending = false

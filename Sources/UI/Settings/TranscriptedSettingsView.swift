@@ -206,9 +206,7 @@ struct TranscriptedSettingsView: View {
                 discoveredPage: navigation.presentedPage
             )
         }
-        .onChange(of: navigation.isWindowOpen) { _, _ in
-            updateLibraryVisibility()
-        }
+        .onChange(of: navigation.isWindowOpen) { _, _ in updateLibraryVisibility() }
         .onChange(of: navigation.selectedPage) { oldPage, page in
             if oldPage == .people && page != .people {
                 SpeakerClipPlayback.stop()
