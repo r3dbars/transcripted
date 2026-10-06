@@ -174,8 +174,8 @@ func testDictationMuffleFilter() {
         assertEqual(wired, .plain, "a 7 ms wired lag keeps the plain fade")
         assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: nil, sampleRate: sampleRate), .plain, "an unknown lag keeps the plain fade")
         let airPods = DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: sampleRate)
-        let muteFrames = Int((DictationMuffleSplice.muteLatencySeconds * sampleRate).rounded())
-        assertEqual(airPods.holdFrames, 8_198 + muteFrames, "holds until the copy reaches where the originals stopped")
+        let extraFrames = Int(((DictationMuffleSplice.muteLatencySeconds + DictationMuffleSplice.skipSideMarginSeconds) * sampleRate).rounded())
+        assertEqual(airPods.holdFrames, 8_198 + extraFrames, "holds until the copy is past where the originals stopped")
         assertEqual(airPods.fadeFrames, Int((DictationMuffleSplice.heldFadeSeconds * sampleRate).rounded()), "then fades in smoothly")
         let capped = DictationMuffleSplice.atCut(copyDelayFrames: 1_000_000, sampleRate: sampleRate)
         assertEqual(capped.holdFrames, Int((DictationMuffleSplice.maxHoldSeconds * sampleRate).rounded()), "a wild lag reading can't leave a long silence")
@@ -200,6 +200,41 @@ func testDictationMuffleFilter() {
         if let fullAt {
             assertTrue(abs(fullAt - (holdFrames + fadeFrames)) <= 2, "full level at the end of the fade, reached at \(fullAt)")
         }
+    }
+
+    runSuite("Across many IO cycles a held copy opens exactly when the hold runs out") {
+        let cycle = 128
+        let splice = DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: sampleRate)
+        var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
+        let constant = [Float](repeating: 0.5, count: cycle)
+        var hold = splice.holdFrames
+        var firstSoundAt: Int?
+        var rendered = 0
+        while rendered < splice.holdFrames + 4 * cycle, firstSoundAt == nil {
+            let out = muffleRender(
+                &filter, input: [constant, constant], inputLayout: [2], outputLayout: [2],
+                muffle: 0, gate: 1, gateHoldFrames: hold, gateFadeFrames: splice.fadeFrames
+            ).out[0]
+            if let index = out.firstIndex(where: { $0 != 0 }) { firstSoundAt = rendered + index }
+            hold = DictationMuffleSplice.remainingHold(hold, afterFrames: cycle)
+            rendered += cycle
+        }
+        assertEqual(firstSoundAt, splice.holdFrames, "the copy should open on the first frame after the hold")
+        assertEqual(DictationMuffleSplice.remainingHold(100, afterFrames: 512), 0, "a hold never goes negative")
+        assertEqual(DictationMuffleSplice.remainingHold(600, afterFrames: 512), 88, "a hold counts down by the frames rendered")
+    }
+
+    runSuite("While the gate is held shut the filter jumps to its muffle target, so the copy comes back fully muffled") {
+        var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
+        let constant = [Float](repeating: 0.5, count: 512)
+        _ = muffleRender(
+            &filter, input: [constant, constant], inputLayout: [2], outputLayout: [2],
+            muffle: 1, gate: 1, gateHoldFrames: 4_096, gateFadeFrames: 960
+        )
+        assertEqual(filter.amount, 1, "fully muffled before the gate opens")
+        var gliding = DictationMuffleFilter(sampleRate: sampleRate, startGated: false)
+        _ = muffleRender(&gliding, input: [constant, constant], inputLayout: [2], outputLayout: [2], muffle: 1, gate: 1)
+        assertTrue(gliding.amount < 1, "an open gate still glides, got \(gliding.amount)")
     }
 
     runSuite("render returns the cycle's input peak, and 0 for silence or no input") {

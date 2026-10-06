@@ -40,8 +40,8 @@ import CoreAudio
 import Foundation
 import Synchronization
 
-/// The only state the copy's IO thread touches: three atomics, two counters
-/// and a preallocated filter.
+/// The only state the copy's IO thread touches: a few atomics and a
+/// preallocated filter.
 final class DictationMuffleRenderState {
     /// Below this input peak a cycle counts as quiet (-40 dBFS).
     static let quietPeak: Float = 0.01
@@ -101,7 +101,11 @@ private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputT
     if hold > 0 {
         // Count the hold down by this cycle. If the muffler queue changed it
         // meanwhile (a new cut or a hand back), its value wins.
-        _ = state.gateHoldFrames.compareExchange(expected: hold, desired: max(0, hold - frames), ordering: .relaxed)
+        _ = state.gateHoldFrames.compareExchange(
+            expected: hold,
+            desired: DictationMuffleSplice.remainingHold(hold, afterFrames: frames),
+            ordering: .relaxed
+        )
     }
     if peak < DictationMuffleRenderState.quietPeak {
         state.quietFrames.wrappingAdd(frames, ordering: .relaxed)

@@ -13,9 +13,10 @@
 //      some routes), the cut can wait briefly for a quiet moment so the splice
 //      lands in a pause. By default it doesn't: the route holds the copy back
 //      by the lag instead (DictationMuffleSplice), which needs no pause.
-//   4. Cut: open the copy's gate and mute the originals in the same step. The
-//      copy is still dry, so the only seam is a few milliseconds of time, not
-//      a jump in tone or level.
+//   4. Cut: open the copy's gate and mute the originals in the same step. On
+//      wired routes the copy is still dry, so the only seam is a few
+//      milliseconds of time, not a jump in tone or level. On lagging routes
+//      the copy comes back after a brief drop (DictationMuffleSplice).
 //   5. Shortly after, glide the cutoff down: the muffle fades in.
 //   6. The mic closes: glide back to dry, then hand back (unmute the
 //      originals, then fade the copy out over them; on lagging routes, in a
@@ -48,7 +49,7 @@ struct DictationMuffleTiming: Equatable {
     /// surely landed before the tone starts to change.
     var glideAfterCutNanos: UInt64 = 15_000_000
     /// At the hand back, how long to wait for a quiet moment on routes where
-    /// the copy lags (same rule as the cut), so the originals come back in a
+    /// the copy lags (above quietCutAboveDelayNanos), so the originals come back in a
     /// pause instead of skipping ahead by the copy delay. Short: the music
     /// is already dry by then.
     var handBackQuietWaitNanos: UInt64 = 120_000_000

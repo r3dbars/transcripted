@@ -180,7 +180,16 @@ struct DictationMuffleFilter {
         var peak: Float = 0
         var frame = 0
         while frame < frames {
-            advanceAmount(toward: muffleTarget)
+            if gate == 0, frame + Self.controlBlockFrames <= gateHoldFrames {
+                // Held shut and silent: jump straight to the target, so the
+                // copy comes back fully muffled instead of mid-glide.
+                if amount != muffleTarget {
+                    amount = muffleTarget
+                    updateCoefficients()
+                }
+            } else {
+                advanceAmount(toward: muffleTarget)
+            }
             let blockEnd = min(frames, frame + Self.controlBlockFrames)
             while frame < blockEnd {
                 var left: Float = 0
@@ -306,14 +315,20 @@ struct DictationMuffleFilter {
 /// music, which on AirPods is a clear repeat (heard 2026-10-06). So on a
 /// lagging route the gate stays shut until the copy reaches the moment the
 /// originals stopped, then fades in: the music drops out briefly and comes
-/// back muffled where it left off, with nothing repeated. Short lags (wired
-/// and built-in) keep the plain few-millisecond fade.
+/// back muffled where it left off, with nothing repeated. While the gate is
+/// held the filter jumps to its target, so the copy returns fully muffled:
+/// one "drop, then muffled" step instead of a drop and then a sweep. Short
+/// lags (wired and built-in) keep the plain few-millisecond fade.
 struct DictationMuffleSplice: Equatable {
     /// Above this lag the cut holds the copy back (the same line where the
     /// machine used to wait for a quiet moment).
     static let holdAboveLagSeconds: Double = 0.015
-    /// Tap B mutes the originals about this long after the cut (lab-measured).
+    /// Tap B mutes the originals about this long after the cut (lab-measured
+    /// on built-in speakers).
     static let muteLatencySeconds: Double = 0.0045
+    /// Extra hold so timing error lands on a few skipped milliseconds (hidden
+    /// in the gap) rather than a few repeated ones.
+    static let skipSideMarginSeconds: Double = 0.008
     /// The longest hold, so a bad lag reading can't leave a long silence.
     static let maxHoldSeconds: Double = 0.4
     /// The fade-in after a hold: long enough to come back in smoothly.
@@ -326,13 +341,18 @@ struct DictationMuffleSplice: Equatable {
 
     static let plain = DictationMuffleSplice(holdFrames: 0, fadeFrames: 0)
 
+    /// What's left of a hold after the IO thread renders `frames` more.
+    static func remainingHold(_ hold: Int, afterFrames frames: Int) -> Int {
+        max(0, hold - max(0, frames))
+    }
+
     static func atCut(copyDelayFrames: Int?, sampleRate: Double) -> DictationMuffleSplice {
         guard sampleRate.isFinite, sampleRate > 0, let copyDelayFrames,
               Double(copyDelayFrames) > holdAboveLagSeconds * sampleRate else {
             return .plain
         }
         let hold = min(
-            Double(copyDelayFrames) + muteLatencySeconds * sampleRate,
+            Double(copyDelayFrames) + (muteLatencySeconds + skipSideMarginSeconds) * sampleRate,
             maxHoldSeconds * sampleRate
         )
         return DictationMuffleSplice(

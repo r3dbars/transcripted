@@ -85,7 +85,7 @@
   - `DictationMuffleMachine.swift`: the pure timeline (inputs, effects, a virtual clock). Fast-tested.
   - `DictationMuffleRoute.swift`: the Core Audio objects. Tap A (unmuted, include-list) feeds the copy through a private aggregate on the output. Tap B (`.mutedWhenTapped`, include-list) in a tap-only aggregate is started only at the cut. Never change a running tap's mute behavior: coreaudiod restarts the IO and leaves a ~60 ms hole.
   - `DictationMuffleFilter.swift`: the sound (TPT cutoff glide plus output gate). It runs on the IO thread and is fast-tested.
-  - Copy lag: the copy trails the originals by ~7 ms wired but ~171 ms on AirPods (the tap delivers the mix one output latency late; confirmed by ear 2026-10-06). Opening the copy at the cut replays that much music. `DictationMuffleSplice` holds the gate shut for the lag on lagging routes, so the music drops briefly and comes back muffled where it left off, with no quiet-moment wait at the cut.
+  - Copy lag: the copy trails the originals by ~7 ms wired but ~171 ms on AirPods (the tap delivers the mix one output latency late; confirmed by ear 2026-10-06). Opening the copy at the cut replays that much music. `DictationMuffleSplice` holds the gate shut for the lag on lagging routes, so the music drops briefly and comes back already muffled (the filter jumps to its target while held) where it left off, with no quiet-moment wait at the cut.
   - `DictationMufflePolicy.swift` and `DictationMuffleHAL.swift`: the rules and fail-closed HAL reads.
 
 ## Current Notes
