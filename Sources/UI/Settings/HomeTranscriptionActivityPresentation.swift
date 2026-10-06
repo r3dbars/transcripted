@@ -37,7 +37,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .transcribing:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "waveform.badge.magnifyingglass",
-                title: "Transcribing with local model",
+                title: "Transcribing meeting",
                 status: "Transcribing",
                 detail: "Transcripted is turning the saved audio into a Markdown transcript. Other retries pause until this finishes.",
                 tone: .working,
@@ -47,7 +47,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .finishing:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "square.and.arrow.down.fill",
-                title: "Saving Markdown transcript",
+                title: "Saving transcript",
                 status: "Saving",
                 detail: "Transcripted is writing the Markdown file. When this finishes, the meeting returns to the normal list.",
                 tone: .working,
@@ -69,7 +69,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
 
             return HomeTranscriptionActivityPresentation(
                 symbolName: "checkmark.circle.fill",
-                title: "Markdown transcript saved",
+                title: "Transcript saved",
                 status: "Ready",
                 detail: detail,
                 tone: .success,
@@ -106,7 +106,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
             return HomeTranscriptionActivityPresentation(
                 symbolName: "gearshape.2.fill",
                 title: warmupStatus.subtitle,
-                status: "Preparing...",
+                status: "Preparing…",
                 detail: detail,
                 tone: .working,
                 progress: max(0.05, min(warmupStatus.progress, 0.92)),

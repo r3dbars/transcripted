@@ -11,7 +11,7 @@ func testHomeDeleteConfirmationPolicy() {
         )
         assertEqual(
             presentation.message,
-            "Do you want to delete all of the audio and the transcript that has to do with this meeting? This cannot be undone.",
+            "This deletes the meeting's transcript and audio. This can't be undone.",
             "meeting delete alert should explicitly mention audio and transcript"
         )
         assertEqual(
@@ -30,7 +30,7 @@ func testHomeDeleteConfirmationPolicy() {
             "failed meeting delete alert should name the destructive action"
         )
         assertTrue(
-            presentation.message.contains("saved retry audio"),
+            presentation.message.contains("saved audio"),
             "failed meeting delete alert should explain it deletes retry audio"
         )
         assertEqual(
