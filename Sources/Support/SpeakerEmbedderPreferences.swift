@@ -54,12 +54,16 @@ enum SpeakerEmbedderPreferences {
     /// the persisted preference so the feature can be exercised without UI.
     private static let envKey = "TRANSCRIPTED_SPEAKER_EMBEDDER"
 
-    /// The user's stored choice, ignoring any environment override. Use this to
-    /// drive the Settings UI selection.
+    /// The user's stored choice, ignoring any environment override. A stored
+    /// WeSpeaker came from the old "Better matching on calls" switch being off;
+    /// that switch is gone and the call-audio model is always on, so it reads as
+    /// the default. WeSpeaker is still reachable through the env override and as
+    /// the fallback when ReDimNet2 can't load.
     static func preferredChoice(userDefaults: UserDefaults = .standard) -> SpeakerEmbedderChoice {
         guard
             let raw = userDefaults.string(forKey: preferenceKey),
-            let choice = SpeakerEmbedderChoice(rawValue: raw)
+            let choice = SpeakerEmbedderChoice(rawValue: raw),
+            choice != .weSpeaker
         else { return defaultChoice }
         return choice
     }

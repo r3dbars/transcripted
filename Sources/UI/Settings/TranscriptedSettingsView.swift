@@ -44,8 +44,6 @@ struct TranscriptedSettingsView: View {
     @StateObject var pastMeetingsModel = DictionaryPastMeetingsModel()
     @State var pastMeetingsFixConfirmation: DictionaryPastMeetingsRow?
     @State var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
-    @State var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
-    @State var showSpeakerEmbedderSwitchConfirm = false
     @State var showClearCorrectionsConfirm = false
     @State var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
@@ -105,7 +103,7 @@ struct TranscriptedSettingsView: View {
     @State var homeExpandedMeetingID: String?
     @State var homeExpandedMeetingPreview: HomeMeetingPreview?
     @ObservedObject var captureUndo = CaptureUndoManager.shared
-    @State private var homeMeetingDeletionIDs: Set<String> = []
+    @State var homeDeletionIDs: Set<String> = []  // meeting ids and dictation undo ids being deleted
     @State var homeMeetingSearchQuery = ""
     @State var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State var modelCacheCleanupStatusDetails: String?
@@ -240,7 +238,7 @@ struct TranscriptedSettingsView: View {
             guard let alert else { return }
             handleMeetingArtifactRecoveryAlert(alert)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave).receive(on: DispatchQueue.main)) { _ in
             refreshRecentCaptures(isLibraryChange: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
@@ -733,7 +731,7 @@ struct TranscriptedSettingsView: View {
     /// main actor, so an in-flight rewrite cannot resurrect a deleted meeting.
     private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
         guard !captureUndo.isPending(item.id),
-              homeMeetingDeletionIDs.insert(item.id).inserted else { return }
+              homeDeletionIDs.insert(item.id).inserted else { return }
         if homeExpandedMeetingID == item.id {
             collapseHomeMeetingExpansion()
         }
@@ -741,7 +739,7 @@ struct TranscriptedSettingsView: View {
             MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: [audio.id])
         }
         Task { @MainActor in
-            defer { homeMeetingDeletionIDs.remove(item.id) }
+            defer { homeDeletionIDs.remove(item.id) }
             do {
                 let payload = try await Task.detached(priority: .userInitiated) {
                     try HomeMeetingDeletion.trash(item)

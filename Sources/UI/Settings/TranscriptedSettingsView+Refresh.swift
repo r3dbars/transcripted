@@ -165,9 +165,9 @@ extension TranscriptedSettingsView {
         refreshShortcutState()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
-        if !speakerPeopleModel.hasLoadedProfiles {
-            speakerPeopleModel.refresh()
-        }
+        // No speakers refresh here: this only runs for a new presentation, and
+        // `present()` has just started one. Asking again while it runs queued
+        // a second full transcript scan.
         let storedDictionaryText = CustomDictionaryPreferences.rawText()
         if storedDictionaryText != customDictionaryText {
             // Only rebuild when the saved list changed, so row ids (and the
@@ -366,6 +366,10 @@ extension TranscriptedSettingsView {
     /// App activation. A closed window skips the sweep (about 9 TCC reads on
     /// main per popover open); opening it runs the full `refreshState()`.
     func refreshAfterAppActivation() {
+        guard !SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(
+            presentedAt: navigation.lastPresentedAt,
+            now: Date()
+        ) else { return }
         let work = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: navigation.isWindowOpen)
         if work.permissions { refreshPermissions() }
         if work.recentCaptures { refreshRecentCaptures(reloadDashboard: work.dashboard) }

@@ -58,7 +58,8 @@
 // talking back) do count; that is why it only shortens the wait.
 //
 // Scan cost: each read is a coreaudiod round trip, and a Mac has 30-60 audio
-// clients. A scan reads every process's bundle ID first and only probes the
+// clients. A scan reads every new process's bundle ID first (known ones are
+// kept between scans; see `currentProcessAudioState`) and only probes the
 // running flags of processes that can map to a provider (`shouldProbe`:
 // native conferencing apps and browsers, plus any whose bundle read failed).
 // So the three emitted sets only ever hold such bundles; nothing downstream
@@ -138,6 +139,9 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var lastEmitted: Set<String>?
     private var lastEmittedOutput: Set<String>?
     private var lastEmittedBrowserOutput: Set<String>?
+    /// Bundle IDs read in earlier scans, by process object. See
+    /// `currentProcessAudioState`.
+    private var processBundleIDs: [AudioObjectID: String] = [:]
 
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
@@ -181,6 +185,7 @@ final class MicActivityMonitor: @unchecked Sendable {
             self.activeSince = [:]
             self.outputActiveSince = [:]
             self.browserOutputActiveSince = [:]
+            self.processBundleIDs = [:]
             self.lastEmitted = nil
             self.lastEmittedOutput = nil
             self.lastEmittedBrowserOutput = nil
@@ -549,13 +554,28 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     // MARK: - CoreAudio reads (on `queue`, or any background thread for the
-    // static one-shot; read-only, no stored-state mutation)
+    // static one-shot; read-only apart from the `processBundleIDs` cache)
 
+    /// The probe-filter label (each process's bundle ID) is the scan's
+    /// biggest cost: one coreaudiod round trip per audio client, every 5 s.
+    /// A process object's bundle ID doesn't change while the object lives,
+    /// so a non-empty one is kept from the last scan and objects that left
+    /// the list are dropped. Failed reads (`nil`) and `""` aren't kept, so
+    /// they're read again every scan exactly as before. The `bundleID` a row
+    /// reports for a process holding the mic or output is still read fresh.
     private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
-        Self.probedProcessAudioState(
-            objects: Self.processObjectIDs(),
+        let objects = Self.processObjectIDs()
+        let live = Set(objects)
+        processBundleIDs = processBundleIDs.filter { live.contains($0.key) }
+        return Self.probedProcessAudioState(
+            objects: objects,
             ownBundleID: ownBundleID,
-            label: Self.rawBundleIDProperty,
+            label: { object in
+                if let known = processBundleIDs[object] { return known }
+                let label = Self.rawBundleIDProperty(object)
+                if let label, !label.isEmpty { processBundleIDs[object] = label }
+                return label
+            },
             bundleID: Self.bundleIDProperty,
             isRunningInput: Self.isRunningInputProperty,
             isRunningOutput: Self.isRunningOutputProperty

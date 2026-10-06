@@ -542,7 +542,7 @@ func testReliabilityPacketRecorder() {
 
         assertEqual(packet?.feature, "dictation", "session cap should stay a dictation packet")
         assertEqual(packet?.stage, "recording", "session cap belongs to the recording stage")
-        assertEqual(packet?.outcome, "skipped_expected", "the 5-minute cap is informational and must not inflate failed_retryable counts")
+        assertEqual(packet?.outcome, "skipped_expected", "the session cap is informational and must not inflate failed_retryable counts")
     }
 
     runSuite("ReliabilityPacketRecorder keeps coarse device classes and derived outcomes when fed the raw event") {

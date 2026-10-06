@@ -228,10 +228,13 @@ extension DictationSessionController {
         ).rawValue
         let timingBuckets: [(metric: String, bucket: String)] = [
             ("stop_to_mic_stop_ms", "mic_stop_bucket"),
+            ("snapshot_resample_ms", "resample_bucket"),
+            ("recovery_checkpoint_ms", "checkpoint_bucket"),
             ("model_wait_ms", "model_wait_bucket"),
             ("decode_ms", "decode_bucket"),
             ("cleanup_ms", "cleanup_bucket"),
             ("paste_ms", "paste_bucket"),
+            ("paste_confirmation_wait_ms", "paste_confirm_bucket"),
             ("auto_enter_ms", "auto_enter_bucket"),
             ("save_ms", "save_bucket"),
             ("stop_to_paste_ms", "stop_to_paste_bucket"),
@@ -246,6 +249,9 @@ extension DictationSessionController {
         let exactTimings: [(metric: String, key: String)] = [
             ("decode_ms", "decode_latency_ms"),
             ("stop_to_paste_ms", "stop_to_paste_latency_ms"),
+            // When Cmd+V went out: the text usually shows here, before the
+            // confirmation wait that stop_to_paste includes.
+            ("stop_to_paste_dispatch_ms", "stop_to_paste_dispatch_latency_ms"),
         ]
         for exactTiming in exactTimings {
             guard let milliseconds = measurements[exactTiming.metric] else { continue }
@@ -254,6 +260,9 @@ extension DictationSessionController {
         if let firstSoundMs = pressToFirstSoundMilliseconds(appState: appState, stopRequestedAt: timing.requestedAt) {
             analyticsProperties["first_sound_latency_bucket"] = AnalyticsReporter.latencyBucket(milliseconds: firstSoundMs)
             analyticsProperties["first_sound_latency_ms"] = MachineClassTelemetry.roundedMilliseconds(firstSoundMs)
+        }
+        if let micBackend = timing.micBackend {
+            analyticsProperties["mic_backend"] = micBackend
         }
         analyticsProperties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
 

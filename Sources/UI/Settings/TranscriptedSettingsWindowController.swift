@@ -74,6 +74,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         navigationModel.select(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
         navigationModel.presentationSource = source
         navigationModel.presentationID = UUID()
+        navigationModel.lastPresentedAt = Date()
         AnalyticsReporter.track(
             "settings_opened",
             properties: [

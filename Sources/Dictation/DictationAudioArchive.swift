@@ -41,8 +41,8 @@ enum DictationAudioArchive {
     // MARK: - Keep
 
     /// Moves a saved take's recovery WAV into the audio folder as
-    /// `<uuid>.wav` and removes its recovery metadata, so the launch reminder
-    /// no longer offers it. Returns the kept WAV, or nil when nothing moved
+    /// `<uuid>.wav` and removes its recovery metadata, so recovery lookups
+    /// (the importer, the launch purge) no longer find it. Returns the kept WAV, or nil when nothing moved
     /// (the recovery copy is left alone in that case).
     @discardableResult
     static func keep(

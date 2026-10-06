@@ -68,12 +68,46 @@ extension DictationSessionController {
             sourceBundleID: sessionSourceApp?.bundleIdentifier,
             allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
         )
+        let sessionID = currentDictationSessionID
+        let trigger = currentDictationTrigger
         let outcome = textPaster.paste(
             text,
-            target: sessionPasteTarget
+            target: sessionPasteTarget,
+            endWaitOnLikelyPaste: autoSendRequestDecision.pasteMayEndWaitOnLikelyPaste,
+            onLateConfirmation: { diagnostic in
+                Self.recordLateConfirmation(diagnostic, sessionID: sessionID, trigger: trigger)
+            }
         )
         recordPasteAttemptOutcome(outcome, attempt: "initial")
         return outcome
+    }
+
+    /// The paste already ended its wait as a likely paste (and reported
+    /// `target_confirmation_mode=clipboard_read`), then the target confirmed
+    /// over Accessibility before the full wait would have ended. This can come
+    /// after the next take started, so it carries the take's own session id.
+    private static func recordLateConfirmation(
+        _ diagnostic: ClipboardPasteConfirmationDiagnostic,
+        sessionID: UUID,
+        trigger: DictationTrigger
+    ) {
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "overlay",
+            event: diagnostic.event,
+            message: "Paste confirmed from privacy-safe target signals after the wait ended on a likely paste",
+            context: diagnostic.context.merging(["attempt": "initial"]) { current, _ in current }
+        )
+        AnalyticsReporter.track(
+            "dictation_paste_late_confirmed",
+            properties: [
+                "session_id": sessionID.uuidString,
+                "correlation_id": sessionID.uuidString,
+                "trigger": trigger.rawValue,
+                "target_confirmation_mode": DictationTargetConfirmationMode
+                    .accessibilityMode(diagnostic.context["confirmation_mode"]).rawValue,
+            ]
+        )
     }
 
     private func recordPasteAttemptOutcome(

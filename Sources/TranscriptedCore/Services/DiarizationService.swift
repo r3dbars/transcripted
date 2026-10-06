@@ -539,6 +539,9 @@ public class DiarizationService: ObservableObject {
     /// Nemotron path of `diarizeOffline(samples:sampleRate:)`: frame probabilities
     /// → exclusive turns (`NemotronTurnBuilder`) → one voiceprint per turn.
     private nonisolated func diarizeWithNemotron(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] {
+        // Timed like the pyannote path (embedder wait + inference + re-embed),
+        // so `diarize_ms` covers the default backend too.
+        let diarizeStart = ProcessInfo.processInfo.systemUptime
         let loadedRunner = await MainActor.run(body: { self.nemotronRunner })
         let activeEmbedder: (any SpeakerSegmentEmbedder)?
         if let injected = segmentEmbedder {
@@ -605,6 +608,10 @@ public class DiarizationService: ObservableObject {
         }
         prewarmVoiceprintLengths(for: segments, sampleCount: audio.count, sampleRate: modelSampleRate, using: embedder)
         let finalSegments = reembed(segments: segments, samples: audio, sampleRate: modelSampleRate, using: embedder)
+        MeetingPipelineTimings.current?.add(
+            .diarize,
+            seconds: ProcessInfo.processInfo.systemUptime - diarizeStart
+        )
 
         let speakerIds = Set(finalSegments.map { $0.speakerId })
         AppLogger.transcription.info("Offline diarization complete", [

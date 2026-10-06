@@ -62,8 +62,16 @@ final class HomeViewModel: ObservableObject {
         refreshState.isEnabled = shown
         // A change held while Home was hidden reads now. The view's reveal
         // refresh can be throttled, so it can't be the only thing that starts
-        // it, and nothing claims a load is running unless one starts.
-        if revealed, refreshState.startPending() { startCurrentLimitsLoad() }
+        // it, and nothing claims a load is running unless one starts. Start it
+        // one main-actor turn later: the reveal usually calls `refresh()` in
+        // this same turn, and that load already covers the held change, so
+        // starting both would scan the library twice in a row.
+        if revealed {
+            Task { @MainActor [weak self] in
+                guard let self, self.refreshState.startPending() else { return }
+                self.startCurrentLimitsLoad()
+            }
+        }
         if !shown {
             meetingSearchTask?.cancel()
             meetingSearchGeneration.invalidate()

@@ -36,7 +36,7 @@ extension ParakeetEngine {
 
     private func microphoneSharingDowngradeIsAllowed() -> Bool {
         ParakeetMicrophoneSharingPolicy.mayDowngrade(
-            callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
+            callAppRunning: CallAppMicrophoneSharingMonitor.shared.callAppRunning(),
             isRecording: isRecording,
             borrowsMeetingMic: sharedMeetingMicClaim != nil,
             audioStartInProgress: audioStartInProgress,
@@ -124,6 +124,30 @@ extension ParakeetEngine {
             event: "audio_engine_start_failed",
             message: message,
             context: context
+        )
+    }
+
+    /// A stuck CoreAudio call keeps a work circuit open until it returns, and
+    /// the dictation readiness wait retries every poll meanwhile. The first
+    /// circuit-open failure per throttle window goes out at error level; the
+    /// repeats stay local warnings, like `reportAudioStartFailureIfNeeded`.
+    private func reportWorkCircuitOpenIfNeeded(message: String, context: [String: String]) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let reportsAsError = ParakeetAudioStartRecoveryPolicy.shouldReportFailure(
+            now: now,
+            lastReportAt: lastWorkCircuitOpenReportAt
+        )
+        if reportsAsError {
+            lastWorkCircuitOpenReportAt = now
+        }
+        EventReporter.shared.capture(
+            level: reportsAsError ? .error : .warning,
+            engine: "parakeet",
+            event: "audio_engine_work_circuit_open",
+            message: message,
+            context: reportsAsError
+                ? context
+                : context.merging(["report_throttled": "true"]) { current, _ in current }
         )
     }
 
@@ -219,6 +243,30 @@ extension ParakeetEngine {
                 firstAudioSampleAt = nil
             }
         }
+        // While the system-input circuit is open, both recorders fail at
+        // their first system-input lookup (pinned prepare, then the engine
+        // snapshot's selection load) before either touches the graph. Fail
+        // here the way the snapshot failure below does, minus the pinned
+        // fallback, graph rebuild and repeat Sentry error. Otherwise the
+        // readiness wait turned each poll into all three until the stuck
+        // CoreAudio call returned. A closed circuit skips this entirely.
+        if let circuitOpen = Self.systemInputWorkCoordinator.circuitOpenError(
+            operation: "start_recording"
+        ) {
+            lastRecordingStartFailureReason = .audioEngineStartTimedOut
+            reportWorkCircuitOpenIfNeeded(
+                message: "Audio engine start was blocked by a prior timed operation",
+                context: [
+                    "attempt": "1",
+                    "failure_kind": "audio_engine_work_circuit_open",
+                    "start_mode": isRecoveryAttempt ? "recovery" : "normal",
+                    "error": circuitOpen.localizedDescription
+                ]
+            )
+            markFormatUnreadyAndPublish()
+            schedulePrewarmRetry()
+            return await failAudioStart()
+        }
         if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
             return pinnedStarted
         }
@@ -270,22 +318,28 @@ extension ParakeetEngine {
                 let failureKind = workCircuitOpen
                     ? "audio_engine_work_circuit_open"
                     : operationTimedOut ? "audio_format_read_timeout" : "audio_format_unavailable"
-                EventReporter.shared.capture(
-                    level: operationBlocked ? .error : .warning,
-                    engine: "parakeet",
-                    event: failureKind,
-                    message: workCircuitOpen
-                        ? "Audio engine start was blocked by a prior timed operation"
-                        : operationTimedOut
-                        ? "Audio hardware format read timed out while starting dictation"
-                        : "Audio hardware format could not be read while starting dictation",
-                    context: [
-                        "attempt": "\(attempt)",
-                        "failure_kind": failureKind,
-                        "start_mode": isRecoveryAttempt ? "recovery" : "normal",
-                        "error": error.localizedDescription
-                    ]
-                )
+                let failureContext = [
+                    "attempt": "\(attempt)",
+                    "failure_kind": failureKind,
+                    "start_mode": isRecoveryAttempt ? "recovery" : "normal",
+                    "error": error.localizedDescription
+                ]
+                if workCircuitOpen {
+                    reportWorkCircuitOpenIfNeeded(
+                        message: "Audio engine start was blocked by a prior timed operation",
+                        context: failureContext
+                    )
+                } else {
+                    EventReporter.shared.capture(
+                        level: operationTimedOut ? .error : .warning,
+                        engine: "parakeet",
+                        event: failureKind,
+                        message: operationTimedOut
+                            ? "Audio hardware format read timed out while starting dictation"
+                            : "Audio hardware format could not be read while starting dictation",
+                        context: failureContext
+                    )
+                }
                 if audioEngineWorkError?.requiresGraphAbandonment == true {
                     guard abandonBlockedAudioEngine(
                         reason: "audio_format_read_timeout",
@@ -522,10 +576,7 @@ extension ParakeetEngine {
 
                 if workCircuitOpen {
                     AppLogger.transcription.error("PARAKEET | audio engine start blocked by an open work circuit after \(attempt) attempt(s): \(error.localizedDescription)")
-                    EventReporter.shared.capture(
-                        level: .error,
-                        engine: "parakeet",
-                        event: "audio_engine_work_circuit_open",
+                    reportWorkCircuitOpenIfNeeded(
                         message: "Audio engine start was blocked by a prior timed operation",
                         context: context
                     )
@@ -584,6 +635,7 @@ extension ParakeetEngine {
                 )
             }
             lastAudioStartFailureReportAt = nil
+            lastWorkCircuitOpenReportAt = nil
             break
         }
 

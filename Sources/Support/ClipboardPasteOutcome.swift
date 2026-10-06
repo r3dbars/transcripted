@@ -103,6 +103,19 @@ enum TextPasteOutcome: Equatable {
 struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let event: String
     let context: [String: String]
+
+    static let lateConfirmedEvent = "dictation_paste_late_confirmed"
+
+    /// The target confirmed over Accessibility after a dictation paste had
+    /// already ended its wait as a likely paste (`ClipboardLateConfirmationWatch`).
+    /// The paste still reports `target_confirmation_mode=clipboard_read`; this
+    /// is what tells such takes apart from ones nothing ever confirmed.
+    static func lateConfirmed(mode: String?) -> ClipboardPasteConfirmationDiagnostic {
+        ClipboardPasteConfirmationDiagnostic(
+            event: lateConfirmedEvent,
+            context: ["confirmation_mode": mode ?? "unknown"]
+        )
+    }
 }
 
 struct ClipboardPasteTiming: Equatable {
@@ -161,7 +174,13 @@ enum DictationTargetConfirmationMode: String, Equatable {
         guard diagnostic?.event == "dictation_paste_confirmed" else {
             return .none
         }
-        switch diagnostic?.context["confirmation_mode"] {
+        return accessibilityMode(diagnostic?.context["confirmation_mode"])
+    }
+
+    /// The coarse mode for an Accessibility `confirmation_mode`; `none` for
+    /// anything else.
+    static func accessibilityMode(_ confirmationMode: String?) -> DictationTargetConfirmationMode {
+        switch confirmationMode {
         case "text_value":
             return .textValue
         case "selection_range":

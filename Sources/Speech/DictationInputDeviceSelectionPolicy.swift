@@ -122,6 +122,24 @@ enum PinnedDictationInputPolicy {
         return !afterEngineFallback && recorderIsNeeded(for: selection, speedPathIsOff: speedPathIsOff)
     }
 
+    /// The engine itself will record a Bluetooth headset that is the macOS
+    /// input ("Same as macOS Sound settings", or the headset is the only mic).
+    /// Idle warmup still skips it, but a forced readiness recovery replaces
+    /// the dormant engine, which is still bound to the route from before the
+    /// headset connected. Only a relaunch used to clear that, so starts kept
+    /// failing with "Switching microphone" until then. Replacing the engine
+    /// never reads `inputNode`, so the headset isn't opened until the key press.
+    static func engineRecordsBluetoothInput(
+        for selection: DictationInputDeviceSelection?,
+        speedPathIsOff: (DictationAudioDevice) -> Bool = { PinnedDictationSpeedPath.isTurnedOff(for: $0) }
+    ) -> Bool {
+        guard let selection,
+              DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput) == "bluetooth" else {
+            return false
+        }
+        return !recorderIsNeeded(for: selection, speedPathIsOff: speedPathIsOff)
+    }
+
     /// Inputs to rank when re-picking after `excluded` died or went silent.
     /// The macOS default stays listed so the selection can still describe it;
     /// the caller rejects a pick that lands on the excluded id.

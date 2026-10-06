@@ -351,6 +351,109 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(second.count, 1, "a rewritten transcript must be read again, not skipped from the cache")
     }
 
+    runSuite("SpeakerReviewQueueScanner shows a voice named in the database on the next scan of an untouched transcript") {
+        withUntouchedPendingTranscript(sampleText: "Name me without editing the file.") { directory, speakerId, _ in
+            let unnamed = [makeReviewQueueProfile(id: speakerId, name: nil)]
+            let first = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: unnamed, clipURLsByProfileID: [:]
+            )
+            assertEqual(first.count, 1, "an unnamed pending voice starts in the queue")
+
+            let named = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory,
+                profiles: [makeReviewQueueProfile(id: speakerId, name: "Maya")],
+                clipURLsByProfileID: [:]
+            )
+            assertEqual(named.count, 0, "naming the voice in the database must clear it even though the transcript did not change")
+
+            let unnamedAgain = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: unnamed, clipURLsByProfileID: [:]
+            )
+            assertEqual(unnamedAgain.count, 1, "an unnamed profile brings the row back from the same untouched transcript")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner drops a deleted voice on the next scan of an untouched transcript") {
+        withUntouchedPendingTranscript(sampleText: "Delete this voice.") { directory, speakerId, _ in
+            let first = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory,
+                profiles: [makeReviewQueueProfile(id: speakerId, name: nil)],
+                clipURLsByProfileID: [:]
+            )
+            assertEqual(first.count, 1, "the pending voice starts in the queue")
+
+            let afterDelete = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: [], clipURLsByProfileID: [:]
+            )
+            assertEqual(afterDelete.count, 0, "a deleted profile must leave the queue even though the transcript did not change")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner applies profile clips fresh on every scan of an untouched transcript") {
+        withUntouchedPendingTranscript(sampleText: "Clips come and go.") { directory, speakerId, _ in
+            let profiles = [makeReviewQueueProfile(id: speakerId, name: nil)]
+            // Keep the clip outside the scanned folder so it can't count as a transcript.
+            let clipURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("SpeakerReviewQueueClip-\(UUID().uuidString).wav")
+            try? Data([4, 5, 6]).write(to: clipURL)
+            defer { try? FileManager.default.removeItem(at: clipURL) }
+
+            let withClip = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(withClip.count, 1)
+            assertEqual(withClip.first?.clipURL, clipURL, "the first scan carries the profile's clip")
+
+            let withoutClip = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
+            )
+            assertEqual(withoutClip.count, 1)
+            assertEqual(withoutClip.first?.clipURL, nil, "a clip removed since the last scan must not stick to the row")
+            assertEqual(withoutClip.first?.sampleText, "Clips come and go.", "the row keeps its transcript sample without a clip")
+            assertEqual(withoutClip.first?.retainedAudioSample, nil, "no retained audio exists in this fixture")
+
+            // And back again, still without touching the transcript.
+            let clipAgain = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(clipAgain.first?.clipURL, clipURL, "a clip added since the last scan shows up on the row")
+            assertEqual(clipAgain.first?.sampleText, "Clips come and go.")
+            let clipGoneAgain = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
+            )
+            assertEqual(clipGoneAgain.first?.clipURL, nil, "the clip drops off again once it's gone")
+            assertEqual(clipGoneAgain.first?.sampleText, "Clips come and go.")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner returns the same visible row on repeated scans of an untouched transcript") {
+        withUntouchedPendingTranscript(sampleText: "Same row twice.") { directory, speakerId, transcriptId in
+            let profiles = [makeReviewQueueProfile(id: speakerId, name: nil)]
+            let first = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
+            )
+            let second = SpeakerReviewQueueScanner.loadPendingItems(
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
+            )
+            assertEqual(first.count, 1)
+            assertEqual(second.count, 1)
+            // Pin the first scan to the fixture so "equal" can't mean "both empty".
+            assertEqual(first.first?.meetingTitle, "Untouched Call")
+            assertEqual(first.first?.transcriptId, transcriptId)
+            assertEqual(first.first?.sampleText, "Same row twice.")
+            assertEqual(first.first?.meetingDurationSeconds, 42 * 60 + 10)
+            assertTrue(first.first?.recordedAt != nil, "fixture date and time should parse")
+
+            assertEqual(second.first?.meetingTitle, first.first?.meetingTitle, "title stays the same across scans")
+            assertEqual(second.first?.recordedAt, first.first?.recordedAt, "recorded time stays the same across scans")
+            assertEqual(second.first?.transcriptId, first.first?.transcriptId, "transcript identity stays the same across scans")
+            assertEqual(second.first?.sampleText, first.first?.sampleText, "sample line stays the same across scans")
+            assertEqual(second.first?.sourceName, first.first?.sourceName, "speaker label stays the same across scans")
+            assertEqual(second.first?.meetingDurationSeconds, first.first?.meetingDurationSeconds, "duration stays the same across scans")
+            assertEqual(second.first?.isImported, first.first?.isImported, "import flag stays the same across scans")
+        }
+    }
+
     runSuite("SpeakerReviewQueueScanner no-pending cache matches only the same file version") {
         let cache = SpeakerReviewQueueScanner.NoPendingSpeakersCache()
         let url = URL(fileURLWithPath: "/tmp/Cache_Probe.md")
@@ -647,6 +750,35 @@ private func withRetainedReviewAudio(stems: [String], _ body: (URL, [URL]) -> Vo
     } catch {
         assertTrue(false, "could not create retained-audio fixture: \(error)")
     }
+}
+
+/// Writes one pending-speaker transcript into a fresh folder, then hands the
+/// folder, the speaker id and the transcript id to `body`. The body must not
+/// write to the transcript: these tests scan the same file version repeatedly.
+private func withUntouchedPendingTranscript(sampleText: String, _ body: (URL, UUID, UUID) -> Void) {
+    let fm = FileManager.default
+    let directory = fm.temporaryDirectory
+        .appendingPathComponent("SpeakerReviewQueueScannerTests-\(UUID().uuidString)", isDirectory: true)
+    let transcriptURL = directory.appendingPathComponent("Untouched_Call.md")
+    let speakerId = UUID()
+    let transcriptId = UUID()
+    try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: directory) }
+
+    let markdown = deferredMarkdown(
+        speakerId: speakerId,
+        title: "Untouched Call",
+        transcriptId: transcriptId,
+        speakerName: "Speaker 1",
+        sampleText: sampleText
+    ).replacingOccurrences(of: "capture_type: meeting", with: "capture_type: meeting\nduration: \"42:10\"")
+    do {
+        try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+    } catch {
+        assertTrue(false, "could not write untouched transcript fixture: \(error)")
+        return
+    }
+    body(directory, speakerId, transcriptId)
 }
 
 private func deferredMarkdown(

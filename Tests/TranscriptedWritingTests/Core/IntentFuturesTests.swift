@@ -91,3 +91,15 @@ struct IntentFuturesTests {
         #expect(!hint.contains("delaying"))
     }
 }
+
+extension IntentFuturesTests {
+    @Test("A NaN weight counts as no evidence and the prompt hint still builds")
+    func nanWeightIsZero() {
+        let futures = [
+            IntentFuture(kind: .answer, weight: .nan),
+            IntentFuture(kind: .accept, weight: 0.5),
+        ]
+        #expect(futures[0].weight == 0)
+        #expect(IntentFuturesPlanner.promptHint(for: futures).contains(":0"))
+    }
+}

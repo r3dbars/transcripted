@@ -40,11 +40,12 @@ extension SpeakerPeopleSettingsViewModel {
         NSWorkspace.shared.open(item.transcriptURL)
     }
 
+    static func transcriptPaths(of items: [SpeakerPendingReviewItem]) -> Set<String> {
+        Set(items.map { $0.transcriptURL.standardizedFileURL.path })
+    }
+
     func hasPendingReview(forTranscript transcriptURL: URL) -> Bool {
-        let targetPath = transcriptURL.standardizedFileURL.path
-        return reviewQueueItems.contains {
-            $0.transcriptURL.standardizedFileURL.path == targetPath
-        }
+        reviewQueueTranscriptPaths.contains(transcriptURL.standardizedFileURL.path)
     }
 
     nonisolated static func duplicateCandidates(from profiles: [SpeakerProfile]) -> [SpeakerDuplicateCandidate] {

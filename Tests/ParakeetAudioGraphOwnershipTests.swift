@@ -741,6 +741,91 @@ func testParakeetAudioGraphOwnership() async {
         assertEqual(countLock.withLock { workersCompleted }, 2, "bounded test workers should shut down after release")
     }
 
+    // Dictation's start fails fast on this report instead of letting every
+    // readiness poll run a pinned fallback and a graph rebuild into the same
+    // refusal, so it has to agree with `run` and clear when the calls return.
+    await runSuite("Parakeet system-input circuit reports open exactly while two stuck calls hold it") {
+        let timeouts = ManualSystemInputTimeouts()
+        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+            label: "test.parakeet.circuit-open-report",
+            scheduleTimeout: timeouts.schedule
+        )
+        assertTrue(
+            coordinator.circuitOpenError(operation: "start_recording") == nil,
+            "a fresh coordinator must admit a start"
+        )
+
+        let releaseWorkers = DispatchSemaphore(value: 0)
+        let lateCleanupsFinished = ParakeetAsyncInterleavingGate()
+        let cleanupLock = NSLock()
+        var lateCleanups = 0
+        for attempt in 0..<2 {
+            let entered = DispatchSemaphore(value: 0)
+            let stuck = Task {
+                try await coordinator.run(
+                    operation: "stuck_\(attempt)",
+                    timeoutNanoseconds: 20_000_000,
+                    cleanupAfterLateCompletion: { _ in
+                        let allFinished = cleanupLock.withLock { () -> Bool in
+                            lateCleanups += 1
+                            return lateCleanups == 2
+                        }
+                        if allFinished {
+                            Task { await lateCleanupsFinished.open() }
+                        }
+                    }
+                ) { () -> Bool in
+                    entered.signal()
+                    // Backstop only, so a regression can't strand this worker.
+                    _ = releaseWorkers.wait(timeout: .now() + .seconds(30))
+                    return true
+                }
+            }
+            guard await signalled(entered) else {
+                assertTrue(false, "stuck_\(attempt) must enter on its own queue")
+                releaseWorkers.signal()
+                releaseWorkers.signal()
+                await timeouts.expireNext()
+                _ = try? await stuck.value
+                return
+            }
+            await timeouts.expireNext()
+            _ = try? await stuck.value
+            if attempt == 0 {
+                assertTrue(
+                    coordinator.circuitOpenError(operation: "start_recording") == nil,
+                    "one stuck call replaces the queue and must leave the circuit closed"
+                )
+            }
+        }
+
+        assertEqual(
+            coordinator.circuitOpenError(operation: "start_recording"),
+            ParakeetSystemInputWorkError.circuitOpen(operation: "start_recording", activeTimeouts: 2),
+            "two stuck calls must report an open circuit"
+        )
+        var probeRefused = false
+        do {
+            _ = try await coordinator.run(operation: "probe", timeoutNanoseconds: 20_000_000) { true }
+        } catch {
+            probeRefused = (error as? ParakeetSystemInputWorkError)?.isCircuitOpen == true
+        }
+        assertTrue(probeRefused, "an open report must match run refusing work")
+
+        releaseWorkers.signal()
+        releaseWorkers.signal()
+        await lateCleanupsFinished.wait()
+        assertTrue(
+            coordinator.circuitOpenError(operation: "start_recording") == nil,
+            "the circuit must report closed once the stuck calls return"
+        )
+        let admittedAfterClose = (try? await coordinator.run(
+            operation: "after_close",
+            timeoutNanoseconds: 20_000_000
+        ) { true }) == true
+        assertTrue(admittedAfterClose, "a closed report must match run admitting work")
+    }
+
     runSuite("Parakeet system-input budget that runs out before work starts skips it and spends no capacity") {
         let timeouts = ManualSystemInputTimeouts()
         let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(

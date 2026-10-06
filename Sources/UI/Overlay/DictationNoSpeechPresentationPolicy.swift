@@ -3,11 +3,15 @@ import Foundation
 enum DictationNoSpeechPresentationPolicy {
     /// `silentMicName` is set when the mic sent audio that was all exact
     /// zeros (a muted mic, not a quiet room), so the message can say so.
+    /// `savedRecordingOffered` is true when the message carries Transcribe It
+    /// (a long take, see `DictationFailedTakePolicy`); otherwise the audio is
+    /// already gone and the message must not promise it.
     static func message(
         trigger: String,
         reason: DictationEmptyTranscriptionReason = .noSpeech,
         shortcutMode: DictationShortcutMode? = nil,
-        silentMicName: String? = nil
+        silentMicName: String? = nil,
+        savedRecordingOffered: Bool = false
     ) -> String {
         if reason == .noSpeech, let silentMicName {
             let name = silentMicName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,7 +30,11 @@ enum DictationNoSpeechPresentationPolicy {
             return "This came out in a language your Mac isn't set up for, so it wasn't pasted. If it's right, choose \(DictationHeldTextActionCopy.pasteAnywayTitle)."
         }
         if reason == .audioNeedsRecovery {
-            return "Captured audio did not become text. It's saved, and Transcribe It adds it to Meetings."
+            guard savedRecordingOffered else {
+                // Not "No speech heard": the mic did pick up sound.
+                return "Didn't catch that. Try again."
+            }
+            return "Captured audio did not become text. Transcribe It adds it to Meetings."
         }
 
         if trigger == "physical_key" {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The last-30-seconds warning before the 5-minute dictation cap.
+/// The last-30-seconds warning before the 15-minute dictation cap.
 ///
 /// It used to swap the listening pill for a "Long dictation" loading card that
 /// told everyone to "release the key", even hands-free people with no key

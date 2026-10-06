@@ -8,7 +8,7 @@ extension DictationSessionController {
     ///
     /// When `autoPaste` is `false` the transcript is still transcribed and saved
     /// to the daily Markdown file, but it is not pasted into the focused app and
-    /// auto-send is suppressed. The 5-minute session cap uses this to recover a
+    /// auto-send is suppressed. The 15-minute session cap uses this to recover a
     /// walked-away dictation instead of discarding it, without injecting text
     /// into whatever app now happens to hold focus.
     func stopDictationAndPaste(
@@ -195,6 +195,7 @@ extension DictationSessionController {
                 Task { await checkpointSignal.complete() }
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
+            stopTiming.micBackend = appState.sttRouter.parakeetEngine.dictationMicBackendName
             // runStopUntilTranscribed (DictationSessionPipeline.swift) owns the
             // order: the stale-task fence, then DictationStopCheckpoint (stop
             // the mic, play the stop click, save the take to a private WAV),

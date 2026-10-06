@@ -32,7 +32,7 @@ func testHomeImportAudioAction() {
 
     runSuite("Home's empty meetings list routes to the same import") {
         let action = HomeCaptureListCopy.EmptyMeetingsImportAction.self
-        assertEqual(action.title, "Transcribe audio file", "the empty state should offer import as its second button")
+        assertEqual(action.title, "Transcribe a file…", "the empty state should offer import as its second button")
         assertTrue(action.automationIdentifier.hasPrefix("transcripted.home."), "the empty-state button should be scriptable")
         assertTrue(
             HomeCaptureListCopy.emptyMeetings.contains("transcribe an existing audio file"),

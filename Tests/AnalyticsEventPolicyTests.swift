@@ -1088,6 +1088,11 @@ func testAnalyticsEventPolicy() {
                 "stop_to_paste_bucket": "500_999ms",
                 "stop_to_paste_ms": "621",
                 "stop_to_paste_latency_ms": "620",
+                "stop_to_paste_dispatch_latency_ms": "270",
+                "paste_confirm_bucket": "250_499ms",
+                "checkpoint_bucket": "lt_100ms",
+                "resample_bucket": "lt_100ms",
+                "mic_backend": "pinned_ioproc",
                 "stt_model": "parakeet-tdt-v3",
                 "target_confirmation_mode": "clipboard_read_only",
                 "trigger": "physical_key",
@@ -1108,6 +1113,11 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["decode_latency_ms"], "420", "10 ms decode timing should survive for per-model percentiles")
         assertEqual(sanitized["stop_to_paste_latency_ms"], "620", "10 ms stop-to-paste timing should survive")
         assertEqual(sanitized["first_sound_latency_ms"], "200", "10 ms key-to-first-sound timing should survive")
+        assertEqual(sanitized["stop_to_paste_dispatch_latency_ms"], "270", "10 ms stop-to-Cmd+V timing should survive")
+        assertEqual(sanitized["paste_confirm_bucket"], "250_499ms", "the bucketed paste confirmation wait should survive")
+        assertEqual(sanitized["checkpoint_bucket"], "lt_100ms", "the bucketed recovery checkpoint should survive")
+        assertEqual(sanitized["resample_bucket"], "lt_100ms", "the bucketed stop resample should survive")
+        assertEqual(sanitized["mic_backend"], "pinned_ioproc", "which recorder the take used should survive")
         assertEqual(sanitized["first_sound_latency_bucket"], "100_249ms", "bucketed key-to-first-sound timing should survive")
         assertEqual(sanitized["stt_model"], "parakeet-tdt-v3", "the speech model id should survive")
         assertEqual(sanitized["mac_chip"], "m2_pro", "the coarse chip family should survive")
@@ -1229,6 +1239,30 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["stage"], "restart", "coarse recovery stage should survive")
         assertNil(sanitized["audio_device"], "raw device labels must stay out of zombie telemetry")
         assertNil(sanitized["sample_count"], "exact callback counts must stay out of zombie telemetry")
+    }
+
+    runSuite("A late paste confirmation reaches analytics as one coarse mode") {
+        let lateConfirmed = AnalyticsEventPolicy.policy(forEvent: ClipboardPasteConfirmationDiagnostic.lateConfirmedEvent)
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "target_confirmation_mode": DictationTargetConfirmationMode.accessibilityMode(
+                    ClipboardPasteConfirmationDiagnostic.lateConfirmed(mode: "text_value").context["confirmation_mode"]
+                ).rawValue,
+                "confirmation_mode": "text_value",
+                "source_app_bundle": "com.example.PrivateApp",
+                "pasted_text": "hello private words",
+            ],
+            allowedKeys: (lateConfirmed?.allowedProperties ?? []).union(TelemetryContext.keys)
+        )
+        assertNotNil(lateConfirmed, "the late-confirmation event is allowlisted")
+        assertEqual(sanitized, ["target_confirmation_mode": "text_value"], "only the coarse Accessibility mode survives")
+        assertEqual(
+            DictationTargetConfirmationMode.accessibilityMode(
+                ClipboardPasteConfirmationDiagnostic.lateConfirmed(mode: nil).context["confirmation_mode"]
+            ),
+            .none,
+            "a confirmation with no known mode reports none, never a raw value"
+        )
     }
 
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
