@@ -168,7 +168,7 @@ func testDictationAudioArchive() async {
         assertFalse(fm.fileExists(atPath: recovery.url.path), "the recovery WAV moved out")
         assertTrue(
             DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: recovery.url.deletingLastPathComponent()).isEmpty,
-            "the launch reminder no longer offers a kept take"
+            "recovery lookups no longer find a kept take"
         )
         assertEqual(
             DictationAudioArchive.resolveURL(relativePath: path, dictationsFolder: dictations)?.lastPathComponent,

@@ -520,7 +520,6 @@ func testUIAutomationSurfaceContract() async {
             "transcripted.settings.general.model",
             "transcripted.settings.general.corrections",
             "transcripted.settings.general.people-in-room",
-            "transcripted.settings.general.call-matching",
             "transcripted.settings.general.crash-reports",
             "transcripted.settings.general.usage-stats",
             "transcripted.settings.storage.capture-library",
@@ -657,7 +656,7 @@ func testUIAutomationSurfaceContract() async {
         assertTrue(
             speakers.contains("enum SpeakerPeopleEmptyState")
                 && speakers.contains("static let title = \"No speakers yet\"")
-                && speakers.contains("static let actionTitle = \"Start a meeting\"")
+                && speakers.contains("static let actionTitle = \"Record a meeting\"")
                 && speakers.contains("transcripted.speakers.empty.start-meeting")
                 && speakers.contains("struct SpeakersEmptyStateView")
                 && speakers.contains("Transcripted learns each voice as you record."),

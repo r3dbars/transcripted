@@ -15,7 +15,7 @@
         "isEnabled": true,
         "isVisible": true,
         "title": "Start Dictation",
-        "toolTip": "Starts local voice setup on first use",
+        "toolTip": "Sets up the first time you use it",
         "trailingText": "Fn / Right ⌥"
       },
       "startMeeting": {
@@ -25,7 +25,7 @@
         "isEnabled": true,
         "isVisible": true,
         "title": "Record Meeting",
-        "toolTip": "Starts local meeting setup on first use",
+        "toolTip": "Sets up the first time you use it",
         "trailingText": "⌥M"
       }
     },

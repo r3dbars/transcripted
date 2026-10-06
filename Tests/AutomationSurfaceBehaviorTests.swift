@@ -53,7 +53,7 @@ func testAutomationSurfaceBehavior() async {
         assertTrue(LibraryTokens.minimumHitTarget >= 40, "the window's hit-target floor should stay at least 40pt")
         let sizes: [MenuBarActionRowView.Size] = [.primary, .utility, .button]
         for size in sizes {
-            for detail in ["", "Starts local voice setup on first use"] {
+            for detail in ["", "Sets up the first time you use it"] {
                 let sized = MenuBarActionRowView(frame: .zero)
                 sized.update(symbolName: "mic.fill", title: "Start Dictation", detail: detail, size: size)
                 assertTrue(

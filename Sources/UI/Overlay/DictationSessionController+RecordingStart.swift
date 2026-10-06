@@ -431,7 +431,7 @@ extension DictationSessionController {
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                 overlayController.showError(
                     "Dictation couldn't start: \(message)",
-                    actionTitle: "Retry Dictation",
+                    actionTitle: "Try Again",
                     action: { [weak self] in
                         self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
                     }
@@ -448,7 +448,7 @@ extension DictationSessionController {
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
                 overlayController.showError(
                     "The voice model is still warming up. Try again in a moment.",
-                    actionTitle: "Retry Dictation",
+                    actionTitle: "Try Again",
                     action: { [weak self] in
                         self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
                     }

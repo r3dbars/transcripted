@@ -33,6 +33,14 @@ func testSpeakerEmbedderPreferences() {
         assertEqual(SpeakerEmbedderPreferences.preferredChoice(userDefaults: d).rawValue, "eres2net", "preferredChoice ignores env")
     }
 
+    runSuite("a stored WeSpeaker choice from the old call-matching switch reads as the default") {
+        let (d, s) = makeDefaults(); defer { d.removePersistentDomain(forName: s) }
+        SpeakerEmbedderPreferences.setPreferredChoice(.weSpeaker, userDefaults: d)
+        assertEqual(SpeakerEmbedderPreferences.preferredChoice(userDefaults: d).rawValue, "redimnet2", "stored wespeaker -> default")
+        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "redimnet2", "no env -> call-audio model")
+        assertEqual(SpeakerEmbedderPreferences.effectiveChoice(userDefaults: d, environment: [envKey: "wespeaker"]).rawValue, "wespeaker", "env can still pick the previous model")
+    }
+
     // Regression guard for the load-vs-file-existence bug: the speaker DB filename
     // is keyed on the *loaded* embedder identifier. A nil identifier — which is
     // what a present-but-unloadable ERes2Net model produces — must map to the
