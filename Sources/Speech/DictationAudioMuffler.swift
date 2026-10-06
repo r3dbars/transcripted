@@ -206,7 +206,7 @@ final class DictationAudioMuffler: @unchecked Sendable {
                 "quiet_wait_ms": Self.milliseconds(quietWait),
                 "cut_in_quiet": String(cutInQuiet),
                 "copy_delay_ms": route?.copyDelayNanos.map { Self.milliseconds($0, decimals: 1) } ?? "-",
-                "gate_fade_ms": route.map { String(format: "%.1f", $0.gateFadeMilliseconds) } ?? "-",
+                "hold_ms": route.map { String(format: "%.0f", $0.lastHoldMilliseconds) } ?? "-",
                 "buffer_frames": String(route?.copyBufferFrames ?? 0),
                 "bluetooth": String(route?.bluetooth ?? false),
                 "apps": String(route?.processCount ?? 0),

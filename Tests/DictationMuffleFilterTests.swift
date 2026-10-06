@@ -169,37 +169,36 @@ func testDictationMuffleFilter() {
         assertTrue(fadeOut.out[0][0] > 0.5 * level, "gate should fade out from open, not drop at once, got \(fadeOut.out[0][0])")
     }
 
-    runSuite("The gate fade stretches to cover a lagging copy, within gateSeconds and maxGateFadeSeconds") {
-        let shortest = Int((DictationMuffleFilter.gateSeconds * sampleRate).rounded())
-        let longest = Int((DictationMuffleFilter.maxGateFadeSeconds * sampleRate).rounded())
-        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: nil, sampleRate: sampleRate), shortest, "unknown lag")
-        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 0, sampleRate: sampleRate), shortest, "no lag")
-        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 100, sampleRate: sampleRate), shortest, "lag under the shortest fade")
-        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 520, sampleRate: sampleRate), 520, "AirPods lag")
-        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 50_000, sampleRate: sampleRate), longest, "a huge lag is capped")
+    runSuite("A short copy lag cuts with the plain gate fade; an AirPods-size lag holds the copy back by the lag first") {
+        let wired = DictationMuffleSplice.atCut(copyDelayFrames: 346, sampleRate: sampleRate)
+        assertEqual(wired, .plain, "a 7 ms wired lag keeps the plain fade")
+        assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: nil, sampleRate: sampleRate), .plain, "an unknown lag keeps the plain fade")
+        let airPods = DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: sampleRate)
+        let muteFrames = Int((DictationMuffleSplice.muteLatencySeconds * sampleRate).rounded())
+        assertEqual(airPods.holdFrames, 8_198 + muteFrames, "holds until the copy reaches where the originals stopped")
+        assertEqual(airPods.fadeFrames, Int((DictationMuffleSplice.heldFadeSeconds * sampleRate).rounded()), "then fades in smoothly")
+        let capped = DictationMuffleSplice.atCut(copyDelayFrames: 1_000_000, sampleRate: sampleRate)
+        assertEqual(capped.holdFrames, Int((DictationMuffleSplice.maxHoldSeconds * sampleRate).rounded()), "a wild lag reading can't leave a long silence")
+        assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: 0), .plain, "no sample rate, no hold")
     }
 
-    runSuite("A longer gate fade opens and closes the copy over that many frames") {
-        let fadeFrames = 520
+    runSuite("A held gate stays silent for the hold, then fades in over the fade length") {
+        let holdFrames = 300
+        let fadeFrames = 200
         var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
         let level: Float = 0.5
         let constant = [Float](repeating: level, count: 1_024)
-        let renderGate = { (gate: Float) in
-            muffleRender(&filter, input: [constant, constant], inputLayout: [2], outputLayout: [2], muffle: 0, gate: gate, gateFadeFrames: fadeFrames).out[0]
-        }
-        let fadeIn = renderGate(1)
-        let halfway = fadeIn[fadeFrames / 2]
-        assertTrue(halfway > 0.4 * level && halfway < 0.6 * level, "halfway through the fade the copy should be near half level, got \(halfway)")
-        let fullAt = fadeIn.firstIndex { abs($0 - level) <= 5e-5 }
+        let out = muffleRender(
+            &filter, input: [constant, constant], inputLayout: [2], outputLayout: [2],
+            muffle: 0, gate: 1, gateHoldFrames: holdFrames, gateFadeFrames: fadeFrames
+        ).out
+        assertTrue(out[0][..<holdFrames].allSatisfy { $0 == 0 } && out[1][..<holdFrames].allSatisfy { $0 == 0 }, "silent through the hold")
+        let halfway = out[0][holdFrames + fadeFrames / 2]
+        assertTrue(halfway > 0.4 * level && halfway < 0.6 * level, "half level halfway through the fade, got \(halfway)")
+        let fullAt = out[0].firstIndex { abs($0 - level) <= 5e-5 }
         assertNotNil(fullAt, "gate should reach full level within the cycle")
         if let fullAt {
-            assertTrue(fullAt >= fadeFrames - 2 && fullAt <= fadeFrames + 2, "gate should reach full level at about \(fadeFrames) frames, reached at \(fullAt)")
-        }
-        let fadeOut = renderGate(0)
-        let closedAt = fadeOut.firstIndex { abs($0) <= 5e-5 }
-        assertNotNil(closedAt, "gate should close within the cycle")
-        if let closedAt {
-            assertTrue(closedAt >= fadeFrames - 2 && closedAt <= fadeFrames + 2, "gate should close at about \(fadeFrames) frames, closed at \(closedAt)")
+            assertTrue(abs(fullAt - (holdFrames + fadeFrames)) <= 2, "full level at the end of the fade, reached at \(fullAt)")
         }
     }
 
@@ -361,6 +360,7 @@ private func muffleRender(
     gate: Float,
     prefill: Float = 0,
     frames explicitFrames: Int? = nil,
+    gateHoldFrames: Int = 0,
     gateFadeFrames: Int = 0
 ) -> MuffleRenderResult {
     let frames = explicitFrames ?? input?.first?.count ?? 0
@@ -371,9 +371,9 @@ private func muffleRender(
         for channel in 0..<min(inList.channelCount, input.count) {
             for frame in 0..<frames { inList[channel, frame] = input[channel][frame] }
         }
-        peak = filter.render(input: UnsafePointer(inList.list.unsafeMutablePointer), output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateFadeFrames: gateFadeFrames)
+        peak = filter.render(input: UnsafePointer(inList.list.unsafeMutablePointer), output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateHoldFrames: gateHoldFrames, gateFadeFrames: gateFadeFrames)
     } else {
-        peak = filter.render(input: nil, output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateFadeFrames: gateFadeFrames)
+        peak = filter.render(input: nil, output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateHoldFrames: gateHoldFrames, gateFadeFrames: gateFadeFrames)
     }
     var out: [[Float]] = []
     for channel in 0..<outList.channelCount {

@@ -111,42 +111,6 @@ func testDictationMufflePolicy() {
         assertEqual(DictationMuffleOutputRoute.ineligibility(transport: .unknown, inputStreamCount: 0, outputChannelCount: 2), .unknownTransport, "unknown")
     }
 
-    runSuite("The copy delay leaves out the output's own latency, so AirPods no longer look 170 ms late") {
-        let sampleRate = 48_000.0
-        let quietCutAbove = Double(DictationMuffleTiming().quietCutAboveDelayNanos) / 1_000_000_000
-        // AirPods on the owner's Mac: the tap reports the output's 7,680-frame
-        // latency, and the IOProc sees two 256-frame buffers.
-        let airPods = DictationMuffleCopyDelay.correctionFrames(
-            tapInputLatency: 7_680,
-            tapInputSafetyOffset: 0,
-            outputLatency: 7_680,
-            driftLatencyFrames: 8
-        )
-        assertEqual(airPods, 8, "the shared Bluetooth latency adds nothing")
-        let airPodsDelaySeconds = Double(512 + airPods) / sampleRate
-        assertTrue(airPodsDelaySeconds < quietCutAbove, "AirPods lag \(airPodsDelaySeconds) s should cut without waiting for quiet")
-        // The same take read the old way would have waited for quiet.
-        assertTrue(Double(512 + 7_680 + 8) / sampleRate > quietCutAbove, "the old reading was over the quiet-wait line")
-    }
-
-    runSuite("Tap latency beyond the output's own still counts toward the copy delay") {
-        assertEqual(
-            DictationMuffleCopyDelay.correctionFrames(tapInputLatency: 100, tapInputSafetyOffset: 10, outputLatency: 60, driftLatencyFrames: 8),
-            38,
-            "40 frames of extra tap latency, less the safety offset, plus drift"
-        )
-        assertEqual(
-            DictationMuffleCopyDelay.correctionFrames(tapInputLatency: 82, tapInputSafetyOffset: 0, outputLatency: 0, driftLatencyFrames: 8),
-            90,
-            "an output that reports no latency keeps the whole tap latency"
-        )
-        assertEqual(
-            DictationMuffleCopyDelay.correctionFrames(tapInputLatency: 50, tapInputSafetyOffset: 0, outputLatency: 200, driftLatencyFrames: 8),
-            8,
-            "an output latency above the tap's never makes the correction negative"
-        )
-    }
-
     runSuite("An output with no channels or more than two channels is refused") {
         for transport in muffleAllowedTransports {
             assertEqual(

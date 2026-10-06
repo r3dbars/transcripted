@@ -47,6 +47,10 @@ final class DictationMuffleRenderState {
     static let quietPeak: Float = 0.01
 
     let gateOpen = Atomic<Bool>(false)
+    /// Frames the gate still holds shut after the cut (DictationMuffleSplice).
+    /// Set before `gateOpen` (which is stored releasing), counted down by
+    /// the IO thread.
+    let gateHoldFrames = Atomic<Int>(0)
     /// Gate fade length in frames (0 means DictationMuffleFilter.gateSeconds).
     let gateFadeFrames = Atomic<Int>(0)
     let muffled = Atomic<Bool>(false)
@@ -71,11 +75,14 @@ final class DictationMuffleRenderState {
 private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputTime, output, outputTime, clientData in
     guard let clientData else { return noErr }
     let state = Unmanaged<DictationMuffleRenderState>.fromOpaque(clientData).takeUnretainedValue()
+    let gateOpen = state.gateOpen.load(ordering: .acquiring)
+    let hold = gateOpen ? state.gateHoldFrames.load(ordering: .relaxed) : 0
     let peak = state.filter.pointee.render(
         input: input,
         output: output,
         muffleTarget: state.muffled.load(ordering: .relaxed) ? 1 : 0,
-        gateTarget: state.gateOpen.load(ordering: .relaxed) ? 1 : 0,
+        gateTarget: gateOpen ? 1 : 0,
+        gateHoldFrames: hold,
         gateFadeFrames: state.gateFadeFrames.load(ordering: .relaxed)
     )
     if peak > 0, !state.soundFlowing.load(ordering: .relaxed) {
@@ -91,6 +98,11 @@ private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputT
     let firstBuffer = output.pointee.mBuffers
     let channels = Int(max(1, firstBuffer.mNumberChannels))
     let frames = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channels)
+    if hold > 0 {
+        // Count the hold down by this cycle. If the muffler queue changed it
+        // meanwhile (a new cut or a hand back), its value wins.
+        _ = state.gateHoldFrames.compareExchange(expected: hold, desired: max(0, hold - frames), ordering: .relaxed)
+    }
     if peak < DictationMuffleRenderState.quietPeak {
         state.quietFrames.wrappingAdd(frames, ordering: .relaxed)
     } else {
@@ -190,9 +202,8 @@ final class DictationMuffleRoute {
     }
 
     /// How far the copy lags the original: the IOProc's output-minus-input
-    /// time, corrected by the aggregate's input safety offset, the tap latency
-    /// beyond the output's own (DictationMuffleCopyDelay), and the drift
-    /// compensator.
+    /// time, corrected by the aggregate's input safety offset and latency and
+    /// the drift compensator. Matched the measured delay exactly in the lab.
     var copyDelayNanos: UInt64? {
         copyDelayFrames.map { UInt64(Double($0) / sampleRate * 1_000_000_000) }
     }
@@ -204,22 +215,26 @@ final class DictationMuffleRoute {
         return max(0, raw + delayCorrectionFrames)
     }
 
-    /// How long the gate fades at the cut and the hand back, in milliseconds.
-    var gateFadeMilliseconds: Double {
-        Double(gateFadeFrames()) / sampleRate * 1_000
+    /// How long the last cut held the copy back, in milliseconds.
+    var lastHoldMilliseconds: Double {
+        Double(lastSplice.holdFrames) / sampleRate * 1_000
     }
 
-    private func gateFadeFrames() -> Int {
-        DictationMuffleFilter.gateFadeFrames(copyDelayFrames: copyDelayFrames, sampleRate: sampleRate)
-    }
+    /// How the copy came in at the last cut.
+    private(set) var lastSplice = DictationMuffleSplice.plain
 
-    /// Opens the copy's gate and mutes the originals in the same step.
+    /// Opens the copy's gate and mutes the originals in the same step. On a
+    /// lagging route the gate holds shut until the copy catches up to where
+    /// the originals stopped (DictationMuffleSplice).
     /// Returns false (and leaves the originals playing) if the mute can't
     /// start.
     func cut() -> Bool {
         guard let state, let cutProc else { return false }
-        state.takeUnretainedValue().gateFadeFrames.store(gateFadeFrames(), ordering: .relaxed)
-        state.takeUnretainedValue().gateOpen.store(true, ordering: .relaxed)
+        let render = state.takeUnretainedValue()
+        lastSplice = DictationMuffleSplice.atCut(copyDelayFrames: copyDelayFrames, sampleRate: sampleRate)
+        render.gateHoldFrames.store(lastSplice.holdFrames, ordering: .relaxed)
+        render.gateFadeFrames.store(lastSplice.fadeFrames, ordering: .relaxed)
+        render.gateOpen.store(true, ordering: .releasing)
         guard AudioDeviceStart(cutDevice, cutProc) == noErr else {
             state.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
             return false
@@ -236,8 +251,10 @@ final class DictationMuffleRoute {
     /// back first, so the copy fades out over them instead of leaving a gap.
     func handBack() {
         stopCut()
-        state?.takeUnretainedValue().gateFadeFrames.store(gateFadeFrames(), ordering: .relaxed)
-        state?.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
+        guard let render = state?.takeUnretainedValue() else { return }
+        render.gateHoldFrames.store(0, ordering: .relaxed)
+        render.gateFadeFrames.store(0, ordering: .relaxed)
+        render.gateOpen.store(false, ordering: .releasing)
     }
 
     /// Stops and destroys everything, unmuting first. Safe to call twice.
@@ -327,13 +344,7 @@ final class DictationMuffleRoute {
         sampleRate = DictationMuffleHAL.float64(copyDevice, kAudioDevicePropertyNominalSampleRate).flatMap { $0 > 0 ? $0 : nil } ?? 48_000
         let inputSafetyOffset = DictationMuffleHAL.uint32(copyDevice, kAudioDevicePropertySafetyOffset, scope: kAudioObjectPropertyScopeInput) ?? 0
         let inputLatency = DictationMuffleHAL.uint32(copyDevice, kAudioDevicePropertyLatency, scope: kAudioObjectPropertyScopeInput) ?? 0
-        let outputLatency = DictationMuffleHAL.uint32(plan.output, kAudioDevicePropertyLatency, scope: kAudioObjectPropertyScopeOutput) ?? 0
-        delayCorrectionFrames = DictationMuffleCopyDelay.correctionFrames(
-            tapInputLatency: Int(inputLatency),
-            tapInputSafetyOffset: Int(inputSafetyOffset),
-            outputLatency: Int(outputLatency),
-            driftLatencyFrames: Self.driftLatencyFrames
-        )
+        delayCorrectionFrames = Int(inputLatency) - Int(inputSafetyOffset) + Self.driftLatencyFrames
 
         let render = Unmanaged.passRetained(DictationMuffleRenderState(sampleRate: sampleRate))
         var proc: AudioDeviceIOProcID?
