@@ -323,6 +323,10 @@ extension DictationSessionController {
                     startPlan: currentStartReadinessProfile.name,
                     appActive: releasedWhileAppActive
                 )
+            ),
+            forwardToSentry: DictationEarlyReleaseCancelReport.forwardsToSentry(
+                shortcutMode: shortcutMode,
+                pendingForMs: startPendingForMs
             )
         )
         // Same two numbers the diagnostics above already carry. Whether the
