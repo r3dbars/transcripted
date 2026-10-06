@@ -65,6 +65,13 @@ struct DictationAutoSendRequestDecision: Equatable {
         key: .enter,
         blockReason: .notEvaluated
     )
+
+    /// Auto Enter presses Return only after a confirmed paste, so a take that
+    /// expects it keeps the full confirmation wait. Any other take may end the
+    /// wait on a likely paste (`ClipboardRestoringTextPaster.paste`).
+    var pasteMayEndWaitOnLikelyPaste: Bool {
+        !expected
+    }
 }
 
 enum DictationAutoSendPreferences {

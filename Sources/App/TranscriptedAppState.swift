@@ -74,22 +74,21 @@ class TranscriptedAppState: ObservableObject {
         isInitialized = true
 
         if !Self.isLaunchSmokeMode {
-            do {
-                try LaunchAtLoginController.applySavedOptOutAtStartup()
-            } catch {
-                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
-                    message: error.localizedDescription)
-            }
-
-            // Covers existing installs that finished onboarding before the default
-            // existed; fresh installs get it from the onboarding-completion hook.
-            do {
-                try LaunchAtLoginController.applyDefaultEnableIfNeeded(
-                    onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
-                )
-            } catch {
-                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
-                    message: error.localizedDescription)
+            // The saved opt-out, then the default enable, which covers existing
+            // installs that finished onboarding before the default existed (fresh
+            // installs get it from the onboarding-completion hook). The XPC calls
+            // run off the main thread; nothing below waits on them.
+            let onboardingCompleted = PermissionsOnboardingPreferences.hasCompleted()
+            Task { @MainActor in
+                let result = await LaunchAtLoginController.applyStartupState(onboardingCompleted: onboardingCompleted)
+                if let message = result.optOutFailure {
+                    EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
+                        message: message)
+                }
+                if let message = result.defaultEnableFailure {
+                    EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                        message: message)
+                }
             }
         }
 
@@ -134,8 +133,9 @@ class TranscriptedAppState: ObservableObject {
         }
         // Writing runs once its setup is done and a feature is on (or behind
         // the debug default); the Writing tab starts and stops it after that.
-        // One main-actor turn later, so the launch task registers the
-        // hotkeys first: Writing's start installs the keyboard synchronously.
+        // One main-actor turn later, so the hotkeys (registered in the
+        // launch turn) come first: Writing's start installs the keyboard
+        // synchronously.
         // This ordering assumes nothing above in initialize() awaits; the
         // controller's own guards (terminated, wake) cover a quit in between.
         if !Self.isLaunchSmokeMode {
@@ -309,6 +309,10 @@ class TranscriptedAppState: ObservableObject {
             // no loading UI, no permission prompts, and a failure here is
             // retried by the next start, wake, or model switch.
             let warmupStartedAt = CFAbsoluteTimeGetCurrent()
+            LaunchTimingTelemetry.markWarmupStarted()
+            // First pass only: a rerun after a model switch is not launch time.
+            var dictationWarmupMs: Int?
+            var meetingWarmupMs: Int?
             repeat {
                 self.runtimeReadinessRerunRequested = false
                 guard !Task.isCancelled, !self.isShutDown else { return }
@@ -320,19 +324,34 @@ class TranscriptedAppState: ObservableObject {
                 } onCancel: {
                     dictationWarmup.cancel()
                 }
+                let dictationWarmedAt = CFAbsoluteTimeGetCurrent()
+                if dictationWarmupMs == nil {
+                    dictationWarmupMs = Self.elapsedMilliseconds(from: warmupStartedAt, to: dictationWarmedAt)
+                }
                 guard !Task.isCancelled, !self.isShutDown else { return }
                 if #available(macOS 14.0, *), !self.meetingSession.areMeetingModelsWarm {
                     await self.meetingSession.prepareModels(showLoadingUI: false)
                 }
+                if meetingWarmupMs == nil {
+                    meetingWarmupMs = Self.elapsedMilliseconds(from: dictationWarmedAt, to: CFAbsoluteTimeGetCurrent())
+                }
             } while self.runtimeReadinessRerunRequested
-            self.reportLaunchWarmupOnce(startedAt: warmupStartedAt)
+            self.reportLaunchWarmupOnce(
+                startedAt: warmupStartedAt,
+                dictationWarmupMs: dictationWarmupMs,
+                meetingWarmupMs: meetingWarmupMs
+            )
         }
     }
 
     /// One PostHog event per launch saying whether the launch warmup left
     /// dictation and meetings ready, and how long it took. Later passes
     /// (model switch, wake) are not reported.
-    private func reportLaunchWarmupOnce(startedAt: CFAbsoluteTime) {
+    private func reportLaunchWarmupOnce(
+        startedAt: CFAbsoluteTime,
+        dictationWarmupMs: Int?,
+        meetingWarmupMs: Int?
+    ) {
         guard !hasReportedLaunchWarmup else { return }
         hasReportedLaunchWarmup = true
         let meetingReady: Bool
@@ -341,15 +360,21 @@ class TranscriptedAppState: ObservableObject {
         } else {
             meetingReady = false
         }
-        let elapsedMs = max(0, Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000))
-        AnalyticsReporter.track(
-            "launch_models_warmed",
-            properties: [
-                "dictation_ready": sttRouter.isModelLoaded ? "true" : "false",
-                "meeting_recording_ready": meetingReady ? "true" : "false",
-                "warmup_latency_bucket": AnalyticsReporter.latencyBucket(milliseconds: elapsedMs),
-            ]
+        let elapsedMs = Self.elapsedMilliseconds(from: startedAt, to: CFAbsoluteTimeGetCurrent())
+        var properties = LaunchTimingTelemetry.properties(
+            marks: LaunchTimingTelemetry.marks,
+            dictationWarmupMs: dictationWarmupMs,
+            meetingWarmupMs: meetingWarmupMs,
+            speechModel: sttRouter.selectedModel.rawValue
         )
+        properties["dictation_ready"] = sttRouter.isModelLoaded ? "true" : "false"
+        properties["meeting_recording_ready"] = meetingReady ? "true" : "false"
+        properties["warmup_latency_bucket"] = AnalyticsReporter.latencyBucket(milliseconds: elapsedMs)
+        AnalyticsReporter.track("launch_models_warmed", properties: properties)
+    }
+
+    private static func elapsedMilliseconds(from start: CFAbsoluteTime, to end: CFAbsoluteTime) -> Int {
+        max(0, Int(((end - start) * 1_000).rounded()))
     }
 
     /// STTRouter already reloads the newly selected dictation model on a

@@ -663,3 +663,16 @@ struct ScreenSceneWindowTitleTests {
         #expect(scene.windowTitle == nil)
     }
 }
+
+extension ScreenSceneTests {
+    @Test("A block with a non-finite or huge position never traps classification")
+    func nonFinitePositionsDoNotTrap() {
+        let blocks = [
+            block("Are we still on for lunch?", x: 0.1, y: .nan, window: slack),
+            block("Yes, see you at noon", x: 0.6, y: .infinity, window: slack),
+            block("Great", x: 0.1, y: 1e300, window: slack),
+        ]
+        let scene = ScreenScene.classify(blocks: blocks, frontmostBundleID: slack, fieldText: "ok")
+        #expect([ScreenScene.Mode.composing, .replying, .referencing].contains(scene.mode))
+    }
+}

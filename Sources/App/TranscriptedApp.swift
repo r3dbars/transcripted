@@ -513,6 +513,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let button = statusItem?.button {
             configureStatusItemButton(button)
         }
+        LaunchTimingTelemetry.markStatusItemShownAfterThisTurn()
         bindStatusItemUpdateBadge()
         bindStatusItemRecordingIndicator()
 
@@ -522,6 +523,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         pop.behavior = .transient
         pop.delegate = self
         popover = pop
+        // Shortcuts go live before the Home window and engine setup, so a key press
+        // during the rest of launch is queued (the tap has its own thread), not lost.
+        appState.contextCapture.registerHotkey()
+        LaunchTimingTelemetry.markHotkeysRegistered()
 
         writeLaunchUISmokeReportIfRequested()
 
@@ -542,7 +547,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         presentInitialOnboardingIfNeeded()
         if LaunchWindowPolicy.shouldOpenMainWindow(
             launchedAsLoginItem: launchedAsLoginItem,
-            secondsSinceLogin: Self.secondsSinceConsoleLogin(),
+            secondsSinceLogin: Self.secondsSinceConsoleLoginNotingLaunch(launchedAsLoginItem: launchedAsLoginItem),
             onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
             isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
         ) {
@@ -552,7 +557,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Initialize engines
         Task { @MainActor in
             await appState.initialize()
-            appState.contextCapture.registerHotkey()
             await writeFirstRunReliabilityReportIfRequested()
         }
         CompanionConnectionService.shared.configure(meetingSession: appState.meetingSession)

@@ -21,7 +21,7 @@ enum HomeCaptureListCopy {
 
     /// The empty Meetings list's second button, which opens the same picker.
     enum EmptyMeetingsImportAction {
-        static let title = "Transcribe audio file"
+        static let title = "Transcribe a file…"
         static let automationIdentifier = "transcripted.home.meetings.empty.import-audio"
     }
 }

@@ -30,7 +30,7 @@ struct RecentMeetingItem: Identifiable, Sendable {
     var listDate: Date { importedAt ?? date }
 
     var systemAudioVerificationWarning: String? {
-        systemAudioSignalVerified == false ? "System audio unverified" : nil
+        systemAudioSignalVerified == false ? "Didn't hear the other side" : nil
     }
 
     var id: String { transcriptURL.path }

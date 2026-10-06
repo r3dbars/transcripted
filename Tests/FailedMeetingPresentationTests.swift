@@ -23,7 +23,7 @@ func testFailedMeetingPresentation() {
             isRetryable: true
         )
 
-        assertEqual(copy.title, "Transcript needs another pass", "generic retry copy should not look like short audio")
+        assertEqual(copy.title, "Something went wrong", "generic retry copy should not look like short audio")
         assertEqual(copy.detail, "Upload failed after at least one retry.", "generic retry detail should be preserved")
     }
 
@@ -219,7 +219,7 @@ func testFailedMeetingPresentation() {
         assertEqual(presentation.statusText, "Retry ready", "retryable rows should show that recovery is available")
         assertEqual(
             presentation.inlineDetail,
-            "Saved audio is still here. Try again will transcribe it.",
+            "Your audio is saved. Click Try again to transcribe it.",
             "retryable rows should make saved audio preservation visible"
         )
         assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
@@ -250,7 +250,7 @@ func testFailedMeetingPresentation() {
         )
         assertEqual(
             unknownKind.inlineDetail,
-            "Saved audio is still here. Try again will transcribe it.",
+            "Your audio is saved. Click Try again to transcribe it.",
             "kinds where Try again is the whole answer keep the saved-audio line"
         )
 
@@ -323,7 +323,7 @@ func testFailedMeetingPresentation() {
         assertEqual(presentation.statusText, "Retry ready", "Home should show that saved audio can be retried")
         assertEqual(
             presentation.inlineDetail,
-            "Saved audio is still here. Try again will transcribe it.",
+            "Your audio is saved. Click Try again to transcribe it.",
             "Home should make the recovery path visible"
         )
         assertTrue(presentation.canShowRetryAction, "retained stop-timeout audio should show Try again")

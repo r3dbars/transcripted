@@ -8,8 +8,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
     @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = [] {
-        didSet { rebuildReviewStack() }
+        didSet { reviewQueueTranscriptPaths = Self.transcriptPaths(of: reviewQueueItems); rebuildReviewStack() }
     }
+    /// Lets each Meetings row's "has a review" check skip scanning the queue.
+    private(set) var reviewQueueTranscriptPaths: Set<String> = []
     /// The "Name these people" cards and what they hide from Everyone,
     /// rebuilt only when the queue, a skip, or Later changes it. The page,
     /// the Everyone list, and Home's attention row all read this one value.

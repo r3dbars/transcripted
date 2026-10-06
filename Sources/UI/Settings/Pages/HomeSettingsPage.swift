@@ -170,7 +170,7 @@ struct HomeSettingsPage: View {
                 symbolName: "waveform",
                 title: "No meetings yet",
                 message: "Record a meeting or transcribe an existing audio file. Transcripted labels each speaker and saves the transcript here.",
-                actionTitle: "Start a meeting",
+                actionTitle: "Record a meeting",
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: onStartMeeting,
                 secondaryActionTitle: HomeCaptureListCopy.EmptyMeetingsImportAction.title,

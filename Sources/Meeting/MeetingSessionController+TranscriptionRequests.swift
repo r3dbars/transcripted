@@ -283,7 +283,9 @@ extension MeetingSessionController {
             }
         }
 
-        taskManager.cancelAll()
+        // The running meeting keeps its audio as a retry row too, like the
+        // queued ones above; only an import's scratch copy is removed.
+        taskManager.cancelAll(recordedAudioRetryMessage: "Transcription cancelled")
         activeQueuedTranscriptionJobID = nil
         activeStoppedAudioRecovery = nil
         // The cancelled work is background transcription (queued/importing

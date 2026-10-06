@@ -47,9 +47,11 @@ final class MeetingPromptDetector {
     var ownCaptureActivity: (() -> MeetingPromptOwnCaptureActivity)?
     /// Injectable frontmost-app lookup. Unit tests override this with a fixed
     /// value so attribution never depends on which real app happens to be
-    /// frontmost on the machine running the suite.
-    var frontmostBundleIDProvider: () -> String? = {
-        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    /// frontmost on the machine running the suite. The bundle ID is read off
+    /// the main thread, like `runningBundleIDsProvider`.
+    var frontmostBundleIDProvider: @MainActor () async -> String? = {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        return await RunningApplicationsReader.bundleIdentifier(of: app)
     }
     /// Returns false when the Settings toggle is off. This keeps late monitor
     /// callbacks quiet after the user disables auto call detection.
@@ -170,8 +172,12 @@ final class MeetingPromptDetector {
     // demoted to a slow safety net rather than removed: the widest of those windows
     // (calendarReminderPostStartGrace, 5 min) comfortably absorbs a 120s cadence
     // without missing a prompt window, at the cost of the poll-caught transitions
-    // landing up to ~100s later than the old 20s cadence.
-    private let pollIntervalNanoseconds: UInt64 = 120_000_000_000
+    // landing up to ~100s later than the old 20s cadence. The 15 s tolerance
+    // lets macOS batch this wake with others; it stays far inside that window.
+    // The suspending clock keeps the old Task.sleep(nanoseconds:) behavior of
+    // not counting time the Mac spent asleep.
+    private let pollInterval: Duration = .seconds(120)
+    private let pollTolerance: Duration = .seconds(15)
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
@@ -226,7 +232,7 @@ final class MeetingPromptDetector {
             // Later poll passes aren't counted as in flight: they are the
             // slow safety net, not something a caller is waiting on.
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+                try? await Task.sleep(for: pollInterval, tolerance: pollTolerance, clock: .suspending)
                 guard !Task.isCancelled else { return }
                 await evaluate()
             }
@@ -289,8 +295,8 @@ final class MeetingPromptDetector {
 
         // Off the main thread: reading bundle IDs can block on LaunchServices.
         let runningBundleIDs = await runningBundleIDsProvider()
+        let frontmostBundleID = await frontmostBundleIDProvider()
         let now = Date()
-        let frontmostBundleID = frontmostBundleIDProvider()
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
         updateDetectedCallSession(

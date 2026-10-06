@@ -53,14 +53,53 @@ enum LaunchAtLoginController {
         currentState.statusDescription
     }
 
-    static func applySavedOptOutAtStartup() throws {
-        guard LaunchAtLoginPreferences.hasExplicitChoice(),
-              !LaunchAtLoginPreferences.isEnabled()
-        else {
-            return
-        }
+    /// What the launch-time login-item sync failed at, as error messages.
+    struct StartupSyncResult: Sendable {
+        var optOutFailure: String?
+        var defaultEnableFailure: String?
+    }
 
-        try unregisterIfNeeded()
+    /// The launch-time sync: the saved opt-out, then the one-time default
+    /// enable. The choice is made from saved preferences here; the
+    /// `SMAppService` calls run on `statusQueue`, because `status` is a
+    /// blocking XPC call that has frozen launch for 5 s+ on the main thread
+    /// (Sentry APPLE-MACOS-3W).
+    static func applyStartupState(onboardingCompleted: Bool) async -> StartupSyncResult {
+        let hasExplicitChoice = LaunchAtLoginPreferences.hasExplicitChoice()
+        let optOut = hasExplicitChoice && !LaunchAtLoginPreferences.isEnabled()
+        let defaultEnable = LaunchAtLoginPreferences.shouldApplyDefaultEnable(
+            hasExplicitChoice: hasExplicitChoice,
+            hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(),
+            onboardingCompleted: onboardingCompleted
+        )
+        if defaultEnable {
+            LaunchAtLoginPreferences.markDefaultEnableApplied()
+        }
+        guard optOut || defaultEnable else { return StartupSyncResult() }
+        return await runStartupSync(optOut: optOut, defaultEnable: defaultEnable)
+    }
+
+    private nonisolated static func runStartupSync(optOut: Bool, defaultEnable: Bool) async -> StartupSyncResult {
+        await withCheckedContinuation { continuation in
+            statusQueue.async {
+                var result = StartupSyncResult()
+                if optOut {
+                    do {
+                        try unregisterIfNeeded()
+                    } catch {
+                        result.optOutFailure = error.localizedDescription
+                    }
+                }
+                if defaultEnable {
+                    do {
+                        try registerIfNeeded()
+                    } catch {
+                        result.defaultEnableFailure = error.localizedDescription
+                    }
+                }
+                continuation.resume(returning: result)
+            }
+        }
     }
 
     /// One-time default-enable: the meeting-detection stack is dead while the
@@ -93,7 +132,7 @@ enum LaunchAtLoginController {
         LaunchAtLoginPreferences.setEnabled(enabled)
     }
 
-    private static func registerIfNeeded() throws {
+    nonisolated private static func registerIfNeeded() throws {
         switch SMAppService.mainApp.status {
         case .enabled, .requiresApproval:
             return
@@ -104,7 +143,7 @@ enum LaunchAtLoginController {
         }
     }
 
-    private static func unregisterIfNeeded() throws {
+    nonisolated private static func unregisterIfNeeded() throws {
         switch SMAppService.mainApp.status {
         case .enabled, .requiresApproval:
             try SMAppService.mainApp.unregister()

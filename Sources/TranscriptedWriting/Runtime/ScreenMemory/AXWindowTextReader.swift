@@ -157,16 +157,27 @@ enum AXWindowTextReader {
     /// app to realize its entire backing collection.
     private static func boundedChildren(_ element: AXUIElement) -> [AXUIElement] {
         var visible: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXVisibleChildrenAttribute as CFString, &visible) == .success,
-           let list = visible as? [AXUIElement], !list.isEmpty {
-            return Array(list.prefix(childrenCap))
+        if AXUIElementCopyAttributeValue(element, kAXVisibleChildrenAttribute as CFString, &visible) == .success {
+            let list = axElements(visible)
+            if !list.isEmpty { return Array(list.prefix(childrenCap)) }
         }
         var ranged: CFArray?
-        if AXUIElementCopyAttributeValues(element, kAXChildrenAttribute as CFString, 0, childrenCap, &ranged) == .success,
-           let list = ranged as? [AXUIElement] {
-            return list
+        if AXUIElementCopyAttributeValues(element, kAXChildrenAttribute as CFString, 0, childrenCap, &ranged) == .success {
+            return axElements(ranged)
         }
         return []
+    }
+
+    /// The array's AX elements. `as? [AXUIElement]` can't check a CF array's
+    /// element types, so another app returning something else in its
+    /// children would reach the next AX call as the wrong type; those
+    /// entries are dropped here instead.
+    private static func axElements(_ value: CFTypeRef?) -> [AXUIElement] {
+        guard let value, CFGetTypeID(value) == CFArrayGetTypeID(),
+              let items = value as? [CFTypeRef] else { return [] }
+        return items.compactMap { item in
+            CFGetTypeID(item) == AXUIElementGetTypeID() ? (item as! AXUIElement) : nil
+        }
     }
 
     private static func batched(_ element: AXUIElement) -> [String: CFTypeRef] {

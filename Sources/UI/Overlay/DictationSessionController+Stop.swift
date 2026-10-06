@@ -195,6 +195,7 @@ extension DictationSessionController {
                 Task { await checkpointSignal.complete() }
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
+            stopTiming.micBackend = appState.sttRouter.parakeetEngine.dictationMicBackendName
             // runStopUntilTranscribed (DictationSessionPipeline.swift) owns the
             // order: the stale-task fence, then DictationStopCheckpoint (stop
             // the mic, play the stop click, save the take to a private WAV),

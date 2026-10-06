@@ -324,7 +324,7 @@ enum FirstRunExperience {
         case .failed:
             subtitle = "Voice setup failed. Try again"
         case .notLoaded:
-            subtitle = "Starts local voice setup on first use"
+            subtitle = "Sets up the first time you use it"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
         case .cached:
@@ -377,7 +377,7 @@ enum FirstRunExperience {
         default:
             subtitle = dictationReady
                 ? "Meeting tools are still loading in the background"
-                : "Starts local meeting setup on first use"
+                : "Sets up the first time you use it"
         }
 
         return MenuBarPrimaryActionState(

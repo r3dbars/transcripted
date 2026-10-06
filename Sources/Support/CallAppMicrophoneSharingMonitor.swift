@@ -78,6 +78,8 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
     /// Bumped by every refresh, so a background read that finishes after a
     /// newer one (or after a synchronous pre-capture refresh) is dropped.
     private var refreshGeneration = 0
+    /// False until a first read has landed. See `callAppRunning()`.
+    private var hasRead = false
     private var observers: [NSObjectProtocol] = []
 
     init(
@@ -95,7 +97,23 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
                 MainActor.assumeIsolated { self?.refreshAfterApplicationChange() }
             })
         }
-        refresh()
+        // The shared monitor is first built during launch on the main thread,
+        // where a synchronous read can block on LaunchServices, so its first
+        // read is the background one. Readers that can't wait use
+        // `callAppRunning()`.
+        if backgroundRunningApplicationBundleIDs == nil {
+            refresh()
+        } else {
+            refreshAfterApplicationChange()
+        }
+    }
+
+    /// `isCallAppRunning` for a capture start that doesn't `refresh()` first.
+    /// Before the first read lands it reads synchronously, as the monitor did
+    /// when it was created; after that it's the kept value, as before.
+    func callAppRunning() -> Bool {
+        if !hasRead { refresh() }
+        return isCallAppRunning
     }
 
     /// Synchronous read, for capture start: it must decide before the mic
@@ -121,6 +139,7 @@ final class CallAppMicrophoneSharingMonitor: ObservableObject {
     }
 
     private func apply(runningApplicationBundleIDs bundleIDs: [String]) {
+        hasRead = true
         let apps = MicrophoneSharingPolicy.runningCallApps(
             runningApplicationBundleIDs: bundleIDs
         )

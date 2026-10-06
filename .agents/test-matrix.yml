@@ -37,6 +37,7 @@ rules:
       - "Sources/Support/ClipboardRestoringTextPaster+Pasteboard.swift"
       - "Sources/Support/ClipboardRestoringTextPaster+SavedClipboard.swift"
       - "Sources/Support/ClipboardPasteOutcome.swift"
+      - "Sources/Support/ClipboardPasteConfirmationWait.swift"
       - "Sources/Support/ClipboardPasteTarget.swift"
       - "Sources/Support/FocusedTextPasteConfirmation.swift"
       - "Sources/Support/TranscriptedConstants.swift"
@@ -309,6 +310,15 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/dev/mutation-probe.py"
       - "python3 scripts/dev/mutation-probe.py --self-test"
+
+  - paths:
+      - "scripts/dev/bench-all.sh"
+      - "scripts/dev/bench-compare.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/bench-all.sh"
+      - "python3 -m py_compile scripts/dev/bench-compare.py"
+      - "python3 scripts/dev/bench-compare.py --self-test"
 
   - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"

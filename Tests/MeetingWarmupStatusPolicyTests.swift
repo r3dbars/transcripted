@@ -106,8 +106,8 @@ func testMeetingWarmupStatusPolicy() {
         assertEqual(status.dictationStatus, "Downloading", "zero-progress Parakeet downloads should not pretend to have exact percent progress")
         assertFalse(status.isReadyForMenuHeader, "real downloads should still surface as in-progress work")
         assertTrue(
-            status.detail.contains("future app updates should reuse the cached model"),
-            "download copy should explain update-safe model caching"
+            status.detail.contains("One-time download"),
+            "download copy should say the download only happens once"
         )
     }
 
