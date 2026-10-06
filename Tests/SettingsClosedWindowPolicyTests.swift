@@ -19,6 +19,35 @@ func testSettingsClosedWindowPolicy() {
         )
     }
 
+    runSuite("Opening the window - the activation it causes doesn't repeat the open's refresh") {
+        let presentedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        assertTrue(
+            SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(
+                presentedAt: presentedAt,
+                now: presentedAt.addingTimeInterval(0.2)
+            ),
+            "an activation right after present() is covered by the open's full refresh"
+        )
+        assertFalse(
+            SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(
+                presentedAt: presentedAt,
+                now: presentedAt.addingTimeInterval(5)
+            ),
+            "coming back to the app later still refreshes, e.g. after granting a permission"
+        )
+        assertFalse(
+            SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(presentedAt: nil, now: presentedAt),
+            "a window never presented doesn't skip anything"
+        )
+        assertFalse(
+            SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(
+                presentedAt: presentedAt,
+                now: presentedAt.addingTimeInterval(-1)
+            ),
+            "a clock that moved backwards doesn't skip anything"
+        )
+    }
+
     runSuite("Closed window - rebuilds are held, and the newest one shows on reopen") {
         var hold = SettingsWindowSnapshotHold<Int>()
         assertEqual(hold.deliver(1), 1, "an open window publishes right away")

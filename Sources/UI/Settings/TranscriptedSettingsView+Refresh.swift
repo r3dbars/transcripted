@@ -366,6 +366,10 @@ extension TranscriptedSettingsView {
     /// App activation. A closed window skips the sweep (about 9 TCC reads on
     /// main per popover open); opening it runs the full `refreshState()`.
     func refreshAfterAppActivation() {
+        guard !SettingsClosedWindowRefreshPolicy.activationRepeatsPresentation(
+            presentedAt: navigation.lastPresentedAt,
+            now: Date()
+        ) else { return }
         let work = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: navigation.isWindowOpen)
         if work.permissions { refreshPermissions() }
         if work.recentCaptures { refreshRecentCaptures(reloadDashboard: work.dashboard) }
