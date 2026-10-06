@@ -129,7 +129,9 @@ extension MeetingSessionController {
             handleAccidentalStartDiscarded()
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
-            // A failed import must retain its original stopped-audio checkpoint.
+            // A failed import keeps its original stopped-audio checkpoint
+            // for a retry this run; the next launch's dictation cleanup
+            // removes it only if it holds under 30 s of audio.
             if let failedJobID = activeQueuedTranscriptionJobID,
                let stoppedAudioRecovery = activeStoppedAudioRecovery {
                 stoppedAudioRecoveryRetryRegistry.retain(

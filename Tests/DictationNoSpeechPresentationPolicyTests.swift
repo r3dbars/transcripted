@@ -1,15 +1,27 @@
 import Foundation
 
 func testDictationNoSpeechPresentationPolicy() {
-    runSuite("Undecoded captured audio offers import without claiming speech certainty") {
+    runSuite("Undecoded audio from a long take offers import without claiming speech certainty") {
         let message = DictationNoSpeechPresentationPolicy.message(
             trigger: "physical_key",
-            reason: .audioNeedsRecovery
+            reason: .audioNeedsRecovery,
+            savedRecordingOffered: true
         )
         assertTrue(message.contains("did not become text"), "empty inference or stale converted samples should use honest recovery copy")
         assertTrue(message.contains(DictationSavedAudioActionCopy.transcribeTitle), "recovery should name the Transcribe It button on the message")
         assertFalse(message.contains("Capture →"), "don't send people to a menu that only shows while the app is in front")
         assertFalse(message.contains("Home"), "do not send users to a page that is now labeled Meetings")
+        assertFalse(message.contains("No speech heard"), "audio activity must not be dismissed as silence")
+    }
+
+    runSuite("Undecoded audio from a short take just asks for another try") {
+        let message = DictationNoSpeechPresentationPolicy.message(
+            trigger: "physical_key",
+            reason: .audioNeedsRecovery
+        )
+        assertEqual(message, "Didn't catch that. Try again.", "the audio is already gone, so say it plainly")
+        assertFalse(message.contains(DictationSavedAudioActionCopy.transcribeTitle), "no button to name: nothing was kept")
+        assertFalse(message.contains("saved"), "don't promise a recording that was deleted")
         assertFalse(message.contains("No speech heard"), "audio activity must not be dismissed as silence")
     }
     runSuite("DictationNoSpeechPresentationPolicy gives physical-key users direct recovery copy") {

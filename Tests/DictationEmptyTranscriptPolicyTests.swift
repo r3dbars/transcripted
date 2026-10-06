@@ -7,18 +7,21 @@ import Foundation
 func testDictationEmptyTranscriptPolicy() {
     let quickPress: TimeInterval = 0.3
     let longPress: TimeInterval = 4
+    let longTake: TimeInterval = 45
 
     func decide(
         _ reason: DictationEmptyTranscriptionReason,
         press: TimeInterval = 4,
         heldText: Bool = false,
-        saved: Bool = false
+        saved: Bool = false,
+        inMemory: Bool = false
     ) -> DictationEmptyTranscriptPolicy.Decision {
         DictationEmptyTranscriptPolicy.decide(
             reason: reason,
             pressDuration: press,
             hasHeldBackText: heldText,
-            hasSavedRecording: saved
+            hasSavedRecording: saved,
+            audioStillInMemory: inMemory
         )
     }
 
@@ -46,21 +49,31 @@ func testDictationEmptyTranscriptPolicy() {
         assertEqual(decision.action, .offerPasteAnyway, "the check can be wrong, so the text is one press away")
         assertFalse(decision.discardsSavedRecording, "the audio stays in case the guess was wrong")
 
-        let nothingHeld = decide(.otherLanguage, heldText: false, saved: true)
-        assertEqual(nothingHeld.action, .offerSavedRecording(remindAtLaunch: false),
-                    "without held-back text, fall back to the saved recording")
+        let nothingHeld = decide(.otherLanguage, press: longTake, heldText: false, saved: true)
+        assertEqual(nothingHeld.action, .offerSavedRecording,
+                    "without held-back text, a long take falls back to the saved recording")
     }
 
-    runSuite("A saved recording is offered for another try") {
-        let modelFailed = decide(.modelFailure, saved: true)
-        assertEqual(modelFailed.action, .offerSavedRecording(remindAtLaunch: false), "the audio is saved, so offer to transcribe it again")
-        assertFalse(modelFailed.discardsSavedRecording, "the saved audio is kept")
+    runSuite("A long take's saved recording is offered and kept") {
+        for reason in [DictationEmptyTranscriptionReason.modelFailure, .audioNeedsRecovery] {
+            let decision = decide(reason, press: longTake, saved: true)
+            assertEqual(decision.action, .offerSavedRecording, "\(reason.rawValue): a long take is hard to say again, so offer Transcribe It")
+            assertFalse(decision.discardsSavedRecording, "\(reason.rawValue): the long take's audio is kept while it's offered")
+        }
+        let atThreshold = decide(.audioNeedsRecovery, press: DictationFailedTakePolicy.minimumLengthToKeep, saved: true)
+        assertEqual(atThreshold.action, .offerSavedRecording, "exactly the minimum length counts as long")
+    }
 
-        let heardNothing = decide(.audioNeedsRecovery, saved: true)
-        assertEqual(heardNothing.action, .offerSavedRecording(remindAtLaunch: true),
-                    "audio the model heard nothing in keeps its launch reminder")
-        assertFalse(heardNothing.discardsSavedRecording,
-                    "audio the model heard nothing in must be kept: deleting it here loses the user's recording")
+    runSuite("A short take's saved recording is dropped with the error") {
+        let justUnder = DictationFailedTakePolicy.minimumLengthToKeep - 0.1
+        for reason in [DictationEmptyTranscriptionReason.modelFailure, .audioNeedsRecovery, .otherLanguage] {
+            for press in [longPress, justUnder] {
+                let decision = decide(reason, press: press, saved: true)
+                assertEqual(decision.action, .showMessage, "\(reason.rawValue) after \(press) s: say why, no Transcribe It")
+                assertTrue(decision.discardsSavedRecording, "\(reason.rawValue) after \(press) s: saying it again beats recovering it")
+                assertFalse(decision.countsAsCancelled, "\(reason.rawValue): still a give-up, not a cancel")
+            }
+        }
     }
 
     runSuite("Audio that needs recovery with no saved WAV offers the checkpoint retry") {
@@ -73,15 +86,34 @@ func testDictationEmptyTranscriptPolicy() {
         assertEqual(decide(.otherLanguage).action, .showMessage, "a language guess with nothing held and nothing saved")
     }
 
-    runSuite("Only silence or a too-short take drops the saved audio") {
+    runSuite("A short take the model never consumed keeps its WAV, so memory audio can't block the next take") {
+        for reason in [DictationEmptyTranscriptionReason.modelFailure, .audioNeedsRecovery] {
+            let decision = decide(reason, saved: true, inMemory: true)
+            assertEqual(decision.action, .showMessage, "\(reason.rawValue): still no Transcribe It for a short take")
+            assertFalse(decision.discardsSavedRecording,
+                        "\(reason.rawValue): audio in memory with no WAV would refuse the next take and Quit")
+            assertFalse(
+                DictationTerminationAdmissionPolicy.blocksNewCapture(
+                    hasRecoverableRecording: true,
+                    recoveryWAVExists: !decision.discardsSavedRecording
+                ),
+                "\(reason.rawValue): keeping the WAV lets the next take start"
+            )
+        }
+    }
+
+    runSuite("Silence, a too-short take, or a short failed take drops the saved audio; a long one keeps it") {
         for reason in [DictationEmptyTranscriptionReason.modelFailure, .audioNeedsRecovery, .otherLanguage] {
-            for saved in [true, false] {
-                assertFalse(decide(reason, saved: saved).discardsSavedRecording,
-                            "\(reason.rawValue) keeps its audio for another try")
-            }
+            assertFalse(decide(reason, press: longTake, saved: true).discardsSavedRecording,
+                        "\(reason.rawValue) from a long take keeps its audio for Transcribe It")
+            assertFalse(decide(reason, saved: false).discardsSavedRecording,
+                        "\(reason.rawValue) with nothing saved has nothing to drop")
         }
         assertTrue(decide(.noSpeech).discardsSavedRecording, "silence isn't kept")
         assertTrue(decide(.recordingTooShort).discardsSavedRecording, "a too-short take isn't kept")
+        assertTrue(decide(.audioNeedsRecovery, saved: true).discardsSavedRecording, "a short failed take isn't kept")
+        assertFalse(decide(.otherLanguage, heldText: true, saved: true).discardsSavedRecording,
+                    "Paste Anyway keeps the audio even for a short take, in case the guess was wrong")
     }
 
     runSuite("Only a mis-tap counts as cancelled") {

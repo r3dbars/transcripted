@@ -23,7 +23,7 @@ func testRecentCaptureScanners() async {
                 let rows = RecentMeetingsScanner.loadRecent(limit: 10, cache: cache)
                 assertEqual(rows.count, 3, "all fixtures must remain available")
                 assertEqual(rows.first { $0.title == "Unverified" }?.systemAudioSignalVerified, false, "saved false survives the cache")
-                assertEqual(rows.first { $0.title == "Unverified" }?.systemAudioVerificationWarning, "System audio unverified", "persistent warning does not claim denial")
+                assertEqual(rows.first { $0.title == "Unverified" }?.systemAudioVerificationWarning, "Didn't hear the other side", "persistent warning does not claim denial")
                 assertEqual(rows.first { $0.title == "Verified" }?.systemAudioSignalVerified, true, "verified stays distinct")
                 assertNil(rows.first { $0.title == "Verified" }?.systemAudioVerificationWarning, "verified recording has no warning")
                 assertNil(rows.first { $0.title == "Legacy" }?.systemAudioSignalVerified, "legacy and imported absence stays unknown")

@@ -65,7 +65,22 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 2
         )
 
-        assertEqual(copy.title, "Switching microphone", "long unready state should name the route switch")
+        assertEqual(copy.title, "Starting microphone", "a slow start with no live recovery is not a switch")
         assertEqual(copy.status, "Retrying MacBook Pro Microphone", "retry status should stay explicit")
+    }
+
+    runSuite("DictationMicrophoneLoadingPresentationPolicy never calls deferred readiness a switch") {
+        // AirPods route chatter defers readiness after nearly every take; a
+        // tester saw "Switching microphone" on every press with no mic change.
+        let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
+            elapsed: 1.0,
+            deviceName: "AirPods",
+            isRecovering: false,
+            inputFormatReady: false,
+            startAttempts: 1
+        )
+
+        assertEqual(copy.title, "Starting microphone", "deferred idle readiness keeps the normal start title")
+        assertEqual(copy.detail, "Opening the selected audio input.", "deferred idle readiness keeps the normal start detail")
     }
 }

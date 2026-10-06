@@ -1,10 +1,10 @@
 // DictationSessionController+SessionCap.swift
-// The 5-minute dictation cap and its live countdown.
+// The dictation length cap (15 minutes) and its live countdown.
 
 import AppKit
 
 extension DictationSessionController {
-    /// Max duration for a listening session before auto-cancel (5 minutes).
+    /// Max duration for a listening session before the cap saves it (15 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
     /// Derived from the shared constant so the speech engine's audio buffer
     /// sizing stays in lockstep with the cap.
@@ -16,7 +16,7 @@ extension DictationSessionController {
     /// re-evaluate the uptime-based deadline before firing the cancel branch.
     private static let sessionTimeoutPollIntervalNanos: UInt64 = 30 * 1_000_000_000
 
-    /// Install a timeout that auto-cancels the session after 5 minutes of
+    /// Install a timeout that finalizes the session after 15 minutes of
     /// *active* uptime. Tracks the deadline against `ProcessInfo.systemUptime`
     /// so Mac sleep does not consume the session's remaining record window —
     /// otherwise a session that sees the Mac sleep for hours would auto-cancel
@@ -56,8 +56,8 @@ extension DictationSessionController {
                 )
                 EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_timeout",
                     message: shouldAutoPaste
-                        ? "Dictation reached the 5-minute cap; pasting because the original target is still active"
-                        : "Dictation reached the 5-minute cap; saving without paste")
+                        ? "Dictation reached the session cap; pasting because the original target is still active"
+                        : "Dictation reached the session cap; saving without paste")
                 self.stopDictationAndPaste(trigger: .sessionCap, autoPaste: shouldAutoPaste)
             }
         }
