@@ -173,6 +173,9 @@ class ParakeetEngine: ObservableObject {
     /// analytics callers without a live CoreAudio device enumeration.
     var cachedInputDeviceSelection: DictationInputDeviceSelection?
     var lastAudioStartFailureReportAt: TimeInterval?
+    /// System uptime of the last circuit-open start failure sent at error
+    /// level (`reportWorkCircuitOpenIfNeeded`).
+    var lastWorkCircuitOpenReportAt: TimeInterval?
     var lastRecordingStartFailureReason: ParakeetStartRecordingFailureReason?
     var lastInputSelectionReportKey: String?
     var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
