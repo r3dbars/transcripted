@@ -45,6 +45,24 @@ func testHomeMeetingPreviewFormatter() {
         assertNil(HomeMeetingTranscriptClock.seconds(from: "99999999999999999999:00"), "Oversized values must not overflow")
     }
 
+    runSuite("Home meeting rows retain hour clocks and legacy playback offsets") {
+        let clocks: [(String, Double)] = [
+            ("59:59", 3599), ("60:00", 3600), ("1:00:00", 3600),
+            ("01:00:00", 3600), ("01:00:01", 3601),
+            ("24:00:00", 86400), ("6000:00", 360000), ("100:00:00", 360000),
+        ]
+        for styled in [false, true] {
+            let rows = clocks.map { clock in
+                styled
+                    ? "**\(clock.0)**  [System/Speaker 0]\nSynthetic text."
+                    : "[\(clock.0)] [System/Speaker 0] Synthetic text."
+            }.joined(separator: "\n\n")
+            let content = HomeMeetingPreviewContent.make(from: "## \(styled ? "Transcript" : "Full Transcript")\n\n\(rows)")
+            assertEqual(content.transcriptLines.map(\.time), clocks.map { $0.0 })
+            assertEqual(content.transcriptLines.map(\.startSeconds), clocks.map { Optional($0.1) })
+        }
+    }
+
     runSuite("HomeMeetingSpeakerNamingPolicy groups voices and keeps saved-person identity") {
         let lines = HomeMeetingPreviewContent.make(from: styledMeetingMarkdown()).transcriptLines
         let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)

@@ -93,6 +93,16 @@ public enum DateFormattingHelper {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    /// Elapsed transcript time, truncated to whole seconds. Hours are shown
+    /// from one hour onward and never wrap at a day: 59:59, 01:00:00, 100:00:00.
+    static func formatTranscriptTimestamp(_ interval: TimeInterval) -> String {
+        let totalSeconds = Int(interval)
+        if totalSeconds >= 3600 {
+            return String(format: "%02d:%02d:%02d", totalSeconds / 3600, (totalSeconds / 60) % 60, totalSeconds % 60)
+        }
+        return String(format: "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
+    }
+
     /// Format a day stamp for filenames and frontmatter dates.
     /// Example: "2024-01-15"
     public static func formatDayStamp(_ date: Date) -> String {
