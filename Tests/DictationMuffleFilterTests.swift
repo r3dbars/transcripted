@@ -169,6 +169,40 @@ func testDictationMuffleFilter() {
         assertTrue(fadeOut.out[0][0] > 0.5 * level, "gate should fade out from open, not drop at once, got \(fadeOut.out[0][0])")
     }
 
+    runSuite("The gate fade stretches to cover a lagging copy, within gateSeconds and maxGateFadeSeconds") {
+        let shortest = Int((DictationMuffleFilter.gateSeconds * sampleRate).rounded())
+        let longest = Int((DictationMuffleFilter.maxGateFadeSeconds * sampleRate).rounded())
+        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: nil, sampleRate: sampleRate), shortest, "unknown lag")
+        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 0, sampleRate: sampleRate), shortest, "no lag")
+        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 100, sampleRate: sampleRate), shortest, "lag under the shortest fade")
+        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 520, sampleRate: sampleRate), 520, "AirPods lag")
+        assertEqual(DictationMuffleFilter.gateFadeFrames(copyDelayFrames: 50_000, sampleRate: sampleRate), longest, "a huge lag is capped")
+    }
+
+    runSuite("A longer gate fade opens and closes the copy over that many frames") {
+        let fadeFrames = 520
+        var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
+        let level: Float = 0.5
+        let constant = [Float](repeating: level, count: 1_024)
+        let renderGate = { (gate: Float) in
+            muffleRender(&filter, input: [constant, constant], inputLayout: [2], outputLayout: [2], muffle: 0, gate: gate, gateFadeFrames: fadeFrames).out[0]
+        }
+        let fadeIn = renderGate(1)
+        let halfway = fadeIn[fadeFrames / 2]
+        assertTrue(halfway > 0.4 * level && halfway < 0.6 * level, "halfway through the fade the copy should be near half level, got \(halfway)")
+        let fullAt = fadeIn.firstIndex { abs($0 - level) <= 5e-5 }
+        assertNotNil(fullAt, "gate should reach full level within the cycle")
+        if let fullAt {
+            assertTrue(fullAt >= fadeFrames - 2 && fullAt <= fadeFrames + 2, "gate should reach full level at about \(fadeFrames) frames, reached at \(fullAt)")
+        }
+        let fadeOut = renderGate(0)
+        let closedAt = fadeOut.firstIndex { abs($0) <= 5e-5 }
+        assertNotNil(closedAt, "gate should close within the cycle")
+        if let closedAt {
+            assertTrue(closedAt >= fadeFrames - 2 && closedAt <= fadeFrames + 2, "gate should close at about \(fadeFrames) frames, closed at \(closedAt)")
+        }
+    }
+
     runSuite("render returns the cycle's input peak, and 0 for silence or no input") {
         var filter = DictationMuffleFilter(sampleRate: sampleRate)
         var left = [Float](repeating: 0.1, count: 256)
@@ -326,7 +360,8 @@ private func muffleRender(
     muffle: Float,
     gate: Float,
     prefill: Float = 0,
-    frames explicitFrames: Int? = nil
+    frames explicitFrames: Int? = nil,
+    gateFadeFrames: Int = 0
 ) -> MuffleRenderResult {
     let frames = explicitFrames ?? input?.first?.count ?? 0
     let outList = MuffleBufferList(layout: outputLayout, frames: frames, fill: prefill)
@@ -336,9 +371,9 @@ private func muffleRender(
         for channel in 0..<min(inList.channelCount, input.count) {
             for frame in 0..<frames { inList[channel, frame] = input[channel][frame] }
         }
-        peak = filter.render(input: UnsafePointer(inList.list.unsafeMutablePointer), output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate)
+        peak = filter.render(input: UnsafePointer(inList.list.unsafeMutablePointer), output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateFadeFrames: gateFadeFrames)
     } else {
-        peak = filter.render(input: nil, output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate)
+        peak = filter.render(input: nil, output: outList.list.unsafeMutablePointer, muffleTarget: muffle, gateTarget: gate, gateFadeFrames: gateFadeFrames)
     }
     var out: [[Float]] = []
     for channel in 0..<outList.channelCount {

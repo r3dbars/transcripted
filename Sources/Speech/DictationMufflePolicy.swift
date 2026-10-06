@@ -115,3 +115,29 @@ enum DictationMuffleOutputRoute {
         return nil
     }
 }
+
+/// How far the muffled copy lags the original, from what the copy's IOProc
+/// sees. The muffler waits for a quiet moment at the cut only when this lag
+/// is long enough to hear (see DictationMuffleTiming.quietCutAboveDelayNanos),
+/// and the gate fade stretches to cover it.
+enum DictationMuffleCopyDelay {
+    /// Frames to add to the IOProc's output-minus-input sample time.
+    ///
+    /// The tap reports the output device's own latency as its input latency.
+    /// That latency is shared: the originals and the copy both go through the
+    /// same device, so it adds nothing to the lag between them. On wired
+    /// outputs it's small and barely matters; on AirPods it's 7,680 frames
+    /// (160 ms), which made every Bluetooth take look 170 ms late, so
+    /// the cut waited its full 300 ms for a quiet moment that music rarely
+    /// has (36 of 45 Bluetooth takes on the owner's Mac, 2026-10-06), while
+    /// the real lag is the IOProc's two buffers, about 11 ms. Only tap
+    /// latency beyond the device's own counts.
+    static func correctionFrames(
+        tapInputLatency: Int,
+        tapInputSafetyOffset: Int,
+        outputLatency: Int,
+        driftLatencyFrames: Int
+    ) -> Int {
+        max(0, tapInputLatency - max(0, outputLatency)) - tapInputSafetyOffset + driftLatencyFrames
+    }
+}

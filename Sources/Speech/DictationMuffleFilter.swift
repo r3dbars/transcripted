@@ -10,7 +10,7 @@
 // stay clean while their cutoff moves.
 //
 // A separate output gate fades the whole output in and out over a few
-// milliseconds. The muffler opens it as the originals are muted, and closes
+// milliseconds (up to the copy's lag on routes where it lags). The muffler opens it as the originals are muted, and closes
 // it just after they come back, so the copy fades out over them.
 //
 // Runs on the Core Audio IO thread: no allocation, locks or ObjC. All state is
@@ -30,6 +30,8 @@ struct DictationMuffleFilter {
     static let releaseSeconds: Double = 0.22
     /// How long the output gate takes to fade the whole copy in or out.
     static let gateSeconds: Double = 0.004
+    /// The longest the gate fade stretches to cover a lagging copy.
+    static let maxGateFadeSeconds: Double = 0.025
     /// Frames between coefficient updates while the cutoff moves.
     static let controlBlockFrames = 16
 
@@ -57,6 +59,22 @@ struct DictationMuffleFilter {
     private var l1s1: Float = 0, l1s2: Float = 0, l2s1: Float = 0, l2s2: Float = 0
     private var r1s1: Float = 0, r1s2: Float = 0, r2s1: Float = 0, r2s2: Float = 0
 
+    /// How many frames the gate fade takes on a route where the copy lags the
+    /// original by `copyDelayFrames`. Right after the cut the copy replays
+    /// the last moment the originals already played, which you hear as a
+    /// tiny repeat. Fading in over that lag plays the repeat quietly, right
+    /// after louder sound that masks it, instead of at full level. The hand
+    /// back uses the same length, so the copy fades out over the returning
+    /// originals instead of the music jumping ahead. Never shorter than
+    /// `gateSeconds`, never longer than `maxGateFadeSeconds`.
+    static func gateFadeFrames(copyDelayFrames: Int?, sampleRate: Double) -> Int {
+        let rate = sampleRate > 0 ? sampleRate : 48_000
+        let shortest = max(1, Int((gateSeconds * rate).rounded()))
+        let longest = max(shortest, Int((maxGateFadeSeconds * rate).rounded()))
+        guard let copyDelayFrames else { return shortest }
+        return min(longest, max(shortest, copyDelayFrames))
+    }
+
     init(sampleRate: Double, startGated: Bool = false) {
         let rate = sampleRate > 0 ? sampleRate : 48_000
         self.sampleRate = rate
@@ -71,7 +89,8 @@ struct DictationMuffleFilter {
 
     /// Reads the tap's audio from `input`, filters it at the current amount,
     /// and writes it to `output`. `muffleTarget` (0 or 1) is where the cutoff
-    /// glides toward; `gateTarget` (0 or 1) is where the output gate fades.
+    /// glides toward; `gateTarget` (0 or 1) is where the output gate fades,
+    /// over `gateFadeFrames` (0 means `gateSeconds`).
     ///
     /// Handles interleaved or split Float32 buffers on either side: mono input
     /// feeds both sides, a mono output gets the average, and output channels
@@ -85,7 +104,8 @@ struct DictationMuffleFilter {
         input: UnsafePointer<AudioBufferList>?,
         output: UnsafeMutablePointer<AudioBufferList>?,
         muffleTarget: Float,
-        gateTarget: Float
+        gateTarget: Float,
+        gateFadeFrames: Int = 0
     ) -> Float {
         guard let output else { return 0 }
         let outList = UnsafeMutableAudioBufferListPointer(output)
@@ -169,6 +189,7 @@ struct DictationMuffleFilter {
 
         let gateTarget = min(max(gateTarget, 0), 1)
         let muffleTarget = min(max(muffleTarget, 0), 1)
+        let gateStep = gateFadeFrames > 0 ? 1 / Float(gateFadeFrames) : self.gateStep
         var peak: Float = 0
         var frame = 0
         while frame < frames {
