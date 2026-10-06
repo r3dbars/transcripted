@@ -514,42 +514,58 @@ extension TranscriptedSettingsView {
     /// (or trashed, when this was its only entry) immediately and reversibly,
     /// and the undo offer is staged with the app-wide manager so the
     /// "Deleted · Undo" line survives navigation and refreshes for the whole
-    /// grace window.
+    /// grace window. The file work runs off the main thread: it reads and
+    /// rewrites the day file under the lock the dictation writer also takes.
     private func deleteDictationWithUndo(_ entry: SavedDictationEntry) {
         trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
-        do {
-            let undoPayload = try DictationTranscriptStore.deleteEntryReversibly(entry)
-            let preview = QuietDictationLibraryFormatting.truncated(
-                QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title),
-                maxLength: 34
-            )
-            captureUndo.stage(
-                id: DictationUndoID.id(for: entry),
-                message: CaptureUndoMessage.deleted(preview),
-                undoAction: {
-                    do {
-                        try DictationTranscriptStore.restoreDeletedEntry(undoPayload)
-                    } catch {
-                        presentHomeDeleteFailure(
-                            title: "Could not restore dictation",
-                            error: error,
-                            retry: { refreshRecentCaptures(force: true) }
-                        )
+        let undoID = DictationUndoID.id(for: entry)
+        guard homeDeletionIDs.insert(undoID).inserted else { return }
+        Task { @MainActor in
+            defer { homeDeletionIDs.remove(undoID) }
+            do {
+                let undoPayload = try await Task.detached(priority: .userInitiated) {
+                    try DictationTranscriptStore.deleteEntryReversibly(entry)
+                }.value
+                let preview = QuietDictationLibraryFormatting.truncated(
+                    QuietDictationLibraryFormatting.firstLine(of: entry.text, fallback: entry.title),
+                    maxLength: 34
+                )
+                captureUndo.stage(
+                    id: undoID,
+                    message: CaptureUndoMessage.deleted(preview),
+                    undoAction: {
+                        Task { @MainActor in
+                            do {
+                                try await Task.detached(priority: .userInitiated) {
+                                    try DictationTranscriptStore.restoreDeletedEntry(undoPayload)
+                                }.value
+                            } catch {
+                                presentHomeDeleteFailure(
+                                    title: "Could not restore dictation",
+                                    error: error,
+                                    retry: { refreshRecentCaptures(force: true) }
+                                )
+                            }
+                            refreshRecentCaptures(force: true)
+                        }
+                    },
+                    finalize: {
+                        // The delete is permanent now, so its kept audio goes too.
+                        Task { @MainActor in
+                            await Task.detached(priority: .utility) {
+                                _ = DictationAudioArchive.deleteKeptAudio(for: entry)
+                            }.value
+                            refreshRecentCaptures(force: true)
+                        }
                     }
-                    refreshRecentCaptures(force: true)
-                },
-                finalize: {
-                    // The delete is permanent now, so its kept audio goes too.
-                    DictationAudioArchive.deleteKeptAudio(for: entry)
-                    refreshRecentCaptures(force: true)
-                }
-            )
-        } catch {
-            presentHomeDeleteFailure(
-                title: "Could not delete dictation",
-                error: error,
-                retry: { deleteDictationWithUndo(entry) }
-            )
+                )
+            } catch {
+                presentHomeDeleteFailure(
+                    title: "Could not delete dictation",
+                    error: error,
+                    retry: { deleteDictationWithUndo(entry) }
+                )
+            }
         }
     }
 
