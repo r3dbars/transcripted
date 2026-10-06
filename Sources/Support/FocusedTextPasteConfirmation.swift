@@ -189,7 +189,9 @@ enum FocusedTextPasteConfirmationPolicy {
 
     /// The restore delay after a likely paste. When the wait ended early on the
     /// read, the part of the wait it skipped is added back, so the user's
-    /// clipboard never comes back sooner than it would after a full wait.
+    /// clipboard comes back about when it would after a full wait: a few ms
+    /// sooner, or up to ~300 ms sooner when the full wait's last Accessibility
+    /// checks would have stalled.
     static func likelyPasteRestoreDelay(fallbackDelay: UInt64, unusedWait: TimeInterval) -> UInt64 {
         guard unusedWait.isFinite, unusedWait > 0 else { return fallbackDelay }
         let extra = UInt64((min(unusedWait, 60) * 1_000_000_000).rounded())

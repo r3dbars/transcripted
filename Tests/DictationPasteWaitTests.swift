@@ -35,7 +35,7 @@ func testDictationPasteWait() async {
         assertFalse(ends(readAt: nil), "no read, no evidence")
     }
 
-    runSuite("Ending the wait early never brings the user's clipboard back sooner") {
+    runSuite("Ending the wait early adds the skipped wait back to the clipboard restore") {
         let fallback: UInt64 = 2_500_000_000
         assertEqual(
             FocusedTextPasteConfirmationPolicy.likelyPasteRestoreDelay(fallbackDelay: fallback, unusedWait: 0.3),
@@ -72,6 +72,7 @@ func testDictationPasteWait() async {
         let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitEarly-\(UUID().uuidString)")
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
         let source = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: 3) }
+        let probe = await MainActor.run { PasteWaitProbe() }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -91,7 +92,8 @@ func testDictationPasteWait() async {
                 restoreDelay: restoreDelay,
                 fallbackRestoreDelay: fallbackRestoreDelay,
                 pasteConfirmationWait: 5,
-                endWaitOnLikelyPaste: true
+                endWaitOnLikelyPaste: true,
+                onLateConfirmation: { probe.lateConfirmations.append($0) }
             )
         }
         let askedDuringPaste = await MainActor.run { source.asked }
@@ -106,10 +108,16 @@ func testDictationPasteWait() async {
 
         await paster.waitForLateConfirmationWatch()
         let delayAfterWatch = await MainActor.run { paster.scheduledClipboardRestoreDelay }
+        let lateConfirmations = await MainActor.run { probe.lateConfirmations }
         assertEqual(
             delayAfterWatch,
             restoreDelay,
             "a confirmation the full wait would have seen brings the clipboard back on the confirmed-paste delay"
+        )
+        assertEqual(
+            lateConfirmations,
+            [ClipboardPasteConfirmationDiagnostic.lateConfirmed(mode: "text_value")],
+            "the late confirmation is reported once, with its Accessibility mode, so telemetry can tell it from a plain likely paste"
         )
         if delayAfterWatch != restoreDelay {
             await MainActor.run { paster.cancelPendingClipboardRestore() }
@@ -159,11 +167,12 @@ func testDictationPasteWait() async {
         assertEqual(finalClipboard, original, "the user's clipboard comes back")
     }
 
-    await runSuite("Without a late confirmation the clipboard comes back no sooner than after a full wait") {
+    await runSuite("Without a late confirmation the clipboard stays on the long restore schedule") {
         let original = "synthetic original clipboard"
         let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitNoLate-\(UUID().uuidString)")
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
         let source = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: nil) }
+        let probe = await MainActor.run { PasteWaitProbe() }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -183,7 +192,8 @@ func testDictationPasteWait() async {
                 restoreDelay: restoreDelay,
                 fallbackRestoreDelay: fallbackRestoreDelay,
                 pasteConfirmationWait: 0.3,
-                endWaitOnLikelyPaste: true
+                endWaitOnLikelyPaste: true,
+                onLateConfirmation: { probe.lateConfirmations.append($0) }
             )
         }
         assertEqual(outcome, .likelyPasted, "a quick read without Accessibility proof is a likely paste")
@@ -193,7 +203,9 @@ func testDictationPasteWait() async {
         let delay = await MainActor.run { paster.scheduledClipboardRestoreDelay } ?? 0
         let clipboardDuringRestoreWait = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
 
+        let lateConfirmations = await MainActor.run { probe.lateConfirmations }
         assertTrue(askedAfterWatch > 1, "the watch kept asking Accessibility after the paste returned")
+        assertTrue(lateConfirmations.isEmpty, "nothing confirmed, so no late confirmation is reported")
         assertTrue(delay > fallbackRestoreDelay, "with no confirmation the restore stays on the long schedule")
         assertEqual(
             clipboardDuringRestoreWait,
@@ -237,17 +249,17 @@ func testDictationPasteWait() async {
         await MainActor.run { paster.cancelPendingClipboardRestore() }
     }
 
-    await runSuite("A new paste stops the late-confirmation watch of the one before") {
-        let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitSuperseded-\(UUID().uuidString)")
+    await runSuite("A target with no Accessibility surface that reads right after Cmd+V reports that a likely paste ended the wait") {
+        let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitNoSurface-\(UUID().uuidString)")
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
-        let source = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: nil) }
+        let source = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: nil, canObservePaste: false) }
 
-        let askedBeforeNextPaste = await MainActor.run { () -> Int in
+        let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
             pasteboard.clearContents()
             pasteboard.setString("synthetic original clipboard", forType: .string)
-            _ = paster.paste(
-                "synthetic first dictation",
+            return paster.paste(
+                "synthetic no surface dictation",
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
@@ -260,45 +272,157 @@ func testDictationPasteWait() async {
                 restoreDelay: restoreDelay,
                 fallbackRestoreDelay: fallbackRestoreDelay,
                 pasteConfirmationWait: 5,
-                endWaitOnLikelyPaste: true
+                endWaitOnLikelyPaste: false
             )
-            let asked = source.asked
-            _ = paster.paste(
-                "synthetic next dictation",
+        }
+        let diagnostic = await MainActor.run { paster.lastConfirmationDiagnostic }
+        let delay = await MainActor.run { paster.scheduledClipboardRestoreDelay }
+
+        assertEqual(outcome, .likelyPasted, "a quick read with no way to confirm is a likely paste")
+        assertEqual(diagnostic?.context["likely_paste_ended_wait"], "true", "the diagnostic says the quick read ended the wait")
+        assertEqual(delay, fallbackRestoreDelay, "this path keeps its plain fallback restore, with nothing added")
+        await MainActor.run { paster.cancelPendingClipboardRestore() }
+    }
+
+    await runSuite("A newer paste stops the older paste's late-confirmation watch, which never touches the newer restore") {
+        let original = "synthetic original clipboard"
+        let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitSuperseded-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        // The older target would confirm the moment its watch asked again.
+        let olderSource = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: 2) }
+        let newerSource = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: nil) }
+        let probe = await MainActor.run { PasteWaitProbe() }
+
+        let (olderOutcome, newerOutcome, olderAskedBeforeNewerPaste) = await MainActor.run {
+            () -> (TextPasteOutcome, TextPasteOutcome, Int) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            @MainActor func paste(_ text: String, source: ConfirmsOnAskSource, wait: TimeInterval) -> TextPasteOutcome {
+                paster.paste(
+                    text,
+                    pasteboard: pasteboard,
+                    accessibilityTrusted: { true },
+                    requestAccessibilityTrust: {},
+                    pasteDispatcher: {
+                        _ = pasteboard.string(forType: .string)
+                        return true
+                    },
+                    confirmationSource: { source },
+                    targetIsFrontmost: { true },
+                    restoreDelay: restoreDelay,
+                    fallbackRestoreDelay: fallbackRestoreDelay,
+                    pasteConfirmationWait: wait,
+                    endWaitOnLikelyPaste: true,
+                    onLateConfirmation: { probe.lateConfirmations.append($0) }
+                )
+            }
+            let olderOutcome = paste("synthetic first dictation", source: olderSource, wait: 5)
+            let olderAsked = olderSource.asked
+            let newerOutcome = paste("synthetic next dictation", source: newerSource, wait: 0.2)
+            return (olderOutcome, newerOutcome, olderAsked)
+        }
+        // The newer paste's own watch runs to its deadline. A still-running
+        // older watch would have confirmed many times over in that window.
+        await paster.waitForLateConfirmationWatch()
+        let olderAskedAfter = await MainActor.run { olderSource.asked }
+        let newerAsked = await MainActor.run { newerSource.asked }
+        let lateConfirmations = await MainActor.run { probe.lateConfirmations }
+        let delay = await MainActor.run { paster.scheduledClipboardRestoreDelay } ?? 0
+        let clipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+
+        assertEqual(olderOutcome, .likelyPasted, "the older paste ended its wait on the quick read")
+        assertEqual(newerOutcome, .likelyPasted, "the newer paste ended its wait on the quick read")
+        assertTrue(newerAsked > 1, "the newer watch kept asking until its deadline, so the older one had time to act")
+        assertEqual(olderAskedAfter, olderAskedBeforeNewerPaste, "the older watch never asks its target again once a newer paste starts")
+        assertTrue(lateConfirmations.isEmpty, "the older paste reports no late confirmation after it was superseded")
+        assertTrue(delay > fallbackRestoreDelay, "the newer paste keeps its own long restore, not the older paste's confirmed-paste delay")
+        assertEqual(clipboard, "synthetic next dictation", "the newer dictation stays on the clipboard until its own restore")
+        await MainActor.run { paster.cancelPendingClipboardRestore() }
+        let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+        assertEqual(finalClipboard, original, "the user's clipboard comes back after both pastes")
+    }
+
+    await runSuite("Focus moving away during the late-confirmation watch keeps the take Pasted and still restores the clipboard") {
+        let original = "synthetic original clipboard"
+        let pasteboardName = NSPasteboard.Name("TranscriptedPasteWaitFocusMoved-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        // The target would confirm the moment the watch asked again.
+        let source = await MainActor.run { ConfirmsOnAskSource(confirmOnAsk: 2) }
+        let probe = await MainActor.run { PasteWaitProbe() }
+        let shortFallbackRestoreDelay: UInt64 = 300_000_000
+
+        let outcome = await MainActor.run { () -> TextPasteOutcome in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            let pasted = paster.paste(
+                "synthetic focus moved dictation",
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { true },
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                confirmationSource: { source },
+                targetIsFrontmost: { probe.targetIsFrontmost },
                 restoreDelay: restoreDelay,
-                fallbackRestoreDelay: fallbackRestoreDelay
+                fallbackRestoreDelay: shortFallbackRestoreDelay,
+                pasteConfirmationWait: 0.2,
+                endWaitOnLikelyPaste: true,
+                onLateConfirmation: { probe.lateConfirmations.append($0) }
             )
-            return asked
+            // The user switches apps right after the paste returns.
+            probe.targetIsFrontmost = false
+            return pasted
         }
         await paster.waitForLateConfirmationWatch()
-        let askedAfter = await MainActor.run { source.asked }
-        assertEqual(askedAfter, askedBeforeNextPaste, "the earlier paste's watch never asks the target again once a new paste starts")
+        let asked = await MainActor.run { source.asked }
+        let lateConfirmations = await MainActor.run { probe.lateConfirmations }
+        let delay = await MainActor.run { paster.scheduledClipboardRestoreDelay } ?? 0
+        let clipboardBeforeRestore = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
+
+        assertEqual(outcome, .likelyPasted, "the take stays a likely paste")
+        assertEqual(
+            DictationDeliveryPresentation.resolve(outcome: outcome, saveFailureMessage: nil, autoSend: .disabled, autoSendExpected: false),
+            .success(title: "Pasted"),
+            "the pill says Pasted, not the focus-moved press-⌘V notice"
+        )
+        assertEqual(asked, 1, "the watch stops without asking the target once focus moved")
+        assertTrue(lateConfirmations.isEmpty, "a watch stopped by a focus change reports no late confirmation")
+        assertTrue(delay > shortFallbackRestoreDelay, "the restore stays on the likely-paste schedule, not the confirmed-paste delay")
+        assertEqual(clipboardBeforeRestore, "synthetic focus moved dictation", "the dictation stays on the clipboard until that restore")
+
         await paster.waitForPendingClipboardRestore()
         let finalClipboard = await MainActor.run { NSPasteboard(name: pasteboardName).string(forType: .string) }
-        assertEqual(finalClipboard, "synthetic original clipboard", "the user's clipboard comes back after both pastes")
+        assertEqual(finalClipboard, original, "the user's clipboard still comes back after focus moved")
     }
 }
 
-/// A focus that can observe a paste and confirms it on the given Accessibility
-/// check (never when nil), like an editor whose value updates a beat after the
-/// clipboard read.
+/// What the fake target's focus does and what the paster reported back.
+@MainActor
+private final class PasteWaitProbe {
+    var targetIsFrontmost = true
+    var lateConfirmations: [ClipboardPasteConfirmationDiagnostic] = []
+}
+
+/// A focus that can observe a paste (unless told otherwise) and confirms it on
+/// the given Accessibility check (never when nil), like an editor whose value
+/// updates a beat after the clipboard read.
 @MainActor
 private final class ConfirmsOnAskSource: ClipboardPasteConfirmationSource {
     private let confirmOnAsk: Int?
     private let clearlyNotTextEntry: Bool
+    let canObservePaste: Bool
     private(set) var asked = 0
 
-    init(confirmOnAsk: Int?, clearlyNotTextEntry: Bool = false) {
+    init(confirmOnAsk: Int?, clearlyNotTextEntry: Bool = false, canObservePaste: Bool = true) {
         self.confirmOnAsk = confirmOnAsk
         self.clearlyNotTextEntry = clearlyNotTextEntry
+        self.canObservePaste = canObservePaste
     }
 
-    var canObservePaste: Bool { true }
     var focusIsClearlyNotTextEntry: Bool { clearlyNotTextEntry }
 
     func confirmationMode(

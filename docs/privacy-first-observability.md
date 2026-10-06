@@ -148,6 +148,7 @@ allowlist.
 - `dictation_start_failed`
 - `dictation_start_dropped_for_modifier_combo`
 - `dictation_completed`
+- `dictation_paste_late_confirmed`
 - `dictation_paste_retry_completed`
 - `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
@@ -221,6 +222,13 @@ allowlist.
   `word_count_bucket`, and `duration_bucket`
 - paste retry analytics limited to `result` and a coarse `reason`; never text,
   capture identifiers, or target-app identifiers
+- `dictation_paste_late_confirmed` limited to `target_confirmation_mode`
+  (`text_value` / `selection_range` / `change_notification` / `none`) plus the
+  take's `session_id`, `correlation_id` and `trigger`. It fires when a take
+  that already ended its paste wait as a likely paste (and reported
+  `target_confirmation_mode=clipboard_read`) is confirmed over Accessibility
+  before the full wait would have ended, so those takes can be told apart from
+  ones nothing ever confirmed; never text or target-app identifiers
 - agent capture-query analytics limited to one terminal event with
   `client_family`, `tool_kind`, `capture_kind`, `result`,
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated

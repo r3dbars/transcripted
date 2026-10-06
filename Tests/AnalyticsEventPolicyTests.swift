@@ -1231,6 +1231,30 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["sample_count"], "exact callback counts must stay out of zombie telemetry")
     }
 
+    runSuite("A late paste confirmation reaches analytics as one coarse mode") {
+        let lateConfirmed = AnalyticsEventPolicy.policy(forEvent: ClipboardPasteConfirmationDiagnostic.lateConfirmedEvent)
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "target_confirmation_mode": DictationTargetConfirmationMode.accessibilityMode(
+                    ClipboardPasteConfirmationDiagnostic.lateConfirmed(mode: "text_value").context["confirmation_mode"]
+                ).rawValue,
+                "confirmation_mode": "text_value",
+                "source_app_bundle": "com.example.PrivateApp",
+                "pasted_text": "hello private words",
+            ],
+            allowedKeys: (lateConfirmed?.allowedProperties ?? []).union(TelemetryContext.keys)
+        )
+        assertNotNil(lateConfirmed, "the late-confirmation event is allowlisted")
+        assertEqual(sanitized, ["target_confirmation_mode": "text_value"], "only the coarse Accessibility mode survives")
+        assertEqual(
+            DictationTargetConfirmationMode.accessibilityMode(
+                ClipboardPasteConfirmationDiagnostic.lateConfirmed(mode: nil).context["confirmation_mode"]
+            ),
+            .none,
+            "a confirmation with no known mode reports none, never a raw value"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
