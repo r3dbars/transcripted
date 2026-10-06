@@ -164,3 +164,10 @@ enum DictationTranscribeAgainPolicy {
         availability == .available
     }
 }
+
+/// Automation ids for the Dictations card's ⋯ menu. The page picks the
+/// shell's reveal item by this id, not by its title.
+enum DictationRowMenuIdentifier {
+    static let reveal = "transcripted.dictations.row.reveal"
+    static let transcribeAgain = "transcripted.dictations.row.transcribeAgain"
+}

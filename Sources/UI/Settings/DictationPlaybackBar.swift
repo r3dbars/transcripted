@@ -83,9 +83,9 @@ struct DictationCardBar: View {
                 copyAutomationIdentifier: "transcripted.dictations.row.copy"
             )
             .frame(height: 22)
+            // Hidden from the pointer until hover, never from VoiceOver.
             .opacity(showsActions ? 1 : 0)
             .allowsHitTesting(showsActions)
-            .accessibilityHidden(!showsActions)
         }
         .frame(minHeight: 22)
         .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.85), value: isOpen)

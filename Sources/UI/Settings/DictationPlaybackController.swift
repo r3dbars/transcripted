@@ -187,20 +187,32 @@ final class DictationAudioInfoStore: ObservableObject {
         Self.key(for: entry).flatMap { infos[$0] }
     }
 
-    func load(_ entry: SavedDictationEntry) async {
+    /// Reads the entry's kept-audio facts. A found file is cached for good;
+    /// a miss isn't, because a just-saved take's audio lands in the archive a
+    /// moment after its text: a recent entry retries a few times, and any
+    /// entry tries again the next time its card appears.
+    func load(_ entry: SavedDictationEntry, now: Date = Date()) async {
         guard let key = Self.key(for: entry),
               let relativePath = entry.audioRelativePath,
-              infos[key] == nil, !inFlight.contains(key) else { return }
+              infos[key]?.isAvailable != true, !inFlight.contains(key) else { return }
         inFlight.insert(key)
         defer { inFlight.remove(key) }
         let folder = entry.url.deletingLastPathComponent()
-        let info = await Task.detached(priority: .utility) {
-            guard let url = DictationAudioArchive.resolveURL(relativePath: relativePath, dictationsFolder: folder) else {
-                return Info(isAvailable: false, duration: nil)
-            }
-            return Info(isAvailable: true, duration: Self.duration(of: url))
-        }.value
-        infos[key] = info
+        let isRecent = now.timeIntervalSince(entry.createdAt) < 120
+        let retryDelays: [UInt64] = isRecent ? [1, 2, 4, 8] : []
+        var attempt = 0
+        while true {
+            let info = await Task.detached(priority: .utility) {
+                guard let url = DictationAudioArchive.resolveURL(relativePath: relativePath, dictationsFolder: folder) else {
+                    return Info(isAvailable: false, duration: nil)
+                }
+                return Info(isAvailable: true, duration: Self.duration(of: url))
+            }.value
+            infos[key] = info
+            guard !info.isAvailable, attempt < retryDelays.count, !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: retryDelays[attempt] * 1_000_000_000)
+            attempt += 1
+        }
     }
 
     /// The file to play right now. Resolved again on every play because the

@@ -172,7 +172,9 @@ settings-side agent connection flow.
   length (`DictationAudioInfoStore`). `DictationCardPresentation.swift` holds
   the fast-tested metadata line and Transcribe again rules;
   `DictationTranscribeAgainRunner.swift` runs one Transcribe again at a time
-  (file-based STT, never an audio engine).
+  (file-based STT through `STTRouter.transcribeSavedDictation`, which keeps
+  `isTranscribing` true so a new dictation queues behind it; never an audio
+  engine).
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color
   palette shared by the Home expansion.
 - Foundation-pure Home policy/copy helpers (fast-testable, no SwiftUI):

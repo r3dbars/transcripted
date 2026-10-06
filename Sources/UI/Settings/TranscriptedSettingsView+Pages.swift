@@ -487,7 +487,7 @@ extension TranscriptedSettingsView {
             transcribeAgainUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
             // File-based STT over the kept take; no engine or input device.
             transcribeSamples: { [sttRouter] samples in
-                try await sttRouter.transcribeSegment(samples: samples, source: .microphone)
+                try await sttRouter.transcribeSavedDictation(samples: samples)
             },
             onTranscribeAgainFailure: { message, retry in
                 presentHomeActionFailure(

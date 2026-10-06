@@ -38,7 +38,7 @@ func testHomeFirstArtifactVisibility() {
         // (DictationCardPresentationTests), and Show in Finder reveals the file.
         assertTrue(
             settingsSource.contains(#"HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text")"#),
-            "dictation row menu should use the same Open Markdown language as meeting previews"
+            "the shell's dictation menu items should keep the Open Markdown wording meeting previews use (the Dictations card itself shows Show in Finder, not Open Markdown)"
         )
         // Quiet-library redesign: the activity card became a row
         // (QuietWorkingRow); a just-saved meeting settles into the day list

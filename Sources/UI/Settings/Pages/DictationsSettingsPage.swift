@@ -163,8 +163,10 @@ struct DictationsSettingsPage: View {
     }
 
     /// The card's ⋯ menu: Transcribe again (only with kept audio), Show in
-    /// Finder, and Delete. "Show in Finder" is the shell's Reveal in Finder
-    /// item relabeled, so revealing stays one owned implementation.
+    /// Finder, and Delete. "Show in Finder" is the shell's reveal item
+    /// (picked by its automation id) relabeled, so revealing stays one owned
+    /// implementation. The shell's Open Markdown item stays off this menu,
+    /// per the approved mockup.
     private func menuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
 
@@ -175,7 +177,7 @@ struct DictationsSettingsPage: View {
                     title: title,
                     symbolName: "arrow.clockwise",
                     isEnabled: DictationTranscribeAgainPolicy.isEnabled(availability),
-                    automationIdentifier: "transcripted.dictations.row.transcribeAgain"
+                    automationIdentifier: DictationRowMenuIdentifier.transcribeAgain
                 ) {
                     startTranscribeAgain(entry)
                 }
@@ -183,11 +185,12 @@ struct DictationsSettingsPage: View {
         }
 
         items.append(contentsOf: dictationRowMenuItems(entry).compactMap { item in
-            guard item.title == "Reveal in Finder" else { return nil }
+            guard item.automationIdentifier == DictationRowMenuIdentifier.reveal else { return nil }
             return HomeRowMenuItem(
                 title: "Show in Finder",
                 symbolName: item.symbolName,
                 isEnabled: item.isEnabled,
+                automationIdentifier: DictationRowMenuIdentifier.reveal,
                 action: item.action
             )
         })

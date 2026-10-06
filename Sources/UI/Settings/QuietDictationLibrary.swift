@@ -135,6 +135,9 @@ struct QuietDictationCard: View {
             await onLoadAudioInfo()
         }
         .accessibilityElement(children: .contain)
+        // The hover-only buttons, reachable from the card itself too.
+        .accessibilityAction(named: Text("Copy"), onCopy)
+        .modifier(DictationMenuAccessibilityActions(items: menuItems))
         .accessibilityIdentifier("transcripted.dictations.row")
     }
 
@@ -187,5 +190,16 @@ struct QuietDictationCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("transcripted.dictations.row.showMore")
+    }
+}
+
+/// Each ⋯ menu item as a named VoiceOver action on the card.
+private struct DictationMenuAccessibilityActions: ViewModifier {
+    let items: [HomeRowMenuItem]
+
+    func body(content: Content) -> some View {
+        items.filter(\.isEnabled).reduce(AnyView(content)) { view, item in
+            AnyView(view.accessibilityAction(named: Text(item.title), item.action))
+        }
     }
 }
