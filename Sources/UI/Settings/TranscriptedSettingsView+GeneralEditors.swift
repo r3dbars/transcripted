@@ -343,7 +343,9 @@ extension TranscriptedSettingsView {
                     title: "Apps",
                     message: "Auto-send only happens in these apps. Toggle a running app below, or use Add to allow one that isn't open right now."
                 ),
-                showsDivider: !mergedAutoSendApps.isEmpty
+                // Same as `!mergedAutoSendApps.isEmpty` without building the
+                // list (and its app-name lookups) a second time per render.
+                showsDivider: !(autoEnterAllowedBundleIDs.isEmpty && autoEnterAppCandidates.isEmpty)
             ) {
                 HStack(spacing: 8) {
                     SettingsInlineActionButton(title: "Refresh") {
