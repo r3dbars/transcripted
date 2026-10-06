@@ -2,7 +2,7 @@
 // Transcribe again: run local STT over a saved take's kept audio file and
 // replace that entry's text in its day file.
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 /// Re-transcribes one saved dictation from its kept audio file.
