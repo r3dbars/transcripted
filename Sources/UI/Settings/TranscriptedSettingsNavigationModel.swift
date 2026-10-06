@@ -11,6 +11,9 @@ final class TranscriptedSettingsNavigationModel {
     /// True from `present()` until the window closes (not minimized or hidden).
     /// Work done for a window nobody can see is gated on it.
     var isWindowOpen = false
+    /// When `present()` last ran. The app activation it causes would only
+    /// repeat reads the presentation's full refresh already does.
+    @ObservationIgnored var lastPresentedAt: Date?
 
     /// Bumped by ⌘F (Find Meetings). Home reveals and focuses its find bar
     /// via `.task(id:)` on this token, which also fires on mount — so the
