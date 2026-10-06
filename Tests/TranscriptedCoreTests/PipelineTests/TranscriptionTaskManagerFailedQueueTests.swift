@@ -868,6 +868,84 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(manager.activeTasks.isEmpty)
     }
 
+    /// Cancel on Home during transcription must not throw away a recorded
+    /// meeting: the running job's audio becomes a retry row, like queued
+    /// meetings, and no late transcript or second row appears.
+    func testCancelAllKeepingRecordedAudioLeavesOneRetryRowWithPlayableAudio() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "This should not be saved.")
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 0,
+                    endTime: 2,
+                    embedding: [Float](repeating: 0.42, count: 256),
+                    qualityScore: 0.95
+                )
+            ]),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("keep-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("keep-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            meetingTitle: "Kept call"
+        )
+        try await waitUntil { speech.didStart }
+
+        manager.cancelAll(recordedAudioRetryMessage: "Transcription cancelled")
+
+        let rows = manager.failedTranscriptionManager.failedTranscriptions
+        XCTAssertEqual(rows.count, 1, "the cancelled meeting should be kept as one retry row")
+        XCTAssertEqual(rows.first?.errorMessage, "Transcription cancelled")
+        XCTAssertEqual(rows.first?.meetingTitle, "Kept call")
+        XCTAssertEqual(manager.activeCount, 1, "the cancelled model call still occupies the pipeline until it returns")
+        XCTAssertFalse(
+            manager.hasPreservableActiveTranscriptionAudio,
+            "the retry row owns the audio now, so quitting must not save it a second time"
+        )
+        XCTAssertEqual(
+            manager.preserveActiveTranscriptionsForShutdown(errorMessage: "App quit during cancellation"),
+            0,
+            "cancel then quit must not add a second row for the same meeting"
+        )
+
+        speech.release()
+        try await waitUntil { speech.didReturn && manager.activeTasks.isEmpty }
+
+        let finalRows = manager.failedTranscriptionManager.failedTranscriptions
+        XCTAssertEqual(finalRows.count, 1, "the late cancelled body must not add or remove rows")
+        let row = try XCTUnwrap(finalRows.first)
+        try await waitUntil {
+            let current = manager.failedTranscriptionManager.failedTranscriptions.first ?? row
+            return FileManager.default.fileExists(atPath: current.micAudioURL.path)
+                && (current.systemAudioURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+        }
+        let savedMarkdown = (try? FileManager.default.contentsOfDirectory(
+            at: outputFolder,
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "md" } ?? []
+        XCTAssertTrue(savedMarkdown.isEmpty, "a cancelled meeting should not save a late transcript")
+        XCTAssertNil(manager.lastSavedTranscriptURL, "a cancelled meeting should not publish saved metadata")
+        XCTAssertTrue(
+            manager.failedTranscriptionManager.failedTranscriptions.first?.isRetryable ?? false,
+            "the kept meeting should offer Try again"
+        )
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+    }
+
     func testCancelAllAfterCommittedSideEffectsStillPublishesTranscript() async throws {
         let statsStore = CancellingOnRecordStatsStore()
         let manager = makeManager(
