@@ -36,7 +36,7 @@ extension ParakeetEngine {
 
     private func microphoneSharingDowngradeIsAllowed() -> Bool {
         ParakeetMicrophoneSharingPolicy.mayDowngrade(
-            callAppRunning: CallAppMicrophoneSharingMonitor.shared.isCallAppRunning,
+            callAppRunning: CallAppMicrophoneSharingMonitor.shared.callAppRunning(),
             isRecording: isRecording,
             borrowsMeetingMic: sharedMeetingMicClaim != nil,
             audioStartInProgress: audioStartInProgress,
