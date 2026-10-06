@@ -596,7 +596,7 @@ struct TranscriptedSettingsView: View {
                     result: didOpen ? .success : .failed
                 )
             },
-            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
+            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder", automationIdentifier: DictationRowMenuIdentifier.reveal) {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
                 let didReveal = revealOwnFile(
                     candidateURLs: [entry.url],

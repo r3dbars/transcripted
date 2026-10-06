@@ -162,8 +162,19 @@ settings-side agent connection flow.
 - `QuietHomeLibrary.swift` - quiet-library Meetings components (2026-08
   redesign): header sentence, meeting/working rows, and the in-place
   expansion with speaker labels and naming.
-- `QuietDictationLibrary.swift` - the matching per-entry Dictations rows and
-  expansion.
+- `QuietDictationLibrary.swift` - the Dictations page card (2026-10 redesign
+  after Handy's history page): bar on top, italic text below clamped to four
+  lines with Show more, Copy and ⋯ on hover. `DictationPlaybackBar.swift` is
+  the bar and the inline player that grows out of the play button (icon
+  morph, pulse, scrubber; Reduce Motion turns it into plain state changes).
+  `DictationPlaybackController.swift` plays one take at a time with
+  `AVAudioPlayer` (output only) and lazily reads each card's kept-audio
+  length (`DictationAudioInfoStore`). `DictationCardPresentation.swift` holds
+  the fast-tested metadata line and Transcribe again rules;
+  `DictationTranscribeAgainRunner.swift` runs one Transcribe again at a time
+  (file-based STT through `STTRouter.transcribeSavedDictation`, which keeps
+  `isTranscribing` true so a new dictation queues behind it; never an audio
+  engine).
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color
   palette shared by the Home expansion.
 - Foundation-pure Home policy/copy helpers (fast-testable, no SwiftUI):

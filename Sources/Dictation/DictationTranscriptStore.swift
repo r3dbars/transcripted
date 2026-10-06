@@ -591,7 +591,7 @@ enum DictationTranscriptStore {
         pattern: #"^## \d{1,2}:\d{2} [AP]M - .+"#
     )
 
-    private static func isEntryHeading(_ line: String) -> Bool {
+    static func isEntryHeading(_ line: String) -> Bool {
         // Every match starts with "## ", so this cheap check skips the regex
         // for the body and metadata lines that make up most of a day file.
         guard line.hasPrefix("## "), let regex = entryHeadingRegex else { return false }

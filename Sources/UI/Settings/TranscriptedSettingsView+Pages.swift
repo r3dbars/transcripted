@@ -481,32 +481,21 @@ extension TranscriptedSettingsView {
                 trackSettingsAction("load_more_dictations", page: navigation.selectedPage)
                 homeViewModel.loadMoreDictations()
             },
-            onOpenDictation: { entry in
-                trackSettingsAction("open_recent_dictation", page: navigation.selectedPage)
-                let didOpen = openOwnFile(
-                    candidateURLs: [entry.url],
-                    failureTitle: "Could not open dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound,
-                    onComplete: { ProductUsageTelemetry.trackResult(kind: .dictation, action: .openMarkdown, surface: .dictations, succeeded: $0, artifactDate: entry.createdAt) }
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .dictation,
-                    actionKind: .openMarkdown,
-                    surface: .homeRow,
-                    artifactDate: entry.createdAt,
-                    result: didOpen ? .success : .failed
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .reviewYesterday,
-                    surface: .homeRow,
-                    artifactKind: .dictation,
-                    artifactDate: entry.createdAt,
-                    result: didOpen ? .success : .failed
-                )
-            },
             onCopyDictation: { entry in handleCopyDictation(entry) },
             dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) },
-            onDeleteDictation: { entry in deleteDictationWithUndo(entry) }
+            onDeleteDictation: { entry in deleteDictationWithUndo(entry) },
+            transcribeAgainUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
+            // File-based STT over the kept take; no engine or input device.
+            transcribeSamples: { [sttRouter] samples in
+                try await sttRouter.transcribeSavedDictation(samples: samples)
+            },
+            onTranscribeAgainFailure: { message, retry in
+                presentHomeActionFailure(
+                    title: "Could not transcribe dictation again",
+                    message: message,
+                    retry: retry
+                )
+            }
         )
     }
 
