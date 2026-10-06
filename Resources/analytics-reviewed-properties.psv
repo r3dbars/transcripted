@@ -85,6 +85,7 @@ delivery
 destination
 diarize_ms
 dictation_ready
+dictation_warmup_ms
 dictations_completed
 digest_day
 digest_is_partial
@@ -106,6 +107,7 @@ graduated
 had_suggestion
 has_target
 hfp_suspected
+hotkeys_ready_ms
 import_stage
 initiation
 input_channels
@@ -117,10 +119,12 @@ install_uuid
 is_retry
 last_event
 location_type
+login_launch
 mac_chip
 measurement_basis
 meeting_dry_run_completed
 meeting_recording_ready
+meeting_warmup_ms
 meetings_completed
 meetings_started
 mic_backend
@@ -219,6 +223,7 @@ start_failure_stage
 start_latency_ms
 start_retry
 state
+status_item_ms
 step_id
 step_index
 stop_timed_out
@@ -258,6 +263,7 @@ version
 voice_processing
 voice_processing_active
 voice_processing_start_fallback
+warmup_start_ms
 warning_kind
 was_recorded
 was_recording

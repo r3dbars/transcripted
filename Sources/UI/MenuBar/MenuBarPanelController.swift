@@ -292,8 +292,12 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
-        MenuBarShortcutWarningPresentation.resolve(
-            hotkeyError: appState.contextCapture.hotkeyError,
+        // No warning is the usual case, and resolve() shows nothing then.
+        // Return before the Fn-key lookup below, which syncs system
+        // preferences on every popover refresh.
+        guard let hotkeyError = appState.contextCapture.hotkeyError, !hotkeyError.isEmpty else { return nil }
+        return MenuBarShortcutWarningPresentation.resolve(
+            hotkeyError: hotkeyError,
             accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
             functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
                 for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),

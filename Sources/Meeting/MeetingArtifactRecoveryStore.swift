@@ -129,13 +129,19 @@ enum MeetingArtifactRecoveryStore {
         lock.lock()
         defer { lock.unlock() }
 
+        let directory = directory ?? defaultDirectory
+        let storedRecords = try records(in: directory, fileManager: fileManager)
+        // Home asks this for every meeting without audio. There is almost
+        // never a pending record, so skip reading the transcript's
+        // frontmatter when there is nothing to match it against.
+        guard !storedRecords.isEmpty else { return nil }
+
         let captureID = captureID(
             sourceTranscriptURL: transcriptURL,
             targetTranscriptURL: transcriptURL
         )
         let transcriptPath = transcriptURL.standardizedFileURL.path
-        let directory = directory ?? defaultDirectory
-        for (url, storedRecord) in try records(in: directory, fileManager: fileManager) where matches(
+        for (url, storedRecord) in storedRecords where matches(
             storedRecord,
             captureID: captureID,
             transcriptPaths: [transcriptPath]

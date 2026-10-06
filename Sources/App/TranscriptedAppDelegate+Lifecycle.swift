@@ -19,6 +19,17 @@ extension TranscriptedAppDelegate {
             == OSType(keyAELaunchedAsLogInItem)
     }
 
+    /// `secondsSinceConsoleLogin()`, also telling launch telemetry whether
+    /// this counts as a login start (same 120 s window as the Home window).
+    static func secondsSinceConsoleLoginNotingLaunch(launchedAsLoginItem: Bool) -> TimeInterval? {
+        let secondsSinceLogin = secondsSinceConsoleLogin()
+        LaunchTimingTelemetry.noteLaunchedAtLogin(
+            launchedAsLoginItem
+                || (secondsSinceLogin.map { $0 < LaunchWindowPolicy.loginStartWindowSeconds } ?? false)
+        )
+        return secondsSinceLogin
+    }
+
     /// How long ago this user's current console login happened, from utmpx.
     static func secondsSinceConsoleLogin(now: Date = Date()) -> TimeInterval? {
         let user = NSUserName()

@@ -564,6 +564,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/AnalyticsActiveDay.swift"
     "Sources/Observability/MachineClassTelemetry.swift"
+    "Sources/Observability/LaunchTimingTelemetry.swift"
     "Sources/Meeting/MeetingProcessingTelemetry.swift"
     "Sources/Observability/DictationPasteRetryTelemetry.swift"
     "Sources/Observability/WorkflowRecoveryTelemetry.swift"

@@ -302,6 +302,15 @@ For each new or changed event:
   `suggestions_shown` and `suggestions_accepted` totals for one whole local
   day, read from the text-free outcome ledger. Accepted words go out only as
   `words_accepted_bucket`, on the `word_count_bucket` boundaries
+- launch speed is the fifth: `launch_models_warmed` carries `status_item_ms`,
+  `hotkeys_ready_ms` and `warmup_start_ms` (process start to the menu bar
+  icon, the shortcuts being registered (before onboarding grants
+  Accessibility they're registered but can't fire yet), and the model warmup
+  starting), `dictation_warmup_ms` and `meeting_warmup_ms` (each warmup step;
+  a first run that downloads a model counts the download), all rounded to
+  10 ms; `login_launch` (true when started at login); plus
+  `stt_model`, `mac_chip`, and `memory_gb_bucket`. `LaunchTimingTelemetry`
+  formats them. Durations only
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and

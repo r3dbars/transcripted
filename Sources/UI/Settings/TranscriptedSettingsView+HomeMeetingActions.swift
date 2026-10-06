@@ -99,19 +99,23 @@ extension TranscriptedSettingsView {
         let sourceURL = preview.transcriptURL
         let attachmentID = preview.audio?.id
 
-        let renameTask = Task.detached(priority: .userInitiated) { () throws -> HomeMeetingRenameResult in
+        let renameTask = Task.detached(
+            priority: .userInitiated
+        ) { () throws -> (HomeMeetingRenameResult, MeetingAudioAttachment?) in
             if let attachmentID {
                 await MainActor.run {
                     MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: [attachmentID])
                 }
             }
-            return try HomeMeetingRename.rename(transcriptAt: sourceURL, to: rawTitle)
+            let result = try HomeMeetingRename.rename(transcriptAt: sourceURL, to: rawTitle)
+            // Finding the renamed audio lists folders and can read the
+            // recovery records, so it stays off the main thread too.
+            return (result, MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL))
         }
 
         Task { @MainActor in
             do {
-                let result = try await renameTask.value
-                let audio = MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL)
+                let (result, audio) = try await renameTask.value
                 if homeExpandedMeetingID == preview.id || homeExpandedMeetingPreview?.id == preview.id {
                     // Base the update on the loaded preview when it arrived
                     // meanwhile (keeps the transcript body); fall back to the
@@ -276,12 +280,15 @@ extension TranscriptedSettingsView {
                 return
             }
 
-            let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [preview.transcriptURL])
-                ?? preview.transcriptURL
+            let candidateURL = preview.transcriptURL
             Task { @MainActor in
                 do {
                     _ = try await Task.detached(priority: .userInitiated) {
-                        try HomeMeetingSpeakerRename.renameMany(
+                        // A stale path makes this list the transcripts folder,
+                        // so resolve it here rather than on the main thread.
+                        let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [candidateURL])
+                            ?? candidateURL
+                        return try HomeMeetingSpeakerRename.renameMany(
                             transcriptAt: transcriptURL,
                             assignments: resolvedLocalAssignments
                         )
@@ -678,11 +685,27 @@ extension TranscriptedSettingsView {
             : nil
         let savedSource = searchResults
             ?? homeViewModel.meetingDaySections.flatMap { $0.items }
-        let savedMeetings = savedSource
-            .filter { HomeMeetingListFilter.matches(query: query, in: HomeMeetingListFilter.searchFields(for: $0)) }
+        // This runs on every body pass of the window. With no query every row
+        // matches, so skip building each row's date words; otherwise split the
+        // query once instead of once per row.
+        let tokens = HomeMeetingListFilter.tokens(in: query)
+        let savedMeetings = (tokens.isEmpty
+            ? savedSource
+            : savedSource.filter {
+                HomeMeetingListFilter.matches(
+                    tokens: tokens,
+                    haystack: HomeMeetingListFilter.haystack(for: HomeMeetingListFilter.searchFields(for: $0))
+                )
+            })
             .map(HomeMeetingListItem.saved)
-        let failedMeetings = meetingSession.failedMeetings
-            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+        let failedMeetings = (tokens.isEmpty
+            ? meetingSession.failedMeetings
+            : meetingSession.failedMeetings.filter {
+                HomeMeetingListFilter.matches(
+                    tokens: tokens,
+                    haystack: HomeMeetingListFilter.haystack(for: Self.searchFields(for: $0))
+                )
+            })
             .map(HomeMeetingListItem.failed)
         let items = (savedMeetings + failedMeetings)
             .sorted { $0.date > $1.date }
