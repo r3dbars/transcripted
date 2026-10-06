@@ -642,19 +642,19 @@ final class MeetingCaptureBridge: ObservableObject {
         // for older embedders, but this host needs the generation to reject a
         // completion from a previous timed-out recording.
 
-        // Capture-lifecycle cues used to live inside Core (NSSound("Tink") on
-        // start, NSSound("Pop") on stop). Core no longer depends on AppKit for
-        // cosmetic UI; the host plays the sounds here. Audio fires the cue from
-        // the main queue (via DispatchQueue.main.async / MainActor.run inside
-        // the lifecycle helpers), but we still bounce through Task @MainActor
-        // to match the rest of the bridge's threading discipline.
+        // Native sound startup can block in Core Audio routing. Only enqueue
+        // these cosmetic cues on the main actor; the sound player's serial
+        // output queue owns loading, preparation and playback. Capture and its
+        // readiness/timeout callbacks must never wait for a cue to start.
+        // Keep the legacy unconditional meeting cues: enableUISounds is the
+        // Settings "Dictation sounds" switch, not a meeting-sound preference.
         audio.onCaptureLifecycleCue = { [weak self] cue in
             Task { @MainActor [weak self] in
                 switch cue {
                 case .recordingStarted:
-                    NSSound(named: "Tink")?.play()
+                    AppSoundPlayer.shared.play(.meetingRecordingStart, respectingPreferences: false)
                 case .recordingStopped:
-                    NSSound(named: "Pop")?.play()
+                    AppSoundPlayer.shared.play(.meetingRecordingStop, respectingPreferences: false)
                 case .micAttenuatedByForeignVoiceProcessing:
                     self?.micAttenuationCueObserved = true
                 case .meetingRouteStabilityWarning(let outcome):

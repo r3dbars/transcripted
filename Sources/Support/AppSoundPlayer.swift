@@ -23,6 +23,17 @@ enum UISoundPreferences {
     }
 }
 
+protocol AppCueAudioPlayer: AnyObject {
+    var volume: Float { get set }
+    var currentTime: TimeInterval { get set }
+    var isPlaying: Bool { get }
+    func prepareToPlay() -> Bool
+    func play() -> Bool
+    func stop()
+}
+
+extension AVAudioPlayer: AppCueAudioPlayer {}
+
 final class AppSoundPlayer {
     typealias WarningReporter = @Sendable (_ cue: Cue) -> Void
 
@@ -32,6 +43,8 @@ final class AppSoundPlayer {
         case dictationCancelled
         case noSpeech
         case meetingTranscriptComplete
+        case meetingRecordingStart
+        case meetingRecordingStop
         /// The menu bar menu's hover tick. Interface chrome, so it also
         /// follows the Mac's own interface-sounds switch.
         case menuHover
@@ -52,6 +65,8 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.dictationCancelledSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
+            case .meetingRecordingStart, .meetingRecordingStop:
+                return nil
             case .menuHover:
                 return "menu-hover.wav"
             case .menuRowHover:
@@ -77,7 +92,7 @@ final class AppSoundPlayer {
                 // A touch firmer than the hover ticks (about 10%), still well
                 // under the dictation clicks.
                 return 0.15
-            case .dictationCancelled, .meetingTranscriptComplete:
+            case .dictationCancelled, .meetingTranscriptComplete, .meetingRecordingStart, .meetingRecordingStop:
                 return 1.0
             }
         }
@@ -86,9 +101,23 @@ final class AppSoundPlayer {
             switch self {
             case .menuHover, .menuRowHover, .menuPress:
                 return true
-            case .dictationStart, .dictationStop, .dictationCancelled, .noSpeech, .meetingTranscriptComplete:
+            case .dictationStart, .dictationStop, .dictationCancelled, .noSpeech, .meetingTranscriptComplete,
+                 .meetingRecordingStart, .meetingRecordingStop:
                 return false
             }
+        }
+
+        var systemSoundFileName: String? {
+            switch self {
+            case .meetingRecordingStart: return "Tink.aiff"
+            case .meetingRecordingStop: return "Pop.aiff"
+            default: return nil
+            }
+        }
+
+        var playbackVolume: Float {
+            // Preserve the previous NSSound cues' default volume.
+            systemSoundFileName == nil ? TranscriptedConstants.overlayCueVolume * volumeMultiplier : 1.0
         }
     }
 
@@ -96,12 +125,23 @@ final class AppSoundPlayer {
 
     // Output only; never opens an input device. userInitiated so a cue is not
     // starved behind background work while dictation is starting or stopping.
-    private let queue = DispatchQueue(label: "com.transcripted.ui-sound-player", qos: .userInitiated)
-    private var players: [Cue: AVAudioPlayer] = [:]
+    private let queue: DispatchQueue
+    private let makePlayer: (URL) throws -> AppCueAudioPlayer
+    private let now: () -> TimeInterval
+    private var players: [Cue: AppCueAudioPlayer] = [:]
+    private var attemptedCues: Set<Cue> = []
     private var didAttemptPreload = false
     private var warningReporter: WarningReporter?
 
-    private init() {}
+    init(
+        queue: DispatchQueue = DispatchQueue(label: "com.transcripted.ui-sound-player", qos: .userInitiated),
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        makePlayer: @escaping (URL) throws -> AppCueAudioPlayer = { try AVAudioPlayer(contentsOf: $0) }
+    ) {
+        self.queue = queue
+        self.now = now
+        self.makePlayer = makePlayer
+    }
 
     func setWarningReporter(_ reporter: WarningReporter?) {
         queue.async { [weak self] in
@@ -118,13 +158,16 @@ final class AppSoundPlayer {
     func play(_ cue: Cue, respectingPreferences: Bool = true) {
         guard !respectingPreferences || UISoundPreferences.isEnabled() else { return }
         guard !cue.followsSystemInterfaceSounds || UISoundPreferences.systemInterfaceSoundsEnabled() else { return }
-        let requestedAt = ProcessInfo.processInfo.systemUptime
+        let requestedAt = now()
         queue.async { [weak self] in
             guard let self else { return }
+            guard !Self.isStale(requestedAt: requestedAt, now: self.now()) else { return }
             self.loadPlayersIfNeeded()
             // A click that lands a second late reads as a glitch, not feedback.
-            guard !Self.isStale(requestedAt: requestedAt, now: ProcessInfo.processInfo.systemUptime) else { return }
-            guard let player = self.players[cue] else { return }
+            guard !Self.isStale(requestedAt: requestedAt, now: self.now()) else { return }
+            guard let player = self.player(for: cue) else { return }
+            // Creating or preparing a player can itself wait on Core Audio.
+            guard !Self.isStale(requestedAt: requestedAt, now: self.now()) else { return }
             if player.isPlaying {
                 player.stop()
             }
@@ -141,20 +184,32 @@ final class AppSoundPlayer {
         guard !didAttemptPreload else { return }
         didAttemptPreload = true
 
-        for cue in Cue.allCases {
-            guard let url = Self.bundledURL(for: cue) else { continue }
-            do {
-                let player = try AVAudioPlayer(contentsOf: url)
-                player.volume = TranscriptedConstants.overlayCueVolume * cue.volumeMultiplier
-                player.prepareToPlay()
-                players[cue] = player
-            } catch {
-                warningReporter?(cue)
-            }
+        // Meeting system sounds stay lazy: launch preloading must not open
+        // another native sound path before a meeting actually requests it.
+        for cue in Cue.allCases where cue.systemSoundFileName == nil {
+            _ = player(for: cue)
         }
     }
 
-    private static func bundledURL(for cue: Cue) -> URL? {
+    private func player(for cue: Cue) -> AppCueAudioPlayer? {
+        if let player = players[cue] { return player }
+        guard attemptedCues.insert(cue).inserted, let url = Self.soundURL(for: cue) else { return nil }
+        do {
+            let player = try makePlayer(url)
+            player.volume = cue.playbackVolume
+            _ = player.prepareToPlay()
+            players[cue] = player
+            return player
+        } catch {
+            warningReporter?(cue)
+            return nil
+        }
+    }
+
+    static func soundURL(for cue: Cue) -> URL? {
+        if let fileName = cue.systemSoundFileName {
+            return URL(fileURLWithPath: "/System/Library/Sounds").appendingPathComponent(fileName)
+        }
         guard let fileName = cue.bundledFileName else { return nil }
         return Bundle.main.resourceURL?.appendingPathComponent("Sounds/\(fileName)")
     }
