@@ -9,13 +9,6 @@ import Foundation
 import TranscriptedCore
 #endif
 
-private enum ClipboardPasteConfirmationWaitResult: Equatable {
-    case confirmed
-    case unconfirmed
-    case focusChanged
-    case cancelled
-}
-
 @MainActor
 final class ClipboardRestoringTextPaster {
     struct PendingClipboardRestore {
@@ -67,6 +60,9 @@ final class ClipboardRestoringTextPaster {
     private var latestStartedOperation: SupersessionEpoch.Token?
     private(set) var lastConfirmationDiagnostic: ClipboardPasteConfirmationDiagnostic?
     private(set) var lastPasteTiming: ClipboardPasteTiming?
+    /// The delay the latest scheduled restore of the user's clipboard waits.
+    private(set) var scheduledClipboardRestoreDelay: UInt64?
+    private lazy var lateConfirmationWatch = ClipboardLateConfirmationWatch()
 
     deinit {
         clipboardRestoreTask?.cancel()
@@ -142,6 +138,14 @@ final class ClipboardRestoringTextPaster {
         await waitForPendingClipboardRestore()
     }
 
+    func waitForLateConfirmationWatch() async {
+        await lateConfirmationWatch.waitUntilFinished()
+    }
+
+    /// `endWaitOnLikelyPaste`: the caller needs no confirmed paste (a dictation with Auto Enter not
+    /// expected), so a quick read by a target that could still confirm may end the wait as a likely
+    /// paste (`FocusedTextPasteConfirmationPolicy.endsWaitOnLikelyPaste`). `onLateConfirmation`
+    /// hears if that target confirms before the full wait would have ended.
     func paste(
         _ text: String,
         target: DictationPasteTarget? = nil,
@@ -159,7 +163,9 @@ final class ClipboardRestoringTextPaster {
         retainClipboardForPasteRetry: Bool = true,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
-        pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
+        pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
+        endWaitOnLikelyPaste: Bool = false,
+        onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil
     ) -> TextPasteOutcome {
         let operation = operationEpoch.begin()
         latestStartedOperation = operation
@@ -338,9 +344,8 @@ final class ClipboardRestoringTextPaster {
         timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
 
         let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
-        let targetRemainsFrontmost = targetIsFrontmost ?? {
-            target?.matchesCurrentFrontmostApp() != false
-        }
+        let targetRemainsFrontmost = targetIsFrontmost ?? { target?.matchesCurrentFrontmostApp() != false }
+        var accessibilityConfirmedMode: String?
         let confirmPasteReceived = pasteConfirmed ?? {
             // The text cannot have landed before the target read the borrowed
             // clipboard, so don't ask over Accessibility until it has. Asking
@@ -350,37 +355,47 @@ final class ClipboardRestoringTextPaster {
             if let temporaryProvider, !temporaryProvider.didProvideData {
                 return false
             }
-            if accessibilityConfirmation?.confirmationMode(
+            guard let mode = accessibilityConfirmation?.confirmationMode(
                 text,
                 clipboardWasRead: temporaryProvider?.didProvideData == true,
                 clipboardReadAt: temporaryProvider?.firstReadAt,
                 pasteDispatchedAt: pasteDispatchedAt
-            ) != nil {
-                return true
-            }
-            return false
+            ) else { return false }
+            accessibilityConfirmedMode = mode
+            return true
         }
         // A target with no observable confirmation surface can never upgrade to a
         // confirmed paste inside this wait (no AX value, selection, or change
         // observer exists to fire), so once the target reads the borrowed
         // clipboard after Cmd+V the rest of the window is dead time. The read is
         // not process-attributed, so it may shorten the wait but can never prove
-        // delivery or authorize Auto Enter.
+        // delivery or authorize Auto Enter. A target that can confirm keeps the
+        // full wait unless the caller opted out of needing a confirmed paste.
+        let focusRefutesPaste = pasteConfirmed == nil
+            && accessibilityConfirmation?.focusIsClearlyNotTextEntry == true
+        var waitEndedOnLikelyPaste = false, waitEndedOnReadWithoutSurface = false
         let stopWaitingAfterClipboardRead = {
-            guard confirmationUnavailable,
-                  let clipboardReadAt = temporaryProvider?.firstReadAt else {
-                return false
-            }
-            return clipboardReadAt >= pasteDispatchedAt
+            guard let clipboardReadAt = temporaryProvider?.firstReadAt else { return false }
+            waitEndedOnReadWithoutSurface = confirmationUnavailable && clipboardReadAt >= pasteDispatchedAt
+            if confirmationUnavailable { return waitEndedOnReadWithoutSurface }
+            waitEndedOnLikelyPaste = pasteConfirmed == nil && FocusedTextPasteConfirmationPolicy.endsWaitOnLikelyPaste(
+                callerAllows: endWaitOnLikelyPaste,
+                focusRefutesPaste: focusRefutesPaste,
+                pasteDispatchedAt: pasteDispatchedAt,
+                clipboardReadAt: clipboardReadAt
+            )
+            return waitEndedOnLikelyPaste
         }
 
         timingConfirmationStartedAt = CFAbsoluteTimeGetCurrent()
-        let pasteConfirmationResult = waitForPasteConfirmation(
+        var confirmationDeadline: TimeInterval = 0
+        let pasteConfirmationResult = ClipboardPasteConfirmationWait.run(
             targetIsFrontmost: targetRemainsFrontmost,
             pasteConfirmed: confirmPasteReceived,
             stopWaitingUnconfirmed: stopWaitingAfterClipboardRead,
             isCurrentOperation: isCurrentOperation,
-            timeout: pasteConfirmationWait
+            timeout: pasteConfirmationWait,
+            deadline: &confirmationDeadline
         )
         timingConfirmationFinishedAt = CFAbsoluteTimeGetCurrent()
         guard isCurrentOperation(), pasteConfirmationResult != .cancelled else { return cancelledOutcome }
@@ -406,6 +421,7 @@ final class ClipboardRestoringTextPaster {
             let clipboardReadOutsideWindow = !clipboardReadSuggestsPaste
                 && temporaryProvider?.firstReadAt != nil
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
+            diagnostics["likely_paste_ended_wait"] = "\(waitEndedOnLikelyPaste || (waitEndedOnReadWithoutSurface && clipboardReadSuggestsPaste))"
             diagnostics["paste_evidence"] = targetStillFrontmost && clipboardReadSuggestsPaste
                 ? "clipboard_read"
                 : clipboardReadOutsideWindow ? "read_outside_window" : "none"
@@ -448,8 +464,6 @@ final class ClipboardRestoringTextPaster {
             // Cmd+V even with no text box focused, so a quick read only counts
             // as a paste when the focus could take text. A caller that decides
             // confirmation itself (`pasteConfirmed`) also owns this call.
-            let focusRefutesPaste = pasteConfirmed == nil
-                && accessibilityConfirmation?.focusIsClearlyNotTextEntry == true
             diagnostics["focus_refutes_paste"] = "\(focusRefutesPaste)"
             lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
                 event: "dictation_paste_confirmation_diagnostics",
@@ -457,14 +471,35 @@ final class ClipboardRestoringTextPaster {
             )
             if clipboardReadSuggestsPaste && !focusRefutesPaste {
                 guard isCurrentOperation() else { return cancelledOutcome }
+                // Ending early adds the skipped wait back, so the clipboard returns about
+                // when a full wait's would: a few ms sooner, ~300 ms when AX stalls the
+                // full wait's last checks. A late confirmation still gets the short restore.
+                let unusedWait = waitEndedOnLikelyPaste
+                    ? confirmationDeadline - ProcessInfo.processInfo.systemUptime : 0
                 scheduleClipboardRestore(
                     savedItems,
                     temporaryString: text,
                     temporaryChangeCount: temporaryChangeCount,
                     to: pasteboard,
                     token: pasteToken,
-                    delay: fallbackRestoreDelay
+                    delay: FocusedTextPasteConfirmationPolicy.likelyPasteRestoreDelay(
+                        fallbackDelay: fallbackRestoreDelay, unusedWait: unusedWait
+                    )
                 )
+                if waitEndedOnLikelyPaste {
+                    lateConfirmationWatch.start(
+                        until: confirmationDeadline,
+                        isCurrent: { [weak self] in self?.pasteEpoch.isCurrent(pasteToken) == true },
+                        targetIsFrontmost: targetRemainsFrontmost,
+                        pasteConfirmed: confirmPasteReceived,
+                        onConfirmed: { [weak self, temporaryChangeCount] in
+                            self?.scheduleClipboardRestore(savedItems, temporaryString: text,
+                                temporaryChangeCount: temporaryChangeCount, to: pasteboard,
+                                token: pasteToken, delay: restoreDelay)
+                            onLateConfirmation?(.lateConfirmed(mode: accessibilityConfirmedMode))
+                        }
+                    )
+                }
                 return .likelyPasted
             }
 
@@ -530,6 +565,7 @@ final class ClipboardRestoringTextPaster {
         clipboardAutoEnterReadinessTask?.cancel()
         clipboardAutoEnterReadinessTask = nil
         clipboardAutoEnterReadyToken = nil
+        lateConfirmationWatch.cancel()
         temporaryPasteboardDataProvider = nil
         return pendingClipboardRestore.clear()
     }
@@ -620,6 +656,7 @@ final class ClipboardRestoringTextPaster {
     ) {
         guard pasteEpoch.isCurrent(token) else { return }
         clipboardRestoreTask?.cancel()
+        scheduledClipboardRestoreDelay = delay
         pendingClipboardRestore.install(
             PendingClipboardRestore(
                 savedItems: savedItems,
@@ -700,38 +737,6 @@ final class ClipboardRestoringTextPaster {
 
         temporaryPasteboardDataProvider = provider
         return true
-    }
-
-    private func waitForPasteConfirmation(
-        targetIsFrontmost: @MainActor () -> Bool,
-        pasteConfirmed: @MainActor () -> Bool,
-        stopWaitingUnconfirmed: @MainActor () -> Bool,
-        isCurrentOperation: @MainActor () -> Bool,
-        timeout: TimeInterval
-    ) -> ClipboardPasteConfirmationWaitResult {
-        func check() -> ClipboardPasteConfirmationWaitResult? {
-            guard isCurrentOperation() else { return .cancelled }
-            let frontmost = targetIsFrontmost()
-            guard isCurrentOperation() else { return .cancelled }
-            guard frontmost else { return .focusChanged }
-            let confirmed = pasteConfirmed()
-            guard isCurrentOperation() else { return .cancelled }
-            let stillFrontmost = targetIsFrontmost()
-            guard isCurrentOperation() else { return .cancelled }
-            guard stillFrontmost else { return .focusChanged }
-            if confirmed { return .confirmed }
-            let stop = stopWaitingUnconfirmed()
-            guard isCurrentOperation() else { return .cancelled }
-            return stop ? .unconfirmed : nil
-        }
-        if let result = check() { return result }
-        guard timeout > 0 else { return .unconfirmed }
-        let deadline = ProcessInfo.processInfo.systemUptime + timeout
-        while ProcessInfo.processInfo.systemUptime < deadline {
-            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-            if let result = check() { return result }
-        }
-        return check() ?? .unconfirmed
     }
 }
 
