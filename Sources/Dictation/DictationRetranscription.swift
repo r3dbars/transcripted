@@ -105,21 +105,33 @@ enum DictationRetranscription {
             throw Failure.unreadableAudio
         }
 
-        var delivered = false
+        let source = OneShotInput(buffer: input)
         var conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-            if delivered {
+            if source.delivered {
                 inputStatus.pointee = .endOfStream
                 return nil
             }
-            delivered = true
+            source.delivered = true
             inputStatus.pointee = .haveData
-            return input
+            return source.buffer
         }
         guard status != .error, conversionError == nil,
               let channel = output.floatChannelData?[0] else {
             throw Failure.unreadableAudio
         }
         return Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
+    }
+
+    /// The one input buffer for `convert(to:)`. The SDK marks the input block
+    /// `@Sendable`, but the converter calls it synchronously on this thread,
+    /// so the buffer and flag never cross threads.
+    private final class OneShotInput: @unchecked Sendable {
+        let buffer: AVAudioPCMBuffer
+        var delivered = false
+
+        init(buffer: AVAudioPCMBuffer) {
+            self.buffer = buffer
+        }
     }
 }
