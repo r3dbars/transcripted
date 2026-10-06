@@ -228,8 +228,8 @@ final class DictationMuffleRoute {
     private(set) var lastSplice = DictationMuffleSplice.plain
 
     /// Opens the copy's gate and mutes the originals in the same step. On a
-    /// lagging route the gate holds shut until the copy catches up to where
-    /// the originals stopped (DictationMuffleSplice).
+    /// lagging route the gate holds shut, then swells in as the copy catches
+    /// up to where the originals stopped (DictationMuffleSplice).
     /// Returns false (and leaves the originals playing) if the mute can't
     /// start.
     func cut() -> Bool {

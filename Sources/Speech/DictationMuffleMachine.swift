@@ -11,12 +11,12 @@
 //      source, a revoked grant), stand down: nothing was ever muted.
 //   3. If the copy lags the original by more than a few milliseconds (seen on
 //      some routes), the cut can wait briefly for a quiet moment so the splice
-//      lands in a pause. By default it doesn't: the route holds the copy back
-//      by the lag instead (DictationMuffleSplice), which needs no pause.
+//      lands in a pause. By default it doesn't: the route swells the copy in
+//      over the lag instead (DictationMuffleSplice), which needs no pause.
 //   4. Cut: open the copy's gate and mute the originals in the same step. On
 //      wired routes the copy is still dry, so the only seam is a few
 //      milliseconds of time, not a jump in tone or level. On lagging routes
-//      the copy comes back after a brief drop (DictationMuffleSplice).
+//      the copy swells in over the lag (DictationMuffleSplice).
 //   5. Shortly after, glide the cutoff down: the muffle fades in.
 //   6. The mic closes: glide back to dry, then hand back (unmute the
 //      originals, then fade the copy out over them; on lagging routes, in a

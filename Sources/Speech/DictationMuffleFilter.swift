@@ -312,13 +312,15 @@ struct DictationMuffleFilter {
 /// The copy trails the original by `copyDelayFrames`: ~7 ms on wired outputs,
 /// ~171 ms on AirPods, where the tap delivers the mix one output latency late.
 /// Opening the copy the moment the originals are muted replays that much
-/// music, which on AirPods is a clear repeat (heard 2026-10-06). So on a
-/// lagging route the gate stays shut until the copy reaches the moment the
-/// originals stopped, then fades in: the music drops out briefly and comes
-/// back muffled where it left off, with nothing repeated. While the gate is
-/// held the filter jumps to its target, so the copy returns fully muffled:
-/// one "drop, then muffled" step instead of a drop and then a sweep. Short
-/// lags (wired and built-in) keep the plain few-millisecond fade.
+/// music, which on AirPods is a clear repeat (heard 2026-10-06). Holding the
+/// copy back for the whole lag removes the repeat but leaves a noticeable
+/// silence. So on a lagging route the gate stays shut for half the catch-up
+/// and swells in over the other half, reaching full level exactly where the
+/// originals stopped: the music eases into muffled, and only the swell
+/// replays anything, quietly and already muffled (the owner's pick by ear,
+/// 2026-10-06). While the gate is held the filter jumps to its target, so
+/// the swell is fully muffled. Short lags (wired and built-in) keep the
+/// plain few-millisecond fade.
 struct DictationMuffleSplice: Equatable {
     /// Above this lag the cut holds the copy back (the same line where the
     /// machine used to wait for a quiet moment).
