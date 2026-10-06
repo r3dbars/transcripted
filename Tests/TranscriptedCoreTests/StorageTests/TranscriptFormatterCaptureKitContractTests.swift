@@ -85,6 +85,34 @@ final class TranscriptFormatterCaptureKitContractTests: XCTestCase {
 
     // MARK: - Transcript body lines the kit's legacy parser expects
 
+    func testTranscriptClocksShowHoursWithoutRoundingOrWrapping() {
+        let clocks: [(Double, String)] = [
+            (0, "00:00"), (59.999, "00:59"), (60, "01:00"),
+            (3599.999, "59:59"), (3600, "01:00:00"),
+            (3600.999, "01:00:00"), (3601, "01:00:01"),
+            (86400, "24:00:00"), (359999, "99:59:59"),
+            (360000, "100:00:00"),
+        ]
+        let utterances = clocks.enumerated().map { index, clock in
+            TranscriptionUtterance(
+                start: clock.0, end: clock.0 + 1, channel: 1, speakerId: 0,
+                persistentSpeakerId: nil, matchSimilarity: nil,
+                transcript: "Boundary row \(index)."
+            )
+        }
+        let result = TranscriptionResult(
+            micUtterances: [], systemUtterances: utterances,
+            duration: 360001, processingTime: 1
+        )
+        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result, transcriptId: Self.captureId,
+            date: Date(timeIntervalSince1970: 1_775_000_000)
+        )
+        for (index, clock) in clocks.enumerated() {
+            XCTAssertTrue(markdown.contains("[\(clock.1)] [System/Speaker 0] Boundary row \(index).\n\n"))
+        }
+    }
+
     func testTranscriptBodyLinesMatchLegacyRowFormat() {
         let doc = makeMarkdown()
 

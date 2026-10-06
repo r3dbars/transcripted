@@ -261,9 +261,7 @@ extension TranscriptSaver {
 
         // Merge all utterances sorted by timestamp
         for utterance in result.allUtterances {
-            let startMinutes = Int(utterance.start) / 60
-            let startSeconds = Int(utterance.start) % 60
-            let timestampStr = String(format: "%02d:%02d", startMinutes, startSeconds)
+            let timestampStr = DateFormattingHelper.formatTranscriptTimestamp(utterance.start)
 
             let source = utterance.channel == 0 ? "Mic" : "System"
 

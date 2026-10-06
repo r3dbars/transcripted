@@ -86,6 +86,43 @@ is missing or incomplete; they never silently build retrieval-only instead.
 - No AI summary/restyling, new speaker learning, app stats update, or background
   watcher. The app/context reader can read the saved meeting.
 
+### Network output and an uncertain save
+
+Meeting imports publish the completed Markdown with a hard link so a competing
+writer cannot be overwritten and readers cannot see an incomplete transcript.
+Some mounted filesystems, including some SMB configurations, do not support this
+operation even when ordinary file creation works. `--plain-filename` changes
+collision naming; it does not change filesystem support. The CLI does not fall
+back to an overwriting rename or an incomplete copy under the final filename.
+
+For an unsupported destination, export to an explicitly **local** folder first:
+
+```sh
+"$CLI" import-audio recording.m4a --output-dir /path/to/local/export \
+  --no-retain-audio --json
+```
+
+Then copy the finished Markdown to the desired destination using a copy operation
+that refuses to replace an existing entry. Keep the local file until the copied
+bytes are verified. A manual copy can be visible before it finishes; this is an
+export workaround, not the CLI's atomic-publication guarantee. The original
+recording is untouched. `--no-retain-audio` means the copied note has no retained
+playback audio and no hidden playback reference to the original recording.
+
+An I/O or connection error during publication may mean the final link was created
+but its reply was lost. The CLI reports that it **could not confirm publication**,
+returns an error instead of a success receipt, and does not try a second filename.
+It preserves the hidden `.transcripted-import-*.tmp` Markdown and any owned
+`audio/<transcript-stem>_audio/` archive in the output directory. Check the output
+before retrying or removing these files: a final Markdown file may already refer
+to that audio. The staged Markdown's `capture_id` identifies the import. A proven
+collision or unsupported-operation failure still cleans up its own uncommitted
+files; it never removes an existing final transcript.
+
+This behavior does not establish compatibility with any particular NAS or SMB
+server. Direct publication still requires filesystem support and validation on a
+scratch share.
+
 The command uses Parakeet v3's multilingual automatic transcription, not the
 app's selected Whisper model or explicit language picker. It does not claim a
 detected language code. Files need at least two seconds of decodable audio and

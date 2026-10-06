@@ -10,6 +10,10 @@ struct MeetingImportReceipt: Codable {
 /// Publishes a new meeting without replacing an existing capture. The Markdown
 /// is the commit marker: readers cannot see it until retained audio is complete.
 enum MeetingImportPublisher {
+    private enum PublicationOutcome {
+        case preparing, committed, uncertain
+    }
+
     static func publish(
         markdown: String,
         normalizedAudioURL: URL?,
@@ -26,9 +30,9 @@ enum MeetingImportPublisher {
         )
     }
 
-    /// The commit-boundary hook allows deterministic cancellation/failure tests
-    /// without relying on a race against disk speed. Production uses the
-    /// overload above, which supplies no additional work.
+    /// The commit-boundary hook and link operation allow deterministic failure
+    /// tests, including a completed remote operation followed by a lost reply.
+    /// Production uses the real no-replace link and no additional hook.
     static func publish(
         markdown: String,
         normalizedAudioURL: URL?,
@@ -37,7 +41,8 @@ enum MeetingImportPublisher {
         captureID: UUID,
         date: Date,
         plainFilename: Bool = false,
-        beforeCommit: () throws -> Void
+        beforeCommit: () throws -> Void,
+        link: (Int32, String, Int32, String) -> Int32 = { Darwin.linkat($0, $1, $2, $3, 0) }
     ) throws -> MeetingImportReceipt {
         // A plain name (just the title) is tried first when asked for. If that
         // name is already taken, fall back to the unique title + capture ID
@@ -48,7 +53,7 @@ enum MeetingImportPublisher {
                 return try publish(
                     markdown: markdown, normalizedAudioURL: normalizedAudioURL,
                     outputDirectory: outputDirectory, stem: stem, captureID: captureID,
-                    beforeCommit: beforeCommit
+                    beforeCommit: beforeCommit, link: link
                 )
             } catch let error as NSError
                 where index < stems.count - 1 && error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
@@ -64,7 +69,8 @@ enum MeetingImportPublisher {
         outputDirectory: URL,
         stem: String,
         captureID: UUID,
-        beforeCommit: () throws -> Void
+        beforeCommit: () throws -> Void,
+        link: (Int32, String, Int32, String) -> Int32
     ) throws -> MeetingImportReceipt {
         try Task.checkCancellation()
         guard outputDirectory.isFileURL else {
@@ -90,13 +96,13 @@ enum MeetingImportPublisher {
         var archiveFD: Int32 = -1
         var archiveOwned = false
         var retainedAudioOwned = false
-        var committed = false
+        var outcome = PublicationOutcome.preparing
 
         defer {
-            if stagingOwned {
+            if stagingOwned, outcome != .uncertain {
                 Darwin.unlinkat(rootFD, stagingName, 0)
             }
-            if !committed, archiveOwned {
+            if outcome == .preparing, archiveOwned {
                 if archiveFD >= 0 {
                     if retainedAudioOwned {
                         Darwin.unlinkat(archiveFD, "system_audio.wav", 0)
@@ -171,10 +177,30 @@ enum MeetingImportPublisher {
         // linkat is atomic and refuses ANY existing final entry, including a
         // symlink. Unlike an existence check followed by rename/write, this
         // remains no-clobber when separate CLI processes publish concurrently.
-        guard Darwin.linkat(rootFD, stagingName, rootFD, transcriptName, 0) == 0 else {
-            throw failure("Could not publish the meeting transcript without replacing an existing file.")
+        guard link(rootFD, stagingName, rootFD, transcriptName) == 0 else {
+            let code = errno
+            if code == ENOTSUP || code == EOPNOTSUPP {
+                throw failure(
+                    "This filesystem does not support safe transcript publication. "
+                        + "Use --output-dir with a local folder and --no-retain-audio, then copy "
+                        + "the finished Markdown without replacing an existing file.", code: code
+                )
+            }
+            if code == EEXIST, hasDifferentDestination(rootFD, staged: stagingName, final: transcriptName) {
+                throw failure("Could not publish the meeting transcript without replacing an existing file.", code: code)
+            }
+            // A server can create the link and then lose the acknowledgement.
+            // Even EEXIST can be a replay of that successful request: only a
+            // different destination proves a collision. Keep recovery files on
+            // all other failures; a failed lookup is not proof of nonpublication.
+            outcome = .uncertain
+            throw NSError(domain: "MeetingImportPublisher.UncertainPublication", code: Int(code), userInfo: [
+                NSLocalizedDescriptionKey: "Could not confirm transcript publication. Check the output directory "
+                    + "before retrying: the transcript may already be saved. The staged Markdown and any retained "
+                    + "audio were left in place. \(String(cString: strerror(code)))"
+            ])
         }
-        committed = true
+        outcome = .committed
         // Publication has happened; never turn a late cancellation or a best-
         // effort directory sync failure into deletion of this saved meeting.
         _ = Darwin.fsync(rootFD)
@@ -183,6 +209,16 @@ enum MeetingImportPublisher {
             audioPath: retainedPath,
             captureID: captureID.uuidString
         )
+    }
+
+    /// A real collision is a different entry, including a directory or symlink.
+    /// An equal identity or an unavailable lookup leaves publication uncertain.
+    private static func hasDifferentDestination(_ rootFD: Int32, staged: String, final: String) -> Bool {
+        var stagedInfo = stat()
+        var finalInfo = stat()
+        guard Darwin.fstatat(rootFD, staged, &stagedInfo, AT_SYMLINK_NOFOLLOW) == 0,
+              Darwin.fstatat(rootFD, final, &finalInfo, AT_SYMLINK_NOFOLLOW) == 0 else { return false }
+        return stagedInfo.st_dev != finalInfo.st_dev || stagedInfo.st_ino != finalInfo.st_ino
     }
 
     private static func fileStems(title: String, captureID: UUID, date: Date, plain: Bool) -> [String] {

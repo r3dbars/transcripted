@@ -227,8 +227,16 @@ Transcript grammar: one entry per line under `## Full Transcript`, blank line
 between entries:
 
 ```
-[<MM:SS>] [<Mic|System>/<speaker label>] <text>
+[<MM:SS or HH:MM:SS>] [<Mic|System>/<speaker label>] <text>
 ```
+
+Elapsed timestamps use `MM:SS` below one hour and `HH:MM:SS` from one hour
+onward, truncating fractional seconds: `59:59`, `01:00:00`, `100:00:00`.
+Hours have at least two digits and do not wrap at 24. Readers also accept older
+total-minute timestamps such as `60:00` and `6000:00`, and unpadded hours such
+as `1:00:00`. Speaker renaming preserves the original timestamp spelling.
+These already-supported clock forms remain within format version 1; duration
+metadata and speaking-time summaries keep their existing formats.
 
 Mic labels default to `You` (or a named speaker with local-speaker review);
 system labels default to `Speaker <n>` until named. In legacy
@@ -274,7 +282,8 @@ Details:
   `Recorded <medium date, short time>`, humanized duration, word count and turn
   count when nonzero.
 - Transcript entries are blank-line-separated blocks: a header line
-  `**<MM:SS>**  [<Mic|System>/<label>]` (two spaces after the bold timestamp)
+  `**<MM:SS or HH:MM:SS>**  [<Mic|System>/<label>]` (two spaces after the bold timestamp,
+  with the same elapsed-time and legacy-read rules as raw transcripts)
   followed by the utterance text on the next line(s).
 - An empty transcript renders as `_No transcript captured._`.
 - Unknown trailing Markdown sections, including old generated summary blocks,

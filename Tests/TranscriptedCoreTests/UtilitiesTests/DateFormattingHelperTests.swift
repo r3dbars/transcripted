@@ -27,6 +27,14 @@ final class DateFormattingHelperTests: XCTestCase {
         XCTAssertEqual(DateFormattingHelper.formatDayStamp(fixedDate), "2024-01-15")
     }
 
+    func testTranscriptTimestampHoursDoNotChangeGeneralDurationFormatting() {
+        XCTAssertEqual(DateFormattingHelper.formatTranscriptTimestamp(3599.999), "59:59")
+        XCTAssertEqual(DateFormattingHelper.formatTranscriptTimestamp(3600.999), "01:00:00")
+        XCTAssertEqual(DateFormattingHelper.formatTranscriptTimestamp(86400), "24:00:00")
+        XCTAssertEqual(DateFormattingHelper.formatTranscriptTimestamp(360000), "100:00:00")
+        XCTAssertEqual(DateFormattingHelper.formatDuration(3600), "60:00")
+    }
+
     func testParseDayStampRoundTripsWithFormat() {
         let parsed = DateFormattingHelper.parseDayStamp("2024-01-15")
         XCTAssertEqual(parsed.map(DateFormattingHelper.formatDayStamp), "2024-01-15")
