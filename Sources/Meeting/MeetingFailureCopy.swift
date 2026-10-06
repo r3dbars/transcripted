@@ -201,7 +201,7 @@ struct MeetingFailureCopy: Equatable {
                 )
             }
             return MeetingFailureCopy(
-                title: isRetryable ? "Transcript needs another pass" : "Recording needs attention",
+                title: isRetryable ? "Something went wrong" : "Recording needs attention",
                 detail: shortErrorMessage
             )
         }

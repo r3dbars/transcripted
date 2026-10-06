@@ -144,4 +144,25 @@ func testCallAppMicrophoneSharingMonitor() {
         )
         assertTrue(monitor.isZoomRunning, "The old name reports any call app, same as isCallAppRunning")
     }
+
+    runSuite("The launch monitor skips the blocking read, but a capture start never acts before one") {
+        var synchronousReads = 0
+        let monitor = CallAppMicrophoneSharingMonitor(
+            notificationCenter: NotificationCenter(),
+            runningApplicationBundleIDs: {
+                synchronousReads += 1
+                return ["us.zoom.xos"]
+            },
+            backgroundRunningApplicationBundleIDs: {
+                // Never answers during this suite: the first read is still out.
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                return []
+            }
+        )
+        assertEqual(synchronousReads, 0, "Building the monitor doesn't read running apps on the caller's thread")
+        assertTrue(monitor.callAppRunning(), "A start before the first read lands still sees Zoom")
+        assertEqual(synchronousReads, 1, "That start read once, synchronously")
+        assertTrue(monitor.callAppRunning(), "Later starts use the kept value")
+        assertEqual(synchronousReads, 1, "No second synchronous read once one has landed")
+    }
 }

@@ -40,12 +40,16 @@ final class EventReporter {
     }
 
     /// Capture an event. Fire-and-forget — never blocks the caller.
+    /// `forwardToSentry: false` keeps an allowlisted `.error` out of Sentry
+    /// for this one call; everything else (local log, reliability packet,
+    /// `reliability_failure_observed`) is unchanged.
     func capture(
         level: EventLevel,
         engine: String,
         event: String,
         message: String,
-        context: [String: String]? = nil
+        context: [String: String]? = nil,
+        forwardToSentry: Bool = true
     ) {
         let plan = ObservabilityEventCapturePlan.make(
             level: level,
@@ -57,7 +61,8 @@ final class EventReporter {
             infoDictionary: Bundle.main.infoDictionary,
             timestamp: isoFormatter.string(from: Date()),
             appVersion: appVersion,
-            osVersion: osVersion
+            osVersion: osVersion,
+            forwardToSentry: forwardToSentry
         )
         let localEntry = plan.localEntry
 
@@ -88,13 +93,15 @@ final class EventReporter {
             // including low-level engine failures without a product lifecycle event.
             // Both sinks receive the exact same UUIDs and failure taxonomy.
             AnalyticsReporter.track("reliability_failure_observed", properties: plan.mergedContext)
-            CrashReporter.shared.captureObservabilityEvent(
-                level: level,
-                engine: sentryPolicy.engine,
-                event: sentryPolicy.event,
-                message: sentryPolicy.summary,
-                context: plan.mergedContext
-            )
+            if plan.forwardsToSentry {
+                CrashReporter.shared.captureObservabilityEvent(
+                    level: level,
+                    engine: sentryPolicy.engine,
+                    event: sentryPolicy.event,
+                    message: sentryPolicy.summary,
+                    context: plan.mergedContext
+                )
+            }
         }
     }
 

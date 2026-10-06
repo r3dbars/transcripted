@@ -243,8 +243,13 @@ public enum ScreenScene {
         return bands.count >= 2
     }
 
+    /// A NaN, infinite or huge `y` (a misbehaving app's AX frame) would trap
+    /// in `Int(_:)`; it lands in band 0 or the clamp instead. Real frames
+    /// sit in 0...1 and are unaffected.
     private static func verticalBand(of rect: NormalizedRect) -> Int {
-        Int((rect.y * Double(verticalBandCount)).rounded(.down))
+        let band = (rect.y * Double(verticalBandCount)).rounded(.down)
+        guard band.isFinite else { return 0 }
+        return Int(min(max(band, -1_000_000), 1_000_000))
     }
 
     /// Left-aligned bubbles are read as the other party, right-aligned as

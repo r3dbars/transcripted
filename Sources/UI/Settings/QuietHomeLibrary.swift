@@ -92,9 +92,9 @@ struct QuietHomeHeader: View {
 
     private var capturesSummary: String {
         switch capturesToday {
-        case 0: return "No captures yet today"
-        case 1: return "1 capture today"
-        default: return "\(capturesToday) captures today"
+        case 0: return "Nothing saved yet today"
+        case 1: return "1 saved today"
+        default: return "\(capturesToday) saved today"
         }
     }
 }
@@ -132,7 +132,7 @@ struct QuietMeetingRow: View {
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
-                    .help("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                    .help("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
                     .accessibilityIdentifier("transcripted.home.meeting.system-audio-unverified")
             }
 
@@ -310,7 +310,7 @@ struct QuietMeetingExpansion: View {
                         Label(warning, systemImage: "exclamationmark.triangle")
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.attention)
-                        Text("No system-audio signal was detected. The other side may have been quiet, or system audio may not have been captured.")
+                        Text("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                     }

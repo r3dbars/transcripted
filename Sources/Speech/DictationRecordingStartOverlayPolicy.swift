@@ -197,10 +197,16 @@ struct DictationEarlyReleasePresentationPolicy {
     static let shortTapMessage = "Hold the key while you speak. Push to Talk records until you let go."
 
     static func message(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> String {
-        guard shortcutMode == .pushToTalk, pendingForMs < shortTapThresholdMs else {
-            return microphoneNotReadyMessage
-        }
-        return shortTapMessage
+        blamesMicrophone(shortcutMode: shortcutMode, pendingForMs: pendingForMs)
+            ? microphoneNotReadyMessage
+            : shortTapMessage
+    }
+
+    /// True when the user is told "Mic wasn't ready": a Hands-Free second
+    /// press, a mode we don't know (UI retry), or a Push to Talk release at or
+    /// past `shortTapThresholdMs`. False only for a tapped Push to Talk key.
+    static func blamesMicrophone(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> Bool {
+        !(shortcutMode == .pushToTalk && pendingForMs < shortTapThresholdMs)
     }
 }
 
@@ -212,10 +218,24 @@ struct DictationEarlyReleaseCancelReport: Equatable {
     // Deliberately not "push-to-talk release": hands-free is the default
     // mode, and its stop press reaches here too.
     static let message = "Dictation hotkey ended the session before the microphone finished opening"
-    /// `.error`, not `.info`: only `.error` events reach Sentry and the
-    /// reliability counter. The user asked to dictate, saw an error, and lost
-    /// the attempt, the same as `microphone_start_timeout`.
+    /// `.error`, not `.info`: only `.error` events reach the reliability
+    /// counter (PostHog) and Sentry. The user asked to dictate, saw an error,
+    /// and lost the attempt, the same as `microphone_start_timeout`.
     static let level: EventLevel = .error
+
+    /// Sentry gets this event only when the user saw "Mic wasn't ready", the
+    /// same split `DictationEarlyReleasePresentationPolicy` makes for the
+    /// message. A tapped Push to Talk key (under 250 ms) was told to hold the
+    /// key; it isn't a mic failure, and it was most of Sentry issue 2J's
+    /// volume. It still goes out as `.error`, so the local log, the
+    /// reliability packet and PostHog's `reliability_failure_observed` count
+    /// are the same for every early release.
+    static func forwardsToSentry(shortcutMode: DictationShortcutMode?, pendingForMs: Int) -> Bool {
+        DictationEarlyReleasePresentationPolicy.blamesMicrophone(
+            shortcutMode: shortcutMode,
+            pendingForMs: pendingForMs
+        )
+    }
 
     /// `pending_for_ms` is how long the start had been running when the
     /// hotkey ended it (seconds means a stalled mic open, ~100 ms means a quick

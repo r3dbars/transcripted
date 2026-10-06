@@ -19,15 +19,15 @@
 ## Files
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
-- `DictationSessionCapTimer.swift` — the clock behind the 5-minute cap: sleep until the last 30 seconds, then tick every second so the pill counts down (telling VoiceOver once, the first time the countdown shows), and return at the cap or on cancel. `DictationSessionController.installSessionTimeout` runs it on the real uptime clock and then finalizes the take; `Tests/DictationSessionCapTimerTests.swift` runs it on a fake clock
-- `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session. `saveTranscriptAndRetire` is the one rule for a finished take, shared by the async and synchronous saves: decide whether audio is kept (Settings → Storage → Keep dictation audio), save the transcript with its `Audio:` path when kept, then `retire(_:afterSaving:keptAudioRelativePath:)` moves the WAV into the archive (or deletes it when not kept). A failed save always leaves the WAV in recovery
+- `DictationSessionCapTimer.swift` — the clock behind the 15-minute cap: sleep until the last 30 seconds, then tick every second so the pill counts down (telling VoiceOver once, the first time the countdown shows), and return at the cap or on cancel. `DictationSessionController.installSessionTimeout` runs it on the real uptime clock and then finalizes the take; `Tests/DictationSessionCapTimerTests.swift` runs it on a fake clock
+- `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus metadata immediately after recording stops and keeps both until the transcript saves, the take is discarded (Esc, no speech, or a short failed take), or the next launch's `purgeLeftovers(createdBefore:)` deletes a short (under 30 s) leftover from an earlier run. `saveTranscriptAndRetire` is the one rule for a finished take, shared by the async and synchronous saves: decide whether audio is kept (Settings → Storage → Keep dictation audio), save the transcript with its `Audio:` path when kept, then `retire(_:afterSaving:keptAudioRelativePath:)` moves the WAV into the archive (or deletes it when not kept). A failed save always leaves the WAV in recovery
 - `DictationAudioArchive.swift` — kept dictation audio in `<capture-library>/dictations/audio/<uuid>.m4a|.wav`: `keep` moves a saved take's recovery WAV in and drops its recovery metadata, `compress` turns it into an M4A in the background (the WAV is deleted only after a checked M4A is in place), `resolveURL` maps a day file's relative `Audio:` path to the M4A, else the WAV, else nil, `prune` deletes files older than the keep window, and `deleteKeptAudio(for:)` removes a deleted entry's audio once Home's undo window closes (the store's delete functions leave audio alone so the storage smokes compile them without the archive). Everything checks names and refuses symlinks and paths outside the audio folder
 - `DictationEntryTextRewrite.swift` — Transcribe again's day-file edit: `DictationTranscriptStore.replaceEntryText(entryID:in:with:createdAt:)` rewrites one entry, found by Entry ID under `DictationTranscriptMutationLock`. Only the heading title, `Words:`, `Characters:`, and the body change; every other line and section stays byte for byte. An unknown ID or empty text throws and leaves the file alone
 - `DictationRetranscription.swift` — Transcribe again: decodes a kept take with `AVAudioFile` + `AVAudioConverter` to 16 kHz mono, hands the samples to an injected transcriber (the Dictations page passes `STTRouter.transcribeSegment`), applies the same filler cleanup as a live take, then calls `replaceEntryText`. File-based only: no `AVAudioEngine`, no input node, so AirPods as the default input are never opened. No words keeps the old text
 - `DictationStoppedAudioCheckpointSignal.swift` — marks checkpoint completion, with bounded cancellation-aware waits for Quit and retry admission; completion alone does not prove persistence
 - `DictationStopCheckpoint.swift` — the first stage of stopping a dictation: stop the mic, play the stop click, then write the private recovery WAV off the main actor before anything waits on the model, re-checking the session after each step. `DictationSessionController` runs it with the real router, sound and store; `Tests/DictationStopCheckpointTests.swift` runs it with fakes
 - `DictationPostStopModelWait.swift` — the second stage of stopping: after the checkpoint, wait for the voice model if it isn't loaded (kick a load nobody started, join one in flight, give up on a failed load right away, stop at the budget). Unlike the start path's wait it never retries a failed load, because the audio is already saved. Clock and router are injected; `Tests/DictationPostStopModelWaitTests.swift` runs it on a fake clock
-- `DictationEmptyTranscriptPolicy.swift` — what a take with no text does, first match wins: a mis-tap closes like a cancel; no speech shows the note and drops the audio; a wrong-language guess with held-back text offers Paste Anyway; a saved recording is offered again (audio the model heard nothing in keeps its launch reminder); unsaved audio that needs recovery offers the checkpoint retry; anything else just says why
+- `DictationEmptyTranscriptPolicy.swift` — what a take with no text does, first match wins: a mis-tap closes like a cancel; no speech shows the note and drops the audio; a wrong-language guess with held-back text offers Paste Anyway; a saved recording from a take of 30 s or more (`DictationFailedTakePolicy`) is offered through Transcribe It, and a shorter one is dropped with the error; unsaved audio that needs recovery offers the checkpoint retry; anything else just says why
 - `DictationTerminationAdmissionPolicy.swift` — prevents Quit, new capture, or consuming inference from discarding the only native recording when no durable WAV exists; fences same-session Retry Saving
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
@@ -54,21 +54,38 @@
 - stopped-audio recovery: `~/Library/Application Support/Transcripted/state/dictation-audio-recovery/`
 - kept audio: `<capture-library>/dictations/audio/<uuid>.m4a` (or `.wav` before compression); the entry's `Audio:` line holds the relative path. It may have aged out, so callers resolve through `DictationAudioArchive.resolveURL` and treat nil as normal
 
-Stopped-audio recovery is intentionally bounded and local. Launch scans at most
-one pending metadata record for presentation, then `Show Audio` reveals the WAV
-in Finder. The operational recovery path is Transcripted's Capture menu ->
-Transcribe Audio File -> select that WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
-restart never deletes the checkpoint. Closing a "Transcribe It" message (the launch
-reminder, or the one shown when a take's transcription came back empty) with X
-or Esc, not a timeout or a newer message, sets `dismissed` in its metadata: the launch reminder skips it
-(`pendingRecoveries(excludingDismissed: true)`), but the WAV stays and importers
-still find it. This stops an empty take from nagging on every launch.
+Stopped-audio recovery is intentionally bounded and local. A saved recording is
+only offered while its own take's message is on screen, never later: a failed
+dictation is usually quicker to say again than to recover. When a take of 30 s
+or more (`DictationFailedTakePolicy`) comes back empty after its WAV was
+written (empty text over real audio, or a model failure), the message offers
+Transcribe It, which sends the WAV through the normal local imported-audio
+pipeline (the same as Capture -> Transcribe Audio File), so the transcript
+lands in Meetings; the importer deletes the WAV once that transcript is saved.
+A shorter take's WAV is deleted with the error, unless the model never
+consumed the take and its audio is still in memory (deleting the WAV then
+would block the next take and Quit; launch removes it instead). A model that
+never loaded after the stop always offers Transcribe It, whatever the length,
+because the wait told the user their recording was safe. Launch never asks
+about saved audio: `AppLaunchSteps` runs
+`DictationStoppedAudioRecoveryStore.purgeLeftovers(createdBefore:)` with the
+launch time. From an earlier run (an ignored Transcribe It, a Quit, or a
+crash) it deletes each `dictation_*` WAV holding under 30 s of audio
+(`DictationFailedTakePolicy`, length read from the WAV header) with its
+metadata. A WAV of 30 s or more stays on disk quietly, as does one whose length
+can't be read; nothing offers it again, but it's still in
+`state/dictation-audio-recovery/` for Capture -> Transcribe Audio File.
+Anything newer than launch is kept.
+It is skipped when `TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1`, since a
+second copy on the same container could delete a file the first copy is
+offering.
 
 Empty ASR output is not automatically silence: after a focused retry, captured
-audio with measurable speech-like activity remains checkpointed and offers an
-immediate `Show Audio`/Capture -> Transcribe Audio File recovery path. This signal heuristic
-does not certify that spoken words were present. Truly quiet or too-short audio
-keeps the normal no-speech/explicit-discard flow. Repeated Stop requests for the
+audio with measurable speech-like activity is reported as
+`audio_needs_recovery` ("Didn't catch that. Try again.", or Transcribe It for a
+long take) rather than "No speech heard". This signal heuristic does not
+certify that spoken words were present. Truly quiet or too-short audio keeps
+the normal no-speech/explicit-discard flow. Repeated Stop requests for the
 same session are fenced before the loading/recording stop decision, so a second
 request cannot cancel or overwrite the first durable checkpoint.
 
@@ -76,7 +93,8 @@ If checkpoint conversion or writing fails while native audio remains, inference
 and new capture must not consume or overwrite that only copy. `Retry Saving`
 re-enters the existing stop/checkpoint flow for the same session without starting
 the microphone or automatically pasting. Quit waits for normal finalization, then
-uses a bounded checkpoint wait; an unsafe Quit is declined visibly. This does
+uses a bounded checkpoint wait; an unsafe Quit is declined visibly. The WAV Quit
+keeps is removed by the next launch's cleanup. This does
 not recover a permanently blocked native audio driver or protect RAM from force
 quit, crashes, power loss, or explicit recording discard.
 

@@ -10,6 +10,13 @@ final class SingleInstanceGuard {
 
     static let reopenNotificationName = Notification.Name("com.transcripted.single-instance.reopen")
 
+    /// Labs and harnesses set `TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1`
+    /// to run a second copy. Launch work that would touch the other copy's
+    /// files checks this.
+    static var isDisabledByEnvironment: Bool {
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] == "1"
+    }
+
     private let lockURL: URL
     private var lockFileDescriptor: Int32 = -1
 
@@ -22,7 +29,7 @@ final class SingleInstanceGuard {
     }
 
     func acquire() -> AcquisitionResult {
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] == "1" {
+        if Self.isDisabledByEnvironment {
             return .acquired
         }
 

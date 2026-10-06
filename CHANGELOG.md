@@ -35,6 +35,13 @@ force-installed by Sparkle so existing users recover from a regression.
   tooltip. Existing recordable dictation/meeting triggers are unchanged.
 
 ### Changed
+- Transcripted no longer asks about a failed dictation every time it opens.
+  When a dictation under 30 seconds doesn't become text, it just says "Didn't
+  catch that. Try again." and the recording is deleted; a longer one still
+  offers Transcribe It right then. At launch, short recordings left over from
+  earlier runs are deleted instead of piling up; ones 30 seconds or longer
+  (including a long take cut off by Quit or a crash) stay on disk quietly, with
+  no prompt.
 - Dictation and meetings are ready as soon as Transcripted opens. The voice
   model and the meeting speaker models now load quietly in the background at
   launch (and again after a model switch or wake) instead of on first use, so

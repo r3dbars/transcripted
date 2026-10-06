@@ -226,7 +226,7 @@ enum SpeakerPeopleEmptyState {
     static let symbolName = "person.2"
     static let title = "No speakers yet"
     static let message = "Transcripted learns each voice as you record. After your first meeting, the people in it show up here, so you can name someone once and have them recognized in every meeting after."
-    static let actionTitle = "Start a meeting"
+    static let actionTitle = "Record a meeting"
     static let actionAutomationIdentifier = "transcripted.speakers.empty.start-meeting"
     static let noSearchMatches = "No speakers match your search."
 }

@@ -414,6 +414,10 @@ func testDictationInputDeviceSelectionPolicy() {
             availableInputs: [airPodsInput, macMic], prefersBuiltInBluetoothInput: false
         )
         assertFalse(PinnedDictationInputPolicy.recorderIsNeeded(for: followsMacOS), "following macOS onto the headset never engages the recorder")
+        assertTrue(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: followsMacOS, speedPathIsOff: { _ in false }),
+            "following macOS onto the headset gets a fresh engine on forced recovery"
+        )
     }
 
     runSuite("Engine warmup is skipped whenever the recorder records, and never runs on a Bluetooth macOS input") {
@@ -484,6 +488,25 @@ func testDictationInputDeviceSelectionPolicy() {
         assertTrue(
             PinnedDictationInputPolicy.skipsEngineWarmup(for: nil, afterEngineFallback: false),
             "an unreadable route counts as a headset"
+        )
+
+        assertTrue(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: headsetOnly, speedPathIsOff: { _ in false }),
+            "a headset the engine records gets a fresh engine on forced recovery, as a relaunch would"
+        )
+        assertFalse(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: skipsHeadset, speedPathIsOff: { _ in false }),
+            "a skipped headset is recorded by the recorder, so its engine is left alone"
+        )
+        for selection in [macDefault, usbDefault, pickedOverMac, virtualDefault] {
+            assertFalse(
+                PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: selection, speedPathIsOff: { _ in false }),
+                "off a Bluetooth input, forced recovery keeps its old behavior (\(selection.selectedInput.name))"
+            )
+        }
+        assertFalse(
+            PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: nil),
+            "an unreadable route replaces nothing"
         )
 
         assertFalse(

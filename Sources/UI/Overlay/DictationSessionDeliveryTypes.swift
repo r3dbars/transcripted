@@ -5,6 +5,8 @@ import AppKit
 
 struct DictationStopTiming {
     let requestedAt: CFAbsoluteTime
+    /// Which recorder this take used, read before the mic stops.
+    var micBackend: String?
     var micStoppedAt: CFAbsoluteTime?
     var snapshotStartedAt: CFAbsoluteTime?
     var snapshotFinishedAt: CFAbsoluteTime?

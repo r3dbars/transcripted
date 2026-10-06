@@ -347,11 +347,9 @@ extension MeetingSessionController {
         // the stopping state. Core retains this attempt's drained-tail signal;
         // a successor recording must not supply evidence for its predecessor.
         let stopEvidence = MeetingCaptureHealthEvidence.make(capture: capture)
-        let finalizedSystemSignalVerified = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
-            observed: recordingSnapshot.healthInfo.systemAudioSignalVerified == true
-                || stopEvidence.systemAudioSignalVerified,
-            micOnlyByChoice: recordingSnapshot.isMicOnlyByChoice
-        )
+        let observedSystemSignal = recordingSnapshot.healthInfo.systemAudioSignalVerified == true
+            || stopEvidence.systemAudioSignalVerified
+        let finalizedSystemSignalVerified = recordingSnapshot.systemSignalEvidence(observed: observedSystemSignal)
         let systemAudioFinalizationFailed = stopEvidence.systemAudioFinalizationFailed
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
@@ -382,7 +380,7 @@ extension MeetingSessionController {
             ? CaptureOutcome.micOnlyByChoice.rawValue
             : MeetingCaptureHealthTelemetry.finalizedOutcome(
                 rawCaptureOutcome.rawValue,
-                finalizedSystemSignalVerified
+                recordingSnapshot.systemSignalEvidence(observed: observedSystemSignal, forTelemetry: true)
             )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
@@ -765,9 +763,10 @@ extension MeetingSessionController {
         let systemAudioStatus = evidence.systemAudioStatus
         let durationSeconds = recordingDuration
         var baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
+        let accessConfirmedByMacOS = systemAudioAccessConfirmedAtStop()
         if let signalEvidence = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
-            observed: capture.hasObservedSystemAudioSignal,
-            micOnlyByChoice: activeRecordingIsMicOnlyByChoice
+            observed: capture.hasObservedSystemAudioSignal, micOnlyByChoice: activeRecordingIsMicOnlyByChoice,
+            accessConfirmedByMacOS: accessConfirmedByMacOS
         ) {
             baseHealthInfo = baseHealthInfo.markingSystemAudioSignalVerified(signalEvidence)
         }
@@ -799,7 +798,8 @@ extension MeetingSessionController {
             languageSelection: recordingLanguageSelection,
             sttModel: recordingSTTModel,
             isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice,
-            skippedSystemAudioTap: !capture.currentRecordingCapturesSystemAudio
+            skippedSystemAudioTap: !capture.currentRecordingCapturesSystemAudio,
+            systemAudioAccessConfirmedByMacOS: accessConfirmedByMacOS
         )
     }
 

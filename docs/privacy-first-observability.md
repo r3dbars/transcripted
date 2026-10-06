@@ -148,6 +148,7 @@ allowlist.
 - `dictation_start_failed`
 - `dictation_start_dropped_for_modifier_combo`
 - `dictation_completed`
+- `dictation_paste_late_confirmed`
 - `dictation_paste_retry_completed`
 - `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
@@ -221,6 +222,13 @@ allowlist.
   `word_count_bucket`, and `duration_bucket`
 - paste retry analytics limited to `result` and a coarse `reason`; never text,
   capture identifiers, or target-app identifiers
+- `dictation_paste_late_confirmed` limited to `target_confirmation_mode`
+  (`text_value` / `selection_range` / `change_notification` / `none`) plus the
+  take's `session_id`, `correlation_id` and `trigger`. It fires when a take
+  that already ended its paste wait as a likely paste (and reported
+  `target_confirmation_mode=clipboard_read`) is confirmed over Accessibility
+  before the full wait would have ended, so those takes can be told apart from
+  ones nothing ever confirmed; never text or target-app identifiers
 - agent capture-query analytics limited to one terminal event with
   `client_family`, `tool_kind`, `capture_kind`, `result`,
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
@@ -281,7 +289,9 @@ For each new or changed event:
 - dictation speed is the other reviewed raw-number case: `dictation_started`
   carries `start_latency_ms`, and `dictation_stop_latency_measured` carries
   `first_sound_latency_ms` (key press to first audio buffer),
-  `decode_latency_ms`, and `stop_to_paste_latency_ms`, all rounded to 10 ms
+  `decode_latency_ms`, `stop_to_paste_latency_ms`, and
+  `stop_to_paste_dispatch_latency_ms` (stop to Cmd+V sent, before the paste
+  confirmation wait), all rounded to 10 ms
   by `MachineClassTelemetry.roundedMilliseconds`. Both events, and
   `dictation_start_requested` so the attempt funnel stays comparable, also carry
   `stt_model` (the `TranscriptionModelChoice` raw value), `mac_chip` (chip
@@ -300,6 +310,15 @@ For each new or changed event:
   `suggestions_shown` and `suggestions_accepted` totals for one whole local
   day, read from the text-free outcome ledger. Accepted words go out only as
   `words_accepted_bucket`, on the `word_count_bucket` boundaries
+- launch speed is the fifth: `launch_models_warmed` carries `status_item_ms`,
+  `hotkeys_ready_ms` and `warmup_start_ms` (process start to the menu bar
+  icon, the shortcuts being registered (before onboarding grants
+  Accessibility they're registered but can't fire yet), and the model warmup
+  starting), `dictation_warmup_ms` and `meeting_warmup_ms` (each warmup step;
+  a first run that downloads a model counts the download), all rounded to
+  10 ms; `login_launch` (true when started at login); plus
+  `stt_model`, `mac_chip`, and `memory_gb_bucket`. `LaunchTimingTelemetry`
+  formats them. Durations only
 - route activation and return-loop events through `ActivationTelemetry` when
   possible so saved-artifact and agent-payoff signals stay coarse
 - verify `bash run-tests.sh --filter AnalyticsEventPolicy` and

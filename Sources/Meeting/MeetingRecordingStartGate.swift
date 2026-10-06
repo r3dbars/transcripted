@@ -345,11 +345,19 @@ enum MeetingMicOnlyChoicePreference {
 /// What a recording says about system audio once it ends.
 enum MeetingMicOnlyRecordingPolicy {
     /// True when system audio was actually heard. Otherwise false
-    /// ("unverified"), except when the user chose mic only: then nothing was
-    /// expected, so there is no claim to make and the library shouldn't
-    /// flag it.
-    static func systemAudioSignalEvidence(observed: Bool, micOnlyByChoice: Bool) -> Bool? {
+    /// ("unverified"), except when there is no claim to make and the library
+    /// shouldn't flag it: the user chose mic only, so nothing was expected,
+    /// or macOS confirmed System Audio Recording access, so the silence was a
+    /// quiet Mac (an in-person meeting, a remote side that never spoke). The
+    /// live notice already stays hidden in that second case; the saved file
+    /// used to say "System audio unverified" anyway. A call playing that the
+    /// tap can't hear still marks the meeting degraded on its own path.
+    static func systemAudioSignalEvidence(
+        observed: Bool,
+        micOnlyByChoice: Bool,
+        accessConfirmedByMacOS: Bool = false
+    ) -> Bool? {
         if observed { return true }
-        return micOnlyByChoice ? nil : false
+        return micOnlyByChoice || accessConfirmedByMacOS ? nil : false
     }
 }

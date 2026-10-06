@@ -8,7 +8,8 @@ enum DiagnosticsTrail {
         engine: String,
         event: String,
         message: String,
-        context: [String: String] = [:]
+        context: [String: String] = [:],
+        forwardToSentry: Bool = true
     ) {
         let trimmedContext = context.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -29,7 +30,8 @@ enum DiagnosticsTrail {
             engine: engine,
             event: event,
             message: message,
-            context: trimmedContext.isEmpty ? nil : trimmedContext
+            context: trimmedContext.isEmpty ? nil : trimmedContext,
+            forwardToSentry: forwardToSentry
         )
     }
 }

@@ -18,6 +18,8 @@ EVENTS_SINCE=""
 SKIP_LAUNCH=0
 SKIP_HOME=0
 SKIP_EVENTS=0
+SKIP_COLD=0
+DICTATION_STOP_ITERATIONS=0
 
 usage() {
     cat <<'USAGE'
@@ -33,12 +35,19 @@ Options:
   --skip-launch       Skip the launch benchmark (needs build/Transcripted.app)
   --skip-home         Skip the Home recent-captures benchmark (slow: compiles)
   --skip-events       Skip real-usage percentiles
+  --skip-cold         Skip the cold (fresh HOME) launch pass
+  --dictation-stop N  Also run the dictation stop-to-text bench, N iterations per
+                      clip (uses macOS `say` to make clips; plays no sound)
   -h, --help          Show this help.
 
 Benchmarks:
-  launch    cold/warm launch-to-interactive, N isolated launches
+  launch    warm and cold launch-to-interactive, N isolated launches each
   home      Home recent-captures loader at 1k and 10k captures
   events    real-usage percentiles for every latency key in events.jsonl
+  dictation stop-to-text on four spoken clips (opt-in, --dictation-stop N)
+
+Every run ends with summary.json (one row per metric, in ms). Compare two runs:
+  python3 scripts/dev/bench-compare.py build/benchmarks/<before> build/benchmarks/<after>
 USAGE
 }
 
@@ -51,6 +60,8 @@ while [ "$#" -gt 0 ]; do
         --skip-launch) SKIP_LAUNCH=1; shift ;;
         --skip-home) SKIP_HOME=1; shift ;;
         --skip-events) SKIP_EVENTS=1; shift ;;
+        --skip-cold) SKIP_COLD=1; shift ;;
+        --dictation-stop) DICTATION_STOP_ITERATIONS="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -70,7 +81,7 @@ echo "Transcripted benchmark sweep — $LABEL"
 echo "output: $RUN_DIR"
 
 if [ "$SKIP_LAUNCH" = "0" ]; then
-    hr; echo "1/3  LAUNCH TO INTERACTIVE"; echo
+    hr; echo "1/4  LAUNCH TO INTERACTIVE"; echo
     if [ ! -d "$REPO_ROOT/build/Transcripted.app" ]; then
         echo "  skipped — build/Transcripted.app missing (run: bash build.sh --no-open)"
         SECTION_STATUS+=("launch=skipped")
@@ -83,12 +94,24 @@ if [ "$SKIP_LAUNCH" = "0" ]; then
         echo "  launch benchmark failed"
         SECTION_STATUS+=("launch=failed")
     fi
+    if [ "$SKIP_COLD" = "0" ] && [ -d "$REPO_ROOT/build/Transcripted.app" ]; then
+        echo; echo "  cold pass (fresh HOME per launch, like a first launch)"; echo
+        if bash "$SCRIPT_DIR/bench-launch-latency.sh" \
+                --samples "$LAUNCH_SAMPLES" --warmups 2 \
+                --label "$LABEL-cold" \
+                --out "$RUN_DIR/launch-cold.json"; then
+            SECTION_STATUS+=("launch-cold=ok")
+        else
+            echo "  cold launch benchmark failed"
+            SECTION_STATUS+=("launch-cold=failed")
+        fi
+    fi
 else
     SECTION_STATUS+=("launch=skipped")
 fi
 
 if [ "$SKIP_HOME" = "0" ]; then
-    hr; echo "2/3  HOME RECENT-CAPTURES LOADER"; echo
+    hr; echo "2/4  HOME RECENT-CAPTURES LOADER"; echo
     if REPETITIONS=5 bash "$SCRIPT_DIR/benchmark-home-recent-captures.sh" \
             > "$RUN_DIR/home-recent-captures.txt" 2>&1; then
         cat "$RUN_DIR/home-recent-captures.txt"
@@ -103,7 +126,7 @@ else
 fi
 
 if [ "$SKIP_EVENTS" = "0" ]; then
-    hr; echo "3/3  REAL-USAGE PERCENTILES"; echo
+    hr; echo "3/4  REAL-USAGE PERCENTILES"; echo
     if [ ! -s "$EVENTS_PATH" ]; then
         echo "  skipped — no event log at $EVENTS_PATH"
         echo "  (use the app for a while, or pass --events PATH)"
@@ -131,9 +154,33 @@ else
     SECTION_STATUS+=("events=skipped")
 fi
 
+if [ "$DICTATION_STOP_ITERATIONS" != "0" ]; then
+    hr; echo "4/4  DICTATION STOP TO TEXT"; echo
+    if [ ! -d "$REPO_ROOT/build/Transcripted.app" ]; then
+        echo "  skipped — build/Transcripted.app missing (run: bash build.sh --no-open)"
+        SECTION_STATUS+=("dictation-stop=skipped")
+    elif TRANSCRIPTED_DICTATION_STOP_BENCH_WORK_DIR="$RUN_DIR/dictation-stop-work" \
+            bash "$REPO_ROOT/scripts/ops/dictation-stop-autoeval.sh" \
+            --skip-build --label "$LABEL" --iterations "$DICTATION_STOP_ITERATIONS" \
+            > "$RUN_DIR/dictation-stop.txt" 2>&1; then
+        cat "$RUN_DIR/dictation-stop.txt"
+        cp "$RUN_DIR"/dictation-stop-work/results/*.jsonl "$RUN_DIR/dictation-stop.jsonl"
+        # The work dir holds saved dictation text; keep only the numbers.
+        rm -rf "$RUN_DIR/dictation-stop-work"
+        SECTION_STATUS+=("dictation-stop=ok")
+    else
+        echo "  dictation stop bench failed — see $RUN_DIR/dictation-stop.txt"
+        tail -5 "$RUN_DIR/dictation-stop.txt"
+        rm -rf "$RUN_DIR/dictation-stop-work"
+        SECTION_STATUS+=("dictation-stop=failed")
+    fi
+fi
+
+python3 "$SCRIPT_DIR/bench-compare.py" --summarize "$RUN_DIR" || true
+
 hr
 echo "summary: ${SECTION_STATUS[*]}"
 echo "artifacts in $RUN_DIR"
 echo
-echo "Compare two runs:"
-echo "  diff <(jq -S . $OUT_DIR/<old>/real-usage-percentiles.json) <(jq -S . $RUN_DIR/real-usage-percentiles.json)"
+echo "Compare with an earlier run:"
+echo "  python3 scripts/dev/bench-compare.py $OUT_DIR/<before> $RUN_DIR"

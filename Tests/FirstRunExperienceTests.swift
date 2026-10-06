@@ -123,7 +123,7 @@ func testFirstRunExperience() {
         )
 
         assertEqual(failed.subtitle, "Try again to reload meeting tools", "failed meeting warmup should offer a retry path")
-        assertEqual(lazy.subtitle, "Starts local meeting setup on first use", "cold startup should explain lazy meeting setup")
+        assertEqual(lazy.subtitle, "Sets up the first time you use it", "cold startup should explain lazy meeting setup")
     }
 
     runSuite("FirstRunExperience.dictationAction — stays enabled while dictation is still downloading") {

@@ -28,6 +28,18 @@ enum SettingsClosedWindowRefreshPolicy {
         )
     }
 
+    /// True when an activation comes right after the window was presented.
+    /// `present()` activates the app and starts the full `refreshState()` for
+    /// that presentation, which already covers every read activation does, so
+    /// the activation sweep would read permissions, shortcuts and login state
+    /// a second time on the main thread while the window opens.
+    static let presentationActivationWindow: TimeInterval = 1
+
+    static func activationRepeatsPresentation(presentedAt: Date?, now: Date) -> Bool {
+        guard let presentedAt else { return false }
+        let elapsed = now.timeIntervalSince(presentedAt)
+        return elapsed >= 0 && elapsed < presentationActivationWindow
+    }
 }
 
 /// Holds the newest value while the window is closed instead of publishing

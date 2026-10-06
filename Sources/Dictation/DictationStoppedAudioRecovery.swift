@@ -51,9 +51,6 @@ enum DictationStoppedAudioRecoveryStore {
         let sessionID: UUID
         let createdAt: Date
         let audioFilename: String
-        /// Set when the user closed the "Transcribe It" message for this
-        /// recording. The launch reminder skips it; the file stays on disk.
-        var dismissed: Bool? = nil
     }
 
     static var defaultDirectory: URL {
@@ -87,7 +84,6 @@ enum DictationStoppedAudioRecoveryStore {
 
     static func pendingRecoveries(
         limit: Int = 10,
-        excludingDismissed: Bool = false,
         directory: URL? = nil,
         fileManager: FileManager = .default
     ) -> [DictationStoppedAudioRecovery] {
@@ -102,8 +98,7 @@ enum DictationStoppedAudioRecoveryStore {
         var recoveries: [DictationStoppedAudioRecovery] = []
         for case let metadataURL as URL in enumerator where metadataURL.pathExtension == "json" {
             guard let metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL)),
-                  metadata.version == 1,
-                  !(excludingDismissed && metadata.dismissed == true) else { continue }
+                  metadata.version == 1 else { continue }
             let audioURL = folder.appendingPathComponent(metadata.audioFilename, isDirectory: false)
             guard fileManager.fileExists(atPath: audioURL.path) else { continue }
             recoveries.append(DictationStoppedAudioRecovery(
@@ -152,10 +147,11 @@ enum DictationStoppedAudioRecoveryStore {
     }
 
     /// Retires a take's checkpoint once its transcript is saved. A failed
-    /// save keeps the WAV, so the take can still be transcribed later. When
-    /// the saved entry recorded an `Audio:` path, the WAV moves into the
-    /// dictation audio archive (and gets compressed in the background)
-    /// instead of being deleted; if that move fails, it is deleted as before.
+    /// save keeps the WAV for the next launch's `purgeLeftovers`, which
+    /// deletes it only when it holds under 30 s of audio. When the saved
+    /// entry recorded an `Audio:` path, the WAV moves into the dictation
+    /// audio archive (and gets compressed in the background) instead of
+    /// being deleted; if that move fails, it is deleted as before.
     @discardableResult
     static func retire(
         _ recovery: DictationStoppedAudioRecovery?,
@@ -218,21 +214,146 @@ enum DictationStoppedAudioRecoveryStore {
         }
     }
 
-    /// Stops the launch reminder for one saved recording without deleting it.
-    /// The user closed its "Transcribe It" message, so asking again on every
-    /// launch is a nag; the WAV stays where it is. Returns `true` when marked.
+    /// Deletes short recordings saved before `cutoff`, with their metadata.
+    /// Launch runs this with the launch time, and nothing asks about what's
+    /// left. A take under 30 s (`DictationFailedTakePolicy`) is cheaper to
+    /// say again, so its WAV from an earlier run (a failed take nobody
+    /// transcribed, or one left by Quit or a crash) is just private audio
+    /// sitting on disk. A take of 30 s or more stays on disk quietly, and so
+    /// does any WAV whose length can't be read: never delete on a guess.
+    /// Files from this run are newer than `cutoff` and stay. Only
+    /// `dictation_*.wav` and `dictation_*.json` directly inside `directory`
+    /// are touched. Returns how many recordings were removed.
     @discardableResult
-    static func markDismissed(audioURL: URL, fileManager: FileManager = .default) -> Bool {
-        let url = metadataURL(for: audioURL)
-        guard var metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: url)),
-              metadata.version == 1 else { return false }
-        metadata.dismissed = true
-        do {
-            try write(metadata, to: url, fileManager: fileManager)
-            return true
-        } catch {
-            return false
+    static func purgeLeftovers(
+        createdBefore cutoff: Date,
+        directory: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> Int {
+        let folder = (directory ?? defaultDirectory).standardizedFileURL
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        // Both sides resolved the same way, so /var vs /private/var can't
+        // make a file look like it lives somewhere else.
+        func resolvedPath(_ url: URL) -> String {
+            url.resolvingSymlinksInPath().standardizedFileURL.path
         }
+        let folderPath = resolvedPath(folder)
+        func isOwnedFile(_ url: URL, extension pathExtension: String) -> Bool {
+            url.lastPathComponent.hasPrefix("dictation_")
+                && url.pathExtension == pathExtension
+                && resolvedPath(url.deletingLastPathComponent()) == folderPath
+                && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+        func modifiedBeforeCutoff(_ url: URL) -> Bool {
+            guard let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                return false
+            }
+            return modified < cutoff
+        }
+        // An unreadable length counts as long: keep the file.
+        func isShortTake(_ audioURL: URL) -> Bool {
+            guard let seconds = recordedDuration(ofWAVAt: audioURL) else { return false }
+            return !DictationFailedTakePolicy.keepsSavedRecording(takeLength: seconds)
+        }
+
+        var removed = 0
+        var claimedAudio: Set<String> = []
+        for metadataURL in contents where isOwnedFile(metadataURL, extension: "json") {
+            let audioURL: URL?
+            let isOld: Bool
+            if let metadata = try? JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL)) {
+                let candidate = folder.appendingPathComponent(metadata.audioFilename, isDirectory: false)
+                audioURL = isOwnedFile(candidate, extension: "wav") ? candidate : nil
+                isOld = metadata.createdAt < cutoff
+            } else {
+                // Unreadable metadata from an older or broken write. Its
+                // WAV, if any, has the same name.
+                let sibling = metadataURL.deletingPathExtension().appendingPathExtension("wav")
+                audioURL = isOwnedFile(sibling, extension: "wav") ? sibling : nil
+                isOld = modifiedBeforeCutoff(metadataURL)
+            }
+            if let audioURL { claimedAudio.insert(audioURL.lastPathComponent) }
+            guard isOld else { continue }
+            if let audioURL {
+                // A long take keeps its WAV and the metadata beside it.
+                guard isShortTake(audioURL) else { continue }
+                do {
+                    try fileManager.removeItem(at: audioURL)
+                } catch {
+                    continue
+                }
+            }
+            // No WAV of ours is left behind this metadata, so it holds no audio.
+            try? fileManager.removeItem(at: metadataURL)
+            removed += 1
+        }
+        // A WAV without metadata: the app stopped between the two writes.
+        // Its file date says which run it came from.
+        for audioURL in contents where isOwnedFile(audioURL, extension: "wav")
+            && !claimedAudio.contains(audioURL.lastPathComponent)
+            && !fileManager.fileExists(atPath: metadataURL(for: audioURL).path)
+            && modifiedBeforeCutoff(audioURL)
+            && isShortTake(audioURL) {
+            try? fileManager.removeItem(at: audioURL)
+            removed += 1
+        }
+        return removed
+    }
+
+    /// How much audio a recovery WAV holds: the bytes on disk after its
+    /// `data` chunk header over the `fmt ` chunk's sample rate and frame
+    /// size. Nil when it can't tell (not a RIFF/WAVE file, or no `fmt ` and
+    /// `data` chunk in the first 4 KB).
+    static func recordedDuration(ofWAVAt url: URL) -> TimeInterval? {
+        guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 4_096) else { return nil }
+        let bytes = [UInt8](header)
+
+        func uint16(at offset: Int) -> UInt16? {
+            guard offset >= 0, offset + 2 <= bytes.count else { return nil }
+            return UInt16(bytes[offset]) | UInt16(bytes[offset + 1]) << 8
+        }
+        func uint32(at offset: Int) -> UInt32? {
+            guard offset >= 0, offset + 4 <= bytes.count else { return nil }
+            return UInt32(bytes[offset])
+                | UInt32(bytes[offset + 1]) << 8
+                | UInt32(bytes[offset + 2]) << 16
+                | UInt32(bytes[offset + 3]) << 24
+        }
+        func tag(at offset: Int) -> String? {
+            guard offset >= 0, offset + 4 <= bytes.count else { return nil }
+            return String(decoding: bytes[offset..<(offset + 4)], as: UTF8.self)
+        }
+
+        guard tag(at: 0) == "RIFF", tag(at: 8) == "WAVE" else { return nil }
+        var sampleRate: UInt32?
+        var blockAlign: UInt16?
+        var offset = 12
+        while let chunkID = tag(at: offset), let chunkSize = uint32(at: offset + 4) {
+            let body = offset + 8
+            if chunkID == "fmt " {
+                sampleRate = uint32(at: body + 4)
+                blockAlign = uint16(at: body + 12)
+            } else if chunkID == "data" {
+                guard let sampleRate, sampleRate > 0,
+                      let blockAlign, blockAlign > 0 else { return nil }
+                // Count what's on disk after the data header rather than the
+                // header's own count: a count never filled in (0) or a chunk
+                // after the audio can only make this longer, and longer keeps.
+                let dataBytes = fileSize > body ? UInt64(fileSize - body) : 0
+                return Double(dataBytes / UInt64(blockAlign)) / Double(sampleRate)
+            }
+            // Chunks are padded to an even length.
+            offset = body + Int(chunkSize) + Int(chunkSize % 2)
+        }
+        return nil
     }
 
     private static func writeMetadata(
@@ -279,7 +400,7 @@ enum DictationStoppedAudioRecoveryStore {
         // Convert into one contiguous Int16 block, then append it in a single
         // call. The per-sample `append(_:to:)` helper pays a `withUnsafeBytes`
         // closure plus a `Sequence` append for every sample, which dominated
-        // this function: at the 5-minute dictation cap that is 4.8M round trips.
+        // this function: at a 5-minute take that is 4.8M round trips.
         // The arithmetic below is byte-for-byte the old expression — the NaN
         // guard, the clamp, `Float(Int16.max)`, and bare `.rounded()`
         // (schoolbook, half-away-from-zero) are all load-bearing for that.

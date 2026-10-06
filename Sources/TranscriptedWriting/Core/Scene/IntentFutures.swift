@@ -22,7 +22,9 @@ public struct IntentFuture: Equatable, Sendable {
 
     public init(kind: Kind, weight: Double) {
         self.kind = kind
-        self.weight = min(max(weight, 0), 1)
+        // `max`/`min` pass NaN through, and `promptHint` would then trap in
+        // `Int(_:)`; a NaN weight counts as no evidence.
+        self.weight = weight.isNaN ? 0 : min(max(weight, 0), 1)
     }
 }
 

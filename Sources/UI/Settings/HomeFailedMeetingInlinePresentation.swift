@@ -39,7 +39,7 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
             return HomeFailedMeetingInlinePresentation(
                 statusText: "Retry ready",
                 inlineDetail: failureKind.flatMap(retryReason(for:))
-                    ?? "Saved audio is still here. Try again will transcribe it.",
+                    ?? "Your audio is saved. Click Try again to transcribe it.",
                 canShowRetryAction: true
             )
         }

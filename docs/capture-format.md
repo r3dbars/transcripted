@@ -148,7 +148,7 @@ Recording-health keys (optional, only when health info exists):
 | `capture_quality` | `excellent` | `excellent` / `good` / `fair` / `degraded`. |
 | `audio_gaps` | `0` | |
 | `device_switches` | `0` | |
-| `system_audio_signal_verified` | `true` | Optional flat boolean: finite nonzero system PCM was observed during this live recording. `false` means unverified, not permission denied; ordinary silence after observed signal remains `true`. Omitted for imports and legacy captures. Independent of `capture_quality`. |
+| `system_audio_signal_verified` | `true` | Optional flat boolean: finite nonzero system PCM was observed during this live recording. `false` means unverified, not permission denied; ordinary silence after observed signal remains `true`. Omitted for imports and legacy captures, for "Record Just My Mic", and when no system audio was heard but macOS confirmed System Audio Recording access (a quiet Mac). Independent of `capture_quality`. |
 | `gap_events` | — | **Nested** list of quoted strings; invisible to flat parsers. Omitted when empty. |
 | `audio_health` | `mic_attenuated_by_call_app` | Flat; omitted for healthy meetings. |
 | `mic_boost_prompt` | `"declined"` | Flat; only alongside `audio_health`. |

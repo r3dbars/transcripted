@@ -3,7 +3,8 @@ import Foundation
 /// What `EventReporter.capture` sends where, worked out with no side effects
 /// so the fast tests can check it. `EventReporter` runs the plan: it writes
 /// `localEntry` to events.jsonl, hands `entry` to the reliability recorder,
-/// tracks `forwarded` in PostHog, and reports `sentryPolicy` failures.
+/// tracks `forwarded` in PostHog, counts `sentryPolicy` failures in PostHog,
+/// and sends them to Sentry when `forwardsToSentry` is set.
 struct ObservabilityEventCapturePlan {
     /// The caller's context plus engine state, build identity, and telemetry
     /// enrichment. Sentry and the reliability-failure analytics event get this.
@@ -15,8 +16,15 @@ struct ObservabilityEventCapturePlan {
     let localEntry: ObservabilityEvent
     /// The PostHog event, built only from the caller's own context.
     let forwarded: AnalyticsEventForwardingPolicy.ForwardedEvent?
-    /// Set for allowlisted hard failures.
+    /// Set for allowlisted hard failures. Every one is counted in PostHog as
+    /// `reliability_failure_observed`.
     let sentryPolicy: SentryEventPolicy?
+    /// Whether that failure also goes to Sentry. Only false when the caller
+    /// passed `forwardToSentry: false`, for an attempt the user wasn't shown
+    /// as a failure (a tapped Push to Talk key, see
+    /// `DictationEarlyReleaseCancelReport.forwardsToSentry`). The PostHog
+    /// count still goes out.
+    let forwardsToSentry: Bool
 
     static func make(
         level: EventLevel,
@@ -28,7 +36,8 @@ struct ObservabilityEventCapturePlan {
         infoDictionary: [String: Any]?,
         timestamp: String,
         appVersion: String,
-        osVersion: String
+        osVersion: String,
+        forwardToSentry: Bool = true
     ) -> ObservabilityEventCapturePlan {
         // Merge caller context with live engine state
         var mergedContext = context ?? [:]
@@ -69,12 +78,14 @@ struct ObservabilityEventCapturePlan {
             context: context ?? [:]
         )
 
+        let sentryPolicy = level == .error ? SentryEventPolicy.policy(forEngine: engine, event: event) : nil
         return ObservabilityEventCapturePlan(
             mergedContext: mergedContext,
             entry: entry,
             localEntry: LocalObservabilityPayloadSanitizer.sanitize(entry),
             forwarded: forwarded,
-            sentryPolicy: level == .error ? SentryEventPolicy.policy(forEngine: engine, event: event) : nil
+            sentryPolicy: sentryPolicy,
+            forwardsToSentry: sentryPolicy != nil && forwardToSentry
         )
     }
 }

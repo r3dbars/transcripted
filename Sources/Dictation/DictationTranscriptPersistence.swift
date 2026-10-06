@@ -69,7 +69,7 @@ enum DictationSessionCapCompletionTelemetryPolicy {
     }
 }
 
-/// How a take the 5-minute cap finalized without pasting is saved and shown.
+/// How a take the 15-minute cap finalized without pasting is saved and shown.
 enum DictationSessionCapSavePolicy {
     /// The cap saves to Markdown without pasting; history records it as such.
     static let delivery: DictationDelivery = .savedWithoutPaste

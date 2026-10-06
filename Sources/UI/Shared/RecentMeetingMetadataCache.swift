@@ -338,30 +338,27 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     /// Call it from the background refresh path only — never the main thread.
     @discardableResult
     func pruneMissingPaths(fileManager: FileManager = .default) -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let db else { return 0 }
-
-        var paths: [String] = []
-        var selectStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
-            while sqlite3_step(selectStmt) == SQLITE_ROW {
-                if let cString = sqlite3_column_text(selectStmt, 0) {
-                    paths.append(String(cString: cString))
-                }
-            }
-        }
-        sqlite3_finalize(selectStmt)
+        // The stats run outside the lock so a search or Today build that
+        // needs the cache isn't held up for one `stat` per cached row.
+        let paths = cachedPaths()
 
         // A cancelled Home refresh stops statting here. Rows found missing so
         // far are still dropped; the rest wait for the next prune.
-        var missing: [String] = []
+        var candidates: [String] = []
         for path in paths {
             if Task.isCancelled { break }
             if !fileManager.fileExists(atPath: path) {
-                missing.append(path)
+                candidates.append(path)
             }
         }
+        guard !candidates.isEmpty else { return 0 }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return 0 }
+        // A file can come back between the stat above and taking the lock
+        // (a meeting saved again at the same path), so check again here.
+        let missing = candidates.filter { !fileManager.fileExists(atPath: $0) }
         guard !missing.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
@@ -376,6 +373,24 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_finalize(deleteStmt)
         sqlite3_exec(db, "COMMIT;", nil, nil, nil)
         return missing.count
+    }
+
+    private func cachedPaths() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return [] }
+
+        var paths: [String] = []
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                if let cString = sqlite3_column_text(selectStmt, 0) {
+                    paths.append(String(cString: cString))
+                }
+            }
+        }
+        sqlite3_finalize(selectStmt)
+        return paths
     }
 
     /// Run cache maintenance on the first refresh, then at most once per minute.
