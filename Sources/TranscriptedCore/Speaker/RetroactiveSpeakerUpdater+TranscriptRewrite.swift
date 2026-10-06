@@ -196,7 +196,7 @@ extension TranscriptSaver {
         var utteranceIndex = 0
 
         for index in lines.indices {
-            // Only `[<MM:SS>] [<Mic|System>/...]` lines are rows. An utterance
+            // Only `[<elapsed time>] [<Mic|System>/...]` lines are rows. An utterance
             // continuation line that merely starts with brackets is text.
             guard let components = parseTranscriptLine(lines[index]),
                   isTranscriptSource(components.source),
@@ -206,9 +206,11 @@ extension TranscriptSaver {
             let utterance = utterances[utteranceIndex]
             utteranceIndex += 1
 
-            let expectedTimestamp = formatTranscriptTimestamp(utterance.start)
             let expectedSource = utterance.channel == 0 ? "Mic" : "System"
-            guard components.timestamp == expectedTimestamp, components.source == expectedSource else {
+            guard let expectedSeconds = Int(exactly: utterance.start.rounded(.towardZero)),
+                  expectedSeconds >= 0,
+                  transcriptTimestampSeconds(components.timestamp) == expectedSeconds,
+                  components.source == expectedSource else {
                 return false
             }
 
@@ -357,14 +359,16 @@ extension TranscriptSaver {
         utterances: [TranscriptionUtterance],
         updatesByChannelKey: [String: (oldName: String, newName: String)]
     ) -> [String?]? {
+        let rowSeconds = rows.compactMap { transcriptTimestampSeconds($0.timestamp) }
+        guard rowSeconds.count == rows.count else { return nil }
         let utteranceKeys = utterances.map { utterance in
             (
-                timestamp: formatTranscriptTimestamp(utterance.start),
+                seconds: Int(exactly: utterance.start.rounded(.towardZero)),
                 source: utterance.channel == 0 ? "Mic" : "System"
             )
         }
         func matches(_ utteranceIndex: Int, _ rowIndex: Int) -> Bool {
-            utteranceKeys[utteranceIndex].timestamp == rows[rowIndex].timestamp
+            utteranceKeys[utteranceIndex].seconds == rowSeconds[rowIndex]
                 && utteranceKeys[utteranceIndex].source == rows[rowIndex].source
         }
 
@@ -503,9 +507,22 @@ extension TranscriptSaver {
         return "[[\(name)]]"
     }
 
-    private static func formatTranscriptTimestamp(_ seconds: Double) -> String {
-        let startMinutes = Int(seconds) / 60
-        let startSeconds = Int(seconds) % 60
-        return String(format: "%02d:%02d", startMinutes, startSeconds)
+    /// Old saves use total minutes; new saves show hours. Compare elapsed
+    /// seconds while keeping the row's original spelling in the rewritten file.
+    private static func transcriptTimestampSeconds(_ timestamp: String) -> Int? {
+        let parts = timestamp.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3,
+              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
+        let values = parts.compactMap { Int($0) }
+        guard values.count == parts.count, let seconds = values.last, seconds < 60,
+              values.count != 3 || values[1] < 60 else { return nil }
+        var total = 0
+        for value in values {
+            let (shifted, multiplyOverflow) = total.multipliedReportingOverflow(by: 60)
+            let (next, addOverflow) = shifted.addingReportingOverflow(value)
+            guard !multiplyOverflow, !addOverflow else { return nil }
+            total = next
+        }
+        return total
     }
 }

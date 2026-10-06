@@ -231,7 +231,9 @@ enum DictationTranscriptWriter {
         try TranscriptFileRewrite.write(data, to: url)
     }
 
-    private static func buildTitle(from text: String, createdAt: Date) -> String {
+    /// The heading title for a section: the first seven words, or a dated
+    /// fallback for very short text. `DictationEntryTextRewrite` reuses it.
+    static func buildTitle(from text: String, createdAt: Date) -> String {
         let words = text
             .replacingOccurrences(of: "\n", with: " ")
             .split(whereSeparator: \.isWhitespace)

@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// The Settings > Dictations page. Extracted from `TranscriptedSettingsView`
-/// (see `docs/` audit 2026-07-08 wave 2, spec W2-A); restyled in the 2026-08
-/// quiet-library redesign so each saved dictation is its own row instead of
-/// one row per daily Markdown file (see `QuietDictationLibrary.swift`). The
-/// daily file stays the storage shape — this is presentation only. All the
-/// actual open/copy/reveal/delete logic stays owned by the parent and
-/// arrives as focused closures.
+/// The Settings > Dictations page. One card per saved dictation, grouped by
+/// day (`QuietDictationCard` in `QuietDictationLibrary.swift`; the 2026-10
+/// redesign after Handy's history page). The daily Markdown file stays the
+/// storage shape; this is presentation plus inline playback. Copy, reveal,
+/// delete, and the STT call stay owned by the parent and arrive as closures.
 ///
 /// Delete/undo routes through the app-wide `CaptureUndoManager` (not
 /// page-local state) so a pending "Deleted · Undo" offer survives navigating
@@ -16,15 +14,23 @@ struct DictationsSettingsPage: View {
     let homeCopiedRowID: String?
     let onStartDictation: () -> Void
     let onLoadMoreDictations: () -> Void
-    let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let dictationRowMenuItems: (SavedDictationEntry) -> [HomeRowMenuItem]
     /// Deletes a single dictation entry reversibly and stages the undo offer
     /// with `CaptureUndoManager.shared` (the shell owns the disk mutation).
-    /// `nil` hides Delete from the row/expansion overflow menu entirely.
+    /// `nil` hides Delete from the card's ⋯ menu entirely.
     var onDeleteDictation: ((SavedDictationEntry) -> Void)? = nil
+    /// Why Transcribe again can't run right now (dictating, recording,
+    /// loading models, finishing a meeting), or nil when it can.
+    var transcribeAgainUnavailableReason: String? = nil
+    /// Local STT over 16 kHz mono samples. nil hides Transcribe again.
+    var transcribeSamples: (([Float]) async throws -> String)? = nil
+    /// Shows a Transcribe again failure; the closure retries.
+    var onTranscribeAgainFailure: ((String, @escaping () -> Void) -> Void)? = nil
 
-    @State private var expandedEntryID: String?
+    @StateObject private var playback = DictationPlaybackController()
+    @StateObject private var audioInfo = DictationAudioInfoStore()
+    @ObservedObject private var transcribeAgain = DictationTranscribeAgainRunner.shared
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
 
     var body: some View {
@@ -38,15 +44,8 @@ struct DictationsSettingsPage: View {
 
             homeDictationsListSection
         }
-        // Clicking anywhere outside an open dictation collapses it, matching
-        // the Meetings page. The expansion swallows its own inside taps.
-        .homeBackgroundTapCatcher {
-            if expandedEntryID != nil {
-                collapse()
-            }
-        }
         .onDisappear {
-            expandedEntryID = nil
+            playback.stop()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.dictations")
@@ -95,7 +94,8 @@ struct DictationsSettingsPage: View {
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreDictations,
             getID: { AnyHashable($0.id) },
-            onLoadMore: onLoadMoreDictations
+            onLoadMore: onLoadMoreDictations,
+            showsRowDividers: false
         ) { entry in
             dictationRow(for: entry)
         }
@@ -105,70 +105,100 @@ struct DictationsSettingsPage: View {
     private func dictationRow(for entry: SavedDictationEntry) -> some View {
         if let offer = captureUndo.offer(for: DictationUndoID.id(for: entry)) {
             UndoLineView(offer: offer, manager: captureUndo)
-        } else if expandedEntryID == entry.id {
-            QuietDictationExpansion(
-                entry: entry,
-                isCopied: homeCopiedRowID == entry.id,
-                onCopy: { onCopyDictation(entry) },
-                onOpenFile: { onOpenDictation(entry) },
-                onCollapse: collapse,
-                menuItems: menuItems(for: entry)
-            )
         } else {
-            QuietDictationRow(
+            QuietDictationCard(
                 entry: entry,
                 isCopied: homeCopiedRowID == entry.id,
-                onOpen: { toggleExpansion(entry) },
+                audioInfo: audioInfo.info(for: entry),
+                isTranscribingAgain: transcribeAgain.runningEntryID == entry.id,
+                playback: playback,
+                menuItems: menuItems(for: entry),
+                onTogglePlayback: { togglePlayback(entry) },
                 onCopy: { onCopyDictation(entry) },
-                menuItems: menuItems(for: entry)
+                onLoadAudioInfo: { await audioInfo.load(entry) },
+                onShowMore: {
+                    ProductUsageTelemetry.trackResult(kind: .dictation, action: .preview, surface: .dictations,
+                                                      succeeded: true, artifactDate: entry.createdAt)
+                }
             )
         }
     }
 
-    private func toggleExpansion(_ entry: SavedDictationEntry) {
-        withAnimation(.snappy(duration: 0.2)) {
-            expandedEntryID = (expandedEntryID == entry.id) ? nil : entry.id
+    private func togglePlayback(_ entry: SavedDictationEntry) {
+        let didToggle = playback.togglePlayback(entryID: entry.id) {
+            audioInfo.playableURL(for: entry)
         }
-        if expandedEntryID == entry.id {
-            ProductUsageTelemetry.trackResult(kind: .dictation, action: .preview, surface: .dictations,
-                                              succeeded: true, artifactDate: entry.createdAt)
-        }
-    }
-
-    private func collapse() {
-        withAnimation(.snappy(duration: 0.2)) {
-            expandedEntryID = nil
+        if !didToggle {
+            NSSound.beep()
         }
     }
 
-    /// Builds the row/expansion overflow menu: Open file, Reveal in Finder,
-    /// and Delete — never "Report issue". Sourced from the shell's
-    /// `dictationRowMenuItems(_:)` (relabeling "Open Markdown" to "Open
-    /// file" since it's the row's only open affordance) so Reveal-in-Finder
-    /// stays a single owned implementation.
-    private func menuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
-        var items: [HomeRowMenuItem] = dictationRowMenuItems(entry).compactMap { item in
-            switch item.title {
-            case "Open Markdown":
-                return HomeRowMenuItem(
-                    title: "Open file",
-                    symbolName: item.symbolName,
-                    isEnabled: item.isEnabled,
-                    action: item.action
-                )
-            case "Reveal in Finder":
-                return item
-            default:
-                return nil
+    private func transcribeAgainAvailability(for entry: SavedDictationEntry) -> DictationTranscribeAgainPolicy.Availability {
+        DictationTranscribeAgainPolicy.availability(
+            entryID: entry.id,
+            hasAudio: transcribeSamples != nil && audioInfo.info(for: entry)?.isAvailable == true,
+            runningEntryID: transcribeAgain.runningEntryID,
+            globalUnavailableReason: transcribeAgainUnavailableReason
+        )
+    }
+
+    private func startTranscribeAgain(_ entry: SavedDictationEntry) {
+        guard let transcribeSamples,
+              DictationTranscribeAgainPolicy.isEnabled(transcribeAgainAvailability(for: entry)) else { return }
+        guard let url = audioInfo.playableURL(for: entry) else {
+            onTranscribeAgainFailure?(
+                "Transcripted couldn't find this dictation's audio. It may have aged out or been deleted.",
+                {}
+            )
+            return
+        }
+        transcribeAgain.start(
+            entry: entry,
+            audioURL: url,
+            transcribe: transcribeSamples,
+            onFailure: { message in
+                onTranscribeAgainFailure?(message, { startTranscribeAgain(entry) })
             }
+        )
+    }
+
+    /// The card's ⋯ menu: Transcribe again (only with kept audio), Show in
+    /// Finder, and Delete. "Show in Finder" is the shell's reveal item
+    /// (picked by its automation id) relabeled, so revealing stays one owned
+    /// implementation. The shell's Open Markdown item stays off this menu,
+    /// per the approved mockup.
+    private func menuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
+        var items: [HomeRowMenuItem] = []
+
+        let availability = transcribeAgainAvailability(for: entry)
+        if let title = DictationTranscribeAgainPolicy.menuTitle(for: availability) {
+            items.append(
+                HomeRowMenuItem(
+                    title: title,
+                    symbolName: "arrow.clockwise",
+                    isEnabled: DictationTranscribeAgainPolicy.isEnabled(availability),
+                    automationIdentifier: DictationRowMenuIdentifier.transcribeAgain
+                ) {
+                    startTranscribeAgain(entry)
+                }
+            )
         }
+
+        items.append(contentsOf: dictationRowMenuItems(entry).compactMap { item in
+            guard item.automationIdentifier == DictationRowMenuIdentifier.reveal else { return nil }
+            return HomeRowMenuItem(
+                title: "Show in Finder",
+                symbolName: item.symbolName,
+                isEnabled: item.isEnabled,
+                automationIdentifier: DictationRowMenuIdentifier.reveal,
+                action: item.action
+            )
+        })
 
         if let onDeleteDictation {
             items.append(
                 HomeRowMenuItem(title: "Delete", symbolName: "trash", isDestructive: true) {
-                    if expandedEntryID == entry.id {
-                        collapse()
-                    }
+                    playback.stop(entryID: entry.id)
                     onDeleteDictation(entry)
                 }
             )

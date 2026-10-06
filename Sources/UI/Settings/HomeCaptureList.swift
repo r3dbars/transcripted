@@ -80,6 +80,9 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     let getID: (Item) -> AnyHashable
     var sectionSpacing: CGFloat = 12
     var headerSpacing: CGFloat = 2
+    /// Hairline dividers between rows. Off for lists of cards (Dictations),
+    /// which carry their own edges.
+    var showsRowDividers = true
     @ViewBuilder let row: (Item) -> Row
 
     private static var headerFormatter: DateFormatter {
@@ -130,7 +133,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                             ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
                                 row(item)
                                     .id(getID(item))
-                                if index < section.items.count - 1 {
+                                if showsRowDividers, index < section.items.count - 1 {
                                     Divider()
                                 }
                             }
@@ -209,6 +212,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
     let canLoadMore: Bool
     let getID: (Item) -> AnyHashable
     let onLoadMore: () -> Void
+    var showsRowDividers = true
     @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
@@ -231,6 +235,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
                     getID: getID,
                     sectionSpacing: 14,
                     headerSpacing: 2,
+                    showsRowDividers: showsRowDividers,
                     row: row
                 )
 

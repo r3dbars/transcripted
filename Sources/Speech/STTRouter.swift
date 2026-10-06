@@ -23,7 +23,11 @@ class STTRouter: ObservableObject {
     /// for the Meeting language row in Settings.
     @Published private(set) var appleSpeechLanguageDownload: AppleSpeechLanguageDownload?
     @Published var isRecording = false
+    /// True while the engine finishes a take or while Transcribe again runs
+    /// over a saved dictation file, so a new dictation queues behind either.
     @Published var isTranscribing = false
+    /// Transcribe again is running (`transcribeSavedDictation`).
+    @Published private(set) var isTranscribingSavedDictation = false
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
@@ -87,7 +91,11 @@ class STTRouter: ObservableObject {
         self.audioLevels = audioLevels
         parakeetEngine = ParakeetEngine(audioLevels: audioLevels)
         parakeetEngine.$isRecording.assign(to: &$isRecording)
-        parakeetEngine.$isTranscribing.assign(to: &$isTranscribing)
+        parakeetEngine.$isTranscribing
+            .combineLatest($isTranscribingSavedDictation)
+            .map { $0 || $1 }
+            .removeDuplicates()
+            .assign(to: &$isTranscribing)
         parakeetEngine.$recordingInterrupted.assign(to: &$recordingInterrupted)
         parakeetEngine.$isRecovering.assign(to: &$isRecovering)
         parakeetEngine.$inputFormatReady.assign(to: &$inputFormatReady)
@@ -556,6 +564,29 @@ class STTRouter: ObservableObject {
                     context: ["model": model.rawValue]
                 )
             }
+        )
+    }
+
+    /// Transcribe again: 16 kHz mono samples decoded from a saved dictation
+    /// file. Uses the dictation model and the live take's language context
+    /// (none: dictation follows the model's own detection, like
+    /// `transcribe(preparedRecording:)`). Never opens an input device. While
+    /// it runs `isTranscribing` is true, so a new dictation press queues
+    /// behind it the way it queues behind a finishing take, and saved-audio
+    /// re-transcription stays unavailable. One at a time.
+    func transcribeSavedDictation(samples: [Float]) async throws -> String {
+        guard !isTranscribingSavedDictation, !isRecording, !isTranscribing else {
+            throw NSError(domain: "STTRouter", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Transcription is busy",
+            ])
+        }
+        isTranscribingSavedDictation = true
+        defer { isTranscribingSavedDictation = false }
+        return try await transcribeSegment(
+            samples: samples,
+            source: .microphone,
+            model: selectedModel,
+            language: nil
         )
     }
 
