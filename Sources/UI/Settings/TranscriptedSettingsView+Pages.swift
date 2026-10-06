@@ -517,9 +517,9 @@ extension TranscriptedSettingsView {
     /// grace window. The file work runs off the main thread: it reads and
     /// rewrites the day file under the lock the dictation writer also takes.
     private func deleteDictationWithUndo(_ entry: SavedDictationEntry) {
-        trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
         let undoID = DictationUndoID.id(for: entry)
         guard homeDeletionIDs.insert(undoID).inserted else { return }
+        trackSettingsAction("delete_dictation_confirm", page: navigation.selectedPage)
         Task { @MainActor in
             defer { homeDeletionIDs.remove(undoID) }
             do {
