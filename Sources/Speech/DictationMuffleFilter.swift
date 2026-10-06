@@ -331,8 +331,13 @@ struct DictationMuffleSplice: Equatable {
     static let skipSideMarginSeconds: Double = 0.008
     /// The longest hold, so a bad lag reading can't leave a long silence.
     static let maxHoldSeconds: Double = 0.4
-    /// The fade-in after a hold: long enough to come back in smoothly.
+    /// The shortest fade-in after a hold.
     static let heldFadeSeconds: Double = 0.02
+    /// How much of the lag the fade-in covers instead of silence. The fade
+    /// ends exactly where the originals stopped, so the part it covers
+    /// replays the last moment quietly and already muffled: a soft swell
+    /// rather than a gap (0) or a full repeat (1).
+    static let swellFraction: Double = 0.5
 
     /// Frames the gate stays shut after the cut.
     var holdFrames: Int
@@ -351,13 +356,12 @@ struct DictationMuffleSplice: Equatable {
               Double(copyDelayFrames) > holdAboveLagSeconds * sampleRate else {
             return .plain
         }
-        let hold = min(
+        let catchUp = min(
             Double(copyDelayFrames) + (muteLatencySeconds + skipSideMarginSeconds) * sampleRate,
             maxHoldSeconds * sampleRate
         )
-        return DictationMuffleSplice(
-            holdFrames: Int(hold.rounded()),
-            fadeFrames: max(1, Int((heldFadeSeconds * sampleRate).rounded()))
-        )
+        let hold = Int((catchUp * (1 - swellFraction)).rounded())
+        let fade = max(Int((heldFadeSeconds * sampleRate).rounded()), Int(catchUp.rounded()) - hold)
+        return DictationMuffleSplice(holdFrames: hold, fadeFrames: max(1, fade))
     }
 }

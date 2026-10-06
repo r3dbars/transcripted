@@ -175,10 +175,12 @@ func testDictationMuffleFilter() {
         assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: nil, sampleRate: sampleRate), .plain, "an unknown lag keeps the plain fade")
         let airPods = DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: sampleRate)
         let extraFrames = Int(((DictationMuffleSplice.muteLatencySeconds + DictationMuffleSplice.skipSideMarginSeconds) * sampleRate).rounded())
-        assertEqual(airPods.holdFrames, 8_198 + extraFrames, "holds until the copy is past where the originals stopped")
-        assertEqual(airPods.fadeFrames, Int((DictationMuffleSplice.heldFadeSeconds * sampleRate).rounded()), "then fades in smoothly")
+        let catchUp = 8_198 + extraFrames
+        assertEqual(airPods.holdFrames + airPods.fadeFrames, catchUp, "the fade-in ends exactly where the originals stopped, so nothing plays twice at full level")
+        assertTrue(airPods.holdFrames > 0 && airPods.holdFrames < catchUp, "part silence, part swell, hold \(airPods.holdFrames)")
+        assertTrue(airPods.fadeFrames >= Int((DictationMuffleSplice.heldFadeSeconds * sampleRate).rounded()), "the swell is never shorter than the plain held fade")
         let capped = DictationMuffleSplice.atCut(copyDelayFrames: 1_000_000, sampleRate: sampleRate)
-        assertEqual(capped.holdFrames, Int((DictationMuffleSplice.maxHoldSeconds * sampleRate).rounded()), "a wild lag reading can't leave a long silence")
+        assertEqual(capped.holdFrames + capped.fadeFrames, Int((DictationMuffleSplice.maxHoldSeconds * sampleRate).rounded()), "a wild lag reading can't leave a long silence")
         assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: 0), .plain, "no sample rate, no hold")
     }
 
