@@ -433,18 +433,19 @@ func runMeetingSeries(_ args: [String]) async {
     guard await MainActor.run(body: { diarization.isReady }) else { die("diarizer failed to initialize") }
 
     // A shared DB for series meetings (fresh_db == false) persists across the run.
-    // A run resumes the one on disk only when it was built with this exact setup
-    // and holds exactly the finished meetings; otherwise it starts empty so it
-    // can't inherit voices the last run learned (LabSharedSpeakerDB).
+    // A run resumes the one on disk only when it was built with this exact setup,
+    // nothing was interrupted, and it holds exactly the finished meetings. A new
+    // run or --force starts it empty; any other mismatch stops here and asks for
+    // --force (LabSharedSpeakerDB).
     let sharedDBDir = LabSharedSpeakerDB.directory(workRoot: workRoot)
     let sharedMeetings = series.meetings.filter { !($0.fresh_db ?? true) }.map(\.id)
     let sharedConfig = LabSharedSpeakerDB.Config(
         set: series.set,
         workRoot: workRoot.standardizedFileURL.path,
         sharedMeetings: sharedMeetings,
-        backend: backend.rawValue,
         speakerDBFile: voiceprint?.speakerDBFileName ?? "speakers.sqlite",
-        embedderArgs: LabSharedSpeakerDB.embedderArgs(args)
+        runArgs: LabSharedSpeakerDB.fingerprintArgs(args),
+        fileHashes: LabSharedSpeakerDB.fileHashes(args: args, environment: ProcessInfo.processInfo.environment)
     )
     let finishedShared = Set(sharedMeetings.filter { id in
         fm.fileExists(atPath: setDir.appendingPathComponent(id, isDirectory: true)
@@ -459,6 +460,8 @@ func runMeetingSeries(_ args: [String]) async {
         case .reset(let reason):
             log("[lab] shared speaker DB: starting empty (\(reason))")
         }
+    } catch let refused as LabSharedSpeakerDB.ResumeRefused {
+        die(refused.description)
     } catch {
         die("could not prepare the shared speaker DB: \(error.localizedDescription)")
     }
@@ -497,6 +500,12 @@ func runMeetingSeries(_ args: [String]) async {
             try fm.copyItem(at: meetingDir.appendingPathComponent("system.wav"), to: systemURL)
         } catch {
             log("[lab] \(meeting.id): audio copy failed: \(error.localizedDescription)"); continue
+        }
+
+        if !freshDB {
+            do { try LabSharedSpeakerDB.beginMeeting(meeting.id, workRoot: workRoot) } catch {
+                die("could not mark \(meeting.id) in progress in the shared speaker DB: \(error.localizedDescription)")
+            }
         }
 
         // The voiceprint model's bars (a custom model's come from --embedder-thresholds)

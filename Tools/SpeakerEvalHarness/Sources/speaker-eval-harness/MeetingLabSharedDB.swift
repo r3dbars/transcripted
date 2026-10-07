@@ -2,10 +2,11 @@ import Foundation
 
 /// The shared speaker DB that `meeting-series` uses for fresh_db == false meetings.
 /// It lives at `<workRoot>/shared-db` and carries voices from one series meeting to
-/// the next. A run may keep it only when it is the same series, in the same work
-/// root, with the same diarizer and voiceprint settings, and the meetings already in
-/// it are exactly the finished ones, in series order with no gap. Anything else
-/// starts it empty, or a meeting silently matches voices it should never have heard.
+/// the next. A run may keep it only when it was built with this exact setup, no
+/// meeting was interrupted mid-run, and the meetings already in it are exactly the
+/// finished ones, in series order with no gap. A brand-new run (nothing finished)
+/// or `--force` starts it empty. Any other mismatch stops the run and asks for
+/// `--force`, instead of running the rest of the series on an empty DB.
 enum LabSharedSpeakerDB {
     static let markerFileName = "lab-shared-db.json"
 
@@ -15,16 +16,20 @@ enum LabSharedSpeakerDB {
         var workRoot: String
         /// fresh_db == false meetings, in series order.
         var sharedMeetings: [String]
-        var backend: String
         var speakerDBFile: String
-        /// Every --embedder-* flag and its value, as given.
-        var embedderArgs: [String]
+        /// Every meeting-series flag and value except --only, --limit and --force,
+        /// grouped per flag and sorted (see `fingerprintArgs`).
+        var runArgs: [String]
+        /// sha256 of the files those flags (or the lab knobs env var) point at.
+        var fileHashes: [String: String]
     }
 
-    /// Written into the shared DB folder; `applied` grows as meetings finish.
+    /// Written into the shared DB folder. `inProgress` is set while a shared
+    /// meeting runs; `applied` grows as each one finishes.
     struct Marker: Codable, Equatable {
         var config: Config
         var applied: [String]
+        var inProgress: String?
     }
 
     enum Decision: Equatable {
@@ -32,25 +37,57 @@ enum LabSharedSpeakerDB {
         case reset(reason: String)
     }
 
+    /// The DB can't be resumed, but some series meetings already finished and would
+    /// be skipped, so running on would build the rest of the series on an empty DB.
+    struct ResumeRefused: Error, CustomStringConvertible {
+        let reason: String
+        var description: String {
+            "the shared speaker DB can't be resumed (\(reason)), and finished meetings would be skipped. Rerun with --force to start the series over."
+        }
+    }
+
     static func directory(workRoot: URL) -> URL {
         workRoot.appendingPathComponent("shared-db", isDirectory: true)
     }
 
-    /// The --embedder-* flags and values from a meeting-series command line.
-    static func embedderArgs(_ args: [String]) -> [String] {
-        var out: [String] = []
+    /// The meeting-series flags that shape what the DB learns: everything except
+    /// --only/--limit (which meetings run) and --force. Each flag stays with its
+    /// value and the groups are sorted, so flag order doesn't matter.
+    static func fingerprintArgs(_ args: [String]) -> [String] {
+        let skippedWithValue: Set<String> = ["--only", "--limit"]
+        var groups: [[String]] = []
         var index = 0
         while index < args.count {
-            if args[index].hasPrefix("--embedder-") {
-                out.append(args[index])
-                if index + 1 < args.count, !args[index + 1].hasPrefix("--") {
-                    out.append(args[index + 1])
-                    index += 1
-                }
+            var group = [args[index]]
+            if args[index].hasPrefix("--"), index + 1 < args.count, !args[index + 1].hasPrefix("--") {
+                group.append(args[index + 1])
+                index += 1
             }
             index += 1
+            if skippedWithValue.contains(group[0]) || group[0] == "--force" {
+                // A value-less --force must not swallow the next flag's value.
+                if group[0] == "--force", group.count == 2 { groups.append([group[1]]) }
+                continue
+            }
+            groups.append(group)
         }
-        return out
+        return groups.sorted { $0.joined(separator: "\u{0}") < $1.joined(separator: "\u{0}") }.flatMap { $0 }
+    }
+
+    /// sha256 of the files whose contents change results: the --embedder-thresholds
+    /// JSON and the TRANSCRIPTED_LAB_KNOBS_FILE knobs file. A file that can't be
+    /// read hashes as "unreadable".
+    static func fileHashes(args: [String], environment: [String: String]) -> [String: String] {
+        var files: [String: String] = [:]
+        if let index = args.firstIndex(of: "--embedder-thresholds"), index + 1 < args.count {
+            files["--embedder-thresholds"] = args[index + 1]
+        }
+        if let knobs = environment["TRANSCRIPTED_LAB_KNOBS_FILE"], !knobs.isEmpty {
+            files["TRANSCRIPTED_LAB_KNOBS_FILE"] = knobs
+        }
+        return files.mapValues { path in
+            (try? sha256Hex(of: URL(fileURLWithPath: path))) ?? "unreadable"
+        }
     }
 
     /// Decides whether this run resumes the shared DB, empties it when not, and
@@ -65,8 +102,11 @@ enum LabSharedSpeakerDB {
     ) throws -> Decision {
         let dir = directory(workRoot: workRoot)
         let markerURL = dir.appendingPathComponent(markerFileName)
-        let marker = (try? Data(contentsOf: markerURL)).flatMap { try? JSONDecoder().decode(Marker.self, from: $0) }
+        let marker = readMarker(markerURL)
         let decision = resumeDecision(marker: marker, config: config, finished: finished, force: force)
+        if case .reset(let reason) = decision, !force, !finished.isEmpty {
+            throw ResumeRefused(reason: reason)
+        }
         if case .reset = decision {
             guard try reset(dir, workRoot: workRoot, fileManager: fileManager) else {
                 throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: dir.path])
@@ -74,7 +114,7 @@ enum LabSharedSpeakerDB {
         }
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let applied = decision == .resumed ? (marker?.applied ?? []) : []
-        try writeMarker(Marker(config: config, applied: applied), to: markerURL)
+        try writeMarker(Marker(config: config, applied: applied, inProgress: nil), to: markerURL)
         return decision
     }
 
@@ -82,10 +122,12 @@ enum LabSharedSpeakerDB {
         if force { return .reset(reason: "--force") }
         if finished.isEmpty { return .reset(reason: "no series meeting has finished yet") }
         guard let marker else { return .reset(reason: "no marker says what built it") }
-        guard marker.config == config else {
-            return .reset(reason: "built with a different set, work root, diarizer, or voiceprint")
+        if let interrupted = marker.inProgress {
+            return .reset(reason: "\(interrupted) was interrupted mid-run and may have left voices in it")
         }
-        // The DB must hold exactly the finished meetings, as the first N in series order.
+        guard marker.config == config else {
+            return .reset(reason: "it was built with different settings, set, or work root")
+        }
         let prefix = Array(config.sharedMeetings.prefix(marker.applied.count))
         guard marker.applied == prefix, Set(marker.applied) == finished else {
             return .reset(reason: "its meetings don't match the finished ones in series order")
@@ -93,13 +135,29 @@ enum LabSharedSpeakerDB {
         return .resumed
     }
 
-    /// Records that `meeting` has run against the shared DB.
-    static func recordApplied(_ meeting: String, workRoot: URL, fileManager: FileManager = .default) {
+    /// Marks `meeting` as running against the shared DB. Call before the pipeline
+    /// can write to it; `recordApplied` clears it. If the run dies in between, the
+    /// next run sees it and won't resume.
+    static func beginMeeting(_ meeting: String, workRoot: URL) throws {
         let markerURL = directory(workRoot: workRoot).appendingPathComponent(markerFileName)
-        guard let data = try? Data(contentsOf: markerURL),
-              var marker = try? JSONDecoder().decode(Marker.self, from: data) else { return }
+        guard var marker = readMarker(markerURL) else {
+            throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: markerURL.path])
+        }
+        marker.inProgress = meeting
+        try writeMarker(marker, to: markerURL)
+    }
+
+    /// Records that `meeting` has finished against the shared DB.
+    static func recordApplied(_ meeting: String, workRoot: URL) {
+        let markerURL = directory(workRoot: workRoot).appendingPathComponent(markerFileName)
+        guard var marker = readMarker(markerURL) else { return }
         if !marker.applied.contains(meeting) { marker.applied.append(meeting) }
+        if marker.inProgress == meeting { marker.inProgress = nil }
         try? writeMarker(marker, to: markerURL)
+    }
+
+    private static func readMarker(_ url: URL) -> Marker? {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Marker.self, from: $0) }
     }
 
     private static func writeMarker(_ marker: Marker, to url: URL) throws {
@@ -126,8 +184,10 @@ enum LabSharedSpeakerDB {
 }
 
 /// Promise checks for the shared-DB reset, run by `autoeval-self-test`.
+/// Every failed promise is listed before the command exits nonzero.
 func runMeetingLabSharedDBSelfTests() {
-    func fail(_ what: String) -> Never { die("meeting-lab self-test failed: \(what)") }
+    var failures: [String] = []
+    func check(_ ok: Bool, _ what: String) { if !ok { failures.append(what) } }
 
     let fm = FileManager.default
     let scratch = fm.temporaryDirectory.appendingPathComponent("MeetingLabSharedDB-\(UUID().uuidString)", isDirectory: true)
@@ -136,101 +196,132 @@ func runMeetingLabSharedDBSelfTests() {
         let workRoot = scratch.appendingPathComponent("runs/set", isDirectory: true)
         let shared = LabSharedSpeakerDB.directory(workRoot: workRoot)
         let learned = shared.appendingPathComponent("speakers.sqlite")
-        let config = LabSharedSpeakerDB.Config(
+        let baseArgs = ["--series", "sim/set", "--backend", "pyannote"]
+        let base = LabSharedSpeakerDB.Config(
             set: "set", workRoot: workRoot.path, sharedMeetings: ["m1", "m2", "m3", "m4"],
-            backend: "pyannote", speakerDBFile: "speakers.sqlite", embedderArgs: []
+            speakerDBFile: "speakers.sqlite",
+            runArgs: LabSharedSpeakerDB.fingerprintArgs(baseArgs), fileHashes: [:]
         )
+        func config(args: [String], hashes: [String: String] = [:]) -> LabSharedSpeakerDB.Config {
+            var changed = base
+            changed.runArgs = LabSharedSpeakerDB.fingerprintArgs(args)
+            changed.fileHashes = hashes
+            return changed
+        }
 
-        /// Simulates a run built with `builtWith` that got through `applied`, then
-        /// calls prepare the way the next run would, and reports whether the
-        /// learned voices survived.
+        enum Outcome: Equatable { case resumed, reset, refused }
+        /// Builds a DB with `builtWith` that got through `applied` (and, if given,
+        /// was killed during `interrupted`), then calls prepare the way the next run
+        /// would. Returns what happened and whether the learned voices survived.
         func rerun(
             applied: [String],
-            builtWith: LabSharedSpeakerDB.Config = config,
-            now: LabSharedSpeakerDB.Config = config,
+            interrupted: String? = nil,
+            builtWith: LabSharedSpeakerDB.Config = base,
+            now: LabSharedSpeakerDB.Config = base,
             finished: Set<String>,
             force: Bool = false
-        ) throws -> (decision: LabSharedSpeakerDB.Decision, kept: Bool) {
+        ) throws -> (outcome: Outcome, kept: Bool) {
             _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: builtWith, finished: [], force: true)
-            try fm.createDirectory(at: shared, withIntermediateDirectories: true)
             try Data("learned voices".utf8).write(to: learned)
-            for meeting in applied { LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot) }
-            let decision = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: now, finished: finished, force: force)
-            return (decision, fm.fileExists(atPath: learned.path))
+            for meeting in applied {
+                try LabSharedSpeakerDB.beginMeeting(meeting, workRoot: workRoot)
+                LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot)
+            }
+            if let interrupted { try LabSharedSpeakerDB.beginMeeting(interrupted, workRoot: workRoot) }
+            let outcome: Outcome
+            do {
+                let decision = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: now, finished: finished, force: force)
+                outcome = decision == .resumed ? .resumed : .reset
+            } catch is LabSharedSpeakerDB.ResumeRefused {
+                outcome = .refused
+            }
+            return (outcome, fm.fileExists(atPath: learned.path))
         }
 
-        var outcome = try rerun(applied: ["m1", "m2"], finished: ["m1", "m2"])
-        guard outcome.decision == .resumed, outcome.kept else {
-            fail("resuming a half-done series threw away the shared DB it needs")
-        }
-        // The resumed DB must still be resumable after more meetings finish.
+        var result = try rerun(applied: ["m1", "m2"], finished: ["m1", "m2"])
+        check(result == (.resumed, true), "resuming a half-done series threw away the shared DB it needs")
+        try LabSharedSpeakerDB.beginMeeting("m3", workRoot: workRoot)
         LabSharedSpeakerDB.recordApplied("m3", workRoot: workRoot)
-        guard try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: config, finished: ["m1", "m2", "m3"], force: false) == .resumed,
-              fm.fileExists(atPath: learned.path) else {
-            fail("a second resume lost track of the meetings already in the DB")
-        }
+        let second = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1", "m2", "m3"], force: false)
+        check(second == .resumed && fm.fileExists(atPath: learned.path),
+              "a second resume lost track of the meetings already in the DB")
 
-        outcome = try rerun(applied: ["m1", "m2"], finished: [])
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("a fresh series run kept a shared DB left by an earlier run")
-        }
-        outcome = try rerun(applied: ["m1", "m2", "m3", "m4"], finished: ["m1", "m2", "m3", "m4"], force: true)
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("a --force rerun kept the voices the last run learned")
-        }
-        // m2 failed and its result was deleted to retry it, but m3 and m4 already ran.
-        outcome = try rerun(applied: ["m1", "m2", "m3", "m4"], finished: ["m1", "m3", "m4"])
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("retrying a mid-series meeting kept voices from meetings after it")
-        }
-        var otherEmbedder = config
-        otherEmbedder.embedderArgs = ["--embedder-id", "redimnet"]
-        otherEmbedder.speakerDBFile = "speakers_redimnet.sqlite"
-        outcome = try rerun(applied: ["m1"], now: otherEmbedder, finished: ["m1"])
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("a run with different voiceprint settings resumed a DB built with other ones")
-        }
-        var otherBackend = config
-        otherBackend.backend = "nemotron"
-        outcome = try rerun(applied: ["m1"], now: otherBackend, finished: ["m1"])
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("a run with a different diarizer resumed a DB built with another one")
-        }
-        var otherWorkRoot = config
+        result = try rerun(applied: ["m1", "m2"], finished: [])
+        check(result == (.reset, false), "a fresh series run kept a shared DB left by an earlier run")
+        result = try rerun(applied: ["m1", "m2", "m3", "m4"], finished: ["m1", "m2", "m3", "m4"], force: true)
+        check(result == (.reset, false), "a --force rerun kept the voices the last run learned")
+
+        // m3 was killed after writing voices, before its lab_result.json.
+        result = try rerun(applied: ["m1", "m2"], interrupted: "m3", finished: ["m1", "m2"])
+        check(result.outcome != .resumed, "resumed on a DB holding a meeting that was interrupted mid-run")
+        result = try rerun(applied: ["m1", "m2"], interrupted: "m3", finished: ["m1", "m2"], force: true)
+        check(result == (.reset, false), "--force kept a DB holding an interrupted meeting")
+
+        // Anything that can't resume while finished meetings exist must stop and ask
+        // for --force, leaving the DB alone, not run the rest on an empty DB.
+        result = try rerun(applied: ["m1", "m2", "m3", "m4"], finished: ["m1", "m3", "m4"])
+        check(result == (.refused, true), "retrying a mid-series meeting without --force did not stop and ask for --force")
+        result = try rerun(applied: ["m1"], now: config(args: baseArgs + ["--embedder-id", "redimnet"]), finished: ["m1"])
+        check(result == (.refused, true), "different voiceprint settings without --force did not stop and ask for --force")
+        result = try rerun(applied: ["m1"], now: config(args: ["--series", "sim/set", "--backend", "nemotron"]), finished: ["m1"])
+        check(result == (.refused, true), "a different diarizer without --force did not stop and ask for --force")
+        result = try rerun(applied: ["m1"], now: config(args: baseArgs + ["--calendar-naming"]), finished: ["m1"])
+        check(result == (.refused, true), "turning on --calendar-naming did not invalidate the shared DB")
+        result = try rerun(applied: ["m1"], builtWith: config(args: baseArgs, hashes: ["--embedder-thresholds": "aaa"]),
+                           now: config(args: baseArgs, hashes: ["--embedder-thresholds": "bbb"]), finished: ["m1"])
+        check(result == (.refused, true), "edited --embedder-thresholds contents did not invalidate the shared DB")
+        var otherWorkRoot = base
         otherWorkRoot.workRoot = scratch.appendingPathComponent("runs/other").path
-        outcome = try rerun(applied: ["m1"], now: otherWorkRoot, finished: ["m1"])
-        guard outcome.decision != .resumed, !outcome.kept else {
-            fail("a run with a different --work resumed a DB it did not build")
-        }
+        result = try rerun(applied: ["m1"], now: otherWorkRoot, finished: ["m1"])
+        check(result == (.refused, true), "a different --work without --force did not stop and ask for --force")
+
         // A DB with no marker (an older build, or a copy) can't be trusted.
         try fm.removeItem(at: shared)
         try fm.createDirectory(at: shared, withIntermediateDirectories: true)
         try Data("learned voices".utf8).write(to: learned)
-        guard try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: config, finished: ["m1"], force: false) != .resumed,
-              !fm.fileExists(atPath: learned.path) else {
-            fail("resumed a shared DB that has no marker saying what built it")
-        }
+        var refused = false
+        do { _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1"], force: false) }
+        catch is LabSharedSpeakerDB.ResumeRefused { refused = true }
+        check(refused && fm.fileExists(atPath: learned.path), "resumed or emptied a shared DB with no marker instead of asking for --force")
 
-        guard LabSharedSpeakerDB.embedderArgs(["--series", "s", "--embedder-id", "x", "--force", "--embedder-dim", "192"])
-                == ["--embedder-id", "x", "--embedder-dim", "192"] else {
-            fail("embedder settings were not captured from the command line")
+        // Fingerprint: which meetings run doesn't matter; everything else does, in any order.
+        check(LabSharedSpeakerDB.fingerprintArgs(["--backend", "nemotron", "--only", "m2", "--limit", "3", "--force", "--calendar-naming"])
+                == LabSharedSpeakerDB.fingerprintArgs(["--calendar-naming", "--backend", "nemotron"]),
+              "--only/--limit/--force or flag order changed the shared-DB fingerprint")
+        for flags in [["--separation", "lab"], ["--sep-threshold", "0.7"], ["--no-invite"], ["--speaker-hint", "oracle"],
+                      ["--embedder-thresholds", "t.json"]] {
+            check(LabSharedSpeakerDB.fingerprintArgs(baseArgs + flags) != LabSharedSpeakerDB.fingerprintArgs(baseArgs),
+                  "\(flags[0]) was left out of the shared-DB fingerprint")
         }
+        let thresholds = scratch.appendingPathComponent("thresholds.json")
+        let knobs = scratch.appendingPathComponent("knobs.json")
+        try Data("{\"match\":0.5}".utf8).write(to: thresholds)
+        try Data("{\"k\":1}".utf8).write(to: knobs)
+        let thresholdArgs = ["--embedder-thresholds", thresholds.path]
+        let env = ["TRANSCRIPTED_LAB_KNOBS_FILE": knobs.path]
+        let before = LabSharedSpeakerDB.fileHashes(args: thresholdArgs, environment: env)
+        try Data("{\"match\":0.6}".utf8).write(to: thresholds)
+        let afterThresholds = LabSharedSpeakerDB.fileHashes(args: thresholdArgs, environment: env)
+        try Data("{\"k\":2}".utf8).write(to: knobs)
+        let afterKnobs = LabSharedSpeakerDB.fileHashes(args: thresholdArgs, environment: env)
+        check(!before.isEmpty && before != afterThresholds, "editing the --embedder-thresholds file didn't change its hash")
+        check(afterThresholds != afterKnobs, "editing the lab knobs file didn't change its hash")
 
         let outside = scratch.appendingPathComponent("elsewhere/shared-db", isDirectory: true)
         let outsideFile = outside.appendingPathComponent("speakers.sqlite")
         try fm.createDirectory(at: outside, withIntermediateDirectories: true)
         try Data("not ours".utf8).write(to: outsideFile)
-        guard try !LabSharedSpeakerDB.reset(outside, workRoot: workRoot), fm.fileExists(atPath: outsideFile.path) else {
-            fail("reset deleted a directory outside the run's work root")
-        }
+        check(try !LabSharedSpeakerDB.reset(outside, workRoot: workRoot) && fm.fileExists(atPath: outsideFile.path),
+              "reset deleted a directory outside the run's work root")
         let escape = workRoot.appendingPathComponent("../../elsewhere/shared-db", isDirectory: true)
-        guard try !LabSharedSpeakerDB.reset(escape, workRoot: workRoot), fm.fileExists(atPath: outsideFile.path) else {
-            fail("reset followed .. out of the run's work root")
-        }
-        guard try !LabSharedSpeakerDB.reset(workRoot, workRoot: workRoot), fm.fileExists(atPath: workRoot.path) else {
-            fail("reset deleted the work root itself")
-        }
+        check(try !LabSharedSpeakerDB.reset(escape, workRoot: workRoot) && fm.fileExists(atPath: outsideFile.path),
+              "reset followed .. out of the run's work root")
+        check(try !LabSharedSpeakerDB.reset(workRoot, workRoot: workRoot) && fm.fileExists(atPath: workRoot.path),
+              "reset deleted the work root itself")
     } catch {
-        fail("fixture: \(error)")
+        failures.append("fixture: \(error)")
+    }
+    if !failures.isEmpty {
+        die("meeting-lab self-test failed:\n  - " + failures.joined(separator: "\n  - "))
     }
 }
