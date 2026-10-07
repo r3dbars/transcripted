@@ -6,11 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Observability/ActivationTelemetry.swift": {
-      "Dictation": [
-        "SavedDictationTranscript"
-      ]
-    },
     "Sources/Observability/AnalyticsEventPolicy.swift": {
       "Speech": [
         "DictationInputDeviceSelectionReason"
