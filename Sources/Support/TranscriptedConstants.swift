@@ -355,20 +355,11 @@ enum TranscriptedConstants {
     // MARK: - Async Utilities
 
     /// Run an async operation with a deadline. Throws CancellationError on timeout.
+    /// The operation is cancelled at the deadline, but the throw doesn't wait
+    /// for it to unwind: a task group would join it first, so work that ignores
+    /// cancellation (awaiting another Task's value) would blow the deadline.
     static func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw CancellationError()
-            }
-            guard let result = try await group.next() else {
-                group.cancelAll()
-                throw CancellationError()
-            }
-            group.cancelAll()
-            return result
-        }
+        try await withDetachedTimeout(seconds: seconds, operation: operation)
     }
 
     /// Run an async operation with a deadline and return as soon as the deadline
