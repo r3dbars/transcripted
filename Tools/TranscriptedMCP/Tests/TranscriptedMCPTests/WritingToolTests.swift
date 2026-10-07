@@ -208,6 +208,27 @@ final class WritingToolTests: XCTestCase {
         XCTAssertTrue(page.hint.contains("read_writing"))
     }
 
+    /// A huge `limit` must return the rest of the day, not trap the server on
+    /// integer overflow.
+    func testReadWritingHugeLimitReturnsRemainingEntriesWithoutTrapping() throws {
+        let writingDir = try makeWritingDir()
+
+        let result = try handleReadWriting(
+            params: CallTool.Parameters(name: "read_writing", arguments: [
+                "filename": .string("Writing_2026-09-25"),
+                "offset": .int(1),
+                "limit": .int(Int.max),
+            ]),
+            writingDirs: [writingDir]
+        )
+
+        let page = try JSONDecoder().decode(WritingDayPage.self, from: Data(try text(result).utf8))
+        XCTAssertEqual(page.totalEntries, 2)
+        XCTAssertEqual(page.returned, 1)
+        XCTAssertFalse(page.truncated)
+        XCTAssertNil(page.nextOffset)
+    }
+
     func testReadWritingRejectsMissingTraversalAndNonWritingFiles() throws {
         let writingDir = try makeWritingDir()
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-09-24_10-00-00", to: writingDir)
