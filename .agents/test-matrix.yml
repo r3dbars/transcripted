@@ -247,6 +247,16 @@ rules:
       - "python3 scripts/dev/check-known-traps.py"
 
   - paths:
+      - "scripts/dev/check-qa-proof-boundary.py"
+      - "scripts/ops/transcripted-qa-bench.sh"
+      - "docs/qa-test-bench.md"
+      - "docs/audio-reliability-daily-check.md"
+      - ".agents/qa-gates.yml"
+    checks:
+      - "python3 scripts/dev/check-qa-proof-boundary.py --self-test"
+      - "python3 scripts/dev/check-qa-proof-boundary.py"
+
+  - paths:
       - "scripts/dev/explain-missing-sources.py"
       - "scripts/dev/test-parakeet-lifecycle.sh"
     checks:

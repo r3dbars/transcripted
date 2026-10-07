@@ -678,7 +678,10 @@ func testBluetoothRouteContract() async {
     }
 
     runSuite("Bluetooth route contract - dictation never writes the Mac-wide default input") {
-        // A banned-call check, not an ordering pin. The snapshot's ordering
+        // Still source-text, deliberately: a banned-call check over the engine
+        // files. No fake can observe a CoreAudio default-input write that no
+        // code path here performs, and a script reading Swift isn't allowed.
+        // Not an ordering pin. The snapshot's ordering
         // (serialized selection, fail-closed lookup, ignore window armed before
         // the graph read) is a behavior test in ParakeetAudioGraphTests.swift.
         // The only legitimate Mac-wide input writes are
@@ -696,20 +699,9 @@ func testBluetoothRouteContract() async {
         }
     }
 
-    runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
-        let bench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
-        let benchDoc = readSourceFixture("docs/qa-test-bench.md")
-        let dailyDoc = readSourceFixture("docs/audio-reliability-daily-check.md")
-        let gates = readSourceFixture(".agents/qa-gates.yml")
-
-        let boundary = "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof."
-        let manualProof = "Real connected AirPods/Bluetooth hardware remains manual proof."
-
-        for content in [bench, benchDoc, dailyDoc, gates] {
-            assertTrue(content.contains(boundary), "Bluetooth route docs/report should include the mocked proof boundary")
-            assertTrue(content.contains(manualProof), "Bluetooth route docs/report should keep real hardware proof manual")
-        }
-    }
+    // The QA report's mocked-proof boundary is a docs/script/YAML agreement,
+    // checked by scripts/dev/check-qa-proof-boundary.py (wired into
+    // linux-checks.sh and .agents/test-matrix.yml).
 }
 
 private func bluetoothDevice(
