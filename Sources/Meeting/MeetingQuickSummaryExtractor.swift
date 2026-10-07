@@ -351,6 +351,13 @@ enum MeetingQuickSummaryExtractor {
         "have a good", "sounds good", "no worries", "you're welcome",
     ]
 
+    /// Sign-off phrases that contain a weak action cue ("let me ", "have to ")
+    /// but never carry a real commitment.
+    private static let courtesyClosers: [String] = [
+        "let me know", "catch up", "see you", "talk soon", "talk later",
+        "have to run", "have to go", "have to drop", "have to jump", "have to hop",
+    ]
+
     private static func matchesAny(_ cues: [String], in normalized: String) -> Bool {
         cues.contains { normalized.contains($0) }
     }
@@ -376,9 +383,16 @@ enum MeetingQuickSummaryExtractor {
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < 3 { return true }
         guard matchesAny(smallTalkMarkers, in: trimmed) else { return false }
-        // A courtesy opener ("Sounds good, we'll go with X.") must not hide
-        // a decision or action item in the same sentence.
-        return !matchesAny(decisionCues, in: trimmed) && !matchesAny(actionCues, in: trimmed)
+        // A courtesy clause ("Sounds good, we'll go with X.") must not hide a
+        // decision or action in another clause of the same sentence. Drop
+        // the courtesy clauses and closers ("let me know", "see you"), then
+        // look for a cue in what's left.
+        let substantive = trimmed
+            .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
+            .map(String.init)
+            .filter { !matchesAny(smallTalkMarkers, in: $0) && !matchesAny(courtesyClosers, in: $0) }
+            .joined(separator: ",")
+        return !matchesAny(decisionCues, in: substantive) && !matchesAny(actionCues, in: substantive)
     }
 
     // MARK: - Summary assembly

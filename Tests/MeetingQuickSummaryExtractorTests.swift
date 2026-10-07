@@ -80,6 +80,38 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("courtesy closers with a weak action phrase stay small talk") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Thanks everyone, let me know if anything comes up.
+
+        **00:05**  [Mic/Justin]
+        Sounds good, I'll see you then.
+
+        **00:09**  [System/Maya]
+        Have a good weekend, let's catch up Monday.
+
+        **00:12**  [Mic/Justin]
+        No worries, I have to run to another call.
+
+        **00:15**  [System/Maya]
+        We'll go with the blue logo, sounds good.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertEqual(sections.actionItems, "None found.", "courtesy closers are not action items, got: \(sections.actionItems)")
+        for closer in ["let me know", "see you then", "catch up Monday", "run to another call"] {
+            assertFalse(
+                (sections.summary + sections.decisions + sections.openQuestions).contains(closer),
+                "courtesy closer should stay out of every section: \(closer)"
+            )
+        }
+        assertTrue(
+            sections.decisions.contains("blue logo"),
+            "a decision followed by a courtesy tail is still a decision, got: \(sections.decisions)"
+        )
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]
