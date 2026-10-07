@@ -527,6 +527,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioLevels.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
+    "Sources/Meeting/AVFoundationMeetingAudioPlaybackMixer.swift"
     "Sources/Meeting/ImportedTranscriptionQueueJournalState.swift"
     "Sources/Meeting/MeetingImportedAudioPreparer.swift"
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
