@@ -85,6 +85,18 @@ final class AudioSignalRecoveryTests: XCTestCase {
         )
     }
 
+    func testUsableCaptureSignalRejectsHissWithOneIsolatedClick() {
+        // A dead mic: 2 s of hiss above the frame RMS floor but below the
+        // capture peak, plus one click late in the track.
+        var hissAndClick = [Float](repeating: 0.0003, count: 32_000)
+        hissAndClick[25_000] = 0.5
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndClick, sampleRate: 16_000),
+            "one click in a dead mic's hiss must not make the track look usable"
+        )
+    }
+
     func testUsableCaptureSignalRejectsBelowFloorNoise() {
         let inaudible = [Float](repeating: 0.0004, count: 32_000)
 
