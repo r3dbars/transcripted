@@ -106,8 +106,7 @@
     },
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift": {
       "Core": [
-        "SpeakerIdentityOption",
-        "UtteranceChannel"
+        "SpeakerIdentityOption"
       ]
     },
     "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": {
@@ -123,11 +122,6 @@
     "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
       "Core": [
         "SQLiteHandle"
-      ]
-    },
-    "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
-      "Core": [
-        "UtteranceChannel"
       ]
     }
   }

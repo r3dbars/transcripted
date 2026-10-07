@@ -275,7 +275,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                             transcriptURL: reviewItem.transcriptURL,
                             dbId: speakerId,
                             diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                            channel: reviewItem.channel
+                            channel: reviewItem.channel.utteranceChannel
                         )
                     },
                     newName: trimmed,
@@ -340,7 +340,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 transcriptURL: reviewItem.transcriptURL,
                 dbId: sourceId,
                 diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                channel: reviewItem.channel
+                channel: reviewItem.channel.utteranceChannel
             )
         }
         let confirmedTranscriptIds = matchingReviewItems.compactMap(\.transcriptId)
