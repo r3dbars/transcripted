@@ -9,7 +9,6 @@
     "Tests/DictationQueuedStartPolicyTests.swift": 4,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 4,
-    "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 6,
     "Tests/OverlayScreenSharePrivacyTests.swift": 9,

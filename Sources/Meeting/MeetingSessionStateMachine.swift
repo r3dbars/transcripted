@@ -128,6 +128,16 @@ enum MeetingSessionStateMachine {
         return false
     }
 
+    /// May the user discard the live recording right now? Only while the
+    /// session itself is steady-state `.recording`. The overlay's own state also
+    /// reads `.recording` through `.stoppingRecording`, and a Discard that
+    /// outlives Stop must not cancel a preserve already in flight, so callers
+    /// ask this both when offering Discard and again after the confirm alert.
+    static func mayDiscardRecording(sessionState: MeetingSessionState?) -> Bool {
+        guard let sessionState else { return false }
+        return isSteadyStateRecording(sessionState)
+    }
+
     /// May a failure that is NOT about this session's own capture pipeline
     /// (an import rejected because a meeting is recording, a queued
     /// transcription job's model prep failing in the background) still force

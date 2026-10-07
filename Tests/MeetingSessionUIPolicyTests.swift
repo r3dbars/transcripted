@@ -296,53 +296,21 @@ func testMeetingSessionUIPolicy() async {
         assertFalse(competing.acceptsRecord, "a competing start must not count as an accepted Record")
     }
 
-    runSuite("MeetingOverlayController Discard menu requires session.recording") {
-        let source = readSourceFixture(
-            "Sources/UI/Overlay/MeetingOverlayController.swift",
-            description: "MeetingOverlayController.swift"
-        )
-        guard let start = source.range(of: "private func makeStripMenu()"),
-              let end = source.range(
-                of: "@objc private func handleMenuDiscard()",
-                range: start.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "meeting right-click menu should remain present")
-            return
+    runSuite("Discard is offered, and still honored after the confirm alert, only while the session itself is recording") {
+        // The overlay stays up through .stoppingRecording, so it can't gate Discard; the session state does.
+        assertTrue(MeetingSessionStateMachine.mayDiscardRecording(sessionState: .recording), "a steady recording can be discarded")
+        let notDiscardable: [MeetingSessionState] = [
+            .startingRecording, .stoppingRecording, .idle, .loadingModels, .ready, .transcribing, .error("synthetic"),
+        ]
+        for state in notDiscardable {
+            assertFalse(
+                MeetingSessionStateMachine.mayDiscardRecording(sessionState: state),
+                "\(state) must hide Discard, and a confirm that outlived Stop must not cancel a preserve in flight"
+            )
         }
-        let body = String(source[start.lowerBound..<end.lowerBound])
-        guard let sessionRecording = body.range(of: "if case .recording = meetingSession?.state"),
-              let discard = body.range(of: "Discard Recording…") else {
-            assertTrue(false, "Discard must be gated on the session being .recording, not overlay state")
-            return
-        }
-        assertTrue(
-            sessionRecording.lowerBound < discard.lowerBound,
-            "Discard must sit inside the session.recording check so it hides while stopping"
-        )
-    }
-
-    runSuite("MeetingOverlayController Discard confirm re-checks session.recording") {
-        let source = readSourceFixture(
-            "Sources/UI/Overlay/MeetingOverlayController.swift",
-            description: "MeetingOverlayController.swift"
-        )
-        guard let start = source.range(of: "private func handleDiscardRequested()"),
-              let end = source.range(
-                of: "private func scheduleAutoHide(",
-                range: start.upperBound..<source.endIndex
-              ) else {
-            assertTrue(false, "discard confirm handler should remain present")
-            return
-        }
-        let body = String(source[start.lowerBound..<end.lowerBound])
-        guard let confirm = body.range(of: "alert.runModal()") else {
-            assertTrue(false, "discard confirm must present a modal alert")
-            return
-        }
-        let afterConfirm = body[confirm.upperBound...]
-        assertTrue(
-            afterConfirm.contains("guard case .recording = session.state else { return }"),
-            "a Discard confirm that outlived Stop must not cancel a preserve already in flight"
+        assertFalse(
+            MeetingSessionStateMachine.mayDiscardRecording(sessionState: nil),
+            "no session means nothing to discard"
         )
     }
 
