@@ -49,10 +49,15 @@
     },
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
       "Core": [
-        "SpeakerIdentityOption",
         "SpeakerMatchOutcomeKind",
         "SpeakerNameUpdate",
         "SpeakerReviewPrioritizer"
+      ]
+    },
+    "Sources/UI/Overlay/NotchIslandVoiceRowView.swift": {
+      "Core": [
+        "SpeakerIdentityOption",
+        "SpeakerNameUpdate"
       ]
     },
     "Sources/UI/Settings/HomeTranscriptionActivityPresentation.swift": {
