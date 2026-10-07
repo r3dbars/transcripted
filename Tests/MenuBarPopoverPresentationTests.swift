@@ -77,6 +77,7 @@ func testMenuBarPopoverPresentation() async {
         assertFalse(panel.hidesOnDeactivate, "the anchor stays visible while the full-screen app remains active")
         assertEqual(panel.backgroundColor, .clear, "the helper does not paint over the status icon")
         assertEqual(panel.alphaValue, 1, "AppKit still sees a visible positioning window")
+        assertEqual(panel.sharingType, .readOnly, "the empty positioning surface does not hide the menu from screenshots")
         assertTrue(panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]), "the anchor can join another app's full-screen Space")
     }
 

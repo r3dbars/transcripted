@@ -58,6 +58,9 @@ final class MenuBarPopoverPresentation: NSObject {
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = false
+            // This contains only a clear positioning view, never capture text.
+            // Keep the menu's normal screenshot behavior unchanged.
+            panel.sharingType = .readOnly
             panel.ignoresMouseEvents = true
             panel.hidesOnDeactivate = false
             panel.level = .statusBar

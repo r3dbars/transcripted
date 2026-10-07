@@ -123,6 +123,9 @@ func testOverlayScreenSharePrivacy() async {
 
     runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
         let expectedMarkers: [String] = [
+            // Clear geometry-only anchor, with no capture text. Its readOnly
+            // sharing policy is checked by MenuBarPopoverPresentationTests.
+            "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift|private final class MenuBarPopoverAnchorPanel: NSPanel {",
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
             "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
