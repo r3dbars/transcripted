@@ -1,8 +1,9 @@
 // The first suite drives StatusItemPresentation, the same code the app delegate runs at launch and on
 // every recording change, against a plain NSButton, and renders every MenuBarGlyph to check it stays a
 // neutral template. The second renders every MenuBarGlyph into a bitmap and checks the silhouettes
-// actually differ where they are meant to. MenuBarGlyphGeometry staying in step with the SVG generator
-// in docs/assets/menu-bar-icon/ is checked by scripts/dev/check-menu-bar-glyph-sync.py.
+// actually differ where they are meant to. The third builds the real CGPaths MenuBarGlyphGeometry makes
+// (corner arcs and the tail included) and compares every path element with the SVGs the generator in
+// docs/assets/menu-bar-icon/make_menu_bar_icons.py wrote; that generator is the source of truth.
 
 import AppKit
 import Foundation
@@ -128,6 +129,127 @@ func testStatusItemPresentation() {
             "repeat refreshes should reuse the same image instead of redrawing it"
         )
     }
+
+    runSuite("menu bar glyph paths match the SVGs the generator draws") {
+        let g = MenuBarGlyphGeometry.self
+        let idle = svgPathData("docs/assets/menu-bar-icon/idle.svg")
+        // dictating.svg also holds the mask's stem and side-bar paths; the bubble is the closed one.
+        let dictating = svgPathData("docs/assets/menu-bar-icon/dictating.svg").filter { $0.last?.kind == "Z" }
+        assertEqual(idle.count, 5, "idle.svg should hold the outline, crossbar, stem and two side bars")
+        assertEqual(dictating.count, 1, "dictating.svg should hold one closed bubble path")
+        guard idle.count == 5, dictating.count == 1 else { return }
+
+        // The real CGPaths the app strokes, each against the generator's output. The outline and the
+        // body include the four corner arcs and the tail's two quadratic curves.
+        let comparisons: [(String, CGPath, [PathElement])] = [
+            ("idle outline (corner arcs and tail)", g.outlinePath(), idle[0]),
+            ("filled body (corner arcs and tail)", g.bodyPath(), dictating[0]),
+            ("crossbar", g.crossbarPath(), idle[1]),
+            ("idle stem", g.stemPath(from: g.top), idle[2]),
+            ("side bars", g.sideBarsPath(), idle[3] + idle[4]),
+        ]
+        for (name, path, expected) in comparisons {
+            let actual = pathElements(of: path)
+            assertEqual(actual.count, expected.count, "\(name) should have the generator's number of segments")
+            for (index, pair) in zip(actual, expected).enumerated() {
+                assertTrue(
+                    pair.0.kind == pair.1.kind && pair.0.points.count == pair.1.points.count
+                        && zip(pair.0.points, pair.1.points).allSatisfy {
+                            abs($0.x - $1.x) < 0.01 && abs($0.y - $1.y) < 0.01
+                        },
+                    "\(name) segment \(index) is \(pair.0), the generator draws \(pair.1)"
+                )
+            }
+        }
+
+        // The tail really is two quadratic curves, and the box frames the SVG viewBox.
+        assertEqual(pathElements(of: g.bodyPath()).filter { $0.kind == "Q" }.count, 2, "the tail should be two quad curves")
+        assertEqual(g.box.width, g.box.height, "the glyph box should be square")
+        assertEqual(svgViewBox("docs/assets/menu-bar-icon/idle.svg"), g.box, "the generator's viewBox should be the glyph box")
+    }
+}
+
+private struct PathElement: CustomStringConvertible {
+    let kind: String          // M, L, C, Q or Z
+    let points: [CGPoint]
+    var description: String { "\(kind) " + points.map { "(\($0.x), \($0.y))" }.joined(separator: " ") }
+}
+
+private func pathElements(of path: CGPath) -> [PathElement] {
+    var elements: [PathElement] = []
+    path.applyWithBlock { element in
+        let e = element.pointee
+        let count: Int
+        let kind: String
+        switch e.type {
+        case .moveToPoint: (kind, count) = ("M", 1)
+        case .addLineToPoint: (kind, count) = ("L", 1)
+        case .addQuadCurveToPoint: (kind, count) = ("Q", 2)
+        case .addCurveToPoint: (kind, count) = ("C", 3)
+        default: (kind, count) = ("Z", 0)
+        }
+        elements.append(PathElement(kind: kind, points: (0..<count).map { e.points[$0] }))
+    }
+    return elements
+}
+
+/// Every `<path d="...">` in a generated SVG as path elements. Handles the absolute M L H V C Q Z
+/// commands the generator emits; anything else comes back as a "?" element so the comparison fails.
+private func svgPathData(_ relativePath: String) -> [[PathElement]] {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8) else { return [] }
+    var results: [[PathElement]] = []
+    for chunk in svg.components(separatedBy: " d=\"").dropFirst() {
+        guard let data = chunk.components(separatedBy: "\"").first else { continue }
+        let tokens = data.split(separator: " ").map(String.init)
+        var elements: [PathElement] = []
+        var current = CGPoint.zero
+        var index = 0
+        func number(_ offset: Int) -> CGFloat {
+            index + offset < tokens.count ? CGFloat(Double(tokens[index + offset]) ?? .nan) : .nan
+        }
+        while index < tokens.count {
+            switch tokens[index] {
+            case "M", "L":
+                current = CGPoint(x: number(1), y: number(2))
+                elements.append(PathElement(kind: tokens[index], points: [current]))
+                index += 3
+            case "H":
+                current.x = number(1)
+                elements.append(PathElement(kind: "L", points: [current]))
+                index += 2
+            case "V":
+                current.y = number(1)
+                elements.append(PathElement(kind: "L", points: [current]))
+                index += 2
+            case "Q":
+                current = CGPoint(x: number(3), y: number(4))
+                elements.append(PathElement(kind: "Q", points: [CGPoint(x: number(1), y: number(2)), current]))
+                index += 5
+            case "C":
+                current = CGPoint(x: number(5), y: number(6))
+                elements.append(PathElement(kind: "C", points: [
+                    CGPoint(x: number(1), y: number(2)), CGPoint(x: number(3), y: number(4)), current,
+                ]))
+                index += 7
+            case "Z":
+                elements.append(PathElement(kind: "Z", points: []))
+                index += 1
+            default:
+                elements.append(PathElement(kind: "?\(tokens[index])", points: []))
+                index += 1
+            }
+        }
+        results.append(elements)
+    }
+    return results
+}
+
+private func svgViewBox(_ relativePath: String) -> CGRect {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8),
+          let box = svg.components(separatedBy: "viewBox=\"").dropFirst().first?.components(separatedBy: "\"").first
+    else { return .null }
+    let n = box.split(separator: " ").compactMap { Double($0) }.map { CGFloat($0) }
+    return n.count == 4 ? CGRect(x: n[0], y: n[1], width: n[2], height: n[3]) : .null
 }
 
 /// Renders a glyph straight through MenuBarGlyph.draw(in:context:) into a 36 px bitmap, so the pixel
