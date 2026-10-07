@@ -36,7 +36,7 @@ struct PersonalNextWordStoredCheckpoint: Codable, Equatable, Sendable {
             && self.excludedApps == PersonalHistoryCapturePolicy.normalizedExcludedApps(excludedApps)
     }
 
-    fileprivate var hasValidEnvelope: Bool {
+    var hasValidEnvelope: Bool {
         v > 0
             && PersonalHistoryEvent.validIdentifier(historyIdentifier)
             && PersonalHistoryEvent.validIdentifier(experimentIdentifier)
@@ -93,7 +93,7 @@ struct PersonalNextWordStoredModel: Codable, Equatable, Sendable {
             && model.isCompatibleWithCurrentRecipe
     }
 
-    fileprivate var hasValidEnvelope: Bool {
+    var hasValidEnvelope: Bool {
         v > 0
             && PersonalHistoryEvent.validIdentifier(historyIdentifier)
             && PersonalHistoryEvent.validIdentifier(experimentIdentifier)
