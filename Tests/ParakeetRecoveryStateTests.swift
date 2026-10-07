@@ -261,6 +261,7 @@ func testParakeetRecoveryState() async {
             group.addTask { await task.value; return true }
             group.addTask { try? await Task.sleep(nanoseconds: 30_000_000_000); return false }
             let first = await group.next() ?? false
+            if !first { task.cancel() }  // lets a stuck wait exit so the group can finish
             group.cancelAll()
             return first
         }
