@@ -224,6 +224,36 @@ final class RecentMeetingsWidgetTests: XCTestCase {
         XCTAssertNotNil(result._meta?["ui"])
     }
 
+    /// When a long transcript is cut, the hint must name something
+    /// `read_meeting` actually opens, so the agent can fetch the rest.
+    func testTruncatedTranscriptHintNamesAReadableMeeting() throws {
+        let filler = String(repeating: "budget planning detail ", count: 14)
+        let utterances = makeSequentialUtterances(count: 200) { "Utterance \($0): \(filler)" }
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-26T16:04:11-0500", utterances: utterances),
+            filename: "Call_2026-03-26_16-04-11", to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let transcript = try XCTUnwrap(try model().meetings.first).transcript
+        let hintPrefix = "Use read_meeting \""
+        let hintStart = try XCTUnwrap(transcript.range(of: hintPrefix), "long transcript should carry a truncation hint")
+        let rest = transcript[hintStart.upperBound...]
+        let argument = String(rest[..<(try XCTUnwrap(rest.firstIndex(of: "\"")))])
+
+        // Keep telemetry on a local no-op recorder while calling the read tool.
+        AgentCaptureQueryTelemetryRuntime.recorder = DiscardingAgentCaptureQueryTelemetry()
+        defer { AgentCaptureQueryTelemetryRuntime.recorder = AgentCaptureQueryTelemetry.shared }
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: [
+                "filename": .string(argument),
+                "limit": .int(1),
+            ]),
+            meetingDirs: [tempDir]
+        )
+        XCTAssertNotEqual(result.isError, true, "read_meeting should open the meeting the hint names")
+    }
+
     func testTextFallbackListsMeetings() throws {
         let m = RecentMeetingsWidgetModel(
             serverName: "transcripted", serverVersion: "test", generatedDate: "2026-07-07",
@@ -240,4 +270,8 @@ final class RecentMeetingsWidgetTests: XCTestCase {
         XCTAssertTrue(text.contains("30:00"))
         XCTAssertTrue(text.contains("▶ audio"))
     }
+}
+
+private final class DiscardingAgentCaptureQueryTelemetry: AgentCaptureQueryTelemetryRecording {
+    func track(_ observation: AgentCaptureQueryObservation) {}
 }
