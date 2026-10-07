@@ -55,7 +55,8 @@ enum NotchIslandPalette {
         }
     }
 
-    static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    // An immutable NSFont, never mutated.
+    nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
 
     static var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
