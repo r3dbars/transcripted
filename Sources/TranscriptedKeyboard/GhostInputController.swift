@@ -256,11 +256,10 @@ final class GhostInputController: IMKInputController {
                 dismiss(client)
                 return false
             }
+            let route = Self.plainTabRoute(ghostVisible: state.isVisible, awaitingChainedGhost: awaitingChainedGhost())
+            if route == .holdForChainedGhost { return true }
             let accepted = acceptSuggestion(client, observation: insertionObservation)
-            if !accepted {
-                if awaitingChainedGhost() { return true }
-                breakHistorySegment()
-            }
+            if !accepted { breakHistorySegment() }
             return accepted
 
         case 50: // The physical backtick/tilde key accepts the whole visible suggestion.

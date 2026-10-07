@@ -29,6 +29,14 @@ struct GhostInputControllerTests {
         ))
     }
 
+    @Test("A Tab that lands mid-chain, before the chained ghost shows, is held; any other Tab accepts")
+    func tabMidChainIsHeld() {
+        #expect(GhostInputController.plainTabRoute(ghostVisible: false, awaitingChainedGhost: true) == .holdForChainedGhost)
+        #expect(GhostInputController.plainTabRoute(ghostVisible: true, awaitingChainedGhost: true) == .acceptWord)
+        #expect(GhostInputController.plainTabRoute(ghostVisible: true, awaitingChainedGhost: false) == .acceptWord)
+        #expect(GhostInputController.plainTabRoute(ghostVisible: false, awaitingChainedGhost: false) == .acceptWord)
+    }
+
     @Test("Slow-key timing separates queue delay from handler work")
     func slowKeyTiming() throws {
         let timing = try #require(GhostInputController.slowKeyTiming(
