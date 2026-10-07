@@ -46,12 +46,38 @@ final class QABenchExitCodeTests: XCTestCase {
                       "\(report.scorecard.hardGateFailures)")
     }
 
+    func testQABenchAbortAfterPassingStepsStillFails() async throws {
+        // set -u abort mid-run: earlier steps appended PASS rows, write_report never ran.
+        let report = try await runQABench(rows: ["01-build\tBuild\tPASS\t0\t9\t"], exitCode: 1, writesReport: false)
+
+        XCTAssertEqual(report.status, .failed, report.summary)
+        XCTAssertTrue(report.scorecard.hardGateFailures.contains { $0.contains("exited with code 1") },
+                      "\(report.scorecard.hardGateFailures)")
+    }
+
+    func testQABenchAbortWithEmptyResultsStillFails() async throws {
+        // Startup truncates results.tsv, then `cd "$REPO_ROOT" || exit 1` fails.
+        let report = try await runQABench(rows: [], exitCode: 1, writesReport: false)
+
+        XCTAssertEqual(report.status, .failed, report.summary)
+        XCTAssertTrue(report.scorecard.hardGateFailures.contains { $0.contains("exited with code 1") },
+                      "\(report.scorecard.hardGateFailures)")
+    }
+
+    func testQABenchFailExitWithoutFailRowsStillFails() async throws {
+        let report = try await runQABench(rows: ["01-build\tBuild\tPASS\t0\t9\t"], exitCode: 1)
+
+        XCTAssertEqual(report.status, .failed, report.summary)
+        XCTAssertTrue(report.scorecard.hardGateFailures.contains { $0.contains("exited with code 1") },
+                      "\(report.scorecard.hardGateFailures)")
+    }
+
     // MARK: - Fixture
 
     /// Runs the QA bench against a fake repository whose qa-bench script writes
-    /// `rows` (when given) to results.tsv the way the real script does, then
-    /// exits with `exitCode`.
-    private func runQABench(rows: [String]?, exitCode: Int32) async throws -> LabRunReport {
+    /// `rows` (when given) to results.tsv, plus qa-report.md when `writesReport`
+    /// (as write_report does), then exits with `exitCode`.
+    private func runQABench(rows: [String]?, exitCode: Int32, writesReport: Bool = true) async throws -> LabRunReport {
         let root = try temporaryDirectory()
         let repo = root.appendingPathComponent("repo", isDirectory: true)
         let script = repo.appendingPathComponent("scripts/ops/transcripted-qa-bench.sh")
@@ -64,11 +90,11 @@ final class QABenchExitCodeTests: XCTestCase {
         var writeRows = ""
         if let rows {
             let fixture = root.appendingPathComponent("results-fixture.tsv")
-            try (rows.joined(separator: "\n") + "\n").write(to: fixture, atomically: true, encoding: .utf8)
+            try rows.map { $0 + "\n" }.joined().write(to: fixture, atomically: true, encoding: .utf8)
             writeRows = """
             mkdir -p "$out/$run"
             cp '\(fixture.path)' "$out/$run/results.tsv"
-            echo '# QA report' > "$out/$run/qa-report.md"
+            \(writesReport ? "echo '# QA report' > \"$out/$run/qa-report.md\"" : "")
             """
         }
         let source = """
