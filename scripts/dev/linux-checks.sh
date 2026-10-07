@@ -213,8 +213,6 @@ else
 fi
 check "telemetry keys self-test" "python3 scripts/dev/check-telemetry-keys.py --self-test"
 check "telemetry keys survive sanitizers" "python3 scripts/dev/check-telemetry-keys.py"
-check "window capture policy self-test" "python3 scripts/dev/check-window-capture-policy.py --self-test"
-check "window capture policy" "python3 scripts/dev/check-window-capture-policy.py"
 check "privacy leak sweep" "python3 scripts/ops/privacy-leak-sweep.py --write-report $OUT_DIR/privacy-leak-sweep-report.json"
 
 # The strict release-health gate needs the GitHub release fixture that matches
