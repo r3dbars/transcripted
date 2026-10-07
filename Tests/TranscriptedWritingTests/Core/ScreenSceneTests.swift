@@ -234,6 +234,24 @@ struct ScreenSceneTests {
         #expect(!scene.conversationTurns.contains { $0.text.contains("I can make it") })
     }
 
+    @Test("An echo of the typed text high in the window does not cut off the thread beneath it")
+    func echoAboveThreadDoesNotMoveTheFloor() {
+        let blocks = [
+            // An older copy of what the user is typing, near the top of the window.
+            block("Are we still on for Tuesday at 3?", x: 0.55, y: 0.10, window: slack),
+            block("Quick check about the offsite plans", x: 0.05, y: 0.30, window: slack),
+            block("The venue moved to the north building", x: 0.05, y: 0.45, window: slack),
+            block("Parking is on the east side now", x: 0.05, y: 0.60, window: slack),
+            block("Let me know if that works for you", x: 0.05, y: 0.70, window: slack),
+            // The compose field holding the typed text.
+            block("are we still on for tuesday at 3", x: 0.30, y: 0.85, window: slack),
+        ]
+        let scene = ScreenScene.classify(blocks: blocks, frontmostBundleID: slack, fieldText: "are we still on for tuesday at 3")
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "Let me know if that works for you")
+        #expect(scene.conversationTurns.contains { $0.text == "The venue moved to the north building" })
+    }
+
     @Test("With nothing typed there is no floor and the bottom bubbles are used as before")
     func emptyFieldKeepsLegacySelection() {
         let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)

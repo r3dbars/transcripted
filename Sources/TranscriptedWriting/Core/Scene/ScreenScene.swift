@@ -486,25 +486,24 @@ public enum ScreenScene {
     /// is doing the containing (e.g. "ok", "yes") since they'd trivially
     /// "match" almost any text without actually being the same message.
     private static let dedupeMinimumLength = 6
-    /// Top edge of the highest block that reads back the user's own typed
-    /// text, or `nil` when none does (empty field, or the field is
-    /// scrolled out of view). A wrapped compose field yields several
-    /// fragments; any fragment of two or more words found in the field
-    /// text counts, so the floor sits at the first such line.
+    /// Top edge of the highest block in the lower half of the window that
+    /// reads back the user's own typed text, or `nil` when none does (empty
+    /// field, or the field is scrolled out of view). A wrapped compose field
+    /// yields several fragments; any fragment of two or more words found in
+    /// the field text counts, so the floor sits at the first such line.
     private static func composeFieldTop(in blocks: [OCRBlock], fieldText: String) -> Double? {
         let field = normalizedForDedupe(fieldText)
         guard field.count >= dedupeMinimumLength else { return nil }
-        let matches = blocks.filter { block in
-            let candidate = normalizedForDedupe(block.text)
-            guard candidate.count >= dedupeMinimumLength,
-                  candidate.split(separator: " ").count >= 2 else { return false }
-            return field.contains(candidate) || candidate.contains(field)
-        }
         // A compose field sits in the lower half of its window. A match
         // higher up is a quoted or echoed message, not the field; dedupe
         // still drops it, but it must not cut the thread beneath it.
-        guard let lowest = matches.max(by: { $0.boundingBox.y < $1.boundingBox.y }),
-              windowRelativeY(of: lowest) >= 0.5 else { return nil }
+        let matches = blocks.filter { block in
+            let candidate = normalizedForDedupe(block.text)
+            guard candidate.count >= dedupeMinimumLength,
+                  candidate.split(separator: " ").count >= 2,
+                  windowRelativeY(of: block) >= 0.5 else { return false }
+            return field.contains(candidate) || candidate.contains(field)
+        }
         return matches.map(\.boundingBox.y).min()
     }
 
