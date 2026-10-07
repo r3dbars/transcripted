@@ -258,6 +258,47 @@ func testTranscriptedConstants() async {
         assertFalse(cleanupNeeded.isSet, "the deadline must not need the harness escape hatch")
     }
 
+    await runSuite("TranscriptedConstants.withTimeout — a cancelled caller ends right away, not at the deadline") {
+        // Wake recovery is cancelled on shutdown. The readiness wait must end
+        // then, not run to its deadline and report a false timeout.
+        let releaseWork = ParakeetAsyncInterleavingGate()
+        let workStarted = ParakeetAsyncInterleavingGate()
+        let cleanupNeeded = DetachedTimeoutWorkFlag()
+        // The deadline is far past this escape hatch, so if cancellation
+        // isn't forwarded the work is released and returns "late".
+        let cleanup = Task {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            cleanupNeeded.set()
+            await workStarted.open()
+            await releaseWork.open()
+        }
+        defer { cleanup.cancel() }
+
+        let caller = Task { () -> Result<String, Error> in
+            do {
+                return .success(try await TranscriptedConstants.withTimeout(seconds: 3_600) {
+                    await workStarted.open()
+                    await releaseWork.wait()
+                    return "late"
+                })
+            } catch {
+                return .failure(error)
+            }
+        }
+        await workStarted.wait()
+        caller.cancel()
+        let result = await caller.value
+
+        switch result {
+        case .success(let value):
+            assertTrue(false, "a cancelled caller must not get the work's value, got \(value)")
+        case .failure(let error):
+            assertTrue(error is CancellationError, "a cancelled caller should get CancellationError, got \(error)")
+        }
+        assertFalse(cleanupNeeded.isSet, "the cancelled wait must end without the harness escape hatch")
+        await releaseWork.open()
+    }
+
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns completed work before deadline") {
         let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 1) {
             "ok"
