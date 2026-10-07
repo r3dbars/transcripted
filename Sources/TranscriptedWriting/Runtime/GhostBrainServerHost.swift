@@ -621,7 +621,7 @@ final class GhostBrainServerHost: @unchecked Sendable {
     /// can be proven directly without a live socket.
     static func awaitPersonalPrediction(
         _ race: PersonalLookupRace?,
-        now: @Sendable () -> Date = Date.init,
+        now: @Sendable () -> Date = { Date() },
         diagnostics: @Sendable (String, [String: String]) -> Void = { event, metadata in
             DiagnosticsLog.shared.record(event, metadata: metadata)
         }
