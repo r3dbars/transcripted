@@ -4,7 +4,7 @@ Runs every 30 minutes as a Codex automation on the owner's Mac. Its job is to an
 
 ## Which PRs
 
-Open PRs whose branch starts with `cleanup/`, `garden/` or `codex/issue-`, that have at least one **unresolved** review thread started by `chatgpt-codex-connector`. Skip PRs labeled `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
+Open PRs whose branch starts with `cleanup/`, `garden/` or `codex/issue-`, that have at least one **unresolved** review thread started by `chatgpt-codex-connector`. Skip PRs labeled `waiting-on-owner`, `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
 
 Find unresolved threads with GraphQL (`reviewThreads { isResolved comments { author { login } body path line } }`).
 
@@ -28,7 +28,7 @@ The push starts a new Codex review automatically.
 Never call a finding wrong without evidence in the reply.
 
 **Unsure, or not yours to decide: hand it to Justin.**
-Reply with what you checked and what's unclear. Leave the thread open and add the label `needs owner review`. Use this when:
+Reply with what you checked and what's unclear. Leave the thread open and add the label `waiting-on-owner`. Use this when:
 
 - the finding is P0, or from the security review, and you can't fix it inside the lane
 - the fix would change behavior in a cleanup PR, or leave the lane
