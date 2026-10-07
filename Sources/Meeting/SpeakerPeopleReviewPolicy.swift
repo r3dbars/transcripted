@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
 import TranscriptedCore
+#endif
 
 /// Which saved people the Speakers page flags for review, and the order it lists
 /// them in. Only Settings uses it, so it lives in Meeting rather than Core.
