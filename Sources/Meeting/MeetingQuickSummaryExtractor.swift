@@ -375,7 +375,10 @@ enum MeetingQuickSummaryExtractor {
     private static func isSmallTalk(_ normalized: String) -> Bool {
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < 3 { return true }
-        return smallTalkMarkers.contains { trimmed.contains($0) }
+        guard matchesAny(smallTalkMarkers, in: trimmed) else { return false }
+        // A courtesy opener ("Sounds good, we'll go with X.") must not hide
+        // a decision or action item in the same sentence.
+        return !matchesAny(decisionCues, in: trimmed) && !matchesAny(actionCues, in: trimmed)
     }
 
     // MARK: - Summary assembly

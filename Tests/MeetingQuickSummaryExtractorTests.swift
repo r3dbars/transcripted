@@ -46,6 +46,40 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("a courtesy opener does not hide a decision or action item in the same sentence") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Sounds good, we'll go with Postgres.
+
+        **00:12**  [Mic/Justin]
+        Thanks everyone, I'll send the deck Friday.
+
+        **00:20**  [System/Maya]
+        Thanks everyone, that was a really productive session today.
+
+        **00:24**  [Mic/Justin]
+        Thanks everyone!
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.decisions.contains("we'll go with Postgres"),
+            "a decision after a courtesy opener should be kept, got: \(sections.decisions)"
+        )
+        assertTrue(
+            sections.actionItems.contains("send the deck Friday"),
+            "an action item after a courtesy opener should be kept, got: \(sections.actionItems)"
+        )
+        assertFalse(
+            sections.summary.lowercased().contains("productive session"),
+            "a courtesy sentence with no decision or action cue is still small talk, got: \(sections.summary)"
+        )
+        assertFalse(
+            (sections.decisions + sections.actionItems + sections.openQuestions).contains("Thanks everyone!"),
+            "pure courtesy lines stay filtered"
+        )
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]
