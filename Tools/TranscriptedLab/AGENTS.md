@@ -25,6 +25,7 @@ Transcripted Lab is an experiment orchestrator, not a second implementation of T
 - `Sources/transcripted-lab/TranscriptedLabCLI.swift` — CLI: `run`, `snapshot`, `doctor`, `list`, `show`, `compare`
 - `Sources/TranscriptedLab/` — SwiftUI app: `TranscriptedLabApp.swift` (entry), `LabWorkspaceStore.swift` (observable run/report state over the kit), `LabContentView.swift` (sidebar, experiment form, run detail)
 - `Tests/TranscriptedLabKitTests/TranscriptedLabKitTests.swift` — kit tests
+- `Tests/TranscriptedLabKitTests/QABenchExitCodeTests.swift` — qa-bench exit 1/3 runs still get scored; crashes without a report still fail
 - `script/build_and_run.sh` — builds both products, assembles and ad-hoc signs a local app bundle, and opens it unless `--verify`
 
 ## Hard gates

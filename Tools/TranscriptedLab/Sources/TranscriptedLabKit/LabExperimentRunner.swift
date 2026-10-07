@@ -42,7 +42,10 @@ public actor LabExperimentRunner {
                 processResult = nil
             }
 
-            if let processResult, processResult.timedOut || processResult.exitCode != 0 {
+            let qaBenchReported = processResult.map {
+                Self.qaBenchWroteReport($0, bench: configuration.bench, expected: expected, fileManager: fileManager)
+            } ?? false
+            if let processResult, !qaBenchReported, processResult.timedOut || processResult.exitCode != 0 {
                 let failure = processResult.timedOut
                     ? "Experiment timed out after \(Int(configuration.timeoutSeconds)) seconds."
                     : "Experiment process exited with code \(processResult.exitCode)."
@@ -70,14 +73,23 @@ public actor LabExperimentRunner {
                 artifactDirectory: runArtifacts,
                 expectedArtifacts: expected
             )
+            var scorecard = analysis.scorecard
+            if qaBenchReported, processResult?.exitCode == 3 {
+                scorecard = LabScorecard(
+                    overallScore: scorecard.overallScore,
+                    dimensions: scorecard.dimensions,
+                    hardGateFailures: scorecard.hardGateFailures,
+                    warnings: scorecard.warnings + ["QA bench held the gate (exit 3): a step was skipped or warned."]
+                )
+            }
             let report = LabRunReport(
                 id: id,
                 startedAt: startedAt,
                 finishedAt: Date(),
-                status: status(for: analysis.scorecard),
+                status: status(for: scorecard),
                 configuration: configuration,
                 summary: analysis.summary,
-                scorecard: analysis.scorecard,
+                scorecard: scorecard,
                 metrics: analysis.metrics,
                 command: command,
                 process: processResult,
@@ -164,6 +176,24 @@ public actor LabExperimentRunner {
                 title: "Transcripted QA"
             )
         }
+    }
+
+    /// transcripted-qa-bench.sh's write_report exits 1 when a step FAILed and 3
+    /// when a step was skipped or held, after writing results.tsv. Those runs are
+    /// scored (the analyzer turns FAIL rows into hard gates); any other nonzero
+    /// exit, a timeout, or a missing results file is still a process failure.
+    static func qaBenchWroteReport(
+        _ result: LabProcessResult,
+        bench: LabBench,
+        expected: [LabArtifact],
+        fileManager: FileManager
+    ) -> Bool {
+        guard bench == .qa || bench == .transcriptionCorpus,
+              !result.timedOut,
+              result.exitCode == 1 || result.exitCode == 3 else { return false }
+        let resultsLabel = bench == .qa ? "QA results" : "Transcription QA results"
+        guard let results = expected.first(where: { $0.label == resultsLabel }) else { return false }
+        return fileManager.fileExists(atPath: results.path)
     }
 
     private func status(for scorecard: LabScorecard) -> LabRunStatus {
