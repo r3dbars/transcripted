@@ -107,9 +107,13 @@ public class FailedTranscriptionManager: ObservableObject {
                     // the row (title, error, retry count, one-click retry) is
                     // gone for good — switching the library back does not
                     // restore it. Keep entries that still look like real
-                    // archived capture audio and are still on disk; counting
+                    // archived capture audio and are still on disk (or whose old library
+                    // is offline right now, so the audio can't be checked); counting
                     // them unavailable also suppresses the destructive rewrite.
-                    if isRelocatedCaptureAudioStillOnDisk(relocatedEntry) {
+                    if RelocatedCaptureAudioPolicy.shouldKeep(
+                        micAudioURL: Self.canonicalFileURL(relocatedEntry.micAudioURL),
+                        systemAudioURL: relocatedEntry.systemAudioURL.map(Self.canonicalFileURL)
+                    ) {
                         AppLogger.pipeline.warning("Kept failed transcription whose audio is outside the current capture library", [
                             "id": relocatedEntry.id.uuidString,
                             "micURL": relocatedEntry.micAudioURL.lastPathComponent
@@ -353,26 +357,6 @@ public class FailedTranscriptionManager: ObservableObject {
         healed.micAudioURL = micURL
         healed.systemAudioURL = systemURL
         return (healed, true)
-    }
-
-    /// Whether an entry's out-of-root audio still looks like real archived
-    /// capture audio in a library the user moved away from: the required mic
-    /// path still exists in a `<stem>_audio` directory, and any optional system
-    /// path uses that same archive layout. The system file may be missing; once
-    /// that library is active again, normal reconciliation drops the optional
-    /// reference and keeps the meeting retryable from its mic track. Kept
-    /// deliberately narrow so genuinely tampered paths — `/tmp`, `..`
-    /// traversal, arbitrary home files — are still rejected outright.
-    private func isRelocatedCaptureAudioStillOnDisk(_ entry: FailedTranscription) -> Bool {
-        let micURL = Self.canonicalFileURL(entry.micAudioURL)
-        guard micURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio"),
-              FileManager.default.fileExists(atPath: micURL.path) else {
-            return false
-        }
-        guard let systemURL = entry.systemAudioURL.map(Self.canonicalFileURL) else {
-            return true
-        }
-        return systemURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
     }
 
     private func relocatedAudioURL(for url: URL) -> URL? {
