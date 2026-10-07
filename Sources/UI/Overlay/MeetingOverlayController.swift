@@ -44,7 +44,7 @@ final class MeetingOverlayController: NSObject {
 
     // MARK: - State
 
-    private(set) var state: OverlayState = .idle {
+    var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
             if case .error = state { return }

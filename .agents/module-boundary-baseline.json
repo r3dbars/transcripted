@@ -41,6 +41,11 @@
         "CoreAudioSystemAudioCapture"
       ]
     },
+    "Sources/UI/Overlay/MeetingOverlayController+Prompts.swift": {
+      "Core": [
+        "CaptureRouteStabilizationOutcome"
+      ]
+    },
     "Sources/UI/Overlay/MeetingOverlayController.swift": {
       "Core": [
         "CaptureRouteStabilizationOutcome",
