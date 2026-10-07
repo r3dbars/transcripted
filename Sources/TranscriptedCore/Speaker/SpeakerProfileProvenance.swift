@@ -527,6 +527,7 @@ extension SpeakerDatabase {
                 // This throws on any ledger inconsistency so the transaction rolls back.
                 try restoreConfirmationsForUnmergeImpl(mergeEventId: mergeId)
 
+                let markerRowid = try mergeMarkerRowidImpl(mergeEventId: mergeId)
                 // Drop the fuse marker so it doesn't linger on the keeper's audit trail.
                 try execBindOrThrow(
                     "DELETE FROM speaker_provenance WHERE merge_event_id = ? AND kind = ?;",
@@ -535,13 +536,10 @@ extension SpeakerDatabase {
                     expectedChanges: 1
                 )
 
-                // Re-derive both profiles from their (now disjoint) contribution embeddings.
-                // The snapshots above are exact pre-merge state, but the keeper may have
-                // gained recordings after the merge — re-deriving from contributions keeps
-                // that post-merge learning instead of silently discarding it. No-op (keeps
-                // the snapshot) for legacy profiles that have no stored contribution rows.
-                try rederiveProfileFromContributionsOrThrowImpl(event.sourceId)
-                try rederiveProfileFromContributionsOrThrowImpl(event.targetId)
+                // The snapshots stay the base; only post-merge rows are folded on top.
+                // See SpeakerUnmergeRestore.swift for why rows are never re-averaged here.
+                try foldPostMergeContributionsOrThrowImpl(into: sourceSnapshot, afterRowid: markerRowid)
+                try foldPostMergeContributionsOrThrowImpl(into: targetSnapshot, afterRowid: markerRowid)
 
                 let now = ISO8601DateFormatter().string(from: Date())
                 try execBindOrThrow(

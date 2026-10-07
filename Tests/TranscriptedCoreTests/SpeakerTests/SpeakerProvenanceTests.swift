@@ -179,6 +179,58 @@ final class SpeakerProvenanceTests: XCTestCase {
         XCTAssertNotNil(database.getSpeaker(id: source.id))
     }
 
+    /// Builds a profile with `legacyRecordings` recordings that predate provenance (their
+    /// audit rows are dropped, like a profile created before provenance shipped), then one
+    /// post-provenance recording with `laterAxis` that leaves a single contribution row.
+    private func makePartlyLegacyProfile(axis: Int, legacyRecordings: Int, laterAxis: Int) throws -> UUID {
+        let id = UUID()
+        for _ in 0..<legacyRecordings {
+            _ = database.addOrUpdateSpeaker(embedding: embedding(axis: axis), existingId: id)
+        }
+        let dropResult = database.queue.sync {
+            sqlite3_exec(database.db, "DELETE FROM speaker_provenance WHERE profile_id = '\(id.uuidString)';", nil, nil, nil)
+        }
+        XCTAssertEqual(dropResult, SQLITE_OK)
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: laterAxis), existingId: id)
+        XCTAssertEqual(database.contributions(forProfileId: id).count, 1)
+        return id
+    }
+
+    func testUnmergeRestoresPreMergeVoiceprintForPartlyLegacySource() throws {
+        let sourceId = try makePartlyLegacyProfile(axis: 50, legacyRecordings: 20, laterAxis: 51)
+        let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 52), existingId: nil)
+        let preSource = try XCTUnwrap(database.getSpeaker(id: sourceId))
+        XCTAssertEqual(preSource.callCount, 21)
+
+        try database.mergeProfiles(sourceId: sourceId, into: target.id)
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: target.id))
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: sourceId))
+        XCTAssertEqual(restored.callCount, 21, "un-merge must keep the 20 recordings that have no audit rows")
+        XCTAssertGreaterThan(
+            cosine(restored.embedding, preSource.embedding), 0.999,
+            "un-merge must restore the pre-merge voiceprint, not the mean of one contribution row"
+        )
+    }
+
+    func testUnmergeKeepsPartlyLegacyTargetHistoryAndAddsPostMergeLearning() throws {
+        let targetId = try makePartlyLegacyProfile(axis: 60, legacyRecordings: 20, laterAxis: 61)
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 62), existingId: nil)
+        let preTarget = try XCTUnwrap(database.getSpeaker(id: targetId))
+
+        try database.mergeProfiles(sourceId: source.id, into: targetId)
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 60), existingId: targetId)
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: targetId))
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: targetId))
+        XCTAssertEqual(restored.callCount, preTarget.callCount + 1, "pre-merge history plus the one post-merge recording")
+        XCTAssertGreaterThan(
+            cosine(restored.embedding, preTarget.embedding), 0.99,
+            "a partial row set must not replace the keeper's voiceprint"
+        )
+        XCTAssertLessThan(cosine(restored.embedding, embedding(axis: 62)), 0.5, "the absorbed voice is gone again")
+    }
+
     func testUnmergeNonexistentEventIsNoop() {
         XCTAssertFalse(database.unmerge(mergeId: UUID()))
         XCTAssertFalse(database.unmergeMostRecent(forTargetId: UUID()))
