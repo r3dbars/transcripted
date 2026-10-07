@@ -118,9 +118,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
-        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople.map {
-            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount)
-        }, recognized: recognized)
+        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: MeetingSpeakerReviewNaming.choices(for: request), recognized: recognized)
         row.onChange = { [weak self] in self?.rowChanged() }
         row.onInteract = { [weak self] in self?.stopLaterCountdown() }
         row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
