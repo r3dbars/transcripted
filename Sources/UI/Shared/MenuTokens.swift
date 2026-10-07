@@ -77,14 +77,15 @@ enum MenuTokens {
     // a raw `NSFont.systemFont(ofSize:)` literal. Changing a menubar font means
     // changing it once, here.
     enum Font {
-        static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-        static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
-        static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+        // NSFont constants are immutable and never mutated.
+        nonisolated(unsafe) static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        nonisolated(unsafe) static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+        nonisolated(unsafe) static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
         // Monospaced digits so the live recording timer doesn't jitter.
-        static let rowTrailingPrimary = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
-        static let rowTrailingUtility = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-        static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+        nonisolated(unsafe) static let rowTrailingPrimary = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        nonisolated(unsafe) static let rowTrailingUtility = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        nonisolated(unsafe) static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        nonisolated(unsafe) static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
     }
 }
 
