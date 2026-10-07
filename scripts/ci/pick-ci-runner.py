@@ -208,6 +208,7 @@ def self_test() -> int:
         ("hosted", dict(head_repo="")),
         ("hosted", dict(event="pull_request_target")),
         ("hosted", dict(event="workflow_run")),
+        ("hosted", dict(event="merge_group", head_repo="")),
         ("hosted", dict(event="")),
         ("hosted", dict(heartbeat=str(now - 61))),
         ("hosted", dict(heartbeat=str(now + 31))),
