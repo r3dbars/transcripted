@@ -120,11 +120,6 @@
         "SpeakerDatabase"
       ]
     },
-    "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
-      "Core": [
-        "SQLiteHandle"
-      ]
-    },
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
       "Core": [
         "UtteranceChannel"
