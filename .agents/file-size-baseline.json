@@ -11,7 +11,6 @@
     "Sources/Observability/AnalyticsReporter.swift": 889,
     "Sources/Observability/SparkleUpdaterController.swift": 1177,
     "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
-    "Sources/Support/TranscriptedPermissionAccess.swift": 975,
     "Sources/TranscriptedCore/Audio/Audio.swift": 813,
     "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 1159,
     "Sources/TranscriptedCore/Audio/CoreAudioSystemAudioCapture.swift": 1056,
