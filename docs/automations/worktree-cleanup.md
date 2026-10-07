@@ -1,6 +1,6 @@
 # Codex job: worktree cleanup
 
-Runs weekly, Sunday at 4:00, as a Codex automation on the owner's Mac. Agents create a git worktree per task and rarely remove it, so finished ones pile up and fill the disk. This job removes only worktrees whose work is safely on GitHub.
+Runs weekly, Sunday at 1:00 AM, as a Codex automation on the owner's Mac. Agents create a git worktree per task and rarely remove it, so finished ones pile up and fill the disk. This job removes only worktrees whose work is safely on GitHub.
 
 ## Where
 

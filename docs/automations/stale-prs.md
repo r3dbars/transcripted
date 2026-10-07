@@ -1,6 +1,6 @@
 # Codex job: stale PRs
 
-Runs nightly at 3:00 as a Codex automation on the owner's Mac. It keeps the open PR list honest, so Justin and the auto-merge gate aren't looking at work that already landed or went quiet. It writes no code, except merging `main` into a lane branch that can't merge.
+Runs nightly at midnight as a Codex automation on the owner's Mac. It keeps the open PR list honest, so Justin and the auto-merge gate aren't looking at work that already landed or went quiet. It writes no code, except merging `main` into a lane branch that can't merge.
 
 ## For each open PR
 

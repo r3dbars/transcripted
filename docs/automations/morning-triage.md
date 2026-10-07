@@ -1,6 +1,6 @@
 # Codex job: morning triage
 
-Runs daily at 6:00 as a Codex automation on the owner's Mac. It turns overnight crashes and errors into GitHub issues, so problems land in the queue instead of waiting for someone to notice. It writes no code.
+Runs daily at 3:00 AM, so new issues are ready before Justin starts at 4:45 AM as a Codex automation on the owner's Mac. It turns overnight crashes and errors into GitHub issues, so problems land in the queue instead of waiting for someone to notice. It writes no code.
 
 ## Sources
 
