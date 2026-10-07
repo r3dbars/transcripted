@@ -12,6 +12,7 @@ Writing's IMKit input method, ported from Tilde's InlineGhostIME. It shows autoc
 
 - `main.swift` — starts the `IMKServer` with the connection name from `TildeProductProfile`; it must match `InputMethodConnectionName` in `Info.plist`.
 - `GhostInputController.swift` — the controller: marked-text ghost, type-through, dictionary suffixes for partial words, chained accept, and phrase requests to the app. Interaction behavior comes from the app's served configuration, not this bundle.
+- `GhostInputController+Suggestions.swift`, `+Context.swift`, `+Outcomes.swift` — extensions of the controller: scheduling and requesting suggestions, field snapshots and ticket context, and outcome-ledger recording. Stored state stays in the main file, so members they share are internal, not `private`.
 - `GhostContextTailSampler.swift` — the Screen Memory content-reset sampler (host text only, runs after the key callback returns) plus the process-wide calm-reveal (Chromium/Electron) cache.
 - `GhostBrainClient.swift` — one cancellable streaming request over the app's owner-only unix socket. Cancelling closes the connection, which tells the app to stop inference.
 - `PersonalHistoryCapture.swift` — memory-only batching of typing events (including Backspace inside its own text), sent to the app on a utility queue. The key callback only snapshots consent and enqueues.

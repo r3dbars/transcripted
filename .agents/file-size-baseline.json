@@ -22,7 +22,6 @@
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift": 856,
     "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift": 1421,
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 885,
-    "Sources/TranscriptedKeyboard/GhostInputController.swift": 1434,
     "Sources/TranscriptedWriting/Core/PersonalHistory/PersonalVocabularyShadow.swift": 1159,
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1459,
     "Sources/TranscriptedWriting/Runtime/GhostBrainServerHost.swift": 1212,
