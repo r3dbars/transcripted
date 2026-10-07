@@ -35,6 +35,8 @@ All of these, checked on every run:
 7. Every reviewer the lane requires reviewed the head commit, or reacted 👍 after it was pushed. Today that's Codex (`chatgpt-codex-connector`) for every lane; a lane can require more with `reviewers_required`.
 8. `bug-fix` only: a test changed, and the app verification summary is clean and matches the head commit.
 
+Agents open lane PRs as drafts. Once a draft passes everything except the review, the gate marks it ready for review, so Codex reviews it; a later run merges it after that review.
+
 Each run merges at most 3 PRs, and at most one per lane, so main's CI runs between batches.
 
 ## Running it

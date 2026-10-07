@@ -22,7 +22,9 @@ only when ALL of these hold:
 
 At most `max_merges_per_run` PRs merge per run, and at most one per lane, so
 main's CI runs between batches; a red main stops every merge until it's green.
-Drafts are marked ready first. Merges use a merge commit, never squash or rebase.
+A draft in a lane is marked ready for review as soon as everything but the
+review passes, so Codex reviews it; a later run merges it once that review is in.
+Merges use a merge commit, never squash or rebase.
 
     python3 scripts/ops/auto-merge-gate.py            # dry run: print decisions
     python3 scripts/ops/auto-merge-gate.py --apply    # merge what qualifies
@@ -188,6 +190,11 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     return lane, reasons
 
 
+def waiting_only_on_review(reasons: list[str]) -> bool:
+    """True when the review is the only thing missing."""
+    return bool(reasons) and all(r.startswith("waiting for a ") for r in reasons)
+
+
 def main_is_healthy(config: dict) -> tuple[bool, str]:
     runs = gh_json("run", "list", "--workflow", config["main_ci_workflow"], "--branch", "main",
                    "--event", "push", "--limit", "10", "--json", "status,conclusion,headSha")
@@ -254,6 +261,12 @@ def run(apply: bool, only: int | None) -> int:
                 reasons = [f"already merged one {lane['id']} PR this run, next run"]
         label = lane["id"] if lane else "-"
         if reasons:
+            if lane is not None and pr.get("isDraft") and waiting_only_on_review(reasons):
+                if apply:
+                    gh("pr", "ready", str(number))
+                print(f"#{number} [{label}] {'marked' if apply else 'would mark'} ready for review; "
+                      f"merges after: {'; '.join(reasons)}")
+                continue
             print(f"#{number} [{label}] wait: {'; '.join(reasons)}")
             continue
         if apply:
@@ -369,6 +382,15 @@ def self_test() -> int:
              {"headRefName": "garden/docs/x", "labels": [{"name": "gardener"}],
               "files": [{"path": "docs/release-packaging.md"}]}, None, "protected files"),
     ]
+    ready_cases = [
+        (["waiting for a chatgpt-codex-connector review of the latest commit"], True),
+        (["check build-and-test is pending", "waiting for a chatgpt-codex-connector review of the latest commit"], False),
+        ([], False),
+    ]
+    for reasons_in, expected in ready_cases:
+        ok = waiting_only_on_review(reasons_in) == expected
+        results.append(ok)
+        print(f"{'PASS' if ok else 'FAIL'} ready-for-review when only waiting on review={expected}: {reasons_in}")
     disabled = json.loads(json.dumps(config))
     disabled["lanes"][0]["enabled"] = False
     _, reasons = evaluate(base_pr, extra, disabled)
