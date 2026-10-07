@@ -36,7 +36,7 @@
         "AnalyticsRuntimeConfiguration"
       ]
     },
-    "Sources/Support/TranscriptedPermissionAccess.swift": {
+    "Sources/Support/SystemAudioPermissionRequester.swift": {
       "Core": [
         "CoreAudioSystemAudioCapture"
       ]
