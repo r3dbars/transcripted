@@ -55,6 +55,7 @@ reach the real one.
 | `BlockingStdioTransport.swift` | Default stdio transport (wrapped by `CompanionTransport`): one blocking reader thread plus a serial-queue writer, newline framing identical to SDK 0.12 `StdioTransport`, never touches O_NONBLOCK, no polling while idle |
 | `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct handler; the tool bodies themselves live in the `ToolHandlers+*.swift` files below |
+| `ToolHandlers+Helpers.swift` | Shared handler helpers (`textResult`, empty-result scopes, window sizing, agent-capture-query telemetry wrapper) plus the `JSONEncoder.pretty` and `Value` accessors |
 | `ToolHandlers+Meetings.swift` | `list_meetings` / `read_meeting` handlers |
 | `ToolHandlers+Dictations.swift` | `list_dictations` / `read_dictation` handlers |
 | `ToolHandlers+Writing.swift` | `list_writing` / `read_writing` handlers (same shape as the dictation pair) |
