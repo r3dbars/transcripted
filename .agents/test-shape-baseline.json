@@ -22,7 +22,6 @@
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 2,
-    "Tools/TranscriptedCLI/Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift": 1,
-    "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SummaryItemIndexTests.swift": 1
+    "Tools/TranscriptedCLI/Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift": 1
   }
 }
