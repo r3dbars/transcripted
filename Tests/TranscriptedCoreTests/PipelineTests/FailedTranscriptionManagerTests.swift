@@ -1060,6 +1060,61 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(Set(persisted.map(\.id)), Set([relocatedEntry.id, manager.failedTranscriptions[0].id]))
     }
 
+    func testLoadKeepsOutOfRootRowWhenItsOldLibraryIsOffline() throws {
+        // Old library sat on a drive that is not mounted at launch: nothing
+        // under its audio folder can be seen, so the row's audio can't be
+        // checked right now. The row must survive in the queue file.
+        let paths = makePaths(root: testRoot)
+        let offlineArchiveDirectory = testRoot
+            .appendingPathComponent("offline-drive/old-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: offlineArchiveDirectory.appendingPathComponent("system_audio.wav"),
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertTrue(
+            manager.failedTranscriptions.isEmpty,
+            "audio outside the active library must not be exposed for retry or deletion"
+        )
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(persisted.map(\.id), [entry.id], "an offline old library must not erase the queued row")
+    }
+
+    func testLoadDropsOutOfRootRowWhenItsOldLibraryIsOnlineButAudioIsGone() throws {
+        // The old library's audio folder is reachable and the archive is
+        // gone from it: the audio is provably missing, so the row is dropped.
+        let paths = makePaths(root: testRoot)
+        let oldAudioFolder = testRoot.appendingPathComponent("old-library/meetings/audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldAudioFolder, withIntermediateDirectories: true)
+        let goneArchiveDirectory = oldAudioFolder.appendingPathComponent("Failed_Budget_Sync_audio", isDirectory: true)
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: goneArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertTrue(persisted.isEmpty, "audio provably gone from a reachable old library is dropped")
+    }
+
     func testLoadRepairsUnfinalizedWAVHeader() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
