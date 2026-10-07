@@ -12,7 +12,7 @@ Runs nightly at 2:00 as a Codex automation on the owner's Mac. It keeps the fold
 - One folder or one doc per PR. At most 2 PRs per night.
 - Change only what is now wrong. Don't rewrite style, reorganize, or add new guidance.
 - Branch from `origin/main` as `garden/docs/<folder-or-doc>`, in its own git worktree.
-- Stay inside the `docs` lane: folder `AGENTS.md` files (not the root one), `docs/*.md` except release, QA, download and credential docs, and `Tests/README.md`. If a fix needs anything else, open an issue for Justin instead, labeled `documentation` and `waiting-on-owner`.
+- Stay inside the `docs` lane: folder `AGENTS.md` files (not the root one), `docs/*.md` except release, QA, download and credential docs, and `Tests/README.md`. If a fix needs anything else, open an issue for Justin instead, labeled `documentation` and `waiting-on-human`.
 - Keep each PR under 300 changed lines.
 - Run `bash check.sh`.
 - Commit as `r3dbars <r3dbars@users.noreply.github.com>` with no AI co-author lines. Never force-push.
