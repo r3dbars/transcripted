@@ -149,7 +149,7 @@
         "docs/release-packaging.md",
         "docs/sparkle-updates.md"
       ],
-      "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
+      "docs": ["scripts/release/AGENTS.md", "docs/release-packaging.md", "docs/sparkle-updates.md"],
       "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast", "website", "download page", "transcripted.app", "notarize", "release candidate", "dmg"],
       "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
       "invariants": [
@@ -162,7 +162,7 @@
     {
       "id": "tests",
       "path_prefixes": ["Tests/"],
-      "docs": ["Tests/README.md"],
+      "docs": ["Tests/AGENTS.md", "Tests/README.md"],
       "keywords": ["test", "fast tests", "integration", "e2e", "fixture", "qa"],
       "owns": "Fast tests, package tests, deterministic smoke fixtures, and test contracts.",
       "invariants": [
@@ -178,7 +178,7 @@
       "id": "agent-workflow",
       "path_prefixes": [".agents/", ".github/", "scripts/dev/"],
       "exact_paths": ["AGENTS.md", "CLAUDE.md", "WORKFLOW.md"],
-      "docs": ["AGENTS.md", "docs/agent-closeout.md"],
+      "docs": ["AGENTS.md", ".agents/AGENTS.md", ".github/AGENTS.md", "docs/agent-closeout.md"],
       "keywords": ["agent", "codex", "claude", "preflight", "workflow", "review", "context"],
       "owns": "Agent routing, path-to-check selection, review policy, and handoff proof.",
       "invariants": [
@@ -191,7 +191,7 @@
     {
       "id": "tools",
       "path_prefixes": ["Tools/"],
-      "docs": ["Tools/README.md"],
+      "docs": ["Tools/README.md", "Tools/TranscriptedLive/AGENTS.md", "Tools/TranscriptedCompanion/AGENTS.md"],
       "keywords": ["cli", "mcp", "qa tool", "capture kit", "speaker eval"],
       "owns": "Standalone CLI, MCP, QA, capture-kit, and evaluation packages.",
       "invariants": [

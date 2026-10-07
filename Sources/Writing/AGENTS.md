@@ -28,7 +28,7 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for the tab's Today list. Never writes.
 - `WritingAnalytics.swift` — the two count-only Writing events, through `AnalyticsReporter.track`.
 - `WritingStorageUsage.swift` — byte sizes for the tab's storage meter (models, saved writing, learning data). Never opens file contents.
-- Delete model (`WritingController.deleteDownloadedModels()`, next to the storage meter) — turns Autocomplete off if it's on, cancels model work and waits for the helper to exit, then empties the model root through `WritingModelStore.removeAll(under:)` (refuses a symlinked root; never follows links). The sequence is `WritingModelRemoval` in the runtime library, tested with a fake host. Delete all writing never touches the model.
+- `WritingController+ModelRemoval.swift` — Delete model (`deleteDownloadedModels()`, next to the storage meter; split out because `WritingController.swift` is at its size cap) — turns Autocomplete off if it's on, cancels model work and waits for the helper to exit, then empties the model root through `WritingModelStore.removeAll(under:)` (refuses a symlinked root; never follows links). The sequence is `WritingModelRemoval` in the runtime library, tested with a fake host. Delete all writing never touches the model.
 - `WritingSetupPresentation.swift` — the tab's words and small rules from the approved design (`docs/writing-plan.md`). Foundation plus two WritingCore value types, so the fast tests compile it.
 - `WritingPausableIngest.swift` — wraps Personal History ingest so "Pause for 1 hour" drops typed text (acknowledged, never kept) as well as suggestions.
 - `WritingSidebarNewBadge.swift` — the defaults key the Writing tab sets when setup finishes, which drops the sidebar's "New" badge.
@@ -44,7 +44,7 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 
 ## Tests
 
-- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingDayFileReaderTests.swift`, `Tests/WritingSetupPresentationTests.swift`, and the tab's `Tests/WritingDemoScriptTests.swift`. Run them with `bash run-tests.sh --filter Writing` (case-insensitive substring).
+- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingPauseWakeupTests.swift`, `Tests/WritingDayFileReaderTests.swift`, `Tests/WritingSetupPresentationTests.swift`, `Tests/WritingRefreshTimersTests.swift`, `Tests/WritingFrontWindowChangeDetectorTests.swift`, and the tab's `Tests/WritingDemoScriptTests.swift`. Run them with `bash run-tests.sh --filter Writing` (case-insensitive substring).
 - Library behavior (recorder, composer, scrubber, Personal History) is tested under `swift test --filter '^TranscriptedWritingTests\.'`.
 - `WritingController` has no unit tests; check it with a real signed build (autocomplete needs a real signing identity, see `Sources/TranscriptedWriting/AGENTS.md`).
 
