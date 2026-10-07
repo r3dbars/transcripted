@@ -204,6 +204,19 @@ rules:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
 
+  # QA harness permission-state contract: the CLI command, the bench ordering,
+  # and the docs/gates that say permission blockers are INCOMPLETE must agree.
+  - paths:
+      - "Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift"
+      - "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PermissionState.swift"
+      - "scripts/ops/transcripted-qa-bench.sh"
+      - "docs/qa-test-bench.md"
+      - ".agents/qa-gates.yml"
+      - "scripts/dev/check-qa-harness-contract.py"
+    checks:
+      - "python3 scripts/dev/check-qa-harness-contract.py --self-test"
+      - "python3 scripts/dev/check-qa-harness-contract.py"
+
   # Source-pin count ratchet: resolved source-text pins per test file can only
   # shrink (.agents/source-pin-baseline.json). Shrink with
   # `check-source-pins.py --count-baseline --shrink`.

@@ -146,8 +146,9 @@ Two more root tests pinned Parakeet source through the `readParakeet*Source()` h
   of `ParakeetAudioGraph.start` and `withStartSnapshotLease` in `ParakeetAudioGraphTests.swift`.
 - `ParakeetStartRecordingFailurePolicyTests.swift`: no source reads left after PR #1949
 
-`PermissionStateHarnessContractTests.swift` reads `Tools/TranscriptedQA/Sources/...`, which is
-another package's source, not app source.
+`PermissionStateHarnessContractTests.swift` is deleted. It only grepped the QA CLI, the QA bench
+script, and the docs for text. That cross-file contract is now `scripts/dev/check-qa-harness-contract.py`
+(wired into `linux-checks.sh` and the test matrix).
 
 ## What changed in this pass
 

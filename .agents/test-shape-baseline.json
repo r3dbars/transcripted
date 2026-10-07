@@ -13,7 +13,6 @@
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 6,
     "Tests/OverlayScreenSharePrivacyTests.swift": 9,
-    "Tests/PermissionStateHarnessContractTests.swift": 5,
     "Tests/SentryEventPolicyTests.swift": 2,
     "Tests/StatusItemPresentationTests.swift": 1,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
