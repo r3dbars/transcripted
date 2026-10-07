@@ -1003,9 +1003,9 @@ public enum WritingSecretScrubber {
         }
         var output = ""
         var cursor = text.startIndex
-        for candidate in candidates where candidate.range.lowerBound >= cursor {
-            output += text[cursor..<candidate.range.lowerBound]
-            output += token(for: candidate.kind)
+        for candidate in candidates where candidate.range.upperBound > cursor {
+            // One that starts inside the last token runs that token on to its own end.
+            if candidate.range.lowerBound >= cursor { output += text[cursor..<candidate.range.lowerBound] + token(for: candidate.kind) }
             cursor = candidate.range.upperBound
         }
         output += text[cursor...]

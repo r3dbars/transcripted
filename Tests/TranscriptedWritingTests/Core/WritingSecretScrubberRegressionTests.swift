@@ -154,4 +154,22 @@ struct WritingSecretScrubberRegressionTests {
             #expect(WritingSecretScrubber.scrub(secret, appBundleIdentifier: Self.messages).kinds == [.password], "\(secret)")
         }
     }
+
+    /// The random-token rule takes `key=` plus the value up to the first
+    /// symbol it doesn't allow; the key rule takes the whole value. When the
+    /// two overlap, every character of the secret still goes.
+    @Test(
+        "A key=value secret with a symbol inside is redacted to its end, not just up to the symbol",
+        arguments: [
+            ("set api_token=Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx!Hunter2Pass in the env", ["Xy7Kp2", "Hunter2Pass"]),
+            ("db_password=Rt5Gh8Jk2Lm9Np4Qs7Vw1Xz3Bc6Df0Hj#Fs0Aq", ["Rt5Gh8", "#Fs0Aq"]),
+        ]
+    )
+    func overlappingKeyValueSecretFullyRedacted(text: String, secrets: [String]) {
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: Self.slack)
+        for secret in secrets {
+            #expect(!result.clean.contains(secret), "\(secret) survived: \(result.clean)")
+        }
+        #expect(!result.kinds.isEmpty)
+    }
 }
