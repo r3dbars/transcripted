@@ -517,6 +517,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingPromptCalendarReader.swift"
     "Sources/Meeting/MeetingPromptRecordAction.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
+    "Sources/Meeting/MeetingPromptCalendarScoring.swift"
     "Sources/Meeting/MeetingPromptTelemetry.swift"
     "Sources/Meeting/MicActivityMonitor.swift"
     "Sources/Meeting/CameraActivityMonitor.swift"
