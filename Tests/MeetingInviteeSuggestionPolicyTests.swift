@@ -100,6 +100,28 @@ func testMeetingInviteeSuggestionPolicy() {
         )
     }
 
+    runSuite("MeetingInviteeSuggestionPolicy treats one named meeting on two calendars as one, whatever the counts") {
+        let eventStart = start
+        let workCopy = MeetingInviteeEventSnapshot(
+            startDate: eventStart,
+            endDate: eventStart.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            inviteeNames: ["Sam Lee", "Priya Shah"],
+            invitedPeopleCount: 2
+        )
+        // The other calendar's copy lists one extra email-only attendee.
+        let personalCopy = MeetingInviteeEventSnapshot(
+            startDate: eventStart,
+            endDate: eventStart.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            inviteeNames: ["Sam Lee", "Priya Shah"],
+            invitedPeopleCount: 3
+        )
+        let matched = match(startedMinutesIntoEvent: 0, [workCopy, personalCopy])
+        assertEqual(matched?.inviteeNames, ["Sam Lee", "Priya Shah"], "same names on two calendars is still one meeting")
+        assertEqual(matched?.invitedPeopleCount, 3, "the bigger count wins, so the call is never undercounted")
+    }
+
     runSuite("MeetingInviteeSuggestionPolicy cleans invitee names") {
         let names = MeetingInviteeSuggestionPolicy.inviteeNames(from: [
             MeetingInviteeRawParticipant(name: "Justin", email: "mailto:me@example.com", isCurrentUser: true, isPerson: true),

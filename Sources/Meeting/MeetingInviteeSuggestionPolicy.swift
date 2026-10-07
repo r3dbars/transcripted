@@ -60,11 +60,18 @@ enum MeetingInviteeSuggestionPolicy {
             let startedAfterEvent = recordingStart.timeIntervalSince(event.startDate)
             return (-startLeadTime ... startGrace).contains(startedAfterEvent)
         }
+        // Same names = the same meeting on two calendars, even when one copy
+        // lists an extra email-only guest; keep the bigger count. With no
+        // names to compare, only equal counts can show it's one meeting.
         guard let first = matches.first,
-              matches.allSatisfy({
-                  $0.inviteeNames == first.inviteeNames && peopleCount(of: $0) == peopleCount(of: first)
-              }) else { return nil }
-        return first
+              matches.allSatisfy({ $0.inviteeNames == first.inviteeNames }),
+              !first.inviteeNames.isEmpty || matches.allSatisfy({ peopleCount(of: $0) == peopleCount(of: first) })
+        else { return nil }
+        let biggestCount = matches.map(peopleCount(of:)).max() ?? 0
+        guard biggestCount > peopleCount(of: first) else { return first }
+        var merged = first
+        merged.invitedPeopleCount = biggestCount
+        return merged
     }
 
     private static func peopleCount(of event: MeetingInviteeEventSnapshot) -> Int {
