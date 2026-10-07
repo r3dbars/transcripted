@@ -21,6 +21,7 @@ trap 'rm -rf "$work"' EXIT
 swiftc -O \
     Sources/TranscriptedWriting/Core/Text/SecretRules.swift \
     Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift \
+    Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber+Prompts.swift \
     scripts/dev/writing-scrubber-measure/main.swift \
     -o "$work/measure"
 
@@ -32,7 +33,7 @@ fi
 git ls-files 'docs/*.md' '*.md' | sort -u > "$work/docs.txt"
 # The two rule files are catalogues of example secrets in their doc comments.
 git ls-files 'Sources/*.swift' 'Tools/*.swift' \
-    | grep -v -e 'Core/Text/WritingSecretScrubber.swift' -e 'Core/Text/SecretRules.swift' > "$work/swift.txt"
+    | grep -v -e 'Core/Text/WritingSecretScrubber.swift' -e 'Core/Text/WritingSecretScrubber+Prompts.swift' -e 'Core/Text/SecretRules.swift' > "$work/swift.txt"
 git ls-files '*.sh' > "$work/scripts.txt"
 mkdir -p "$work/log"
 git log -n 3000 --format='%B%n' > "$work/log/commits.txt"
