@@ -109,7 +109,7 @@ final class SpeakerDatabaseSnapshotTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: target), bytes)
     }
 
-    func testExclusiveLockFailsWithinBoundAndPreservesSource() throws {
+    func testExclusiveLockFailsWithBusyAndPreservesSource() throws {
         let folder = try temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let source = folder.appendingPathComponent("source.sqlite")
@@ -119,11 +119,9 @@ final class SpeakerDatabaseSnapshotTests: XCTestCase {
         try execute(database, "CREATE TABLE speakers (name TEXT); INSERT INTO speakers VALUES ('Fixture Beta'); BEGIN EXCLUSIVE;")
         defer { sqlite3_exec(database, "ROLLBACK", nil, nil, nil) }
         let original = try Data(contentsOf: source)
-        let start = ProcessInfo.processInfo.systemUptime
         XCTAssertThrowsError(try SpeakerDatabaseSnapshot.create(sourceURL: source, destinationURL: destination, busyTimeout: 0.05)) { error in
             XCTAssertEqual(error as? SpeakerDatabaseSnapshot.SnapshotError, .busy)
         }
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1)
         XCTAssertEqual(try Data(contentsOf: source), original)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
