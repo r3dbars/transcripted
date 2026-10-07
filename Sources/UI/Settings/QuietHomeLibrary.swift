@@ -283,7 +283,7 @@ struct QuietMeetingExpansion: View {
     let onCopy: () -> Void
     let onRevealInFinder: () -> Void
     let onCollapse: () -> Void
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onAssignSpeakers: (
         [HomeMeetingSpeakerAssignment],
@@ -597,7 +597,7 @@ private struct QuietTranscriptTimestamp: View {
 /// single-click button: the popover stages an edit and only writes on Save.
 private struct QuietMeetingSpeakerLabel: View {
     let identity: HomeMeetingSpeakerIdentity
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
@@ -668,7 +668,7 @@ private struct QuietMeetingSpeakerLabel: View {
 
 private struct HomeMeetingSpeakerPicker: View {
     let identity: HomeMeetingSpeakerIdentity
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
     let onCancel: () -> Void
     let onSave: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
@@ -680,7 +680,7 @@ private struct HomeMeetingSpeakerPicker: View {
 
     init(
         identity: HomeMeetingSpeakerIdentity,
-        knownPeople: [SpeakerIdentityOption],
+        knownPeople: [SpeakerNameChoice],
         isSavedPerson: Bool,
         onCancel: @escaping () -> Void,
         onSave: @escaping (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
@@ -773,7 +773,7 @@ private struct HomeMeetingSpeakerPicker: View {
 }
 
 private struct HomeMeetingSpeakerNamingSheet: View {
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onCancel: () -> Void
     let onSave: ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -785,7 +785,7 @@ private struct HomeMeetingSpeakerNamingSheet: View {
 
     init(
         content: HomeMeetingPreviewContent,
-        knownPeople: [SpeakerIdentityOption],
+        knownPeople: [SpeakerNameChoice],
         savedSpeakerIDs: Set<UUID>,
         onCancel: @escaping () -> Void,
         onSave: @escaping ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -919,7 +919,7 @@ private struct HomeMeetingSpeakerNamingSheet: View {
 
 private struct HomeMeetingSpeakerNamingRow: View {
     @Binding var draft: HomeMeetingSpeakerNamingDraft
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
 
     var body: some View {

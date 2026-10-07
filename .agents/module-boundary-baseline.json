@@ -60,30 +60,10 @@
         "DisplayStatus"
       ]
     },
-    "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/QuietHomeLibrary.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerNameAutocompleteField.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
         "TranscriptSaver",
         "TranscriptionTaskManager"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerPeopleRows.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
       ]
     },
     "Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Duplicates.swift": {
@@ -106,13 +86,7 @@
     },
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift": {
       "Core": [
-        "SpeakerIdentityOption",
         "UtteranceChannel"
-      ]
-    },
-    "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
       ]
     },
     "Sources/UI/Settings/TranscriptedSettingsWindowController.swift": {
