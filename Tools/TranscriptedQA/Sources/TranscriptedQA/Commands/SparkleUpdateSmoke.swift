@@ -121,7 +121,7 @@ struct SparkleUpdateSmokeRunner {
         return buildReport(runID: runID, appURL: appURL, outputURL: outputURL, scenarios: scenarios)
     }
 
-    private func runScenario(
+    func runScenario(
         state: String,
         appExecutableURL: URL,
         outputURL: URL
@@ -131,11 +131,15 @@ struct SparkleUpdateSmokeRunner {
         let logURL = scenarioDirectory.appendingPathComponent("app.log", isDirectory: false)
         do {
             try fileManager.createDirectory(at: scenarioDirectory, withIntermediateDirectories: true)
+            // A report left by an earlier run must never count as this launch's evidence.
+            if fileManager.fileExists(atPath: reportURL.path) {
+                try fileManager.removeItem(at: reportURL)
+            }
         } catch {
             return .singleFailure(
                 state: state,
                 id: "scenario-directory",
-                detail: "Could not create scenario directory: \(error.localizedDescription)"
+                detail: "Could not prepare scenario directory: \(error.localizedDescription)"
             )
         }
 
