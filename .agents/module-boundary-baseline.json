@@ -49,7 +49,6 @@
     },
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
       "Core": [
-        "SpeakerIdentityOption",
         "SpeakerMatchOutcomeKind",
         "SpeakerNameUpdate",
         "SpeakerReviewPrioritizer"

@@ -118,7 +118,9 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
-        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople, recognized: recognized)
+        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople.map {
+            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount)
+        }, recognized: recognized)
         row.onChange = { [weak self] in self?.rowChanged() }
         row.onInteract = { [weak self] in self?.stopLaterCountdown() }
         row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
@@ -601,7 +603,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// Named on its own in this meeting: shown as recognized, corrected on
     /// hover, never asked about.
     private let isRecognized: Bool
-    private let knownPeopleByLabel: [String: SpeakerIdentityOption]
+    private let knownPeopleByLabel: [String: SpeakerNameChoice]
     private let knownPeople: [(label: String, callCount: Int)]
     private var answer: Answer = .none
     private var isEditing = false
@@ -635,7 +637,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return field
     }()
 
-    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption], recognized: Bool = false) {
+    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerNameChoice], recognized: Bool = false) {
         self.entry = entry
         self.isRecognized = recognized && !(entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         self.question = NotchIslandSpeakerReviewPolicy.question(
@@ -1253,10 +1255,10 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// the naming coordinator turns into a correction of the recognized
     /// person (their match is undone and disputed, the pick learns the voice).
     private func namedUpdate(_ label: String) -> SpeakerNameUpdate? {
-        SpeakerNamingPolicy.typedNameUpdate(
+        MeetingSpeakerReviewNaming.typedNameUpdate(
             entry: entry,
             typedName: label,
-            optionsByLabel: knownPeopleByLabel
+            choicesByLabel: knownPeopleByLabel
         )
     }
 
