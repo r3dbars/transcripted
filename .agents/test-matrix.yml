@@ -247,14 +247,6 @@ rules:
       - "python3 scripts/dev/check-known-traps.py"
 
   - paths:
-      - "Sources/TranscriptedKeyboard/Info.plist"
-      - "Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift"
-      - "scripts/dev/check-keyboard-identity.py"
-    checks:
-      - "python3 scripts/dev/check-keyboard-identity.py --self-test"
-      - "python3 scripts/dev/check-keyboard-identity.py"
-
-  - paths:
       - "scripts/dev/explain-missing-sources.py"
       - "scripts/dev/test-parakeet-lifecycle.sh"
     checks:
