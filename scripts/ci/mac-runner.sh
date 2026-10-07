@@ -676,10 +676,26 @@ for plist in /Library/LaunchDaemons/*.plist; do
   if [ -n "$prog" ] && [ -e "$prog" ] && user_can_change "$prog"; then
     flag "$plist runs $prog, which the job user can change"
   fi
+  # A PATH folder the job user can change (or create) lets a job plant a
+  # program the daemon later runs as root. Cirrus Labs' tart-guest-daemon puts
+  # /opt/homebrew/bin and /usr/local/bin first. Drop such folders; system
+  # folders are enough for a root daemon.
+  env_path="$("$buddy" -c "Print :EnvironmentVariables:PATH" "$plist" 2>/dev/null || true)"
+  if [ -n "$env_path" ]; then
+    kept=""
+    IFS=: read -r -a path_parts <<< "$env_path"
+    for dir in "${path_parts[@]}"; do
+      [ -n "$dir" ] || continue
+      if user_can_change "$dir"; then echo "dropped $dir from the PATH of $plist"; continue; fi
+      kept="${kept:+$kept:}$dir"
+    done
+    [ -n "$kept" ] || kept=/usr/bin:/bin:/usr/sbin:/sbin
+    [ "$kept" = "$env_path" ] || "$buddy" -c "Set :EnvironmentVariables:PATH $kept" "$plist"
+  fi
   env="$("$buddy" -c "Print :EnvironmentVariables" "$plist" 2>/dev/null || true)"
   if printf '%s\n' "$env" | grep -q "DYLD_"; then flag "$plist sets DYLD_ variables"; fi
   for dir in $(printf '%s\n' "$env" | sed -n 's/^ *PATH = //p' | tr ':' ' '); do
-    [ ! -e "$dir" ] || ! user_can_change "$dir" || flag "$plist puts $dir, which the job user can change, on PATH"
+    ! user_can_change "$dir" || flag "$plist puts $dir, which the job user can change, on PATH"
   done
 done
 # Other ways macOS runs things as root.
