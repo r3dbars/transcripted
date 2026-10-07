@@ -93,6 +93,35 @@ enum SemanticSearchFusion {
         return Array(fused.prefix(maxItems))
     }
 
+    /// Merge already-ranked per-kind lists (meetings, dictations, writing) by
+    /// RRF over each item's rank within its own list. Items at the same rank in
+    /// different lists tie; ties go to the newer item. Nothing is truncated.
+    static func fuseRankedContextLists(_ lists: [[ContextSearchGroup]]) -> [ContextSearchGroup] {
+        func key(_ g: ContextSearchGroup) -> String { "\(g.kind)\u{1}\(g.filename)\u{1}\(g.entryId ?? "")" }
+
+        var score: [String: Double] = [:]
+        var byKey: [String: ContextSearchGroup] = [:]
+        var order: [String] = []
+
+        for list in lists {
+            for (rank, group) in list.enumerated() {
+                let k = key(group)
+                score[k, default: 0] += rrf(rank)
+                if byKey[k] == nil { order.append(k); byKey[k] = group }
+            }
+        }
+
+        // Swift's sort isn't stable, so first-seen order is the last tiebreak.
+        let ranked = order.enumerated().sorted { a, b in
+            let sa = score[a.element] ?? 0, sb = score[b.element] ?? 0
+            if sa != sb { return sa > sb }
+            let da = byKey[a.element]?.datetime ?? "", db = byKey[b.element]?.datetime ?? ""
+            if da != db { return da > db }
+            return a.offset < b.offset
+        }
+        return ranked.compactMap { byKey[$0.element] }
+    }
+
     /// Lexical snippets first (they're exact matches), then any semantic snippet
     /// not already present, capped at `limit`. Dedupe on timestamp+text.
     private static func mergeSnippets(
