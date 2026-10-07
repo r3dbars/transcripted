@@ -10,7 +10,7 @@
 
 - **Owns:** meeting capture (mic + system audio), the transcription pipeline and queue, diarization, the speaker database and naming, transcript save and formatting.
 - **Public surface:** only `public` declarations count. They come in tiers: `core-vocab` (logging, `PrivacyTextRedactor`, `SupersessionEpoch`, `ClaimSlot`, `DateFormattingHelper`, `TranscriptFrontmatter*`, `TranscriptFileRewrite`, `AudioResampler`, `TranscriptionLanguage*`, `SpeakerProfile`, `SpeakerNaming*`, `NameSource`) that any app module may name; `mic-primitives` (`PinnedMicrophoneCapture*`, `MicrophoneDownmix`, `MacLidState`, `AudioTapInstallGuard`, `AudioInputTapTeardownPolicy`, `ModelDownloadService`) for Speech; and `core-engine`, everything else, for Meeting. The lists live in `.agents/modules.json`.
-- **May depend on:** nothing in the app; the compiler enforces it. Grandfathered app uses of `core-engine` types outside Meeting (mostly the Speakers directory in `UI/Settings`) are in `.agents/module-boundary-baseline.json`.
+- **May depend on:** nothing in the app; the compiler enforces it. App modules outside Meeting reach `core-engine` behavior through Meeting, never by naming its types.
 - **Entry points:** `Audio` (capture), `TranscriptionTaskManager` (queue), `Transcription` (pipeline), `SpeakerDatabase`; see "The seams embedders should know" below.
 - **Tests:** `swift test`, `bash run-integration-smoke.sh`; after any change, `bash build-deps.sh --force` before `bash build.sh --no-open`.
 - **Rules:** CoreAudio real-time callbacks do no I/O, locks, allocations or ObjC calls; see "Editing rules" below.

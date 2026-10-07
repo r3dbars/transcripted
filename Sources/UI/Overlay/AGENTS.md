@@ -19,11 +19,6 @@ What other modules name today: `DictationSessionController`, `FloatingOverlayCon
 
 UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core's `core-vocab` tier. Only AppShell, Capture, UIMenuBar and UISettings may depend on UIOverlay. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` answers for one file.
 
-Grandfathered crossings (`.agents/module-boundary-baseline.json`):
-
-- Into Core outside `core-vocab`: `MeetingOverlayController` (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
-- From below: Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving that policy file down into Dictation removes the edge.
-
 ## Entry points
 
 - `NotchIslandController.swift` — builds the island panel at launch (`prewarm`), picks a display per show, runs the Core Animation grow/shrink, and owns hover and click-through.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Module-boundary ratchet for the app's Swift sources.
+"""Module-boundary check for the app's Swift sources.
 
 The app compiles as one Swift target, so the compiler lets any file name any
 type. This check gives the folders real edges. `.agents/modules.json` maps every
@@ -12,25 +12,20 @@ Core (`Sources/TranscriptedCore`) is a separate Swift library, so only its
 the type is in one of the Core tiers the module lists (`Core:core-vocab`,
 `Core:mic-primitives`, ...; `Core:core-engine` means all of Core).
 
-Existing crossings are grandfathered in `.agents/module-boundary-baseline.json`
-(file -> module -> type names). The check fails on a crossing that isn't in the
-baseline and on a baseline entry that no longer happens, so the pile only
-shrinks:
+Nothing is grandfathered: every crossing fails. Fix one by moving the type down
+or passing plain values; if the edge itself is right, change `mayDependOn` (or
+a Core tier) in `.agents/modules.json` as a reviewed human edit.
 
     python3 scripts/dev/check-module-boundaries.py             # check
-    python3 scripts/dev/check-module-boundaries.py --shrink    # drop baseline entries that went away
     python3 scripts/dev/check-module-boundaries.py --explain Sources/Speech/ParakeetEngine.swift
     python3 scripts/dev/check-module-boundaries.py --graph     # module edge counts
     python3 scripts/dev/check-module-boundaries.py --self-test
 
---shrink never adds an entry. Growing the baseline is a human edit made in
-review and called out in the PR.
-
 It is a lexer, not a compiler: it sees type names, not type inference, free
 functions, globals, or members added by extensions. A surprising violation is
 more likely a checker bug than a real edge, so fix the checker (or add the name
-to `ambiguousNames` with a reason) rather than baselining noise. Offline,
-python3 stdlib only, writes nothing except the baseline on --shrink.
+to `ambiguousNames` with a reason) rather than allowing noise. Offline,
+python3 stdlib only, writes nothing.
 """
 
 from __future__ import annotations
@@ -50,7 +45,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / ".agents/modules.json"
-BASELINE_PATH = REPO_ROOT / ".agents/module-boundary-baseline.json"
 CORE_MODULE = "Core"
 CORE_ENGINE_TIER = "core-engine"
 
@@ -338,47 +332,6 @@ def count_crossings(edges: dict[str, dict[str, list[str]]]) -> int:
     return sum(len(names) for targets in edges.values() for names in targets.values())
 
 
-def load_baseline(path: Path) -> dict[str, dict[str, list[str]]]:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8")).get("edges", {})
-
-
-def save_baseline(path: Path, edges: dict[str, dict[str, list[str]]]) -> None:
-    payload = {
-        "_comment": (
-            "Grandfathered module-boundary crossings: file -> module it reaches into -> type names. "
-            "scripts/dev/check-module-boundaries.py --shrink only removes entries; adding one is a reviewed human edit."
-        ),
-        "edges": edges,
-    }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def compare(current, baseline):
-    new, stale = [], []
-    for rel, targets in current.items():
-        for target, names in targets.items():
-            allowed = set(baseline.get(rel, {}).get(target, []))
-            new += [(rel, target, n) for n in names if n not in allowed]
-    for rel, targets in baseline.items():
-        for target, names in targets.items():
-            have = set(current.get(rel, {}).get(target, []))
-            stale += [(rel, target, n) for n in names if n not in have]
-    return new, stale
-
-
-def shrink(current, baseline):
-    out: dict[str, dict[str, list[str]]] = {}
-    for rel, targets in baseline.items():
-        for target, names in targets.items():
-            have = set(current.get(rel, {}).get(target, []))
-            kept = [n for n in names if n in have]
-            if kept:
-                out.setdefault(rel, {})[target] = kept
-    return out
-
-
 def explain_path(manifest: Manifest, raw_path: str) -> int:
     rel = Path(raw_path).as_posix()
     while rel.startswith("./"):
@@ -397,7 +350,7 @@ def explain_path(manifest: Manifest, raw_path: str) -> int:
     return 0
 
 
-def run(root: Path, manifest_path: Path, baseline_path: Path, mode: str = "check", explain: str | None = None) -> int:
+def run(root: Path, manifest_path: Path, mode: str = "check", explain: str | None = None) -> int:
     manifest = load_manifest(manifest_path)
     if explain:
         return explain_path(manifest, explain)
@@ -420,30 +373,15 @@ def run(root: Path, manifest_path: Path, baseline_path: Path, mode: str = "check
         importers = [f.rel for f in files if f.imports_core and f.module not in (CORE_MODULE, "Meeting")]
         print(f"\nfiles outside Core and Meeting that import TranscriptedCore: {len(importers)}")
         print(f"names declared in more than one app module (ignored): {len(ambiguous)}")
-        print(f"grandfathered crossings: {count_crossings(load_baseline(baseline_path))}")
+        print(f"crossings: {count_crossings(current)}")
         for problem in problems:
             print(f"FAIL {problem}")
         return 1 if problems else 0
 
     for problem in problems:
         print(f"FAIL {problem}")
-    baseline = load_baseline(baseline_path)
-    new, stale = compare(current, baseline)
-    if mode == "shrink":
-        if problems or new:
-            for rel, target, name in new:
-                print(f"FAIL new crossing: {rel} -> {target}.{name}")
-            print("Refusing to shrink while the check has new failures; fix them first.")
-            return 1
-        save_baseline(baseline_path, shrink(current, baseline))
-        print(f"Baseline updated: {count_crossings(load_baseline(baseline_path))} crossings")
-        return 0
-    if mode == "write-baseline":
-        save_baseline(baseline_path, current)
-        print(f"Baseline written: {count_crossings(current)} crossings")
-        return 1 if problems else 0
-
     line_of = {(e.rel, e.target, e.name): e.line for e in edges if not e.allowed}
+    new = [(rel, target, name) for rel, targets in current.items() for target, names in targets.items() for name in names]
     for rel, target, name in new:
         source = manifest.module_of(rel)
         tier = " (outside its Core tiers)" if target == CORE_MODULE else ""
@@ -456,14 +394,9 @@ def run(root: Path, manifest_path: Path, baseline_path: Path, mode: str = "check
             "  Fix: move the type down, pass plain values, or (if the edge is right) change mayDependOn in "
             ".agents/modules.json and that module's AGENTS.md. `--explain <file>` shows what a file may use."
         )
-    for rel, target, name in stale:
-        print(f"FAIL baseline entry no longer happens: {rel} -> {target}.{name}. Run with --shrink.")
-    if problems or new or stale:
+    if problems or new:
         return 1
-    print(
-        f"module boundaries OK: {len(files)} files in {len(manifest.modules)} modules, "
-        f"{count_crossings(current)} grandfathered crossings"
-    )
+    print(f"module boundaries OK: {len(files)} files in {len(manifest.modules)} modules, no crossings")
     return 0
 
 
@@ -505,7 +438,6 @@ def self_test() -> None:
             (root / rel).write_text(text, encoding="utf-8")
         manifest_path = root / "modules.json"
         manifest_path.write_text(json.dumps(manifest_doc), encoding="utf-8")
-        baseline_path = root / "baseline.json"
         manifest = load_manifest(manifest_path)
         assert validate_manifest(manifest, root) == [], validate_manifest(manifest, root)
         files, unmapped = collect(root, manifest)
@@ -521,24 +453,19 @@ def self_test() -> None:
         # A file that doesn't import Core can't be naming a Core type.
         assert not any(e.rel.endswith("NoImport.swift") for e in edges)
         with contextlib.redirect_stdout(io.StringIO()):
-            assert run(root, manifest_path, baseline_path) == 1  # empty baseline: two new crossings
-            save_baseline(baseline_path, current)
-            assert run(root, manifest_path, baseline_path) == 0
-            # A stale entry fails until --shrink drops it; --shrink never adds.
-            save_baseline(baseline_path, {**current, "Sources/High/H.swift": {"Low": ["Gone"]}})
-            assert run(root, manifest_path, baseline_path) == 1
-            assert run(root, manifest_path, baseline_path, mode="shrink") == 0
-            assert load_baseline(baseline_path) == current
-            save_baseline(baseline_path, {})
-            assert run(root, manifest_path, baseline_path, mode="shrink") == 1
-            save_baseline(baseline_path, current)
+            assert run(root, manifest_path) == 1  # any crossing fails; nothing is grandfathered
+            (root / "Sources/Low/L.swift").write_text(
+                sources["Sources/Low/L.swift"].replace("func bad() { _ = HighThing(); _ = Engine() }\n", ""),
+                encoding="utf-8",
+            )
+            assert run(root, manifest_path) == 0
             # A new file outside every module fails.
             (root / "Sources/Stray").mkdir()
             (root / "Sources/Stray/S.swift").write_text("struct S {}\n", encoding="utf-8")
-            assert run(root, manifest_path, baseline_path) == 1
+            assert run(root, manifest_path) == 1
             (root / "Sources/Stray/S.swift").unlink()
-            assert run(root, manifest_path, baseline_path, explain="Sources/High/H.swift") == 0
-            assert run(root, manifest_path, baseline_path, explain="Elsewhere/X.swift") == 1
+            assert run(root, manifest_path, explain="Sources/High/H.swift") == 0
+            assert run(root, manifest_path, explain="Elsewhere/X.swift") == 1
         # Manifest rules: cycles and depending on AppShell are refused.
         bad = json.loads(json.dumps(manifest_doc))
         bad["modules"][1]["mayDependOn"] = ["High", "AppShell"]
@@ -555,17 +482,15 @@ def self_test() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--shrink", action="store_true", help="drop baseline entries that no longer happen (never adds)")
     parser.add_argument("--explain", metavar="PATH", help="print the module, allowed deps and AGENTS.md for a path")
     parser.add_argument("--graph", action="store_true", help="print module edge counts")
-    parser.add_argument("--write-baseline", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         self_test()
         return 0
-    mode = "shrink" if args.shrink else "graph" if args.graph else "write-baseline" if args.write_baseline else "check"
-    return run(REPO_ROOT, MANIFEST_PATH, BASELINE_PATH, mode=mode, explain=args.explain)
+    mode = "graph" if args.graph else "check"
+    return run(REPO_ROOT, MANIFEST_PATH, mode=mode, explain=args.explain)
 
 
 if __name__ == "__main__":

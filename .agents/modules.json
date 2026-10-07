@@ -1,5 +1,5 @@
 {
-  "_comment": "Module map for the app's Swift sources. Every Sources/**/*.swift file maps to exactly one module (longest path prefix wins). mayDependOn lists the modules whose types a module may name; Core:<tier> grants a slice of TranscriptedCore's public types (Core:core-engine is all of it). Checked by scripts/dev/check-module-boundaries.py; grandfathered crossings live in .agents/module-boundary-baseline.json. A new top-level Sources/ folder needs an entry here and an AGENTS.md.",
+  "_comment": "Module map for the app's Swift sources. Every Sources/**/*.swift file maps to exactly one module (longest path prefix wins). mayDependOn lists the modules whose types a module may name; Core:<tier> grants a slice of TranscriptedCore's public types (Core:core-engine is all of it). Checked by scripts/dev/check-module-boundaries.py; nothing is grandfathered, so every crossing fails. A new top-level Sources/ folder needs an entry here and an AGENTS.md.",
   "modules": [
     {
       "name": "Core",
