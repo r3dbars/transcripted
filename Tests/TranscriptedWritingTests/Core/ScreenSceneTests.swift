@@ -252,6 +252,24 @@ struct ScreenSceneTests {
         #expect(scene.conversationTurns.contains { $0.text == "The venue moved to the north building" })
     }
 
+    @Test("A quote of the typed text in the lower half, above the field, does not cut off the messages under it")
+    func lowerHalfQuoteAboveFieldDoesNotMoveTheFloor() {
+        let blocks = [
+            block("Quick check about the offsite plans", x: 0.05, y: 0.30, window: slack),
+            // A quoted copy of what the user is typing, below the window's middle.
+            block("Are we still on for Tuesday at 3?", x: 0.55, y: 0.55, window: slack),
+            block("The venue moved to the north building", x: 0.05, y: 0.62, window: slack),
+            // Different speakers, so the two close lines stay separate turns.
+            block("Sounds good, I will drive over", x: 0.55, y: 0.70, window: slack),
+            // The compose field holding the typed text.
+            block("are we still on for tuesday at 3", x: 0.30, y: 0.85, window: slack),
+        ]
+        let scene = ScreenScene.classify(blocks: blocks, frontmostBundleID: slack, fieldText: "are we still on for tuesday at 3")
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "Sounds good, I will drive over")
+        #expect(scene.conversationTurns.contains { $0.text == "The venue moved to the north building" })
+    }
+
     @Test("With nothing typed there is no floor and the bottom bubbles are used as before")
     func emptyFieldKeepsLegacySelection() {
         let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)

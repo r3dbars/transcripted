@@ -486,11 +486,11 @@ public enum ScreenScene {
     /// is doing the containing (e.g. "ok", "yes") since they'd trivially
     /// "match" almost any text without actually being the same message.
     private static let dedupeMinimumLength = 6
-    /// Top edge of the highest block in the lower half of the window that
+    /// Top edge of the lowest block in the lower half of the window that
     /// reads back the user's own typed text, or `nil` when none does (empty
-    /// field, or the field is scrolled out of view). A wrapped compose field
-    /// yields several fragments; any fragment of two or more words found in
-    /// the field text counts, so the floor sits at the first such line.
+    /// field, or the field is scrolled out of view). Only the lowest match is
+    /// the field: a higher one is a quoted or echoed message. The upper lines
+    /// of a wrapped field sit above the floor, but dedupe drops them.
     private static func composeFieldTop(in blocks: [OCRBlock], fieldText: String) -> Double? {
         let field = normalizedForDedupe(fieldText)
         guard field.count >= dedupeMinimumLength else { return nil }
@@ -504,7 +504,7 @@ public enum ScreenScene {
                   windowRelativeY(of: block) >= 0.5 else { return false }
             return field.contains(candidate) || candidate.contains(field)
         }
-        return matches.map(\.boundingBox.y).min()
+        return matches.map(\.boundingBox.y).max()
     }
 
     private static func windowRelativeY(of block: OCRBlock) -> Double {
