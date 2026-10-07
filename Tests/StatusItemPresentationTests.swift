@@ -1,8 +1,8 @@
 // The first suite drives StatusItemPresentation, the same code the app delegate runs at launch and on
 // every recording change, against a plain NSButton, and renders every MenuBarGlyph to check it stays a
 // neutral template. The second renders every MenuBarGlyph into a bitmap and checks the silhouettes
-// actually differ where they are meant to. The third keeps MenuBarGlyphGeometry (numbers and the drawn
-// tail curves) in step with the generator that draws the committed SVGs in docs/assets/menu-bar-icon/.
+// actually differ where they are meant to. MenuBarGlyphGeometry staying in step with the SVG generator
+// in docs/assets/menu-bar-icon/ is checked by scripts/dev/check-menu-bar-glyph-sync.py.
 
 import AppKit
 import Foundation
@@ -128,108 +128,6 @@ func testStatusItemPresentation() {
             "repeat refreshes should reuse the same image instead of redrawing it"
         )
     }
-
-    runSuite("menu bar glyph geometry matches the SVG generator") {
-        let generator = readSourceFixture("docs/assets/menu-bar-icon/make_menu_bar_icons.py")
-        let g = MenuBarGlyphGeometry.self
-        let expected: [(String, [CGFloat])] = [
-            ("SW", [g.strokeWidth]),
-            ("L, R, TOP, BOT, RAD", [g.left, g.right, g.top, g.bottom, g.radius]),
-            ("CX, MID", [g.centerX, g.barMidY]),
-            ("CB", [g.crossbarHalfLength]),
-            ("GAP", [g.crossbarGap]),
-            ("STEM_BOT", [g.stemBottom]),
-            ("SIDE_BARS", [g.sideBarOffset, g.sideBarHeight]),
-            ("DOT_C, DOT_R, DOT_RING", [g.dotCenter.x, g.dotCenter.y, g.dotRadius, g.dotRing]),
-            ("BOX_X, BOX_Y, BOX", [g.box.minX, g.box.minY, g.box.width]),
-        ]
-        for (names, values) in expected {
-            assertEqual(
-                pythonAssignmentNumbers(generator, names: names),
-                values,
-                "\(names) in make_menu_bar_icons.py should match MenuBarGlyphGeometry"
-            )
-        }
-        assertEqual(g.box.width, g.box.height, "the glyph box should be square")
-
-        // The tail: walk the path the glyph really draws and compare its two
-        // quadratic curves with the generator's `Q` commands.
-        let tailCommand = generator.split(separator: "\n")
-            .first { $0.contains("d += f'L 404 {BOT} Q ") }
-            .map(String.init) ?? ""
-        let generatorQuads = svgQuadCurves(tailCommand, bottom: g.bottom)
-        assertEqual(generatorQuads.count, 2, "the generator should draw the tail as two Q curves")
-        for (name, path) in [("outline", g.outlinePath()), ("body", g.bodyPath())] {
-            assertEqual(
-                quadCurves(in: path),
-                generatorQuads,
-                "the \(name) path's tail should match the generator's curves"
-            )
-        }
-    }
-}
-
-/// Quadratic curves in a CGPath as [start.x, start.y, control.x, control.y, end.x, end.y].
-private func quadCurves(in path: CGPath) -> [[CGFloat]] {
-    var curves: [[CGFloat]] = []
-    var current = CGPoint.zero
-    path.applyWithBlock { element in
-        let e = element.pointee
-        switch e.type {
-        case .moveToPoint, .addLineToPoint:
-            current = e.points[0]
-        case .addQuadCurveToPoint:
-            curves.append([current.x, current.y, e.points[0].x, e.points[0].y, e.points[1].x, e.points[1].y])
-            current = e.points[1]
-        case .addCurveToPoint:
-            current = e.points[2]
-        default:
-            break
-        }
-    }
-    return curves
-}
-
-/// `Q cx cy x y` commands in an SVG path f-string, each with the point it
-/// starts from, and `{BOT}` filled in.
-private func svgQuadCurves(_ command: String, bottom: CGFloat) -> [[CGFloat]] {
-    let tokens = command
-        .replacingOccurrences(of: "{BOT}", with: "\(Int(bottom))")
-        .split(whereSeparator: { $0 == " " || $0 == "'" })
-        .map(String.init)
-    func number(_ index: Int) -> CGFloat? {
-        index < tokens.count ? Double(tokens[index]).map { CGFloat($0) } : nil
-    }
-    var curves: [[CGFloat]] = []
-    var current: [CGFloat] = []
-    var index = 0
-    while index < tokens.count {
-        if tokens[index] == "L", let x = number(index + 1), let y = number(index + 2) {
-            current = [x, y]
-            index += 3
-        } else if tokens[index] == "Q",
-                  let cx = number(index + 1), let cy = number(index + 2),
-                  let x = number(index + 3), let y = number(index + 4) {
-            curves.append(current + [cx, cy, x, y])
-            current = [x, y]
-            index += 5
-        } else {
-            index += 1
-        }
-    }
-    return curves
-}
-
-/// Numbers on the right of a line like `DOT_C, DOT_R, DOT_RING = (744, 757), 84, 44`, ignoring any
-/// trailing comment.
-private func pythonAssignmentNumbers(_ source: String, names: String) -> [CGFloat] {
-    let prefix = "\(names) = "
-    guard let line = source.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
-        return []
-    }
-    let rhs = line.dropFirst(prefix.count).split(separator: "#", maxSplits: 1).first ?? ""
-    let numbers = rhs.split(whereSeparator: { !($0.isNumber || $0 == ".") })
-    return numbers.compactMap { Double($0) }.map { CGFloat($0) }
 }
 
 /// Renders a glyph straight through MenuBarGlyph.draw(in:context:) into a 36 px bitmap, so the pixel

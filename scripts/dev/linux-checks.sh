@@ -213,6 +213,8 @@ else
 fi
 check "telemetry keys self-test" "python3 scripts/dev/check-telemetry-keys.py --self-test"
 check "telemetry keys survive sanitizers" "python3 scripts/dev/check-telemetry-keys.py"
+check "menu bar glyph sync self-test" "python3 scripts/dev/check-menu-bar-glyph-sync.py --self-test"
+check "menu bar glyph matches SVG generator" "python3 scripts/dev/check-menu-bar-glyph-sync.py"
 check "privacy leak sweep" "python3 scripts/ops/privacy-leak-sweep.py --write-report $OUT_DIR/privacy-leak-sweep-report.json"
 
 # The strict release-health gate needs the GitHub release fixture that matches
