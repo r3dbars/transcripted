@@ -231,6 +231,27 @@ final class SpeakerProvenanceTests: XCTestCase {
         XCTAssertLessThan(cosine(restored.embedding, embedding(axis: 62)), 0.5, "the absorbed voice is gone again")
     }
 
+    func testUnmergeWeighsPostMergeRowsAgainstTheKeepersFullHistory() throws {
+        let targetId = try makePartlyLegacyProfile(axis: 70, legacyRecordings: 20, laterAxis: 70)
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 72), existingId: nil)
+        let preTarget = try XCTUnwrap(database.getSpeaker(id: targetId))
+        XCTAssertEqual(preTarget.callCount, 21)
+
+        try database.mergeProfiles(sourceId: source.id, into: targetId)
+        // Three post-merge recordings of a different voice land on the keeper.
+        for _ in 0..<3 {
+            _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 71), existingId: targetId)
+        }
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: targetId))
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: targetId))
+        XCTAssertEqual(restored.callCount, 24, "21 pre-merge recordings plus the 3 after it")
+        XCTAssertGreaterThan(
+            cosine(restored.embedding, preTarget.embedding), 0.95,
+            "3 new rows must not outweigh 21 recordings of history"
+        )
+    }
+
     func testUnmergeNonexistentEventIsNoop() {
         XCTAssertFalse(database.unmerge(mergeId: UUID()))
         XCTAssertFalse(database.unmergeMostRecent(forTargetId: UUID()))
