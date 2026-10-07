@@ -31,11 +31,6 @@
         "TimedTranscriptToken"
       ]
     },
-    "Sources/Support/ClaudeDesktopIntegrationInstaller.swift": {
-      "Observability": [
-        "AnalyticsRuntimeConfiguration"
-      ]
-    },
     "Sources/Support/TranscriptedPermissionAccess.swift": {
       "Core": [
         "CoreAudioSystemAudioCapture"
