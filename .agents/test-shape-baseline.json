@@ -5,7 +5,6 @@
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 6,
     "Tests/CaptureLibraryPathSafetySyncTests.swift": 2,
-    "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 4,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 4,
@@ -20,7 +19,6 @@
     "Tests/UIAutomationSurfaceContractTests.swift": 46
   },
   "wall-clock": {
-    "Tests/ClipboardRestoringTextPasterTests.swift": 2,
     "Tests/ParakeetRecoveryStateTests.swift": 2,
     "Tools/TranscriptedCLI/Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift": 1,
     "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SummaryItemIndexTests.swift": 1

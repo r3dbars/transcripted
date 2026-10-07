@@ -45,6 +45,31 @@ struct NotchIslandDictationContent: Equatable {
         /// The line under the words; nil reads "Click where it goes, then
         /// press ⌘V."
         var hint: String? = nil
+
+        /// A dictation that didn't paste: its words ride along as the preview.
+        struct NotPasted: Equatable {
+            var text: String
+            var actionTitle: String
+            var hint: String?
+            var dismissSeconds: Double
+        }
+
+        /// Builds the message for a finished dictation. With a not-pasted
+        /// dictation, the words become the preview and the not-pasted action,
+        /// hint and countdown replace the plain error action.
+        static func make(tone: Tone, text: String, errorActionTitle: String?, notPasted: NotPasted?) -> Message {
+            guard let notPasted else {
+                return Message(tone: tone, text: text, actionTitle: errorActionTitle)
+            }
+            return Message(
+                tone: tone,
+                text: text,
+                actionTitle: notPasted.actionTitle,
+                preview: nil,
+                dismissSeconds: notPasted.dismissSeconds,
+                hint: notPasted.hint
+            )
+        }
     }
 
     var phase: Phase

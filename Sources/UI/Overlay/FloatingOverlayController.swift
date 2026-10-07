@@ -218,13 +218,18 @@ class FloatingOverlayController {
             case .saved:
                 tone = .saved
             }
-            phase = .message(.init(
+            phase = .message(.make(
                 tone: tone,
                 text: errorMessage,
-                actionTitle: notPastedText != nil ? notPastedActionTitle : errorActionTitle,
-                preview: notPastedText,
-                dismissSeconds: notPastedText != nil ? Self.notPastedDismissSeconds : nil,
-                hint: notPastedText != nil ? notPastedHint : nil
+                errorActionTitle: errorActionTitle,
+                notPasted: notPastedText.map {
+                    .init(
+                        text: $0,
+                        actionTitle: notPastedActionTitle,
+                        hint: notPastedHint,
+                        dismissSeconds: Self.notPastedDismissSeconds
+                    )
+                }
             ))
         case .success:
             phase = .success(title: successTitle)
