@@ -102,9 +102,10 @@ env:
   TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
 
 jobs:
-  # Picks the runner for `checks` and `spm-tests`: the owner's Mac when its
-  # heartbeat says it is free and nothing is waiting for it, hosted macos-26
-  # otherwise. Linux, so it never takes one of the 5 hosted macOS slots.
+  # Picks the runner for `checks`, `spm-tests` and `app-build`: the owner's Mac
+  # when its heartbeat says it is free and nothing is waiting for it, hosted
+  # macos-26 otherwise. The Mac runs two job VMs at a time, so app-build may
+  # start a few minutes after the other two. Linux, so it never takes one of the 5 hosted macOS slots.
   # actions: read lets it count jobs already queued for the Mac. Runs stuck
   # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
   pick-runner:
@@ -341,7 +342,8 @@ jobs:
   # full ~15-25 min app build.
   # ---------------------------------------------------------------------------
   app-build:
-    runs-on: macos-26
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs-on) }}
     if: github.event_name != 'workflow_dispatch' || (inputs.full_bench_source_sha == '' && inputs.staged_update_source_sha == '')
     timeout-minutes: 120
 
@@ -359,6 +361,7 @@ jobs:
 
       - name: Cache prebuilt dependencies
         id: deps-cache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: |
@@ -372,11 +375,28 @@ jobs:
           restore-keys: |
             deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
 
+      # Same split as spm-tests: the Mac reads hosted and Mac entries but only
+      # writes deps-mac- entries, and only from pushes to main.
+      - name: Restore prebuilt dependencies (owner's Mac)
+        id: deps-cache-mac
+        if: runner.environment == 'self-hosted'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+            deps-mac-${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.swift-toolchain.outputs.fingerprint }}-
+
       - name: Build dependencies
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ] || [ "${{ steps.deps-cache-mac.outputs.cache-hit }}" = "true" ]; then
             # The cache key already hashes every staleness input, so a hit means
             # the artifacts match this tree. Refresh the mtime stamp so
             # build-deps.sh's mtime check agrees with the fresh checkout.
@@ -384,11 +404,29 @@ jobs:
           fi
           bash build-deps.sh
 
+      - name: Save prebuilt dependencies (owner's Mac, main only)
+        if: runner.environment == 'self-hosted' && github.event_name == 'push' && steps.deps-cache-mac.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: ${{ steps.deps-cache-mac.outputs.cache-primary-key }}
+
       - name: Build app
         shell: bash
         # GitHub-hosted macOS runners boot a real GUI/WindowServer session (the
-        # same reason XCUITest works there), so build.sh runs its launch smoke
-        # here instead of skipping it.
+        # same reason XCUITest works there), and so does the owner's Mac's job
+        # VM (it logs in to its own desktop), so build.sh runs its launch smoke
+        # in both instead of skipping it.
+        env:
+          # Launch-to-interactive ceiling for build.sh's launch smoke budget. The
+          # job VM on the owner's Mac launches slower and noisier than a hosted
+          # runner, so it gets more headroom. The smoke itself is required
+          # either way: no report fails the budget step below.
+          TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS: ${{ runner.environment == 'self-hosted' && '10000' || '3000' }}
         run: bash build.sh --no-open
 
       - name: Premium performance budget
@@ -403,7 +441,9 @@ jobs:
         # to never flake while still failing on a gross blow-up (e.g. a
         # synchronous model/network load added to the launch path). A future
         # tightening is min-of-N sampling in the smoke to sharpen the signal.
-        run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms 3000
+        env:
+          TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS: ${{ runner.environment == 'self-hosted' && '10000' || '3000' }}
+        run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms "$TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS"
 
   # ---------------------------------------------------------------------------
   # Required-status umbrella. Branch protection requires the "build-and-test"
@@ -430,7 +470,7 @@ jobs:
           spm_result='${{ needs.spm-tests.result }}'
           app_result='${{ needs.app-build.result }}'
           echo "pick-runner=$pick_result checks=$checks_result spm-tests=$spm_result app-build=$app_result"
-          echo "checks + spm-tests ran on: ${PICKED_RUNNER:-unknown}"
+          echo "checks + spm-tests + app-build ran on: ${PICKED_RUNNER:-unknown}"
           for result in "$pick_result" "$checks_result" "$spm_result" "$app_result"; do
             if [ "$result" != "success" ]; then
               echo "::error::A required Swift CI job did not succeed (pick-runner=$pick_result, checks=$checks_result, spm-tests=$spm_result, app-build=$app_result)."

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pick where Swift CI's `checks` and `spm-tests` jobs run.
+"""Pick where Swift CI's `checks`, `spm-tests` and `app-build` jobs run.
 
 They go to the owner's Mac (a one-job runner labelled transcripted-mac, in a
 fresh throwaway macOS VM) only when all of these hold:
@@ -298,13 +298,13 @@ def main() -> int:
                                 mode=mode, now=now, max_age=max_age, busy_mac_jobs=busy)
 
     runs_on = MAC if choice == "mac" else HOSTED
-    print(f"checks + spm-tests -> {runs_on} ({reason})")
+    print(f"checks + spm-tests + app-build -> {runs_on} ({reason})")
     if env("GITHUB_OUTPUT"):
         with open(env("GITHUB_OUTPUT"), "a", encoding="utf-8") as handle:
             handle.write(f"runs-on={runs_on}\n")
     if env("GITHUB_STEP_SUMMARY"):
         with open(env("GITHUB_STEP_SUMMARY"), "a", encoding="utf-8") as handle:
-            handle.write(f"checks + spm-tests run on `{runs_on}`: {reason}\n")
+            handle.write(f"checks + spm-tests + app-build run on `{runs_on}`: {reason}\n")
     return 0
 
 

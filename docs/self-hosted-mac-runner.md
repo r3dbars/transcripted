@@ -2,8 +2,9 @@
 
 GitHub gives this account 5 concurrent hosted macOS jobs, and every PR's Swift
 CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
-most of them wait in line. So `checks` and `spm-tests` can run on the owner's
-Mac, and only `app-build` has to use a hosted slot.
+most of them wait in line, and hosted `macos-26` machines can be scarce. So
+when the owner's Mac is free, all three run there instead. The Mac runs two job
+VMs at a time, so `app-build` starts when the first of the other two finishes.
 
 Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself, and
 a VM only exists while a job is waiting for it.
@@ -62,9 +63,13 @@ main's copy of the script, since it holds an `actions: write` token, and does
 nothing until the heartbeat variable exists. So a required `build-and-test`
 check can't sit pending on the Mac forever.
 
-A re-run redoes the whole run, including a hosted `app-build` that may already
-be partway through. GitHub can't re-run just the two Mac jobs with a new
-runner choice, because "re-run failed jobs" keeps `pick-runner`'s old answer.
+A re-run redoes the whole run, including an `app-build` that may already be
+partway through. GitHub can't re-run just some jobs with a new runner choice,
+because "re-run failed jobs" keeps `pick-runner`'s old answer.
+
+A job waiting behind its own run's other jobs on this Mac (the third job, while
+both VMs are busy with the first two) is never sent back to GitHub for waiting;
+only a run with nothing running here is rerouted after 15 minutes.
 
 A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
 minutes). It only asks GitHub for a registration once a VM has booted.
@@ -89,8 +94,14 @@ The timestamp in both forms lets `pick-runner` tell a live Mac from one that
 went quiet. While a VM runs, the service keeps the Mac from idle-sleeping
 (`caffeinate -i`).
 
-`app-build` never uses the Mac. Its launch smoke stays on hosted runners
-(`scripts/ops/native-smoke-isolation.py`).
+`app-build`'s launch smoke runs in the job VM as the VM's own desktop user.
+`scripts/ops/native-smoke-isolation.py` allows that only in CI, on a
+`transcripted-mac-` runner, when the root-owned marker
+`/Library/TranscriptedCI/throwaway-ci-vm` exists. The golden-VM setup writes
+it; the owner's Mac never has it, so smokes there stay blocked for the owner's
+account. The launch-to-interactive budget is 10 seconds in the VM (3 on hosted
+runners), because a VM's cold launch is slower and noisier; the smoke must still
+launch the app and report, or the budget step fails.
 
 ## What a job can and can't reach
 

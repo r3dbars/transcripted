@@ -671,7 +671,9 @@ fi
 # the budget rather than fail on a file that was intentionally not produced.
 LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
 if [ "$LAUNCH_SMOKE_RAN" = "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
-    PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 3000)
+    # CI sets TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS (more headroom in the
+    # owner's Mac's job VM); everywhere else it stays 3000.
+    PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms "${TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS:-3000}")
 fi
 
 # Runtime dictation-latency budgets, scored against this machine's local event

@@ -42,22 +42,22 @@ func testCIWorkflowContract() {
         }
     }
 
-    runSuite("CI workflow contract - only checks and spm-tests can use the owner's Mac") {
-        // pick-runner routes these two jobs to the owner's Mac when it is idle.
-        // Fork PRs must stay hosted, and app-build must stay hosted because its
-        // launch smoke needs an isolated account.
+    runSuite("CI workflow contract - checks, spm-tests and app-build can use the owner's Mac") {
+        // pick-runner routes these three jobs to the owner's Mac when it is idle.
+        // Fork PRs must stay hosted. app-build's launch smoke runs there only
+        // inside the throwaway job VM (scripts/ops/native-smoke-isolation.py).
         assertTrue(
             swiftCI.contains("HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}"),
             "pick-runner should see the PR head repo so fork PRs stay on hosted runners"
         )
         assertEqual(
             occurrences(of: "runs-on: ${{ fromJSON(needs.pick-runner.outputs.runs-on) }}", in: swiftCI),
-            2,
-            "only checks and spm-tests should take their runner from pick-runner"
+            3,
+            "checks, spm-tests and app-build should take their runner from pick-runner"
         )
         assertTrue(
-            swiftCI.contains("  app-build:\n    runs-on: macos-26\n"),
-            "app-build should stay on a hosted macos-26 runner"
+            swiftCI.contains("  app-build:\n    needs: pick-runner\n"),
+            "app-build should wait for pick-runner to choose its runner"
         )
         assertTrue(
             swiftCI.contains("needs: [pick-runner, checks, spm-tests, app-build]"),
