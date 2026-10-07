@@ -1,17 +1,11 @@
-// Source-text pins: most of this suite calls AnalyticsEventPolicy, AnalyticsPayloadSanitizer,
-// ActivationTelemetry, and FeatureDiscoveryTelemetry directly — real behavioral coverage, since
-// those types are in run-tests.sh's APP_SOURCES. A few suites instead grep source as text:
-// Sources/Observability/WorkflowRecoveryTelemetry.swift is NOT in APP_SOURCES (and its only
-// effect, AnalyticsReporter.track, silently no-ops without a configured PostHog key, so there is
-// nothing to observe even if it were compiled); Sources/App/TranscriptedApp.swift and the
-// MeetingSessionController files are @MainActor/AppKit and also excluded from
-// APP_SOURCES, so the meeting-prompt telemetry call-site counts are counted as text instead of
-// exercised; Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift lives
-// in a separate SPM package never linked into this runner, so its allowedProperties literal is
-// parsed as text to cross-check against the app-side allowlist;
-// Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift depends on the people
-// database and is not in APP_SOURCES either, so its reason raw values are read as text. If you
-// refactor any of these, keep the grepped strings/counts in sync with the source.
+// Most of this suite calls AnalyticsEventPolicy, AnalyticsPayloadSanitizer, ActivationTelemetry,
+// and FeatureDiscoveryTelemetry directly. Two pieces live outside this runner, so the suite
+// carries a copy of their public lists and a test next to the real code keeps each copy honest:
+// - SpeakerFinalizationFailureReason (Core, needs the people database): the raw-value list below
+//   is checked by SpeakerFinalizationFailureReasonTests in the Core package.
+// - AgentCaptureQueryTelemetryPolicy.allowedProperties (separate MCP package): the literal list
+//   asserted in this suite is also asserted by AgentCaptureQueryTelemetryTests in that package.
+// Docs and Resources/*.psv are read as data files (repo files that must agree with the allowlist).
 
 import Foundation
 
@@ -183,11 +177,6 @@ func testAnalyticsEventPolicy() {
             agentQuery?.allowedProperties ?? Set<String>(),
             ["app_version", "build_channel", "build_revision", "client_family", "capture_kind", "latency_bucket", "result", "result_count_bucket", "source_count_bucket", "tool_kind"],
             "agent query observation should stay build-scoped, enum, and bucket only"
-        )
-        assertEqual(
-            agentQuery?.allowedProperties ?? Set<String>(),
-            mcpAgentCaptureQueryAllowedProperties(),
-            "MCP agent capture telemetry must mirror the app analytics allowlist"
         )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
@@ -1457,9 +1446,9 @@ func testAnalyticsEventPolicy() {
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let allowedKeys = speakerFinalizationFailed?.allowedProperties ?? []
-        let reasons = analyticsSpeakerFinalizationReasonRawValues()
+        let reasons = analyticsSpeakerFinalizationReasonRawValues
 
-        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+        assertEqual(reasons.count, 12, "every speaker finalization reason should be checked")
         for key in ["finalization_reason", "review_mode", "is_retry"] {
             assertEqual(allowedKeys.contains(key), true, "\(key) should be allowlisted for speaker finalization failures")
             assertEqual(meetingFailed?.allowedProperties.contains(key), false, "\(key) belongs to speaker finalization failures only")
@@ -1909,25 +1898,38 @@ func testAnalyticsEventPolicy() {
     }
 }
 
-/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
-/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
-private func analyticsSpeakerFinalizationReasonRawValues() -> [String] {
-    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
-    guard let start = source.range(of: "public enum SpeakerFinalizationFailureReason"),
-          let end = source.range(of: "static func classify", range: start.upperBound..<source.endIndex) else {
-        return []
-    }
-    return source[start.upperBound..<end.lowerBound].split(separator: "\n").compactMap { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("case ") else { return nil }
-        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
-        guard quoted.count >= 3 else { return nil }
-        return String(quoted[1])
+/// Raw values of Core's `SpeakerFinalizationFailureReason`. Core isn't linked into this runner,
+/// so this is a copy; `SpeakerFinalizationFailureReasonTests` in the Core package fails when the
+/// enum and this list drift apart.
+private let analyticsSpeakerFinalizationReasonRawValues = [
+    "plan_missing_embedding",
+    "transcript_unresolved",
+    "transcript_unreadable",
+    "name_rewrite_failed",
+    "deferred_marker_failed",
+    "collapse_failed",
+    "discard_failed",
+    "merge_profile_missing",
+    "merge_embedding_invalid",
+    "confirmation_profile_missing",
+    "database_unavailable",
+    "database_write_failed",
+]
+
+/// Reads a repo data file (docs or Resources taxonomy), not production code.
+private func loadRepoDataFile(_ relativePath: String, file: String = #file, line: Int = #line) -> String {
+    do {
+        return try String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)
+    } catch {
+        totalTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        recordFailure("  FAIL [\(loc)] could not read \(relativePath): \(error)")
+        return ""
     }
 }
 
 private func documentedAnalyticsEvents() -> [String] {
-    let text = readSourceFixture("docs/privacy-first-observability.md")
+    let text = loadRepoDataFile("docs/privacy-first-observability.md")
     let section = markdownSection(
         named: "## Allowlisted analytics events",
         in: text
@@ -1962,7 +1964,7 @@ private func reviewedNonBucketAnalyticsProperties() -> Set<String> {
 }
 
 private func taxonomyDataLines(relativePath: String) -> [String] {
-    readSourceFixture(relativePath)
+    loadRepoDataFile(relativePath)
         .split(separator: "\n")
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty && !$0.hasPrefix("#") }
@@ -1979,27 +1981,4 @@ private func markdownSection(named heading: String, in text: String) -> String {
     }
 
     return String(sourceAfterHeading[..<end.lowerBound])
-}
-
-private func mcpAgentCaptureQueryAllowedProperties() -> Set<String> {
-    let source = readSourceFixture("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
-    guard let declaration = source.range(of: "static let allowedProperties: Set<String> = [") else {
-        return []
-    }
-
-    let afterDeclaration = String(source[declaration.upperBound...])
-    guard let closingBracket = afterDeclaration.range(of: "]") else {
-        return []
-    }
-
-    let literalBody = String(afterDeclaration[..<closingBracket.lowerBound])
-    return Set(
-        literalBody
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .compactMap { line -> String? in
-                let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "\","))
-                return trimmed.isEmpty ? nil : trimmed
-            }
-    )
 }

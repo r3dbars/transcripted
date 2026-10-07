@@ -1,6 +1,5 @@
 {
   "source-text": {
-    "Tests/AnalyticsEventPolicyTests.swift": 5,
     "Tests/AudioAutomationCoverageContractTests.swift": 8,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 6,
