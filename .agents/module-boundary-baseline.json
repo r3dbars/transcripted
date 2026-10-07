@@ -75,12 +75,6 @@
         "SpeakerIdentityOption"
       ]
     },
-    "Sources/UI/Settings/SpeakerNamingSheet.swift": {
-      "Core": [
-        "TranscriptSaver",
-        "TranscriptionTaskManager"
-      ]
-    },
     "Sources/UI/Settings/SpeakerPeopleRows.swift": {
       "Core": [
         "SpeakerIdentityOption"

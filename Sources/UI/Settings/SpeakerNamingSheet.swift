@@ -1,5 +1,5 @@
 // SpeakerNamingSheet.swift
-// Presents TranscriptionTaskManager.$speakerNamingRequest in the Notch
+// Presents the task manager's `speakerNamingRequest` in the Notch
 // island ("Who was on this call?", `NotchIslandSpeakerReviewView`). The
 // island calls `request.onComplete(updates)` so Core's
 // SpeakerNamingCoordinator can write the names back into the transcript.
@@ -35,13 +35,13 @@ final class SpeakerNamingSheet {
     private var islandReviewView: NotchIslandSpeakerReviewView?
     private var islandReviewContent: NotchIslandSpeakerReviewContent?
 
-    /// Wire the presenter to a task manager and to whether a meeting is being
-    /// captured. Idempotent — later calls replace the subscriptions.
+    /// Wire the presenter to the stream of naming requests (the task manager's
+    /// `$speakerNamingRequest`) and to whether a meeting is being captured. Idempotent — later calls replace the subscriptions.
     func observe(
-        taskManager: TranscriptionTaskManager,
+        speakerNamingRequests: AnyPublisher<SpeakerNamingRequest?, Never>,
         meetingCaptureActive: AnyPublisher<Bool, Never> = Just(false).eraseToAnyPublisher()
     ) {
-        subscription = taskManager.$speakerNamingRequest
+        subscription = speakerNamingRequests
             .receive(on: RunLoop.main)
             .sink { [weak self] request in
                 guard let self else { return }
@@ -87,13 +87,7 @@ final class SpeakerNamingSheet {
         let url = request.transcriptURL
         let transcriptID = request.transcriptId
         return await Task.detached(priority: .utility) { () -> String? in
-            var transcriptURL: URL? = url
-            if !FileManager.default.fileExists(atPath: url.path) {
-                transcriptURL = TranscriptSaver.existingTranscriptURL(
-                    in: url.deletingLastPathComponent(),
-                    transcriptId: transcriptID
-                )
-            }
+            let transcriptURL = SpeakerReviewTranscriptLocator.currentURL(for: url, transcriptId: transcriptID)
             return transcriptURL.flatMap { MeetingTranscriptStyler.displayTranscriptPreview(at: $0)?.title }
         }.value
     }
@@ -105,13 +99,7 @@ final class SpeakerNamingSheet {
         let url = request.transcriptURL
         let transcriptID = request.transcriptId
         let recording = await Task.detached(priority: .utility) { () -> (start: Date, remoteVoices: Int?)? in
-            var transcriptURL: URL? = url
-            if !FileManager.default.fileExists(atPath: url.path) {
-                transcriptURL = TranscriptSaver.existingTranscriptURL(
-                    in: url.deletingLastPathComponent(),
-                    transcriptId: transcriptID
-                )
-            }
+            let transcriptURL = SpeakerReviewTranscriptLocator.currentURL(for: url, transcriptId: transcriptID)
             guard let transcriptURL,
                   let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
                   values["imported_at"] == nil,

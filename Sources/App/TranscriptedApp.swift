@@ -501,7 +501,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
             }
             SpeakerNamingSheet.shared.observe(
-                taskManager: meetingSession.taskManager,
+                speakerNamingRequests: meetingSession.taskManager.$speakerNamingRequest.eraseToAnyPublisher(),
                 meetingCaptureActive: meetingSession.$state
                     .map { MeetingSessionStateMachine.isCaptureSessionActive($0) }
                     .eraseToAnyPublisher()
