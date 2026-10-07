@@ -116,8 +116,10 @@ enum AudioSignalRecovery {
             if frameRMS >= minimumCaptureFrameRMS {
                 activeDuration += Double(frame.count) / sampleRate
             }
-            if activeDuration >= minimumCaptureActiveDuration {
-                return peak >= minimumCapturePeak
+            // Exit early only on a yes: a quiet start can't rule out louder
+            // audio later in the track, so a "no" needs the whole scan.
+            if activeDuration >= minimumCaptureActiveDuration, peak >= minimumCapturePeak {
+                return true
             }
         }
         return peak >= minimumCapturePeak && activeDuration >= minimumCaptureActiveDuration

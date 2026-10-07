@@ -73,6 +73,18 @@ final class AudioSignalRecoveryTests: XCTestCase {
         )
     }
 
+    func testUsableCaptureSignalKeepsSpeechThatFollowsAQuietStart() {
+        // 1 s of faint room noise (frames above the RMS floor, peak below the
+        // capture peak), then a second of clear speech-level signal.
+        let quietStart = [Float](repeating: 0.0003, count: 16_000)
+        let laterSpeech = [Float](repeating: 0.3, count: 16_000)
+
+        XCTAssertTrue(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: quietStart + laterSpeech, sampleRate: 16_000),
+            "a quiet first stretch must not hide speech later in the microphone track"
+        )
+    }
+
     func testUsableCaptureSignalRejectsBelowFloorNoise() {
         let inaudible = [Float](repeating: 0.0004, count: 32_000)
 
