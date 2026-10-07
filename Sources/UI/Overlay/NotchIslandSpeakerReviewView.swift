@@ -186,11 +186,6 @@ final class NotchIslandSpeakerReviewView: NSView {
         guard hovered != isHovered else { return }
         isHovered = hovered
         updateLaterClock()
-        if hardCapReached, !isFinished,
-           NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: hovered, answering: recognizedRows.contains { !$0.isAnswered }) {
-            finishLater()
-            return
-        }
         if isFinished {
             if hovered {
                 lingerTask?.cancel()
@@ -199,6 +194,7 @@ final class NotchIslandSpeakerReviewView: NSView {
                 scheduleLingerEnd()
             }
         }
+        closeAtHardCapIfDue()
     }
 
     // MARK: Building
@@ -343,6 +339,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     private func rowChanged() {
         refreshInvitees()
         onLayoutChange?()
+        closeAtHardCapIfDue()
     }
 
     private func focusNextOpenRow(after row: NotchIslandVoiceRowView?) {
@@ -395,10 +392,13 @@ final class NotchIslandSpeakerReviewView: NSView {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled, let self, !self.isFinished else { return }
             self.hardCapReached = true
-            if NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: self.isHovered, answering: self.recognizedRows.contains { !$0.isAnswered }) {
-                self.finishLater()
-            }
+            self.closeAtHardCapIfDue()
         }
+    }
+
+    private func closeAtHardCapIfDue() { // also re-checked when an answer finishes (rowChanged)
+        guard hardCapReached, !isFinished, NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: isHovered, answering: recognizedRows.contains { !$0.isAnswered }) else { return }
+        finishLater()
     }
 
     /// Someone started answering: the review waits for them now.
