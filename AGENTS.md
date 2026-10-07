@@ -75,7 +75,7 @@ Report as high severity (P0/P1):
 - **Weakened checks.** A baseline grown, a check loosened or skipped, a test made to pass by asserting less, or a test that reads `Sources/` as text.
 - **Auto-merge widening.** Edits to `.agents/auto-merge-lanes.json` or `scripts/ops/auto-merge-gate.py` that let more merge without the owner.
 
-Don't report: naming or formatting preferences, comment wording, or speculative refactors.
+Don't report: naming or formatting preferences, comment wording, speculative refactors, or commit author and committer identity (the checkout a reviewer sees may not show the real author; `git log` on the PR branch is the truth).
 
 ## Releases
 
