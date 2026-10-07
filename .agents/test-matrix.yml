@@ -172,6 +172,14 @@ rules:
       - "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
 
   - paths:
+      - "scripts/ops/auto-merge-gate.py"
+      - ".agents/auto-merge-lanes.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/auto-merge-gate.py"
+      - "python3 scripts/ops/auto-merge-gate.py --self-test"
+
+  - paths:
       - "scripts/dev/onboarding.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"

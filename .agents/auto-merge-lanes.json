@@ -1,0 +1,79 @@
+{
+  "_comment": "Lanes that scripts/ops/auto-merge-gate.py may merge without the owner. A PR qualifies only if its branch starts with a lane's prefix, every changed file matches that lane's allow globs, no file matches deny_always, and every check in scripts/ops/auto-merge-gate.py passes. Set a lane's enabled to false to stop it, for example after a revert. Adding a lane or widening a lane's globs is a reviewed owner edit. See docs/auto-merge-gate.md.",
+  "version": 1,
+  "required_checks": [
+    "build-and-test",
+    "repo-hygiene"
+  ],
+  "required_label": "cleanup",
+  "blocking_labels": [
+    "needs owner review",
+    "do not merge",
+    "hold"
+  ],
+  "allowed_authors": [
+    "r3dbars"
+  ],
+  "reviewers": [
+    "chatgpt-codex-connector"
+  ],
+  "main_ci_workflow": "swift-ci.yml",
+  "max_merges_per_run": 3,
+  "deny_always": [
+    "Sources/TranscriptedCore/**",
+    "Sources/Meeting/**",
+    "Sources/Speech/**",
+    "Sources/Observability/**",
+    ".github/**",
+    "scripts/release/**",
+    "scripts/ci/**",
+    "Casks/**",
+    "docs/appcast.xml",
+    "Package.swift",
+    ".agents/modules.json",
+    ".agents/auto-merge-lanes.json",
+    "AGENTS.md",
+    "WORKFLOW.md"
+  ],
+  "lanes": [
+    {
+      "id": "test-shape",
+      "enabled": true,
+      "branch_prefix": "cleanup/test-shape/",
+      "max_changed_lines": 400,
+      "allow": [
+        "Tests/**",
+        "Tools/*/Tests/**",
+        ".agents/test-shape-baseline.json"
+      ]
+    },
+    {
+      "id": "source-pins",
+      "enabled": true,
+      "branch_prefix": "cleanup/source-pins/",
+      "max_changed_lines": 400,
+      "allow": [
+        "Tests/**",
+        "Tools/*/Tests/**",
+        ".agents/source-pin-baseline.json"
+      ]
+    },
+    {
+      "id": "file-size",
+      "enabled": true,
+      "branch_prefix": "cleanup/file-size/",
+      "max_changed_lines": 1600,
+      "allow": [
+        "Sources/**",
+        "Tools/*/Sources/**",
+        "Tools/*/Tests/**",
+        "Tests/**",
+        "*/AGENTS.md",
+        ".agents/file-size-baseline.json",
+        ".agents/source-pin-baseline.json",
+        "scripts/entrypoints/run-tests.sh",
+        "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      ]
+    }
+  ]
+}
