@@ -94,13 +94,22 @@ func testMeetingQuickSummaryExtractor() {
         **00:12**  [Mic/Justin]
         No worries, I have to run to another call.
 
+        **00:13**  [System/Maya]
+        Talk soon, I'll let you go.
+
+        **00:14**  [Mic/Justin]
+        Have a good one, I'll talk to you later.
+
+        **00:14**  [System/Maya]
+        Sounds good, I'll catch you later.
+
         **00:15**  [System/Maya]
         We'll go with the blue logo, sounds good.
         """
 
         let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
         assertEqual(sections.actionItems, "None found.", "courtesy closers are not action items, got: \(sections.actionItems)")
-        for closer in ["let me know", "see you then", "catch up Monday", "run to another call"] {
+        for closer in ["let me know", "see you then", "catch up Monday", "run to another call", "let you go", "talk to you later", "catch you later"] {
             assertFalse(
                 (sections.summary + sections.decisions + sections.openQuestions).contains(closer),
                 "courtesy closer should stay out of every section: \(closer)"
@@ -109,6 +118,19 @@ func testMeetingQuickSummaryExtractor() {
         assertTrue(
             sections.decisions.contains("blue logo"),
             "a decision followed by a courtesy tail is still a decision, got: \(sections.decisions)"
+        )
+    }
+
+    runSuite("a real deadline that says have to go through is not a sign-off") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        No worries, we have to go through the contract by Friday.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("go through the contract"),
+            "\"have to go through\" is work, not a sign-off, got: \(sections.actionItems)"
         )
     }
 

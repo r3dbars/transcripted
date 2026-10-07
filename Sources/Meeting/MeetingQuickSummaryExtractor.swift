@@ -355,8 +355,24 @@ enum MeetingQuickSummaryExtractor {
     /// but never carry a real commitment.
     private static let courtesyClosers: [String] = [
         "let me know", "catch up", "see you", "talk soon", "talk later",
-        "have to run", "have to go", "have to drop", "have to jump", "have to hop",
+        "let you go", "talk to you", "catch you", "get back to your",
     ]
+
+    /// "I have to run" leaves the call; "we have to go through the contract"
+    /// is work. These only close when the clause ends there or carries on
+    /// with to / now / soon / in / off.
+    private static let leaveVerbs = ["have to run", "have to go", "have to drop", "have to jump", "have to hop"]
+    private static let leaveTails = [" to ", " now", " soon", " in ", " off"]
+
+    private static func isCourtesyCloser(_ clause: String) -> Bool {
+        if matchesAny(courtesyClosers, in: clause) { return true }
+        let text = clause.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return leaveVerbs.contains { verb in
+            guard let range = text.range(of: verb) else { return false }
+            let rest = String(text[range.upperBound...]) + " "
+            return rest == " " || leaveTails.contains { rest.hasPrefix($0) }
+        }
+    }
 
     private static func matchesAny(_ cues: [String], in normalized: String) -> Bool {
         cues.contains { normalized.contains($0) }
@@ -390,7 +406,7 @@ enum MeetingQuickSummaryExtractor {
         let substantive = trimmed
             .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
             .map(String.init)
-            .filter { !matchesAny(smallTalkMarkers, in: $0) && !matchesAny(courtesyClosers, in: $0) }
+            .filter { !matchesAny(smallTalkMarkers, in: $0) && !isCourtesyCloser($0) }
             .joined(separator: ",")
         return !matchesAny(decisionCues, in: substantive) && !matchesAny(actionCues, in: substantive)
     }
