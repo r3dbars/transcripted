@@ -298,10 +298,10 @@ func testMeetingSessionUIPolicy() async {
 
     runSuite("MeetingOverlayController Discard menu requires session.recording") {
         let source = readSourceFixture(
-            "Sources/UI/Overlay/MeetingOverlayController.swift",
-            description: "MeetingOverlayController.swift"
+            "Sources/UI/Overlay/MeetingOverlayController+Actions.swift",
+            description: "MeetingOverlayController+Actions.swift"
         )
-        guard let start = source.range(of: "private func makeStripMenu()"),
+        guard let start = source.range(of: "func makeStripMenu()"),
               let end = source.range(
                 of: "@objc private func handleMenuDiscard()",
                 range: start.upperBound..<source.endIndex
@@ -323,12 +323,12 @@ func testMeetingSessionUIPolicy() async {
 
     runSuite("MeetingOverlayController Discard confirm re-checks session.recording") {
         let source = readSourceFixture(
-            "Sources/UI/Overlay/MeetingOverlayController.swift",
-            description: "MeetingOverlayController.swift"
+            "Sources/UI/Overlay/MeetingOverlayController+Actions.swift",
+            description: "MeetingOverlayController+Actions.swift"
         )
         guard let start = source.range(of: "private func handleDiscardRequested()"),
               let end = source.range(
-                of: "private func scheduleAutoHide(",
+                of: "func scheduleAutoHide(",
                 range: start.upperBound..<source.endIndex
               ) else {
             assertTrue(false, "discard confirm handler should remain present")
