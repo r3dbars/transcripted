@@ -98,7 +98,6 @@
         "SpeakerDatabase",
         "SpeakerIdentityMutationService",
         "SpeakerMergeRecord",
-        "SpeakerPeopleReviewPolicy",
         "SpeakerUserConfirmation",
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"

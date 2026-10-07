@@ -615,7 +615,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift"
     "Sources/TranscriptedCore/Utilities/LabKnobOverrides.swift"
-    "Sources/TranscriptedCore/Speaker/SpeakerPeopleReviewPolicy.swift"
+    "Sources/Meeting/SpeakerPeopleReviewPolicy.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFormatOptions.swift"
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
     "Sources/Meeting/MeetingInviteeSuggestionPolicy.swift"
