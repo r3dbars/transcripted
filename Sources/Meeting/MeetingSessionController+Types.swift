@@ -121,6 +121,19 @@ extension DisplayStatus {
     }
 }
 
+@available(macOS 14.0, *)
+@MainActor
+extension MeetingSessionController {
+    /// The speaker database the Settings people directory should edit: the
+    /// session's own store when it is a `SpeakerDatabase`, otherwise one
+    /// opened at the active embedder's database path. Lives here so the
+    /// Settings window controller doesn't have to name the Core type.
+    func speakerDatabaseForSettings() -> SpeakerDatabase {
+        (services.speakerStore as? SpeakerDatabase)
+            ?? SpeakerDatabase(path: SpeakerEmbedderFactory.activeSpeakerDBURL().path)
+    }
+}
+
 extension MeetingWarmupMeetingState {
     init(_ state: DiarizationModelState) {
         switch state {
