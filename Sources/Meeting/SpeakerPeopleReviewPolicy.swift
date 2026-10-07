@@ -5,7 +5,6 @@ import TranscriptedCore
 
 /// Which saved people the Speakers page flags for review, and the order it lists
 /// them in. Only Settings uses it, so it lives in Meeting rather than Core.
-
 enum SpeakerPeopleReviewPolicy {
     static func needsReview(profile: SpeakerProfile, duplicateIds: Set<UUID>) -> Bool {
         duplicateIds.contains(profile.id)
