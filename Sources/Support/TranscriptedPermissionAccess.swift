@@ -4,9 +4,6 @@ import ApplicationServices
 import CoreAudio
 import Combine
 import EventKit
-#if canImport(TranscriptedCore)
-import TranscriptedCore
-#endif
 
 enum TranscriptedPermissionAccess {
     enum SystemAudioPermissionState: Equatable, Sendable {
@@ -186,6 +183,10 @@ enum TranscriptedPermissionAccess {
         calendarStatus: () -> EKAuthorizationStatus = { EKEventStore.authorizationStatus(for: .event) },
         requestMicrophone: @MainActor () async -> Bool = { await requestMicrophoneAccessIfNeeded() },
         requestCalendar: @MainActor () async -> Bool = { await requestCalendarAccessIfNeeded() },
+        /// Runs the system-audio probe. The capture backend lives in Meeting,
+        /// so callers that can reach `.systemAudioRecording` pass it in; with
+        /// none, that kind only opens its Settings pane.
+        requestSystemAudio: (@MainActor () async -> Bool)? = nil,
         activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
         isAccessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
         hasShownAccessibilityPrompt: () -> Bool = { TranscriptedPermissionAccess.hasShownAccessibilityPrompt() },
@@ -229,7 +230,12 @@ enum TranscriptedPermissionAccess {
             return isAccessibilityTrusted()
         case .systemAudioRecording:
             let wasGranted = systemAudioRecordingGranted()
-            let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)
+            let granted: Bool
+            if let requestSystemAudio {
+                granted = await requestSystemAudio()
+            } else {
+                granted = wasGranted
+            }
             notifyPermissionsDidChange(kind: .systemAudioRecording)
             // Review manages an existing grant. A fresh Allow in the macOS
             // box should leave the user in Transcripted.
@@ -380,13 +386,20 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
-    static func requestSystemAudioRecordingAccessIfNeeded(forceRefresh: Bool = false) async -> Bool {
-        await systemAudioRecordingAccessDecision(forceRefresh: forceRefresh).canProceed
+    static func requestSystemAudioRecordingAccessIfNeeded(
+        forceRefresh: Bool = false,
+        makeRequester: @MainActor () -> SystemAudioPermissionRequester
+    ) async -> Bool {
+        await systemAudioRecordingAccessDecision(
+            forceRefresh: forceRefresh,
+            makeRequester: makeRequester
+        ).canProceed
     }
 
     @MainActor
     static func systemAudioRecordingAccessDecision(
-        forceRefresh: Bool = false
+        forceRefresh: Bool = false,
+        makeRequester: @MainActor () -> SystemAudioPermissionRequester
     ) async -> SystemAudioPermissionAccessDecision {
         switch refreshSystemAudioRecordingStatusFromSystem() {
         case .authorized:
@@ -412,12 +425,14 @@ enum TranscriptedPermissionAccess {
         }
 
         activateForPermissionPrompt()
-        let result = await performSystemAudioRecordingAccessRequest()
+        let result = await performSystemAudioRecordingAccessRequest(requester: makeRequester())
         return applySystemAudioRecordingProbeResult(result)
     }
 
     @MainActor
-    static func revalidateSystemAudioRecordingStatus() async -> Bool {
+    static func revalidateSystemAudioRecordingStatus(
+        makeRequester: @MainActor () -> SystemAudioPermissionRequester
+    ) async -> Bool {
         if isLaunchSmokeMode {
             return systemAudioRecordingGranted()
         }
@@ -436,8 +451,9 @@ enum TranscriptedPermissionAccess {
             break
         }
 
+        let requester = makeRequester()
         let task = Task { @MainActor in
-            let result = await performSystemAudioRecordingAccessRequest()
+            let result = await performSystemAudioRecordingAccessRequest(requester: requester)
             let granted = applySystemAudioRecordingProbeResult(result).canProceed
             notifyPermissionsDidChange(kind: .systemAudioRecording)
             return granted
@@ -503,8 +519,9 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
-    private static func performSystemAudioRecordingAccessRequest() async -> SystemAudioPermissionProbeResult {
-        let requester = SystemAudioPermissionRequester()
+    private static func performSystemAudioRecordingAccessRequest(
+        requester: SystemAudioPermissionRequester
+    ) async -> SystemAudioPermissionProbeResult {
         let attempt = SystemAudioPermissionRequestAttempt(
             timeoutNanoseconds: systemAudioProbeTimeout(for: systemAudioRecordingStatus())
         )
@@ -759,37 +776,20 @@ final class SystemAudioPermissionRequester {
     private var completion: ((ProbeResult) -> Void)?
     private var backendErrorSubscription: AnyCancellable?
 
+    /// The production capture backend is supplied by the caller (Meeting owns
+    /// the Core Audio tap), so Support never names it. `backendErrors` carries
+    /// the backend's terminal-failure messages, if it has any.
     init(
         prepare: @escaping () throws -> Void,
         start: @escaping (@escaping (SystemAudioPermissionSampleEvidence) -> Void) throws -> Void,
         stop: @escaping () -> Void,
+        backendErrors: AnyPublisher<String?, Never>? = nil,
         silenceObservationDelay: TimeInterval = 2
     ) {
         worker = SystemAudioPermissionProbeWorker(prepare: prepare, start: start, stop: stop, silenceObservationDelay: silenceObservationDelay)
-    }
-
-    convenience init() {
-#if canImport(TranscriptedCore)
-        let capture = CoreAudioSystemAudioCapture()
-        self.init(
-            prepare: { try capture.prepare() },
-            start: { receivedSignal in
-                try capture.start { buffer in
-                    receivedSignal(SystemAudioPermissionProbeClassifier.sampleEvidence(buffer))
-                }
-            },
-            stop: { capture.stopSync() }
-        )
-        backendErrorSubscription = capture.errorMessagePublisher.sink { [weak self] message in
+        backendErrorSubscription = backendErrors?.sink { [weak self] message in
             Task { @MainActor [weak self] in self?.handleBackendError(message) }
         }
-#else
-        // The dependency-free fast-test runner injects a fake capture above.
-        // A missing production backend must never manufacture a grant.
-        self.init(prepare: {
-            throw NSError(domain: "SystemAudioPermissionProbe", code: 1)
-        }, start: { _ in }, stop: {})
-#endif
     }
 
     func requestAccess(completion: @escaping (ProbeResult) -> Void) {

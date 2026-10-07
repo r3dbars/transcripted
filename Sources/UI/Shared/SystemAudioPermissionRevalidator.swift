@@ -27,7 +27,7 @@ enum SystemAudioPermissionRevalidator {
         guard task.wrappedValue == nil else { return }
         guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
         task.wrappedValue = Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+            _ = await MeetingSystemAudioPermissionProbe.revalidateStatus()
             onUpdated()
             task.wrappedValue = nil
         }

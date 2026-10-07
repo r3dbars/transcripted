@@ -49,7 +49,7 @@
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
-- `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
+- `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access. The system-audio probe's Core Audio tap is supplied by `Sources/Meeting/MeetingSystemAudioPermissionProbe.swift` (the access-decision and revalidate calls take a `makeRequester`); Support never names the Core type
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
 - `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
 - `TranscriptionModelPreferences.swift` — persisted local transcription-model selection shared by dictation and meetings

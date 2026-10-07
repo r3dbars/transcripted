@@ -399,7 +399,7 @@ extension TranscriptedSettingsView {
                 ) {
                     trackPermissionCTA(kind)
                     Task { @MainActor in
-                        await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+                        await MeetingSystemAudioPermissionProbe.requestAccessOrOpenSettings(for: kind)
                         refreshPermissions()
                     }
                 }

@@ -337,7 +337,7 @@ struct PermissionsOnboardingView: View {
 
         if kind == .systemAudioRecording {
             systemAudioRequestTask = Task { @MainActor in
-                let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(forceRefresh: true)
+                let decision = await MeetingSystemAudioPermissionProbe.accessDecision(forceRefresh: true)
                 guard !Task.isCancelled else { return }
                 systemAudioProbeResult = decision.probeResult
                 systemAudioState = decision.state
@@ -349,7 +349,7 @@ struct PermissionsOnboardingView: View {
 
         pendingSystemSettingsHandoff = true
         Task { @MainActor in
-            _ = await TranscriptedPermissionAccess.requestAccessOrOpenSettings(
+            _ = await MeetingSystemAudioPermissionProbe.requestAccessOrOpenSettings(
                 for: kind,
                 firstAccessibilityAskShowsPromptOnly: true
             )

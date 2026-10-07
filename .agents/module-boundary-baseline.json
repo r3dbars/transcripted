@@ -36,11 +36,6 @@
         "AnalyticsRuntimeConfiguration"
       ]
     },
-    "Sources/Support/TranscriptedPermissionAccess.swift": {
-      "Core": [
-        "CoreAudioSystemAudioCapture"
-      ]
-    },
     "Sources/UI/Overlay/MeetingOverlayController.swift": {
       "Core": [
         "CaptureRouteStabilizationOutcome",

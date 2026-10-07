@@ -64,7 +64,7 @@ extension MeetingSessionController {
             )
         )
 
-        let systemAudioAccess = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
+        let systemAudioAccess = await MeetingSystemAudioPermissionProbe.accessDecision(
             forceRefresh: shouldRevalidateCachedSystemAudioPermission
         )
         systemAudioRecordingGranted = systemAudioAccess.canProceed
