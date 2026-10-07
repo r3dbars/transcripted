@@ -3,7 +3,6 @@
     "Tests/AudioAutomationCoverageContractTests.swift": 20,
     "Tests/AuditRegressionCoverageContractTests.swift": 3,
     "Tests/BluetoothRouteContractTests.swift": 2,
-    "Tests/CIWorkflowContractTests.swift": 14,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
