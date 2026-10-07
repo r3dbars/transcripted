@@ -111,7 +111,7 @@ enum SemanticSearchFusion {
             }
         }
 
-        // Swift's sort isn't stable, so first-seen order is the last tiebreak.
+        // Swift doesn't promise a stable sort, so first-seen order is the last tiebreak.
         let ranked = order.enumerated().sorted { a, b in
             let sa = score[a.element] ?? 0, sb = score[b.element] ?? 0
             if sa != sb { return sa > sb }
