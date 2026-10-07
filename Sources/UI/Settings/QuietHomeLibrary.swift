@@ -220,13 +220,14 @@ struct QuietWorkingRow: View {
                         .font(LibraryTokens.rowTitle)
                         .lineLimit(1)
                     HStack(spacing: 6) {
-                        if tone == .working {
+                        switch HomeActivityIndicator.make(isWorking: tone == .working, isSuccess: tone == .success) {
+                        case .spinner:
                             ProgressView()
                                 .controlSize(.mini)
-                        } else {
+                        case .statusIcon(let isSuccess):
                             Image(systemName: symbolName)
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(tone == .success ? Color.green : Color.orange)
+                                .foregroundStyle(isSuccess ? Color.green : Color.orange)
                         }
                         Text(status)
                             .font(.system(size: 11.5))

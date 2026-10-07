@@ -503,28 +503,9 @@ struct TranscriptedSettingsView: View {
         }.value
     }
 
-    private enum HomeCopyMeetingReadResult {
-        case missingFile
-        case readFailure
-        case success(text: String, usedBundle: Bool)
-    }
-
     private static func loadCopyMeetingText(for item: RecentMeetingItem) async -> HomeCopyMeetingReadResult {
         await Task.detached(priority: .userInitiated) {
-            guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
-                return .missingFile
-            }
-            if let bundle = AgentConnectionGuide.portableMeetingBundle(
-                title: item.title,
-                date: item.date,
-                transcriptURL: transcriptURL
-            ) {
-                return .success(text: bundle, usedBundle: true)
-            } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
-                return .success(text: raw, usedBundle: false)
-            } else {
-                return .readFailure
-            }
+            HomeCopyMeetingReader.read(title: item.title, date: item.date, transcriptURL: item.transcriptURL)
         }.value
     }
 

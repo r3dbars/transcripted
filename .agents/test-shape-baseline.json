@@ -8,7 +8,7 @@
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 4,
     "Tests/DictationSoundsTests.swift": 2,
-    "Tests/HomeFirstArtifactVisibilityTests.swift": 4,
+    "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
     "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/NightlySecurityContractTests.swift": 1,
     "Tests/ObservabilityLogWriterTests.swift": 6,

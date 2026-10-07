@@ -7,7 +7,7 @@
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
-    "Tests/HomeFirstArtifactVisibilityTests.swift": 11,
+    "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
     "Tests/MeetingSessionUIPolicyTests.swift": 8,
     "Tests/NightlySecurityContractTests.swift": 34,
     "Tests/OverlayScreenSharePrivacyTests.swift": 4,
