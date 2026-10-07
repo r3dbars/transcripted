@@ -26,6 +26,8 @@ The current package is intentionally small:
 | `ImportedAudioNativeSmoke.swift` | Native audio-import picker automation and saved imported-meeting artifact validation |
 | `ImportedAudioSmoke.swift` | Deterministic imported-audio artifact smoke: synthetic WAV, imported meeting Markdown, retained single-file audio, parser and validator proof |
 | `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
+| `UISmoke+MenuBarAudit.swift` | Menu-bar audit target and row types plus the manual-proof tail rows used by `UISmoke` |
+| `UISmoke+Report.swift` | `UISmoke` status, check, report, and report-builder types |
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
 | `PackagedAppSmoke.swift` | Pre-publish packaged app smoke: the command, its check/report types, and the process runner |
 | `PackagedAppSmokeRunner.swift` | The packaged-app checks: bundle, Sparkle, observability, helper, keyboard, CLI, signing, dSYM, DMG, appcast and log privacy, plus the UI / first-run tail |
