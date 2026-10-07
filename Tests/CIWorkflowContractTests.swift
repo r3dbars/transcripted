@@ -36,11 +36,9 @@ func testCIWorkflowContract() {
     runSuite("CI workflow contract - swift-ci stays a blocking gate") {
         let jobs = workflow.child("jobs")?.children ?? []
         assertTrue(jobs.count >= 4, "swift-ci should parse into its jobs")
-        let continueOnError = workflow.descendants(named: "continue-on-error")
-        assertEqual(
-            continueOnError.filter { $0.scalar?.lowercased() == "true" }.count,
-            0,
-            "swift-ci must not be continue-on-error — it is a required, blocking gate"
+        assertTrue(
+            workflow.descendants(named: "continue-on-error").isEmpty,
+            "swift-ci must not use continue-on-error anywhere — it is a required, blocking gate"
         )
     }
 
@@ -137,9 +135,25 @@ func testCIWorkflowContract() {
         )
     }
 
-    // Removed: "clipboard timing skip set stays locked". It counted the skip
-    // guards by reading ClipboardRestoringTextPasterTests.swift as text. The CI
-    // side (the only skip env var is the timing one) is still asserted above.
+    runSuite("CI workflow contract - clipboard timing skip set stays locked") {
+        let clipboardTests = (try? String(
+            contentsOf: repoFixtureURL("Tests/ClipboardRestoringTextPasterTests.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertFalse(clipboardTests.isEmpty, "ClipboardRestoringTextPasterTests.swift should be readable")
+
+        // Each timing-sensitive proof guards an early SKIPPED return on the
+        // TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS env. Lock the count so the
+        // env-skipped set cannot quietly grow.
+        let guardCount = occurrences(
+            of: "if ProcessInfo.processInfo.environment[\"TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS\"] == \"1\" {",
+            in: clipboardTests
+        )
+        let skipMarkerCount = occurrences(of: "    SKIPPED: wall-clock timing proof", in: clipboardTests)
+
+        assertEqual(guardCount, 5, "exactly five clipboard timing proofs should guard on the timing-skip env")
+        assertEqual(skipMarkerCount, 5, "exactly five clipboard timing proofs should print a SKIPPED marker")
+    }
 }
 
 /// A deliberately small indentation-based reader for the YAML subset swift-ci.yml
@@ -158,7 +172,8 @@ private struct WorkflowNode {
         children.flatMap { ($0.key == name ? [$0] : []) + $0.descendants(named: name) }
     }
 
-    /// `[a, b]` or a block list of bare items, as strings.
+    /// An inline `[a, b]` list, as strings. Block lists (`- a`) nest as "-" nodes
+    /// and come back empty here, so an assert on them fails closed.
     var list: [String] {
         guard let scalar, scalar.hasPrefix("["), scalar.hasSuffix("]") else { return children.compactMap(\.scalar) }
         return scalar.dropFirst().dropLast().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -242,4 +257,15 @@ private struct WorkflowNode {
         guard value.count >= 2, let first = value.first, first == "\"" || first == "'", value.last == first else { return value }
         return String(value.dropFirst().dropLast())
     }
+}
+
+private func occurrences(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+    var count = 0
+    var searchRange = haystack.startIndex..<haystack.endIndex
+    while let found = haystack.range(of: needle, range: searchRange) {
+        count += 1
+        searchRange = found.upperBound..<haystack.endIndex
+    }
+    return count
 }
