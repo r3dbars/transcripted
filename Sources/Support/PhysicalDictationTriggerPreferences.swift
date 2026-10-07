@@ -296,7 +296,7 @@ enum PhysicalDictationTriggerPreferences {
 
         return PhysicalDictationTriggerBinding(
             keyCode: keyCode,
-            modifiers: currentModifiers & ~primaryModifier
+            modifiers: currentModifiers & ~primaryModifier & ~PhysicalDictationTriggerModifiers.capsLock
         )
     }
 
@@ -417,7 +417,9 @@ enum PhysicalDictationTriggerPreferences {
             return false
         }
 
-        return (modifiers & ~primaryModifier) == binding.modifiers
+        // Caps Lock is latched, not held, so it never blocks a modifier chord.
+        let ignored = primaryModifier | PhysicalDictationTriggerModifiers.capsLock
+        return (modifiers & ~ignored) == (binding.modifiers & ~ignored)
     }
 
     private static func modifierChordEventBelongs(

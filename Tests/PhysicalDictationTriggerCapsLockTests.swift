@@ -1,0 +1,46 @@
+import Carbon
+import CoreGraphics
+import Foundation
+
+// Caps Lock is a latched toggle, not a held modifier. With it on, every event
+// tap flag set carries the capsLock bit, and the shortcuts must still fire.
+func testPhysicalDictationTriggerCapsLock() {
+    let option = PhysicalDictationTriggerModifiers.option
+    let capsLock = PhysicalDictationTriggerModifiers.capsLock
+    let rightOption = UInt32(kVK_RightOption)
+
+    runSuite("The Right Option dictation key still presses and releases with Caps Lock on") {
+        let binding = PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+        let pressFlags = PhysicalDictationTriggerPreferences.modifiers(from: CGEventFlags([.maskAlternate, .maskAlphaShift]))
+        let releaseFlags = PhysicalDictationTriggerPreferences.modifiers(from: CGEventFlags([.maskAlphaShift]))
+
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: rightOption, modifiers: pressFlags),
+            "Right Option down with Caps Lock latched should start dictation"
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(binding, keyCode: rightOption, modifiers: releaseFlags),
+            "Right Option up with Caps Lock latched should end the hold"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(
+                binding,
+                keyCode: rightOption,
+                modifiers: option | capsLock | PhysicalDictationTriggerModifiers.shift
+            ),
+            "a real extra modifier (Shift) still blocks the bare Right Option key"
+        )
+    }
+
+    runSuite("A modifier chord recorded with Caps Lock on does not need Caps Lock to fire") {
+        let recorded = PhysicalDictationTriggerPreferences.bindingForFlagsChanged(
+            keyCode: rightOption,
+            modifierFlags: [.option, .capsLock]
+        )
+        assertEqual(
+            recorded,
+            PhysicalDictationTriggerBinding(keyCode: rightOption),
+            "recording Right Option while Caps Lock is on should save plain Right Option"
+        )
+    }
+}
