@@ -29,12 +29,86 @@ struct GhostInputControllerTests {
         ))
     }
 
-    @Test("A Tab that lands mid-chain, before the chained ghost shows, is held; any other Tab accepts")
-    func tabMidChainIsHeld() {
-        #expect(GhostInputController.plainTabRoute(ghostVisible: false, awaitingChainedGhost: true) == .holdForChainedGhost)
-        #expect(GhostInputController.plainTabRoute(ghostVisible: true, awaitingChainedGhost: true) == .acceptWord)
-        #expect(GhostInputController.plainTabRoute(ghostVisible: true, awaitingChainedGhost: false) == .acceptWord)
-        #expect(GhostInputController.plainTabRoute(ghostVisible: false, awaitingChainedGhost: false) == .acceptWord)
+    /// The keyboard state a plain Tab sees, with the accept attempt's real
+    /// side effect: a failed accept cancels pending work, which moves the
+    /// schedule revision on and drops the pending request.
+    private struct ChainedTabModel {
+        var hold = ChainedTabHold()
+        var scheduleRevision = 0
+        var requestPending = false
+        var ghostVisible = false
+        var acceptAttempts = 0
+
+        mutating func chainAfterAccept() {
+            scheduleRevision += 1
+            hold.chained(revision: scheduleRevision)
+        }
+
+        mutating func tab() -> GhostInputController.PlainTabOutcome {
+            GhostInputController.routePlainTab(
+                awaitingChainedGhost: {
+                    hold.isAwaitingGhost(scheduleRevision: scheduleRevision, requestPending: requestPending, ghostVisible: ghostVisible)
+                },
+                acceptWord: {
+                    acceptAttempts += 1
+                    if ghostVisible { return true }
+                    scheduleRevision += 1
+                    requestPending = false
+                    return false
+                }
+            )
+        }
+    }
+
+    @Test("A Tab mid-chain is held before the accept attempt can cancel the chained request")
+    func tabMidChainIsHeldBeforeAccept() {
+        var model = ChainedTabModel()
+        model.chainAfterAccept()
+        model.hold.taskStarted(revision: model.scheduleRevision)
+        model.requestPending = true
+        #expect(model.tab() == .held)
+        #expect(model.acceptAttempts == 0)
+        #expect(model.requestPending, "the chained request must keep running")
+    }
+
+    @Test("A Tab in a calm host's settle window, before the chained request is pending, is held")
+    func tabBeforeChainedTaskStartsIsHeld() {
+        var model = ChainedTabModel()
+        model.chainAfterAccept()
+        #expect(model.tab() == .held)
+        #expect(model.acceptAttempts == 0)
+    }
+
+    @Test("Once the chained task bails without a request, the next Tab goes to the host")
+    func chainedTaskBailDoesNotStickTheHold() {
+        var model = ChainedTabModel()
+        model.chainAfterAccept()
+        // A bail that leaves the revision alone (the host app changed).
+        model.hold.taskStarted(revision: model.scheduleRevision)
+        #expect(model.tab() == .passedToHost)
+        #expect(model.acceptAttempts == 1)
+    }
+
+    @Test("A stale chained task never clears a newer chain's hold")
+    func staleChainedTaskKeepsNewerHold() {
+        var model = ChainedTabModel()
+        model.chainAfterAccept()
+        let stale = model.scheduleRevision
+        model.chainAfterAccept()
+        model.hold.taskStarted(revision: stale)
+        #expect(model.tab() == .held)
+    }
+
+    @Test("A visible ghost or no chain at all: Tab tries to accept as usual")
+    func ordinaryTabAccepts() {
+        var visible = ChainedTabModel()
+        visible.chainAfterAccept()
+        visible.ghostVisible = true
+        #expect(visible.tab() == .accepted)
+
+        var plain = ChainedTabModel()
+        #expect(plain.tab() == .passedToHost)
+        #expect(plain.acceptAttempts == 1)
     }
 
     @Test("Slow-key timing separates queue delay from handler work")
