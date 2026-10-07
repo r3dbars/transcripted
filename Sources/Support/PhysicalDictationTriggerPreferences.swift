@@ -569,7 +569,14 @@ enum PhysicalDictationTriggerPreferences {
         _ binding: PhysicalDictationTriggerBinding,
         fallback: PhysicalDictationTriggerBinding
     ) -> PhysicalDictationTriggerBinding {
-        rejectionReason(for: binding) == nil ? binding : fallback
+        // Older builds saved the latched Caps Lock bit with a key. It isn't a
+        // held modifier, so drop it: otherwise Caps Lock itself "belongs" to
+        // the chord and Settings labels it "Caps".
+        let binding = PhysicalDictationTriggerBinding(
+            keyCode: binding.keyCode,
+            modifiers: binding.modifiers & ~PhysicalDictationTriggerModifiers.capsLock
+        )
+        return rejectionReason(for: binding) == nil ? binding : fallback
     }
 
     private static func isFunctionKey(_ keyCode: UInt32) -> Bool {

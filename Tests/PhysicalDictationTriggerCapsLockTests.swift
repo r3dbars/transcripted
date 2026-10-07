@@ -71,4 +71,43 @@ func testPhysicalDictationTriggerCapsLock() {
             "a chord recorded with Caps Lock on should fire after Caps Lock is turned off"
         )
     }
+
+    runSuite("A key saved with the Caps Lock bit by an older build loads without it") {
+        let suiteName = "PhysicalDictationTriggerCapsLockTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let leftOption = UInt32(kVK_Option)
+        // Older builds recorded the latched Caps Lock bit with the key.
+        PhysicalDictationTriggerPreferences.savePushToTalk(
+            PhysicalDictationTriggerBinding(keyCode: leftOption, modifiers: capsLock),
+            userDefaults: defaults
+        )
+        let loaded = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults)
+
+        assertEqual(loaded, PhysicalDictationTriggerBinding(keyCode: leftOption), "the stored Caps Lock bit should be dropped on load")
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(loaded, keyCode: UInt32(kVK_CapsLock), modifiers: option | capsLock),
+            "pressing Caps Lock while holding Left Option must not count as the dictation key"
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(loaded, keyCode: leftOption, modifiers: option | capsLock),
+            "Left Option itself still starts dictation with Caps Lock on"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.displayString(for: loaded).contains("Caps"),
+            "Settings should not label the key with Caps"
+        )
+
+        PhysicalDictationTriggerPreferences.saveMeeting(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_M), modifiers: option | capsLock),
+            userDefaults: defaults
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "a stored Option-Caps-M loads as plain Option-M"
+        )
+    }
 }
