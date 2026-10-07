@@ -153,8 +153,7 @@ final class ClipboardRestoringTextPaster {
         pasteboard: any ClipboardPasteboard = NSPasteboard.general,
         accessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
         requestAccessibilityTrust: () -> Void = {
-            // Documented value of `kAXTrustedCheckOptionPrompt`; the global itself is a mutable CFString the concurrency checker flags.
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary // literal value of kAXTrustedCheckOptionPrompt
             _ = AXIsProcessTrustedWithOptions(options)
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,

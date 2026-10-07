@@ -132,8 +132,7 @@ enum TranscriptedPermissionAccess {
 
     static func showAccessibilityPrompt(userDefaults: UserDefaults = .standard) {
         userDefaults.set(true, forKey: accessibilityPromptShownKey)
-        // Documented value of `kAXTrustedCheckOptionPrompt`; the global itself is a mutable CFString the concurrency checker flags.
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary // literal value of kAXTrustedCheckOptionPrompt
         _ = AXIsProcessTrustedWithOptions(options)
     }
 
