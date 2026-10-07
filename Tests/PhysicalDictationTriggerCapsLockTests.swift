@@ -43,4 +43,32 @@ func testPhysicalDictationTriggerCapsLock() {
             "recording Right Option while Caps Lock is on should save plain Right Option"
         )
     }
+
+    runSuite("Option-M and other chord shortcuts still fire with Caps Lock on") {
+        let meeting = PhysicalDictationTriggerPreferences.defaultMeetingBinding
+        let flags = PhysicalDictationTriggerPreferences.modifiers(from: CGEventFlags([.maskAlternate, .maskAlphaShift]))
+
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(meeting, keyCode: meeting.keyCode, modifiers: flags),
+            "Option-M with Caps Lock latched should still start a meeting"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                meeting,
+                keyCode: meeting.keyCode,
+                modifiers: option | capsLock | PhysicalDictationTriggerModifiers.command
+            ),
+            "a real extra modifier (Command) still keeps Option-M from matching"
+        )
+
+        let recorded = PhysicalDictationTriggerPreferences.bindingForKeyDown(
+            keyCode: meeting.keyCode,
+            modifierFlags: [.option, .capsLock]
+        )
+        assertEqual(recorded, meeting, "recording Option-M while Caps Lock is on should save plain Option-M")
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(recorded, keyCode: meeting.keyCode, modifiers: option),
+            "a chord recorded with Caps Lock on should fire after Caps Lock is turned off"
+        )
+    }
 }

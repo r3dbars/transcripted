@@ -274,7 +274,7 @@ enum PhysicalDictationTriggerPreferences {
     static func bindingForKeyDown(keyCode: UInt32, modifierFlags: NSEvent.ModifierFlags) -> PhysicalDictationTriggerBinding {
         PhysicalDictationTriggerBinding(
             keyCode: keyCode,
-            modifiers: modifiers(from: modifierFlags)
+            modifiers: modifiers(from: modifierFlags) & ~PhysicalDictationTriggerModifiers.capsLock
         )
     }
 
@@ -306,8 +306,10 @@ enum PhysicalDictationTriggerPreferences {
         modifiers: UInt32
     ) -> Bool {
         guard !isModifierKey(binding.keyCode) else { return false }
+        // Caps Lock is latched, not held, so it never blocks a chord.
+        let relevant = PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
         return binding.keyCode == keyCode
-            && binding.modifiers == (modifiers & PhysicalDictationTriggerModifiers.all)
+            && (binding.modifiers & relevant) == (modifiers & relevant)
     }
 
     static func matchesFlagsChangedPress(
