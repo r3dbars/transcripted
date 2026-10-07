@@ -788,6 +788,11 @@ as_user /usr/bin/curl -fsS -m 30 -o /dev/null https://api.github.com/zen \\
 
 # No admin rights for the job user, so a job can't turn the firewall off.
 dseditgroup -o edit -d "\$user" -t user admin 2>/dev/null || true
+# Nobody else either: the Cirrus Labs image also leaves _mbsetupuser (the
+# Setup Assistant account) in admin. Only root stays.
+for member in \$(dscl . -read /Groups/admin GroupMembership 2>/dev/null | sed 's/^GroupMembership://'); do
+  [ "\$member" = root ] || dseditgroup -o edit -d "\$member" -t user admin 2>/dev/null || true
+done
 dsmemberutil flushcache 2>/dev/null || true
 for f in /etc/sudoers.d/*; do
   [ -f "\$f" ] || continue
