@@ -187,7 +187,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         isHovered = hovered
         updateLaterClock()
         if hardCapReached, !isFinished,
-           NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: hovered) {
+           NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: hovered, answering: recognizedRows.contains { !$0.isAnswered }) {
             finishLater()
             return
         }
@@ -395,7 +395,7 @@ final class NotchIslandSpeakerReviewView: NSView {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled, let self, !self.isFinished else { return }
             self.hardCapReached = true
-            if NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: self.isHovered) {
+            if NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: self.isHovered, answering: self.recognizedRows.contains { !$0.isAnswered }) {
                 self.finishLater()
             }
         }
