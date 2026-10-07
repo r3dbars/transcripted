@@ -1,10 +1,8 @@
 // Most of this suite calls AnalyticsEventPolicy, AnalyticsPayloadSanitizer, ActivationTelemetry,
-// and FeatureDiscoveryTelemetry directly. Two pieces live outside this runner, so the suite
-// carries a copy of their public lists and a test next to the real code keeps each copy honest:
-// - SpeakerFinalizationFailureReason (Core, needs the people database): the raw-value list below
-//   is checked by SpeakerFinalizationFailureReasonTests in the Core package.
-// - AgentCaptureQueryTelemetryPolicy.allowedProperties (separate MCP package): the literal list
-//   asserted in this suite is also asserted by AgentCaptureQueryTelemetryTests in that package.
+// and FeatureDiscoveryTelemetry directly, plus Core's SpeakerFinalizationFailureReason (its
+// database-free file is in the fast runner). AgentCaptureQueryTelemetryPolicy lives in the
+// separate MCP package, so this suite asserts a literal copy of its allowedProperties and
+// AgentCaptureQueryTelemetryTests in that package asserts the same list against the real set.
 // Docs and Resources/*.psv are read as data files (repo files that must agree with the allowlist).
 
 import Foundation
@@ -1446,9 +1444,9 @@ func testAnalyticsEventPolicy() {
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let allowedKeys = speakerFinalizationFailed?.allowedProperties ?? []
-        let reasons = analyticsSpeakerFinalizationReasonRawValues
+        let reasons = SpeakerFinalizationFailureReason.allCases.map(\.rawValue)
 
-        assertEqual(reasons.count, 12, "every speaker finalization reason should be checked")
+        assertFalse(reasons.isEmpty, "every speaker finalization reason should be checked")
         for key in ["finalization_reason", "review_mode", "is_retry"] {
             assertEqual(allowedKeys.contains(key), true, "\(key) should be allowlisted for speaker finalization failures")
             assertEqual(meetingFailed?.allowedProperties.contains(key), false, "\(key) belongs to speaker finalization failures only")
@@ -1897,24 +1895,6 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
 }
-
-/// Raw values of Core's `SpeakerFinalizationFailureReason`. Core isn't linked into this runner,
-/// so this is a copy; `SpeakerFinalizationFailureReasonTests` in the Core package fails when the
-/// enum and this list drift apart.
-private let analyticsSpeakerFinalizationReasonRawValues = [
-    "plan_missing_embedding",
-    "transcript_unresolved",
-    "transcript_unreadable",
-    "name_rewrite_failed",
-    "deferred_marker_failed",
-    "collapse_failed",
-    "discard_failed",
-    "merge_profile_missing",
-    "merge_embedding_invalid",
-    "confirmation_profile_missing",
-    "database_unavailable",
-    "database_write_failed",
-]
 
 /// Reads a repo data file (docs or Resources taxonomy), not production code.
 private func loadRepoDataFile(_ relativePath: String, file: String = #file, line: Int = #line) -> String {

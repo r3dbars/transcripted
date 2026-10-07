@@ -1,12 +1,11 @@
 import XCTest
 @testable import TranscriptedCore
 
-/// The telemetry suites (AnalyticsEventPolicyTests, SentryEventPolicyTests) can't
-/// link this Core type, so they carry a copy of these codes. This test keeps that
-/// copy honest: if a reason is added, renamed, or removed, it goes red until the
-/// list here and in those suites is updated together.
+/// These raw values go off-device as Sentry tags and PostHog properties, and
+/// dashboards group on them. Renaming one silently splits a series, so any
+/// add, rename, or removal has to show up here as a deliberate edit.
 final class SpeakerFinalizationFailureReasonTests: XCTestCase {
-    func testReasonCodesMatchTheListTelemetrySuitesCheck() {
+    func testReasonCodesAreStable() {
         XCTAssertEqual(
             Set(SpeakerFinalizationFailureReason.allCases.map(\.rawValue)),
             [

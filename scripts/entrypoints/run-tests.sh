@@ -610,6 +610,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Models/FailedTranscription.swift"
     "Sources/TranscriptedCore/Models/TranscriptionLanguage.swift"
     "Sources/TranscriptedCore/Pipeline/PipelineFailureDisplayCopy.swift"
+    "Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerVectorMath.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"

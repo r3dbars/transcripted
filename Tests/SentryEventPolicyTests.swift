@@ -327,8 +327,8 @@ func testSentryEventPolicy() {
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps coarse speaker finalization failure reasons") {
-        let reasons = sentrySpeakerFinalizationReasonRawValues
-        assertEqual(reasons.count, 12, "every speaker finalization reason should be checked")
+        let reasons = SpeakerFinalizationFailureReason.allCases.map(\.rawValue)
+        assertFalse(reasons.isEmpty, "every speaker finalization reason should be checked")
 
         for reason in reasons {
             let tags = SentryEventPolicy.diagnosticTags(
@@ -670,21 +670,3 @@ func testSentryEventPolicy() {
         )
     }
 }
-
-/// Raw values of Core's `SpeakerFinalizationFailureReason`. Core isn't linked into this
-/// runner, so this is a copy; `SpeakerFinalizationFailureReasonTests` in the Core package
-/// fails when the enum and this list drift apart.
-private let sentrySpeakerFinalizationReasonRawValues = [
-    "plan_missing_embedding",
-    "transcript_unresolved",
-    "transcript_unreadable",
-    "name_rewrite_failed",
-    "deferred_marker_failed",
-    "collapse_failed",
-    "discard_failed",
-    "merge_profile_missing",
-    "merge_embedding_invalid",
-    "confirmation_profile_missing",
-    "database_unavailable",
-    "database_write_failed",
-]
