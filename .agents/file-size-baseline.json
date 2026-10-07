@@ -9,7 +9,6 @@
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,
     "Sources/Meeting/MeetingSessionController.swift": 842,
     "Sources/Observability/AnalyticsReporter.swift": 889,
-    "Sources/Observability/SparkleUpdaterController.swift": 1177,
     "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
     "Sources/Support/TranscriptedPermissionAccess.swift": 975,
     "Sources/TranscriptedCore/Audio/Audio.swift": 813,
