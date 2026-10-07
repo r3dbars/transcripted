@@ -242,8 +242,7 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$recordingDuration
-            .map { Int($0) }
-            .removeDuplicates()
+            .wholeSecondTicks()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] wholeSecond in
                 guard let self else { return }
