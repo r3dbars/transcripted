@@ -755,6 +755,18 @@ rules:
       - "python3 scripts/dev/check-doc-paths.py --self-test"
       - "python3 scripts/dev/check-doc-paths.py"
 
+  # Window capture policy: every NSWindow/NSPanel under Sources/UI is reviewed,
+  # titled windows stay capturable, and detected meeting prompts use the call
+  # prompt controller. A scan, because nothing at runtime says a window was added.
+  - paths:
+      - "Sources/UI/**"
+      - "Sources/App/TranscriptedApp.swift"
+      - "scripts/dev/check-window-capture-policy.py"
+    checks:
+      - "python3 -m py_compile scripts/dev/check-window-capture-policy.py"
+      - "python3 scripts/dev/check-window-capture-policy.py --self-test"
+      - "python3 scripts/dev/check-window-capture-policy.py"
+
   # Root fast tests assert on the literal *content* of these non-Swift files
   # (readSourceFixture / repoFixtureURL / readObservabilityTestRepoTextFile), so
   # editing one can fail run-tests.sh even though no Swift changed. Without this

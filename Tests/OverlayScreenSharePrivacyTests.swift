@@ -8,22 +8,11 @@
 // work. Live/transient overlays and transcript-bearing review windows opt out
 // with `sharingType = .none`.
 //
-// Source-text pin: "non-sensitive titled windows stay capturable" below reads
-// Sources/UI/Settings/{TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift
-// as text instead of constructing every surface. TranscriptedSettingsWindowController needs a live
-// TranscriptedAppState/TranscriptedSettingsActions object
-// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
-// TranscriptedOnboardingWindowController's init only takes closures (makeView returning
-// PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
-// in the same table rather than special-cased.
 // NotchIslandPanel (including its Show island in screen sharing switch) and
-// PasteLastDictationFeedbackPanel are compiled here and built live by the first two
-// suites, so no protected surface is left on a source table. "detected meeting
-// prompts route through the call prompt controller" still reads TranscriptedApp.swift;
-// it needs an app-delegate seam first. The last suite
-// (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
-// definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
-// added" — update expectedMarkers when you add, rename, or remove one.
+// PasteLastDictationFeedbackPanel are built live by the suites below. The static parts moved to
+// scripts/dev/check-window-capture-policy.py: every new NSWindow/NSPanel being reviewed, the titled
+// Onboarding and Settings windows staying capturable, and detected meeting prompts routing through the
+// call prompt controller.
 
 import AppKit
 import Foundation
@@ -85,123 +74,4 @@ func testOverlayScreenSharePrivacy() async {
             "the paste-last-dictation notice shows dictated text and must not be visible to screen sharing / capture"
         )
     }
-
-    runSuite("non-sensitive titled Transcripted windows stay capturable") {
-        let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
-        let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
-
-        let inits: [(name: String, body: String)] = [
-            (
-                "TranscriptedOnboardingWindowController",
-                overlayPrivacySlice(
-                    onboardingWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-            (
-                "TranscriptedSettingsWindowController",
-                overlayPrivacySlice(
-                    settingsWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-        ]
-
-        for entry in inits {
-            assertTrue(
-                entry.body.contains("sharingType = .readOnly"),
-                "\(entry.name) should support normal macOS screenshots"
-            )
-            assertFalse(
-                entry.body.contains("sharingType = .none"),
-                "\(entry.name) must not opt itself out of screenshots"
-            )
-        }
-    }
-
-    runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
-        let expectedMarkers: [String] = [
-            "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
-            "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
-            "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
-            "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
-        ]
-        let markers = overlayPrivacyWindowPanelMarkers()
-        assertEqual(
-            markers,
-            expectedMarkers,
-            "any new Transcripted NSWindow/NSPanel must be reviewed here and classified as protected or capturable"
-        )
-    }
-
-    runSuite("detected meeting prompts route through the call prompt controller") {
-        let app = overlayPrivacySource("Sources/App/TranscriptedApp.swift")
-        let promptRequest = overlayPrivacySlice(
-            app,
-            from: "meetingPromptDetector.onPromptRequest =",
-            to: "// Ad-hoc call detection:"
-        )
-        assertTrue(
-            promptRequest.contains("capturePillController.present("),
-            "detected meeting prompts should use the call prompt controller"
-        )
-        assertTrue(
-            promptRequest.contains("MeetingPromptHeuristics.promptTimeoutSeconds"),
-            "detected meeting prompts should preserve calendar vs ad-hoc prompt timeouts"
-        )
-        assertTrue(
-            app.contains("capturePillController.onRemind = remindPrompt"),
-            "the call prompt should expose the short remind-soon path"
-        )
-        assertTrue(
-            app.contains("capturePillController.onExpired = expirePrompt"),
-            "the call prompt timeout should use the expiry path, not an explicit dismissal"
-        )
-        assertFalse(
-            promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
-            "detected meeting prompts should not reuse the recording overlay prompt surface"
-        )
-    }
-}
-
-private func overlayPrivacySource(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-}
-
-private func overlayPrivacySlice(_ contents: String, from start: String, to end: String) -> String {
-    guard let startRange = contents.range(of: start) else { return "" }
-    let tail = contents[startRange.upperBound...]
-    guard let endRange = tail.range(of: end) else { return String(tail) }
-    return String(tail[..<endRange.lowerBound])
-}
-
-private func overlayPrivacyWindowPanelMarkers() -> [String] {
-    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/UI")
-    guard let enumerator = FileManager.default.enumerator(
-        at: root,
-        includingPropertiesForKeys: nil
-    ) else { return [] }
-
-    var markers: [String] = []
-    for case let url as URL in enumerator where url.pathExtension == "swift" {
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
-        let relativePath = "Sources/UI/" + url.path.replacingOccurrences(of: root.path + "/", with: "")
-        for rawLine in contents.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            let isWindowOrPanelClass = (
-                line.hasPrefix("class ")
-                    || line.hasPrefix("final class ")
-                    || line.hasPrefix("private final class ")
-            ) && line.contains(": NSPanel")
-            if isWindowOrPanelClass || line.contains("NSPanel(") || line.contains("NSWindow(") {
-                markers.append("\(relativePath)|\(line)")
-            }
-        }
-    }
-    return markers.sorted()
 }
