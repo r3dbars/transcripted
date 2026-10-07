@@ -103,7 +103,7 @@ public struct PersonalNextWordOutcomeCells: Codable, Equatable, Sendable {
         ]
     }
 
-    fileprivate mutating func record(
+    mutating func record(
         baseline: PersonalNextWordShadow.PredictionOutcome,
         candidate: PersonalNextWordShadow.PredictionOutcome
     ) {

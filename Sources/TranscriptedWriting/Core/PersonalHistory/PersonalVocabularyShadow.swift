@@ -82,7 +82,7 @@ public struct PersonalNextWordShadow: Sendable {
     private static let minimumWinnerSupport = 2
     private static let streamGapMilliseconds: Int64 = 30 * 60 * 1_000
 
-    fileprivate enum PredictionOutcome { case silent, correct, wrong }
+    enum PredictionOutcome { case silent, correct, wrong }
 
     private struct StreamKey: Hashable, Sendable {
         let history: String
