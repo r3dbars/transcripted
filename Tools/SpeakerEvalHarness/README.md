@@ -454,7 +454,7 @@ hard-capped; there is no "download all of VoxCeleb" path.
 |---|---|
 | `Sources/speaker-eval-harness/main.swift` | wire models, helpers, command entry |
 | `Sources/speaker-eval-harness/Dump.swift` | `dump`: diarize one file per variant (backend × embedder) |
-| `Sources/speaker-eval-harness/MeetingLabSharedDB.swift` | `meeting-series` shared speaker DB: emptied on every run except a plain resume (`--force` always empties it) |
+| `Sources/speaker-eval-harness/MeetingLabSharedDB.swift` | `meeting-series` shared speaker DB: resumed only when its `lab-shared-db.json` marker matches this run's setup and finished meetings; otherwise emptied (`--force` always empties it) |
 | `Sources/speaker-eval-harness/LabVoiceprintEmbedder.swift` | `meeting-series --embedder-*`: load and probe a fused Core ML voiceprint model |
 | `Sources/speaker-eval-harness/Replay.swift` | `replay`: clusterer + speaker DB replay with threshold and fingerprint-update knobs |
 | `Sources/speaker-eval-harness/EmbeddingParity.swift` | `embedding-parity`: pyannote's offline WeSpeaker vs the online WeSpeaker embedder on the same segments |

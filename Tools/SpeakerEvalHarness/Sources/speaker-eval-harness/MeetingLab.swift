@@ -433,26 +433,34 @@ func runMeetingSeries(_ args: [String]) async {
     guard await MainActor.run(body: { diarization.isReady }) else { die("diarizer failed to initialize") }
 
     // A shared DB for series meetings (fresh_db == false) persists across the run.
-    // Only a plain resume keeps the one already on disk; any other run starts it
-    // empty so it can't inherit voices the last run learned.
+    // A run resumes the one on disk only when it was built with this exact setup
+    // and holds exactly the finished meetings; otherwise it starts empty so it
+    // can't inherit voices the last run learned (LabSharedSpeakerDB).
     let sharedDBDir = LabSharedSpeakerDB.directory(workRoot: workRoot)
-    let finishedSharedMeetings = series.meetings.filter { meeting in
-        !(meeting.fresh_db ?? true) && fm.fileExists(atPath: setDir
-            .appendingPathComponent(meeting.id, isDirectory: true)
+    let sharedMeetings = series.meetings.filter { !($0.fresh_db ?? true) }.map(\.id)
+    let sharedConfig = LabSharedSpeakerDB.Config(
+        set: series.set,
+        workRoot: workRoot.standardizedFileURL.path,
+        sharedMeetings: sharedMeetings,
+        backend: backend.rawValue,
+        speakerDBFile: voiceprint?.speakerDBFileName ?? "speakers.sqlite",
+        embedderArgs: LabSharedSpeakerDB.embedderArgs(args)
+    )
+    let finishedShared = Set(sharedMeetings.filter { id in
+        fm.fileExists(atPath: setDir.appendingPathComponent(id, isDirectory: true)
             .appendingPathComponent("lab_result.json").path)
-    }.count
-    if LabSharedSpeakerDB.shouldReset(force: force, finishedSharedMeetings: finishedSharedMeetings) {
-        let hadSharedDB = fm.fileExists(atPath: sharedDBDir.path)
-        do {
-            guard try LabSharedSpeakerDB.reset(sharedDBDir, workRoot: workRoot) else {
-                die("refusing to clear a shared speaker DB outside the work root")
-            }
-            if hadSharedDB { log("[lab] cleared the shared speaker DB from the last run") }
-        } catch {
-            die("could not clear the shared speaker DB: \(error.localizedDescription)")
+    })
+    do {
+        switch try LabSharedSpeakerDB.prepare(
+            workRoot: workRoot, config: sharedConfig, finished: finishedShared, force: force
+        ) {
+        case .resumed:
+            log("[lab] shared speaker DB: resumed (\(finishedShared.count) finished meeting(s) already in it)")
+        case .reset(let reason):
+            log("[lab] shared speaker DB: starting empty (\(reason))")
         }
-    } else if only != nil {
-        log("[lab] resuming with the existing shared speaker DB; --only reruns see voices from every finished meeting")
+    } catch {
+        die("could not prepare the shared speaker DB: \(error.localizedDescription)")
     }
     var done = 0
     for meeting in series.meetings {
@@ -567,6 +575,7 @@ func runMeetingSeries(_ args: [String]) async {
             failed.embedder = voiceprint?.embedder.identifier
             failed.embedderThresholds = voiceprint?.thresholdsSource
             write(failed, to: outURL)
+            if !freshDB { LabSharedSpeakerDB.recordApplied(meeting.id, workRoot: workRoot) }
             continue
         }
 
@@ -692,6 +701,7 @@ func runMeetingSeries(_ args: [String]) async {
             }
         }
         write(out, to: outURL)
+        if !freshDB { LabSharedSpeakerDB.recordApplied(meeting.id, workRoot: workRoot) }
         let remote = truth.participants.filter { $0.role == "remote" }.count
         log(String(format: "[lab] %@: %.0fs audio in %.1fs | remote true %d, found %d | rows %d, silent %d",
                    meeting.id, truth.duration_s, processing, remote, result.systemSpeakerCount, rows.count, silent.count))
