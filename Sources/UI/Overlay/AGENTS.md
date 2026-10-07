@@ -21,7 +21,7 @@ UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core
 
 Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
-- Into Core outside `core-vocab`: `MeetingOverlayController` (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
+- Into Core outside `core-vocab`: `MeetingOverlayController` and its `+Prompts` extension (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
 - From below: Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving that policy file down into Dictation removes the edge.
 
 ## Entry points
@@ -31,7 +31,7 @@ Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 - `NotchIslandLiveTranscriptView.swift` — the recording drop-down's scrolling live transcript. The controller keeps one alive across drop-down rebuilds and feeds it from `LiveMeetingCaptions`; it appends finished words and replaces only the faded tail, so long meetings stay cheap. Copy all (`meetingCopyTranscript`) is handled by the island itself, in `NotchIslandController+LiveTranscript.swift`.
 - `NotchIslandDictationPreviewView.swift` / `NotchIslandDropView+Dictation.swift` / `NotchIslandController+DictationPreview.swift` — the dictation hover: a four-line window onto the whole take (newest line at the bottom; no fade, so scrolling up clearly stops at the start), scrollable back to the start (it follows the newest words unless you scrolled up) from `LiveDictationCaptions` (newest at the bottom, last two words dimmed), then Cancel and "Insert into <app>" with the app's icon. The words stay through Writing and Pasted and crossfade into the written text, which the recent-insert hover then keeps. The controller keeps one preview view alive like the live transcript and sets `NotchIslandDictationContent.showsLivePreview`; the island also keeps the drop-down itself built between hovers while the take is spoken (`NotchIslandDrop.staysBuiltBetweenHovers`, `NotchIslandController+DictationDrop.swift`) and draws the app icon once per take (`NotchIslandAppIconCache`). During a meeting the hover is the meeting's.
 - `DictationSessionController.swift` — `startDictation` / stop entry; the STT control flow it composes lives in `Sources/Speech/DictationSession.swift`.
-- `MeetingOverlayController.swift` / `CapturePillController.swift` — the island's meeting state and the detected-meeting prompt (the record / dismiss / remind flow is a protected product surface).
+- `MeetingOverlayController.swift` (plus `+Prompts.swift`: warning-prompt resolution, countdown, prompt text; `+Actions.swift`: pill taps, Discard, right-click menu) / `CapturePillController.swift` — the island's meeting state and the detected-meeting prompt (the record / dismiss / remind flow is a protected product surface).
 
 ## Tests
 
