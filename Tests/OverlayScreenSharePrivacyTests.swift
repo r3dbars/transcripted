@@ -8,14 +8,11 @@
 // work. Live/transient overlays and transcript-bearing review windows opt out
 // with `sharingType = .none`.
 //
-// Source-text pin: "non-sensitive titled windows stay capturable" below reads
-// Sources/UI/Settings/{TranscriptedOnboardingWindowController,TranscriptedSettingsWindowController}.swift
-// as text instead of constructing every surface. TranscriptedSettingsWindowController needs a live
+// Source-text pin: "Settings stays capturable" below reads its controller as text.
+// TranscriptedSettingsWindowController needs a live
 // TranscriptedAppState/TranscriptedSettingsActions object
-// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds —
-// TranscriptedOnboardingWindowController's init only takes closures (makeView returning
-// PermissionsOnboardingView, itself needing just onComplete) and looks just as constructible, but is kept
-// in the same table rather than special-cased.
+// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds.
+// Onboarding's AppKit window factory is tested directly without its permission views.
 // NotchIslandPanel (including its Show island in screen sharing switch) and
 // PasteLastDictationFeedbackPanel are compiled here and built live by the first two
 // suites, so no protected surface is left on a source table. "detected meeting
@@ -86,19 +83,23 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
-    runSuite("non-sensitive titled Transcripted windows stay capturable") {
-        let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
+    runSuite("onboarding stays capturable without displaying a window") {
+        _ = NSApplication.shared
+        let preferredSize = NSSize(width: 640, height: 560)
+        let window = TranscriptedOnboardingWindow.make(preferredSize: preferredSize)
+        assertEqual(window.sharingType, .readOnly, "first-run setup supports normal macOS screenshots")
+        assertFalse(window.isVisible, "constructing onboarding does not show or activate it")
+        assertFalse(window.isKeyWindow, "constructing onboarding does not take keyboard focus")
+        assertEqual(window.contentRect(forFrameRect: window.frame).size, preferredSize, "preserve onboarding content size")
+        assertEqual(window.minSize, preferredSize, "preserve onboarding minimum size")
+        assertEqual(window.styleMask, [.titled, .closable, .resizable, .fullSizeContentView], "preserve onboarding controls")
+        assertFalse(window.isReleasedWhenClosed, "the controller retains its reusable window")
+    }
+
+    runSuite("Settings stays capturable") {
         let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
 
         let inits: [(name: String, body: String)] = [
-            (
-                "TranscriptedOnboardingWindowController",
-                overlayPrivacySlice(
-                    onboardingWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
             (
                 "TranscriptedSettingsWindowController",
                 overlayPrivacySlice(
@@ -128,7 +129,7 @@ func testOverlayScreenSharePrivacy() async {
             "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift|private final class MenuBarPopoverAnchorPanel: NSPanel {",
             "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
             "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
-            "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
+            "Sources/UI/Settings/TranscriptedOnboardingWindow.swift|let window = NSWindow(",
             "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
         ]
         let markers = overlayPrivacyWindowPanelMarkers()
