@@ -28,7 +28,7 @@ All of these, checked on every run:
 
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.
-3. The lane's label. No `needs owner review`, `do not merge` or `hold` label.
+3. The lane's label. No `needs owner review`, `do not merge`, `hold` or `waiting-on-human` label.
 4. Every changed file inside the lane, none protected, within the size limit.
 5. `build-and-test` and `repo-hygiene` succeeded on the head commit.
 6. No conflicts, no review requesting changes, no unresolved review thread.
