@@ -86,12 +86,6 @@
         "SpeakerIdentityOption"
       ]
     },
-    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Duplicates.swift": {
-      "Core": [
-        "SpeakerClipExtractor",
-        "SpeakerVectorMath"
-      ]
-    },
     "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
       "Core": [
         "CoreStoragePaths",
