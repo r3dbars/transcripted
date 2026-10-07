@@ -1,31 +1,23 @@
 // CaptureLibraryPathSafety.swift
 //
-// SYNCED COPY — this exact file exists byte-identically in three places:
+// SINGLE SOURCE: this is the one real file. Two git symlinks point at it, so
+// the other build units compile the very same bytes:
 //
-//   - Sources/Support/CaptureLibraryPathSafety.swift (this file, the app target)
-//   - Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift (TranscriptedCore)
+//   - Sources/Support/CaptureLibraryPathSafety.swift (app target, raw `swiftc`)
 //   - Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift
-//     (TranscriptedCaptureKit)
+//     (TranscriptedCaptureKit, SwiftPM follows symlinks)
 //
-// These are three independent build units that compile in total isolation
-// with no shared module boundary between them (app target via raw `swiftc`,
-// TranscriptedCore via SPM, TranscriptedCaptureKit via SPM), so this file
-// cannot be a single physical file shared three ways. A git symlink was
-// tried first and reverted: on a checkout with `core.symlinks=false`, git
-// materializes a symlink as a plain text file containing the literal link
-// target, which fails to compile under plain `swift test`, Xcode/SPM, and
-// the CaptureKit package build. Real duplicated files are the portable
-// option.
+// Edit only this file. The three build units can't drift because there is
+// nothing to drift. The real file lives in TranscriptedCore on purpose: the
+// deps build copies that tree with `ditto` and the staleness checks use
+// `find -type f`, so a symlink there would dangle or go unnoticed. A checkout
+// with `core.symlinks=false` turns the two links into text files and fails to
+// compile; fix it with `git config core.symlinks true` and a re-checkout.
 //
-// The single, dependency-free (pure Foundation) definition of "is this
+// This is the single, dependency-free (pure Foundation) definition of "is this
 // filesystem path safe to use as a Transcripted capture-library / meeting
-// save-path root?" lives here.
-//
-// EDIT ALL THREE FILES TOGETHER. `Tests/CaptureLibraryPathSafetySyncTests.swift`
-// reads all three from disk and fails if any one of them diverges by even a
-// byte — that test is the enforcement mechanism for this rule, replacing the
-// three old hand-written "keep this rule in lockstep" comments this file's
-// history removed.
+// save-path root?". `CaptureLibraryPathSafetyTests` in TranscriptedCaptureKit
+// pins its behavior.
 //
 // Must remain pure Foundation with no other imports: it compiles directly
 // into build units with different linker/framework setups and must not
