@@ -215,8 +215,8 @@ struct DictationEarlyReleasePresentationPolicy {
 struct DictationEarlyReleaseCancelReport: Equatable {
     static let engine = "dictation"
     static let event = "dictation_cancelled_before_microphone_ready"
-    // Deliberately not "push-to-talk release": hands-free is the default
-    // mode, and its stop press reaches here too.
+    // Deliberately not "push-to-talk release": Tap to toggle (and a
+    // tap-kept take) stops on a press, and that press reaches here too.
     static let message = "Dictation hotkey ended the session before the microphone finished opening"
     /// `.error`, not `.info`: only `.error` events reach the reliability
     /// counter (PostHog) and Sentry. The user asked to dictate, saw an error,

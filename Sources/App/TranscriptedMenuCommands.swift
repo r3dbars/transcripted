@@ -4,7 +4,7 @@
 //
 // This is purely additive: every action routes through an existing app-delegate
 // entry point, and none of the user's recordable dictation / meeting triggers
-// (push-to-talk, hands-free, meeting, paste-last) are remapped. The commands
+// (dictation, meeting) are remapped. The commands
 // only fire while the app is active (a window is open), which is exactly when
 // navigation, search, and in-app capture make sense; the global physical
 // triggers remain the background path.

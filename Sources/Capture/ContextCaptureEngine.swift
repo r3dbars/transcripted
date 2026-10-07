@@ -297,8 +297,6 @@ private final class PhysicalShortcutDetector {
                 onShortcut?(.dictationHandsFree, .press)
             case .meeting:
                 onShortcut?(.meeting, .press)
-            case .pasteLastDictation:
-                onShortcut?(.pasteLastDictation, .press)
             }
             return nil
 
@@ -409,13 +407,6 @@ private final class PhysicalShortcutDetector {
                 } else {
                     cancelPendingModifierShortcut()
                     onShortcut?(.meeting, .press)
-                }
-            case .pasteLastDictation:
-                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
-                    schedulePendingModifierShortcut(keyCode: keyCode, action: .pasteLastDictation)
-                } else {
-                    cancelPendingModifierShortcut()
-                    onShortcut?(.pasteLastDictation, .press)
                 }
             }
             return nil
@@ -606,8 +597,6 @@ class ContextCaptureEngine: ObservableObject {
     /// the meeting subsystem is unavailable — the hotkey simply does nothing.
     var onMeetingToggle: (() -> Void)?
 
-    var onPasteLastDictation: (() -> Void)?
-
     func registerHotkey() {
         guard hotkeyChangeObserver == nil else {
             EventReporter.shared.capture(level: .warning, engine: "capture", event: "hotkey_already_registered",
@@ -767,15 +756,13 @@ class ContextCaptureEngine: ObservableObject {
             handlePhysicalDictationHandsFreeComboInterrupted()
         case (.meeting, .press):
             handlePhysicalMeetingPress()
-        case (.pasteLastDictation, .press):
-            handlePhysicalPasteLastDictationPress()
-        case (.dictationHandsFree, .release), (.meeting, .release), (.pasteLastDictation, .release):
+        case (.dictationHandsFree, .release), (.meeting, .release):
             break
-        case (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease), (.pasteLastDictation, .tapRelease):
+        case (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease):
             break
         case (.dictationPushToTalk, .comboInterrupted):
             handlePhysicalDictationPushToTalkComboInterrupted()
-        case (.meeting, .comboInterrupted), (.pasteLastDictation, .comboInterrupted):
+        case (.meeting, .comboInterrupted):
             break
         }
     }
@@ -805,21 +792,6 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         onMeetingToggle?()
-    }
-
-    private func handlePhysicalPasteLastDictationPress() {
-        guard shouldAcceptHotkeyAction(.pasteLastDictation) else {
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "capture",
-                event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat paste-last-dictation trigger",
-                context: ["hotkey_id": "paste_last_dictation_physical_trigger"]
-            )
-            return
-        }
-
-        onPasteLastDictation?()
     }
 
     deinit {

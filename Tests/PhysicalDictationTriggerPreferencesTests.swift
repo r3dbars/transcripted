@@ -4,7 +4,7 @@ import CoreGraphics
 import Foundation
 
 func testPhysicalDictationTriggerPreferences() {
-    runSuite("PhysicalDictationTriggerPreferences defaults to Right Option, Option-Shift-V, and Option M") {
+    runSuite("PhysicalDictationTriggerPreferences defaults to Right Option and Option M") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -14,19 +14,9 @@ func testPhysicalDictationTriggerPreferences() {
             "fresh installs should use Right Option for the dictation key"
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
-            "fresh installs should use Right Option for hands-free"
-        )
-        assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             "fresh installs should use Option M for meetings"
-        )
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "fresh installs should use Option Shift V for paste-last-dictation"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
@@ -34,19 +24,9 @@ func testPhysicalDictationTriggerPreferences() {
             "the dictation key default should display as Right Option, not Fn (which opens emoji)"
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
-            "Right ⌥",
-            "hands-free default should display as Right Option"
-        )
-        assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
             "⌥M",
             "meeting default should display as Option M"
-        )
-        assertEqual(
-            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
-            "⌥⇧V",
-            "paste-last-dictation default should display as Option Shift V"
         )
     }
 
@@ -61,105 +41,16 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(PhysicalDictationTriggerPreferences.displayString(for: fn), "Fn", "Fn should have a readable display name")
     }
 
-    runSuite("PhysicalDictationTriggerPreferences persists paste-last-dictation shortcut") {
-        let (defaults, suiteName) = makePhysicalTriggerDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let commandShiftP = PhysicalDictationTriggerBinding(
-            keyCode: UInt32(kVK_ANSI_P),
-            modifiers: PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.shift
-        )
-
-        PhysicalDictationTriggerPreferences.savePasteLastDictation(commandShiftP, userDefaults: defaults)
-
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            commandShiftP,
-            "paste-last-dictation should persist its own independent shortcut"
-        )
-        assertEqual(
-            PhysicalDictationTriggerPreferences.displayString(for: commandShiftP),
-            "⇧⌘P",
-            "custom paste-last-dictation shortcuts should share the normal display formatter"
-        )
-    }
-
-    runSuite("PhysicalDictationTriggerPreferences records paste-last editor chord from keyDown") {
+    runSuite("PhysicalDictationTriggerPreferences records an editor chord from keyDown") {
         let recorded = PhysicalDictationTriggerPreferences.bindingForKeyDown(
-            keyCode: UInt32(kVK_ANSI_V),
-            modifierFlags: [.option, .shift]
+            keyCode: UInt32(kVK_ANSI_M),
+            modifierFlags: [.option]
         )
 
         assertEqual(
             recorded,
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "shortcut editor input for Option-Shift-V should round-trip into the paste-last default"
-        )
-    }
-
-    runSuite("PhysicalDictationTriggerPreferences saving paste-last posts hotkeysDidChange") {
-        let (defaults, suiteName) = makePhysicalTriggerDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        var notificationCount = 0
-        let observer = NotificationCenter.default.addObserver(
-            forName: .hotkeysDidChange,
-            object: nil,
-            queue: nil
-        ) { _ in
-            notificationCount += 1
-        }
-        defer { NotificationCenter.default.removeObserver(observer) }
-
-        PhysicalDictationTriggerPreferences.savePasteLastDictation(
-            PhysicalDictationTriggerBinding(
-                keyCode: UInt32(kVK_ANSI_P),
-                modifiers: PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.shift
-            ),
-            userDefaults: defaults
-        )
-
-        assertEqual(
-            notificationCount,
-            1,
-            "changing paste-last should ask ContextCaptureEngine to re-register physical shortcuts"
-        )
-    }
-
-    runSuite("PhysicalDictationTriggerPreferences masks invalid stored paste-last modifiers") {
-        let (defaults, suiteName) = makePhysicalTriggerDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        defaults.set(Int(kVK_ANSI_V), forKey: "pasteLastDictationTrigger-keyCode")
-        defaults.set(
-            Int(PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift | (1 << 20)),
-            forKey: "pasteLastDictationTrigger-modifiers"
-        )
-
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "corrupt persisted modifier bits should be ignored instead of changing the shortcut contract"
-        )
-    }
-
-    runSuite("PhysicalDictationTriggerPreferences paste-last ignores legacy dictation and meeting shortcuts") {
-        let (defaults, suiteName) = makePhysicalTriggerDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        HotkeyPreferences.save(
-            dictation: HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey)),
-            userDefaults: defaults
-        )
-        HotkeyPreferences.save(
-            meeting: HotkeyBinding(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(controlKey)),
-            userDefaults: defaults
-        )
-
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "paste-last should default independently when only older dictation or meeting shortcuts exist"
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "shortcut editor input for Option-M should round-trip into the meeting default"
         )
     }
 
@@ -234,7 +125,7 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences migrates legacy hands-free shortcut when right Option is disabled") {
+    runSuite("PhysicalDictationTriggerPreferences migrates the legacy single dictation shortcut when right Option is disabled") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -244,7 +135,8 @@ func testPhysicalDictationTriggerPreferences() {
             userDefaults: defaults
         )
 
-        let migrated = PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let migrated = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults)
 
         assertEqual(migrated.keyCode, UInt32(kVK_Space), "disabled right Option should fall back to the old dictation shortcut key")
         assertEqual(
@@ -261,25 +153,27 @@ func testPhysicalDictationTriggerPreferences() {
         let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
         defaults.set(Int(capsLock.keyCode), forKey: "dictationTrigger-keyCode")
         defaults.set(Int(capsLock.modifiers), forKey: "dictationTrigger-modifiers")
-        HotkeyPreferences.setDictationShortcutMode(.pushToTalk, userDefaults: defaults)
+        defaults.set("push_to_talk", forKey: "hotkey-dictation-shortcut-mode")
 
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
             capsLock,
             "existing push-to-talk users should keep their saved physical key"
         )
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
         assertEqual(
-            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
-            "hands-free should move to the new default when the saved key belonged to push-to-talk"
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            capsLock,
+            "the old hands-free slot held the default, so migration must not replace the saved key"
         )
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "and the behavior stays Hold or tap")
     }
 
     runSuite("One dictation key: a custom hands-free key carries over as Tap to toggle") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
-        PhysicalDictationTriggerPreferences.saveHandsFree(f5, userDefaults: defaults)
+        seedLegacyHandsFree(f5, in: defaults)
 
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
         assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults), f5, "their key becomes the dictation key")
@@ -309,7 +203,7 @@ func testPhysicalDictationTriggerPreferences() {
         defer { custom.removePersistentDomain(forName: customSuite) }
         let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
         PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
-        PhysicalDictationTriggerPreferences.saveHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), userDefaults: custom)
+        seedLegacyHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), in: custom)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
         assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "a chosen hold key wins")
     }
@@ -450,7 +344,7 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences reset writes all four modern bindings") {
+    runSuite("PhysicalDictationTriggerPreferences reset writes the modern bindings") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -458,16 +352,8 @@ func testPhysicalDictationTriggerPreferences() {
             PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_A)),
             userDefaults: defaults
         )
-        PhysicalDictationTriggerPreferences.saveHandsFree(
-            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_B)),
-            userDefaults: defaults
-        )
         PhysicalDictationTriggerPreferences.saveMeeting(
             PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_C)),
-            userDefaults: defaults
-        )
-        PhysicalDictationTriggerPreferences.savePasteLastDictation(
-            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_D)),
             userDefaults: defaults
         )
 
@@ -479,19 +365,9 @@ func testPhysicalDictationTriggerPreferences() {
             "reset should restore push-to-talk"
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
-            "reset should restore hands-free"
-        )
-        assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             "reset should restore meeting shortcut"
-        )
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "reset should restore paste-last-dictation shortcut"
         )
     }
 
@@ -530,11 +406,9 @@ func testPhysicalDictationTriggerPreferences() {
         }
 
         let allowed: [(String, PhysicalDictationTriggerBinding)] = [
-            ("default paste-last ⌥⇧V", PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
             ("default meeting ⌥M", PhysicalDictationTriggerPreferences.defaultMeetingBinding),
             ("default dictation key Right ⌥", PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
             ("Fn", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))),
-            ("default hands-free Right ⌥", PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
             ("bare F5", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))),
             ("⌥⌘V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: command | option)),
             ("⌃V", PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: control)),
@@ -558,36 +432,27 @@ func testPhysicalDictationTriggerPreferences() {
         // Older builds let the recorder save these. Reading them back must not
         // hand the event tap a chord it would swallow system-wide, and Settings
         // must show the same binding the tap installs.
-        PhysicalDictationTriggerPreferences.savePasteLastDictation(
-            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_V), modifiers: PhysicalDictationTriggerModifiers.command),
-            userDefaults: defaults
-        )
         PhysicalDictationTriggerPreferences.saveMeeting(
             PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_M)),
             userDefaults: defaults
         )
-        PhysicalDictationTriggerPreferences.saveHandsFree(
+        PhysicalDictationTriggerPreferences.savePushToTalk(
             PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: PhysicalDictationTriggerModifiers.function),
             userDefaults: defaults
         )
 
-        assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
-            "a stored ⌘V paste-last chord must read back as the default instead of hijacking every paste"
-        )
         assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             "a stored bare-letter meeting chord must read back as the default"
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
-            "a stored bare arrow hands-free chord must read back as the default"
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "a stored bare arrow dictation chord must read back as the default"
         )
 
-        PhysicalDictationTriggerPreferences.savePasteLastDictation(
+        PhysicalDictationTriggerPreferences.saveMeeting(
             PhysicalDictationTriggerBinding(
                 keyCode: UInt32(kVK_ANSI_V),
                 modifiers: PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.option
@@ -595,7 +460,7 @@ func testPhysicalDictationTriggerPreferences() {
             userDefaults: defaults
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults).modifiers,
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults).modifiers,
             PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.option,
             "a safe stored chord must read back unchanged"
         )
@@ -632,7 +497,7 @@ func testPhysicalDictationTriggerPreferences() {
         )
         assertNil(
             PhysicalDictationTriggerPreferences.duplicateReason(
-                for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+                for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
                 otherShortcuts: others
             ),
             "Right Option is free when no other shortcut uses it"
@@ -640,7 +505,7 @@ func testPhysicalDictationTriggerPreferences() {
         assertNil(
             PhysicalDictationTriggerPreferences.duplicateReason(
                 for: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Option)),
-                otherShortcuts: [(name: "Hands-Free", binding: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding)]
+                otherShortcuts: [(name: "Dictation", binding: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding)]
             ),
             "Left and Right Option are different keys"
         )
@@ -653,4 +518,10 @@ private func makePhysicalTriggerDefaults() -> (UserDefaults, String) {
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
+}
+
+/// Pre-one-key builds stored a separate Hands-Free key under these raw keys.
+private func seedLegacyHandsFree(_ binding: PhysicalDictationTriggerBinding, in defaults: UserDefaults) {
+    defaults.set(Int(binding.keyCode), forKey: "dictationHandsFreeTrigger-keyCode")
+    defaults.set(Int(binding.modifiers), forKey: "dictationHandsFreeTrigger-modifiers")
 }

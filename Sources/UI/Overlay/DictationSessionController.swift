@@ -136,7 +136,7 @@ class DictationSessionController: ObservableObject {
     /// press or after recording starts (see `DictationStartCuePolicy`).
     var didPlayStartCue = false
     /// The shortcut that started this session, when a shortcut did. Read from
-    /// the press itself, never from `HotkeyPreferences.dictationShortcutMode()`.
+    /// the press itself, never from a stored setting.
     var currentDictationShortcutMode: DictationShortcutMode?
     var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     var stoppedAudioRecoveryPreservationSessionID: UUID?
