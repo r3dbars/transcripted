@@ -7,14 +7,18 @@ only when ALL of these hold:
   - main is healthy: the latest finished Swift CI run on main succeeded
   - it's from an allowed author, on a branch in this repo (no forks)
   - its branch starts with an enabled lane's prefix
-  - it has the required label and none of the blocking labels
+  - it has the lane's labels and none of the blocking labels
   - every changed file matches the lane's allow globs, none match deny_always
+    or the lane's own deny
   - its size (additions + deletions) is within the lane's limit
   - every required check succeeded on the PR's head commit
   - GitHub reports it mergeable (no conflicts)
   - no review requests changes, and no review thread is unresolved
-  - a configured reviewer (Codex) reviewed the head commit, or reacted +1
-    to the PR after the head commit was pushed
+  - every reviewer the lane requires (Codex by default) reviewed the head
+    commit, or reacted +1 to the PR after the head commit was pushed
+  - lanes with require_test_change: it changes at least one test file
+  - lanes with require_verify: the PR body holds a verify-change.sh summary
+    for the head commit with no FAIL, nothing uncovered and no live check owed
 
 At most `max_merges_per_run` PRs merge per run, and at most one per lane, so
 main's CI runs between batches; a red main stops every merge until it's green.
@@ -33,6 +37,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -43,7 +48,7 @@ CONFIG_PATH = REPO_ROOT / ".agents/auto-merge-lanes.json"
 PR_FIELDS = ",".join([
     "number", "title", "headRefName", "headRefOid", "isDraft", "isCrossRepository",
     "labels", "author", "additions", "deletions", "mergeable", "files",
-    "statusCheckRollup", "reviews", "commits", "url",
+    "statusCheckRollup", "reviews", "commits", "url", "body",
 ])
 
 
@@ -77,6 +82,31 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
+
+
+def verify_problems(body: str, head: str) -> list[str]:
+    """Check the `## App verification` block verify-change.sh writes."""
+    if "## App verification" not in body:
+        return ["no app verification summary in the PR body"]
+    block = body.split("## App verification", 1)[1]
+    problems = []
+    shas = re.findall(r"head: `([0-9a-f]{7,40})`", block)
+    if not shas or not head.startswith(shas[0]):
+        problems.append("app verification is not for the head commit")
+    rows = [r for r in re.findall(r"^\|([^|\n]+)\|([^|\n]+)\|", block, re.M)
+            if r[1].strip() in ("PASS", "FAIL", "SKIP")]
+    if not any(r[1].strip() == "PASS" for r in rows):
+        problems.append("app verification has no passing check")
+    if any(r[1].strip() == "FAIL" for r in rows):
+        problems.append("app verification has a FAIL")
+    if "Not covered by any check" in block:
+        problems.append("app verification left files uncovered")
+    if "Needs a live check by Justin" in block:
+        problems.append("app verification needs a live check by Justin")
+    return problems
+
+
 def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str]]:
     """Return (lane, reasons). No reasons means the PR may merge.
 
@@ -96,8 +126,9 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
         reasons.append(f"author {pr['author']['login']} is not allowed")
 
     labels = {label["name"] for label in pr.get("labels", [])}
-    if config["required_label"] not in labels:
-        reasons.append(f"missing label '{config['required_label']}'")
+    for needed in lane.get("labels_required", []):
+        if needed not in labels:
+            reasons.append(f"missing label '{needed}'")
     blocked = sorted(labels & set(config["blocking_labels"]))
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
@@ -105,12 +136,16 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     files = [f["path"] for f in pr.get("files", [])]
     if not files:
         reasons.append("no changed files reported")
-    denied = [p for p in files if matches(p, config["deny_always"])]
+    denied = [p for p in files if matches(p, config["deny_always"] + lane.get("deny", []))]
     if denied:
         reasons.append(f"touches protected files: {', '.join(denied[:3])}")
     outside = [p for p in files if not matches(p, lane["allow"]) and p not in denied]
     if outside:
         reasons.append(f"files outside lane {lane['id']}: {', '.join(outside[:3])}")
+    if lane.get("require_test_change") and not any(matches(p, TEST_GLOBS) for p in files):
+        reasons.append("bug fix without a test change")
+    if lane.get("require_verify"):
+        reasons.extend(verify_problems(pr.get("body") or "", pr["headRefOid"]))
 
     size = pr.get("additions", 0) + pr.get("deletions", 0)
     if size > lane["max_changed_lines"]:
@@ -136,19 +171,19 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
         reasons.append(f"{extra['unresolved_threads']} unresolved review thread(s)")
 
     head = pr["headRefOid"]
-    reviewers = set(config["reviewers"])
-    reviewed_head = any(
-        bare_login(r["author"]["login"]) in reviewers and (r.get("commit") or {}).get("oid") == head
-        for r in reviews
-    )
     commits = pr.get("commits", [])
     pushed_at = parse_time(commits[-1]["committedDate"]) if commits else None
-    thumbs_up = pushed_at is not None and any(
-        bare_login(x["login"]) in reviewers and parse_time(x["created_at"]) >= pushed_at
-        for x in extra.get("reviewer_reactions", [])
-    )
-    if not (reviewed_head or thumbs_up):
-        reasons.append("waiting for a Codex review of the latest commit")
+    for reviewer in lane.get("reviewers_required", config["default_reviewers"]):
+        reviewed_head = any(
+            bare_login(r["author"]["login"]) == reviewer and (r.get("commit") or {}).get("oid") == head
+            for r in reviews
+        )
+        thumbs_up = pushed_at is not None and any(
+            bare_login(x["login"]) == reviewer and parse_time(x["created_at"]) >= pushed_at
+            for x in extra.get("reviewer_reactions", [])
+        )
+        if not (reviewed_head or thumbs_up):
+            reasons.append(f"waiting for a {reviewer} review of the latest commit")
 
     return lane, reasons
 
@@ -191,8 +226,9 @@ def merge(pr: dict, lane: dict) -> None:
         gh("pr", "ready", number)
     gh("pr", "merge", number, "--merge", "--match-head-commit", pr["headRefOid"])
     gh("pr", "comment", number, "--body",
-       f"Merged by the auto-merge gate (lane `{lane['id']}`): required checks green, Codex reviewed "
-       f"the head commit, no open threads, every file inside the lane. See docs/auto-merge-gate.md.")
+       f"Merged by the auto-merge gate (lane `{lane['id']}`, level {lane.get('level', 1)}): required "
+       f"checks green, required reviewers reviewed the head commit, no open threads, every file "
+       f"inside the lane. See docs/auto-merge-gate.md.")
 
 
 def run(apply: bool, only: int | None) -> int:
@@ -233,7 +269,7 @@ def run(apply: bool, only: int | None) -> int:
 
 def self_test() -> int:
     config = json.loads(CONFIG_PATH.read_text())
-    head = "abc123"
+    head = "abc1234def5678"
     base_pr = {
         "number": 1, "title": "t", "headRefName": "cleanup/test-shape/foo", "headRefOid": head,
         "isDraft": True, "isCrossRepository": False, "labels": [{"name": "cleanup"}],
@@ -265,10 +301,10 @@ def self_test() -> int:
         case("thumbs-up before push doesn't count", False,
              {"reviews": []}, {"reviewer_reactions": [{"login": "chatgpt-codex-connector[bot]",
                                                        "created_at": "2026-10-07T09:00:00Z"}]},
-             "waiting for a Codex review"),
+             "waiting for a chatgpt-codex-connector review"),
         case("review of an older commit doesn't count", False,
              {"reviews": [{"author": {"login": "chatgpt-codex-connector"}, "state": "COMMENTED",
-                           "commit": {"oid": "old"}}]}, None, "waiting for a Codex review"),
+                           "commit": {"oid": "old"}}]}, None, "waiting for a chatgpt-codex-connector review"),
         case("branch outside lanes", False, {"headRefName": "claude/feature"}, None, "not in an auto-merge lane"),
         case("protected engine file", False,
              {"headRefName": "cleanup/file-size/x", "files": [{"path": "Sources/TranscriptedCore/Audio/A.swift"}]},
@@ -296,6 +332,40 @@ def self_test() -> int:
         case("unresolved thread", False, None, {"unresolved_threads": 2}, "unresolved"),
         case("fork", False, {"isCrossRepository": True}, None, "fork"),
         case("other author", False, {"author": {"login": "someone"}}, None, "not allowed"),
+    ]
+    verify_body = (f"Fixes #12\n\n## App verification\n\nBase: `origin/main` · head: `{head[:7]}`\n\n"
+                   "| Check | Result | Detail |\n|---|---|---|\n| ui | PASS | opened Home |\n")
+    both_reviews = [{"author": {"login": "chatgpt-codex-connector"}, "state": "COMMENTED", "commit": {"oid": head}},
+                    {"author": {"login": "claude"}, "state": "COMMENTED", "commit": {"oid": head}}]
+    bug = {"headRefName": "codex/issue-12-fix", "labels": [{"name": "bug"}], "body": verify_body,
+           "files": [{"path": "Sources/Support/Foo.swift"}, {"path": "Tests/FooTests.swift"}],
+           "reviews": both_reviews}
+    results += [
+        case("bug fix with proof and two reviews merges", True, bug),
+        case("bug fix without a test", False, {**bug, "files": [{"path": "Sources/Support/Foo.swift"}]},
+             None, "without a test change"),
+        case("bug fix without verify summary", False, {**bug, "body": "Fixes #12"}, None, "no app verification"),
+        case("bug fix verify for old commit", False, {**bug, "body": verify_body.replace(head[:7], "0ff0ff0")},
+             None, "not for the head commit"),
+        case("bug fix verify FAIL", False, {**bug, "body": verify_body + "| paste | FAIL | nope |\n"},
+             None, "has a FAIL"),
+        case("bug fix owes a live check", False,
+             {**bug, "body": verify_body + "\n**Needs a live check by Justin:** audio changed.\n"},
+             None, "live check"),
+        case("bug fix with only Codex review", False, {**bug, "reviews": both_reviews[:1]}, None, "claude review"),
+        case("bug fix in UI is owner-only", False,
+             {**bug, "files": [{"path": "Sources/UI/Home/HomeView.swift"}, {"path": "Tests/FooTests.swift"}]},
+             None, "protected files"),
+        case("bug fix missing bug label", False, {**bug, "labels": []}, None, "missing label 'bug'"),
+        case("module-edges lane", True,
+             {"headRefName": "cleanup/module-edges/x",
+              "files": [{"path": "Sources/Dictation/Foo.swift"}, {"path": ".agents/module-boundary-baseline.json"}]}),
+        case("docs lane merges folder docs", True,
+             {"headRefName": "garden/docs/ui", "labels": [{"name": "gardener"}],
+              "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "docs/storage-paths.md"}]}),
+        case("docs lane can't touch release docs", False,
+             {"headRefName": "garden/docs/x", "labels": [{"name": "gardener"}],
+              "files": [{"path": "docs/release-packaging.md"}]}, None, "protected files"),
     ]
     disabled = json.loads(json.dumps(config))
     disabled["lanes"][0]["enabled"] = False
