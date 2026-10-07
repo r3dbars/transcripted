@@ -7,7 +7,7 @@ import TranscriptedCore
 enum SpeakerReviewTranscriptLocator {
     /// `url` if it still exists, else the renamed file with `transcriptId`
     /// in the same folder, else nil.
-    static func currentURL(for url: URL, transcriptId: UUID?) -> URL? {
+    static func currentURL(for url: URL, transcriptId: UUID) -> URL? {
         if FileManager.default.fileExists(atPath: url.path) { return url }
         return TranscriptSaver.existingTranscriptURL(
             in: url.deletingLastPathComponent(),
