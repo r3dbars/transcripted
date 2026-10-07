@@ -433,7 +433,27 @@ func runMeetingSeries(_ args: [String]) async {
     guard await MainActor.run(body: { diarization.isReady }) else { die("diarizer failed to initialize") }
 
     // A shared DB for series meetings (fresh_db == false) persists across the run.
-    let sharedDBDir = workRoot.appendingPathComponent("shared-db", isDirectory: true)
+    // Only a plain resume keeps the one already on disk; any other run starts it
+    // empty so it can't inherit voices the last run learned.
+    let sharedDBDir = LabSharedSpeakerDB.directory(workRoot: workRoot)
+    let finishedSharedMeetings = series.meetings.filter { meeting in
+        !(meeting.fresh_db ?? true) && fm.fileExists(atPath: setDir
+            .appendingPathComponent(meeting.id, isDirectory: true)
+            .appendingPathComponent("lab_result.json").path)
+    }.count
+    if LabSharedSpeakerDB.shouldReset(force: force, finishedSharedMeetings: finishedSharedMeetings) {
+        let hadSharedDB = fm.fileExists(atPath: sharedDBDir.path)
+        do {
+            guard try LabSharedSpeakerDB.reset(sharedDBDir, workRoot: workRoot) else {
+                die("refusing to clear a shared speaker DB outside the work root")
+            }
+            if hadSharedDB { log("[lab] cleared the shared speaker DB from the last run") }
+        } catch {
+            die("could not clear the shared speaker DB: \(error.localizedDescription)")
+        }
+    } else if only != nil {
+        log("[lab] resuming with the existing shared speaker DB; --only reruns see voices from every finished meeting")
+    }
     var done = 0
     for meeting in series.meetings {
         if done >= limit { break }
