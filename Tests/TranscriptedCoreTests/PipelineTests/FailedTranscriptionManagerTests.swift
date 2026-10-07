@@ -1061,12 +1061,11 @@ final class FailedTranscriptionManagerTests: XCTestCase {
     }
 
     func testLoadKeepsOutOfRootRowWhenItsOldLibraryIsOffline() throws {
-        // Old library sat on a drive that is not mounted at launch: nothing
-        // under its audio folder can be seen, so the row's audio can't be
-        // checked right now. The row must survive in the queue file.
+        // Old library sat on a drive that is not mounted at launch, so the
+        // row's audio can't be checked right now. The row must survive in
+        // the queue file. The volume check is faked; no real mount is used.
         let paths = makePaths(root: testRoot)
-        let offlineArchiveDirectory = testRoot
-            .appendingPathComponent("offline-drive/old-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
+        let offlineArchiveDirectory = URL(fileURLWithPath: "/Volumes/Sweep Test Drive/old-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
         let entry = FailedTranscription(
             id: UUID(),
             timestamp: Date(timeIntervalSince1970: 1_000),
@@ -1076,7 +1075,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         )
         try writeQueue([entry], to: paths)
 
-        let manager = FailedTranscriptionManager(paths: paths)
+        let manager = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: .fakeUnmountedVolumes)
 
         XCTAssertTrue(
             manager.failedTranscriptions.isEmpty,
@@ -1087,6 +1086,97 @@ final class FailedTranscriptionManagerTests: XCTestCase {
             from: Data(contentsOf: paths.failedQueue)
         )
         XCTAssertEqual(persisted.map(\.id), [entry.id], "an offline old library must not erase the queued row")
+    }
+
+    func testLoadDropsOutOfRootRowWhenItsOldLibraryWasDeletedFromAMountedDisk() throws {
+        // The whole old library folder is gone, on a disk that is mounted and
+        // readable: that is permanent, so the row is dropped.
+        let paths = makePaths(root: testRoot)
+        let deletedArchiveDirectory = testRoot
+            .appendingPathComponent("deleted-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
+        let entry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: deletedArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([entry], to: paths)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertTrue(persisted.isEmpty, "a deleted old library on a mounted disk is permanent, so the row is dropped")
+    }
+
+    func testAgeCleanupPrunesOldRowsFromAnOfflineLibrary() throws {
+        let paths = makePaths(root: testRoot)
+        let offlineArchiveDirectory = URL(fileURLWithPath: "/Volumes/Sweep Test Drive/old-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
+        let oldEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date().addingTimeInterval(-30 * 24 * 60 * 60),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        let recentEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("recent-microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([oldEntry, recentEntry], to: paths)
+        let manager = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: .fakeUnmountedVolumes)
+
+        manager.cleanupOldFailedTranscriptions(olderThanDays: 7)
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(persisted.map(\.id), [recentEntry.id], "age cleanup prunes old offline-library rows too, keeping recent ones")
+    }
+
+    func testOfflineLibraryRowDoesNotBlockSavingAnotherRowsHeal() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let missingMicURL = paths.audioCaptures.appendingPathComponent("meeting-mic.wav")
+        let mergedSiblingURL = paths.audioCaptures.appendingPathComponent("meeting-mic_merged.wav")
+        FileManager.default.createFile(atPath: mergedSiblingURL.path, contents: Data("merged".utf8))
+        let healable = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 2_000),
+            micAudioURL: missingMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out"
+        )
+        let offlineArchiveDirectory = URL(fileURLWithPath: "/Volumes/Sweep Test Drive/old-library/meetings/audio/Failed_Budget_Sync_audio", isDirectory: true)
+        let offlineRow = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try writeQueue([offlineRow, healable], to: paths)
+
+        _ = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: .fakeUnmountedVolumes)
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(
+            persisted.first(where: { $0.id == healable.id })?.micAudioURL,
+            mergedSiblingURL,
+            "the heal for an in-library row must be saved even when an offline-library row is queued"
+        )
+        XCTAssertTrue(persisted.contains(where: { $0.id == offlineRow.id }), "the offline-library row stays durable")
     }
 
     func testLoadDropsOutOfRootRowWhenItsOldLibraryIsOnlineButAudioIsGone() throws {
@@ -1212,4 +1302,18 @@ extension JSONDecoder {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }
+}
+
+extension RelocatedCaptureAudioPolicy.FileSystem {
+    /// Nothing under /Volumes is mounted; everything else answers from disk.
+    static let fakeUnmountedVolumes = RelocatedCaptureAudioPolicy.FileSystem(
+        fileExists: { $0.hasPrefix("/Volumes/") ? false : FileManager.default.fileExists(atPath: $0) },
+        directoryExists: { path in
+            guard !path.hasPrefix("/Volumes/") else { return false }
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        },
+        isMountPoint: { _ in false },
+        isAccessDenied: { _ in false }
+    )
 }
