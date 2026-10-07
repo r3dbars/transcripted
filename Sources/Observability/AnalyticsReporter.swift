@@ -577,7 +577,8 @@ final class AnalyticsReporter {
     let apiKey: String?
     private let usageStore: UsageHealthStore?
     let captureHost: String?
-    private static let isoDateFormatter = ISO8601DateFormatter()
+    // Immutable after init; only string(from:) is called, which Foundation documents as thread-safe.
+    private nonisolated(unsafe) static let isoDateFormatter = ISO8601DateFormatter()
     private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
