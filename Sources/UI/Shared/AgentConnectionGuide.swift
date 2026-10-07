@@ -16,7 +16,8 @@ struct AgentConnectionStarterSkill {
 enum AgentConnectionGuide {
     private static let codexInboxSetupFilename = "codex-inbox-setup.md"
 
-    private static let portableDateFormatter: ISO8601DateFormatter = {
+    // Configured once and only used to format; ISO8601DateFormatter is thread-safe.
+    private nonisolated(unsafe) static let portableDateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter

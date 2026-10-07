@@ -210,7 +210,8 @@ enum FeedbackIssueBuilder {
         """
     }
 
-    private static let feedbackDateFormatter: ISO8601DateFormatter = {
+    // Configured once and only used to format; ISO8601DateFormatter is thread-safe.
+    private nonisolated(unsafe) static let feedbackDateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
