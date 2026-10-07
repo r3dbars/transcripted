@@ -442,6 +442,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/DictationCardPresentation.swift"
     "Sources/UI/Settings/DictationPlaybackController.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
+    "Sources/Support/DictationInputDeviceSelectionReason.swift"
     "Sources/Speech/PinnedDictationSpeedPath.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/DictationStartReadiness.swift"
