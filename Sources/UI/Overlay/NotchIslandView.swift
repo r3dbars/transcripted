@@ -61,6 +61,7 @@ enum NotchIslandPalette {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
+    @MainActor
     static func label(_ text: String, font: NSFont, color: NSColor, wraps: Bool = false, width: CGFloat = 0) -> NSTextField {
         let field = wraps ? NSTextField(wrappingLabelWithString: text) : NSTextField(labelWithString: text)
         field.font = font
