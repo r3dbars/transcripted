@@ -72,6 +72,34 @@ func testMeetingInviteeSuggestionPolicy() {
         )
     }
 
+    runSuite("MeetingInviteeSuggestionPolicy keeps events whose invitees are all email-only") {
+        let eventStart = start
+        let emailOnlyTeam = MeetingInviteeEventSnapshot(
+            startDate: eventStart,
+            endDate: eventStart.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            inviteeNames: [],
+            invitedPeopleCount: 3
+        )
+        assertEqual(
+            match(startedMinutesIntoEvent: 0, [emailOnlyTeam]),
+            emailOnlyTeam,
+            "an invite with three email-only people is still a real event with three people"
+        )
+
+        let namedOneOnOne = MeetingInviteeEventSnapshot(
+            startDate: eventStart,
+            endDate: eventStart.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            inviteeNames: ["Dana Kim"],
+            invitedPeopleCount: 1
+        )
+        assertNil(
+            match(startedMinutesIntoEvent: 0, [namedOneOnOne, emailOnlyTeam]),
+            "a named 1:1 double-booked with an email-only team call must not win alone"
+        )
+    }
+
     runSuite("MeetingInviteeSuggestionPolicy cleans invitee names") {
         let names = MeetingInviteeSuggestionPolicy.inviteeNames(from: [
             MeetingInviteeRawParticipant(name: "Justin", email: "mailto:me@example.com", isCurrentUser: true, isPerson: true),

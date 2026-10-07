@@ -52,14 +52,23 @@ enum MeetingInviteeSuggestionPolicy {
         recordingStart: Date,
         among events: [MeetingInviteeEventSnapshot]
     ) -> MeetingInviteeEventSnapshot? {
+        // An invite whose people are all email-only has no names to show but
+        // still counts: it is a real call, and it must take part in the
+        // double-booking check so a named event at the same time can't win.
         let matches = events.filter { event in
-            guard !event.isAllDay, !event.inviteeNames.isEmpty else { return false }
+            guard !event.isAllDay, peopleCount(of: event) > 0 else { return false }
             let startedAfterEvent = recordingStart.timeIntervalSince(event.startDate)
             return (-startLeadTime ... startGrace).contains(startedAfterEvent)
         }
         guard let first = matches.first,
-              matches.allSatisfy({ $0.inviteeNames == first.inviteeNames }) else { return nil }
+              matches.allSatisfy({
+                  $0.inviteeNames == first.inviteeNames && peopleCount(of: $0) == peopleCount(of: first)
+              }) else { return nil }
         return first
+    }
+
+    private static func peopleCount(of event: MeetingInviteeEventSnapshot) -> Int {
+        event.invitedPeopleCount ?? event.inviteeNames.count
     }
 
     // MARK: - Cleaning names
