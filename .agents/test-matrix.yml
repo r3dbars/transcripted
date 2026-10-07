@@ -177,6 +177,17 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/onboarding.sh"
 
+  # Accessibility identifiers the QA smokes and build.sh's launch smoke press
+  # must still be declared in the app (was Tests/UIAutomationSurfaceContractTests.swift).
+  - paths:
+      - "Sources/UI/**"
+      - "Tools/TranscriptedQA/Sources/**"
+      - "scripts/entrypoints/build.sh"
+      - "scripts/dev/check-ui-automation-contract.py"
+    checks:
+      - "python3 scripts/dev/check-ui-automation-contract.py --self-test"
+      - "python3 scripts/dev/check-ui-automation-contract.py"
+
   - paths:
       - "scripts/dev/check-build-source-lists.py"
     checks:

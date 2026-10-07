@@ -7,6 +7,8 @@
 //     needs a seam;
 //   - it's a contract with a script or another package (the QA CLI and bench,
 //     and the identifiers the QA smokes press).
+// The identifiers the QA smokes press and the Settings/Speakers click-flow
+// identifiers are checked by scripts/dev/check-ui-automation-contract.py.
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
 // AutomationSurfaceBehaviorTests.swift now.
@@ -148,28 +150,6 @@ func testUIAutomationSurfaceContract() async {
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
             "the overlay should render the action only for a typed denial")
     }
-    runSuite("UI automation surface contract - every identifier the QA smokes press exists in the app") {
-        // A cross-package contract: the QA CLI and the launch smoke press
-        // these identifiers, so the app must declare each one somewhere. It
-        // checks existence, not which file, so splits and moves don't break
-        // it. The ones compiled into this runner are behavior-tested in
-        // AutomationSurfaceBehaviorTests.swift.
-        let pressed = qaSmokePressedIdentifiers()
-        assertTrue(pressed.count >= 20, "the QA smokes should still drive the menu bar, sidebar, onboarding and import controls")
-        var declared = Set<String>()
-        let root = repoFixtureURL("Sources/")
-        if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
-            for case let url as URL in enumerator where url.pathExtension == "swift" {
-                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                declared.formUnion(automationIdentifierLiterals(in: text))
-            }
-        }
-        declared.formUnion(TranscriptedSettingsPage.allCases.map(\.automationIdentifier))
-        for identifier in pressed.sorted() {
-            assertTrue(declared.contains(identifier), "\(identifier) is pressed by the QA smokes but the app never declares it")
-        }
-    }
-
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         // These raw values are the strings external automation looks up. The
         // QA AX smoke (Tools/TranscriptedQA UISmoke) and the build.sh launch
@@ -498,41 +478,6 @@ func testUIAutomationSurfaceContract() async {
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
-        for identifier in [
-            "transcripted.settings.footer.check-updates",
-            "transcripted.settings.general.launch-at-login",
-            "transcripted.settings.general.show-in-dock",
-            "transcripted.settings.general.dictation-sounds",
-            "transcripted.settings.general.cleanup-pasted-text",
-            "transcripted.settings.section.dictation",
-            "transcripted.settings.section.bluetooth-microphone",
-            "transcripted.settings.section.send-after-dictation",
-            "transcripted.settings.section.meetings",
-            "transcripted.settings.section.speakers",
-            "transcripted.settings.section.transcription",
-            "transcripted.settings.section.app",
-            "transcripted.settings.section.permissions",
-            "transcripted.settings.section.privacy",
-            "transcripted.settings.general.keyboard-shortcuts",
-            "transcripted.settings.general.bluetooth-dictation",
-            "transcripted.settings.general.microphone",
-            "transcripted.settings.general.auto-send",
-            "transcripted.settings.general.model",
-            "transcripted.settings.general.corrections",
-            "transcripted.settings.general.people-in-room",
-            "transcripted.settings.general.crash-reports",
-            "transcripted.settings.general.usage-stats",
-            "transcripted.settings.storage.capture-library",
-            "transcripted.settings.storage.delete-audio",
-            "transcripted.settings.storage.free-up-space",
-            "transcripted.settings.storage.support-files",
-            "transcripted.settings.about.automatic-updates",
-            "transcripted.settings.about.support",
-            "transcripted.settings.general.corrections.clear-all",
-        ] {
-            assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
-        }
-
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.inbox")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".id(ScrollTarget.reviewQueue)")
@@ -562,24 +507,6 @@ func testUIAutomationSurfaceContract() async {
             speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,
             "queue and person overflow menus should use the compact 40pt hit-target label"
         )
-
-        assertFalse(
-            speakersSettingsSource().contains("transcripted.speakers.refresh"),
-            "the speakers surface should not regrow a manual refresh button — navigation and mutations refresh the model"
-        )
-
-        for identifier in [
-            "transcripted.speakers.voice-to-name.play",
-            "transcripted.speakers.voice-to-name.menu",
-            "transcripted.speakers.search.field",
-            "transcripted.speakers.person.play",
-            "transcripted.speakers.person.menu",
-        ] {
-            assertTrue(
-                speakersSettingsSource().contains(identifier),
-                "\(identifier) should keep the speakers surface's icon-only controls scriptable without using speaker names"
-            )
-        }
 
         assertTrue(
             settingsShellSource().contains("HomeRowMenuItem(title: \"Review speakers\"")
