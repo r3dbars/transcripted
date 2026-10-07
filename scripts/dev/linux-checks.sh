@@ -291,6 +291,7 @@ check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 # matching array below. It must pass offline, in any timezone, with only the
 # python3 stdlib (or ruby), and write nothing outside build/ or $TMPDIR.
 SELF_TEST_SCRIPTS=(
+    scripts/ops/auto-merge-gate.py
     scripts/ops/check-crash-free-rate.py
     scripts/ops/generate-nightly-digest.py
     scripts/ops/packaged-app-smoke.py
