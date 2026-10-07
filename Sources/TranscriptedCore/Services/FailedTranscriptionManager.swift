@@ -30,8 +30,14 @@ public class FailedTranscriptionManager: ObservableObject {
     /// again. This prevents both destructive rewrites and unsafe retries against
     /// paths outside the currently approved audio roots.
     private var unavailableRelocatedEntries: [FailedTranscription] = []
+    private let relocatedAudioFileSystem: RelocatedCaptureAudioPolicy.FileSystem
 
-    public init(paths: CoreStoragePaths = .default) {
+    public convenience init(paths: CoreStoragePaths = .default) {
+        self.init(paths: paths, relocatedAudioFileSystem: .live)
+    }
+
+    init(paths: CoreStoragePaths, relocatedAudioFileSystem: RelocatedCaptureAudioPolicy.FileSystem) {
+        self.relocatedAudioFileSystem = relocatedAudioFileSystem
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
         do {
             try FileManager.default.createDirectory(
@@ -106,19 +112,19 @@ public class FailedTranscriptionManager: ObservableObject {
                     // stays 0, so the queue file is rewritten without it and
                     // the row (title, error, retry count, one-click retry) is
                     // gone for good — switching the library back does not
-                    // restore it. Keep entries that still look like real
-                    // archived capture audio and are still on disk (or whose old library
-                    // is offline right now, so the audio can't be checked); counting
-                    // them unavailable also suppresses the destructive rewrite.
+                    // restore it. Keep entries whose archived audio is still on
+                    // disk or can't be checked right now (see the policy).
+                    // `saveFailedTranscriptions` persists them, so they don't
+                    // block saving other rows' reconciliation.
                     if RelocatedCaptureAudioPolicy.shouldKeep(
                         micAudioURL: Self.canonicalFileURL(relocatedEntry.micAudioURL),
-                        systemAudioURL: relocatedEntry.systemAudioURL.map(Self.canonicalFileURL)
+                        systemAudioURL: relocatedEntry.systemAudioURL.map(Self.canonicalFileURL),
+                        fileSystem: relocatedAudioFileSystem
                     ) {
                         AppLogger.pipeline.warning("Kept failed transcription whose audio is outside the current capture library", [
                             "id": relocatedEntry.id.uuidString,
                             "micURL": relocatedEntry.micAudioURL.lastPathComponent
                         ])
-                        unavailableCount += 1
                         unavailableRelocatedEntries.append(relocatedEntry)
                         continue
                     }
@@ -777,6 +783,14 @@ public class FailedTranscriptionManager: ObservableObject {
     public func cleanupOldFailedTranscriptions(olderThanDays days: Int) {
         // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+
+        // Rows from an unavailable old library age out too (metadata only;
+        // their audio is outside the approved roots and is never deleted).
+        let previousRelocated = unavailableRelocatedEntries
+        unavailableRelocatedEntries.removeAll { $0.timestamp < cutoffDate }
+        if unavailableRelocatedEntries.count != previousRelocated.count, !saveFailedTranscriptions() {
+            unavailableRelocatedEntries = previousRelocated
+        }
 
         let oldFailureIDs = failedTranscriptions
             .filter { $0.timestamp < cutoffDate }
