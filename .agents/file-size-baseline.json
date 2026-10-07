@@ -18,7 +18,7 @@
     "Sources/TranscriptedCore/Audio/MeetingInputDeviceSelectionPolicy.swift": 855,
     "Sources/TranscriptedCore/Audio/PinnedMicrophoneCapture.swift": 1106,
     "Sources/TranscriptedCore/Audio/SCKAudioCapture.swift": 1449,
-    "Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift": 1344,
+    "Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift": 1301,
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift": 856,
     "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift": 1421,
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 885,
