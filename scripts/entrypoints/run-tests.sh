@@ -528,6 +528,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingAudioLevels.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
     "Sources/Meeting/ImportedTranscriptionQueueJournalState.swift"
+    "Sources/Meeting/ImportedTranscriptionQueueJournal.swift"
     "Sources/Meeting/MeetingImportedAudioPreparer.swift"
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
