@@ -100,7 +100,6 @@
         "SpeakerMergeRecord",
         "SpeakerPeopleReviewPolicy",
         "SpeakerUserConfirmation",
-        "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
       ]
     },

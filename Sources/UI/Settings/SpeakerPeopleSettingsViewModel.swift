@@ -38,7 +38,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Mirrors the meeting controller's voiceprint migration gate: saved people
     /// moving into a new voice model's database. Edits made meanwhile wait in
     /// `editsWaitingForVoiceprintMigration` and run once it ends.
-    @Published private(set) var voiceprintMigrationPhase: SpeakerVoiceprintMigrationGate.Phase = .idle
+    @Published private(set) var voiceprintMigrationPhase: SpeakerVoiceModelMove = .idle
     private var voiceprintMigrationObservation: AnyCancellable?
     private var editsWaitingForVoiceprintMigration: [() -> Void] = []
 
@@ -73,18 +73,17 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         transcriptDirectory: URL = TranscriptSaver.defaultSaveDirectory,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
-        voiceprintMigrationGate: SpeakerVoiceprintMigrationGate? = nil
+        voiceModelMoveStatus: SpeakerVoiceModelMoveStatus? = nil
     ) {
         self.speakerDatabase = speakerDatabase
         self.transcriptDirectory = transcriptDirectory
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
-        if let voiceprintMigrationGate {
-            voiceprintMigrationPhase = voiceprintMigrationGate.phase
+        if let voiceModelMoveStatus {
+            voiceprintMigrationPhase = voiceModelMoveStatus.move
             // Synchronous on purpose: the mirror changes in the same step as
             // the gate, so an edit can never slip between the two.
-            voiceprintMigrationObservation = voiceprintMigrationGate.$phase
-                .dropFirst()
+            voiceprintMigrationObservation = voiceModelMoveStatus.changes
                 .sink { [weak self] phase in
                     self?.voiceprintMigrationPhaseChanged(to: phase)
                 }
@@ -94,7 +93,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     // MARK: - Voice model migration
 
-    private func voiceprintMigrationPhaseChanged(to phase: SpeakerVoiceprintMigrationGate.Phase) {
+    private func voiceprintMigrationPhaseChanged(to phase: SpeakerVoiceModelMove) {
         voiceprintMigrationPhase = phase
         guard !isMovingPeopleToNewVoiceModel else { return }
         refresh()

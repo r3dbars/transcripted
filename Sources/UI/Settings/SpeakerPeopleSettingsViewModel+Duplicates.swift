@@ -17,8 +17,7 @@ extension SpeakerPeopleSettingsViewModel {
             return "Moving your saved people to the new voice model… \(completed) of \(total)"
         case .moving:
             return "Moving your saved people to the new voice model…"
-        case .finished(let summary) where summary.peopleNeedingConfirmation > 0:
-            let count = summary.peopleNeedingConfirmation
+        case .finished(let count) where count > 0:
             let who = count == 1 ? "1 saved person needs" : "\(count) saved people need"
             return "\(who) one confirmation with the new voice model. Confirm them when a meeting asks who they are."
         case .failed:
