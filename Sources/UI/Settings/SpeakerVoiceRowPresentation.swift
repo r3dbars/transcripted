@@ -41,6 +41,27 @@ enum SpeakerClipPlaybackPresentation {
     }
 }
 
+// MARK: - Everyone row rename
+
+/// What the Everyone row's name box shows once a rename save finishes.
+enum SpeakerEveryoneRenamePolicy {
+    static let saveFailedMessage = "Couldn't save the name."
+
+    struct NameBox: Equatable {
+        let isOpen: Bool
+        let draft: String
+        let errorMessage: String?
+    }
+
+    /// A saved rename closes the card. A failed one keeps the box open with
+    /// the typed name still in it and says so, instead of dropping it silently.
+    static func nameBox(afterSave didSave: Bool, typed: String) -> NameBox {
+        didSave
+            ? NameBox(isOpen: false, draft: typed, errorMessage: nil)
+            : NameBox(isOpen: true, draft: typed, errorMessage: saveFailedMessage)
+    }
+}
+
 // MARK: - Overflow (three-dots) menu
 
 /// Actions exposed by the three-dots overflow menu on a voice row. Replaces the

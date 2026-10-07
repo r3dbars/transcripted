@@ -445,7 +445,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Rename from an Everyone row. A voice still waiting for a name goes
     /// through the same path as naming it on its review card; see
     /// `SpeakerReviewStack.reviewItemForRename`.
-    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String) {
+    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String,
+                            completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         if let item = SpeakerReviewStack.reviewItemForRename(of: profile, in: reviewQueueItems) {
             // Same as naming it on its card: a name one saved person already
             // has adds the voice to them instead of making a second one.
@@ -456,12 +457,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 id: \.id,
                 displayName: \.displayName
             ) {
-                mergePendingReviewItem(item, into: existing)
+                mergePendingReviewItem(item, into: existing, completion: completion)
             } else {
-                namePendingReviewItem(item, to: newName)
+                namePendingReviewItem(item, to: newName) { didSave in completion?(didSave) }
             }
         } else {
-            rename(profile: profile, to: newName)
+            rename(profile: profile, to: newName) { didSave in completion?(didSave) }
         }
     }
 
