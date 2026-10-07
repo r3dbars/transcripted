@@ -361,6 +361,7 @@ struct SpeakerPersonRow: View {
 
     @State private var nameDraft: String = ""
     @State private var renameErrorMessage: String?
+    @State private var isSavingRename = false
     @State private var expansionClipDuration = SpeakerClipProgressBar.fallbackDuration
     @State private var showDeleteConfirmation = false
     @State private var pendingMergeTarget: SpeakerProfile?
@@ -698,10 +699,12 @@ struct SpeakerPersonRow: View {
     }
 
     private func commitRename() {
+        guard SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: nameDraft, saveInFlight: isSavingRename) else { return }
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        isSavingRename = true
         renameErrorMessage = nil
         model.renameFromEveryone(profile, to: trimmed) { [id = profile.id] didSave in
+            isSavingRename = false
             let box = SpeakerEveryoneRenamePolicy.nameBox(afterSave: didSave, typed: nameDraft)
             renameErrorMessage = box.errorMessage
             nameDraft = box.draft

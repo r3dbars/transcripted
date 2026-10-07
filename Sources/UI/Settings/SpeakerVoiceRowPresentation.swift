@@ -60,6 +60,12 @@ enum SpeakerEveryoneRenamePolicy {
             ? NameBox(isOpen: false, draft: typed, errorMessage: nil)
             : NameBox(isOpen: true, draft: typed, errorMessage: saveFailedMessage)
     }
+
+    /// Return renames only a non-blank name, and only when no save for this
+    /// card is still running (a slow transcript rewrite keeps the card open).
+    static func acceptsSubmit(typed: String, saveInFlight: Bool) -> Bool {
+        !saveInFlight && !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 // MARK: - Overflow (three-dots) menu

@@ -12,6 +12,15 @@ func testSpeakerVoiceRowPresentation() {
         assertTrue(saved.errorMessage == nil, "a saved rename shows no error")
     }
 
+    runSuite("A second Return while an Everyone rename is saving is ignored") {
+        assertTrue(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "Maya Chen", saveInFlight: false), "a typed name submits")
+        assertFalse(
+            SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "Maya Chen", saveInFlight: true),
+            "a save already running must not queue a second rename"
+        )
+        assertFalse(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "   ", saveInFlight: false), "a blank name never submits")
+    }
+
     runSuite("Play/pause toggle shows a pause glyph only while a clip plays") {
         assertEqual(
             SpeakerClipPlaybackPresentation.symbolName(isPlaying: false),
