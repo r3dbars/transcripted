@@ -319,7 +319,12 @@ mint_jit() {
 # within an attempt). So a poll costs one call plus one per new run.
 waiting_mac_jobs() {
   local runs key run out settled="$STATE/settled-runs" keep=""
+  # A run whose remaining jobs haven't started yet (a re-run, or one waiting
+  # behind others) reports "queued", not "in_progress", so ask for both.
   runs="$(gh api --paginate "repos/$REPO/actions/workflows/swift-ci.yml/runs?status=in_progress&per_page=100" \
+    --jq '.workflow_runs[] | "\(.id):\(.run_attempt)"')" || return 1
+  runs="$runs
+$(gh api --paginate "repos/$REPO/actions/workflows/swift-ci.yml/runs?status=queued&per_page=100" \
     --jq '.workflow_runs[] | "\(.id):\(.run_attempt)"')" || return 1
   for key in $runs; do
     if grep -qx "$key" "$settled" 2>/dev/null; then
