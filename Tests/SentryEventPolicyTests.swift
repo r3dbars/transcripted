@@ -327,8 +327,8 @@ func testSentryEventPolicy() {
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps coarse speaker finalization failure reasons") {
-        let reasons = sentrySpeakerFinalizationReasonRawValues()
-        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+        let reasons = sentrySpeakerFinalizationReasonRawValues
+        assertEqual(reasons.count, 12, "every speaker finalization reason should be checked")
 
         for reason in reasons {
             let tags = SentryEventPolicy.diagnosticTags(
@@ -671,28 +671,20 @@ func testSentryEventPolicy() {
     }
 }
 
-/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
-/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
-private func sentrySpeakerFinalizationReasonRawValues() -> [String] {
-    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
-    let enumBody = sentrySourceSlice(
-        source,
-        from: "public enum SpeakerFinalizationFailureReason",
-        to: "static func classify"
-    )
-    return enumBody.split(separator: "\n").compactMap { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("case ") else { return nil }
-        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
-        guard quoted.count >= 3 else { return nil }
-        return String(quoted[1])
-    }
-}
-
-private func sentrySourceSlice(_ source: String, from start: String, to end: String) -> String {
-    guard let startRange = source.range(of: start),
-          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
-        return ""
-    }
-    return String(source[startRange.lowerBound..<endRange.lowerBound])
-}
+/// Raw values of Core's `SpeakerFinalizationFailureReason`. Core isn't linked into this
+/// runner, so this is a copy; `SpeakerFinalizationFailureReasonTests` in the Core package
+/// fails when the enum and this list drift apart.
+private let sentrySpeakerFinalizationReasonRawValues = [
+    "plan_missing_embedding",
+    "transcript_unresolved",
+    "transcript_unreadable",
+    "name_rewrite_failed",
+    "deferred_marker_failed",
+    "collapse_failed",
+    "discard_failed",
+    "merge_profile_missing",
+    "merge_embedding_invalid",
+    "confirmation_profile_missing",
+    "database_unavailable",
+    "database_write_failed",
+]
