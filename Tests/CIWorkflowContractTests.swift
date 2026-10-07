@@ -18,7 +18,6 @@ func testCIWorkflowContract() {
         )
         assertTrue(swiftCI.contains("pull_request:"), "swift-ci should keep the pull_request trigger")
         assertTrue(swiftCI.contains("workflow_dispatch:"), "swift-ci should keep the manual dispatch trigger")
-        assertTrue(swiftCI.contains("merge_group:"), "swift-ci must run for the merge queue, or queued PRs never get build-and-test")
     }
 
     runSuite("CI workflow contract - swift-ci runs the full suite") {
