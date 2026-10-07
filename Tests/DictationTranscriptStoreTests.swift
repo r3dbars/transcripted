@@ -368,6 +368,53 @@ func testDictationTranscriptStore() {
         assertEqual(remainingEntries.count, 1, "deleting one same-timestamp entry should keep the other")
         assertEqual(remainingEntries.first?.text, "first saved text", "first same-timestamp entry should remain")
     }
+
+    runSuite("DictationTranscriptStore.restoreDeletedEntry — undo after a newer save brings back only the deleted entry") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        for (index, text) in ["alpha note one", "bravo note two", "charlie note three"].enumerated() {
+            _ = try? DictationTranscriptWriter.save(
+                text: text,
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: isoDate("2026-04-12T10:0\(index):00Z"),
+                directory: outputDir
+            )
+        }
+
+        guard let middle = DictationTranscriptStore.recentSavedDictations(limit: 10, directory: outputDir)
+            .first(where: { $0.text == "bravo note two" }),
+            let undo = try? DictationTranscriptStore.deleteEntryReversibly(middle) else {
+            assertionFailure("Expected to delete the middle entry reversibly")
+            return
+        }
+
+        // A new dictation lands during the undo window.
+        _ = try? DictationTranscriptWriter.save(
+            text: "delta note four",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-12T10:05:00Z"),
+            directory: outputDir
+        )
+
+        do {
+            try DictationTranscriptStore.restoreDeletedEntry(undo)
+        } catch {
+            assertionFailure("restoreDeletedEntry should not throw: \(error)")
+        }
+
+        let texts = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir).map(\.text).sorted()
+        assertEqual(
+            texts,
+            ["alpha note one", "bravo note two", "charlie note three", "delta note four"],
+            "undo should restore the deleted entry once and keep every other entry exactly once"
+        )
+    }
 }
 
 private func temporaryDictationStoreTestRoot(fileManager: FileManager) -> URL {
