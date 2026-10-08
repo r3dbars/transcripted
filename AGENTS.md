@@ -61,6 +61,23 @@ Each of these has cost a red CI run or a wrong merge. The ones with a check fail
 
 **Hotspots.** No file is over 1,500 lines any more. The split hotspots (`TranscriptedSettingsView`, `TranscriptedApp`, `SpeakerPeopleSettingsSection` and the rest) are a core file plus extensions; read the whole set. The riskiest code is meeting capture's stop ordering and the AirPods-sensitive engine touch, in `Sources/TranscriptedCore/Audio/Audio+CaptureLifecycle.swift` and `Audio+MeetingInputGraph.swift`. Read the whole file and its folder's `AGENTS.md` before editing any of these, and don't add another responsibility to them. No new Swift file may go over 800 lines, and the 39 that already are can only shrink (`scripts/dev/check-file-size.py`; a reviewed baseline bump is the exception). What each owns: `docs/repo-layout.md`.
 
+## Review guidelines
+
+For anyone reviewing a PR, including Codex's automatic review. A finding left open blocks the auto-merge gate (`docs/auto-merge-gate.md`), so report real problems, not style.
+
+Report as high severity (P0/P1):
+
+- **Privacy.** Anything that can send or log off the device what "Local-first and private" above forbids. Check new analytics properties, Sentry context, breadcrumbs, and error strings that embed user content. The full security map is `docs/threat-model.md`.
+- **Audio.** I/O, locks, allocations or ObjC calls inside CoreAudio real-time callbacks; a buffer used after an async hop without a deep copy; a new `AVAudioEngine` or `inputNode` use that doesn't say what happens with AirPods as the default input.
+- **Main thread.** Disk, network, model or other slow work moved onto the main actor; UI or session state touched off it.
+- **Hidden behavior change.** A PR titled or branched as cleanup (`cleanup/`, `garden/`) that changes behavior: logic edited during a "pure move", access levels or init order changed, isolation changed, code dropped. Cleanup PRs must be behavior-neutral.
+- **Removed product surface.** Anything in "Keep the product surface" above deleted, hidden or buried.
+- **Harness safety.** A test, script or lab that can write to the real capture library or prefs, or delete outside the root it owns.
+- **Weakened checks.** A baseline grown, a check loosened or skipped, a test made to pass by asserting less, or a test that reads `Sources/` as text.
+- **Auto-merge widening.** Edits to `.agents/auto-merge-lanes.json` or `scripts/ops/auto-merge-gate.py` that let more merge without the owner.
+
+Don't report: naming or formatting preferences, comment wording, speculative refactors, or commit author and committer identity (the checkout a reviewer sees may not show the real author; `git log` on the PR branch is the truth).
+
 ## Releases
 
 Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow. Use `build-beta.sh`, not `build.sh`, for builds that go to other machines. A release isn't done when the DMG exists: publish the signed archive, update `docs/appcast.xml`, and push it to the branch behind the live feed so installs see it; then `bash scripts/release/update-cask.sh <version>` and commit `Casks/transcripted.rb` for Homebrew. If you skip either, say so plainly. Keep `SUFeedURL` and `SUPublicEDKey` in `Info.plist` matching the real feed. Shipping builds are notarized by the Release Candidate workflow (`.github/workflows/release-candidate.yml`), not on this Mac; there's no local notary profile, so a local `build-beta.sh` makes un-notarized test DMGs only. Tag the workflow's `source_ref`, not the run's head SHA. The transcripted.app website is a separate repo, `r3dbars/transcripted-webapp` (clone at `~/transcripted-webapp`); its README says how to sync and deploy after a release.
