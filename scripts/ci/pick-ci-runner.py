@@ -16,6 +16,11 @@ fresh throwaway macOS VM) only when all of these hold:
 
 Anything else, including any GitHub API error, picks hosted macos-26.
 
+MAC_RUNNER_MODE=always skips the heartbeat and queue checks: every
+same-repo run waits for the owner's Mac, however long that takes, and
+never spends GitHub-hosted minutes. Fork PRs still stay hosted, and
+--reroute does nothing, so nothing is ever sent back to GitHub.
+
 With --reroute (run from main by .github/workflows/mac-runner-sweep.yml,
 with an actions: write token), it instead sends stranded runs back to
 GitHub: when the Mac's heartbeat has not changed for SERVICE_ALIVE_SECONDS
@@ -80,6 +85,8 @@ def decide(
         # The Mac's job-started hook refuses these too, since a fork can edit
         # this workflow.
         return "hosted", "pull request comes from a fork"
+    if mode.strip().lower() == "always":
+        return "mac", "MAC_RUNNER_MODE is always"
     word, stamp = parse_heartbeat(heartbeat)
     if word or stamp is None:
         # Logs are public: never say why (a call, battery, paused).
@@ -223,6 +230,12 @@ def self_test() -> int:
         ("hosted", dict(mode="OFF")),
         ("hosted", dict(busy_mac_jobs=1)),
         ("hosted", dict(busy_mac_jobs=None)),
+        # always: waits for the Mac whatever its state, but never for a fork.
+        ("mac", dict(mode="always", heartbeat=f"busy:{now}", busy_mac_jobs=3)),
+        ("mac", dict(mode="Always", heartbeat="", busy_mac_jobs=None)),
+        ("mac", dict(mode="always", event="push", head_repo="")),
+        ("hosted", dict(mode="always", head_repo="evil/fork")),
+        ("hosted", dict(mode="always", event="schedule")),
     ]
     failures = 0
     for want, overrides in cases:
@@ -271,6 +284,9 @@ def main() -> int:
     token = env("GITHUB_TOKEN", "")
 
     if sys.argv[1:] == ["--reroute"]:
+        if env("MODE", "").strip().lower() == "always":
+            print("MAC_RUNNER_MODE is always; runs wait for the Mac, nothing to re-run")
+            return 0
         # With no heartbeat the Mac was never set up, so nothing can be stuck.
         if not heartbeat:
             print("no Mac heartbeat; nothing to do")

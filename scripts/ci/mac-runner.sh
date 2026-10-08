@@ -1206,7 +1206,8 @@ serve() {
       [ -n "$run" ] || continue
       [ "$age" -le "$oldest" ] || oldest="$age"
     done <<< "$waiting"
-    if [ "$oldest" -gt "$REROUTE_SECONDS" ]; then
+    # MAC_RUNNER_MODE=always: jobs wait for this Mac instead of going to GitHub.
+    if [ "$oldest" -gt "$REROUTE_SECONDS" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
       log "a job has waited ${oldest}s and this Mac can't start it ($block)"
       rerouted=0
       for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do

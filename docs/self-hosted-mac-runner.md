@@ -218,6 +218,12 @@ wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the two
 jobs of one run can still land after a pause. To turn routing off from GitHub
 without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 
+Set `MAC_RUNNER_MODE` to `always` to never use GitHub's hosted Macs: every
+same-repo run waits for this Mac, however long the line is, and nothing is
+re-run on GitHub (neither the sweep nor this service reroutes). Fork PRs still
+run hosted. This is the owner's default, because hosted macOS minutes run out
+fast on a private repo.
+
 Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 
 ## Known limits
