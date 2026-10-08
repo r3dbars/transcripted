@@ -66,6 +66,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 
 - `docs/repo-layout.md` — the repo map
 - `docs/agent-closeout.md` — the coordinator handoff line and lane routing
+- `docs/concurrency-debt.md` — Swift concurrency warnings the cleanup PRs left alone (hot-path and audio items), and how the census counts them
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
 - `docs/self-hosted-mac-runner.md` — the owner's Mac as a self-hosted CI runner
 
