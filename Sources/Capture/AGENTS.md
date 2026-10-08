@@ -6,13 +6,13 @@
 
 - dictation start/stop
 - meeting start/stop
-- configurable physical-key triggers. Defaults: Right Option = the one dictation key (not Fn, which also opens emoji) (hold to talk, tap to keep listening), Option-M = meeting. The paste-last-dictation shortcut is no longer registered (`configuredBindings`); its stored binding and `.pasteLastDictation` routing remain but never fire (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
+- configurable physical-key triggers. Defaults: Right Option = the one dictation key (not Fn, which also opens emoji) (hold to talk, tap to keep listening), Option-M = meeting. The global paste-last-dictation binding and routing have been removed; the island’s "Paste again" action remains.
 
 ## Module
 
 `Capture` in `.agents/modules.json`.
 
-- **Owns:** global physical triggers and their routing (dictation, paste-last-dictation, meeting start/stop).
+- **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
 - **Public surface:** `ContextCaptureEngine`, `PhysicalShortcutMatcher`.
 - **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because `ContextCaptureEngine` drives `DictationSessionController` and `FloatingOverlayController` directly; a trigger-sink protocol would let it drop below the UI later.
 - **Entry points:** `ContextCaptureEngine` (owned by `TranscriptedAppState`).
@@ -22,7 +22,7 @@
 ## Key Files
 
 - `ContextCaptureEngine.swift` — accessibility-backed physical trigger detection,
-  shortcut debounce, and routing into dictation, paste-last-dictation, or meeting handlers
+  shortcut debounce, and routing into dictation or meeting handlers
 - `PhysicalShortcutMatcher.swift` — Foundation-pure binding-selection helpers for
   exact/fallback shortcut precedence, release matching, and shared-modifier chord checks
 

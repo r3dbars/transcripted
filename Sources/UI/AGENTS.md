@@ -70,7 +70,7 @@ so tiny transient states do not get duplicated inside controllers.
 - `MenuBar/MenuBarShortcutWarningPresentation.swift` — Foundation-pure copy and click action for the header's shortcut warning (Accessibility access); the macOS Fn key conflict is kept out of the menu and shown in Settings > Shortcuts instead
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPopoverPresentation.swift` — shows the transient status popover and focuses its own window without app-wide activation; a refused show gets one retry from a temporary nonactivating anchor, removed on close or a Space change; left and right clicks share one toggle action
-- `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (Paste Last Dictation keeps its shortcut but has no row)
+- `MenuBar/MenuBarPrimaryActionsView.swift` — the Record and Dictate buttons, side by side at the top of the popover (the island keeps its "Paste again" action; no global paste-last shortcut)
 - `MenuBar/MenuBarPrimaryButtonTitle.swift` — Foundation-pure short titles for those two buttons ("Record", "Stop", "Dictate", "Done"); the full title stays the accessibility label
 - `MenuBar/MenuBarShortcutLabel.swift` — Foundation-pure shortcut text for those buttons: the full shortcut, then the first key of a pair ("Fn / Right ⌥" → "Fn") when the pair doesn't fit
 - `MenuBar/MenuBarUtilityActionsView.swift` — the Open Transcripted, Check for Updates, and Quit rows under the buttons (Settings lives inside Open Transcripted)
