@@ -89,9 +89,27 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.suggestions(query: "jo", people: people, invitees: [], includeOwner: true).map(\.label), ["Jordan Lee"], "Me only shows when the typing could be me")
     }
 
+    runSuite("NotchIslandSpeakerReviewPolicy shows progress toward naming someone on its own until they reach the bar") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.confirmationProgressNote(confirmed: 0, required: 5), "0 of 5 meetings confirmed")
+        assertEqual(Policy.confirmationProgressNote(confirmed: 2, required: 5), "2 of 5 meetings confirmed")
+        assertEqual(Policy.confirmationProgressNote(confirmed: 1, required: 2), "1 of 2 meetings confirmed", "a lineup meeting shows its lower bar")
+        assertEqual(Policy.confirmationProgressNote(confirmed: 5, required: 5), nil, "at the bar there is nothing left to count")
+        assertEqual(Policy.confirmationProgressNote(confirmed: 7, required: 5), nil, "past the bar shows nothing")
+        assertEqual(Policy.confirmationProgressNote(confirmed: 0, required: 0), nil, "no bar, no line")
+        assertEqual(
+            Policy.confirmationProgressHelp(name: "Maya Patel", required: 5),
+            "Once you\u{2019}ve confirmed Maya in 5 meetings, Transcripted names them on its own."
+        )
+        assertEqual(
+            Policy.confirmationProgressHelp(name: "Maya", required: 1),
+            "Once you\u{2019}ve confirmed Maya in 1 meeting, Transcripted names them on its own."
+        )
+    }
+
     runSuite("NotchIslandSpeakerReviewPolicy says what happened after Done") {
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).title, "Everyone’s named")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "Transcripted will know them next time.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "After a few confirmed meetings, Transcripted names them on its own.")
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: "Design sync"), "Who was on Design sync?")

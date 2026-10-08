@@ -867,7 +867,7 @@ extension TranscriptionTaskManager {
                 )
             }.count
 
-            let capturedEntries = namingEntries
+            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
             let capturedRecognizedEntries = recognizedEntries
             // Voices auto-named in this meeting, once each, in the order heard.
             var seenRecognizedNames: Set<String> = []
@@ -1210,7 +1210,7 @@ extension TranscriptionTaskManager {
                 transcriptDate: transcriptDate,
                 notifier: notifier
             )
-            markTaskTranscriptCommitted(taskId: taskId)
+            markTaskTranscriptCommitted(taskId: taskId, transcriptId: transcriptId)
             return true
         }
 

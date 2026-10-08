@@ -39,6 +39,23 @@ enum NotchIslandSpeakerReviewPolicy {
         return .name
     }
 
+    /// The extra line under "Is this Maya?" saying how close Maya is to being
+    /// named on her own: confirmed in `confirmed` distinct meetings before this
+    /// one, out of the `required` this meeting needs. Nil once she's at the bar
+    /// (or with nothing to count), so a recognized-enough person shows no line.
+    static func confirmationProgressNote(confirmed: Int, required: Int) -> String? {
+        guard required > 0, confirmed >= 0, confirmed < required else { return nil }
+        return "\(confirmed) of \(required) meetings confirmed"
+    }
+
+    /// The tooltip and VoiceOver hint that explain the progress line.
+    static func confirmationProgressHelp(name: String, required: Int) -> String {
+        let first = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? name
+        let meetings = required == 1 ? "1 meeting" : "\(required) meetings"
+        return "Once you\u{2019}ve confirmed \(first) in \(meetings), Transcripted names them on its own."
+    }
+
     /// The invitees to offer as one-tap names: people not already named in
     /// this review, in invite order. The first `limit` show; the arrow opens
     /// the rest.
@@ -373,7 +390,7 @@ enum NotchIslandSpeakerReviewPolicy {
     /// The title and line the island shows after Done.
     static func doneCopy(leftForLater: Int) -> (title: String, detail: String) {
         if leftForLater <= 0 {
-            return ("Everyone’s named", "Transcripted will know them next time.")
+            return ("Everyone’s named", "After a few confirmed meetings, Transcripted names them on its own.")
         }
         return ("Names saved", "\(leftForLater) left to name in Speakers.")
     }

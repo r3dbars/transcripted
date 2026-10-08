@@ -205,7 +205,8 @@ final class TranscriptionQueueCoordinator {
         startTrigger: MeetingSessionController.StartTrigger,
         languageSelection: TranscriptionLanguageSelection = .automatic,
         sttModel: TranscriptionModelChoice? = nil,
-        stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil
+        stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil,
+        sourceContentKey: String? = nil
     ) throws -> QueueInsertionOutcome {
         var job = QueuedTranscriptionJob(
             id: UUID(),
@@ -231,6 +232,7 @@ final class TranscriptionQueueCoordinator {
             recordingDate: recordingDate,
             sttModelRawValue: job.sttModel.rawValue,
             languageRawValue: job.languageSelection.rawValue,
+            sourceContentKey: sourceContentKey,
             journalDirectory: importedQueueJournalDirectory,
             scratchDirectory: importedAudioScratchDirectory
         )

@@ -23,4 +23,14 @@ public protocol ImportedTranscriptionRecoverySession: AnyObject, Sendable {
 
     /// A durable failed-queue row now owns the audio.
     func failedQueueHandoffConfirmed()
+
+    /// Content key of the imported source file (hex SHA-256 of its bytes), or
+    /// nil when unknown (older journals). Speaker confirmations from this import
+    /// count once per distinct audio content (`SpeakerConfirmationMeetingID`).
+    /// Local only: never log it or send it anywhere.
+    var sourceContentKey: String? { get }
+}
+
+public extension ImportedTranscriptionRecoverySession {
+    var sourceContentKey: String? { nil }
 }

@@ -169,7 +169,8 @@ extension MeetingSessionController {
                 startTrigger: .fileImport,
                 languageSelection: importLanguage,
                 sttModel: importModel,
-                stoppedAudioRecovery: stoppedAudioRecovery
+                stoppedAudioRecovery: stoppedAudioRecovery,
+                sourceContentKey: preparedAudio.sourceContentKey
             )
         } catch {
             let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(

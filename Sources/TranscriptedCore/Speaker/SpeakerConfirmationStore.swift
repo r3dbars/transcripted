@@ -99,6 +99,16 @@ extension SpeakerDatabase {
         """)
         executeSQL("CREATE INDEX IF NOT EXISTS idx_speaker_confirmation_moves_event ON speaker_confirmation_moves(merge_event_id);")
 
+        // Imported transcripts whose confirmations count toward a content-based
+        // meeting id (SpeakerConfirmationMeetingID), so re-imports and later
+        // confirmations of the same recording land on one ledger row.
+        executeSQL("""
+        CREATE TABLE IF NOT EXISTS speaker_confirmation_meeting_aliases (
+            transcript_id TEXT PRIMARY KEY,
+            meeting_id TEXT NOT NULL
+        );
+        """)
+
         executeSQL("""
         CREATE TABLE IF NOT EXISTS speaker_confirmation_migrations (
             key TEXT PRIMARY KEY,
@@ -254,6 +264,40 @@ extension SpeakerDatabase {
         }
     }
 
+    public func recordConfirmationMeetingAlias(transcriptId: UUID, meetingId: UUID) throws {
+        guard transcriptId != meetingId else { return }
+        let write = { [self] in
+            guard isDatabaseOpen else {
+                throw SQLiteOperationError(
+                    operation: "record confirmation meeting alias", code: SQLITE_MISUSE, detail: "database not open")
+            }
+            let statement = try prepareStatement(
+                "INSERT OR REPLACE INTO speaker_confirmation_meeting_aliases (transcript_id, meeting_id) VALUES (?, ?);",
+                operation: "prepare confirmation meeting alias insert"
+            )
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, (transcriptId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, (meetingId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            try requireDone(statement, operation: "step confirmation meeting alias insert")
+        }
+        if isExecutingOnQueue { try write(); return }
+        try queue.sync { try write() }
+    }
+
+    /// The meeting id a confirmation for `transcriptId` counts toward.
+    private func confirmationMeetingIdImpl(for transcriptId: UUID) throws -> String {
+        let statement = try prepareStatement(
+            "SELECT meeting_id FROM speaker_confirmation_meeting_aliases WHERE transcript_id = ?;",
+            operation: "prepare confirmation meeting alias lookup"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (transcriptId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) {
+            return String(cString: text)
+        }
+        return transcriptId.uuidString
+    }
+
     private func recordUserConfirmationsImpl(_ confirmations: [SpeakerUserConfirmation]) throws {
         guard isDatabaseOpen else {
             throw SQLiteOperationError(
@@ -282,9 +326,11 @@ extension SpeakerDatabase {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
             let confirmedAt = Self.confirmationDateFormatter.string(from: confirmation.confirmedAt)
+            // An imported transcript's confirmations count toward its recording.
+            let meetingId = try confirmationMeetingIdImpl(for: confirmation.transcriptId)
             sqlite3_bind_text(statement, 1, (UUID().uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(statement, 2, (confirmation.profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(statement, 3, (confirmation.transcriptId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, (meetingId as NSString).utf8String, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(statement, 4, (confirmation.kind.rawValue as NSString).utf8String, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(statement, 5, (confirmedAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
             try requireDone(statement, operation: "step speaker confirmation insert")

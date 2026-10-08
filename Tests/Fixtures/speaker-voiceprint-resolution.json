@@ -1,0 +1,31 @@
+{
+  "_comment": "One table for which voiceprint model and speaker database a run uses. Core (SpeakerVoiceprintSelection), the app (SpeakerEmbedderChoiceResolution + SpeakerEmbedderLoadFailureMemory) and the CLI (import-audio --speaker-embedder app) each assert every row, so they cannot drift apart. present = models whose file exists; failed = embedder ids that failed to load on this app build.",
+  "cases": [
+    {"name": "no preference uses ReDimNet2", "stored": null, "env": null, "present": ["redimnet2", "eres2net"], "failed": [],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null},
+    {"name": "stored redimnet2", "stored": "redimnet2", "env": null, "present": ["redimnet2"], "failed": [],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null},
+    {"name": "stored wespeaker from the old switch reads as the default", "stored": "wespeaker", "env": null, "present": ["redimnet2"], "failed": [],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null},
+    {"name": "stored eres2net", "stored": "eres2net", "env": null, "present": ["redimnet2", "eres2net"], "failed": [],
+     "model": "eres2net", "identifier": "eres2net", "database": "speakers_eres2net.sqlite", "fallback": null},
+    {"name": "unknown stored value reads as the default", "stored": "garbage", "env": null, "present": ["redimnet2"], "failed": [],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null},
+    {"name": "env wespeaker wins over the stored preference", "stored": "redimnet2", "env": "wespeaker", "present": ["redimnet2"], "failed": [],
+     "model": "wespeaker", "identifier": null, "database": "speakers.sqlite", "fallback": null},
+    {"name": "env is case-insensitive", "stored": "eres2net", "env": "REDIMNET2", "present": ["redimnet2", "eres2net"], "failed": [],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null},
+    {"name": "env eres2net", "stored": null, "env": "eres2net", "present": ["eres2net"], "failed": [],
+     "model": "eres2net", "identifier": "eres2net", "database": "speakers_eres2net.sqlite", "fallback": null},
+    {"name": "invalid env is ignored", "stored": "eres2net", "env": "garbage", "present": ["eres2net"], "failed": [],
+     "model": "eres2net", "identifier": "eres2net", "database": "speakers_eres2net.sqlite", "fallback": null},
+    {"name": "missing ReDimNet2 model falls back to WeSpeaker", "stored": null, "env": null, "present": [], "failed": [],
+     "model": "redimnet2", "identifier": null, "database": "speakers.sqlite", "fallback": "modelFileMissing"},
+    {"name": "ReDimNet2 that failed to load on this build falls back", "stored": null, "env": null, "present": ["redimnet2"], "failed": ["redimnet2-b4"],
+     "model": "redimnet2", "identifier": null, "database": "speakers.sqlite", "fallback": "failedToLoadOnThisBuild"},
+    {"name": "missing ERes2Net model falls back", "stored": "eres2net", "env": null, "present": ["redimnet2"], "failed": [],
+     "model": "eres2net", "identifier": null, "database": "speakers.sqlite", "fallback": "modelFileMissing"},
+    {"name": "another model's failure does not affect ReDimNet2", "stored": null, "env": null, "present": ["redimnet2"], "failed": ["eres2net"],
+     "model": "redimnet2", "identifier": "redimnet2-b4", "database": "speakers_redimnet2-b4.sqlite", "fallback": null}
+  ]
+}

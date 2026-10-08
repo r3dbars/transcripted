@@ -228,11 +228,94 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         XCTAssertEqual(profileAfter.lastSeen, profileBefore.lastSeen)
     }
 
-    private func seedKnownSpeaker(samples: [Float], models: URL, store: SpeakerDatabase, name: String) async throws -> UUID {
+    /// The app's default voiceprint end to end: a person the app saved in its
+    /// ReDimNet2 database is named by the real binary with no speaker flags, read
+    /// from the app's state folder (here an isolated TRANSCRIPTED_CONTAINER_DIR),
+    /// without changing that database. The same person with 2 of 5 confirmations
+    /// stays numbered and the CLI says why on stderr, while stdout stays one receipt.
+    func testRealExecutableNamesAReDimNet2PersonWithNoSpeakerFlags() async throws {
+        let configuration = try Configuration.fromEnvironment()
+        setenv("TRANSCRIPTED_DISABLE_FILE_LOGGER", "1", 1)
+        guard let modelURL = MeetingImportModels.voiceprintModelURLs(
+            for: .reDimNet2, resourceDirectories: CLIModelPaths.bundledResourceDirectories(),
+            homeDirectory: FileManager.default.homeDirectoryForCurrentUser
+        ).first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let embedder = ReDimNet2Embedder.load(modelURL: modelURL) else {
+            throw XCTSkip("ReDimNet2 model is not installed locally; the app's default voiceprint can't be exercised.")
+        }
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try copyFixture(configuration, into: root)
+        let decoded = try await TranscribeMediaLoader.loadSamples(from: input)
+        let knownName = "Fixture Voice ReDimNet"
+        // The note is dated when the recording was made, like the app's
+        // "Transcribe a file", not when it was transcribed.
+        var noon = DateComponents(); noon.year = 2026; noon.month = 9; noon.day = 1; noon.hour = 12
+        let recordedAt = try XCTUnwrap(Calendar.current.date(from: noon))
+        try FileManager.default.setAttributes([.creationDate: recordedAt, .modificationDate: recordedAt], ofItemAtPath: input.path)
+
+        for (confirmations, nameLikely) in [(SpeakerNamingPolicy.requiredConfirmedMeetings, false), (2, false), (2, true)] {
+            let container = root.appendingPathComponent("container-\(confirmations)-\(nameLikely)", isDirectory: true)
+            let state = container.appendingPathComponent("state", isDirectory: true)
+            try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+            let databaseURL = state.appendingPathComponent("speakers_redimnet2-b4.sqlite")
+            let store = SpeakerDatabase(path: databaseURL.path, thresholds: .reDimNet2B4)
+            let knownID = try await seedKnownSpeaker(
+                samples: decoded.samples, models: configuration.diarizationModels, store: store,
+                name: knownName, embedder: embedder, confirmations: confirmations
+            )
+            XCTAssertEqual(store.getSpeaker(id: knownID)?.embedding.count, ReDimNet2Embedder.dimension)
+            let databaseBefore = try DatabaseProof(databaseURL)
+
+            let output = root.appendingPathComponent("output-\(confirmations)-\(nameLikely)", isDirectory: true)
+            let result = try await runExecutable(
+                configuration.binary,
+                arguments: ["import-audio", input.path, "--output-dir", output.path,
+                            "--models-dir", configuration.models.path,
+                            "--diarization-models-dir", configuration.diarizationModels.path,
+                            "--no-download", "--json"] + (nameLikely ? ["--name-likely-speakers"] : []),
+                root: root, timeout: 600,
+                // Pin the app's default so this run never depends on this Mac's
+                // stored preference; the state folder is the isolated container.
+                extraEnvironment: ["TRANSCRIPTED_CONTAINER_DIR": container.path,
+                                   "TRANSCRIPTED_SPEAKER_EMBEDDER": "redimnet2"]
+            )
+            let receipt = try JSONDecoder().decode(MeetingImportReceipt.self, from: result.stdout)
+            let markdown = try String(contentsOfFile: receipt.transcriptPath, encoding: .utf8)
+            let capture = try assertCapture(markdown, receipt: receipt, configuration: configuration)
+            if ProcessInfo.processInfo.environment["TRANSCRIPTED_CLI_E2E_SHOW_STDERR"] == "1" {
+                print("--- CLI stderr (\(confirmations) confirmations, likely=\(nameLikely)):\n\(result.stderr)")
+            }
+            XCTAssertTrue(result.stderr.contains("Voiceprints: ReDimNet2"), result.stderr)
+            XCTAssertTrue(result.stderr.contains(databaseURL.lastPathComponent), result.stderr)
+            XCTAssertTrue(markdown.contains("\ndate: 2026-09-01\n"), "Note date must be the recording's, not today's.")
+            if confirmations >= SpeakerNamingPolicy.requiredConfirmedMeetings {
+                let named = capture.speakers.filter { $0.name == knownName }
+                XCTAssertFalse(named.isEmpty, "The app's ReDimNet2 person must be named with no speaker flags. stderr: \(result.stderr)")
+                XCTAssertTrue(named.allSatisfy { $0.persistentSpeakerId == knownID.uuidString })
+            } else if nameLikely {
+                let likely = capture.speakers.filter { $0.name == knownName + " (likely)" }
+                XCTAssertFalse(likely.isEmpty, "Opt-in likely naming must hedge the name. stderr: \(result.stderr)")
+                XCTAssertTrue(markdown.contains("source: db_pending"), "A likely name is never a confirmed identity.")
+                XCTAssertFalse(capture.speakers.contains { $0.name == knownName })
+            } else {
+                XCTAssertFalse(capture.speakers.contains { $0.name.hasPrefix(knownName) })
+                XCTAssertTrue(result.stderr.contains("matched \(knownName), but only 2 of 5 confirmed meetings"), result.stderr)
+            }
+            XCTAssertEqual(try DatabaseProof(databaseURL), databaseBefore, "The CLI must never write the live speaker database.")
+            XCTAssertEqual(store.allSpeakers().count, 1)
+        }
+    }
+
+    private func seedKnownSpeaker(
+        samples: [Float], models: URL, store: SpeakerDatabase, name: String,
+        embedder: (any SpeakerSegmentEmbedder)? = nil,
+        confirmations: Int = SpeakerNamingPolicy.requiredConfirmedMeetings
+    ) async throws -> UUID {
         guard let root = MeetingImportModels.fluidAudioRoot(for: models) else {
             throw Failure("Fixture diarization models are incomplete.")
         }
-        let diarizer = await MainActor.run { DiarizationService(bundleProvider: { _ in root }) }
+        let diarizer = await MainActor.run { DiarizationService(bundleProvider: { _ in root }, segmentEmbedder: embedder) }
         await diarizer.initialize()
         guard await diarizer.isReady else {
             throw Failure("Fixture diarization models could not initialize; no download fallback is enabled.")
@@ -247,8 +330,8 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         }
         let segments = EmbeddingClusterer.postProcess(
             segments: rawSegments, existingProfiles: [], pairwiseMergeThreshold: nil,
-            consolidationThreshold: SpeakerEmbeddingThresholds.weSpeaker.consolidation,
-            thresholds: .weSpeaker
+            consolidationThreshold: (embedder?.thresholds ?? .weSpeaker).consolidation,
+            thresholds: embedder?.thresholds ?? .weSpeaker
         )
         let eligible = segments.filter { $0.duration >= 1 && $0.qualityScore >= 0.3 && $0.embedding?.isEmpty == false }
         let grouped = Dictionary(grouping: eligible, by: \.speakerId)
@@ -260,7 +343,7 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         let embedding = Transcription.computeMeanEmbedding(dominant.compactMap(\.embedding))
         let profile = store.addOrUpdateSpeaker(embedding: embedding)
         store.setDisplayName(id: profile.id, name: name)
-        try store.recordUserConfirmations((0..<SpeakerNamingPolicy.requiredConfirmedMeetings).map { _ in
+        try store.recordUserConfirmations((0..<confirmations).map { _ in
             SpeakerUserConfirmation(profileId: profile.id, transcriptId: UUID(), kind: .confirmed)
         })
         return profile.id
@@ -308,7 +391,7 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
 
     private func runExecutable(
         _ binary: URL, arguments: [String], root: URL, timeout: TimeInterval,
-        expectSuccess: Bool = true, interrupt: Int32? = nil
+        expectSuccess: Bool = true, interrupt: Int32? = nil, extraEnvironment: [String: String] = [:]
     ) async throws -> ProcessResult {
         let fm = FileManager.default
         let output = root.appendingPathComponent("stdout-\(UUID().uuidString).txt")
@@ -337,6 +420,7 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         process.standardOutput = stdout
         process.standardError = stderr
         var environment = ProcessInfo.processInfo.environment
+        environment.merge(extraEnvironment) { _, extra in extra }
         environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
         let childTemp = root.appendingPathComponent("child-tmp-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: childTemp, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])

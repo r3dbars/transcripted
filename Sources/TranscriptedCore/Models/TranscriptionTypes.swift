@@ -334,6 +334,10 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
     public let sessionEmbedding: [Float]?   // mean embedding from the current meeting
     public let matchedProfileSnapshot: SpeakerProfile? // pre-meeting DB profile for correction rollback
+    /// For an "Is this …?" row: how many distinct meetings this person was
+    /// confirmed in before this one, and how many this meeting needs before
+    /// Transcripted names them on its own. Nil when there's nothing to show.
+    public var confirmationProgress: SpeakerNamingConfirmationProgress?
 
     public init(
         id: UUID,
@@ -365,6 +369,21 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
         self.needsConfirmation = needsConfirmation
         self.sessionEmbedding = sessionEmbedding
         self.matchedProfileSnapshot = matchedProfileSnapshot
+    }
+}
+
+/// Progress toward silent naming for one suggested person, as the review shows it.
+public struct SpeakerNamingConfirmationProgress: Sendable, Equatable {
+    /// Distinct meetings the person was confirmed in before this review.
+    public let confirmedMeetings: Int
+    /// Confirmed meetings needed before Transcripted names them on its own in a
+    /// meeting like this one (`SpeakerNamingPolicy.requiredConfirmedMeetings`,
+    /// or the lower lineup bar when their name is on the meeting's lineup).
+    public let requiredMeetings: Int
+
+    public init(confirmedMeetings: Int, requiredMeetings: Int) {
+        self.confirmedMeetings = confirmedMeetings
+        self.requiredMeetings = requiredMeetings
     }
 }
 

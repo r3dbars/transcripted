@@ -295,7 +295,11 @@ extension TranscriptionTaskManager {
                                                 $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
                                             )
                                         },
-                                        transcriptId: transcriptId
+                                        // Re-imports of identical audio count once.
+                                        transcriptId: SpeakerConfirmationMeetingID.resolve(
+                                            transcriptId: transcriptId,
+                                            importedContentKey: importedRecoverySession?.sourceContentKey
+                                        )
                                     ),
                                     speakerDB: speakerDB
                                 )

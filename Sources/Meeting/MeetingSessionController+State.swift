@@ -460,7 +460,7 @@ final class MeetingSessionController: ObservableObject {
         // A missing model, or one that failed to load on this build, returns nil:
         // native WeSpeaker embedding AND the default speakers.sqlite. A load that
         // fails later yields no vectors, so 256-d vectors never land in a 192-d DB.
-        let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
+        let embedderChoice = SpeakerEmbedderChoiceResolution.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
         // Nemotron by default, with a hidden switch back to pyannote
         // (DiarizationBackendPreferences). Read once here, so a change takes

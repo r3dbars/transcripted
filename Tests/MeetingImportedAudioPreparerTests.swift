@@ -198,7 +198,7 @@ func testMeetingImportedAudioPreparer() async {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = localTimeZone
 
-        let dateOnly = MeetingImportedAudioPreparer.parseMetadataDate(
+        let dateOnly = ImportedRecordingDate.parseMetadataDate(
             "2025-02-03",
             defaultTimeZone: localTimeZone
         )!
@@ -206,7 +206,7 @@ func testMeetingImportedAudioPreparer() async {
         assertEqual(calendar.component(.month, from: dateOnly), 2, "date-only metadata should keep the local month")
         assertEqual(calendar.component(.day, from: dateOnly), 3, "date-only metadata should not shift to the previous local day")
 
-        let localDateTime = MeetingImportedAudioPreparer.parseMetadataDate(
+        let localDateTime = ImportedRecordingDate.parseMetadataDate(
             "2025-02-03 09:15:00",
             defaultTimeZone: localTimeZone
         )!
@@ -223,7 +223,7 @@ func testMeetingImportedAudioPreparer() async {
         item.identifier = .commonIdentifierCreationDate
         item.value = "2025-02-03" as NSString
 
-        let parsed = await MeetingImportedAudioPreparer.metadataDate(
+        let parsed = await ImportedRecordingDate.metadataDate(
             item,
             defaultTimeZone: localTimeZone
         )!
@@ -238,7 +238,7 @@ func testMeetingImportedAudioPreparer() async {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = utc
 
-        let parsed = MeetingImportedAudioPreparer.parseMetadataDate(
+        let parsed = ImportedRecordingDate.parseMetadataDate(
             "2025-02-03T09:15:00.500Z",
             defaultTimeZone: utc
         )!
@@ -256,7 +256,7 @@ func testMeetingImportedAudioPreparer() async {
         calendar.timeZone = utc
 
         // 2025-02-03 09:15:00 at -05:00 is 2025-02-03 14:15:00 UTC.
-        let parsed = MeetingImportedAudioPreparer.parseMetadataDate(
+        let parsed = ImportedRecordingDate.parseMetadataDate(
             "2025-02-03T09:15:00-0500",
             defaultTimeZone: utc
         )!
@@ -269,75 +269,75 @@ func testMeetingImportedAudioPreparer() async {
         let utc = TimeZone(secondsFromGMT: 0)!
 
         assertNil(
-            MeetingImportedAudioPreparer.parseMetadataDate("", defaultTimeZone: utc),
+            ImportedRecordingDate.parseMetadataDate("", defaultTimeZone: utc),
             "empty metadata strings should not produce a date"
         )
         assertNil(
-            MeetingImportedAudioPreparer.parseMetadataDate("   \n\t  ", defaultTimeZone: utc),
+            ImportedRecordingDate.parseMetadataDate("   \n\t  ", defaultTimeZone: utc),
             "whitespace-only metadata should not produce a date"
         )
         assertNil(
-            MeetingImportedAudioPreparer.parseMetadataDate("banana", defaultTimeZone: utc),
+            ImportedRecordingDate.parseMetadataDate("banana", defaultTimeZone: utc),
             "unrecognized tokens should not produce a date so the resolver falls back to the file system"
         )
     }
 
     runSuite("MeetingImportedAudioPreparer treats only genuine recording tags as recording dates") {
         assertTrue(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "comn/creationdate"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "comn/creationdate"),
             "the common creation-date tag is a recording date"
         )
         assertTrue(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdrc recordingtime"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "id3/tdrc recordingtime"),
             "the ID3 recording-time frame is a recording date"
         )
         assertTrue(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "quicktimemetadatacreationdate"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "quicktimemetadatacreationdate"),
             "the QuickTime creation-date tag is a recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "itsk/purchasedate"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "itsk/purchasedate"),
             "an iTunes purchase date must never be treated as the recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tenc encodingtime"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "id3/tenc encodingtime"),
             "an encode time must never be treated as the recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdtg taggingtime"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "id3/tdtg taggingtime"),
             "a tagging time must never be treated as the recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdrl releasetime"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "id3/tdrl releasetime"),
             "a release date must never be treated as the recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "albumreleasedate"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "albumreleasedate"),
             "an album release date must never be treated as the recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "modificationdate"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "modificationdate"),
             "a modification date is not a recording date for matching purposes"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "title"),
+            ImportedRecordingDate.isRecordingDateMetadata(keyString: "title"),
             "non-date metadata is not a recording date"
         )
     }
 
     runSuite("MeetingImportedAudioPreparer ranks explicit creation tags above looser recording tags") {
         assertEqual(
-            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "comn/creationdate"),
+            ImportedRecordingDate.recordingDatePriority(forKeyString: "comn/creationdate"),
             0,
             "explicit creation tags rank highest"
         )
         assertEqual(
-            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "id3/tdrc recordingtime"),
+            ImportedRecordingDate.recordingDatePriority(forKeyString: "id3/tdrc recordingtime"),
             1,
             "recording-time tags rank below explicit creation tags"
         )
         assertEqual(
-            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "somethingelse"),
+            ImportedRecordingDate.recordingDatePriority(forKeyString: "somethingelse"),
             2,
             "anything else ranks last"
         )
@@ -349,7 +349,7 @@ func testMeetingImportedAudioPreparer() async {
         let laterEdit = recordedDay.addingTimeInterval(3_600)
         let dummy = URL(fileURLWithPath: "/dev/null")
 
-        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+        let resolved = ImportedRecordingDate.reliableFilesystemDate(
             from: dummy,
             sourceAttributes: [.creationDate: recordedDay, .modificationDate: laterEdit],
             now: now
@@ -367,7 +367,7 @@ func testMeetingImportedAudioPreparer() async {
         let originalRecording = now.addingTimeInterval(-30 * 86_400)
         let dummy = URL(fileURLWithPath: "/dev/null")
 
-        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+        let resolved = ImportedRecordingDate.reliableFilesystemDate(
             from: dummy,
             sourceAttributes: [.creationDate: copyTime, .modificationDate: originalRecording],
             now: now
@@ -383,7 +383,7 @@ func testMeetingImportedAudioPreparer() async {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let dummy = URL(fileURLWithPath: "/dev/null")
 
-        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+        let resolved = ImportedRecordingDate.reliableFilesystemDate(
             from: dummy,
             sourceAttributes: [
                 .creationDate: now.addingTimeInterval(-3),
@@ -401,23 +401,23 @@ func testMeetingImportedAudioPreparer() async {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
 
         assertTrue(
-            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(-30 * 86_400), now: now),
+            ImportedRecordingDate.isPlausibleEmbeddedDate(now.addingTimeInterval(-30 * 86_400), now: now),
             "a recent embedded recording date is plausible"
         )
         assertTrue(
-            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(30), now: now),
+            ImportedRecordingDate.isPlausibleEmbeddedDate(now.addingTimeInterval(30), now: now),
             "minor forward clock skew should still be accepted"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: 0), now: now),
+            ImportedRecordingDate.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: 0), now: now),
             "the 1970 Unix epoch is a sentinel, not a recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: -2_082_844_800), now: now),
+            ImportedRecordingDate.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: -2_082_844_800), now: now),
             "the 1904 QuickTime epoch is a sentinel, not a recording date"
         )
         assertFalse(
-            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(3_600), now: now),
+            ImportedRecordingDate.isPlausibleEmbeddedDate(now.addingTimeInterval(3_600), now: now),
             "a date an hour in the future is never a real recording time"
         )
     }
@@ -932,6 +932,72 @@ func testMeetingImportedAudioPreparer() async {
             notPreserved.contains("Import the original file again"),
             "an unrecoverable copied import should give an honest recovery action"
         )
+    }
+
+    await runSuite("Every import of the same audio file gets the same content key, and different audio gets a different one") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let firstURL = root.appendingPathComponent("Weekly sync.wav")
+        let sameBytesURL = root.appendingPathComponent("Weekly sync copy.wav")
+        let otherURL = root.appendingPathComponent("Other call.wav")
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bytes = Data((0..<10_000).map { UInt8($0 % 251) })
+        FileManager.default.createFile(atPath: firstURL.path, contents: bytes)
+        FileManager.default.createFile(atPath: sameBytesURL.path, contents: bytes)
+        FileManager.default.createFile(atPath: otherURL.path, contents: bytes + Data([1]))
+
+        let first = try! await MeetingImportedAudioPreparer.prepareImportedAudio(from: firstURL, scratchDirectory: scratchURL)
+        let again = try! await MeetingImportedAudioPreparer.prepareImportedAudio(from: firstURL, scratchDirectory: scratchURL)
+        let renamedCopy = try! await MeetingImportedAudioPreparer.prepareImportedAudio(from: sameBytesURL, scratchDirectory: scratchURL)
+        let other = try! await MeetingImportedAudioPreparer.prepareImportedAudio(from: otherURL, scratchDirectory: scratchURL)
+
+        assertEqual(first.sourceContentKey?.count, 64, "the content key is a hex SHA-256")
+        assertEqual(first.sourceContentKey, again.sourceContentKey, "importing the same file twice gives the same key")
+        assertEqual(first.sourceContentKey, renamedCopy.sourceContentKey, "a renamed copy of the same audio gives the same key")
+        assertTrue(first.sourceContentKey != other.sourceContentKey, "different audio gives a different key")
+        assertEqual(
+            first.sourceContentKey,
+            try! ImportedAudioContentKey.ofFile(at: firstURL),
+            "hashing while copying matches hashing the file on its own (the video path)"
+        )
+        assertEqual(
+            try! ImportedAudioContentKey.ofFile(at: root.appendingPathComponent("missing.wav")),
+            nil,
+            "an unreadable file gives no key instead of failing the import"
+        )
+    }
+
+    runSuite("The import journal keeps the source content key across a relaunch, and older journals load without one") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
+        let audioURL = scratchURL.appendingPathComponent("keyed.wav")
+        let id = UUID()
+        let key = String(repeating: "ab", count: 32)
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        try! Data([0, 1, 2, 3]).write(to: audioURL)
+        var owner: ImportedTranscriptionQueueJournalSession? = try! ImportedTranscriptionQueueJournal.createClaimed(
+            id: id,
+            audioURL: audioURL,
+            recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
+            sttModelRawValue: "parakeet",
+            sourceContentKey: key,
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+        assertEqual(owner?.sourceContentKey, key, "the live session carries the key to the naming flow")
+        owner = nil
+        let recovered = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
+        assertEqual(recovered?.sourceContentKey, key, "a recovered import still dedupes confirmations by its audio")
+        try! FileManager.default.removeItem(at: audioURL)
+        recovered?.scratchCleanupConfirmed()
+
+        let legacy = """
+        {"id":"\(UUID().uuidString)","audioFilename":"old.wav","recordingDate":0,"enqueuedAt":0,"sttModelRawValue":"parakeet"}
+        """
+        let decoded = try? JSONDecoder().decode(ImportedTranscriptionQueueJournalRecord.self, from: Data(legacy.utf8))
+        assertNotNil(decoded, "a journal written before content keys existed still loads")
+        assertEqual(decoded?.sourceContentKey, nil, "an older journal has no content key")
     }
 }
 

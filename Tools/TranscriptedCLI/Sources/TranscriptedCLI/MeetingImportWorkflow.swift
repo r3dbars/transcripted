@@ -46,12 +46,16 @@ enum MeetingImportWorkflow {
             log: log
         )
         try Task.checkCancellation()
-        let embedder = try MeetingImportModels.speakerEmbedder(choice: command.speakerEmbedder)
-        let sourceDB = command.speakerDb.map { URL(fileURLWithPath: $0) }
-            ?? CoreStoragePaths.default.speakerDB.deletingLastPathComponent()
-                .appendingPathComponent(embedder == nil ? "speakers.sqlite" : "speakers_eres2net.sqlite")
+        let voiceprint = try MeetingImportModels.voiceprint(choice: command.speakerEmbedder)
+        let embedder = voiceprint.embedder
+        let sourceDB = command.speakerDb.map { URL(fileURLWithPath: $0) } ?? voiceprint.databaseURL
         let snapshot = job.appendingPathComponent("speakers.sqlite")
-        if !command.noSpeakerIdentification {
+        // Why nobody can be named this run, when that's known up front.
+        var identificationUnavailable: String?
+        if command.noSpeakerIdentification {
+            identificationUnavailable = "speaker identification is off (--no-speaker-identification)"
+        } else {
+            log("Voiceprints: \(voiceprint.summary). Saved speakers: \(sourceDB.path)")
             if fm.fileExists(atPath: sourceDB.path) {
                 do {
                     try SpeakerDatabaseSnapshot.create(sourceURL: sourceDB, destinationURL: snapshot)
@@ -60,16 +64,28 @@ enum MeetingImportWorkflow {
                     // The default missing/unreadable store permits numbered speakers.
                     if command.speakerDb != nil { throw error }
                     log("Warning: could not read saved speakers; using numbered speakers (\(error.localizedDescription)).")
+                    identificationUnavailable = "the saved speaker database couldn't be read"
                 }
             } else if command.speakerDb != nil {
                 throw ValidationError("Speaker database not found: \(sourceDB.path)")
             } else {
-                log("No saved speaker database; using numbered speakers.")
+                identificationUnavailable = voiceprint.missingDatabaseReason(fileManager: fm)
+                log("No saved speaker database for \(voiceprint.modelName); using numbered speakers.")
             }
         }
 
-        let store = SpeakerDatabase(path: snapshot.path)
+        // The snapshot holds this model's vectors, so it uses this model's bars.
+        let store = SpeakerDatabase(path: snapshot.path, thresholds: voiceprint.thresholds)
         let originalProfiles = store.allSpeakers()
+        // A database holds one model's voiceprints. Another model's vectors can't
+        // match anyone, so say so instead of quietly numbering everyone.
+        if identificationUnavailable == nil,
+           let mismatch = MeetingImportVoiceprint.dimensionMismatch(profiles: originalProfiles, voiceprint: voiceprint) {
+            if command.speakerDb != nil {
+                throw ValidationError("--speaker-db holds \(mismatch) voiceprints, but \(voiceprint.modelName) makes \(voiceprint.dimension)-dimension ones. Pick the matching --speaker-embedder.")
+            }
+            identificationUnavailable = "the saved speaker database holds a different voiceprint model's people"
+        }
         let speech = await MainActor.run { MeetingImportSpeechEngine(manager: manager) }
         let pipeline = await MainActor.run {
             let diarization = DiarizationService(
@@ -90,10 +106,24 @@ enum MeetingImportWorkflow {
         log("Transcribed in \(totalSeconds) s: \(speechStats.0) speech-to-text calls taking \(modelSeconds) s (packing \(speechStats.2 ? "on" : "off")).")
         guard result.systemWordCount > 0 else { throw PipelineError.noSpeechDetected }
 
-        let identities = MeetingImportSpeakerMapping.resolve(result: result, originalProfiles: originalProfiles, store: store)
+        let identities = MeetingImportSpeakerMapping.resolve(
+            result: result, originalProfiles: originalProfiles, store: store,
+            thresholds: voiceprint.thresholds, nameLikelySpeakers: command.nameLikelySpeakers,
+            unavailableReason: identificationUnavailable
+        )
+        for key in identities.reasons.keys.sorted() {
+            let label = identities.mappings[key].map { $0.isConfirmedIdentity ? $0.displayName : "Speaker \($0.speakerId)" } ?? key
+            log("\(label): \(identities.reasons[key] ?? "")")
+        }
         let captureID = UUID()
         let title = command.title ?? input.deletingPathExtension().lastPathComponent
-        let date = Date()
+        // Same note date as the app's "Transcribe a file": when the recording was
+        // made (embedded date, else a file timestamp that predates this import),
+        // not when it was transcribed.
+        let date = await ImportedRecordingDate.resolve(
+            from: input,
+            sourceAttributes: (try? fm.attributesOfItem(atPath: input.path)) ?? [:]
+        )
         let markdown = TranscriptSaver.formatTranscriptMarkdown(
             result: result, transcriptId: captureID,
             speakerMappings: identities.mappings, speakerSources: identities.sources, speakerDbIds: identities.databaseIDs,
@@ -254,25 +284,6 @@ enum MeetingImportModels {
         diarizationRequiredPaths.allSatisfy { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
-    static func speakerEmbedder(choice: String) throws -> (any SpeakerSegmentEmbedder)? {
-        let preferences = UserDefaults.standard.persistentDomain(forName: "com.justinbetker.draft")
-        let allowed = ["wespeaker", "eres2net"]
-        let environmentChoice = ProcessInfo.processInfo.environment["TRANSCRIPTED_SPEAKER_EMBEDDER"]?.lowercased()
-        let preference = preferences?["speaker-embedder-preference"] as? String
-        let appChoice = environmentChoice.flatMap { allowed.contains($0) ? $0 : nil }
-            ?? preference.flatMap { allowed.contains($0) ? $0 : nil } ?? "wespeaker"
-        let resolved = choice == "app" ? appChoice : choice
-        guard resolved == "eres2net" else { return nil }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = CLIModelPaths.bundledResourceDirectories().map {
-            $0.appendingPathComponent("eres2net-embedding/Model.mlmodelc")
-        } + [home.appendingPathComponent("Library/Application Support/FluidAudio/Models/eres2net-embedding/Model.mlmodelc")]
-        for model in candidates where FileManager.default.fileExists(atPath: model.path) {
-            if let embedder = ERes2NetEmbedder(modelURL: model) { return embedder }
-        }
-        if choice == "eres2net" { throw ValidationError("ERes2Net was explicitly selected but its local model could not load. Install it in Transcripted, or select --speaker-embedder wespeaker.") }
-        MeetingImportWorkflow.log("Warning: the app's ERes2Net model is unavailable; using WeSpeaker and its separate speaker database, as the app does.")
-        return nil
-    }
+    // Voiceprint resolution lives in MeetingImportVoiceprint.swift.
 }
 #endif

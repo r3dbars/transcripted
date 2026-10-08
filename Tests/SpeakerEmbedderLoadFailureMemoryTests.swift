@@ -20,7 +20,7 @@ func testSpeakerEmbedderLoadFailureMemory() {
     }
 
     func launchDatabase(_ memory: SpeakerEmbedderLoadFailureMemory, present: Bool = true) -> String {
-        SpeakerEmbedderPreferences.speakerDBFileName(
+        SpeakerVoiceprintSelection.databaseFileName(
             forEmbedderIdentifier: memory.launchModelIdentifier(chosen: model, modelFileIsPresent: present)
         )
     }

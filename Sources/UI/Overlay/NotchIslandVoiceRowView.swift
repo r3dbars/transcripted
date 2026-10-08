@@ -293,6 +293,11 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         case (_, .confirm(let name)) where answer == .none:
             text.addArrangedSubview(title("Is this \(name)?"))
             text.addArrangedSubview(caption(quote))
+            if let progress = progressNote {
+                let line = caption(progress)
+                line.toolTip = progressHelp(name: name)
+                text.addArrangedSubview(line)
+            }
         default:
             text.addArrangedSubview(title(isEditing ? "Who is this?" : "Unknown voice"))
             text.addArrangedSubview(caption(prefilledUntouched ? NotchIslandSpeakerReviewPolicy.prefillNote : quote))
@@ -496,6 +501,20 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return button
     }
 
+    /// "2 of 5 meetings confirmed" under "Is this …?", until they're at the bar.
+    private var progressNote: String? {
+        entry.confirmationProgress.flatMap {
+            NotchIslandSpeakerReviewPolicy.confirmationProgressNote(confirmed: $0.confirmedMeetings, required: $0.requiredMeetings)
+        }
+    }
+
+    private func progressHelp(name: String) -> String {
+        NotchIslandSpeakerReviewPolicy.confirmationProgressHelp(
+            name: name,
+            required: entry.confirmationProgress?.requiredMeetings ?? SpeakerNamingPolicy.requiredConfirmedMeetings
+        )
+    }
+
     private var accessibilitySummary: String {
         if let lock { return NotchIslandSpeakerReviewPolicy.lockNote(lock) }
         switch (answer, question) {
@@ -503,7 +522,9 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         case (.named(let label), _):
             return "\(knownPeopleByLabel[label]?.displayName ?? label), \(isRecognized ? "corrected" : "named")"
         case (.none, _) where isRecognized: return "\(entry.currentName ?? "Voice"), recognized"
-        case (.none, .confirm(let name)): return "Is this \(name)?"
+        case (.none, .confirm(let name)):
+            guard let progress = progressNote else { return "Is this \(name)?" }
+            return "Is this \(name)? \(progress). \(progressHelp(name: name))"
         default: return "Unnamed voice"
         }
     }

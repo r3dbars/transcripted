@@ -374,10 +374,25 @@ public class TranscriptionTaskManager: ObservableObject {
             .compactMap { $0?.standardizedFileURL.path }
     }
 
-    func markTaskTranscriptCommitted(taskId: UUID) {
+    func markTaskTranscriptCommitted(taskId: UUID, transcriptId: UUID? = nil) {
         let audio = tasks[taskId]?.audio
         tasks[taskId] = .committed(audio: audio)
         audio?.importedRecoverySession?.transcriptCommitConfirmed()
+        // An imported recording's confirmations count once per recording, whichever
+        // path later records them (review, re-transcription, Settings, merge).
+        // One small SQLite insert, like the review's own confirmation writes.
+        if let transcriptId, let key = audio?.importedRecoverySession?.sourceContentKey {
+            do {
+                try transcription.speakerDB.recordConfirmationMeetingAlias(
+                    transcriptId: transcriptId,
+                    meetingId: SpeakerConfirmationMeetingID.forImportedContent(key: key)
+                )
+            } catch {
+                AppLogger.speakers.warning("Could not record the imported recording's confirmation meeting", [
+                    "error": error.localizedDescription
+                ])
+            }
+        }
         // The imported journal remains through scratch cleanup. The separate
         // live-recording journal can retire once the transcript is durable.
         if let audio {
