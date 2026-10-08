@@ -101,8 +101,8 @@ func testObservabilityLogWriter() async {
             engineState: nil,
             infoDictionary: [
                 "CFBundleVersion": "4321",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "beta",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc1234",
+                AnalyticsInfoPlistKeys.buildChannelInfoKey: "beta",
+                AnalyticsInfoPlistKeys.buildRevisionInfoKey: "abc1234",
             ],
             timestamp: "2026-05-26T12:00:00.000Z",
             appVersion: "1.2.3",

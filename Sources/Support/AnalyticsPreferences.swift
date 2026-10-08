@@ -12,3 +12,13 @@ enum AnalyticsPreferences {
         userDefaults.set(enabled, forKey: enabledKey)
     }
 }
+
+/// Info.plist keys for the anonymous-analytics build configuration. They live
+/// here (not in `AnalyticsRuntimeConfiguration`) because the Claude Desktop
+/// helper installer in Support copies the same values into the helper's config.
+enum AnalyticsInfoPlistKeys {
+    static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
+    static let hostInfoKey = "TranscriptedPostHogHost"
+    static let buildChannelInfoKey = "TranscriptedBuildChannel"
+    static let buildRevisionInfoKey = "TranscriptedBuildRevision"
+}

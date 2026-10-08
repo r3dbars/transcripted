@@ -46,6 +46,94 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("a courtesy opener does not hide a decision or action item in the same sentence") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Sounds good, we'll go with Postgres.
+
+        **00:12**  [Mic/Justin]
+        Thanks everyone, I'll send the deck Friday.
+
+        **00:20**  [System/Maya]
+        Thanks everyone, that was a really productive session today.
+
+        **00:24**  [Mic/Justin]
+        Thanks everyone!
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.decisions.contains("we'll go with Postgres"),
+            "a decision after a courtesy opener should be kept, got: \(sections.decisions)"
+        )
+        assertTrue(
+            sections.actionItems.contains("send the deck Friday"),
+            "an action item after a courtesy opener should be kept, got: \(sections.actionItems)"
+        )
+        assertFalse(
+            sections.summary.lowercased().contains("productive session"),
+            "a courtesy sentence with no decision or action cue is still small talk, got: \(sections.summary)"
+        )
+        assertFalse(
+            (sections.decisions + sections.actionItems + sections.openQuestions).contains("Thanks everyone!"),
+            "pure courtesy lines stay filtered"
+        )
+    }
+
+    runSuite("courtesy closers with a weak action phrase stay small talk") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Thanks everyone, let me know if anything comes up.
+
+        **00:05**  [Mic/Justin]
+        Sounds good, I'll see you then.
+
+        **00:09**  [System/Maya]
+        Have a good weekend, let's catch up Monday.
+
+        **00:12**  [Mic/Justin]
+        No worries, I have to run to another call.
+
+        **00:13**  [System/Maya]
+        Talk soon, I'll let you go.
+
+        **00:14**  [Mic/Justin]
+        Have a good one, I'll talk to you later.
+
+        **00:14**  [System/Maya]
+        Sounds good, I'll catch you later.
+
+        **00:15**  [System/Maya]
+        We'll go with the blue logo, sounds good.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertEqual(sections.actionItems, "None found.", "courtesy closers are not action items, got: \(sections.actionItems)")
+        for closer in ["let me know", "see you then", "catch up Monday", "run to another call", "let you go", "talk to you later", "catch you later"] {
+            assertFalse(
+                (sections.summary + sections.decisions + sections.openQuestions).contains(closer),
+                "courtesy closer should stay out of every section: \(closer)"
+            )
+        }
+        assertTrue(
+            sections.decisions.contains("blue logo"),
+            "a decision followed by a courtesy tail is still a decision, got: \(sections.decisions)"
+        )
+    }
+
+    runSuite("a real deadline that says have to go through is not a sign-off") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        No worries, we have to go through the contract by Friday.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("go through the contract"),
+            "\"have to go through\" is work, not a sign-off, got: \(sections.actionItems)"
+        )
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]
