@@ -164,7 +164,7 @@ extension DictationSessionController {
             let trigger = context["trigger"] ?? DictationTrigger.unknown.rawValue
             let correlationID = context["correlation_id"]
             let artifactExists = ActivationTelemetry.trackDictationArtifactSaved(
-                saved: saved,
+                savedURL: saved.url,
                 delivery: delivery.rawValue,
                 durationBucket: durationBucket,
                 trigger: trigger,
