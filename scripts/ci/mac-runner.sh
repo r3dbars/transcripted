@@ -312,6 +312,46 @@ self_test() {
   got="$(next_backoff 60)";   expect "$got" "120" "second backoff"
   got="$(next_backoff 1800)"; expect "$got" "1800" "backoff cap"
 
+  # Exercise the real rerouting loop with synthetic run IDs. No GitHub calls.
+  got="$(
+    run_busy_here() { if [ "$1" = 10 ]; then return 0; elif [ "$1" = 16 ]; then return 2; else return 1; fi; }
+    reroute_run() { echo "$1"; }
+    set_heartbeat() { :; }
+    reroute_stuck_runs $'10 1200\n16 1300\n11 1200\n12 900\n13 1201\n14 1202\n15 1203' auto boot
+  )"
+  expect "$got" $'11\n13\n14' "unknown VM identity preserves active run but reroutes three stranded runs"
+  got="$(
+    run_busy_here() { if [ "$1" = 16 ]; then return 2; else return 1; fi; }
+    reroute_run() { echo "$1"; }
+    set_heartbeat() { :; }
+    reroute_stuck_runs $'16 1200\n17 1200' auto boot
+  )"
+  expect "$got" 17 "unknown run activity preserves that run without blocking a known-idle run"
+
+  got="$(
+    run_busy_here() { return 1; }
+    reroute_run() { echo "$1"; }
+    set_heartbeat() { :; }
+    reroute_stuck_runs '11 1200' always boot
+  )"
+  expect "$got" "" "always mode preserves waiting runs even during an unidentified boot"
+  got="$(
+    gh() { return 1; }
+    if run_busy_here 99; then echo 0; else echo "$?"; fi
+  )"
+  expect "$got" 2 "GitHub lookup failure leaves run activity unknown"
+  got="$(
+    gh() { echo malformed; }
+    if run_busy_here 99; then echo 0; else echo "$?"; fi
+  )"
+  expect "$got" 2 "malformed job count leaves run activity unknown"
+  got="$(
+    gh() { echo 0; }
+    if run_busy_here 99; then echo 0; else echo "$?"; fi
+  )"
+  expect "$got" 1 "explicit zero busy jobs permits rerouting"
+
+
   state_dir_ok "/Users/x/.transcripted-ci" || expect bad good "state dir"
   state_dir_ok "/Users/x" && expect good bad "home as state dir"
   state_dir_ok "/Users/x/.transcripted-vm" && expect good bad "#1790's home as state dir"
@@ -333,6 +373,27 @@ self_test() {
     exit 1
   fi
   echo "mac-runner self-test: ok"
+}
+
+# Reroute only stranded runs, even while another slot's VM identity is unknown.
+# A booting slot still prevents another VM from starting; it must not prevent
+# an unrelated old queued run from using hosted capacity.
+reroute_stuck_runs() {
+  local waiting="$1" mode="$2" block="$3" run rerouted=0
+  [ "$mode" != always ] || return 0
+  for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do
+    [ "$rerouted" -lt 3 ] || break
+    if run_busy_here "$run"; then
+      continue
+    else
+      # Only explicit known-idle (1) may be cancelled; lookup errors (2)
+      # must preserve a possibly active run on an unidentified VM.
+      case "$?" in 1) ;; *) continue ;; esac
+    fi
+    reroute_run "$run"
+    rerouted=$((rerouted + 1))
+    set_heartbeat "$block"
+  done
 }
 
 # --- host helpers ------------------------------------------------------------------
@@ -486,8 +547,9 @@ api_quota_low() {
 run_busy_here() {
   local n
   n="$(gh api "repos/$REPO/actions/runs/$1/jobs?filter=latest&per_page=100" --jq \
-    "[.jobs[] | select(.status == \"in_progress\" and ((.labels // []) | any(. == \"$LABEL\")))] | length")" || return 1
-  [ "${n:-0}" -gt 0 ]
+    "[.jobs[] | select(.status == \"in_progress\" and ((.labels // []) | any(. == \"$LABEL\")))] | length")" || return 2
+  case "$n" in ""|*[!0-9]*) return 2 ;; esac
+  [ "$n" -gt 0 ]
 }
 
 reroute_run() {
@@ -1442,16 +1504,9 @@ serve() {
       [ "$age" -le "$oldest" ] || oldest="$age"
     done <<< "$waiting"
     # MAC_RUNNER_MODE=always: jobs wait for this Mac instead of going to GitHub.
-    if [ "$block" != boot ] && [ "$oldest" -gt "$REROUTE_SECONDS" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
+    if [ "$oldest" -gt "$REROUTE_SECONDS" ]; then
       log "a job has waited ${oldest}s and this Mac can't start it ($block)"
-      rerouted=0
-      for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do
-        [ "$rerouted" -lt 3 ] || break
-        if run_busy_here "$run"; then continue; fi
-        reroute_run "$run"
-        rerouted=$((rerouted + 1))
-        set_heartbeat "$block"
-      done
+      reroute_stuck_runs "$waiting" "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" "$block"
     fi
     sleep "$INTERVAL"
   done
