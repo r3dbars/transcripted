@@ -461,10 +461,7 @@ func runMeetingSeries(_ args: [String]) async {
             log("[lab] shared speaker DB: starting empty (\(reason))")
             // Results scored against the old DB no longer describe it; drop them so
             // a partial --force rerun can't mix them in.
-            for id in finishedShared {
-                try? fm.removeItem(at: setDir.appendingPathComponent(id, isDirectory: true)
-                    .appendingPathComponent("lab_result.json"))
-            }
+            try LabSharedSpeakerDB.removeFinishedResults(finishedShared, setDirectory: setDir, fileManager: fm)
         }
     } catch let refused as LabSharedSpeakerDB.ResumeRefused {
         die(refused.description)

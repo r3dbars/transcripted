@@ -144,7 +144,14 @@ enum LabSharedSpeakerDB {
         let dir = directory(workRoot: workRoot)
         let markerURL = dir.appendingPathComponent(markerFileName)
         let marker = readMarker(markerURL)
-        let decision = resumeDecision(marker: marker, config: config, finished: finished, force: force)
+        var decision = resumeDecision(marker: marker, config: config, finished: finished, force: force)
+        if decision == .resumed {
+            let database = dir.appendingPathComponent(config.speakerDBFile)
+            let databaseType = (try? fileManager.attributesOfItem(atPath: database.path))?[.type] as? FileAttributeType
+            if databaseType != .typeRegular {
+                decision = .reset(reason: "its shared database file is missing or not a regular file")
+            }
+        }
         if case .reset(let reason) = decision, !force, !finished.isEmpty {
             throw ResumeRefused(reason: reason)
         }
@@ -217,6 +224,26 @@ enum LabSharedSpeakerDB {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(marker).write(to: url, options: .atomic)
+    }
+
+    /// Removes obsolete result files only inside the explicitly selected set.
+    /// Validate every destination first so an invalid series ID removes nothing.
+    static func removeFinishedResults(
+        _ meetings: Set<String>, setDirectory: URL, fileManager: FileManager = .default
+    ) throws {
+        let root = setDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        let targets = try meetings.map { meeting -> URL in
+            let target = setDirectory.appendingPathComponent(meeting, isDirectory: true)
+                .appendingPathComponent("lab_result.json").standardizedFileURL
+            let parent = target.deletingLastPathComponent().resolvingSymlinksInPath().path
+            guard parent.hasPrefix(root + "/") else {
+                throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: target.path])
+            }
+            return target
+        }
+        for target in targets where fileManager.fileExists(atPath: target.path) {
+            try fileManager.removeItem(at: target)
+        }
     }
 
     /// Removes `directory` only when it sits inside `workRoot` (the root this run
@@ -338,6 +365,37 @@ func runMeetingLabSharedDBSelfTests() {
         otherWorkRoot.workRoot = scratch.appendingPathComponent("runs/other").path
         result = try rerun(applied: ["m1"], now: otherWorkRoot, finished: ["m1"])
         check(result == (.refused, true), "a different --work without --force did not stop and ask for --force")
+
+        // A marker is not evidence that the actual learned database survived.
+        _ = try rerun(applied: ["m1"], finished: ["m1"])
+        try fm.removeItem(at: learned)
+        var missingDBRefused = false
+        do { _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1"], force: false) }
+        catch is LabSharedSpeakerDB.ResumeRefused { missingDBRefused = true }
+        check(missingDBRefused, "resumed with a marker but no actual learned database")
+
+        // Stale-result cleanup must refuse escaping IDs and symlinked meeting dirs.
+        let setDirectory = scratch.appendingPathComponent("set", isDirectory: true)
+        let goodMeeting = setDirectory.appendingPathComponent("m1", isDirectory: true)
+        let goodResult = goodMeeting.appendingPathComponent("lab_result.json")
+        let otherMeeting = scratch.appendingPathComponent("other", isDirectory: true)
+        let otherResult = otherMeeting.appendingPathComponent("lab_result.json")
+        try fm.createDirectory(at: goodMeeting, withIntermediateDirectories: true)
+        try fm.createDirectory(at: otherMeeting, withIntermediateDirectories: true)
+        try Data("obsolete".utf8).write(to: goodResult)
+        try Data("not ours".utf8).write(to: otherResult)
+        var escapeRefused = false
+        do { try LabSharedSpeakerDB.removeFinishedResults(["m1", "../other"], setDirectory: setDirectory) }
+        catch { escapeRefused = true }
+        check(escapeRefused && fm.fileExists(atPath: goodResult.path) && fm.fileExists(atPath: otherResult.path),
+              "stale-result cleanup followed an escaping ID or partially deleted on refusal")
+        try fm.createSymbolicLink(at: setDirectory.appendingPathComponent("linked"), withDestinationURL: otherMeeting)
+        var linkRefused = false
+        do { try LabSharedSpeakerDB.removeFinishedResults(["linked"], setDirectory: setDirectory) }
+        catch { linkRefused = true }
+        check(linkRefused && fm.fileExists(atPath: otherResult.path), "stale-result cleanup followed a meeting symlink")
+        try LabSharedSpeakerDB.removeFinishedResults(["m1"], setDirectory: setDirectory)
+        check(!fm.fileExists(atPath: goodResult.path), "stale owned result survived cleanup")
 
         // A DB with no marker (an older build, or a copy) can't be trusted.
         try fm.removeItem(at: shared)
