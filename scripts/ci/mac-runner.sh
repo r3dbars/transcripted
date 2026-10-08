@@ -1124,7 +1124,9 @@ serve() {
         sleep "$INTERVAL"
         continue
       fi
-      if [ -n "$waiting" ]; then
+      # In always mode a re-run would come straight back here, so waiting
+      # jobs just stay queued until the service is back.
+      if [ -n "$waiting" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
         rm -f "$STATE/STOPPED"
         for run in $(printf '%s\n' "$waiting" | awk '{print $1}' | sort -u); do
           reroute_run "$run"

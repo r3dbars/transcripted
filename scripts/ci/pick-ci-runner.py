@@ -304,10 +304,11 @@ def main() -> int:
     mode = env("MODE", "")
     max_age = int(env("MAX_AGE_SECONDS") or 60)
 
-    # Only spend API calls once everything else already says "Mac".
+    # Only spend API calls once everything else already says "Mac", and never
+    # in always mode, which doesn't look at the queue.
     choice, reason = decide(event=event, repo=repo, head_repo=head_repo, heartbeat=heartbeat,
                             mode=mode, now=now, max_age=max_age, busy_mac_jobs=0)
-    if choice == "mac":
+    if choice == "mac" and mode.strip().lower() != "always":
         jobs = list_mac_jobs(api, repo, token, env("GITHUB_RUN_ID", ""), now)
         busy = None if jobs is None else len(jobs)
         choice, reason = decide(event=event, repo=repo, head_repo=head_repo, heartbeat=heartbeat,
