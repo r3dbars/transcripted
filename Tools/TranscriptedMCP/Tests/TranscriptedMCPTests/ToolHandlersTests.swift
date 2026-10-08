@@ -784,6 +784,34 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "1")
     }
 
+    /// A huge `limit` from an agent must return the rest of the day, not trap
+    /// the server on integer overflow.
+    func testReadDictationHugeLimitReturnsRemainingEntriesWithoutTrapping() throws {
+        let entries: [(id: String, createdAt: String, title: String, text: String, sourceAppName: String, delivery: String)] = [
+            ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "First note", "Alpha text", "Slack", "copied"),
+            ("dictation-20260407-120000-000", "2026-04-07T12:00:00-0500", "Second note", "Beta text", "Mail", "pasted"),
+            ("dictation-20260407-183000-000", "2026-04-07T18:30:00-0500", "Third note", "Gamma text", "Notes", "copied"),
+        ]
+        try writeFixture(makeDictationDayJSON(entries: entries), filename: "Dictations_2026-04-07", to: tempDir)
+
+        let result = try handleReadDictation(
+            params: CallTool.Parameters(name: "read_dictation", arguments: [
+                "filename": .string("Dictations_2026-04-07"),
+                "offset": .int(1),
+                "limit": .int(Int.max),
+            ]),
+            dictationDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let page = try JSONDecoder().decode(DictationDayPage.self, from: Data(resultText(result).utf8))
+        XCTAssertEqual(page.totalEntries, 3)
+        XCTAssertEqual(page.returned, 2)
+        XCTAssertFalse(page.truncated)
+        XCTAssertNil(page.nextOffset)
+        XCTAssertEqual(page.entries.map(\.title), ["Second note", "Third note"])
+    }
+
     func testReadDictationEntryIdBehaviorUnchangedByPaginationParams() throws {
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
 
