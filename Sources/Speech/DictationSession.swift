@@ -22,8 +22,8 @@
 // The DictationSession class itself and its pure value/decision types
 // (WaitStatus, StartOutcome, StartPathDecision, ...) are declared in the
 // sibling DictationSessionTypes.swift so the fast test runner can compile
-// and exercise them without this file's TranscriptedAppState dependency.
-// This file is everything that actually touches TranscriptedAppState/STTRouter.
+// and exercise them without this file's DictationSessionHost dependency.
+// This file is everything that actually touches DictationSessionHost/STTRouter.
 //
 // This type does not publish its own lifecycle/state — see the NOTE at the
 // top of DictationSessionTypes.swift for why.
@@ -33,26 +33,39 @@ import Foundation
 import TranscriptedCore
 #endif
 
+/// Live dependencies supplied by the composition root. Meeting state stays
+/// behind booleans/actions so Speech never names the app or meeting controller.
+@MainActor
+protocol DictationSessionHost: AnyObject {
+    var sttRouter: STTRouter { get }
+    var logger: AppLogSink { get }
+    var canShareMeetingMicWithDictation: Bool { get }
+    var shouldBlockDictationForActiveMeetingCapture: Bool { get }
+    var isSpeakerReviewPending: Bool { get }
+    func startDictationFromActiveMeetingMic() -> Bool
+    func recordDictationStartedAfterWait()
+}
+
 extension DictationSession {
     // MARK: - Meeting-mic sharing / availability
 
-    func canUseActiveMeetingMicForDictation(appState: TranscriptedAppState) -> Bool {
+    func canUseActiveMeetingMicForDictation(appState: DictationSessionHost) -> Bool {
         guard #available(macOS 14.0, *) else { return false }
-        return appState.meetingSession.canShareMicWithDictation
+        return appState.canShareMeetingMicWithDictation
     }
 
-    func dictationStartUnavailableReason(appState: TranscriptedAppState) -> String? {
+    func dictationStartUnavailableReason(appState: DictationSessionHost) -> String? {
         guard #available(macOS 14.0, *) else { return nil }
         return DictationStartAvailabilityPolicy.unavailableReason(
-            hasActiveMeetingCapture: appState.meetingSession.shouldBlockDictationForActiveMeetingCapture,
-            canShareMeetingMic: appState.meetingSession.canShareMicWithDictation,
-            isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
+            hasActiveMeetingCapture: appState.shouldBlockDictationForActiveMeetingCapture,
+            canShareMeetingMic: appState.canShareMeetingMicWithDictation,
+            isSpeakerReviewPending: appState.isSpeakerReviewPending
         )
     }
 
     // MARK: - Recording start
 
-    func startPathDecision(appState: TranscriptedAppState) -> StartPathDecision {
+    func startPathDecision(appState: DictationSessionHost) -> StartPathDecision {
         let recordingModelLoadFailed: Bool
         if case .failed = appState.sttRouter.recordingModelDownloadState {
             recordingModelLoadFailed = true
@@ -66,7 +79,7 @@ extension DictationSession {
     }
 
     func startDictationAudioRecording(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         isRecoveryAttempt: Bool = false,
         // No defaults: every native start says which session its stage
         // reports belong to and what happens after a failed open, so the
@@ -78,7 +91,7 @@ extension DictationSession {
         onStartFailed: @escaping () async -> Void
     ) async -> Bool {
         if canUseActiveMeetingMicForDictation(appState: appState) {
-            if appState.meetingSession.startDictationFromActiveMeetingMic() {
+            if appState.startDictationFromActiveMeetingMic() {
                 return true
             }
             // The meeting may have entered stop between the caller's first
@@ -102,7 +115,7 @@ extension DictationSession {
     /// STTRouter recovery flags, mirroring the read `beginDictationRecording`
     /// used to make before it decides whether to show loading UI.
     func recordingStartPlan(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         canUseMeetingMic: Bool
     ) -> DictationRecordingStartOverlayPolicy.Plan {
         DictationRecordingStartOverlayPolicy.plan(
@@ -118,7 +131,7 @@ extension DictationSession {
     /// `isDictating` — this only performs the engine-facing reset, in the
     /// same order the inline version did.
     func resetEngineAfterFailedStart(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         hardReset: Bool,
         reason: String
     ) async {
@@ -132,7 +145,7 @@ extension DictationSession {
     /// The STTRouter-touching half of the controller's active-task
     /// cancellation. Callers gate this on
     /// `DictationActiveTaskCancellationPolicy.plan(...).cancelSpeechEngine`.
-    func cancelEngine(appState: TranscriptedAppState) {
+    func cancelEngine(appState: DictationSessionHost) {
         appState.sttRouter.cancel()
     }
 
@@ -145,7 +158,7 @@ extension DictationSession {
     /// .recordingModelDownloadState`. The controller turns `onModelStateUpdate`
     /// snapshots into loading-overlay presentation and reacts to the outcome.
     func waitForModelAndStart(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         isDictating: @escaping () -> Bool,
         onModelStateUpdate: @escaping (ParakeetModelState) -> Void
     ) async -> ModelWarmupOutcome {
@@ -201,7 +214,7 @@ extension DictationSession {
     /// session-timeout installation still happen after the call returns,
     /// driven off the returned `.started` outcome.
     func waitForEngineAndStart(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         sessionStartTime: CFAbsoluteTime,
         isDictating: @escaping () -> Bool,
         onStartFailed: @escaping () async -> Void,
@@ -380,7 +393,7 @@ extension DictationSession {
     /// path. See the PR body for the verbatim before/after diff proving this
     /// collapse is faithful to both original branches.
     fileprivate func performStartAttempt(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         isRecoveryAttempt: Bool,
         startedAt: TimeInterval,
         sessionStartTime: CFAbsoluteTime,
@@ -440,7 +453,7 @@ extension DictationSession {
             // telemetry before the overlay update would make it look like
             // the app is still loading while it has already started.
             onRecordingStarted()
-            appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
+            appState.recordDictationStartedAfterWait()
             let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
             let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
             if isRecoveryAttempt {
@@ -525,7 +538,7 @@ extension DictationSession {
     }
 
     fileprivate func dictationContext(
-        appState: TranscriptedAppState,
+        appState: DictationSessionHost,
         extra: [String: String] = [:]
     ) -> [String: String] {
         var context: [String: String] = [
@@ -553,13 +566,13 @@ private final class DictationReadinessRefreshRunner {
     private var operation: String?
     private var startedAt: TimeInterval?
 
-    func start(appState: TranscriptedAppState) -> Bool {
+    func start(appState: DictationSessionHost) -> Bool {
         start(operation: "refresh_input_readiness") {
             await appState.sttRouter.refreshInputReadiness()
         }
     }
 
-    func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool {
+    func startForcedRecovery(appState: DictationSessionHost, reason: String) -> Bool {
         if task != nil, operation != "force_input_recovery" {
             cancel()
         }

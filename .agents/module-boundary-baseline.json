@@ -6,21 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Speech/DictationSession.swift": {
-      "AppState": [
-        "TranscriptedAppState"
-      ]
-    },
-    "Sources/Speech/ParakeetASRInference.swift": {
-      "Core": [
-        "TimedTranscriptToken"
-      ]
-    },
-    "Sources/Speech/STTRouter.swift": {
-      "Core": [
-        "TimedTranscriptToken"
-      ]
-    },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
         "TranscriptSaver",

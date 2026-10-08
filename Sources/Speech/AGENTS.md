@@ -11,7 +11,7 @@
 - **Owns:** dictation STT and the dictation mic engine: `STTRouter`, `ParakeetEngine` and its extensions, the persistent dictation input, device monitoring, the shared meeting mic, and `DictationSession`.
 - **Public surface:** `STTRouter`, `ParakeetEngine`, `PersistentDictationInputController`, `DefaultInputDeviceMonitor`, `SharedMeetingMic*`, `DictationSession` and its types, the dictation start/stop policies in `DictationRecordingStartOverlayPolicy.swift`, and `DictationTrigger` / `DictationHotkeyRouter`.
 - **May depend on:** Support, Observability, Core `core-vocab`, and Core `mic-primitives` (`PinnedMicrophoneCapture*`, `MicrophoneDownmix`, `MacLidState`, `AudioTapInstallGuard`, `AudioInputTapTeardownPolicy`, `ModelDownloadService`).
-- **Grandfathered crossings:** `DictationSession.swift` takes `TranscriptedAppState`; `ParakeetASRInference.swift` and `STTRouter.swift` name Core's `TimedTranscriptToken`. Fixes: inject narrow dependencies, and add the token type to a Core tier if that's the right edge.
+- **Boundaries:** `DictationSessionHost` supplies live router, diagnostics and meeting booleans/actions without naming app state. Timed inference returns `SpeechTimedToken`; Meeting converts it into Core packing tokens. Core tiers stay narrow.
 - **Entry points:** `STTRouter.transcribe`, `ParakeetEngine` recording start / stop, `DictationSession`.
 - **Tests:** `bash run-tests.sh --filter Parakeet`, `--filter STTRouter`, `--filter Dictation`; the real proof is `bash check.sh hardware`.
 - **Rules:** every PR touching this module states what happens with a Bluetooth headset as the default input, even when the answer is "unchanged, moved only". See "Current Notes" below.

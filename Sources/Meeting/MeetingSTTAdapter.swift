@@ -231,11 +231,12 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         }
         let packedTokens: [TimedTranscriptToken]?
         do {
-            packedTokens = try await router.transcribePackedTokens(
+            let speechTokens = try await router.transcribePackedTokens(
                 samples: layout.samples,
                 model: model,
                 language: language
             )
+            packedTokens = speechTokens.map(MeetingTimedTokenBridge.coreTokens)
         } catch {
             // A packed call that throws still spent its time before the fallback.
             recordCall()
