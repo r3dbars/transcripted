@@ -303,17 +303,6 @@ struct PinnedDictationWarmupState: Equatable {
     }
 }
 
-enum DictationInputDeviceSelectionReason: String {
-    case defaultIsSafe
-    case preferredBuiltInForBluetoothHeadset
-    case builtInFallbackSuppressedForRecoveryAttempt
-    case noBuiltInFallbackAvailable
-    case preferredUserChosenForBluetoothHeadset
-    case preferredExternalForBluetoothHeadset
-    /// A mic picked in Settings, recorded over a non-Bluetooth macOS input.
-    case userChosenInput
-}
-
 struct DictationInputDeviceSelection: Equatable {
     let defaultInput: DictationAudioDevice
     let selectedInput: DictationAudioDevice

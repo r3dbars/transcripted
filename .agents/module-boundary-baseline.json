@@ -6,11 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Observability/AnalyticsEventPolicy.swift": {
-      "Speech": [
-        "DictationInputDeviceSelectionReason"
-      ]
-    },
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
