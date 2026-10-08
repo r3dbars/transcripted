@@ -194,7 +194,7 @@ extension ParakeetEngine {
     /// the caller can split the text back per segment. nil when the model
     /// isn't loaded, the audio doesn't fit one window, or the result carries
     /// no token times; the caller then transcribes the segments one by one.
-    func transcribePackedSamplesWithTokenTimes(_ samples: [Float]) async throws -> [TimedTranscriptToken]? {
+    func transcribePackedSamplesWithTokenTimes(_ samples: [Float]) async throws -> [SpeechTimedToken]? {
         try Task.checkCancellation()
         beginPureSampleTranscriptionActivity()
         defer { finishPureSampleTranscriptionActivity() }
@@ -205,7 +205,7 @@ extension ParakeetEngine {
 
         let startTime = CFAbsoluteTimeGetCurrent()
         try await beginASRInference()
-        let tokens: [TimedTranscriptToken]?
+        let tokens: [SpeechTimedToken]?
         do {
             try Task.checkCancellation()
             let decoderLayers = await decoderLayerCount(for: manager)
@@ -219,7 +219,7 @@ extension ParakeetEngine {
                 guard let timings = result.tokenTimings, !timings.isEmpty else {
                     return text.isEmpty ? [] : nil
                 }
-                return timings.map { TimedTranscriptToken(text: String($0.token), startSeconds: $0.startTime) }
+                return timings.map { SpeechTimedToken(text: String($0.token), startSeconds: $0.startTime) }
             }
             finishASRInference()
         } catch {

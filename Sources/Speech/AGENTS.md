@@ -8,7 +8,7 @@
 
 - **Public surface:** `STTRouter`, `ParakeetEngine`, `PersistentDictationInputController`, `DefaultInputDeviceMonitor`, `SharedMeetingMic*`, `DictationSession` and its types, the start/stop policies in `DictationRecordingStartOverlayPolicy.swift`, `DictationTrigger` and `DictationHotkeyRouter`.
 - **May depend on:** Support, Observability, Core `core-vocab`, and Core `mic-primitives` (`PinnedMicrophoneCapture*`, `MicrophoneDownmix`, `MacLidState`, `AudioTapInstallGuard`, `AudioInputTapTeardownPolicy`, `ModelDownloadService`).
-- **Grandfathered crossings:** `DictationSession.swift` takes `TranscriptedAppState`; `ParakeetASRInference.swift` and `STTRouter.swift` name Core's `TimedTranscriptToken`. Fix by injecting narrow dependencies, or adding the token type to a Core tier.
+- **Boundaries:** `DictationSessionHost` supplies live router, diagnostics and meeting booleans/actions without naming app state. Timed inference returns `SpeechTimedToken`; Meeting converts it into Core packing tokens. Core tiers stay narrow.
 - **Entry points:** `STTRouter.transcribe`, `ParakeetEngine` recording start/stop, `DictationSession`.
 - **Tests:** `bash run-tests.sh --filter Parakeet`, `--filter STTRouter`, `--filter Dictation`. The real proof is `bash check.sh hardware`.
 

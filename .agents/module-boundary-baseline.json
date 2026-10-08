@@ -1,21 +1,6 @@
 {
   "_comment": "Grandfathered module-boundary crossings: file -> module it reaches into -> type names. scripts/dev/check-module-boundaries.py --shrink only removes entries; adding one is a reviewed human edit.",
   "edges": {
-    "Sources/Speech/DictationSession.swift": {
-      "AppState": [
-        "TranscriptedAppState"
-      ]
-    },
-    "Sources/Speech/ParakeetASRInference.swift": {
-      "Core": [
-        "TimedTranscriptToken"
-      ]
-    },
-    "Sources/Speech/STTRouter.swift": {
-      "Core": [
-        "TimedTranscriptToken"
-      ]
-    },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
         "TranscriptSaver",
