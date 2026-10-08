@@ -15,7 +15,6 @@
     "Tests/UIAutomationSurfaceContractTests.swift": 46
   },
   "wall-clock": {
-    "Tests/ClipboardRestoringTextPasterTests.swift": 2,
-    "Tools/TranscriptedCLI/Tests/TranscriptedCLITests/SpeakerDatabaseSnapshotTests.swift": 1
+    "Tests/ClipboardRestoringTextPasterTests.swift": 2
   }
 }

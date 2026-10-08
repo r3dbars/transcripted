@@ -109,7 +109,7 @@ final class SpeakerDatabaseSnapshotTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: target), bytes)
     }
 
-    func testExclusiveLockFailsWithinBoundAndPreservesSource() throws {
+    func testExclusiveLockFailsWithBusyAndPreservesSource() throws {
         let folder = try temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let source = folder.appendingPathComponent("source.sqlite")
@@ -119,11 +119,23 @@ final class SpeakerDatabaseSnapshotTests: XCTestCase {
         try execute(database, "CREATE TABLE speakers (name TEXT); INSERT INTO speakers VALUES ('Fixture Beta'); BEGIN EXCLUSIVE;")
         defer { sqlite3_exec(database, "ROLLBACK", nil, nil, nil) }
         let original = try Data(contentsOf: source)
-        let start = ProcessInfo.processInfo.systemUptime
-        XCTAssertThrowsError(try SpeakerDatabaseSnapshot.create(sourceURL: source, destinationURL: destination, busyTimeout: 0.05)) { error in
+        // SQLite exercises the real busy handler; advancing a fake monotonic
+        // clock proves the supplied timeout without measuring runner speed.
+        var simulatedTime: TimeInterval = 0
+        var requestedWaits: [TimeInterval] = []
+        XCTAssertThrowsError(try SpeakerDatabaseSnapshot.create(
+            sourceURL: source, destinationURL: destination, busyTimeout: 0.05,
+            now: { simulatedTime },
+            wait: { interval in
+                requestedWaits.append(interval)
+                simulatedTime += interval
+            }
+        )) { error in
             XCTAssertEqual(error as? SpeakerDatabaseSnapshot.SnapshotError, .busy)
         }
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1)
+        XCTAssertEqual(simulatedTime, 0.05, accuracy: 0.000001)
+        XCTAssertEqual(requestedWaits.count, 5)
+        XCTAssertTrue(requestedWaits.allSatisfy { $0 > 0 && $0 <= 0.01 })
         XCTAssertEqual(try Data(contentsOf: source), original)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }

@@ -43,7 +43,9 @@ enum SpeakerDatabaseSnapshot {
     static func create(
         sourceURL: URL,
         destinationURL: URL,
-        busyTimeout: TimeInterval = 5
+        busyTimeout: TimeInterval = 5,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        wait: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
     ) throws {
         guard sourceURL.isFileURL, !sourceURL.path.utf8.contains(0) else {
             throw SnapshotError.invalidSource
@@ -87,7 +89,7 @@ enum SpeakerDatabaseSnapshot {
             }
         }
 
-        let deadline = BusyDeadline(timeout: busyTimeout)
+        let deadline = BusyDeadline(timeout: busyTimeout, now: now, wait: wait)
         // SQLite retains the callback context as an unowned pointer. Keep its
         // Swift object alive until both database handles have been closed.
         defer { withExtendedLifetime(deadline) {} }
@@ -179,15 +181,21 @@ enum SpeakerDatabaseSnapshot {
     private final class BusyDeadline {
         private let end: TimeInterval
 
-        init(timeout: TimeInterval) {
-            end = ProcessInfo.processInfo.systemUptime + min(max(timeout.isFinite ? timeout : 5, 0), 5)
+        private let now: () -> TimeInterval
+        private let wait: (TimeInterval) -> Void
+
+        init(timeout: TimeInterval, now: @escaping () -> TimeInterval,
+             wait: @escaping (TimeInterval) -> Void) {
+            self.now = now
+            self.wait = wait
+            end = now() + min(max(timeout.isFinite ? timeout : 5, 0), 5)
         }
 
         func waitIfAvailable() -> Bool {
-            let remaining = end - ProcessInfo.processInfo.systemUptime
+            let remaining = end - now()
             guard remaining > 0 else { return false }
-            Thread.sleep(forTimeInterval: min(remaining, 0.01))
-            return ProcessInfo.processInfo.systemUptime < end
+            wait(min(remaining, 0.01))
+            return now() < end
         }
     }
 }
