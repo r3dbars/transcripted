@@ -275,7 +275,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                             transcriptURL: reviewItem.transcriptURL,
                             dbId: speakerId,
                             diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                            channel: reviewItem.channel
+                            channel: reviewItem.channel.utteranceChannel
                         )
                     },
                     newName: trimmed,
@@ -340,7 +340,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 transcriptURL: reviewItem.transcriptURL,
                 dbId: sourceId,
                 diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                channel: reviewItem.channel
+                channel: reviewItem.channel.utteranceChannel
             )
         }
         let confirmedTranscriptIds = matchingReviewItems.compactMap(\.transcriptId)
@@ -363,13 +363,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                     directory: transcriptDirectory,
                     clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
                         onMergeCommitted: { sourceId, targetId in
-                            Self.promoteClipIfNeeded(
+                            SpeakerClipLibrary.promoteClipIfNeeded(
                                 from: sourceId,
                                 to: targetId,
                                 preferredClipsDirectory: preferredClipsDirectory,
                                 legacyClipsDirectory: legacyClipsDirectory
                             )
-                            Self.deleteClips(
+                            SpeakerClipLibrary.deleteClips(
                                 for: sourceId,
                                 preferredClipsDirectory: preferredClipsDirectory,
                                 legacyClipsDirectory: legacyClipsDirectory
@@ -576,13 +576,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                     directory: transcriptDirectory,
                     clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
                         onMergeCommitted: { sourceId, targetId in
-                            Self.promoteClipIfNeeded(
+                            SpeakerClipLibrary.promoteClipIfNeeded(
                                 from: sourceId,
                                 to: targetId,
                                 preferredClipsDirectory: preferredClipsDirectory,
                                 legacyClipsDirectory: legacyClipsDirectory
                             )
-                            Self.deleteClips(
+                            SpeakerClipLibrary.deleteClips(
                                 for: sourceId,
                                 preferredClipsDirectory: preferredClipsDirectory,
                                 legacyClipsDirectory: legacyClipsDirectory
@@ -622,7 +622,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         runEditInBackground(completion: completion) {
             speakerDatabase.deleteSpeaker(id: profileId)
-            Self.deleteClips(
+            SpeakerClipLibrary.deleteClips(
                 for: profileId,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
@@ -761,7 +761,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         var clipURLsByProfileID: [UUID: URL] = [:]
         for profile in profiles {
-            if let url = clipURL(
+            if let url = SpeakerClipLibrary.clipURL(
                 for: profile.id,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
