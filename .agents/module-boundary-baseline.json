@@ -6,16 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Observability/ActivationTelemetry.swift": {
-      "Dictation": [
-        "SavedDictationTranscript"
-      ]
-    },
-    "Sources/Observability/AnalyticsEventPolicy.swift": {
-      "Speech": [
-        "DictationInputDeviceSelectionReason"
-      ]
-    },
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
@@ -31,20 +21,9 @@
         "TimedTranscriptToken"
       ]
     },
-    "Sources/Support/ClaudeDesktopIntegrationInstaller.swift": {
-      "Observability": [
-        "AnalyticsRuntimeConfiguration"
-      ]
-    },
     "Sources/Support/TranscriptedPermissionAccess.swift": {
       "Core": [
         "CoreAudioSystemAudioCapture"
-      ]
-    },
-    "Sources/UI/Overlay/MeetingOverlayController.swift": {
-      "Core": [
-        "CaptureRouteStabilizationOutcome",
-        "DisplayStatus"
       ]
     },
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
@@ -53,11 +32,6 @@
         "SpeakerMatchOutcomeKind",
         "SpeakerNameUpdate",
         "SpeakerReviewPrioritizer"
-      ]
-    },
-    "Sources/UI/Settings/HomeTranscriptionActivityPresentation.swift": {
-      "Core": [
-        "DisplayStatus"
       ]
     },
     "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
@@ -86,19 +60,12 @@
         "SpeakerIdentityOption"
       ]
     },
-    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Duplicates.swift": {
-      "Core": [
-        "SpeakerClipExtractor",
-        "SpeakerVectorMath"
-      ]
-    },
     "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
       "Core": [
         "CoreStoragePaths",
         "SpeakerDatabase",
         "SpeakerIdentityMutationService",
         "SpeakerMergeRecord",
-        "SpeakerPeopleReviewPolicy",
         "SpeakerUserConfirmation",
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
@@ -106,8 +73,7 @@
     },
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift": {
       "Core": [
-        "SpeakerIdentityOption",
-        "UtteranceChannel"
+        "SpeakerIdentityOption"
       ]
     },
     "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": {
@@ -123,11 +89,6 @@
     "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
       "Core": [
         "SQLiteHandle"
-      ]
-    },
-    "Sources/UI/Shared/SpeakerReviewQueueScanner.swift": {
-      "Core": [
-        "UtteranceChannel"
       ]
     }
   }

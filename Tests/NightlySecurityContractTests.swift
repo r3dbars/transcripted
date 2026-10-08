@@ -45,7 +45,12 @@ func testNightlySecurityContract() {
         let firstValueEvents = Set(manifest["required_posthog_first_value_events"]?.arrayValue?.compactMap(\.stringValue) ?? [])
 
         assertEqual(paths["homebrew_cask"]?.stringValue, "Casks/transcripted.rb", "release-health gate should check Homebrew cask parity")
-        assertEqual(paths["analytics_event_policy"]?.stringValue, "Sources/Observability/AnalyticsEventPolicy.swift", "release-health gate should parse the analytics policy source")
+        let analyticsPolicyPath = paths["analytics_event_policy"]?.stringValue ?? ""
+        assertTrue(
+            analyticsPolicyPath.hasSuffix("/AnalyticsEventPolicy.swift")
+                && FileManager.default.fileExists(atPath: repoFixtureURL(analyticsPolicyPath).path),
+            "release-health gate should point at an analytics policy file that exists, so the PostHog schema check has something to parse"
+        )
         assertEqual(paths["health_probe"]?.stringValue, "scripts/ops/health-probe.sh", "release-health gate should keep PostHog probe schema pinned")
         assertEqual(paths["release_debug_files"]?.stringValue, "build/Transcripted.app.dSYM", "release-health gate should know the release dSYM location")
         assertEqual(liveSurfaces["appcast"]?.stringValue, "https://transcripted.app/appcast.xml", "live appcast should be part of the release-health gate")
@@ -190,14 +195,14 @@ func testNightlySecurityContract() {
             preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
             "agent preflight should execute the matrix that owns the strict checker command"
         )
-        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.69.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.70.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
     }
 
     runSuite("Nightly security checker fails stale GitHub release asset metadata") {
         let passing = runNightlySecurityChecker(arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.69.json"
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.70.json"
         ])
         let staleCask = runNightlySecurityChecker(arguments: [
             "--strict",

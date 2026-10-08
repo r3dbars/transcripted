@@ -304,6 +304,30 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(result.items.first?.kind, .dictation)
     }
 
+    /// The mixed feed is newest-first by real time. Meetings store local wall
+    /// clock (`date` + `time`), dictations store UTC with `Z`; an evening
+    /// meeting in Chicago must land between the dictations around it.
+    func testRecentContextOrdersMeetingsAndDictationsByRealTime() throws {
+        // 21:00 CDT meeting; dictations at 20:00 and 22:00 CDT (01:00Z / 03:00Z next day).
+        try writeFixture(makeFixtureJSON(date: "2026-10-06T21:00:00-0500"), filename: "Call_2026-10-06_21-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(date: "2026-10-06", entries: [
+            ("dictation-20261006-200000-000", "2026-10-06T20:00:00-0500", "Before", "Before the meeting", "Slack", "copied"),
+            ("dictation-20261006-220000-000", "2026-10-06T22:00:00-0500", "After", "After the meeting", "Mail", "pasted"),
+        ]), filename: "Dictations_2026-10-06", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let chicago = try XCTUnwrap(TimeZone(identifier: "America/Chicago"))
+        let result = try index.listRecentContext(kind: .all, count: 10, timeZone: chicago)
+        XCTAssertEqual(result.items.map { $0.entryId ?? $0.filename }, [
+            "dictation-20261006-220000-000",
+            "Call_2026-10-06_21-00-00",
+            "dictation-20261006-200000-000",
+        ])
+
+        let newestOnly = try index.listRecentContext(kind: .all, count: 2, timeZone: chicago)
+        XCTAssertEqual(newestOnly.items.map(\.kind), [.dictation, .meeting])
+    }
+
     func testRecentContextMeetingPreviewUsesFirstUtterance() throws {
         try writeFixture(
             makeFixtureJSON(
