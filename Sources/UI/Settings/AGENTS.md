@@ -127,3 +127,5 @@ Then open Settings and check by hand:
 - custom dictionary edits persist and preview
 - Auto Enter app add/remove works
 - Agent page connects detected agents, copies the universal prompt, reveals config and folders, sets up the Codex inbox from Advanced
+
+Core engine types stay behind Meeting seams. The module boundary check has no grandfathered crossings.

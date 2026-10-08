@@ -19,9 +19,7 @@ Everything on screen while you dictate or record, plus the dictation session its
 
 UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core's `core-vocab` tier. Only AppShell, Capture, UIMenuBar and UISettings may depend on UIOverlay. `.agents/modules.json` is the source of truth.
 
-Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
-- Into Core outside `core-vocab`: `NotchIslandSpeakerReviewView` (speaker-review value types). `MeetingOverlayController` reads transcription status and the route warning through Meeting's `MeetingTranscriptionStatus` / `MeetingRouteWarning`, not the Core types.
 - Dictation owns `DictationSessionCapWarningPolicy`; the overlay consumes its countdown and accessible announcement.
 
 ## Where to start

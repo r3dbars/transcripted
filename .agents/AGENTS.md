@@ -18,7 +18,6 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 | `file-size-baseline.json` (Swift files over 800 lines) | `scripts/dev/check-file-size.py` | `--shrink` |
 | `test-shape-baseline.json` (source-text and wall-clock tests) | `scripts/dev/check-test-shape.py` | `--shrink` |
 | `source-pin-baseline.json` (`resolved-pins` counts per test file) | `scripts/dev/check-source-pins.py` | `--count-baseline --shrink` |
-| `module-boundary-baseline.json` (file, module, type crossings) | `scripts/dev/check-module-boundaries.py` | `--shrink` |
 | `concurrency-baseline.json` (Swift 6 warnings per `Sources/` folder) | `scripts/dev/concurrency-census.sh` | `--shrink` |
 
 - The `--shrink` flags only lower existing counts and drop dead entries. They never add a folder or raise a count; new violations require a reviewed human edit.
@@ -32,3 +31,5 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 - Keep `agent-contract.json` `docs` entries pointing at files that exist, and consistent with `agentsDoc` in `modules.json`.
 - Run `python3 scripts/dev/agent-context.py <paths>` to see what an area change resolves to, and `python3 scripts/dev/agent-check.py --self-test` after changing the matrix or contract.
 - `AGENTS.md` at the repo root wins for workflow when it disagrees with these files.
+
+Module boundaries have no baseline or shrink mode: every forbidden crossing fails.

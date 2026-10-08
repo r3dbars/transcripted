@@ -11,7 +11,7 @@ The reusable meeting transcription library. The app links it as a prebuilt libra
   - `core-vocab`, which any app module may name: logging, `PrivacyTextRedactor`, `SupersessionEpoch`, `ClaimSlot`, `DateFormattingHelper`, `TranscriptFrontmatter*`, `TranscriptFileRewrite`, `AudioResampler`, `TranscriptionLanguage*`, `SpeakerProfile`, `SpeakerNaming*`, `NameSource`.
   - `mic-primitives`, for Speech: `PinnedMicrophoneCapture*`, `MicrophoneDownmix`, `MacLidState`, `AudioTapInstallGuard`, `AudioInputTapTeardownPolicy`, `ModelDownloadService`.
   - `core-engine`, everything else, for Meeting.
-- **May depend on:** nothing in the app (the compiler enforces it). Grandfathered app uses of `core-engine` types outside Meeting (mostly Speakers in `UI/Settings`) are in `.agents/module-boundary-baseline.json`.
+- **May depend on:** nothing in the app; the compiler enforces it. App modules outside Meeting reach `core-engine` behavior through Meeting, never by naming its types.
 - **Entry points:** `Audio` (capture), `TranscriptionTaskManager` (queue), `Transcription` (pipeline), `SpeakerDatabase`.
 - **Tests:** `swift test` (five SPM targets: `AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests` under `Tests/TranscriptedCoreTests/`; `Tests/README.md` shows how to scope a loop), `bash run-integration-smoke.sh`. After any change here: `bash build-deps.sh --force`, then `bash build.sh --no-open`, then `bash run-tests.sh`. Changing protocols, `AppServices`, `Package.swift` or public models: also run `swift test` so the standalone boundary is checked.
 
