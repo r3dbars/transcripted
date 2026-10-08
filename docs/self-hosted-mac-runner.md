@@ -13,8 +13,8 @@ a VM only exists while a job is waiting for it.
 ## How a run picks its machine
 
 `pick-runner` in `.github/workflows/swift-ci.yml` runs first, on Linux, and
-calls `scripts/ci/pick-ci-runner.py`. It sends `checks` and `spm-tests` to the
-`transcripted-mac` label only when all of these hold:
+calls `scripts/ci/pick-ci-runner.py`. It sends `checks`, `spm-tests` and `app-build`
+to the `transcripted-mac` label only when all of these hold:
 
 - the `MAC_RUNNER_MODE` repo variable is not `off`
 - the run is a `push`, a `workflow_dispatch`, or a `pull_request` whose head
@@ -51,7 +51,7 @@ before it starts one.
 
 A job that is already waiting always gets run, even if the Mac is paused, on
 battery, or a mic is in use. It was sent here while the Mac said it was free,
-and nothing else will pick it up. So both of a run's jobs finish even if the
+and nothing else will pick it up. So all three of a run's jobs finish even if the
 owner pauses between them. While a mic is in use, a running job drops to
 background priority (efficiency cores and throttled disk) instead of failing.
 
@@ -194,7 +194,7 @@ workflow to ask for the Mac's label. Here's what stops that:
 3. A job-started hook inside the VM runs before any step. It starts from an
    empty environment, reads the event payload, and fails every job that isn't
    a `push`, `workflow_dispatch`, or same-repo `pull_request` on this repo. It
-   also fails any job other than `checks` and `spm-tests`, since GitHub gives
+   also fails any job other than `checks`, `spm-tests` and `app-build`, since GitHub gives
    the VM's runner the default `self-hosted`/`macOS`/`ARM64` labels too.
    Building the golden VM proves the hook refuses a fork PR and accepts a
    same-repo push. If that check fails, the image isn't kept.
@@ -251,7 +251,7 @@ bash ~/.transcripted-ci/mac-runner.sh uninstall  # removes the service, VMs, ima
 ```
 
 Pause before timing-sensitive local work, like benchmarks or speed tests, then
-wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the two
+wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the three
 jobs of one run can still land after a pause. To turn routing off from GitHub
 without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 
