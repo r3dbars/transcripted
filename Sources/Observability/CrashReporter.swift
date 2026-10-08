@@ -6,6 +6,7 @@
 //   2. Uses the official Sentry crash handler for stronger crash capture.
 //   3. Scrubs strings, tags, extras, contexts, requests, and breadcrumbs before send.
 
+import AppKit
 import Foundation
 import Sentry
 
@@ -19,7 +20,12 @@ final class CrashReporter {
     private init() {}
 
     private var hasStarted = false
-    private var sessionTrackingEnabled = false
+    // Session state is only touched on the main thread: launch, Settings,
+    // onboarding, termination, and the sleep/wake and timer callbacks below.
+    private var sessionsAllowed = false
+    private var sessionStartedAt: Date?
+    private var sessionLifecycleObservers: [NSObjectProtocol] = []
+    private var sessionRotationTimer: Timer?
 
     static func setup(dsn: String? = SentryRuntimeConfiguration.dsn()) {
         guard let dsn, !shared.hasStarted else { return }
@@ -66,14 +72,16 @@ final class CrashReporter {
     static func applySessionTrackingPreference() {
         guard shared.hasStarted else { return }
 
-        let shouldTrack = CrashReportingPreferences.isEnabled()
-        guard shouldTrack != shared.sessionTrackingEnabled else { return }
+        shared.sessionsAllowed = true
+        startSessionLifecycleObservers()
 
-        shared.sessionTrackingEnabled = shouldTrack
+        let shouldTrack = CrashReportingPreferences.isEnabled()
+        guard shouldTrack != (shared.sessionStartedAt != nil) else { return }
+
         if shouldTrack {
-            SentrySDK.startSession()
+            startTrackedSession()
         } else {
-            SentrySDK.endSession()
+            endTrackedSession()
         }
     }
 
@@ -81,8 +89,65 @@ final class CrashReporter {
     /// Health receives a completed session rather than only a later abnormal
     /// session marker.
     static func endSession() {
-        guard shared.sessionTrackingEnabled else { return }
-        shared.sessionTrackingEnabled = false
+        shared.sessionRotationTimer?.invalidate()
+        shared.sessionRotationTimer = nil
+        endTrackedSession()
+    }
+
+    // MARK: - Session rotation
+
+    /// Sleep ends the session, wake starts a new one, and a day-old session is
+    /// restarted (`SentrySessionRotationPolicy`), so a menu bar app left
+    /// running for days doesn't count as one session.
+    private static func startSessionLifecycleObservers() {
+        guard shared.sessionLifecycleObservers.isEmpty else { return }
+
+        let center = NSWorkspace.shared.notificationCenter
+        shared.sessionLifecycleObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+                CrashReporter.rotateSession(for: .willSleep)
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+                CrashReporter.rotateSession(for: .didWake)
+            },
+        ]
+
+        let timer = Timer(timeInterval: SentrySessionRotationPolicy.checkInterval, repeats: true) { _ in
+            CrashReporter.rotateSession(for: .periodicCheck)
+        }
+        timer.tolerance = 60
+        RunLoop.main.add(timer, forMode: .common)
+        shared.sessionRotationTimer = timer
+    }
+
+    private static func rotateSession(for trigger: SentrySessionRotationPolicy.Trigger) {
+        let action = SentrySessionRotationPolicy.action(
+            for: trigger,
+            sessionStartedAt: shared.sessionStartedAt,
+            wantsSession: shared.sessionsAllowed && CrashReportingPreferences.isEnabled(),
+            now: Date()
+        )
+        switch action {
+        case .none:
+            break
+        case .end:
+            endTrackedSession()
+        case .start:
+            startTrackedSession()
+        case .restart:
+            endTrackedSession()
+            startTrackedSession()
+        }
+    }
+
+    private static func startTrackedSession() {
+        SentrySDK.startSession()
+        shared.sessionStartedAt = Date()
+    }
+
+    private static func endTrackedSession() {
+        guard shared.sessionStartedAt != nil else { return }
+        shared.sessionStartedAt = nil
         SentrySDK.endSession()
     }
 
