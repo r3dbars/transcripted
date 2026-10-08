@@ -64,7 +64,8 @@ final class PasteLastDictationFeedbackPresenter {
     private var panel: PasteLastDictationFeedbackPanel?
     private var dismissTask: Task<Void, Never>?
 
-    private init() {}
+    /// Internal (not private) so the fast tests can build one without the singleton.
+    init() {}
 
     func present(_ feedback: PasteLastDictationFeedback) {
         dismissTask?.cancel()
@@ -120,7 +121,7 @@ final class PasteLastDictationFeedbackPresenter {
         }
     }
 
-    private func makePanel() -> PasteLastDictationFeedbackPanel {
+    func makePanel() -> PasteLastDictationFeedbackPanel {
         PasteLastDictationFeedbackPanel(
             contentRect: NSRect(origin: .zero, size: PasteLastDictationFeedbackView.size),
             styleMask: [],

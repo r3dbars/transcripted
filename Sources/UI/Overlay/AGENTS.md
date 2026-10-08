@@ -21,7 +21,7 @@ UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, and Core
 
 Grandfathered crossings (`.agents/module-boundary-baseline.json`):
 
-- Into Core outside `core-vocab`: `MeetingOverlayController` (`CaptureRouteStabilizationOutcome`, `DisplayStatus`) and `NotchIslandSpeakerReviewView` (the speaker-review value types).
+- Into Core outside `core-vocab`: `NotchIslandSpeakerReviewView` (the speaker-review value types). `MeetingOverlayController` reads transcription status and the route warning through Meeting's `MeetingTranscriptionStatus` / `MeetingRouteWarning`, not the Core types.
 - From below: Dictation's cap timer names `DictationSessionCapWarningPolicy`. Moving that policy file down into Dictation removes the edge.
 
 ## Entry points
