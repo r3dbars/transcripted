@@ -29,7 +29,7 @@ All of these, checked on every run:
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.
 3. The lane's label. No `needs owner review`, `do not merge`, `hold` or `waiting-on-human` label.
-4. Every changed file inside the lane, none protected, within the size limit.
+4. Every changed path inside the lane, none protected, within the size limit. The gate reads every page of the REST PR files API and checks both `filename` and `previous_filename` for renames; deletions check the removed path. Missing or malformed rename metadata and a file count that disagrees with GitHub's total block merging.
 5. `build-and-test` and `repo-hygiene` succeeded on the head commit.
 6. No conflicts, no review requesting changes, no unresolved review thread.
 7. Every reviewer the lane requires reviewed the head commit, or reacted 👍 after it was pushed. Today that's Codex (`chatgpt-codex-connector`) for every lane; a lane can require more with `reviewers_required`.

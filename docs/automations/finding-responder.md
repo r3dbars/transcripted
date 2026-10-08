@@ -1,6 +1,6 @@
 # Codex job: finding responder
 
-Runs every 30 minutes as a Codex automation on the owner's Mac. Its job is to answer Codex review findings on auto-merge lane PRs, so a PR doesn't sit blocked waiting for Justin. An open finding blocks the auto-merge gate (`docs/auto-merge-gate.md`); this job either fixes it or shows it's wrong.
+Runs every hour as a Codex automation on the owner's Mac. Its job is to answer Codex review findings on auto-merge lane PRs, so a PR doesn't sit blocked waiting for Justin. An open finding blocks the auto-merge gate (`docs/auto-merge-gate.md`); this job either fixes it or shows it's wrong.
 
 ## Which PRs
 

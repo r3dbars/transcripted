@@ -5,7 +5,7 @@ Scheduled jobs that keep Transcripted moving without Justin. Each runs as a Code
 | Job | Every | Playbook | What it does |
 |---|---|---|---|
 | Auto-merge gate | 30 min | `docs/auto-merge-gate.md` | Marks lane drafts ready once only the review is missing; merges lane PRs that pass every check |
-| Finding responder | 30 min | `docs/automations/finding-responder.md` | Fixes real Codex review findings, answers wrong ones with evidence, hands unclear ones to Justin |
+| Finding responder | Hourly | `docs/automations/finding-responder.md` | Fixes real Codex review findings, answers wrong ones with evidence, hands unclear ones to Justin |
 | Docs drift | Nightly, 11:00 PM | `docs/automations/docs-drift.md` | Fixes folder `AGENTS.md` and `docs/` statements the code no longer matches, in `docs` lane PRs |
 | Stale PRs | Nightly, midnight | `docs/automations/stale-prs.md` | Closes PRs whose work already landed, updates conflicted lane branches, flags red or quiet PRs |
 | Morning triage | Daily, 3:00 AM | `docs/automations/morning-triage.md` | Turns overnight Sentry problems into GitHub issues, with no private data |

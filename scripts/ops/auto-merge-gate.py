@@ -8,8 +8,8 @@ only when ALL of these hold:
   - it's from an allowed author, on a branch in this repo (no forks)
   - its branch starts with an enabled lane's prefix
   - it has the lane's labels and none of the blocking labels
-  - every changed file matches the lane's allow globs, none match deny_always
-    or the lane's own deny
+  - every changed path, including both ends of a rename, matches the lane's
+    allow globs, none match deny_always or the lane's own deny
   - its size (additions + deletions) is within the lane's limit
   - every required check succeeded on the PR's head commit
   - GitHub reports it mergeable (no conflicts)
@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / ".agents/auto-merge-lanes.json"
 PR_FIELDS = ",".join([
     "number", "title", "headRefName", "headRefOid", "isDraft", "isCrossRepository",
-    "labels", "author", "additions", "deletions", "mergeable", "files",
+    "labels", "author", "additions", "deletions", "mergeable", "changedFiles",
     "statusCheckRollup", "reviews", "commits", "url", "body",
 ])
 
@@ -87,6 +87,38 @@ def parse_time(value: str) -> datetime:
 TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
 
 
+def changed_paths(records: object, expected_count: object) -> tuple[list[str], list[str]]:
+    """Validate REST PR files and include a rename's removed and added paths."""
+    if not isinstance(records, list):
+        return [], ["changed-file metadata is missing or malformed"]
+    if type(expected_count) is not int or expected_count != len(records):
+        return [], ["changed-file metadata is incomplete or changed during fetch"]
+    paths: list[str] = []
+    destinations: set[str] = set()
+    statuses = {"added", "removed", "modified", "renamed", "copied", "changed", "unchanged"}
+
+    def valid_path(path: object) -> bool:
+        return (isinstance(path, str) and bool(path) and not path.startswith("/")
+                and not any(part in ("", ".", "..") for part in path.split("/")))
+
+    for record in records:
+        if (not isinstance(record, dict) or not isinstance(record.get("status"), str)
+                or record["status"] not in statuses):
+            return [], ["changed-file metadata has an invalid status"]
+        destination = record.get("filename")
+        if not valid_path(destination) or destination in destinations:
+            return [], ["changed-file metadata has an invalid or duplicate filename"]
+        destinations.add(destination)
+        paths.append(destination)
+        previous = record.get("previous_filename")
+        if record["status"] == "renamed" or "previous_filename" in record:
+            if (record["status"] not in ("renamed", "copied")
+                    or not valid_path(previous) or previous == destination):
+                return [], ["changed-file metadata has malformed rename paths"]
+            paths.append(previous)
+    return list(dict.fromkeys(paths)), []
+
+
 def verify_problems(body: str, head: str) -> list[str]:
     """Check the `## App verification` block verify-change.sh writes."""
     if "## App verification" not in body:
@@ -112,7 +144,8 @@ def verify_problems(body: str, head: str) -> list[str]:
 def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str]]:
     """Return (lane, reasons). No reasons means the PR may merge.
 
-    `extra` carries what `gh pr view` doesn't: unresolved_threads (int) and
+    `extra` carries what `gh pr view` doesn't: paginated REST changed_files
+    (including previous_filename), unresolved_threads (int), and
     reviewer_reactions (list of {login, created_at}).
     """
     reasons: list[str] = []
@@ -135,7 +168,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
 
-    files = [f["path"] for f in pr.get("files", [])]
+    files, file_problems = changed_paths(extra.get("changed_files"), pr.get("changedFiles"))
+    reasons.extend(file_problems)
     if not files:
         reasons.append("no changed files reported")
     denied = [p for p in files if matches(p, config["deny_always"] + lane.get("deny", []))]
@@ -218,7 +252,12 @@ def fetch_extra(number: int, config: dict) -> dict:
     threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
     reactions = gh_json("api", f"repos/{owner}/{name}/issues/{number}/reactions",
                         "-H", "Accept: application/vnd.github+json")
+    file_pages = gh_json("api", f"repos/{owner}/{name}/pulls/{number}/files?per_page=100",
+                         "--paginate", "--slurp", "-H", "Accept: application/vnd.github+json")
+    if not isinstance(file_pages, list) or not all(isinstance(page, list) for page in file_pages):
+        raise RuntimeError("PR files API returned malformed pages; refusing to merge")
     return {
+        "changed_files": [record for page in file_pages for record in page],
         "unresolved_threads": sum(1 for t in threads if not t["isResolved"]),
         "reviewer_reactions": [
             {"login": r["user"]["login"], "created_at": r["created_at"]}
@@ -288,18 +327,26 @@ def self_test() -> int:
         "isDraft": True, "isCrossRepository": False, "labels": [{"name": "cleanup"}],
         "author": {"login": "r3dbars"}, "additions": 40, "deletions": 30, "mergeable": "MERGEABLE",
         "files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/test-shape-baseline.json"}],
+        "changedFiles": 2,
         "statusCheckRollup": [{"name": "build-and-test", "conclusion": "SUCCESS"},
                               {"name": "repo-hygiene", "conclusion": "SUCCESS"}],
         "reviews": [{"author": {"login": "chatgpt-codex-connector"}, "state": "COMMENTED",
                      "commit": {"oid": head}}],
         "commits": [{"committedDate": "2026-10-07T10:00:00Z"}],
     }
-    extra = {"unresolved_threads": 0, "reviewer_reactions": []}
+    extra = {"unresolved_threads": 0, "reviewer_reactions": [],
+             "changed_files": [{"filename": f["path"], "status": "modified"} for f in base_pr["files"]]}
 
     def case(name: str, expect_ok: bool, pr_patch: dict | None = None, extra_patch: dict | None = None,
              expect_text: str = "") -> bool:
         pr = {**base_pr, **(pr_patch or {})}
-        ex = {**extra, **(extra_patch or {})}
+        # Existing fixtures use paths; evaluation itself requires REST metadata.
+        files = pr.pop("files")
+        pr["changedFiles"] = len(files)
+        ex = {**extra, "changed_files": [{"filename": f["path"], "status": "modified"} for f in files],
+              **(extra_patch or {})}
+        if pr_patch and "changedFiles" in pr_patch:
+            pr["changedFiles"] = pr_patch["changedFiles"]
         _, reasons = evaluate(pr, ex, config)
         ok = not reasons
         passed = ok == expect_ok and (not expect_text or any(expect_text in r for r in reasons))
@@ -329,6 +376,54 @@ def self_test() -> int:
               "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "Sources/UI/Home/HomeView.swift"}]}),
         case("Sources file outside test-shape lane", False,
              {"files": [{"path": "Sources/UI/Home/HomeView.swift"}]}, None, "outside lane"),
+        case("rename from protected source blocks", False,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed",
+                                 "previous_filename": "Sources/TranscriptedCore/Audio/A.swift"}]},
+             "protected files"),
+        case("rename protected threat model to allowed docs blocks", False,
+             {"headRefName": "garden/docs/x", "labels": [{"name": "gardener"}],
+              "files": [{"path": "docs/x.md"}]},
+             {"changed_files": [{"filename": "docs/x.md", "status": "renamed",
+                                 "previous_filename": "docs/threat-model.md"}]}, "protected files"),
+        case("rename protected playbook to allowed docs blocks", False,
+             {"headRefName": "garden/docs/x", "labels": [{"name": "gardener"}],
+              "files": [{"path": "docs/x.md"}]},
+             {"changed_files": [{"filename": "docs/x.md", "status": "renamed",
+                                 "previous_filename": "docs/automations/finding-responder.md"}]},
+             "protected files"),
+        case("rename to protected destination blocks", False,
+             {"files": [{"path": "Sources/TranscriptedCore/Audio/A.swift"}]},
+             {"changed_files": [{"filename": "Sources/TranscriptedCore/Audio/A.swift", "status": "renamed",
+                                 "previous_filename": "Tests/FooTests.swift"}]}, "protected files"),
+        case("rename from outside lane blocks", False,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed",
+                                 "previous_filename": "Sources/Support/Foo.swift"}]}, "outside lane"),
+        case("rename inside lane merges", True,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed",
+                                 "previous_filename": "Tests/OldFooTests.swift"}]}),
+        case("protected deletion blocks", False,
+             {"files": [{"path": "AGENTS.md"}]},
+             {"changed_files": [{"filename": "AGENTS.md", "status": "removed"}]}, "protected files"),
+        case("allowed deletion merges", True,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "removed"}]}),
+        case("rename without source fails closed", False,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed"}]},
+             "malformed rename"),
+        case("rename with invalid source fails closed", False,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed",
+                                 "previous_filename": "../AGENTS.md"}]}, "malformed rename"),
+        case("unexpected rename metadata fails closed", False,
+             {"files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "modified",
+                                 "previous_filename": "AGENTS.md"}]}, "malformed rename"),
+        case("missing REST metadata fails closed", False, None, {"changed_files": None}, "metadata"),
+        case("truncated files fail closed", False, {"changedFiles": 3}, None, "incomplete"),
         case("owner-review label blocks", False,
              {"labels": [{"name": "cleanup"}, {"name": "needs owner review"}]}, None, "blocking label"),
         case("missing cleanup label", False, {"labels": []}, None, "missing label"),
