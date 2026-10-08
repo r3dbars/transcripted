@@ -5,33 +5,28 @@
 // AppKit windows and panels default to `NSWindow.SharingType.readOnly`, which
 // ScreenCaptureKit and Screenshot window capture can use. That is the right
 // choice for normal windows, where users expect standard macOS screenshots to
-// work. Live/transient overlays and transcript-bearing review windows opt out
-// with `sharingType = .none`.
+// work. Live/transient overlays opt out with `sharingType = .none`.
 //
-// Source-text pin: "Settings stays capturable" below reads its controller as text.
-// TranscriptedSettingsWindowController needs a live
-// TranscriptedAppState/TranscriptedSettingsActions object
-// graph (STTRouter, MeetingSessionController, SparkleUpdaterController...) this runner never builds.
-// Onboarding's AppKit window factory is tested directly without its permission views.
-// NotchIslandPanel (including its Show island in screen sharing switch) and
-// PasteLastDictationFeedbackPanel are compiled here and built live by the first two
-// suites, so no protected surface is left on a source table. "detected meeting
-// prompts route through the call prompt controller" still reads TranscriptedApp.swift;
-// it needs an app-delegate seam first. The last suite
-// (overlayPrivacyWindowPanelMarkers) is inherently static — it walks Sources/UI for every NSWindow/NSPanel
-// definition and diffs against a fixed allowlist, since there's no runtime signal for "a new window got
-// added" — update expectedMarkers when you add, rename, or remove one.
+// Every test builds the real window and reads `sharingType` off it. The call
+// prompt, meeting pill, dictation overlay and speaker review all draw inside
+// the one NotchIslandPanel, so protecting that panel protects them.
+//
+// Window inventory. This is the list of AppKit windows the app makes, and each
+// is built below. Nothing at runtime can say "someone added a window", so a NEW
+// NSWindow/NSPanel must be added here by hand with the right policy.
+//   protected (.none):      NotchIslandPanel, PasteLastDictationFeedbackPanel
+//   capturable (.readOnly): Onboarding window, Settings window,
+//                           MenuBarPopoverAnchorPanel (checked in MenuBarPopoverPresentationTests)
 
 import AppKit
 import Foundation
 
 @MainActor
 func testOverlayScreenSharePrivacy() async {
-    // Behavioral: these panels are dependency-free, so the fast runner can
-    // instantiate them and assert the real runtime property instead of only
-    // inspecting source.
+    _ = NSApplication.shared
+
     runSuite("NotchIslandPanel is excluded from screen capture and never takes focus") {
-        _ = NSApplication.shared
+        // Same arguments NotchIslandController.ensurePanel() uses.
         let panel = NotchIslandPanel(
             contentRect: NSRect(x: 0, y: 0, width: 360, height: 32),
             styleMask: [],
@@ -41,7 +36,7 @@ func testOverlayScreenSharePrivacy() async {
         assertEqual(
             panel.sharingType,
             .none,
-            "the notch island shows live dictation and must not be visible to screen sharing / capture"
+            "the notch island shows live dictation, the call prompt and meeting status, and must not be visible to screen sharing / capture"
         )
         assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
         assertFalse(panel.canBecomeMain, "the island is never a main window")
@@ -68,19 +63,14 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
-    runSuite("PasteLastDictationFeedbackPanel is excluded from screen capture") {
-        _ = NSApplication.shared
-        let panel = PasteLastDictationFeedbackPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 56),
-            styleMask: [],
-            backing: .buffered,
-            defer: true
-        )
+    runSuite("the paste-last-dictation notice panel is excluded from screen capture") {
+        let panel = PasteLastDictationFeedbackPresenter().makePanel()
         assertEqual(
             panel.sharingType,
             .none,
             "the paste-last-dictation notice shows dictated text and must not be visible to screen sharing / capture"
         )
+        assertFalse(panel.canBecomeKey, "the notice never takes focus")
     }
 
     runSuite("onboarding stays capturable without displaying a window") {
@@ -96,116 +86,78 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(window.isReleasedWhenClosed, "the controller retains its reusable window")
     }
 
-    runSuite("Settings stays capturable") {
-        let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
-
-        let inits: [(name: String, body: String)] = [
-            (
-                "TranscriptedSettingsWindowController",
-                overlayPrivacySlice(
-                    settingsWindow,
-                    from: "let window = NSWindow(",
-                    to: "super.init(window: window)"
-                )
-            ),
-        ]
-
-        for entry in inits {
-            assertTrue(
-                entry.body.contains("sharingType = .readOnly"),
-                "\(entry.name) should support normal macOS screenshots"
-            )
-            assertFalse(
-                entry.body.contains("sharingType = .none"),
-                "\(entry.name) must not opt itself out of screenshots"
-            )
-        }
+    runSuite("Settings stays capturable without displaying a window") {
+        let window = TranscriptedSettingsWindow.make(contentViewController: NSViewController())
+        assertEqual(window.sharingType, .readOnly, "Settings supports normal macOS screenshots")
+        assertFalse(window.isVisible, "constructing Settings does not show or activate it")
+        assertEqual(window.contentMinSize, NSSize(width: 880, height: 640), "preserve Settings minimum size")
     }
 
-    runSuite("new NSWindow/NSPanel surfaces must be reviewed by the capture policy contract") {
-        let expectedMarkers: [String] = [
-            // Clear geometry-only anchor, with no capture text. Its readOnly
-            // sharing policy is checked by MenuBarPopoverPresentationTests.
-            "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift|private final class MenuBarPopoverAnchorPanel: NSPanel {",
-            "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|final class PasteLastDictationFeedbackPanel: NSPanel {",
-            "Sources/UI/Overlay/NotchIslandPanel.swift|final class NotchIslandPanel: NSPanel {",
-            "Sources/UI/Settings/TranscriptedOnboardingWindow.swift|let window = NSWindow(",
-            "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
-        ]
-        let markers = overlayPrivacyWindowPanelMarkers()
-        assertEqual(
-            markers,
-            expectedMarkers,
-            "any new Transcripted NSWindow/NSPanel must be reviewed here and classified as protected or capturable"
-        )
-    }
-
-    runSuite("detected meeting prompts route through the call prompt controller") {
-        let app = overlayPrivacySource("Sources/App/TranscriptedApp.swift")
-        let promptRequest = overlayPrivacySlice(
-            app,
-            from: "meetingPromptDetector.onPromptRequest =",
-            to: "// Ad-hoc call detection:"
-        )
-        assertTrue(
-            promptRequest.contains("capturePillController.present("),
-            "detected meeting prompts should use the call prompt controller"
-        )
-        assertTrue(
-            promptRequest.contains("MeetingPromptHeuristics.promptTimeoutSeconds"),
-            "detected meeting prompts should preserve calendar vs ad-hoc prompt timeouts"
-        )
-        assertTrue(
-            app.contains("capturePillController.onRemind = remindPrompt"),
-            "the call prompt should expose the short remind-soon path"
-        )
-        assertTrue(
-            app.contains("capturePillController.onExpired = expirePrompt"),
-            "the call prompt timeout should use the expiry path, not an explicit dismissal"
-        )
+    runSuite("detected meeting prompts go to the call prompt on the island") {
+        let candidate = overlayPrivacyCandidate(reason: .micInput)
+        let controller = CapturePillController()
         assertFalse(
-            promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
-            "detected meeting prompts should not reuse the recording overlay prompt surface"
+            controller.present(candidate: candidate),
+            "with no island there is no other surface to fall back on"
         )
+
+        let island = OverlayPrivacyFakeIsland()
+        controller.island = island
+        var recorded = 0, reminded = 0, dismissed = 0, expired = 0
+        controller.onRecord = { _ in recorded += 1 }
+        controller.onRemind = { _ in reminded += 1 }
+        controller.onDismiss = { _ in dismissed += 1 }
+        controller.onExpired = { _ in expired += 1 }
+
+        assertTrue(controller.present(candidate: candidate, timeout: 45, detailOverride: "Mic only"), "the island shows the prompt")
+        assertEqual(
+            island.prompt,
+            NotchIslandCallPromptContent(title: candidate.title, detail: "Mic only", secondsLeft: 45),
+            "the island gets the candidate's title, the detail override and the timeout"
+        )
+        island.callActionHandler?(.callRemind)
+        assertEqual([recorded, reminded, dismissed, expired], [0, 1, 0, 0], "Remind soon uses the remind path")
+        assertTrue(island.prompt == nil, "answering clears the prompt")
+
+        _ = controller.present(candidate: candidate)
+        island.callActionHandler?(.callRecord)
+        assertEqual([recorded, reminded, dismissed, expired], [1, 1, 0, 0], "Record uses the record path")
+
+        _ = controller.present(candidate: candidate)
+        island.callActionHandler?(.callDismiss)
+        assertEqual([recorded, reminded, dismissed, expired], [1, 1, 1, 0], "Not now is an explicit dismissal, not an expiry")
+    }
+
+    runSuite("ad-hoc call prompts get the longer timeout, calendar prompts the default") {
+        assertEqual(MeetingPromptHeuristics.promptTimeoutSeconds(for: .micInput, calendarDefault: 30), 60, "mic-led call")
+        assertEqual(MeetingPromptHeuristics.promptTimeoutSeconds(for: .audioOutput, calendarDefault: 30), 60, "listen-only call")
+        assertEqual(MeetingPromptHeuristics.promptTimeoutSeconds(for: .calendarNearby, calendarDefault: 30), 30, "calendar event")
     }
 }
 
-private func overlayPrivacySource(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+@MainActor
+private final class OverlayPrivacyFakeIsland: NotchIslandCallPromptPresenting {
+    var callActionHandler: ((NotchIslandAction) -> Void)?
+    var callHoverHandler: ((Bool) -> Void)?
+    var callVisibilityHandler: ((Bool) -> Void)?
+    var prompt: NotchIslandCallPromptContent?
+    func updateCallPrompt(_ content: NotchIslandCallPromptContent?) { prompt = content }
+    func updateCallPromptSeconds(_ secondsLeft: Int) { prompt?.secondsLeft = secondsLeft }
 }
 
-private func overlayPrivacySlice(_ contents: String, from start: String, to end: String) -> String {
-    guard let startRange = contents.range(of: start) else { return "" }
-    let tail = contents[startRange.upperBound...]
-    guard let endRange = tail.range(of: end) else { return String(tail) }
-    return String(tail[..<endRange.lowerBound])
-}
-
-private func overlayPrivacyWindowPanelMarkers() -> [String] {
-    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/UI")
-    guard let enumerator = FileManager.default.enumerator(
-        at: root,
-        includingPropertiesForKeys: nil
-    ) else { return [] }
-
-    var markers: [String] = []
-    for case let url as URL in enumerator where url.pathExtension == "swift" {
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
-        let relativePath = "Sources/UI/" + url.path.replacingOccurrences(of: root.path + "/", with: "")
-        for rawLine in contents.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            let isWindowOrPanelClass = (
-                line.hasPrefix("class ")
-                    || line.hasPrefix("final class ")
-                    || line.hasPrefix("private final class ")
-            ) && line.contains(": NSPanel")
-            if isWindowOrPanelClass || line.contains("NSPanel(") || line.contains("NSWindow(") {
-                markers.append("\(relativePath)|\(line)")
-            }
-        }
-    }
-    return markers.sorted()
+@MainActor
+private func overlayPrivacyCandidate(reason: MeetingPromptReason) -> MeetingPromptDetector.Candidate {
+    let start = Date(timeIntervalSince1970: 2_000)
+    return MeetingPromptDetector.Candidate(
+        id: "overlay-privacy-candidate",
+        title: "Call detected",
+        detail: "Record this call?",
+        provider: .zoom,
+        reason: reason,
+        source: .runtimeApp,
+        startDate: start,
+        endDate: start.addingTimeInterval(1_800),
+        meetingURL: nil,
+        suggestedTranscriptTitle: nil
+    )
 }

@@ -105,16 +105,16 @@ final class WritingController {
     let physicalMemoryBytes: UInt64
     /// The model Writing runs: the saved choice, or Gemma when this Mac
     /// can't run the saved one.
-    private(set) var selectedModel: TildeModelChoice
+    var selectedModel: TildeModelChoice
     /// The socket server is up and the runtime is live.
     private(set) var isRunning = false
-    private(set) var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
+    var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
     /// What enabling the keyboard did on the last try, if it ran. On macOS
     /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
     /// and the source stays off.
-    private(set) var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
+    var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
     /// Whether selecting the keyboard on the first setup worked, if it ran.
-    private(set) var keyboardSelectSucceeded: Bool?
+    var keyboardSelectSucceeded: Bool?
 
     var isQwenEligible: Bool {
         WritingModelEligibility.isEligible(.qwen35B9B, physicalMemoryBytes: physicalMemoryBytes)
@@ -188,7 +188,7 @@ final class WritingController {
         )
     }
 
-    private nonisolated static var keyboardIsInstalled: Bool {
+    nonisolated static var keyboardIsInstalled: Bool {
         let installedPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Input Methods", isDirectory: true)
             .appendingPathComponent(TildeProductProfile.current.inputMethodInstalledBundleName)
@@ -207,7 +207,7 @@ final class WritingController {
 
     // MARK: - Runtime
 
-    private struct Runtime {
+    struct Runtime {
         let models: WritingModelManagerBox
         let llamaServerHost: LlamaServerProcessHost
         /// Keeps the frontmost app's register scaffold in the helper's
@@ -227,23 +227,23 @@ final class WritingController {
 
     let modelRoot: URL
     /// `<capture-library>/writing`, for the day files and Delete all writing.
-    private let writingDirectory: @Sendable () -> URL
-    private let keyboardInstaller = GhostKeyboardInstallerHost()
-    private var inputSources: SystemWritingInputSources {
+    let writingDirectory: @Sendable () -> URL
+    let keyboardInstaller = GhostKeyboardInstallerHost()
+    var inputSources: SystemWritingInputSources {
         SystemWritingInputSources(installer: keyboardInstaller)
     }
-    private var runtime: Runtime?
+    var runtime: Runtime?
     /// Rebuilt on a model switch: its served configuration is per model.
-    private var ghostBrainServerHost: GhostBrainServerHost?
+    var ghostBrainServerHost: GhostBrainServerHost?
     /// The model the runtime is built for. Differs from `selectedModel` only
     /// while a switch is between persisting and rebuilding.
-    private var activeModel: TildeModelChoice?
+    var activeModel: TildeModelChoice?
     private(set) var log: (String) -> Void = { _ in }
     private var frontWindowObserver: WritingFrontWindowObserver?
     /// Model preparation at start, or a model switch. At most one runs.
-    private var modelTask: Task<Void, Never>?
-    private var modelTaskID: UUID?
-    private var wakeTask: Task<Void, Never>?
+    var modelTask: Task<Void, Never>?
+    var modelTaskID: UUID?
+    var wakeTask: Task<Void, Never>?
     private var hasStarted = false
     /// Set by `stop()` at quit. Nothing starts after it.
     private var isTerminated = false
@@ -252,7 +252,7 @@ final class WritingController {
     private var activationAllowed = false
     /// The model and helper run for Autocomplete. Follows the Autocomplete
     /// switch while Writing runs.
-    private var autocompleteRuntimeActive = false
+    var autocompleteRuntimeActive = false
 
     init(
         physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory,
@@ -530,231 +530,9 @@ final class WritingController {
         }
     }
 
-    // MARK: - Actions for the Writing tab
-
-    /// Switches the model without a relaunch: the helper stops, the new
-    /// model is adopted or downloaded and verified, the helper restarts.
-    /// An ineligible choice (Qwen under 16 GiB) is ignored.
-    func selectModel(_ choice: TildeModelChoice) {
-        guard WritingModelEligibility.isEligible(choice, physicalMemoryBytes: physicalMemoryBytes) else {
-            log("WRITING | \(choice.rawValue) needs 16 GB of memory; staying on \(selectedModel.rawValue)")
-            return
-        }
-        guard isRunning else {
-            TildeModelSelection.persist(choice, defaults: Self.appDefaults())
-            selectedModel = choice
-            return
-        }
-        guard autocompleteRuntimeActive else {
-            // No helper and no download with Autocomplete off: save the
-            // choice and serve its configuration. Turning Autocomplete on
-            // prepares this model.
-            guard choice != activeModel else { return }
-            persistModelChoice(choice)
-            rebuildRuntime(for: choice)
-            return
-        }
-        // An interrupted switch leaves the runtime's model unknown, so the
-        // next one runs every step even back to the same model.
-        let current = modelTask == nil ? activeModel : nil
-        let steps = WritingModelSwitchSteps(controller: self)
-        let memory = physicalMemoryBytes
-        runModelTask { controller in
-            let outcome = await WritingModelSwitch.perform(
-                from: current,
-                to: choice,
-                physicalMemoryBytes: memory,
-                host: steps
-            )
-            controller.log("WRITING | model switch to \(choice.rawValue): \(outcome)")
-        }
-    }
-
-    /// Save my writing is Tilde's Personal History switch. It goes through the
-    /// controller when Writing runs, so consent rotates and text queued
-    /// before the change is refused, as in Tilde.
-    func setSaveMyWriting(_ enabled: Bool) {
-        if let runtime {
-            runtime.personalHistoryController.isEnabled = enabled
-        } else {
-            let settings = Self.settings()
-            settings.personalHistoryConsentIdentifier = UUID().uuidString
-            settings.personalHistoryEnabled = enabled
-        }
-    }
-
-    /// Tilde's suggestions switch. Saves only; `applyRunState()` then starts
-    /// or stops the model and helper.
-    func setAutocomplete(_ enabled: Bool) {
-        Self.settings().suggestionsEnabled = enabled
-    }
-
-    /// Off by default (decision 11). Serving also needs Save my writing on.
-    func setPersonalizedSuggestions(_ enabled: Bool) {
-        Self.preferences().personalizedSuggestionsEnabled = enabled
-    }
-
-    /// Tilde's "Pause for 1 hour", which here pauses Save my writing too:
-    /// the keyboard stops suggesting, and text it sends meanwhile is
-    /// acknowledged and never kept (`WritingPausableIngest`).
-    func pause(for interval: TimeInterval) {
-        Self.settings().pause(for: interval)
-        applyFrontWindowWatch()
-        log("WRITING | paused for \(Int(interval / 60)) min")
-    }
-
-    func resume() {
-        Self.settings().resume()
-        applyFrontWindowWatch()
-        log("WRITING | resumed")
-    }
-
-    /// One scope for capture, the day files, Screen Memory context and
-    /// suggestions. The keyboard picks it up on its next key.
-    func setAppScope(_ scope: WritingAppScope) {
-        Self.preferences().appScope = scope
-        applyFrontWindowWatch()
-    }
-
-    /// Delete all writing: Tilde's delete-all (history, trained model,
-    /// Keychain key, outcome ledger) plus every `Writing_*.md` in the writing
-    /// folder. Like Tilde's, it turns Save my writing off. `true` when
-    /// everything went.
-    func deleteAllWriting() async -> Bool {
-        let controller = runtime?.personalHistoryController ?? PersonalHistoryController(
-            store: EncryptedPersonalHistoryStore(),
-            settings: Self.settings(),
-            diagnostics: .shared
-        )
-        var deleted = true
-        do {
-            try await controller.deleteAll()
-        } catch {
-            deleted = false
-        }
-        if !TildeLocalOutcomeStores.deleteAll() { deleted = false }
-        let recorder = runtime?.dayFiles.recorder
-        let directory = writingDirectory
-        let filesDeleted = await Task.detached(priority: .userInitiated) {
-            recorder?.deleteAll() ?? WritingDayFileStore.deleteAll(in: directory())
-        }.value
-        log("WRITING | delete all writing: \(deleted && filesDeleted ? "done" : "incomplete")")
-        return deleted && filesDeleted
-    }
-
-    /// Shows the system Screen Recording prompt the first time. macOS then
-    /// offers its own "Quit & Reopen", which goes through Transcripted's
-    /// normal quit path and its meeting guard. Nothing here relaunches.
-    @discardableResult
-    func requestScreenRecording() -> Bool {
-        Self.settings().screenRecordingRequested = true
-        let granted = ScreenRecordingPermission.request()
-        DiagnosticsLog.shared.record(
-            "screen-recording-permission",
-            metadata: ["outcome": granted ? "granted" : "requested"]
-        )
-        return granted
-    }
-
-    /// After the one system prompt, macOS only grants from System Settings.
-    func openScreenRecordingSettings() {
-        NSWorkspace.shared.open(ScreenRecordingPermission.systemSettingsURL)
-    }
-
-    /// The Writing tab's keyboard step: install or update, register, try to
-    /// enable, and select when it's enabled, every time it's asked (the
-    /// launch path tries the enable and select only on the first setup).
-    /// macOS 26 ignores the enable, so until the user adds the keyboard in
-    /// Keyboard settings this ends not selected. `openSettingsOnFailure` is
-    /// only for the tab's "Open Keyboard Settings" button: nothing else opens
-    /// System Settings. `true` once the keyboard is the selected input
-    /// source.
-    @discardableResult
-    func turnOnKeyboard(openSettingsOnFailure: Bool = false) -> Bool {
-        guard installKeyboardRecordingFirstInstall() else {
-            if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
-            return false
-        }
-        let selected = enableAndSelectKeyboard()
-        if !selected, openSettingsOnFailure {
-            keyboardInstaller.openKeyboardSettings()
-        }
-        return selected
-    }
-
-    /// Install or update and register. When this copied the keyboard in
-    /// where none was before, remembers the login session it happened in
-    /// (`WritingKeyboardFirstInstall`). `true` when the keyboard is in place.
-    private func installKeyboardRecordingFirstInstall() -> Bool {
-        let wasInstalled = Self.keyboardIsInstalled
-        let result = keyboardInstaller.installOrUpdateIfNeeded()
-        keyboardInstallResult = result
-        log("WRITING | keyboard install: \(result)")
-        if result == .installed, !wasInstalled {
-            WritingKeyboardFirstInstall.record(
-                currentSession: WritingLoginSession.currentIdentifier(),
-                defaults: Self.appDefaults()
-            )
-        }
-        return result == .installed || result == .alreadyInstalled
-    }
-
-    /// Tries `TISEnableInputSource`, checks it took, and selects the
-    /// keyboard when it's enabled. Logs what actually happened. `true` once
-    /// the keyboard is the selected input source.
-    private func enableAndSelectKeyboard() -> Bool {
-        let enable = WritingKeyboardInputSource.enable(using: inputSources)
-        keyboardEnableResult = enable
-        switch enable {
-        case .enabled:
-            log("WRITING | keyboard enable: enabled")
-        case .alreadyEnabled:
-            log("WRITING | keyboard enable: already enabled")
-        case .needsUserToAdd:
-            log("WRITING | keyboard enable: still off after TISEnableInputSource returned noErr; the user has to add it in Keyboard settings")
-        case .notRegistered:
-            log("WRITING | keyboard enable: not registered")
-        case let .failed(status):
-            log("WRITING | keyboard enable: TISEnableInputSource failed (\(status))")
-        }
-        guard enable.isEnabled else {
-            keyboardSelectSucceeded = false
-            log("WRITING | keyboard select: skipped, keyboard not enabled")
-            return false
-        }
-        let selected = keyboardInstaller.selectInputSourceIfAvailable()
-        keyboardSelectSucceeded = selected
-        log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
-        if selected {
-            Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
-        }
-        return selected
-    }
-
-    /// Bytes on this Mac, for the Writing tab's storage meter. Reads sizes
-    /// only, off the main thread.
-    func storageUsage() async -> WritingStorageUsage {
-        let historyController = runtime?.personalHistoryController
-        let directory = writingDirectory
-        let modelRoot = modelRoot
-        let historyBytes: Int64
-        if let historyController {
-            historyBytes = await historyController.summary()?.approximateBytes ?? 0
-        } else {
-            historyBytes = (try? await EncryptedPersonalHistoryStore().summary().approximateBytes) ?? 0
-        }
-        return await Task.detached(priority: .utility) {
-            WritingStorageUsage(
-                savedWritingBytes: WritingStorageUsage.dayFileBytes(in: directory()),
-                learningBytes: historyBytes + TildeLocalOutcomeStores.approximateBytes(),
-                modelBytes: WritingStorageUsage.fileBytes(under: modelRoot)
-            )
-        }.value
-    }
-
     // MARK: - Model
 
-    private func makeModelManager(for model: TildeModelChoice) -> ModelManager {
+    func makeModelManager(for model: TildeModelChoice) -> ModelManager {
         ModelManager(
             descriptor: TildeModelSelection.descriptor(
                 for: TildeProductProfile.current,
@@ -803,7 +581,7 @@ final class WritingController {
 
     /// Adopts Tilde's copy when this model isn't installed yet, then lets
     /// `ModelManager` check, download and verify it. `true` once it's ready.
-    fileprivate func prepareCurrentModel() async -> Bool {
+    func prepareCurrentModel() async -> Bool {
         guard let runtime else { return false }
         let manager = runtime.models.manager
         let descriptor = manager.descriptor
@@ -827,7 +605,7 @@ final class WritingController {
         return state.isReady
     }
 
-    private func runModelTask(_ work: @escaping @MainActor (WritingController) async -> Void) {
+    func runModelTask(_ work: @escaping @MainActor (WritingController) async -> Void) {
         modelTask?.cancel()
         let id = UUID()
         modelTaskID = id
@@ -839,98 +617,6 @@ final class WritingController {
                 self.modelTaskID = nil
             }
         }
-    }
-
-    // MARK: - Socket server
-
-    private func makeServerHost(_ runtime: Runtime, model: TildeModelChoice) -> GhostBrainServerHost {
-        let profile = TildeProductProfile.current
-        let completionProfile = TildeModelSelection.completionProfile(for: profile, productionChoice: model)
-        // One configuration for both processes: the build's interaction
-        // policy, the model choice's generator and decision policies.
-        let configuration = TildeEffectiveConfiguration.resolve(
-            build: profile,
-            completionProfile: completionProfile,
-            modelIdentifier: runtime.models.manager.descriptor.identifier
-        )
-        // Phrase continuations go to the llama engine. Mid-word completion
-        // belongs only to the keyboard's system spell-checker path.
-        return GhostBrainServerHost(
-            runtime: runtime.llamaServerHost,
-            personalHistory: WritingPausableIngest(
-                base: WritingHistoryIngest(
-                    dayFiles: runtime.dayFiles.recorder,
-                    appScope: { Self.preferences().appScope }
-                ),
-                isPaused: { Self.settings().pausedUntil != nil }
-            ),
-            sceneProvider: Self.sceneProvider(for: runtime.screenCaptureService),
-            targetProvider: { appBundleIdentifier, fieldSessionIdentifier in
-                Self.suggestionTargetProvider(appBundleIdentifier, fieldSessionIdentifier)
-            },
-            // A bare activity pulse only — see GhostBrainServerHost's doc comment.
-            onCompletionActivity: Self.completionActivityHandler(
-                for: runtime.screenCaptureService,
-                prewarmer: runtime.scaffoldPrewarmer
-            ),
-            onScreenMemoryEvent: Self.screenMemoryEventHandler(for: runtime.screenCaptureService),
-            suggestionsGate: { Self.suggestionsGate(appBundleIdentifier: $0) },
-            personalSuggestionsGate: { Self.personalSuggestionsGate() },
-            personalNextWordProvider: Self.personalNextWordProvider(for: runtime.personalHistoryController),
-            configuration: configuration,
-            productProfile: completionProfile
-        )
-    }
-
-    /// A model switch swaps the model store and the served configuration.
-    /// The socket goes away for a moment; the keyboard treats that like the
-    /// helper being down, which it is for the whole switch anyway.
-    fileprivate func rebuildRuntime(for model: TildeModelChoice) {
-        guard let runtime else { return }
-        // The superseded manager's download would otherwise keep running.
-        runtime.models.manager.cancel()
-        runtime.models.manager = makeModelManager(for: model)
-        activeModel = model
-        ghostBrainServerHost?.stop()
-        let server = makeServerHost(runtime, model: model)
-        if server.start() {
-            ghostBrainServerHost = server
-        } else {
-            ghostBrainServerHost = nil
-            log("WRITING | socket server did not restart after the model switch")
-        }
-    }
-
-    fileprivate func persistModelChoice(_ model: TildeModelChoice) {
-        TildeModelSelection.persist(model, defaults: Self.appDefaults())
-        selectedModel = model
-        DiagnosticsLog.shared.record("model-selected", metadata: ["model": model.rawValue])
-    }
-
-    fileprivate func stopHelper() async {
-        guard let host = runtime?.llamaServerHost else { return }
-        // Up to 1.2 s of TERM-then-KILL; keep it off the main thread.
-        await Task.detached(priority: .userInitiated) { host.stop() }.value
-    }
-
-    /// Delete model, Autocomplete already saved off: ends model work and
-    /// waits for the helper to exit. `applyRunState()` settles the rest.
-    func stopModelWork() async {
-        let previous = modelTask
-        modelTask?.cancel()
-        modelTask = nil
-        modelTaskID = nil
-        wakeTask?.cancel()
-        wakeTask = nil
-        autocompleteRuntimeActive = false
-        runtime?.models.manager.cancel()
-        await previous?.value
-        await stopHelper()
-    }
-
-    fileprivate func startHelper() {
-        guard isRunning, autocompleteRuntimeActive else { return }
-        runtime?.llamaServerHost.start()
     }
 
     // MARK: - Keyboard
@@ -960,7 +646,7 @@ final class WritingController {
 
     // MARK: - Screen Memory observation
 
-    private func applyFrontWindowWatch() {
+    func applyFrontWindowWatch() {
         guard isRunning, let runtime else { return }
         if frontWindowObserver == nil {
             frontWindowObserver = WritingFrontWindowObserver(
@@ -992,134 +678,6 @@ final class WritingController {
         )
     }
 
-    // MARK: - Server closures
-
-    /// Screen Recording is required for any suggestion, and the request's app
-    /// must be in the Writing scope; see `WritingSuggestionsGate` for the
-    /// whole rule. Read fresh on every completion request (never cached), so
-    /// a permission revoked or granted mid-session applies to the very next
-    /// request.
-    private nonisolated static func suggestionsGate(appBundleIdentifier: String?) -> Bool {
-        WritingSuggestionsGate.allows(WritingSuggestionsGate.Inputs(
-            preferences: preferences(),
-            appBundleIdentifier: appBundleIdentifier,
-            screenRecordingGranted: ScreenRecordingPermission.isGranted()
-        ))
-    }
-
-    /// Tilde had one choice: Personal History on meant personal suggestions
-    /// on. Transcripted splits them (decision 11): personalized suggestions
-    /// are their own switch, off by default, and still need Save my writing,
-    /// which is what the predictor learns from.
-    private nonisolated static func personalSuggestionsGate() -> Bool {
-        preferences().personalSuggestionsAllowed
-    }
-
-    /// `nonisolated` for the same reason `sceneProvider`/
-    /// `completionActivityHandler` are: the closure captures and calls an
-    /// actor-isolated method (`PersonalHistoryController.
-    /// personalNextWordPrediction`) from inside a `@MainActor` type.
-    /// Per-app exclusions are enforced on the other side of this closure,
-    /// inside the controller — see its doc comment.
-    private nonisolated static func personalNextWordProvider(
-        for controller: PersonalHistoryController
-    ) -> @Sendable ([String], String?) async -> PersonalNextWordPrediction? {
-        { tailWords, appBundleIdentifier in
-            await controller.personalNextWordPrediction(
-                afterTailWords: tailWords,
-                appBundleIdentifier: appBundleIdentifier
-            )
-        }
-    }
-
-    /// `nonisolated` so the closure it returns has no ambiguous isolation of
-    /// its own to infer: the compiler cannot otherwise tell whether a closure
-    /// written inside a `@MainActor` type belongs to the main actor or to
-    /// `ScreenCaptureService`'s own actor.
-    private nonisolated static func completionActivityHandler(
-        for service: ScreenCaptureService,
-        prewarmer: ScaffoldPrewarmer
-    ) -> @Sendable () -> Void {
-        {
-            prewarmer.noteCompletionActivity()
-            Task { await service.noteCompletionActivity() }
-        }
-    }
-
-    private nonisolated static func screenMemoryEventHandler(
-        for service: ScreenCaptureService
-    ) -> @Sendable (ScreenMemoryInputEvent) -> Void {
-        { event in
-            Task {
-                guard event.kind != .textFieldBlurred else {
-                    await service.noteTextFieldBlurred(sessionIdentifier: event.sessionIdentifier)
-                    return
-                }
-                let target = Self.currentTypingTarget(sessionIdentifier: event.sessionIdentifier)
-                // Screen Memory reads only apps in the Writing scope. A field
-                // outside it ends the capture session instead of starting one.
-                guard Self.preferences().allows(appBundleIdentifier: target?.bundleIdentifier) else {
-                    await service.noteTextFieldBlurred(sessionIdentifier: event.sessionIdentifier)
-                    return
-                }
-                switch event.kind {
-                case .textFieldFocused:
-                    _ = await service.noteTextFieldFocused(
-                        sessionIdentifier: event.sessionIdentifier,
-                        target: target
-                    )
-                case .typingPaused:
-                    _ = await service.noteTypingPaused(
-                        sessionIdentifier: event.sessionIdentifier,
-                        target: target
-                    )
-                case .textFieldBlurred:
-                    break
-                case .contentReset:
-                    _ = await service.noteContentReset(
-                        sessionIdentifier: event.sessionIdentifier,
-                        target: target
-                    )
-                }
-            }
-        }
-    }
-
-    /// The same settings gate `screenCaptureService`'s own `enabled`
-    /// closure uses — a request must never surface screen context capture
-    /// itself would refuse to have started. When the toggle is off, or
-    /// Screen Recording was never granted (so no snapshot exists),
-    /// `freshScene` returns `nil` and the prompt falls back to plain
-    /// autocomplete — degraded, not dead.
-    private nonisolated static func sceneProvider(
-        for service: ScreenCaptureService
-    ) -> @Sendable (
-        String?, String, String?, TypingTargetIdentity?
-    ) async -> ScreenScene.Scene? {
-        { appBundleIdentifier, fieldText, fieldSessionIdentifier, expectedTarget in
-            guard settings().screenMemoryEnabled,
-                  preferences().allows(appBundleIdentifier: appBundleIdentifier) else { return nil }
-            return await service.freshScene(
-                frontmostBundleID: appBundleIdentifier,
-                fieldText: fieldText,
-                fieldSessionIdentifier: fieldSessionIdentifier,
-                expectedTarget: expectedTarget
-            )
-        }
-    }
-
-    private nonisolated static func suggestionTargetProvider(
-        _ appBundleIdentifier: String?,
-        _ fieldSessionIdentifier: String?
-    ) -> TypingTargetIdentity? {
-        guard let fieldSessionIdentifier,
-              let target = currentTypingTarget(sessionIdentifier: fieldSessionIdentifier),
-              appBundleIdentifier == nil || target.bundleIdentifier == appBundleIdentifier else {
-            return nil
-        }
-        return target
-    }
-
     // MARK: - Log text
 
     /// State names for the app log, never a path.
@@ -1142,21 +700,4 @@ final class WritingController {
         case let .failed(reason): "failed (\(reason))"
         }
     }
-}
-
-/// Drives `WritingModelSwitch` against the live runtime without making
-/// those steps part of the controller's own API.
-@MainActor
-private final class WritingModelSwitchSteps: WritingModelSwitchHost {
-    private weak var controller: WritingController?
-
-    init(controller: WritingController) {
-        self.controller = controller
-    }
-
-    func stopHelper() async { await controller?.stopHelper() }
-    func persistModelChoice(_ choice: TildeModelChoice) { controller?.persistModelChoice(choice) }
-    func rebuildRuntime(for choice: TildeModelChoice) { controller?.rebuildRuntime(for: choice) }
-    func prepareModel() async -> Bool { await controller?.prepareCurrentModel() ?? false }
-    func startHelper() { controller?.startHelper() }
 }

@@ -94,7 +94,7 @@ longer has a connect stage). It keeps one mental model:
 - `Settings/HomeMeetingSearchIndex.swift` — in-memory index behind the Home meetings search; covers every saved meeting (title, date, named speakers), not just the loaded slice
 - `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
-- `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
+- `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`MeetingTranscriptionStatus` dependency
 - `Settings/HomeView.swift` — `HomeViewModel` plus Home building blocks: day-grouped capture lists with hover-reveal row actions and load-more, search field, scan-warning card, inline failed-meeting recovery rows, the feedback sheet, and preview/attention models
 - `Settings/QuietHomeLibrary.swift` — quiet-library Meetings components (header sentence, meeting/working rows, in-place expansion with speaker labels and naming)
 - `Settings/QuietDictationLibrary.swift` — per-entry Dictations rows and inline expansion, mirroring the meeting pair
