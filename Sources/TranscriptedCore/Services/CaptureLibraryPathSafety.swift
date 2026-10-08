@@ -21,9 +21,9 @@
 // filesystem path safe to use as a Transcripted capture-library / meeting
 // save-path root?" lives here.
 //
-// EDIT ALL THREE FILES TOGETHER. `Tests/CaptureLibraryPathSafetySyncTests.swift`
-// reads all three from disk and fails if any one of them diverges by even a
-// byte — that test is the enforcement mechanism for this rule, replacing the
+// EDIT ALL THREE FILES TOGETHER. `scripts/dev/check-synced-copies.py`
+// compares all three on disk and fails if any one of them diverges by even a
+// byte — that check is the enforcement mechanism for this rule, replacing the
 // three old hand-written "keep this rule in lockstep" comments this file's
 // history removed.
 //
