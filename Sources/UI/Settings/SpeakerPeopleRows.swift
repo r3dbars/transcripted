@@ -700,12 +700,13 @@ struct SpeakerPersonRow: View {
 
     private func commitRename() {
         guard SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: nameDraft, saveInFlight: isSavingRename) else { return }
-        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let submittedDraft = nameDraft
+        let trimmed = submittedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         isSavingRename = true
         renameErrorMessage = nil
         model.renameFromEveryone(profile, to: trimmed) { [id = profile.id] didSave in
             isSavingRename = false
-            let box = SpeakerEveryoneRenamePolicy.nameBox(afterSave: didSave, typed: nameDraft)
+            let box = SpeakerEveryoneRenamePolicy.nameBox(afterSave: didSave, typed: nameDraft, submitted: submittedDraft)
             renameErrorMessage = box.errorMessage
             nameDraft = box.draft
             if !box.isOpen, expandedPersonID == id { expandedPersonID = nil } // only this card
