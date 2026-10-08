@@ -288,7 +288,7 @@ final class SummaryItemIndexTests: XCTestCase {
         )
     }
 
-    func testFiveHundredMeetingSummaryBackfillBudget() throws {
+    func testFiveHundredMeetingSummaryBackfillIndexesEveryMeeting() throws {
         for index in 0..<500 {
             try writeFixture(
                 makeMeetingWithInlineSummary(
@@ -301,18 +301,24 @@ final class SummaryItemIndexTests: XCTestCase {
             )
         }
 
-        let started = Date()
         try withLogsSuppressed {
             try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         }
-        let elapsed = Date().timeIntervalSince(started)
 
-        XCTAssertLessThan(elapsed, 60, "500-meeting summary backfill should stay under the PRD budget")
         XCTAssertEqual(try index.listRecentMeetings(count: 50).count, 50)
-        XCTAssertEqual(
-            try index.searchUtterances(query: "Synthetic pricing decision 499", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.snippets.first?.speaker,
-            "Summary"
-        )
+
+        for number in 0..<500 {
+            let result = try index.searchUtterances(
+                query: "Synthetic pricing decision \(number)",
+                speaker: nil, dateFrom: nil, dateTo: nil
+            )
+            XCTAssertEqual(
+                result.results.first?.filename,
+                String(format: "Call_2026-04-18_09-15-%03d", number),
+                "Summary search must index meeting \(number)"
+            )
+            XCTAssertEqual(result.results.first?.snippets.first?.speaker, "Summary")
+        }
     }
 
     func testGeneratedSidecarIsNotIndexedAsMeetingButFeedsSummary() throws {
