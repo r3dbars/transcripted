@@ -8,7 +8,6 @@
     "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
     "Tests/MeetingSessionUIPolicyTests.swift": 8,
     "Tests/NightlySecurityContractTests.swift": 34,
-    "Tests/PermissionStateHarnessContractTests.swift": 20,
     "Tests/UIAutomationSurfaceContractTests.swift": 71
   }
 }
