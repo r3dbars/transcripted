@@ -40,13 +40,19 @@ import CoreAudio
 import Foundation
 import Synchronization
 
-/// The only state the copy's IO thread touches: three atomics, two counters
-/// and a preallocated filter.
+/// The only state the copy's IO thread touches: a few atomics and a
+/// preallocated filter.
 final class DictationMuffleRenderState {
     /// Below this input peak a cycle counts as quiet (-40 dBFS).
     static let quietPeak: Float = 0.01
 
     let gateOpen = Atomic<Bool>(false)
+    /// Frames the gate still holds shut after the cut (DictationMuffleSplice).
+    /// Set before `gateOpen` (which is stored releasing), counted down by
+    /// the IO thread.
+    let gateHoldFrames = Atomic<Int>(0)
+    /// Gate fade length in frames (0 means DictationMuffleFilter.gateSeconds).
+    let gateFadeFrames = Atomic<Int>(0)
     let muffled = Atomic<Bool>(false)
     let soundFlowing = Atomic<Bool>(false)
     let quietFrames = Atomic<Int>(0)
@@ -69,11 +75,15 @@ final class DictationMuffleRenderState {
 private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputTime, output, outputTime, clientData in
     guard let clientData else { return noErr }
     let state = Unmanaged<DictationMuffleRenderState>.fromOpaque(clientData).takeUnretainedValue()
+    let gateOpen = state.gateOpen.load(ordering: .acquiring)
+    let hold = gateOpen ? state.gateHoldFrames.load(ordering: .relaxed) : 0
     let peak = state.filter.pointee.render(
         input: input,
         output: output,
         muffleTarget: state.muffled.load(ordering: .relaxed) ? 1 : 0,
-        gateTarget: state.gateOpen.load(ordering: .relaxed) ? 1 : 0
+        gateTarget: gateOpen ? 1 : 0,
+        gateHoldFrames: hold,
+        gateFadeFrames: state.gateFadeFrames.load(ordering: .relaxed)
     )
     if peak > 0, !state.soundFlowing.load(ordering: .relaxed) {
         if inputTime.pointee.mFlags.contains(.sampleTimeValid),
@@ -88,6 +98,15 @@ private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputT
     let firstBuffer = output.pointee.mBuffers
     let channels = Int(max(1, firstBuffer.mNumberChannels))
     let frames = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channels)
+    if hold > 0 {
+        // Count the hold down by this cycle. If the muffler queue changed it
+        // meanwhile (a new cut or a hand back), its value wins.
+        _ = state.gateHoldFrames.compareExchange(
+            expected: hold,
+            desired: DictationMuffleSplice.remainingHold(hold, afterFrames: frames),
+            ordering: .relaxed
+        )
+    }
     if peak < DictationMuffleRenderState.quietPeak {
         state.quietFrames.wrappingAdd(frames, ordering: .relaxed)
     } else {
@@ -190,19 +209,40 @@ final class DictationMuffleRoute {
     /// time, corrected by the aggregate's input safety offset and latency and
     /// the drift compensator. Matched the measured delay exactly in the lab.
     var copyDelayNanos: UInt64? {
+        copyDelayFrames.map { UInt64(Double($0) / sampleRate * 1_000_000_000) }
+    }
+
+    private var copyDelayFrames: Int? {
         guard let state else { return nil }
         let raw = state.takeUnretainedValue().rawDelayFrames.load(ordering: .relaxed)
         guard raw != Int.min else { return nil }
-        let frames = max(0, raw + delayCorrectionFrames)
-        return UInt64(Double(frames) / sampleRate * 1_000_000_000)
+        return max(0, raw + delayCorrectionFrames)
     }
 
-    /// Opens the copy's gate and mutes the originals in the same step.
+    /// How long the last cut held the copy back, in milliseconds.
+    var lastHoldMilliseconds: Double {
+        Double(lastSplice.holdFrames) / sampleRate * 1_000
+    }
+
+    /// How the copy came in at the last cut.
+    private(set) var lastSplice = DictationMuffleSplice.plain
+
+    /// Opens the copy's gate and mutes the originals in the same step. On a
+    /// lagging route the gate holds shut, then swells in as the copy catches
+    /// up to where the originals stopped (DictationMuffleSplice).
     /// Returns false (and leaves the originals playing) if the mute can't
     /// start.
     func cut() -> Bool {
         guard let state, let cutProc else { return false }
-        state.takeUnretainedValue().gateOpen.store(true, ordering: .relaxed)
+        let render = state.takeUnretainedValue()
+        lastSplice = DictationMuffleSplice.atCut(copyDelayFrames: copyDelayFrames, sampleRate: sampleRate)
+        render.gateHoldFrames.store(lastSplice.holdFrames, ordering: .relaxed)
+        render.gateFadeFrames.store(lastSplice.fadeFrames, ordering: .relaxed)
+        // A near-threshold hold can finish before the machine's delayed
+        // glide. Publish its target before opening the gate so every held
+        // swell is already muffled; plain wired cuts keep their dry glide.
+        render.muffled.store(lastSplice.startsMuffled, ordering: .relaxed)
+        render.gateOpen.store(true, ordering: .releasing)
         guard AudioDeviceStart(cutDevice, cutProc) == noErr else {
             state.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
             return false
@@ -219,7 +259,10 @@ final class DictationMuffleRoute {
     /// back first, so the copy fades out over them instead of leaving a gap.
     func handBack() {
         stopCut()
-        state?.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
+        guard let render = state?.takeUnretainedValue() else { return }
+        render.gateHoldFrames.store(0, ordering: .relaxed)
+        render.gateFadeFrames.store(0, ordering: .relaxed)
+        render.gateOpen.store(false, ordering: .releasing)
     }
 
     /// Stops and destroys everything, unmuting first. Safe to call twice.

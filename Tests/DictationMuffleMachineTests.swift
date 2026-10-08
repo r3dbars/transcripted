@@ -102,6 +102,22 @@ func testDictationMuffleMachine() {
         }
     }
 
+    runSuite("With default timing a lagging copy cuts on the first flowing tick, without waiting for quiet") {
+        var run = MuffleMachineRun(timing: DictationMuffleTiming())
+        let lag = ms(171)
+        let flowAt = ms(150)
+        run.send(.micOpened, at: 0)
+        run.send(.routeOpened(bluetooth: true), at: 0)
+        run.signals = { now in now >= flowAt ? muffleFlowing(quiet: false, delay: lag) : .none }
+        run.run(until: ms(1_000))
+        let cuts = run.times(of: .cut)
+        assertEqual(cuts.count, 1, "one cut")
+        if let cut = cuts.first {
+            assertTrue(cut >= flowAt, "not before sound flows, cut at \(cut)")
+            assertTrue(cut <= flowAt + 2 * run.timing.pollNanos, "on the first flowing tick, cut at \(cut)")
+        }
+    }
+
     runSuite("With a small copy delay the muffle cuts on the first flowing tick") {
         // At or under quietCutAboveDelay counts as small.
         for small in [ms(1), muffleTestTiming.quietCutAboveDelayNanos] {
