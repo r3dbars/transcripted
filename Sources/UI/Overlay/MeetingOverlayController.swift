@@ -61,7 +61,7 @@ final class MeetingOverlayController: NSObject {
     /// start that fails before recording never leaves one for the next meeting.
     private var islandCallAudioAskPending = false
     private var promptKind: PromptKind?
-    private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
+    private var audioRouteWarningOutcome: MeetingRouteWarning?
     private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
     private var micOnlyNotice: MeetingMicOnlyNotice?
     // Audio inactivity drives its own per-second countdown Task
@@ -279,7 +279,7 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
-        session.$displayStatus
+        session.transcriptionStatusPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.applyDisplayStatus(status)
@@ -334,7 +334,7 @@ final class MeetingOverlayController: NSObject {
             session.$audioInactivityWarning,
             session.$systemAudioDegradationWarning,
             session.$isMicBoostPromptVisible,
-            session.$audioRouteWarning
+            session.routeWarningPublisher
         )
         .receive(on: DispatchQueue.main)
         .sink { [weak self] inactivity, systemAudio, micBoostVisible, route in
@@ -349,7 +349,7 @@ final class MeetingOverlayController: NSObject {
 
     }
 
-    private func applyDisplayStatus(_ status: DisplayStatus) {
+    private func applyDisplayStatus(_ status: MeetingTranscriptionStatus) {
         // `percent(progress:)` already shows nothing for the idle, saved and
         // failed values (0 or 1), so no switch over every case is needed.
         let previousDetail = finishDetail
@@ -406,7 +406,7 @@ final class MeetingOverlayController: NSObject {
         inactivity: MeetingAudioInactivityWarning?,
         systemAudio: MeetingSystemAudioDegradationWarning?,
         micBoostVisible: Bool,
-        route: CaptureRouteStabilizationOutcome?
+        route: MeetingRouteWarning?
     ) {
         systemAudioDegradationWarning = systemAudio
         audioRouteWarningOutcome = route
@@ -510,7 +510,7 @@ final class MeetingOverlayController: NSObject {
         for kind: PromptKind,
         inactivity: MeetingAudioInactivityWarning?,
         systemAudio: MeetingSystemAudioDegradationWarning?,
-        route: CaptureRouteStabilizationOutcome?
+        route: MeetingRouteWarning?
     ) -> (prompt: PromptDisplay, countdownSeconds: Int, schedulesCountdown: Bool)? {
         switch kind {
         case .systemAudio:
@@ -1048,7 +1048,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func audioRouteWarningPromptDisplay(
-        outcome: CaptureRouteStabilizationOutcome
+        outcome: MeetingRouteWarning
     ) -> PromptDisplay {
         let detail: String
         switch outcome {

@@ -1,15 +1,13 @@
 {
   "resolved-pins": {
-    "Tests/AudioAutomationCoverageContractTests.swift": 20,
     "Tests/BluetoothRouteContractTests.swift": 2,
     "Tests/CIWorkflowContractTests.swift": 14,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
-    "Tests/DictationQueuedStartPolicyTests.swift": 2,
+    "Tests/DictationQueuedStartPolicyTests.swift": 1,
     "Tests/DictationSoundsTests.swift": 2,
-    "Tests/HomeFirstArtifactVisibilityTests.swift": 11,
+    "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
     "Tests/MeetingSessionUIPolicyTests.swift": 8,
     "Tests/NightlySecurityContractTests.swift": 34,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 4,
     "Tests/PermissionStateHarnessContractTests.swift": 20,
     "Tests/ReleaseMetadataContractTests.swift": 6,
     "Tests/UIAutomationSurfaceContractTests.swift": 71
