@@ -185,6 +185,17 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/onboarding.sh"
 
+  # The daily audio script, the issue 500 QA doc and the smoke source lists must
+  # agree (was Tests/AudioAutomationCoverageContractTests.swift).
+  - paths:
+      - "scripts/ops/daily-audio-reliability-check.sh"
+      - "docs/qa-issue-500-meeting-audio.md"
+      - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/dev/check-audio-automation-contract.py"
+    checks:
+      - "python3 scripts/dev/check-audio-automation-contract.py --self-test"
+      - "python3 scripts/dev/check-audio-automation-contract.py"
+
   - paths:
       - "scripts/dev/check-build-source-lists.py"
     checks:
