@@ -176,9 +176,9 @@
     },
     {
       "id": "agent-workflow",
-      "path_prefixes": [".agents/", ".github/", "scripts/dev/"],
+      "path_prefixes": ["scripts/dev/"],
       "exact_paths": ["AGENTS.md", "CLAUDE.md", "WORKFLOW.md"],
-      "docs": ["AGENTS.md", ".agents/AGENTS.md", ".github/AGENTS.md", "docs/agent-closeout.md"],
+      "docs": ["AGENTS.md", "docs/agent-closeout.md"],
       "keywords": ["agent", "codex", "claude", "preflight", "workflow", "review", "context"],
       "owns": "Agent routing, path-to-check selection, review policy, and handoff proof.",
       "invariants": [
@@ -208,7 +208,7 @@
       "docs": [
         "Tools/TranscriptedCaptureKit/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["capture kit", "capture-library parsing"],
       "owns": "Shared capture-library resolution and Markdown parsing.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -223,7 +223,7 @@
       "docs": [
         "Tools/TranscriptedCLI/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["offline cli", "transcripted cli"],
       "owns": "Local capture CLI and offline transcription.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -238,7 +238,7 @@
       "docs": [
         "Tools/TranscriptedMCP/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["mcp", "host-client"],
       "owns": "Saved-capture MCP tools and opt-in companion controls.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -255,7 +255,7 @@
       "docs": [
         "Tools/TranscriptedQA/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["qa tool", "artifact validator"],
       "owns": "Artifact validators and isolated smoke tools.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -270,7 +270,7 @@
       "docs": [
         "Tools/SpeakerEvalHarness/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["speaker eval", "corpus evaluation"],
       "owns": "Headless speaker evaluation and corpus tooling.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -285,7 +285,7 @@
       "docs": [
         "Tools/TranscriptedLab/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["transcripted lab", "native workbench"],
       "owns": "Native experiment workbench and CLI.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -300,7 +300,7 @@
       "docs": [
         "Tools/TranscriptedLive/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["live broker", "live transport"],
       "owns": "Opt-in live meeting broker and transports.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -317,7 +317,7 @@
       "docs": [
         "Tools/TranscriptedCompanion/AGENTS.md"
       ],
-      "keywords": [],
+      "keywords": ["companion plugin", "plugin packaging"],
       "owns": "Portable plugin packaging and fixture tests.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
@@ -443,6 +443,26 @@
         "Find the nearest concrete consumer before changing an uncommon path.",
         "Do not infer product behavior from archived or generated material."
       ],
+      "manual_proof": []
+    },
+    {
+      "id": "agent-config",
+      "path_prefixes": [".agents/"],
+      "exact_paths": [],
+      "docs": ["AGENTS.md", ".agents/AGENTS.md"],
+      "keywords": [],
+      "owns": "Machine-readable agent ownership, proof routing and shrink-only baselines.",
+      "invariants": ["Use one machine-readable source for ownership and proof routing.", "Do not duplicate executable check rules in prose.", "Scale orchestration with risk instead of file count alone."],
+      "manual_proof": []
+    },
+    {
+      "id": "github-workflows",
+      "path_prefixes": [".github/"],
+      "exact_paths": [],
+      "docs": ["AGENTS.md", ".github/AGENTS.md"],
+      "keywords": [],
+      "owns": "GitHub workflows, branch-check contracts and trusted release automation.",
+      "invariants": ["Use one machine-readable source for ownership and proof routing.", "Do not duplicate executable check rules in prose.", "Scale orchestration with risk instead of file count alone."],
       "manual_proof": []
     }
   ]
