@@ -223,6 +223,17 @@ rules:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
 
+  # Synced copies: CaptureLibraryPathSafety.swift lives as three real files, one
+  # per build unit that can't share a module. They must stay byte-identical.
+  - paths:
+      - "Sources/Support/CaptureLibraryPathSafety.swift"
+      - "Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift"
+      - "Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift"
+      - "scripts/dev/check-synced-copies.py"
+    checks:
+      - "python3 scripts/dev/check-synced-copies.py --self-test"
+      - "python3 scripts/dev/check-synced-copies.py"
+
   # Source-pin count ratchet: resolved source-text pins per test file can only
   # shrink (.agents/source-pin-baseline.json). Shrink with
   # `check-source-pins.py --count-baseline --shrink`.

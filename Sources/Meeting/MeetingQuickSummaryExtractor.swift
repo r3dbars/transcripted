@@ -351,6 +351,29 @@ enum MeetingQuickSummaryExtractor {
         "have a good", "sounds good", "no worries", "you're welcome",
     ]
 
+    /// Sign-off phrases that contain a weak action cue ("let me ", "have to ")
+    /// but never carry a real commitment.
+    private static let courtesyClosers: [String] = [
+        "let me know", "catch up", "see you", "talk soon", "talk later",
+        "let you go", "talk to you", "catch you", "get back to your",
+    ]
+
+    /// "I have to run" leaves the call; "we have to go through the contract"
+    /// is work. These only close when the clause ends there or carries on
+    /// with to / now / soon / in / off.
+    private static let leaveVerbs = ["have to run", "have to go", "have to drop", "have to jump", "have to hop"]
+    private static let leaveTails = [" to ", " now", " soon", " in ", " off"]
+
+    private static func isCourtesyCloser(_ clause: String) -> Bool {
+        if matchesAny(courtesyClosers, in: clause) { return true }
+        let text = clause.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return leaveVerbs.contains { verb in
+            guard let range = text.range(of: verb) else { return false }
+            let rest = String(text[range.upperBound...]) + " "
+            return rest == " " || leaveTails.contains { rest.hasPrefix($0) }
+        }
+    }
+
     private static func matchesAny(_ cues: [String], in normalized: String) -> Bool {
         cues.contains { normalized.contains($0) }
     }
@@ -375,7 +398,17 @@ enum MeetingQuickSummaryExtractor {
     private static func isSmallTalk(_ normalized: String) -> Bool {
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < 3 { return true }
-        return smallTalkMarkers.contains { trimmed.contains($0) }
+        guard matchesAny(smallTalkMarkers, in: trimmed) else { return false }
+        // A courtesy clause ("Sounds good, we'll go with X.") must not hide a
+        // decision or action in another clause of the same sentence. Drop
+        // the courtesy clauses and closers ("let me know", "see you"), then
+        // look for a cue in what's left.
+        let substantive = trimmed
+            .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
+            .map(String.init)
+            .filter { !matchesAny(smallTalkMarkers, in: $0) && !isCourtesyCloser($0) }
+            .joined(separator: ",")
+        return !matchesAny(decisionCues, in: substantive) && !matchesAny(actionCues, in: substantive)
     }
 
     // MARK: - Summary assembly

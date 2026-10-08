@@ -47,7 +47,7 @@ enum RecentMeetingsWidgetBuilder {
             }
             let content = CaptureMarkdown.readBoundedContents(of: mdURL) ?? ""
             let title = CaptureMarkdown.extractTitle(from: content) ?? summary.title ?? summary.filename
-            let transcript = transcriptText(from: content)
+            let transcript = transcriptText(from: content, filename: summary.filename)
             let speakerNames = summary.speakers.map(\.name)
 
             let audioDir = audioDirectory(for: mdURL)
@@ -93,8 +93,9 @@ enum RecentMeetingsWidgetBuilder {
     // MARK: - Transcript
 
     /// Speaker-labeled dialogue, bounded by the same read cap the read tools use
-    /// so one long meeting can't blow out the widget payload.
-    static func transcriptText(from content: String) -> String {
+    /// so one long meeting can't blow out the widget payload. `filename` is the
+    /// stem `read_meeting` takes, named in the truncation hint.
+    static func transcriptText(from content: String, filename: String) -> String {
         guard let parsed = CaptureMarkdownParser.parseMeeting(from: content),
               !parsed.utterances.isEmpty else {
             // Fall back to the raw dialogue block for files the parser can't window.
@@ -108,7 +109,7 @@ enum RecentMeetingsWidgetBuilder {
             let speaker = names[utterance.speakerId] ?? utterance.speakerId
             let line = "\(speaker): \(utterance.text)\n"
             if out.count + line.count > maxUnpaginatedReadCharacters {
-                out += "\n… transcript truncated. Use read_meeting \"\(parsed.datetime)\" for the full text."
+                out += "\n… transcript truncated. Use read_meeting \"\(filename)\" for the full text."
                 break
             }
             out += line
