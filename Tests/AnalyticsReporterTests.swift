@@ -125,14 +125,14 @@ func testAnalyticsReporter() {
         try? fm.createDirectory(at: draftOverrides.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         NSDictionary(dictionary: [
-            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "transcripted-key",
+            AnalyticsInfoPlistKeys.apiKeyInfoKey: "transcripted-key",
         ]).write(to: transcriptedOverrides, atomically: true)
         NSDictionary(dictionary: [
-            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "draft-key",
+            AnalyticsInfoPlistKeys.apiKeyInfoKey: "draft-key",
         ]).write(to: draftOverrides, atomically: true)
 
         let value = AnalyticsRuntimeConfiguration.localOverrideValue(
-            forKey: AnalyticsRuntimeConfiguration.apiKeyInfoKey,
+            forKey: AnalyticsInfoPlistKeys.apiKeyInfoKey,
             appSupportDirectory: appSupport
         )
 
@@ -152,11 +152,11 @@ func testAnalyticsReporter() {
 
         try? fm.createDirectory(at: draftOverrides.deletingLastPathComponent(), withIntermediateDirectories: true)
         NSDictionary(dictionary: [
-            AnalyticsRuntimeConfiguration.hostInfoKey: "https://legacy.example.com",
+            AnalyticsInfoPlistKeys.hostInfoKey: "https://legacy.example.com",
         ]).write(to: draftOverrides, atomically: true)
 
         let value = AnalyticsRuntimeConfiguration.localOverrideValue(
-            forKey: AnalyticsRuntimeConfiguration.hostInfoKey,
+            forKey: AnalyticsInfoPlistKeys.hostInfoKey,
             appSupportDirectory: appSupport
         )
 
@@ -170,8 +170,8 @@ func testAnalyticsReporter() {
             infoDictionary: [
                 "CFBundleShortVersionString": "1.2.3",
                 "CFBundleVersion": "456",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "local",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
+                AnalyticsInfoPlistKeys.buildChannelInfoKey: "local",
+                AnalyticsInfoPlistKeys.buildRevisionInfoKey: "abc123def456",
             ],
             operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
         )
@@ -187,8 +187,8 @@ func testAnalyticsReporter() {
 
     runSuite("AnalyticsRuntimeConfiguration accepts safe local build metadata overrides") {
         let info: [String: Any] = [
-            AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
-            AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
+            AnalyticsInfoPlistKeys.buildChannelInfoKey: "release",
+            AnalyticsInfoPlistKeys.buildRevisionInfoKey: "abc123def456",
         ]
         let environment = [
             AnalyticsRuntimeConfiguration.buildChannelEnvironmentKey: "local",
@@ -208,7 +208,7 @@ func testAnalyticsReporter() {
     }
 
     runSuite("AnalyticsRuntimeConfiguration sends nothing from automated launches") {
-        let info: [String: Any] = [AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_bundle"]
+        let info: [String: Any] = [AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_bundle"]
 
         assertEqual(
             AnalyticsRuntimeConfiguration.apiKey(environment: ["POSTHOG_API_KEY": "phc_env"], infoDictionary: info),
@@ -234,8 +234,8 @@ func testAnalyticsReporter() {
 
     runSuite("AnalyticsRuntimeConfiguration rejects unsafe build metadata") {
         let info: [String: Any] = [
-            AnalyticsRuntimeConfiguration.buildChannelInfoKey: "/Users/jane/build",
-            AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "person@example.com",
+            AnalyticsInfoPlistKeys.buildChannelInfoKey: "/Users/jane/build",
+            AnalyticsInfoPlistKeys.buildRevisionInfoKey: "person@example.com",
         ]
         let environment = [
             AnalyticsRuntimeConfiguration.buildChannelEnvironmentKey: "release\nbeta",

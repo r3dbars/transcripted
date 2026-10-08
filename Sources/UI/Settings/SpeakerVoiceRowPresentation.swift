@@ -111,7 +111,7 @@ enum SpeakerVoiceQueueRowActionPolicy {
     /// Matches the post-meeting review's own gating, which only offers the
     /// "You" option for `.mic`-channel voices — a remote participant's voice
     /// can never be "you".
-    static func showsThisIsMe(channel: UtteranceChannel) -> Bool {
+    static func showsThisIsMe(channel: SpeakerReviewChannel) -> Bool {
         channel == .mic
     }
 }

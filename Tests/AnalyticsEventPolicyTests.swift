@@ -341,7 +341,7 @@ func testAnalyticsEventPolicy() {
             directory: outputDir
         )
         assertEqual(
-            saved.map { ActivationTelemetry.savedDictationArtifactExists($0) },
+            saved.map { ActivationTelemetry.savedDictationArtifactExists($0.url) },
             true,
             "dictation_artifact_saved may fire only after a regular Markdown file exists on disk"
         )
@@ -350,7 +350,7 @@ func testAnalyticsEventPolicy() {
             try? fm.removeItem(at: saved.url)
             assertFalse(
                 ActivationTelemetry.trackDictationArtifactSaved(
-                    saved: saved,
+                    savedURL: saved.url,
                     delivery: "pasted",
                     durationBucket: "10_29s",
                     trigger: "hotkey",
