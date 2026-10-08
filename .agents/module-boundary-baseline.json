@@ -6,11 +6,6 @@
         "DictationSessionCapWarningPolicy"
       ]
     },
-    "Sources/Observability/AnalyticsEventPolicy.swift": {
-      "Speech": [
-        "DictationInputDeviceSelectionReason"
-      ]
-    },
     "Sources/Speech/DictationSession.swift": {
       "AppState": [
         "TranscriptedAppState"
@@ -24,11 +19,6 @@
     "Sources/Speech/STTRouter.swift": {
       "Core": [
         "TimedTranscriptToken"
-      ]
-    },
-    "Sources/Support/ClaudeDesktopIntegrationInstaller.swift": {
-      "Observability": [
-        "AnalyticsRuntimeConfiguration"
       ]
     },
     "Sources/Support/TranscriptedPermissionAccess.swift": {

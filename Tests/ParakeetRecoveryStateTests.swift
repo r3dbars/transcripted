@@ -254,20 +254,31 @@ func testParakeetRecoveryState() async {
                             token: callbackToken, engine: NSObject()), "retired graph cannot mask replacement")
     }
 
+    // True if the task completes before a generous give-up margin. The margin
+    // only keeps a broken wake-up from hanging the suite; it is not a speed limit.
+    func finishes(_ task: Task<Void, Never>) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await task.value; return true }
+            group.addTask { try? await Task.sleep(nanoseconds: 30_000_000_000); return false }
+            let first = await group.next() ?? false
+            if !first { task.cancel() }  // lets a stuck wait exit so the group can finish
+            group.cancelAll()
+            return first
+        }
+    }
+
     await runSuite("In-flight AUHAL setter awaits bounded confirmation without blocking notification delivery") {
         let engine = NSObject()
         let selected = route(defaultInputID: 1, selectedInputID: 1)
         let token = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 100)
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        // Budgets are wide on purpose: a loaded CI VM can oversleep by 100ms+,
-        // and a 40ms sleep past a short budget would time the setter out first.
-        let handler = Task { await token.waitForResolution(nativeTimeoutNanoseconds: 5_000_000_000) }
+        // The native timeout is an hour so only finish() can wake the handler;
+        // the outcome check below uses a wide give-up margin, not a time limit.
+        let handler = Task { await token.waitForResolution(nativeTimeoutNanoseconds: 3_600_000_000_000) }
         try? await Task.sleep(nanoseconds: 40_000_000)
         assertFalse(token.wasConfirmed, "callback/route lookup can reach handler before setter returns")
         token.finish(succeeded: true)
-        await handler.value
-        assertTrue(ProcessInfo.processInfo.systemUptime - startedAt < 2.5,
-                   "successful setter wakes handler before whole native timeout")
+        let wokeByFinish = await finishes(handler)
+        assertTrue(wokeByFinish, "successful setter wakes handler before the native timeout (an hour here)")
         assertTrue(ignored(.audioEngine, at: 100.1, observed: selected,
                            token: token, engine: engine), "resolved in-flight echo may be suppressed")
 
@@ -280,10 +291,9 @@ func testParakeetRecoveryState() async {
                             token: failed, engine: engine), "failed setter must recover")
 
         let hung = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 102)
-        let hangStartedAt = ProcessInfo.processInfo.systemUptime
-        await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000)
-        assertTrue(ProcessInfo.processInfo.systemUptime - hangStartedAt < 1.0,
-                   "wedged setter must release notification handler within native budget")
+        let hungHandler = Task { await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000) }
+        let releasedByTimeout = await finishes(hungHandler)
+        assertTrue(releasedByTimeout, "wedged setter must release notification handler once the native timeout fires")
         assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
                             token: hung, engine: engine), "timed-out setter remains unproven")
         hung.finish(succeeded: true)

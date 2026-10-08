@@ -181,6 +181,8 @@ fi
 
 # ---------------------------------------------------------------- build/source contracts
 check "build source lists" "python3 scripts/dev/check-build-source-lists.py"
+check "audio automation contract self-test" "python3 scripts/dev/check-audio-automation-contract.py --self-test"
+check "audio automation contract (daily audio script, issue 500 doc, smoke source lists agree)" "python3 scripts/dev/check-audio-automation-contract.py"
 check "duplicate declarations self-test" "python3 scripts/dev/check-duplicate-declarations.py --self-test"
 check "duplicate declarations" "python3 scripts/dev/check-duplicate-declarations.py"
 check "fast-test naming convention (run-tests --list)" "bash run-tests.sh --list"
@@ -191,6 +193,8 @@ else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
 check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
+check "synced copies self-test" "python3 scripts/dev/check-synced-copies.py --self-test"
+check "synced copies (CaptureLibraryPathSafety stays byte-identical)" "python3 scripts/dev/check-synced-copies.py"
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
 check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"
