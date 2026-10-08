@@ -1,7 +1,7 @@
 // SpeakerNamingSheet.swift
 // Presents TranscriptionTaskManager.$speakerNamingRequest in the Notch
 // island ("Who was on this call?", `NotchIslandSpeakerReviewView`). The
-// island calls `request.onComplete(updates)` so Core's
+// island calls `request.onComplete(updates.map(SpeakerReviewBridge.coreUpdate))` so Core's
 // SpeakerNamingCoordinator can write the names back into the transcript.
 // An empty array (Later) keeps the transcript generic and preserves local
 // review state for the Speakers page.
@@ -145,11 +145,11 @@ final class SpeakerNamingSheet {
         view.onLayoutChange = { [weak island] in island?.speakerReviewLayoutChanged() }
         view.onWantsKeyboard = { [weak island] in island?.makeKeyForTyping() }
         view.onLater = { [weak self] updates in
-            request.onComplete(updates)
+            request.onComplete(updates.map(SpeakerReviewBridge.coreUpdate))
             self?.finishIslandReview(requestID: requestID)
         }
         view.onDone = { [weak self, weak island, weak view] updates, leftForLater in
-            request.onComplete(updates)
+            request.onComplete(updates.map(SpeakerReviewBridge.coreUpdate))
             guard let self, var content = self.islandReviewContent, content.reviewID == requestID else { return }
             self.gate.windowClosed(requestID: requestID)
             content.stage = .done(leftForLater: leftForLater)

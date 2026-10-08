@@ -18,7 +18,7 @@
 //   - local mic voices sit under an "All me" toggle; an open name box
 //     offers "Not a person" for a voice that isn't one
 //
-// Done saves the answers through the same `SpeakerNameUpdate`s the review
+// Done saves the answers through the same `SpeakerReviewUpdate`s the review
 // window builds, then shows "Everyone's named" with Open. Later (or its 20 s
 // ring running out) saves whatever was answered and leaves the rest for
 // Speakers. A name typed but not submitted counts on both. The ring only runs
@@ -37,15 +37,16 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// A name box wants the keyboard.
     var onWantsKeyboard: (() -> Void)?
     /// Done: `updates` to save and how many voices are still unnamed.
-    var onDone: ((_ updates: [SpeakerNameUpdate], _ leftForLater: Int) -> Void)?
+    var onDone: ((_ updates: [SpeakerReviewUpdate], _ leftForLater: Int) -> Void)?
     /// Later, or the ring ran out: save what was answered, leave the rest.
-    var onLater: ((_ updates: [SpeakerNameUpdate]) -> Void)?
+    var onLater: ((_ updates: [SpeakerReviewUpdate]) -> Void)?
     var onOpenTranscript: (() -> Void)?
     /// "Everyone's named" has been up long enough.
     var onDoneLingerEnded: (() -> Void)?
 
     let requestID: UUID
     private let request: SpeakerNamingRequest
+    private let knownPeople: [SpeakerNameChoice]
     private let stack = NSStackView()
     /// Voices the review asks about.
     private var rows: [NotchIslandVoiceRowView] = []
@@ -81,6 +82,9 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     init(request: SpeakerNamingRequest) {
         self.request = request
+        self.knownPeople = request.knownPeople.map {
+            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount)
+        }
         self.requestID = request.id
         self.isRecognizedOnly = request.speakers.isEmpty
         super.init(frame: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 10))
@@ -98,8 +102,8 @@ final class NotchIslandSpeakerReviewView: NSView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         // Doubtful suggestions first: the first answer teaches the matcher most.
-        let ranked = SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .system })
-            + SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .mic })
+        let ranked = SpeakerReviewBridge.ranked(request.speakers.filter { $0.channel == .system })
+            + SpeakerReviewBridge.ranked(request.speakers.filter { $0.channel == .mic })
         rows = ranked.map { makeRow(for: $0, recognized: false) }
         recognizedRows = request.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
         let correctable = Set(request.recognizedSpeakers.compactMap {
@@ -118,7 +122,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
-        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: request.knownPeople, recognized: recognized)
+        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: knownPeople, recognized: recognized)
         row.onChange = { [weak self] in self?.rowChanged() }
         row.onInteract = { [weak self] in self?.stopLaterCountdown() }
         row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
@@ -418,7 +422,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// counts the asked voices still unnamed.
     private func collectUpdates(
         finish: NotchIslandSpeakerReviewPolicy.Finish
-    ) -> (updates: [SpeakerNameUpdate], unanswered: Int) {
+    ) -> (updates: [SpeakerReviewUpdate], unanswered: Int) {
         var updates = recognizedRows.compactMap { $0.buildUpdate(finish: finish) }
         var unanswered = 0
         for row in rows {
@@ -502,7 +506,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         AnalyticsReporter.track("meeting_speaker_review_shown", properties: analyticsProperties())
     }
 
-    private func trackSubmitted(completionKind: String, updates: [SpeakerNameUpdate]) {
+    private func trackSubmitted(completionKind: String, updates: [SpeakerReviewUpdate]) {
         var properties = analyticsProperties()
         properties["completion_kind"] = completionKind
         properties["result"] = updates.isEmpty ? "no_updates" : "updates_submitted"
@@ -536,7 +540,7 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     /// One bucketed event per verdict, joining the matcher's confidence to
     /// the answer, exactly as the review window reports it.
-    private func trackMatchOutcomes(_ updates: [SpeakerNameUpdate]) {
+    private func trackMatchOutcomes(_ updates: [SpeakerReviewUpdate]) {
         // Recognized voices too, so a "Not Taylor?" correction reports the
         // match it overrode instead of an empty bucket.
         let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(
@@ -545,12 +549,12 @@ final class NotchIslandSpeakerReviewView: NSView {
             key: { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) }
         )
         for update in updates {
-            guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else { continue }
+            guard let kind = SpeakerReviewBridge.matchOutcome(for: update) else { continue }
             let entry = entriesByKey[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
             AnalyticsReporter.track(
                 "meeting_speaker_match_reviewed",
                 properties: [
-                    "review_action": kind.rawValue,
+                    "review_action": kind,
                     "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(entry?.matchSimilarity),
                     "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
                         similarity: entry?.matchSimilarity,

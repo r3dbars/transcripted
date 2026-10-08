@@ -21,19 +21,6 @@
         "TimedTranscriptToken"
       ]
     },
-    "Sources/Support/SystemAudioPermissionRequester.swift": {
-      "Core": [
-        "CoreAudioSystemAudioCapture"
-      ]
-    },
-    "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
-      "Core": [
-        "SpeakerIdentityOption",
-        "SpeakerMatchOutcomeKind",
-        "SpeakerNameUpdate",
-        "SpeakerReviewPrioritizer"
-      ]
-    },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
         "TranscriptSaver",
@@ -49,12 +36,6 @@
         "SpeakerUserConfirmation",
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
-      ]
-    },
-    "Sources/UI/Overlay/NotchIslandVoiceRowView.swift": {
-      "Core": [
-        "SpeakerIdentityOption",
-        "SpeakerNameUpdate"
       ]
     }
   }

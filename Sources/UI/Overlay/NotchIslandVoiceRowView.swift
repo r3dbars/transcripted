@@ -29,7 +29,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// Named on its own in this meeting: shown as recognized, corrected on
     /// hover, never asked about.
     private let isRecognized: Bool
-    private let knownPeopleByLabel: [String: SpeakerIdentityOption]
+    private let knownPeopleByLabel: [String: SpeakerNameChoice]
     private let knownPeople: [(label: String, callCount: Int)]
     private var answer: Answer = .none
     private var isEditing = false
@@ -63,7 +63,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         return field
     }()
 
-    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption], recognized: Bool = false) {
+    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerNameChoice], recognized: Bool = false) {
         self.entry = entry
         self.isRecognized = recognized && !(entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         self.question = NotchIslandSpeakerReviewPolicy.question(
@@ -603,29 +603,29 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// The same `SpeakerNameUpdate` the review window would build for this
+    /// The same `SpeakerReviewUpdate` the review window would build for this
     /// row, or nil when the voice was left unnamed (or, for a recognized
     /// voice, left as it was). A name still sitting in an open box counts,
     /// read the way Return would read it, except an untouched calendar name
     /// on Later. All me and Not a person win over any name, and build
     /// the window's `.collapsedToMe` and `.discardedFromDatabase` updates.
-    func buildUpdate(finish: NotchIslandSpeakerReviewPolicy.Finish) -> SpeakerNameUpdate? {
+    func buildUpdate(finish: NotchIslandSpeakerReviewPolicy.Finish) -> SpeakerReviewUpdate? {
         if let lock {
             switch lock {
             case .keptAsYou:
-                return SpeakerNameUpdate(
+                return SpeakerReviewUpdate(
                     persistentSpeakerId: entry.id,
                     diarizerSpeakerId: entry.diarizerSpeakerId,
-                    channel: entry.channel,
+                    channel: SpeakerReviewBridge.channel(entry.channel),
                     newName: "You",
                     previousName: entry.currentName,
                     action: .collapsedToMe
                 )
             case .discarded:
-                return SpeakerNameUpdate(
+                return SpeakerReviewUpdate(
                     persistentSpeakerId: entry.id,
                     diarizerSpeakerId: entry.diarizerSpeakerId,
-                    channel: entry.channel,
+                    channel: SpeakerReviewBridge.channel(entry.channel),
                     newName: entry.currentName ?? "Speaker \(entry.diarizerSpeakerId)",
                     previousName: entry.currentName,
                     action: .discardedFromDatabase
@@ -655,21 +655,21 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         }
     }
 
-    private func confirmedUpdate() -> SpeakerNameUpdate? {
+    private func confirmedUpdate() -> SpeakerReviewUpdate? {
         guard let current = entry.currentName, !current.isEmpty else { return nil }
         if let suggestedProfileId = entry.suggestedProfileId {
-            return SpeakerNameUpdate(
+            return SpeakerReviewUpdate(
                 persistentSpeakerId: entry.id,
                 diarizerSpeakerId: entry.diarizerSpeakerId,
-                channel: entry.channel,
+                channel: SpeakerReviewBridge.channel(entry.channel),
                 newName: current,
                 action: .merged(targetProfileId: suggestedProfileId)
             )
         }
-        return SpeakerNameUpdate(
+        return SpeakerReviewUpdate(
             persistentSpeakerId: entry.id,
             diarizerSpeakerId: entry.diarizerSpeakerId,
-            channel: entry.channel,
+            channel: SpeakerReviewBridge.channel(entry.channel),
             newName: current,
             previousName: current,
             action: .confirmed
@@ -680,8 +680,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     /// a new name saves as `.corrected`, and a saved person as a merge that
     /// the naming coordinator turns into a correction of the recognized
     /// person (their match is undone and disputed, the pick learns the voice).
-    private func namedUpdate(_ label: String) -> SpeakerNameUpdate? {
-        SpeakerNamingPolicy.typedNameUpdate(
+    private func namedUpdate(_ label: String) -> SpeakerReviewUpdate? {
+        SpeakerReviewBridge.typedNameUpdate(
             entry: entry,
             typedName: label,
             optionsByLabel: knownPeopleByLabel

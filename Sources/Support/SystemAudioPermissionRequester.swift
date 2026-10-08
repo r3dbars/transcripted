@@ -134,28 +134,18 @@ final class SystemAudioPermissionRequester {
         worker = SystemAudioPermissionProbeWorker(prepare: prepare, start: start, stop: stop, silenceObservationDelay: silenceObservationDelay)
     }
 
+#if !canImport(TranscriptedCore)
     convenience init() {
-#if canImport(TranscriptedCore)
-        let capture = CoreAudioSystemAudioCapture()
-        self.init(
-            prepare: { try capture.prepare() },
-            start: { receivedSignal in
-                try capture.start { buffer in
-                    receivedSignal(SystemAudioPermissionProbeClassifier.sampleEvidence(buffer))
-                }
-            },
-            stop: { capture.stopSync() }
-        )
-        backendErrorSubscription = capture.errorMessagePublisher.sink { [weak self] message in
+        // Fast tests inject the backend; a missing backend never grants access.
+        self.init(prepare: { throw NSError(domain: "SystemAudioPermissionProbe", code: 1) },
+                  start: { _ in }, stop: {})
+    }
+#endif
+
+    func observeBackendErrors(_ publisher: AnyPublisher<String?, Never>) {
+        backendErrorSubscription = publisher.sink { [weak self] message in
             Task { @MainActor [weak self] in self?.handleBackendError(message) }
         }
-#else
-        // The dependency-free fast-test runner injects a fake capture above.
-        // A missing production backend must never manufacture a grant.
-        self.init(prepare: {
-            throw NSError(domain: "SystemAudioPermissionProbe", code: 1)
-        }, start: { _ in }, stop: {})
-#endif
     }
 
     func requestAccess(completion: @escaping (ProbeResult) -> Void) {
