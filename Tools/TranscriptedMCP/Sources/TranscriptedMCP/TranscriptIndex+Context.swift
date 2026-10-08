@@ -113,7 +113,7 @@ extension TranscriptIndex {
         )
     }
 
-    func listRecentContext(kind: ContextKind, count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> RecentContextResult {
+    func listRecentContext(kind: ContextKind, count: Int, dateFrom: String? = nil, dateTo: String? = nil, timeZone: TimeZone = .current) throws -> RecentContextResult {
         var items: [RecentContextItem] = []
 
         if kind.includes(.meeting) {
@@ -151,8 +151,15 @@ extension TranscriptIndex {
             items.append(contentsOf: try listRecentWritingEntries(count: count, dateFrom: dateFrom, dateTo: dateTo))
         }
 
-        items.sort { $0.datetime > $1.datetime }
-        return RecentContextResult(items: Array(items.prefix(max(1, min(count, 50)))))
+        // Meetings store local wall clock ("2026-10-06T21:00:00"); dictation
+        // and writing store UTC ("2026-10-07T01:00:00.000Z"). Compare real
+        // instants, not strings, or the feed is off by the UTC offset.
+        let instant = RecentContextInstantParser(timeZone: timeZone)
+        let sorted = items
+            .map { (item: $0, date: instant.date(from: $0.datetime) ?? .distantPast) }
+            .sorted { $0.date != $1.date ? $0.date > $1.date : $0.item.datetime > $1.item.datetime }
+            .map(\.item)
+        return RecentContextResult(items: Array(sorted.prefix(max(1, min(count, 50)))))
     }
 
     private func uniqueSpeakerNames(from names: [String]) -> [String] {
@@ -166,5 +173,36 @@ extension TranscriptIndex {
         }
 
         return ordered
+    }
+}
+
+/// Parses the recent feed's mixed datetime strings into instants: ISO 8601
+/// with a zone (dictation, writing), or a zoneless local wall-clock time
+/// (meetings), read in `timeZone`.
+struct RecentContextInstantParser {
+    private let zoned: [ISO8601DateFormatter]
+    private let local: [DateFormatter]
+
+    init(timeZone: TimeZone) {
+        let options: [ISO8601DateFormatter.Options] = [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]]
+        zoned = options.map {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = $0
+            return f
+        }
+        local = ["yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"].map {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.calendar = Calendar(identifier: .gregorian)
+            f.timeZone = timeZone
+            f.dateFormat = $0
+            return f
+        }
+    }
+
+    func date(from value: String) -> Date? {
+        for f in zoned { if let d = f.date(from: value) { return d } }
+        for f in local { if let d = f.date(from: value) { return d } }
+        return nil
     }
 }

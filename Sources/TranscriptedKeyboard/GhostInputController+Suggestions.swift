@@ -37,6 +37,7 @@ extension GhostInputController {
             if settleBeforeReading {
                 try? await Task.sleep(nanoseconds: Self.chainedCalmSettleNanoseconds)
             }
+            self?.chainedTabHold.taskStarted(revision: revision)
             guard let self,
                   self.scheduleRevision == revision,
                   let liveClient = self.client(),
@@ -50,7 +51,7 @@ extension GhostInputController {
 
     /// Whether the current schedule is the one a consumed accept chained.
     private var isChainedSchedule: Bool {
-        chainedRequestRevision == scheduleRevision
+        chainedTabHold.chainedRevision == scheduleRevision
     }
 
     /// Whether `revision` is still the live schedule. A throttled request

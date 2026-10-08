@@ -108,18 +108,40 @@ enum LaunchAtLoginController {
     /// once per install, so removing the login item in System Settings sticks,
     /// and an explicit Settings-toggle choice always wins. Registration surfaces
     /// the standard macOS "added to Login Items" notice, and the Settings toggle
-    /// reflects (and can revert) the state.
-    static func applyDefaultEnableIfNeeded(onboardingCompleted: Bool) throws {
+    /// reflects (and can revert) the state. Returns the register failure, if any.
+    /// `register` is a test seam; production registers the main app.
+    static func applyDefaultEnableIfNeeded(
+        onboardingCompleted: Bool,
+        userDefaults: UserDefaults = .standard,
+        register: (@Sendable () throws -> Void)? = nil
+    ) async -> String? {
         guard LaunchAtLoginPreferences.shouldApplyDefaultEnable(
-            hasExplicitChoice: LaunchAtLoginPreferences.hasExplicitChoice(),
-            hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(),
+            hasExplicitChoice: LaunchAtLoginPreferences.hasExplicitChoice(userDefaults: userDefaults),
+            hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(userDefaults: userDefaults),
             onboardingCompleted: onboardingCompleted
         ) else {
-            return
+            return nil
         }
 
-        LaunchAtLoginPreferences.markDefaultEnableApplied()
-        try registerIfNeeded()
+        LaunchAtLoginPreferences.markDefaultEnableApplied(userDefaults: userDefaults)
+        return await registerOnStatusQueue(register ?? { try registerIfNeeded() })
+    }
+
+    /// Same queue as the launch-time sync: `status` and `register()` are
+    /// blocking XPC calls that must stay off the main thread.
+    private nonisolated static func registerOnStatusQueue(
+        _ register: @escaping @Sendable () throws -> Void
+    ) async -> String? {
+        await withCheckedContinuation { continuation in
+            statusQueue.async {
+                do {
+                    try register()
+                    continuation.resume(returning: nil)
+                } catch {
+                    continuation.resume(returning: error.localizedDescription)
+                }
+            }
+        }
     }
 
     static func setEnabled(_ enabled: Bool) throws {

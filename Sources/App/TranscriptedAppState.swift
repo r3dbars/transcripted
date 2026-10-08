@@ -535,6 +535,8 @@ class TranscriptedAppState: ObservableObject {
                 await runtimeReadinessTask.value
             }
         } catch {
+            // Wake recovery was cancelled (shutdown); that's not a timeout.
+            guard !Task.isCancelled else { return }
             logger.log("WAKE | runtime readiness wait timed out")
             EventReporter.shared.capture(
                 level: .warning,

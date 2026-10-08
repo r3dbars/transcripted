@@ -9,7 +9,8 @@ only when ALL of these hold:
   - its branch starts with an enabled lane's prefix
   - it has the lane's labels and none of the blocking labels
   - every changed file matches the lane's allow globs, none match deny_always
-    or the lane's own deny
+    or the lane's own deny; a changed .agents/*-baseline.json passes only if it
+    lowers counts versus the merge base (never the concurrency baseline)
   - its size (additions + deletions) is within the lane's limit
   - every required check succeeded on the PR's head commit
   - GitHub reports it mergeable (no conflicts)
@@ -50,8 +51,20 @@ CONFIG_PATH = REPO_ROOT / ".agents/auto-merge-lanes.json"
 PR_FIELDS = ",".join([
     "number", "title", "headRefName", "headRefOid", "isDraft", "isCrossRepository",
     "labels", "author", "additions", "deletions", "mergeable", "files",
-    "statusCheckRollup", "reviews", "commits", "url", "body",
+    "statusCheckRollup", "reviews", "commits", "url", "body", "baseRefOid", "comments",
 ])
+# Debt baselines (.agents/*-baseline.json) may only shrink. A PR in any lane may
+# change one only when the change lowers counts or drops entries versus the
+# merge base, even if the lane's allow globs name the file. The concurrency
+# baseline is never eligible: lowering it is only true if the Swift census
+# says so, and that census isn't a required check.
+BASELINE_GLOB = ".agents/*-baseline.json"
+BASELINE_NEEDS_CENSUS = {".agents/concurrency-baseline.json"}
+HUMAN_LABEL = "waiting-on-human"
+HUMAN_LABELS = {HUMAN_LABEL, "needs owner review"}
+HELD_MARKER = "<!-- auto-merge-gate:held -->"
+UNTRUSTED_REASONS = ("PR comes from a fork", "author ")
+DISABLED_LANE = re.compile(r"lane \S+ is disabled$")
 
 
 def gh(*args: str) -> str:
@@ -85,6 +98,49 @@ def parse_time(value: str) -> datetime:
 
 
 TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
+
+
+def only_lowers(base, head, top: bool = True) -> bool:
+    """True when head keeps or lowers every debt count in base and adds nothing.
+
+    Top-level scalars (`limit`, `version`, `_comment`) are settings, not debt,
+    so they must stay present and exactly the same. Lists are multisets: an
+    entry may not appear more times than it did in base.
+    """
+    if isinstance(head, dict):
+        if not isinstance(base, dict):
+            return False
+        if top and any(k not in head for k, v in base.items() if not isinstance(v, (dict, list))):
+            return False
+        for k, v in head.items():
+            if k not in base:
+                return False
+            if top and not isinstance(v, (dict, list)):
+                if v != base[k]:
+                    return False
+            elif not only_lowers(base[k], v, top=False):
+                return False
+        return True
+    if isinstance(head, list):
+        return isinstance(base, list) and all(head.count(item) <= base.count(item) for item in head)
+    if isinstance(head, bool) or isinstance(base, bool):
+        return head == base
+    if isinstance(head, (int, float)) and isinstance(base, (int, float)):
+        return head <= base
+    return head == base
+
+
+def held_for_human(reasons: list[str]) -> list[str]:
+    """Reasons this PR can never pass in its lane, so a human has to look.
+
+    Empty for forks and outside authors: the gate doesn't label or comment on
+    PRs it wouldn't trust to merge anyway. Empty for a disabled lane too: the
+    kill switch stops every write, not just merges.
+    """
+    if any(r.startswith(UNTRUSTED_REASONS) or DISABLED_LANE.match(r) for r in reasons):
+        return []
+    return [r for r in reasons
+            if r.startswith(("touches protected files", "files outside lane")) or "lane limit is" in r]
 
 
 def verify_problems(body: str, head: str) -> list[str]:
@@ -131,7 +187,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     for needed in lane.get("labels_required", []):
         if needed not in labels:
             reasons.append(f"missing label '{needed}'")
-    blocked = sorted(labels & set(config["blocking_labels"]))
+    # Human hand-off labels always block, whatever the lane file lists.
+    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS))
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
 
@@ -141,7 +198,13 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     denied = [p for p in files if matches(p, config["deny_always"] + lane.get("deny", []))]
     if denied:
         reasons.append(f"touches protected files: {', '.join(denied[:3])}")
-    outside = [p for p in files if not matches(p, lane["allow"]) and p not in denied]
+    lowered = set(extra.get("lowered_baselines", []))
+    unknown = [p for p in extra.get("unknown_baselines", []) if p not in denied]
+    if unknown:
+        reasons.append(f"couldn't read baseline from GitHub, next run: {', '.join(unknown[:3])}")
+    # A baseline passes only when it was shown to go down, whatever the lane's allow globs say.
+    outside = [p for p in files if p not in denied and p not in unknown and
+               (p not in lowered if matches(p, [BASELINE_GLOB]) else not matches(p, lane["allow"]))]
     if outside:
         reasons.append(f"files outside lane {lane['id']}: {', '.join(outside[:3])}")
     if lane.get("require_test_change") and not any(matches(p, TEST_GLOBS) for p in files):
@@ -207,7 +270,53 @@ def main_is_healthy(config: dict) -> tuple[bool, str]:
     return True, f"main is green ({latest['headSha'][:7]})"
 
 
-def fetch_extra(number: int, config: dict) -> dict:
+class BaselineUnreadable(Exception):
+    """GitHub didn't answer, so whether a baseline went down is unknown yet."""
+
+
+def file_json(owner: str, name: str, path: str, ref: str):
+    """The file's JSON at ref, or None when it doesn't exist there or isn't JSON."""
+    try:
+        raw = gh("api", f"repos/{owner}/{name}/contents/{path}?ref={ref}",
+                 "-H", "Accept: application/vnd.github.raw")
+    except RuntimeError as err:
+        if "HTTP 404" in str(err):
+            return None
+        raise BaselineUnreadable(str(err)) from err
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def lowered_baselines(owner: str, name: str, pr: dict) -> tuple[list[str], list[str]]:
+    """(lowered, unknown): changed baselines whose head only lowers what the
+    merge base had, and ones GitHub couldn't serve this run."""
+    paths = [f["path"] for f in pr.get("files", [])
+             if matches(f["path"], [BASELINE_GLOB]) and f["path"] not in BASELINE_NEEDS_CENSUS]
+    if not paths:
+        return [], []
+    if not pr.get("baseRefOid"):
+        return [], paths
+    try:
+        merge_base = gh("api", f"repos/{owner}/{name}/compare/{pr['baseRefOid']}...{pr['headRefOid']}",
+                        "--jq", ".merge_base_commit.sha").strip()
+    except RuntimeError:
+        return [], paths
+    lowered, unknown = [], []
+    for path in paths:
+        try:
+            base, head = file_json(owner, name, path, merge_base), file_json(owner, name, path, pr["headRefOid"])
+        except BaselineUnreadable:
+            unknown.append(path)
+            continue
+        if base is not None and head is not None and only_lowers(base, head):
+            lowered.append(path)
+    return lowered, unknown
+
+
+def fetch_extra(pr: dict, config: dict) -> dict:
+    number = pr["number"]
     owner, name = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     query = (
         "query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p)"
@@ -218,13 +327,23 @@ def fetch_extra(number: int, config: dict) -> dict:
     threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
     reactions = gh_json("api", f"repos/{owner}/{name}/issues/{number}/reactions",
                         "-H", "Accept: application/vnd.github+json")
+    lowered, unknown = lowered_baselines(owner, name, pr)
     return {
+        "lowered_baselines": lowered,
+        "unknown_baselines": unknown,
         "unresolved_threads": sum(1 for t in threads if not t["isResolved"]),
         "reviewer_reactions": [
             {"login": r["user"]["login"], "created_at": r["created_at"]}
             for r in reactions if r["content"] == "+1"
         ],
     }
+
+
+def has_held_note(pr: dict, config: dict) -> bool:
+    """True when the gate already posted its hold comment on this PR."""
+    return any(HELD_MARKER in (c.get("body") or "")
+               and bare_login((c.get("author") or {}).get("login", "")) in config["allowed_authors"]
+               for c in pr.get("comments", []))
 
 
 def merge(pr: dict, lane: dict) -> None:
@@ -251,7 +370,7 @@ def run(apply: bool, only: int | None) -> int:
     merged_lanes: set[str] = set()
     for number in sorted(numbers):
         pr = gh_json("pr", "view", str(number), "--json", PR_FIELDS)
-        lane, reasons = evaluate(pr, fetch_extra(number, config), config)
+        lane, reasons = evaluate(pr, fetch_extra(pr, config), config)
         if lane is not None and not reasons:
             if not healthy:
                 reasons = ["main is red, merging nothing"]
@@ -266,6 +385,21 @@ def run(apply: bool, only: int | None) -> int:
                     gh("pr", "ready", str(number))
                 print(f"#{number} [{label}] {'marked' if apply else 'would mark'} ready for review; "
                       f"merges after: {'; '.join(reasons)}")
+                continue
+            held = held_for_human(reasons) if lane is not None else []
+            labels = {item["name"] for item in pr.get("labels", [])}
+            if held and not (labels & HUMAN_LABELS):
+                if apply:
+                    # Comment first, then label: if the label fails, the next run
+                    # sees the note and only retries the label, so nothing is lost
+                    # and nothing is posted twice.
+                    if not has_held_note(pr, config):
+                        gh("pr", "comment", str(number), "--body",
+                           f"{HELD_MARKER}\nThe auto-merge gate can't merge this on its own "
+                           f"({'; '.join(held)}), so it's labeled `{HUMAN_LABEL}` for a human review. "
+                           f"See docs/auto-merge-gate.md.")
+                    gh("pr", "edit", str(number), "--add-label", HUMAN_LABEL)
+                print(f"#{number} [{label}] {'labeled' if apply else 'would label'} {HUMAN_LABEL}: {'; '.join(held)}")
                 continue
             print(f"#{number} [{label}] wait: {'; '.join(reasons)}")
             continue
@@ -294,7 +428,8 @@ def self_test() -> int:
                      "commit": {"oid": head}}],
         "commits": [{"committedDate": "2026-10-07T10:00:00Z"}],
     }
-    extra = {"unresolved_threads": 0, "reviewer_reactions": []}
+    extra = {"unresolved_threads": 0, "reviewer_reactions": [],
+             "lowered_baselines": [".agents/test-shape-baseline.json"]}
 
     def case(name: str, expect_ok: bool, pr_patch: dict | None = None, extra_patch: dict | None = None,
              expect_text: str = "") -> bool:
@@ -374,7 +509,23 @@ def self_test() -> int:
         case("bug fix missing bug label", False, {**bug, "labels": []}, None, "missing label 'bug'"),
         case("module-edges lane", True,
              {"headRefName": "cleanup/module-edges/x",
-              "files": [{"path": "Sources/Dictation/Foo.swift"}, {"path": ".agents/module-boundary-baseline.json"}]}),
+              "files": [{"path": "Sources/Dictation/Foo.swift"}, {"path": ".agents/module-boundary-baseline.json"}]},
+             {"lowered_baselines": [".agents/module-boundary-baseline.json"]}),
+        case("module-edges lane can't raise its own baseline", False,
+             {"headRefName": "cleanup/module-edges/x",
+              "files": [{"path": "Sources/Dictation/Foo.swift"}, {"path": ".agents/module-boundary-baseline.json"}]},
+             {"lowered_baselines": []}, "outside lane"),
+        case("file-size lane can't raise its own baseline", False,
+             {"headRefName": "cleanup/file-size/x",
+              "files": [{"path": "Sources/UI/Home/HomeView.swift"}, {"path": ".agents/file-size-baseline.json"}]},
+             {"lowered_baselines": []}, "outside lane"),
+        case("test-shape lane can't raise its own baseline", False, None, {"lowered_baselines": []}, "outside lane"),
+        case("unreadable baseline waits, isn't outside the lane", False, None,
+             {"lowered_baselines": [], "unknown_baselines": [".agents/test-shape-baseline.json"]},
+             "couldn't read baseline"),
+        case("concurrency baseline is never in a lane", False,
+             {"files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/concurrency-baseline.json"}]},
+             None, "outside lane"),
         case("docs lane merges folder docs", True,
              {"headRefName": "garden/docs/ui", "labels": [{"name": "gardener"}],
               "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "docs/storage-paths.md"}]}),
@@ -391,11 +542,56 @@ def self_test() -> int:
         ok = waiting_only_on_review(reasons_in) == expected
         results.append(ok)
         print(f"{'PASS' if ok else 'FAIL'} ready-for-review when only waiting on review={expected}: {reasons_in}")
+    lowers = [
+        ({"files": {"a": 900, "b": 850}}, {"files": {"a": 850}}, True),
+        ({"files": {"a": 900}}, {"files": {"a": 901}}, False),
+        ({"files": {"a": 900}}, {"files": {"a": 900, "c": 820}}, False),
+        ({"edges": ["x", "y"]}, {"edges": ["x"]}, True),
+        ({"edges": ["x"]}, {"edges": ["x", "z"]}, False),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"_comment": "c", "limit": 800, "files": {}}, True),
+        ({"limit": 800}, {"limit": 900}, False),
+        ({"limit": 800, "files": {"a": 900}}, {"limit": 0, "files": {"a": 900}}, False),
+        ({"version": 1, "files": {"a": 900}}, {"version": 1, "files": {"a": 899}}, True),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"_comment": "c", "files": {"a": 900}}, False),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"limit": 800, "files": {"a": 900}}, False),
+        ({"edges": {"f": {"M": ["T"]}}}, {"edges": {"f": {"M": ["T", "T"]}}}, False),
+        ({"edges": {"f": {"M": ["T", "T"]}}}, {"edges": {"f": {"M": ["T"]}}}, True),
+    ]
+    for base_v, head_v, want in lowers:
+        ok = only_lowers(base_v, head_v) == want
+        results.append(ok)
+        print(f"{'PASS' if ok else 'FAIL'} only_lowers {base_v} -> {head_v} = {want}")
+    pin_pr = {"files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/source-pin-baseline.json"}]}
+    results.append(case("lowered extra baseline is allowed", True, pin_pr,
+                        {"lowered_baselines": [".agents/source-pin-baseline.json"]}))
+    results.append(case("raised extra baseline stays outside the lane", False, pin_pr, None, "outside lane"))
+    held_ok = held_for_human(["touches protected files: X", "check build-and-test is pending",
+                              "files outside lane test-shape: Y", "900 changed lines, lane limit is 400"])
+    results.append(len(held_ok) == 3)
+    print(f"{'PASS' if len(held_ok) == 3 else 'FAIL'} held_for_human keeps only permanent reasons")
+    results.append(held_for_human(["check build-and-test is pending", "1 unresolved review thread(s)"]) == [])
+    print(f"{'PASS' if results[-1] else 'FAIL'} transient reasons don't hold for a human")
+    results.append(held_for_human(["couldn't read baseline from GitHub, next run: X"]) == [])
+    print(f"{'PASS' if results[-1] else 'FAIL'} an unreadable baseline doesn't hold for a human")
+    for untrusted in ("PR comes from a fork", "author someone is not allowed"):
+        results.append(held_for_human([untrusted, "files outside lane test-shape: Y"]) == [])
+        print(f"{'PASS' if results[-1] else 'FAIL'} no label for an untrusted PR ({untrusted})")
+    note = {"body": f"{HELD_MARKER}\nheld", "author": {"login": "r3dbars"}}
+    note_cases = [([note], True), ([], False), ([{**note, "author": {"login": "someone"}}], False),
+                  ([{"body": "other", "author": {"login": "r3dbars"}}], False)]
+    for comments, want in note_cases:
+        results.append(has_held_note({"comments": comments}, config) == want)
+        print(f"{'PASS' if results[-1] else 'FAIL'} hold note found={want} for {len(comments)} comment(s)")
     disabled = json.loads(json.dumps(config))
     disabled["lanes"][0]["enabled"] = False
     _, reasons = evaluate(base_pr, extra, disabled)
     results.append(any("disabled" in r for r in reasons))
     print(f"{'PASS' if results[-1] else 'FAIL'} disabled lane blocks: {reasons}")
+    _, reasons = evaluate({**base_pr, "additions": 5000,
+                           "files": [{"path": "Sources/TranscriptedCore/Audio/A.swift"}]}, extra, disabled)
+    results.append(held_for_human(reasons) == [] and bool(held_for_human(
+        [r for r in reasons if not DISABLED_LANE.match(r)])))
+    print(f"{'PASS' if results[-1] else 'FAIL'} disabled lane never labels or comments: {reasons}")
 
     failed = results.count(False)
     print(f"{len(results) - failed}/{len(results)} passed")

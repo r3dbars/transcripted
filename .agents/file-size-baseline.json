@@ -8,14 +8,13 @@
     "Sources/Meeting/MeetingImportedAudioPreparer.swift": 1052,
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,
     "Sources/Meeting/MeetingSessionController.swift": 842,
-    "Sources/Observability/AnalyticsReporter.swift": 889,
+    "Sources/Observability/AnalyticsReporter.swift": 885,
     "Sources/Observability/SparkleUpdaterController.swift": 1177,
     "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
     "Sources/Support/TranscriptedPermissionAccess.swift": 975,
     "Sources/TranscriptedCore/Audio/Audio.swift": 813,
-    "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 1159,
+    "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 1022,
     "Sources/TranscriptedCore/Audio/CoreAudioSystemAudioCapture.swift": 1056,
-    "Sources/TranscriptedCore/Audio/MeetingInputDeviceSelectionPolicy.swift": 855,
     "Sources/TranscriptedCore/Audio/PinnedMicrophoneCapture.swift": 1106,
     "Sources/TranscriptedCore/Audio/SCKAudioCapture.swift": 1449,
     "Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift": 1344,
@@ -31,7 +30,6 @@
     "Sources/UI/Settings/PermissionsOnboardingView.swift": 948,
     "Sources/UI/Settings/QuietHomeLibrary.swift": 1012,
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894,
-    "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/AutoResearch.swift": 820,
     "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift": 1018
   }
 }

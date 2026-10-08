@@ -20,11 +20,10 @@ final class GhostInputController: IMKInputController {
     /// this bundle: the same request in the same app must never chain,
     /// reveal, or start on punctuation differently in two processes.
     private static var chainsAfterAccept: Bool { ServedConfiguration.interaction.chainsCompletionAfterAccept }
-    /// The schedule revision of the request a consumed accept chained, while
-    /// it is still the live one. A Tab that lands before that ghost appears
-    /// is held rather than handed to the host: the writer is mid-chain, and
-    /// in an Electron composer a stray Tab moves focus out of the field.
-    var chainedRequestRevision: Int?
+    /// The request a consumed accept chained. A Tab that lands before that
+    /// ghost appears is held rather than handed to the host: the writer is
+    /// mid-chain, and in an Electron composer a stray Tab moves focus out.
+    var chainedTabHold = ChainedTabHold()
     private static let slowKeyLogger = Logger(
         subsystem: TildeProductProfile.current.inputMethodBundleIdentifier,
         category: "typing-performance"
@@ -256,12 +255,11 @@ final class GhostInputController: IMKInputController {
                 dismiss(client)
                 return false
             }
-            let accepted = acceptSuggestion(client, observation: insertionObservation)
-            if !accepted {
-                if awaitingChainedGhost() { return true }
-                breakHistorySegment()
+            let outcome = Self.routePlainTab(awaitingChainedGhost: awaitingChainedGhost) {
+                acceptSuggestion(client, observation: insertionObservation)
             }
-            return accepted
+            if outcome == .passedToHost { breakHistorySegment() }
+            return outcome != .passedToHost
 
         case 50: // The physical backtick/tilde key accepts the whole visible suggestion.
             guard Self.shouldAcceptWholeSuggestion(
@@ -579,18 +577,16 @@ final class GhostInputController: IMKInputController {
     private func chainAfterAcceptIfConsumed(_ client: IMKTextInput) {
         guard Self.chainsAfterAccept, !state.isVisible else { return }
         scheduleSuggestion(for: client, afterUserTyped: " ", chained: true)
-        chainedRequestRevision = scheduleRevision
+        chainedTabHold.chained(revision: scheduleRevision)
     }
 
-    /// True while the request a consumed accept chained is still pending.
+    /// True while the request a consumed accept chained is still on its way.
     /// Any newer schedule (a keystroke, a dismissal) moves the revision on,
     /// so an ordinary Tab is never held.
     private func awaitingChainedGhost() -> Bool {
-        guard Self.chainsAfterAccept,
-              let chained = chainedRequestRevision,
-              chained == scheduleRevision,
-              state.pendingTicket != nil else { return false }
-        return true
+        Self.chainsAfterAccept && chainedTabHold.isAwaitingGhost(
+            scheduleRevision: scheduleRevision, requestPending: state.pendingTicket != nil, ghostVisible: state.isVisible
+        )
     }
 
     private func acceptAllSuggestion(
