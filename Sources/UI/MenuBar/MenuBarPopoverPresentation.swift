@@ -63,8 +63,9 @@ final class MenuBarPopoverPresentation: NSObject {
             panel.sharingType = .readOnly
             panel.ignoresMouseEvents = true
             panel.hidesOnDeactivate = false
-            panel.level = .statusBar
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .ignoresCycle]
+            // Above full-screen content; .statusBar sits below it.
+            panel.level = .screenSaver
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .stationary, .ignoresCycle]
             panel.setFrame(screenRect, display: false)
             let anchor = NSView(frame: NSRect(origin: .zero, size: screenRect.size))
             panel.contentView = anchor
