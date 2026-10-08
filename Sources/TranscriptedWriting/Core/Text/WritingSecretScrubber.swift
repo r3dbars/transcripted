@@ -622,7 +622,7 @@ public enum WritingSecretScrubber {
 
     /// A common password word spelled with digits for letters: `Passw0rd`,
     /// `l3tmein`, `hunt3r1`. Trailing digits are dropped first.
-    private static func isLeetCommonPassword(_ token: String) -> Bool {
+    static func isLeetCommonPassword(_ token: String) -> Bool {
         let body = String(token.reversed().drop(while: isDigit).reversed())
         guard body.contains(where: isDigit) || body.contains(where: { "@$".contains($0) }) else { return false }
         // `1` stands for `i` or `l`.

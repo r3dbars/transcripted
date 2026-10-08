@@ -154,4 +154,28 @@ struct WritingSecretScrubberRegressionTests {
             #expect(WritingSecretScrubber.scrub(secret, appBundleIdentifier: Self.messages).kinds == [.password], "\(secret)")
         }
     }
+    @Test("Make options and variable assignments do not hide install password prompts", arguments: ["make -C build install", "make DESTDIR=/opt install", "gmake --directory build install"])
+    func makeInstallOptionsStillPrompt(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == command + "\n" + WritingSecretScrubber.token(for: .password))
+    }
+
+    @Test("Valid shell variable expansions stay intact outside a password prompt", arguments: ["$python3", "$sha256sum", "$foo1bar2"])
+    func shellVariableExpansionsStay(value: String) {
+        #expect(WritingSecretScrubber.scrub(value, appBundleIdentifier: "com.apple.Terminal").clean == value)
+        #expect(WritingSecretScrubber.scrub("sudo -v\n" + value, appBundleIdentifier: "com.apple.Terminal").kinds == [.password])
+    }
+
+    @Test("Quoted install script paths still arm the password prompt")
+    func quotedInstallerPrompts() {
+        let command = "bash \"./install.sh\""
+        #expect(WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal").kinds == [.password])
+    }
+
+    @Test("A downloader running inside a shell without feeding a script does not arm a prompt")
+    func downloaderDoesNotAlwaysPrompt() {
+        let text = "bash -c 'curl -o artifact https://example.com/artifact'\nmoonbeam"
+        #expect(WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal").clean == text)
+    }
+
 }

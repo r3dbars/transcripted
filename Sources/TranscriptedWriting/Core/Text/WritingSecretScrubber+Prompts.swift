@@ -131,22 +131,37 @@ extension WritingSecretScrubber {
     /// `curl … | bash`, `bash -c "$(curl …)"`, `sh <(curl …)`. These often
     /// ask for the sudo password.
     static func runsDownloadedScript(_ line: String) -> Bool {
-        let lower = line.lowercased()
-        guard lower.contains("curl ") || lower.contains("wget ") else { return false }
-        return simpleCommands(in: line).contains { words in
-            guard let first = words.first else { return false }
-            let command = (first.split(separator: "/").last.map(String.init) ?? first).lowercased()
-            return shells.contains(command)
-        }
+        // The downloader must feed the shell, not merely run inside one.
+        let pipe = regex(#"(?i)\b(?:curl|wget)\b[^|\n]*\|\s*(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|zsh)\b"#)
+        let substitution = regex(#"(?i)\b(?:sh|bash|zsh)\b[^\n]*(?:\$|<)\(\s*(?:curl|wget)\b"#)
+        return firstMatch(line, pipe) != nil || firstMatch(line, substitution) != nil
     }
 
     /// A brew, make or install-script command (`indirectElevation`,
     /// `installScriptPattern`): it may run sudo, or may not ask at all.
     static func asksSudoItself(_ command: String, _ arguments: [String]) -> Bool {
         let sub = arguments.first(where: { !$0.hasPrefix("-") })?.lowercased()
+        if command == "make" || command == "gmake" {
+            let valueOptions: Set<String> = ["-C", "--directory", "-f", "--file", "--makefile", "-I", "--include-dir", "-j", "--jobs", "-l", "--load-average", "-o", "--old-file", "--assume-old", "-W", "--what-if", "--new-file", "--assume-new", "--eval"]
+            var index = 0
+            while index < arguments.count {
+                let argument = arguments[index]
+                index += 1
+                if valueOptions.contains(argument) {
+                    // -j and -l may omit a numeric value.
+                    if ["-j", "--jobs", "-l", "--load-average"].contains(argument) {
+                        if index < arguments.count, Double(arguments[index]) != nil { index += 1 }
+                    } else if index < arguments.count { index += 1 }
+                    continue
+                }
+                if argument.hasPrefix("-") || argument.contains("=") { continue }
+                if indirectElevation[command]?.contains(argument.lowercased()) == true { return true }
+            }
+            return false
+        }
         if let subcommands = indirectElevation[command], let sub, subcommands.contains(sub) { return true }
         let script = shells.contains(command) ? sub.flatMap { $0.split(separator: "/").last.map(String.init) } : command
-        return script.map { matchesWhole($0, installScriptPattern) } ?? false
+        return script.map { matchesWhole($0.trimmingCharacters(in: CharacterSet(charactersIn: "\"\'")), installScriptPattern) } ?? false
     }
 
     static let commandPrefixes: Set<String> = ["time", "env", "nohup", "command", "exec", "builtin", "caffeinate"]
@@ -192,6 +207,7 @@ extension WritingSecretScrubber {
     /// variable (`$HOME`, `$db_pass`, `${TOKEN}`) or an amount (`$120k`).
     static func isDollarValue(_ line: String) -> Bool {
         guard line.hasPrefix("$"), let second = line.dropFirst().first, second.isLetter else { return false }
+        if matchesWhole(line, regex(#"^\$[A-Za-z_][A-Za-z0-9_]*$"#)), !isLeetCommonPassword(line) { return false }
         return !isPlaceholderOrCode(line)
     }
 }
