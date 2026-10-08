@@ -1,6 +1,5 @@
 {
   "source-text": {
-    "Tests/AnalyticsEventPolicyTests.swift": 5,
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 6,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
@@ -9,7 +8,6 @@
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
     "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/ObservabilityLogWriterTests.swift": 6,
-    "Tests/SentryEventPolicyTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 46
   },
