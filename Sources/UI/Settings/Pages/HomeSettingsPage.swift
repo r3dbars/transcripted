@@ -51,7 +51,7 @@ struct HomeSettingsPage: View {
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onRevealMeetingInFinder: (RecentMeetingItem) -> Void
     let onCollapseMeetingExpansion: () -> Void
-    let knownPeople: [SpeakerIdentityOption]
+    let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]

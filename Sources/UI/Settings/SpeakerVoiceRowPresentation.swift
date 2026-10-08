@@ -41,6 +41,33 @@ enum SpeakerClipPlaybackPresentation {
     }
 }
 
+// MARK: - Everyone row rename
+
+/// What the Everyone row's name box shows once a rename save finishes.
+enum SpeakerEveryoneRenamePolicy {
+    static let saveFailedMessage = "Couldn't save the name."
+
+    struct NameBox: Equatable {
+        let isOpen: Bool
+        let draft: String
+        let errorMessage: String?
+    }
+
+    /// A saved rename closes the card. A failed one keeps the box open with
+    /// the typed name still in it and says so, instead of dropping it silently.
+    static func nameBox(afterSave didSave: Bool, typed: String) -> NameBox {
+        didSave
+            ? NameBox(isOpen: false, draft: typed, errorMessage: nil)
+            : NameBox(isOpen: true, draft: typed, errorMessage: saveFailedMessage)
+    }
+
+    /// Return renames only a non-blank name, and only when no save for this
+    /// card is still running (a slow transcript rewrite keeps the card open).
+    static func acceptsSubmit(typed: String, saveInFlight: Bool) -> Bool {
+        !saveInFlight && !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 // MARK: - Overflow (three-dots) menu
 
 /// Actions exposed by the three-dots overflow menu on a voice row. Replaces the
@@ -119,7 +146,7 @@ enum SpeakerVoiceQueueRowActionPolicy {
 // MARK: - Name autocomplete data source
 
 /// Builds the suggestion list that feeds the "Who is this?" autocomplete. Reuses
-/// the same `SpeakerIdentityOption` shape that the post-meeting naming sheet
+/// the same `SpeakerNameChoice` shape that the post-meeting naming sheet
 /// passes into `SpeakerNameSelectionPolicy`, so the two surfaces match new
 /// speakers the same way.
 enum SpeakerNameSuggestionSource {
@@ -130,12 +157,12 @@ enum SpeakerNameSuggestionSource {
     static func options(
         from profiles: [SpeakerProfile],
         excluding excludedId: UUID?
-    ) -> [SpeakerIdentityOption] {
+    ) -> [SpeakerNameChoice] {
         profiles.compactMap { profile in
             guard profile.id != excludedId else { return nil }
             let name = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !name.isEmpty else { return nil }
-            return SpeakerIdentityOption(
+            return SpeakerNameChoice(
                 id: profile.id,
                 displayName: name,
                 callCount: profile.callCount

@@ -21,43 +21,10 @@
         "TimedTranscriptToken"
       ]
     },
-    "Sources/Support/TranscriptedPermissionAccess.swift": {
-      "Core": [
-        "CoreAudioSystemAudioCapture"
-      ]
-    },
-    "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
-      "Core": [
-        "SpeakerIdentityOption",
-        "SpeakerMatchOutcomeKind",
-        "SpeakerNameUpdate",
-        "SpeakerReviewPrioritizer"
-      ]
-    },
-    "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/QuietHomeLibrary.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerNameAutocompleteField.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
     "Sources/UI/Settings/SpeakerNamingSheet.swift": {
       "Core": [
         "TranscriptSaver",
         "TranscriptionTaskManager"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerPeopleRows.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
       ]
     },
     "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
@@ -69,26 +36,6 @@
         "SpeakerUserConfirmation",
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": {
-      "Core": [
-        "SpeakerIdentityOption"
-      ]
-    },
-    "Sources/UI/Settings/TranscriptedSettingsWindowController.swift": {
-      "Core": [
-        "SpeakerDatabase"
-      ]
-    },
-    "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
-      "Core": [
-        "SQLiteHandle"
       ]
     }
   }

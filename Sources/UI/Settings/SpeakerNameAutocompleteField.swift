@@ -9,7 +9,7 @@ import TranscriptedCore
 struct SpeakerNameAutocompleteField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
-    var options: [SpeakerIdentityOption]
+    var options: [SpeakerNameChoice]
     /// Carries the exact saved-person UUID selected from the dropdown. Typing
     /// clears it, so callers can distinguish a new name from choosing one of
     /// two saved people who happen to share the same display name.
@@ -68,7 +68,7 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         combo.delegate = nil
     }
 
-    private static func visibleItemCount(for options: [SpeakerIdentityOption]) -> Int {
+    private static func visibleItemCount(for options: [SpeakerNameChoice]) -> Int {
         min(max(options.count, 4), 8)
     }
 
@@ -78,13 +78,13 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
         /// alive, so work already queued must check it before touching bindings.
         var isDismantled = false
         private var labels: [String] = []
-        private var optionsByLabel: [String: SpeakerIdentityOption] = [:]
+        private var optionsByLabel: [String: SpeakerNameChoice] = [:]
 
         init(_ parent: SpeakerNameAutocompleteField) {
             self.parent = parent
         }
 
-        func rebuild(options: [SpeakerIdentityOption]) {
+        func rebuild(options: [SpeakerNameChoice]) {
             let built = SpeakerNameSelectionPolicy.makeIdentityLabels(
                 for: options,
                 id: { $0.id },

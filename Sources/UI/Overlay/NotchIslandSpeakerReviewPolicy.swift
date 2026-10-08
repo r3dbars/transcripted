@@ -338,8 +338,10 @@ enum NotchIslandSpeakerReviewPolicy {
     }
 
     /// At the cap, a pointer over the island holds the close until it leaves.
-    static func hardCapClosesNow(hovered: Bool) -> Bool {
-        !hovered
+    /// A recognized voice with its name box open ("Not Taylor?", mid-answer)
+    /// holds it too: closing would save a half-typed name.
+    static func hardCapClosesNow(hovered: Bool, answering: Bool) -> Bool {
+        !hovered && !answering
     }
 
     /// The asked and recognized voices of one review, keyed for looking up

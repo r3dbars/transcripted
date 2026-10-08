@@ -17,9 +17,6 @@
 
 import Foundation
 import SQLite3
-#if canImport(TranscriptedCore)
-import TranscriptedCore
-#endif
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -126,39 +123,16 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
             // Owner-only: this is a derived cache of meeting metadata, keep it off
             // broader default permissions on multi-user systems. No WAL/busy/sync
             // pragmas — this cache doesn't need them.
-            #if canImport(TranscriptedCore)
-            guard let opened = try? SQLiteHandle.open(at: databaseURL, pragmas: []) else {
-                db = nil
-                return
-            }
-            db = opened
-            #else
-            // The fast-test harness (scripts/entrypoints/run-tests.sh) compiles this file
-            // without linking TranscriptedCore (see the same `canImport` guard elsewhere in
-            // this codebase, e.g. Sources/Meeting/MeetingAudioStorageManager.swift), so it
-            // falls back to the pre-extraction inline open + chmod.
             guard sqlite3_open(databaseURL.path, &db) == SQLITE_OK else {
                 db = nil
                 return
             }
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: databaseURL.path
-            )
-            #endif
+            FileManager.default.restrictSQLiteArtifactsToOwnerOnly(at: databaseURL)
         } else {
-            #if canImport(TranscriptedCore)
-            guard let opened = SQLiteHandle.openInMemory() else {
-                db = nil
-                return
-            }
-            db = opened
-            #else
             guard sqlite3_open(":memory:", &db) == SQLITE_OK else {
                 db = nil
                 return
             }
-            #endif
         }
         createTable()
     }
