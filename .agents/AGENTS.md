@@ -21,7 +21,7 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 | `module-boundary-baseline.json` (file, module, type crossings) | `scripts/dev/check-module-boundaries.py` | `--shrink` |
 | `concurrency-baseline.json` (Swift 6 warnings per `Sources/` folder) | `scripts/dev/concurrency-census.sh` | `--shrink` |
 
-- The `--shrink` flags lower existing counts and drop dead entries. Exception: `concurrency-census.sh --shrink` currently adds a newly seen folder's count to the baseline; inspect the diff and apply the reviewed-human-edit rule below before accepting new entries. It must not be used to silently grandfather a new violation.
+- The `--shrink` flags only lower existing counts and drop dead entries. They never add a folder or raise a count; new violations require a reviewed human edit.
 - Raising a baseline or adding an entry is a reviewed human edit with the reason in the PR. Don't do it to make a check pass; split the file, move the type down, or pass plain values instead.
 - A baseline entry that no longer applies fails the check until you shrink it, so the files carry no dead entries.
 - `check-module-boundaries.py` is a lexer. A surprising violation is more likely a checker bug than a real edge: fix the checker or add to `ambiguousNames` with a reason, don't baseline noise.

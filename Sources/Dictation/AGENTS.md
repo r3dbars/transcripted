@@ -8,7 +8,7 @@
 
 - **Public surface:** `DictationTranscriptStore`, `DictationTranscriptWriter`, `DictationTranscriptPersistenceResult`, `SavedDictation*`, `DictationStoppedAudioRecovery*`, `DictationAudioArchive`, `DictationEntryTextRewrite`, `DictationRetranscription`, `DictationStopFinalizationPolicy`, `DictationStoragePaths`.
 - **May depend on:** Speech, Support, Observability, Core `core-vocab`.
-- **Grandfathered crossing:** `DictationSessionCapTimer.swift` names `DictationSessionCapWarningPolicy` from `UI/Overlay`; moving that policy file here fixes it.
+- **Cap warning:** `DictationSessionCapTimer` and `DictationSessionCapWarningPolicy` own the final-30-second countdown; the overlay consumes the policy.
 - **Entry points:** `DictationTranscriptStore.save(...)`, `DictationStopCheckpoint`.
 - **Tests:** `bash run-tests.sh --filter Dictation`.
 

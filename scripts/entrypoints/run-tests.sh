@@ -674,7 +674,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
     "Sources/UI/Overlay/MeetingPromptPriority.swift"
     "Sources/UI/Overlay/DictationEscapeCancelPolicy.swift"
-    "Sources/UI/Overlay/DictationSessionCapWarningPolicy.swift"
+    "Sources/Dictation/DictationSessionCapWarningPolicy.swift"
     "Sources/UI/Overlay/DictationQueuedStartPolicy.swift"
     "Sources/Speech/DictationTrigger.swift"
     "Sources/UI/Overlay/DictationStartAdmission.swift"
