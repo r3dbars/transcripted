@@ -31,7 +31,6 @@
     "Sources/UI/Settings/PermissionsOnboardingView.swift": 948,
     "Sources/UI/Settings/QuietHomeLibrary.swift": 1012,
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894,
-    "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/AutoResearch.swift": 820,
     "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift": 1018
   }
 }
