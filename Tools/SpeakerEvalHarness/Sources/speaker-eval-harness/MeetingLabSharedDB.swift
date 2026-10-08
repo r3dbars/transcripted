@@ -153,7 +153,9 @@ enum LabSharedSpeakerDB {
     /// Marks `meeting` as running against the shared DB. Call before the pipeline
     /// can write to it; `recordApplied` clears it. If the run dies in between, the
     /// next run sees it and won't resume.
-    static func beginMeeting(_ meeting: String, workRoot: URL) throws {
+    /// `force` (a --force run, which started the DB empty) lets `--only` pick any
+    /// shared meeting; such a DB never matches series order, so it isn't resumed.
+    static func beginMeeting(_ meeting: String, workRoot: URL, force: Bool = false) throws {
         let markerURL = directory(workRoot: workRoot).appendingPathComponent(markerFileName)
         guard var marker = readMarker(markerURL) else {
             throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: markerURL.path])
@@ -161,9 +163,9 @@ enum LabSharedSpeakerDB {
         // Only the next unapplied meeting in series order may write to the DB, so
         // --only can't skip a meeting whose voices later ones need.
         let shared = marker.config.sharedMeetings
-        guard marker.inProgress == nil,
-              marker.applied == Array(shared.prefix(marker.applied.count)),
-              marker.applied.count < shared.count, shared[marker.applied.count] == meeting else {
+        let inOrder = marker.applied == Array(shared.prefix(marker.applied.count))
+            && marker.applied.count < shared.count && shared[marker.applied.count] == meeting
+        guard marker.inProgress == nil, inOrder || (force && shared.contains(meeting)) else {
             throw OutOfOrder(meeting: meeting, applied: marker.applied)
         }
         marker.inProgress = meeting
@@ -280,6 +282,10 @@ func runMeetingLabSharedDBSelfTests() {
 
         result = try rerun(applied: ["m1", "m2"], finished: [])
         check(result == (.reset, false), "a fresh series run kept a shared DB left by an earlier run")
+        _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1", "m2", "m3"], force: true)
+        var forcedOnly = true
+        do { try LabSharedSpeakerDB.beginMeeting("m3", workRoot: workRoot, force: true) } catch { forcedOnly = false }
+        check(forcedOnly, "--force --only m3 emptied the DB and then refused to run m3")
         result = try rerun(applied: ["m1", "m2", "m3", "m4"], finished: ["m1", "m2", "m3", "m4"], force: true)
         check(result == (.reset, false), "a --force rerun kept the voices the last run learned")
 

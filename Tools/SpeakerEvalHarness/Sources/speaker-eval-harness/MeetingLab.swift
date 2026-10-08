@@ -509,7 +509,7 @@ func runMeetingSeries(_ args: [String]) async {
         }
 
         if !freshDB {
-            do { try LabSharedSpeakerDB.beginMeeting(meeting.id, workRoot: workRoot) } catch {
+            do { try LabSharedSpeakerDB.beginMeeting(meeting.id, workRoot: workRoot, force: force) } catch {
                 die("could not mark \(meeting.id) in progress in the shared speaker DB: \(error.localizedDescription)")
             }
         }
