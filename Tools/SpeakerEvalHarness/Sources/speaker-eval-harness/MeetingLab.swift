@@ -459,6 +459,12 @@ func runMeetingSeries(_ args: [String]) async {
             log("[lab] shared speaker DB: resumed (\(finishedShared.count) finished meeting(s) already in it)")
         case .reset(let reason):
             log("[lab] shared speaker DB: starting empty (\(reason))")
+            // Results scored against the old DB no longer describe it; drop them so
+            // a partial --force rerun can't mix them in.
+            for id in finishedShared {
+                try? fm.removeItem(at: setDir.appendingPathComponent(id, isDirectory: true)
+                    .appendingPathComponent("lab_result.json"))
+            }
         }
     } catch let refused as LabSharedSpeakerDB.ResumeRefused {
         die(refused.description)
@@ -584,12 +590,15 @@ func runMeetingSeries(_ args: [String]) async {
             failed.embedder = voiceprint?.embedder.identifier
             failed.embedderThresholds = voiceprint?.thresholdsSource
             write(failed, to: outURL)
-            if !freshDB { LabSharedSpeakerDB.recordApplied(meeting.id, workRoot: workRoot) }
+            // Timed out with the pipeline still running: leave the meeting marked
+            // in progress so the next run won't resume a half-written DB.
+            if !freshDB, finished { recordSharedApplied(meeting.id, workRoot: workRoot) }
             continue
         }
 
         let attribution = LabAttribution(result: result, truth: truth)
         let byPid = Dictionary(uniqueKeysWithValues: truth.participants.map { ($0.pid, $0) })
+        var namingSettled = true
         let request = await MainActor.run { manager.speakerNamingRequest }
         let savedURL = await MainActor.run { request?.transcriptURL ?? manager.lastSavedTranscriptURL }
 
@@ -666,7 +675,10 @@ func runMeetingSeries(_ args: [String]) async {
                 manager.speakerNamingRequest == nil && manager.activeCount == 0
                     && (manager.displayStatus == .transcriptSaved || manager.displayStatus == .idle)
             }
-            if !saved { log("[lab] \(meeting.id): naming completion did not settle in time") }
+            if !saved {
+                log("[lab] \(meeting.id): naming completion did not settle in time")
+                namingSettled = false
+            }
         }
 
         let utterances = result.allUtterances.map {
@@ -710,7 +722,7 @@ func runMeetingSeries(_ args: [String]) async {
             }
         }
         write(out, to: outURL)
-        if !freshDB { LabSharedSpeakerDB.recordApplied(meeting.id, workRoot: workRoot) }
+        if !freshDB, namingSettled { recordSharedApplied(meeting.id, workRoot: workRoot) }
         let remote = truth.participants.filter { $0.role == "remote" }.count
         log(String(format: "[lab] %@: %.0fs audio in %.1fs | remote true %d, found %d | rows %d, silent %d",
                    meeting.id, truth.duration_s, processing, remote, result.systemSpeakerCount, rows.count, silent.count))
@@ -727,4 +739,12 @@ private func write<T: Encodable>(_ value: T, to url: URL) {
 
 private func log(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
+}
+
+/// Records a finished shared meeting in the marker, stopping the run if the marker
+/// can't be written (the next run would otherwise see a stale marker).
+func recordSharedApplied(_ meeting: String, workRoot: URL) {
+    do { try LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot) } catch {
+        die("could not record \(meeting) in the shared speaker DB marker: \(error.localizedDescription)")
+    }
 }

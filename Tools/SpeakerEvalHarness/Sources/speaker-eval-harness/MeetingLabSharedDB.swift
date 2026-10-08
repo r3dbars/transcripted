@@ -46,6 +46,15 @@ enum LabSharedSpeakerDB {
         }
     }
 
+    /// A shared meeting asked to run when it isn't the next one in series order.
+    struct OutOfOrder: Error, CustomStringConvertible {
+        let meeting: String
+        let applied: [String]
+        var description: String {
+            "\(meeting) isn't the next shared meeting in series order (already in the DB: \(applied)). Run the series in order, or rerun with --force."
+        }
+    }
+
     static func directory(workRoot: URL) -> URL {
         workRoot.appendingPathComponent("shared-db", isDirectory: true)
     }
@@ -85,9 +94,15 @@ enum LabSharedSpeakerDB {
         if let knobs = environment["TRANSCRIPTED_LAB_KNOBS_FILE"], !knobs.isEmpty {
             files["TRANSCRIPTED_LAB_KNOBS_FILE"] = knobs
         }
-        return files.mapValues { path in
+        var hashes = files.mapValues { path in
             (try? sha256Hex(of: URL(fileURLWithPath: path))) ?? "unreadable"
         }
+        // Env overrides that swap the diarizer preset or the embedder change what
+        // the DB learns too; record their values as given.
+        for key in ["TRANSCRIPTED_NEMOTRON_PRESET", "TRANSCRIPTED_NEMOTRON_EMBEDDER"] {
+            if let value = environment[key], !value.isEmpty { hashes["env:" + key] = value }
+        }
+        return hashes
     }
 
     /// Decides whether this run resumes the shared DB, empties it when not, and
@@ -143,17 +158,27 @@ enum LabSharedSpeakerDB {
         guard var marker = readMarker(markerURL) else {
             throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: markerURL.path])
         }
+        // Only the next unapplied meeting in series order may write to the DB, so
+        // --only can't skip a meeting whose voices later ones need.
+        let shared = marker.config.sharedMeetings
+        guard marker.inProgress == nil,
+              marker.applied == Array(shared.prefix(marker.applied.count)),
+              marker.applied.count < shared.count, shared[marker.applied.count] == meeting else {
+            throw OutOfOrder(meeting: meeting, applied: marker.applied)
+        }
         marker.inProgress = meeting
         try writeMarker(marker, to: markerURL)
     }
 
     /// Records that `meeting` has finished against the shared DB.
-    static func recordApplied(_ meeting: String, workRoot: URL) {
+    static func recordApplied(_ meeting: String, workRoot: URL) throws {
         let markerURL = directory(workRoot: workRoot).appendingPathComponent(markerFileName)
-        guard var marker = readMarker(markerURL) else { return }
+        guard var marker = readMarker(markerURL) else {
+            throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: markerURL.path])
+        }
         if !marker.applied.contains(meeting) { marker.applied.append(meeting) }
         if marker.inProgress == meeting { marker.inProgress = nil }
-        try? writeMarker(marker, to: markerURL)
+        try writeMarker(marker, to: markerURL)
     }
 
     private static func readMarker(_ url: URL) -> Marker? {
@@ -225,7 +250,7 @@ func runMeetingLabSharedDBSelfTests() {
             try Data("learned voices".utf8).write(to: learned)
             for meeting in applied {
                 try LabSharedSpeakerDB.beginMeeting(meeting, workRoot: workRoot)
-                LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot)
+                try LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot)
             }
             if let interrupted { try LabSharedSpeakerDB.beginMeeting(interrupted, workRoot: workRoot) }
             let outcome: Outcome
@@ -241,10 +266,17 @@ func runMeetingLabSharedDBSelfTests() {
         var result = try rerun(applied: ["m1", "m2"], finished: ["m1", "m2"])
         check(result == (.resumed, true), "resuming a half-done series threw away the shared DB it needs")
         try LabSharedSpeakerDB.beginMeeting("m3", workRoot: workRoot)
-        LabSharedSpeakerDB.recordApplied("m3", workRoot: workRoot)
+        try LabSharedSpeakerDB.recordApplied("m3", workRoot: workRoot)
         let second = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1", "m2", "m3"], force: false)
         check(second == .resumed && fm.fileExists(atPath: learned.path),
               "a second resume lost track of the meetings already in the DB")
+
+        // m1 and m2 are in the DB; --only m4 must not run without m3's voices.
+        _ = try rerun(applied: ["m1", "m2"], finished: ["m1", "m2"])
+        var outOfOrder = false
+        do { try LabSharedSpeakerDB.beginMeeting("m4", workRoot: workRoot) }
+        catch is LabSharedSpeakerDB.OutOfOrder { outOfOrder = true }
+        check(outOfOrder, "a shared meeting ran out of series order (m4 before m3)")
 
         result = try rerun(applied: ["m1", "m2"], finished: [])
         check(result == (.reset, false), "a fresh series run kept a shared DB left by an earlier run")
