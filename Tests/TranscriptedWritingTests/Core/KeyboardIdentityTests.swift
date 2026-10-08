@@ -2,20 +2,22 @@ import Foundation
 import Testing
 @testable import TranscriptedWritingCore
 
-/// The keyboard's identity lives in several places that must agree. If the
-/// Info.plist's connection name drifts from `TildeProductProfile.production`,
-/// `main.swift` still registers the profile's name, the keyboard installs, and
-/// it silently never gets a session. This compares the compiled profile with
-/// the plist, loaded as data (a property list, not Swift source).
+/// The keyboard's identity lives in four places that must agree: its
+/// Info.plist, `TildeProductProfile.production`, the bundle script, and
+/// PackagedAppSmoke. If the plist's connection name drifts, `main.swift`
+/// still registers `profile.inputMethodConnectionName`, the keyboard installs,
+/// and it silently never gets a session. This pins the plist to the profile.
 @Suite struct KeyboardIdentityTests {
-    /// The keyboard target's Info.plist, found from this file's location by
-    /// path components (no repo-path string literal).
+    private static var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Core
+            .deletingLastPathComponent() // TranscriptedWritingTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent()
+    }
+
     private static func keyboardInfoPlist() throws -> [String: Any] {
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { url.deleteLastPathComponent() } // Core, TranscriptedWritingTests, Tests, repo
-        for part in ["Sources", "TranscriptedKeyboard", "Info.plist"] {
-            url.appendPathComponent(part)
-        }
+        let url = repoRoot.appendingPathComponent("Sources/TranscriptedKeyboard/Info.plist")
         let data = try Data(contentsOf: url)
         return try #require(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]

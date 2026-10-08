@@ -151,7 +151,7 @@ extension TranscriptedSettingsView {
     var homeTranscriptionActivity: HomeTranscriptionActivityPresentation? {
         return HomeTranscriptionActivityPresentation.make(
             sessionState: meetingSession.state,
-            displayStatus: meetingSession.displayStatus,
+            displayStatus: meetingSession.transcriptionStatus,
             warmupStatus: meetingSession.warmupStatus,
             lastSavedTitle: meetingSession.lastSavedTitle,
             lastSavedTranscriptURL: meetingSession.lastSavedTranscriptURL
