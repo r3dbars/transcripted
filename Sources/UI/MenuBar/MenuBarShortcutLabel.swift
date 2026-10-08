@@ -3,9 +3,9 @@
 
 import Foundation
 
-/// A button shows its shortcut beside the title when there's room. Dictation
-/// can have two triggers ("Fn / Right ⌥": push-to-talk, then hands-free), and
-/// the pair doesn't fit a half-width button, so the button tries the full
+/// A button shows its shortcut beside the title when there's room. A shortcut
+/// can be a pair ("A / B"), and the pair
+/// doesn't fit a half-width button, so the button tries the full
 /// text first and then just the first key.
 enum MenuBarShortcutLabel {
     static func candidates(for shortcut: String) -> [String] {

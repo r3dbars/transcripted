@@ -32,6 +32,11 @@ MANUAL_COMMAND_FRAGMENTS = (
     "run-live-capture-smoke.sh",
 )
 ALLOWED_EXECUTABLES = {"bash", "python3", "ruby", "swift"}
+# The trusted base matrix names this one model-free fixture proof directly.
+# Accept only this exact executable and argument, never arbitrary repo binaries.
+SPEAKER_EVAL_SELF_TEST_ARGV = [
+    "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness", "autoeval-self-test"
+]
 DEPS_COMMAND = "bash build-deps.sh --force"
 DEPS_BUILD_STAMP = REPO_ROOT / "deps-libs/.build-deps-stamp"
 DEPS_COMMAND_PATTERN = re.compile(r"^bash[ \t]+build-deps\.sh(?:[ \t]|$)")
@@ -393,6 +398,9 @@ def command_argv(command: str) -> list[str]:
     if not arguments:
         raise ProofError("empty command")
     executable = arguments[0]
+    if arguments == SPEAKER_EVAL_SELF_TEST_ARGV:
+        validate_repo_path(executable, "speaker evaluation self-test executable")
+        return arguments
     if executable not in ALLOWED_EXECUTABLES and not executable.startswith("scripts/"):
         raise ProofError("command executable is not allowed")
     if executable.startswith("scripts/"):
@@ -641,6 +649,12 @@ def self_test() -> None:
             "BLOCKED",
             "manual-proof-required",
         ),
+        "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test": ("RUN", None),
+        "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness meeting-series": ("BLOCKED", "invalid-command"),
+        "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test --force": ("BLOCKED", "invalid-command"),
+        "Tools/SpeakerEvalHarness/.build/debug/../../../../outside autoeval-self-test": ("BLOCKED", "invalid-command"),
+        "/tmp/speaker-eval-harness autoeval-self-test": ("BLOCKED", "invalid-command"),
+        "Tools/Other/.build/debug/speaker-eval-harness autoeval-self-test": ("BLOCKED", "invalid-command"),
         "echo first\necho second": ("BLOCKED", "invalid-command"),
         "python3 scripts/dev/untrusted-proof.py": ("RUN", None),
         "bash -c 'echo unsafe'": ("BLOCKED", "invalid-command"),

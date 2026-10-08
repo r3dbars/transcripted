@@ -6,7 +6,7 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 
 `Capture` in `.agents/modules.json`.
 
-- **Owns:** physical trigger detection, debounce, and routing into dictation and meeting handlers.
+- **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
 - **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`.
 - **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
 - **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`.
