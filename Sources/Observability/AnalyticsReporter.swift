@@ -218,10 +218,6 @@ enum AnalyticsDeliveryPolicy {
 }
 
 enum AnalyticsRuntimeConfiguration {
-    static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
-    static let hostInfoKey = "TranscriptedPostHogHost"
-    static let buildChannelInfoKey = "TranscriptedBuildChannel"
-    static let buildRevisionInfoKey = "TranscriptedBuildRevision"
     static let buildChannelEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_CHANNEL"
     static let buildRevisionEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_REVISION"
     private static let localOverridesFileName = "observability-overrides.plist"
@@ -235,16 +231,16 @@ enum AnalyticsRuntimeConfiguration {
         guard !AutomatedLaunchEnvironment.isActive(environment: environment) else { return nil }
         return firstNonEmpty(
             environment["POSTHOG_API_KEY"],
-            localOverrideValue(forKey: apiKeyInfoKey),
-            infoDictionary?[apiKeyInfoKey] as? String
+            localOverrideValue(forKey: AnalyticsInfoPlistKeys.apiKeyInfoKey),
+            infoDictionary?[AnalyticsInfoPlistKeys.apiKeyInfoKey] as? String
         )
     }
 
     static func host() -> String? {
         firstNonEmpty(
             ProcessInfo.processInfo.environment["POSTHOG_HOST"],
-            localOverrideValue(forKey: hostInfoKey),
-            Bundle.main.object(forInfoDictionaryKey: hostInfoKey) as? String
+            localOverrideValue(forKey: AnalyticsInfoPlistKeys.hostInfoKey),
+            Bundle.main.object(forInfoDictionaryKey: AnalyticsInfoPlistKeys.hostInfoKey) as? String
         )
     }
 
@@ -254,7 +250,7 @@ enum AnalyticsRuntimeConfiguration {
     ) -> String {
         firstSafeBuildMetadata(
             environment[buildChannelEnvironmentKey],
-            infoDictionary?[buildChannelInfoKey] as? String
+            infoDictionary?[AnalyticsInfoPlistKeys.buildChannelInfoKey] as? String
         ) ?? "unknown"
     }
 
@@ -264,7 +260,7 @@ enum AnalyticsRuntimeConfiguration {
     ) -> String {
         firstSafeBuildMetadata(
             environment[buildRevisionEnvironmentKey],
-            infoDictionary?[buildRevisionInfoKey] as? String
+            infoDictionary?[AnalyticsInfoPlistKeys.buildRevisionInfoKey] as? String
         ) ?? "unknown"
     }
 
@@ -577,7 +573,7 @@ final class AnalyticsReporter {
     let apiKey: String?
     private let usageStore: UsageHealthStore?
     let captureHost: String?
-    private static let isoDateFormatter = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let isoDateFormatter = ISO8601DateFormatter() // immutable; string(from:) is thread-safe
     private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore
