@@ -32,7 +32,7 @@ App tests, smokes, and fixtures. Full guide with every smoke's details: `Tests/R
 
 ## Flaky tests
 
-A test that fails with no code change gets fixed or benched the same day. Bench by adding `YYYY-MM-DD | <runSuite name, exact> | <why, and who fixes it>` to `Tests/quarantine.txt` (Swift Testing: `.disabled("why")`; XCTest: `XCTSkip("why")`). `check-test-shape.py` fails on a malformed line or a missing suite and warns after 14 days. Never add retries until it passes. Reproduce busy-Mac flakes by running the one test alone, repeatedly, under load (`swift test --skip-build --filter <Suite>/<test>`).
+A test that fails with no code change gets fixed or benched the same day. Bench by adding `YYYY-MM-DD | <runSuite name, exact> | <why, and who fixes it>` to `Tests/quarantine.txt` (Swift Testing: `.disabled("why")`; XCTest: `XCTSkip("why")`). `check-test-shape.py` fails on a malformed line or a missing suite and warns after 14 days. Never add retries until it passes. Reproduce busy-Mac flakes under load using the owning runner: `bash run-tests.sh --filter <entryFn|File>` for raw-swiftc fast suites, or `swift test --skip-build --filter <Suite>/<test>` for already-built package tests. Repetition is for diagnosis, never a retry-until-green gate.
 
 ## Real-world proof
 

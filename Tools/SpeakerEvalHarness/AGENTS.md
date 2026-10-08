@@ -10,8 +10,8 @@ AMI and YODAS3 audio, RTTMs, dumps, simulated meetings, eval reports, and speake
 
 ## Key files
 
-- `Package.swift` wires the harness to root `TranscriptedCore` and the repo-level native dependency bundle.
-- `Sources/speaker-eval-harness/main.swift` owns the wire models (`RawDump`, `ReplayResult`, …), shared helpers, and the command entry; it dispatches `dump`, `replay`, `embedding-parity`, `autoeval`, `autoeval-self-test`, `meeting-series`, `dump-e2e`, `dump-set`, and `embedder-debug`. The last four (`meeting-series`, `dump-e2e`, `dump-set`, `embedder-debug`) require macOS 26+.
+- `Package.swift` wires the harness to root `TranscriptedCore` and the repo-level native dependency bundle; the entire package requires macOS 26+ (`.macOS("26.0")`).
+- `Sources/speaker-eval-harness/main.swift` owns the wire models (`RawDump`, `ReplayResult`, …), shared helpers, and the command entry; it dispatches `dump`, `replay`, `embedding-parity`, `autoeval`, `autoeval-self-test`, `meeting-series`, `dump-e2e`, `dump-set`, and `embedder-debug`.
 - `Sources/speaker-eval-harness/Dump.swift` owns `dump` (`--backend`, `--embedder`, `--eres2net-model`).
 - `Sources/speaker-eval-harness/Replay.swift` owns `replay` (match / same-voice / thresholds / dedup / write-path and fingerprint-update knobs).
 - `Sources/speaker-eval-harness/EmbeddingParity.swift` owns `embedding-parity` (pyannote's offline WeSpeaker vectors vs Core's `FluidWeSpeakerSegmentEmbedder` on the same segments; decides whether Nemotron voiceprints could share `speakers.sqlite`). Its `ParityVerdict` constants are mirrored as `PARITY_*` in `scripts/score_speaker_lab.py`; change both together.

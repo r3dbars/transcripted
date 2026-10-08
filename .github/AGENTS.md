@@ -12,15 +12,15 @@ Workflows, templates, and the CI contracts that gate merges. Repo-wide rules liv
 | `workflows/transcripted-lab.yml` | `Tools/TranscriptedLab/**` changes | Builds and tests that package on `macos-15`. |
 | `workflows/release-candidate.yml` | Manual only | Builds, signs, notarizes, and builds Sparkle metadata. Uses the signing secrets. |
 | `workflows/publish-mcp-registry.yml` | Release published, manual | Repackages the already-signed `transcripted-mcp` into a `.mcpb`; builds and signs nothing. OIDC login, no secret. |
-| `workflows/mac-runner-sweep.yml` | Every 30 min | Re-runs Swift CI on hosted runners if the owner's Mac went quiet. |
+| `workflows/mac-runner-sweep.yml` | Every 30 min | Re-runs Swift CI on hosted runners if the owner's Mac went quiet, except in `MAC_RUNNER_MODE=always`. |
 | `workflows/mutation-monthly.yml` | 1st of the month | Report-only mutation probe on the `transcripted-mac` runner. |
 
 ## Rules
 
 - **Keep the job id `build-and-test`.** Branch protection requires that status context. If you split or rename jobs, the umbrella keeps its id, uses `if: always()`, and asserts every upstream job succeeded. Otherwise the required check is orphaned or silently skipped.
-- **Every `Tools/*` Swift package must run in a workflow** (usually `swift-ci.yml`, or its own file like `transcripted-lab.yml`). `scripts/dev/check-known-traps.py` fails otherwise. New package: add the job and a test-matrix rule in `.agents/test-matrix.yml`.
+- **Every `Tools/*` Swift package must run in a workflow** (usually `swift-ci.yml`, or its own file like `transcripted-lab.yml`), except `SpeakerEvalHarness`: `TOOLS_WITHOUT_CI` in `scripts/dev/check-known-traps.py` records its AMI-corpus/prebuilt-native-deps requirement; its test-matrix rule supplies verification. The checker fails for other missing packages. New package: add the job and a test-matrix rule in `.agents/test-matrix.yml`.
 - **App Swift jobs need macOS 26.** The sources use macOS-only SDKs and target `arm64-apple-macos26.0`. `transcripted-lab.yml` is the exception (`macos-15`, package only).
-- **Runner choice.** `checks` and `spm-tests` go to the owner's Mac only when `scripts/ci/pick-ci-runner.py` says so (heartbeat fresh, no other job queued, not a fork PR). Any API error falls back to hosted `macos-26`. `app-build` always stays hosted. Details: `docs/self-hosted-mac-runner.md`, `scripts/ci/mac-runner.sh`.
+- **Runner choice.** `checks`, `spm-tests`, and `app-build` use `scripts/ci/pick-ci-runner.py`. Normal mode chooses the owner's Mac when its heartbeat and queue allow, with hosted `macos-26` fallback. `MAC_RUNNER_MODE=always` sends eligible same-repo jobs to the Mac regardless of heartbeat/queue and disables sweep rerouting; forks stay hosted. Details: `docs/self-hosted-mac-runner.md`, `scripts/ci/mac-runner.sh`.
 - **Secrets.** Only `release-candidate.yml` reads signing secrets (`DEVELOPER_ID_CERT`, `DEVELOPER_ID_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`, `SPARKLE_PRIVATE_KEY`). Never echo them, never pass them to a step that runs PR code, never add them to a PR-triggered workflow. Keep `permissions:` minimal; widen per job, not per file.
 - **Release Candidate is trusted-input only.** It rejects a `source_ref` that lacks the current `origin/main` tip or differs from main in anything but `Info.plist`, and rejects an existing `v<version>` release. Don't loosen those checks. Tag the workflow's `source_ref`, not the run's head SHA.
 - **Don't push empty commits to retrigger CI**, and Claude sessions can't re-run Actions jobs. Say which check is unproven.

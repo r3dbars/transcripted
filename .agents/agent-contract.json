@@ -191,14 +191,140 @@
     {
       "id": "tools",
       "path_prefixes": ["Tools/"],
-      "docs": ["Tools/README.md", "Tools/TranscriptedLive/AGENTS.md", "Tools/TranscriptedCompanion/AGENTS.md"],
+      "docs": ["Tools/README.md"],
       "keywords": ["cli", "mcp", "qa tool", "capture kit", "speaker eval"],
       "owns": "Standalone CLI, MCP, QA, capture-kit, and evaluation packages.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams.",
         "Run the owning package tests for every tool change."
       ],
-      "manual_proof": ["Host-client connection behavior for MCP or installed tooling changes."]
+      "manual_proof": []
+    },
+    {
+      "id": "tools-capture-kit",
+      "path_prefixes": [
+        "Tools/TranscriptedCaptureKit/"
+      ],
+      "docs": [
+        "Tools/TranscriptedCaptureKit/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Shared capture-library resolution and Markdown parsing.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools-cli",
+      "path_prefixes": [
+        "Tools/TranscriptedCLI/"
+      ],
+      "docs": [
+        "Tools/TranscriptedCLI/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Local capture CLI and offline transcription.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools-mcp",
+      "path_prefixes": [
+        "Tools/TranscriptedMCP/"
+      ],
+      "docs": [
+        "Tools/TranscriptedMCP/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Saved-capture MCP tools and opt-in companion controls.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": [
+        "Host-client connection behavior for MCP or installed tooling changes."
+      ]
+    },
+    {
+      "id": "tools-qa",
+      "path_prefixes": [
+        "Tools/TranscriptedQA/"
+      ],
+      "docs": [
+        "Tools/TranscriptedQA/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Artifact validators and isolated smoke tools.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools-speaker-eval",
+      "path_prefixes": [
+        "Tools/SpeakerEvalHarness/"
+      ],
+      "docs": [
+        "Tools/SpeakerEvalHarness/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Headless speaker evaluation and corpus tooling.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools-lab",
+      "path_prefixes": [
+        "Tools/TranscriptedLab/"
+      ],
+      "docs": [
+        "Tools/TranscriptedLab/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Native experiment workbench and CLI.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "tools-live",
+      "path_prefixes": [
+        "Tools/TranscriptedLive/"
+      ],
+      "docs": [
+        "Tools/TranscriptedLive/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Opt-in live meeting broker and transports.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": [
+        "Live transport and client connection behavior."
+      ]
+    },
+    {
+      "id": "tools-companion",
+      "path_prefixes": [
+        "Tools/TranscriptedCompanion/"
+      ],
+      "docs": [
+        "Tools/TranscriptedCompanion/AGENTS.md"
+      ],
+      "keywords": [],
+      "owns": "Portable plugin packaging and fixture tests.",
+      "invariants": [
+        "Tools remain local-first and consume saved artifacts through documented seams."
+      ],
+      "manual_proof": [
+        "Host-client connection behavior for installed companion tooling."
+      ]
     },
     {
       "id": "scripts-ops",
