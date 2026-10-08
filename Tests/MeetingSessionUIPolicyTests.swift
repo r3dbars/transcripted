@@ -314,6 +314,35 @@ func testMeetingSessionUIPolicy() async {
         )
     }
 
+    runSuite("The Discard menu action only cancels a recording that survives its confirmation") {
+        let blocked: [MeetingSessionState?] = [nil, .idle, .loadingModels, .ready, .startingRecording,
+                                              .stoppingRecording, .transcribing, .error("synthetic")]
+        for initial in blocked {
+            var events: [String] = []
+            MeetingSessionStateMachine.discardRecordingIfConfirmed(
+                sessionState: { events.append("state"); return initial },
+                confirm: { events.append("confirm"); return true },
+                discard: { events.append("discard") }
+            )
+            assertEqual(events, ["state"], "a stale menu action neither shows an alert nor discards")
+        }
+        for (afterAlert, staysRecording) in blocked.map({ ($0, false) }) + [(MeetingSessionState.recording, true)] {
+            for confirmed in [false, true] {
+                var state: MeetingSessionState? = .recording
+                var events: [String] = []
+                MeetingSessionStateMachine.discardRecordingIfConfirmed(
+                    sessionState: { events.append("state"); return state },
+                    confirm: { events.append("confirm"); state = afterAlert; return confirmed },
+                    discard: { events.append("discard") }
+                )
+                let expected = !confirmed ? ["state", "confirm"]
+                    : staysRecording
+                        ? ["state", "confirm", "state", "discard"] : ["state", "confirm", "state"]
+                assertEqual(events, expected, "Keep never cancels; Discard rereads state after the alert before canceling")
+            }
+        }
+    }
+
     runSuite("The menu meeting button means Stop for the whole capture, not just steady recording") {
         assertEqual(MenuBarMeetingMenuAction.resolve(.recording), .stop)
         assertEqual(

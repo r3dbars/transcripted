@@ -138,6 +138,20 @@ enum MeetingSessionStateMachine {
         return isSteadyStateRecording(sessionState)
     }
 
+    /// Runs the same discard flow that the overlay menu invokes. The modal
+    /// confirmation may run an event loop, so read the session again afterward.
+    @MainActor
+    static func discardRecordingIfConfirmed(
+        sessionState: () -> MeetingSessionState?,
+        confirm: () -> Bool,
+        discard: () -> Void
+    ) {
+        guard mayDiscardRecording(sessionState: sessionState()) else { return }
+        guard confirm() else { return }
+        guard mayDiscardRecording(sessionState: sessionState()) else { return }
+        discard()
+    }
+
     /// May a failure that is NOT about this session's own capture pipeline
     /// (an import rejected because a meeting is recording, a queued
     /// transcription job's model prep failing in the background) still force

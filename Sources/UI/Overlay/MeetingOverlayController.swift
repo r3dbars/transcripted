@@ -708,25 +708,20 @@ final class MeetingOverlayController: NSObject {
             isShowingCancelConfirmation = false
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Discard this meeting recording?"
-        alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
-        alert.addButton(withTitle: "Keep Recording")
-        alert.addButton(withTitle: "Discard Recording")
-        alert.buttons.last?.hasDestructiveAction = true
-
-        let response = alert.runModal()
-        guard response == .alertSecondButtonReturn else { return }
-        // The confirm sheet can outlive the recording. Stop or an unexpected
-        // capture end may already be preserving audio — do not cancel then.
-        guard MeetingSessionStateMachine.mayDiscardRecording(sessionState: session.state) else { return }
-
-        Task { [weak session] in
-            await session?.cancelRecording(reason: .discardButton)
-        }
+        MeetingSessionStateMachine.discardRecordingIfConfirmed(sessionState: { session.state }, confirm: {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Discard this meeting recording?"
+            alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
+            alert.addButton(withTitle: "Keep Recording")
+            alert.addButton(withTitle: "Discard Recording")
+            alert.buttons.last?.hasDestructiveAction = true
+            return alert.runModal() == .alertSecondButtonReturn
+        }, discard: {
+            // A confirm can outlive Stop; the flow rechecks before canceling.
+            Task { [weak session] in await session?.cancelRecording(reason: .discardButton) }
+        })
     }
 
     private func scheduleAutoHide(after seconds: Double) {
