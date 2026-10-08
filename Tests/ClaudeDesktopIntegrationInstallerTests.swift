@@ -714,11 +714,11 @@ func testClaudeDesktopIntegrationInstaller() {
                 installedBinaryURL: installedBinaryURL,
                 observabilityConfigURL: helperConfigURL,
                 infoDictionary: [
-                    AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                    AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                    AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                    AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
                     ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.3",
-                    AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
-                    AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
+                    AnalyticsInfoPlistKeys.buildChannelInfoKey: "release",
+                    AnalyticsInfoPlistKeys.buildRevisionInfoKey: "abc123def456",
                 ]
             )
 
@@ -737,8 +737,8 @@ func testClaudeDesktopIntegrationInstaller() {
             )
             let helperConfig = helperObservabilityConfig(at: helperConfigURL)
             assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.3", "refresh should write the current app version")
-            assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "refresh should write the current build channel")
-            assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abc123def456", "refresh should write the current build revision")
+            assertEqual(helperConfig?[AnalyticsInfoPlistKeys.buildChannelInfoKey], "release", "refresh should write the current build channel")
+            assertEqual(helperConfig?[AnalyticsInfoPlistKeys.buildRevisionInfoKey], "abc123def456", "refresh should write the current build revision")
         } catch {
             assertTrue(false, "stale installed helper refresh should succeed: \(error)")
         }
@@ -768,11 +768,11 @@ func testClaudeDesktopIntegrationInstaller() {
             installedBinaryURL: installedBinaryURL,
             observabilityConfigURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
                 ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.4",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "def456abc123",
+                AnalyticsInfoPlistKeys.buildChannelInfoKey: "release",
+                AnalyticsInfoPlistKeys.buildRevisionInfoKey: "def456abc123",
             ]
         )
 
@@ -783,7 +783,7 @@ func testClaudeDesktopIntegrationInstaller() {
         )
         let helperConfig = helperObservabilityConfig(at: configURL)
         assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.4", "matching helper refresh should still update app identity")
-        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "def456abc123", "matching helper refresh should update build identity")
+        assertEqual(helperConfig?[AnalyticsInfoPlistKeys.buildRevisionInfoKey], "def456abc123", "matching helper refresh should update build identity")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — restores a configured missing helper") {
@@ -898,8 +898,8 @@ func testClaudeDesktopIntegrationInstaller() {
                 installedBinaryURL: installedBinaryURL,
                 observabilityConfigURL: helperConfigURL,
                 infoDictionary: [
-                    AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                    AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                    AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                    AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
                 ]
             )
             assertTrue(false, "refresh should surface a bundled helper that fails self-test")
@@ -966,19 +966,19 @@ func testClaudeDesktopIntegrationInstaller() {
         try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
             configURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
                 ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.1.50",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abcdef123456",
+                AnalyticsInfoPlistKeys.buildChannelInfoKey: "release",
+                AnalyticsInfoPlistKeys.buildRevisionInfoKey: "abcdef123456",
             ],
             analyticsEnabled: true
         )
 
         let config = helperObservabilityConfig(at: configURL)
         assertEqual(config?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.1.50", "helper config should carry the real app version")
-        assertEqual(config?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "helper config should carry the real build channel")
-        assertEqual(config?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abcdef123456", "helper config should carry the real build revision")
+        assertEqual(config?[AnalyticsInfoPlistKeys.buildChannelInfoKey], "release", "helper config should carry the real build channel")
+        assertEqual(config?[AnalyticsInfoPlistKeys.buildRevisionInfoKey], "abcdef123456", "helper config should carry the real build revision")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — omits unsafe app identity") {
@@ -990,20 +990,20 @@ func testClaudeDesktopIntegrationInstaller() {
         try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
             configURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
                 ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "/Users/jane/private",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "customer@example.com",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "phc_secret_token",
+                AnalyticsInfoPlistKeys.buildChannelInfoKey: "customer@example.com",
+                AnalyticsInfoPlistKeys.buildRevisionInfoKey: "phc_secret_token",
             ],
             analyticsEnabled: true
         )
 
         let config = helperObservabilityConfig(at: configURL)
-        assertEqual(config?[AnalyticsRuntimeConfiguration.apiKeyInfoKey], "phc_current", "valid analytics config should still be written")
+        assertEqual(config?[AnalyticsInfoPlistKeys.apiKeyInfoKey], "phc_current", "valid analytics config should still be written")
         assertNil(config?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "unsafe app version should be omitted")
-        assertNil(config?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "unsafe build channel should be omitted")
-        assertNil(config?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "unsafe build revision should be omitted")
+        assertNil(config?[AnalyticsInfoPlistKeys.buildChannelInfoKey], "unsafe build channel should be omitted")
+        assertNil(config?[AnalyticsInfoPlistKeys.buildRevisionInfoKey], "unsafe build revision should be omitted")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — removes stale invalid config") {
@@ -1014,8 +1014,8 @@ func testClaudeDesktopIntegrationInstaller() {
 
         try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         let stale = [
-            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_old",
-            AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_old",
+            AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
         ]
         let staleData = try? PropertyListSerialization.data(fromPropertyList: stale, format: .xml, options: 0)
         try? staleData?.write(to: configURL)
@@ -1023,8 +1023,8 @@ func testClaudeDesktopIntegrationInstaller() {
         try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
             configURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_new",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "http://not-allowed.example",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_new",
+                AnalyticsInfoPlistKeys.hostInfoKey: "http://not-allowed.example",
             ]
         )
 
@@ -1042,8 +1042,8 @@ func testClaudeDesktopIntegrationInstaller() {
 
         try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         let stale = [
-            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_old",
-            AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_old",
+            AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
         ]
         let staleData = try? PropertyListSerialization.data(fromPropertyList: stale, format: .xml, options: 0)
         try? staleData?.write(to: configURL)
@@ -1051,8 +1051,8 @@ func testClaudeDesktopIntegrationInstaller() {
         try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
             configURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
             ],
             analyticsEnabled: false
         )
@@ -1085,8 +1085,8 @@ func testClaudeDesktopIntegrationInstaller() {
             installedBinaryURL: installedBinaryURL,
             observabilityConfigURL: configURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_current",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
             ]
         )
 

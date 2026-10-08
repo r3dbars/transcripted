@@ -183,6 +183,8 @@ fi
 check "build source lists" "python3 scripts/dev/check-build-source-lists.py"
 check "ui automation contract self-test" "python3 scripts/dev/check-ui-automation-contract.py --self-test"
 check "ui automation contract (identifiers the QA smokes press are declared in the app)" "python3 scripts/dev/check-ui-automation-contract.py"
+check "audio automation contract self-test" "python3 scripts/dev/check-audio-automation-contract.py --self-test"
+check "audio automation contract (daily audio script, issue 500 doc, smoke source lists agree)" "python3 scripts/dev/check-audio-automation-contract.py"
 check "duplicate declarations self-test" "python3 scripts/dev/check-duplicate-declarations.py --self-test"
 check "duplicate declarations" "python3 scripts/dev/check-duplicate-declarations.py"
 check "fast-test naming convention (run-tests --list)" "bash run-tests.sh --list"
@@ -293,6 +295,7 @@ check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 # matching array below. It must pass offline, in any timezone, with only the
 # python3 stdlib (or ruby), and write nothing outside build/ or $TMPDIR.
 SELF_TEST_SCRIPTS=(
+    scripts/ops/auto-merge-gate.py
     scripts/ops/check-crash-free-rate.py
     scripts/ops/generate-nightly-digest.py
     scripts/ops/packaged-app-smoke.py
