@@ -91,7 +91,7 @@ func testFeedbackIssueBuilder() {
         let report = FeedbackReport(
             sourceKind: "dictation",
             referenceID: "abc123",
-            occurredAt: Date(timeIntervalSince1970: 1_714_000_000),
+            occurredAt: Date(timeIntervalSince1970: 1_714_000_000.123),
             issueKind: "Wrong words",
             userNotes: "It included /Users/redbars/private.txt and person@example.com",
             appVersion: "Version 1.2.3",
@@ -106,6 +106,7 @@ func testFeedbackIssueBuilder() {
 
         assertEqual(subject, "Transcripted Dictation Feedback", "contextual email subject should include the capture type")
         assertTrue(body.contains("Capture:"), "contextual email should include capture metadata")
+        assertTrue(body.contains("Created: 2024-04-24T23:06:40.123Z"), "capture timestamps should retain UTC millisecond rounding")
         assertTrue(body.contains("Type: dictation"), "source kind should be included")
         assertTrue(body.contains("Issue: Wrong words"), "issue kind should be included")
         assertTrue(body.contains("Reference: abc123"), "safe reference should be included")
