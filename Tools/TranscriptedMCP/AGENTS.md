@@ -96,7 +96,21 @@ Also `mcpb/manifest.json` (Claude Desktop bundle manifest; its tool list must ma
 ```bash
 cd Tools/TranscriptedMCP
 swift build -c release && swift test
-./.build/release/transcripted-mcp --self-test   # resolves dirs, builds index, prints status JSON, exits
+# The self-test writes an index: isolate every directory, including inherited
+# per-kind overrides. The subshell owns the fixture and its cleanup trap.
+(
+    mcp_fixture_parent="${TMPDIR:-/tmp}"
+    mcp_fixture_parent="${mcp_fixture_parent%/}"
+    mcp_fixture_root="$(mktemp -d "$mcp_fixture_parent/transcripted-mcp-self-test.XXXXXX")" || exit 1
+    trap 'case "$mcp_fixture_root" in "$mcp_fixture_parent"/transcripted-mcp-self-test.*) rm -rf -- "$mcp_fixture_root" ;; esac' EXIT
+    TRANSCRIPTED_DATA_DIR="$mcp_fixture_root/captures" \
+    TRANSCRIPTED_MEETINGS_DIR="$mcp_fixture_root/captures/meetings" \
+    TRANSCRIPTED_DICTATIONS_DIR="$mcp_fixture_root/captures/dictations" \
+    TRANSCRIPTED_WRITING_DIR="$mcp_fixture_root/captures/writing" \
+    TRANSCRIPTED_INDEX_DIR="$mcp_fixture_root/index" \
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
+        ./.build/release/transcripted-mcp --self-test
+)
 ```
 
 - `Tests/TranscriptedMCPTests/` covers directory resolution, index lifecycle, summary rollups, tool handlers, loader and frontmatter parity, embeddings (backfill, cache, search), transports, companion, widget, telemetry, and writing. `ProcessStartupTests` launches the built executable for a real `initialize` round trip. `TestHelpers.swift` has the fixtures.
