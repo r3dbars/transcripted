@@ -1,6 +1,26 @@
 import Foundation
 
 func testSpeakerVoiceRowPresentation() {
+    runSuite("A rename from the Everyone row that fails keeps the typed name and says so") {
+        let failed = SpeakerEveryoneRenamePolicy.nameBox(afterSave: false, typed: "Maya Chen")
+        assertTrue(failed.isOpen, "a failed save must leave the name box open")
+        assertEqual(failed.draft, "Maya Chen", "the typed name stays in the box so it can be retried")
+        assertEqual(failed.errorMessage, "Couldn't save the name.", "the person is told the save failed")
+
+        let saved = SpeakerEveryoneRenamePolicy.nameBox(afterSave: true, typed: "Maya Chen")
+        assertFalse(saved.isOpen, "a saved rename closes the card like before")
+        assertTrue(saved.errorMessage == nil, "a saved rename shows no error")
+    }
+
+    runSuite("A second Return while an Everyone rename is saving is ignored") {
+        assertTrue(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "Maya Chen", saveInFlight: false), "a typed name submits")
+        assertFalse(
+            SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "Maya Chen", saveInFlight: true),
+            "a save already running must not queue a second rename"
+        )
+        assertFalse(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: "   ", saveInFlight: false), "a blank name never submits")
+    }
+
     runSuite("Play/pause toggle shows a pause glyph only while a clip plays") {
         assertEqual(
             SpeakerClipPlaybackPresentation.symbolName(isPlaying: false),
