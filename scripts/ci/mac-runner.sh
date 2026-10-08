@@ -52,7 +52,8 @@ BEAT_EVERY=40
 BOOT_TIMEOUT=600
 # A connected runner that gets no job in this long is dropped.
 PICKUP_SECONDS=300
-JOB_MAX_SECONDS=$((100 * 60))
+# Above app-build's 120-minute timeout-minutes, so GitHub's own limit fires first.
+JOB_MAX_SECONDS=$((125 * 60))
 # A waiting job this Mac can't start for this long is sent back to GitHub.
 REROUTE_SECONDS=$((15 * 60))
 BACKOFF_MAX=1800
@@ -365,8 +366,8 @@ api_quota_low() {
 # Cancels a run and starts it again. The heartbeat already says this Mac is
 # not free, so pick-runner sends the new attempt to GitHub's runners.
 # True when one of the run's jobs is already running on this Mac. A run sends
-# three jobs here and the Mac runs two VMs, so its third job can wait behind
-# its own siblings for a while; that isn't a stranded job.
+# three jobs here and the service runs one job VM at a time, so its later jobs
+# wait behind their own siblings for a while; that isn't a stranded job.
 run_busy_here() {
   local n
   n="$(gh api "repos/$REPO/actions/runs/$1/jobs?filter=latest&per_page=100" --jq \

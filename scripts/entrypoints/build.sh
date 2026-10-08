@@ -248,7 +248,15 @@ verify_launch_smoke() {
         "$launch_app_bundle" >>"$launch_smoke_log" 2>&1 &
     open_pid=$!
 
-    for _ in $(seq 1 50); do
+    # Wait at least as long as the launch-to-interactive budget scored below
+    # (plus 2s to write the report), so a slow-but-in-budget launch reaches
+    # the budget check instead of failing here. Never less than the old 5s.
+    local launch_wait_ms="${TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS:-3000}"
+    case "$launch_wait_ms" in ''|*[!0-9]*) launch_wait_ms=3000 ;; esac
+    local launch_wait_ticks=$(( (launch_wait_ms + 2000) / 100 ))
+    [ "$launch_wait_ticks" -ge 50 ] || launch_wait_ticks=50
+
+    for _ in $(seq 1 "$launch_wait_ticks"); do
         if [ -s "$launch_ui_report" ]; then
             break
         fi

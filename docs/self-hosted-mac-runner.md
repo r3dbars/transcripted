@@ -3,8 +3,9 @@
 GitHub gives this account 5 concurrent hosted macOS jobs, and every PR's Swift
 CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
 most of them wait in line, and hosted `macos-26` machines can be scarce. So
-when the owner's Mac is free, all three run there instead. The Mac runs two job
-VMs at a time, so `app-build` starts when the first of the other two finishes.
+when the owner's Mac is free, all three run there instead, one after another:
+the service runs one job VM at a time (about 20-25 minutes for a whole run,
+against hours in line for hosted `macos-26` machines on a busy day).
 
 Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself, and
 a VM only exists while a job is waiting for it.
@@ -67,8 +68,8 @@ A re-run redoes the whole run, including an `app-build` that may already be
 partway through. GitHub can't re-run just some jobs with a new runner choice,
 because "re-run failed jobs" keeps `pick-runner`'s old answer.
 
-A job waiting behind its own run's other jobs on this Mac (the third job, while
-both VMs are busy with the first two) is never sent back to GitHub for waiting;
+A job waiting behind its own run's other jobs on this Mac (the second or third
+job, while an earlier one runs) is never sent back to GitHub for waiting;
 only a run with nothing running here is rerouted after 15 minutes.
 
 A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
@@ -228,8 +229,8 @@ Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
   another Swift CI run starts.
 - **Re-runs:** after a Mac failure, use "Re-run all jobs". "Re-run failed
   jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
-- **One job at a time:** a run's `checks` and `spm-tests` go one after the
-  other when both land on the Mac.
+- **One job at a time:** a run's `checks`, `spm-tests` and `app-build` go one
+  after the other when they land on the Mac.
 - **Diagnostics:** Swift CI's stall watcher can't use `sudo` inside the VM,
   so a hung test on the Mac leaves fewer samples than on hosted runners.
 - **VM count:** any app's VM counts toward the two-VM limit, including
