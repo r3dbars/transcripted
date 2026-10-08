@@ -1,22 +1,4 @@
 {
   "_comment": "Grandfathered module-boundary crossings: file -> module it reaches into -> type names. scripts/dev/check-module-boundaries.py --shrink only removes entries; adding one is a reviewed human edit.",
-  "edges": {
-    "Sources/UI/Settings/SpeakerNamingSheet.swift": {
-      "Core": [
-        "TranscriptSaver",
-        "TranscriptionTaskManager"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
-      "Core": [
-        "CoreStoragePaths",
-        "SpeakerDatabase",
-        "SpeakerIdentityMutationService",
-        "SpeakerMergeRecord",
-        "SpeakerUserConfirmation",
-        "SpeakerVoiceprintMigrationGate",
-        "TranscriptSaver"
-      ]
-    }
-  }
+  "edges": {}
 }

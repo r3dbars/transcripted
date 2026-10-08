@@ -8,7 +8,7 @@
 
 - **Public surface:** `TranscriptedSettingsWindowController`, `TranscriptedSettingsPage`, `PermissionsOnboardingView` and its window controller, `SpeakerNamingSheet`, `HomeView`, the `Pages/` views.
 - **May depend on:** UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab`. Only AppShell and UIMenuBar may depend on it.
-- **Grandfathered crossings:** the Speakers files (`SpeakerPeopleSettingsSection.swift`, `SpeakerNamingSheet.swift` and friends) name Core engine types (`SpeakerDatabase`, `SpeakerClipExtractor`, `TranscriptSaver`) directly; the target is Meeting facades. They are in `.agents/module-boundary-baseline.json`; don't add more.
+- **Speaker persistence:** Settings reaches database edits, migration status, saved merge history and naming metadata through Meeting-owned `SpeakerSettingsStore`, `SpeakerSettingsMigration` and `SpeakerNamingMetadata`. Keep Core engine types behind those seams; presentation and edit completion stay in this directory.
 - **Start at:** `TranscriptedSettingsWindowController.swift` (opens the window), `TranscriptedSettingsView.swift` (the shell).
 - **Tests:** `bash run-tests.sh --filter Home`, `--filter Settings`, `--filter Speaker`, `--filter UIAutomationSurfaceContract`.
 - **Product surface to keep:** Speakers directory (review, rename, merge, delete), per-app Auto Enter, model-cache inspection and cleanup, retained-audio playback.

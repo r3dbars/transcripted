@@ -151,3 +151,7 @@ Grouped by job. Several more are small and named for what they do.
 `MeetingPromptDetector`'s defaults read the real Mac: Calendar permission and a live EventKit query, running and frontmost apps, browser titles through Accessibility, the saved meeting shortcut. Build test detectors with `makeIsolatedDetector` in `Tests/MeetingPromptDetectorTests.swift`, never the bare init. The bare init made that suite flaky only on Macs whose terminal has Calendar access, so CI never saw it.
 
 - `MeetingTimedTokenBridge.swift` converts Speech-owned timed tokens into Core packing tokens, preserving spacing, order and time without widening Speech Core access.
+
+- `SpeakerSettingsStore.swift` — speaker reads and transactional edits for Settings, including transcript rollback and clip side effects. Its merge records and review rows are plain values; it retains the controller's canonical database.
+- `SpeakerSettingsMigration.swift` — synchronous value projection of the voiceprint migration gate and the controller's speaker naming publisher.
+- `SpeakerNamingMetadata.swift` — saved transcript title and calendar-invitee lookups for the naming presenter.
