@@ -39,6 +39,12 @@ Agents open lane PRs as drafts. Once a draft passes everything except the review
 
 Each run merges at most 3 PRs, and at most one per lane, so main's CI runs between batches.
 
+## Baselines and held PRs
+
+A PR in any lane may change a debt baseline (`.agents/*-baseline.json`) only when the change lowers counts or drops entries, compared with the PR's merge base. That holds even for a baseline the lane's allow globs name, so a lane PR can never raise its own baseline. Anything else in a baseline (a higher count, a new entry, including a moved one, a repeated list entry, or a changed or deleted top-level setting like `limit` or `_comment`) keeps the PR out of the lane. The other baselines are re-checked against the code by `repo-hygiene`, a required check. `.agents/concurrency-baseline.json` is never eligible: only the Swift concurrency census can say a lower count is true, and that isn't a required check. Which baselines changed comes from the same rename-aware REST file list as rule 4, so renaming a baseline away counts as changing it. If GitHub can't serve a baseline during a run, the PR just waits for the next run.
+
+When a PR can never pass in its lane (it touches protected files, has files outside the lane, or is over the size limit), the gate comments why and labels it `waiting-on-human`, so it shows up on Justin's morning list instead of waiting silently. It comments once (the comment carries a hidden marker, so a retry after a failed label doesn't post twice), and it never labels or comments on a fork, a PR from an author outside `allowed_authors`, or a PR in a disabled lane.
+
 ## Running it
 
 ```bash

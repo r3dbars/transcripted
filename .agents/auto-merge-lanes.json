@@ -1,5 +1,5 @@
 {
-  "_comment": "Lanes that scripts/ops/auto-merge-gate.py may merge without the owner (auto-merge level 3). A PR qualifies only if its branch starts with a lane's prefix, every changed file matches that lane's allow globs, no file matches deny_always or the lane's deny, and every check in scripts/ops/auto-merge-gate.py passes. Set a lane's enabled to false to stop it, for example after a revert. Adding a lane or widening a lane's globs is a reviewed owner edit. See docs/auto-merge-gate.md.",
+  "_comment": "Lanes that scripts/ops/auto-merge-gate.py may merge without the owner (auto-merge level 3). A PR qualifies only if its branch starts with a lane's prefix, every changed file matches that lane's allow globs, no file matches deny_always or the lane's deny, any changed .agents/*-baseline.json only lowers counts versus the merge base (checked whatever the allow globs say; the concurrency baseline never qualifies), and every check in scripts/ops/auto-merge-gate.py passes. Set a lane's enabled to false to stop it, for example after a revert. Adding a lane or widening a lane's globs is a reviewed owner edit. See docs/auto-merge-gate.md.",
   "version": 2,
   "level": 3,
   "required_checks": [
