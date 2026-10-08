@@ -41,9 +41,9 @@ Each run merges at most 3 PRs, and at most one per lane, so main's CI runs betwe
 
 ## Baselines and held PRs
 
-A PR in any lane may also change a debt baseline (`.agents/*-baseline.json`) when the change only lowers counts or drops entries, compared with the PR's merge base. Anything else in a baseline (a higher count, a new entry, including a moved one) keeps the PR out of the lane.
+A PR in any lane may change a debt baseline (`.agents/*-baseline.json`) only when the change lowers counts or drops entries, compared with the PR's merge base. That holds even for a baseline the lane's allow globs name, so a lane PR can never raise its own baseline. Anything else in a baseline (a higher count, a new entry, including a moved one) keeps the PR out of the lane. The other baselines are re-checked against the code by `repo-hygiene`, a required check. `.agents/concurrency-baseline.json` is never eligible: only the Swift concurrency census can say a lower count is true, and that isn't a required check. If GitHub can't serve a baseline during a run, the PR just waits for the next run.
 
-When a PR can never pass in its lane (it touches protected files, has files outside the lane, or is over the size limit), the gate labels it `waiting-on-human` once and comments why, so it shows up on Justin's morning list instead of waiting silently.
+When a PR can never pass in its lane (it touches protected files, has files outside the lane, or is over the size limit), the gate comments why and labels it `waiting-on-human`, so it shows up on Justin's morning list instead of waiting silently. It comments once (the comment carries a hidden marker, so a retry after a failed label doesn't post twice), and it never labels or comments on a fork or a PR from an author outside `allowed_authors`.
 
 ## Running it
 
