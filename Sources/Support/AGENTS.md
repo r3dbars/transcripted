@@ -1,6 +1,6 @@
 # Support
 
-Module `Support` in `.agents/modules.json` (also `Sources/Accessibility/` and `Sources/Reliability/`, which have their own docs). App-wide helpers that don't belong to one UI or pipeline surface: persisted preferences, constants, permission access, storage paths, paste-back, launch and quit sequencing, the companion socket. It may depend only on Core `core-vocab`, so it can't name Meeting, Speech, UI or Observability types. Two grandfathered crossings are listed in `Sources/AGENTS.md`.
+Module `Support` in `.agents/modules.json` (also `Sources/Accessibility/` and `Sources/Reliability/`, which have their own docs). App-wide helpers that don't belong to one UI or pipeline surface: persisted preferences, constants, permission access, storage paths, paste-back, launch and quit sequencing, the companion socket. It may depend only on Core `core-vocab`, so it can't name Meeting, Speech, UI or Observability types. There are no grandfathered crossings; Meeting supplies the live capture backend through the injectable permission requester.
 
 ## Rules
 
