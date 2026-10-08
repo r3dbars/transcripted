@@ -132,7 +132,7 @@ final class ClipboardRestoringTextPaster {
         while let readinessTask = clipboardAutoEnterReadinessTask {
             await readinessTask.value
         }
-        if false, let readyToken = clipboardAutoEnterReadyToken, pasteEpoch.isCurrent(readyToken) {
+        if let readyToken = clipboardAutoEnterReadyToken, pasteEpoch.isCurrent(readyToken) {
             return
         }
         await waitForPendingClipboardRestore()
