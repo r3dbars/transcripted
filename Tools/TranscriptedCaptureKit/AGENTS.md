@@ -1,64 +1,47 @@
 # TranscriptedCaptureKit
 
-`Tools/TranscriptedCaptureKit/` is the shared library behind the standalone tools. It is the single source of truth for:
+Shared, dependency-free library behind `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` (both depend on it via `.package(path: "../TranscriptedCaptureKit")`). It is the single source of truth for:
 
-- capture-library directory resolution (env overrides, app manifest, `transcriptSaveLocation` preference, legacy Draft / `~/Documents/Transcripted` fallback) for meetings, dictations, and writing
-- capture-Markdown detection (`looksLikeCaptureMarkdown`, `captureKind(of:)`, directory probing, frontmatter title extraction)
-- capture-Markdown parsing (meeting transcripts, dictation day files, and writing day files)
+- capture-library directory resolution (env overrides, app manifest, `transcriptSaveLocation`, legacy Draft / `~/Documents/Transcripted` fallback) for meetings, dictations, writing
+- capture-Markdown detection, frontmatter title extraction, and parsing (meeting transcripts, dictation day files, writing day files)
 - structured meeting-summary parsing (Decisions / Action Items / Open Questions)
 
-Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a relative `.package(path: "../TranscriptedCaptureKit")` dependency. Before this package existed, that logic was duplicated nearly verbatim in both tools and had already drifted; do not re-inline it.
+That logic used to be duplicated in both tools and drifted. Do not re-inline it.
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `Package.swift` | Library-only Swift package manifest (no external dependencies) |
-| `Sources/TranscriptedCaptureKit/CaptureLibraryPathSafety.swift` | Pure-Foundation check for whether a directory is safe to use as a capture-library / save-path root (rejects non-absolute paths, `..` traversal, `/`, forbidden system prefixes). Byte-identical synced copy of `Sources/Support/CaptureLibraryPathSafety.swift` and `Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift` — edit all three together |
-| `Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift` | `CaptureLibraryResolver.resolve(...)` → `ResolvedCaptureDirectories` (meeting dirs, dictation dirs, writing dirs, optional shared data root, winning resolution rule + legacy-fallback flag). Writing follows `TRANSCRIPTED_WRITING_DIR`, the manifest's optional `writingDirectory`, then `<library>/writing`; a meetings/dictations override without a writing override reads no writing folder |
-| `Sources/TranscriptedCaptureKit/CaptureMarkdown.swift` | Capture-Markdown detection (`captureKind(of:)`: `Writing_` / `capture_type: writing_day` first, then `Dictations_`, then any frontmatter file as a meeting candidate) and frontmatter `title:` extraction |
-| `Sources/TranscriptedCaptureKit/CaptureDayFileModels.swift` | `ParsedDictationDayCapture` / `ParsedWritingDayCapture`, the parsed day-file shapes. A dictation entry's optional `audioRelativePath` is its `Audio:` line (kept audio relative to the dictations folder; the file may have aged out) |
-| `Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift` | Frontmatter, meeting transcript, dictation day, and writing day parsing into `ParsedMeetingCapture` / `ParsedDictationDayCapture` / `ParsedWritingDayCapture`. Dictation and writing entries share one day-file section parser; each flavor recognizes only its own metadata keys |
-| `Sources/TranscriptedCaptureKit/CapturePathSecurity.swift` | Guards direct file reads against path traversal, symlink escapes, and out-of-root paths when resolving a caller-supplied filename against a trusted base directory. Canonical logic behind `TranscriptedCLI`'s `CLIPathSecurity` and `TranscriptedMCP`'s `PathSecurity` local wrappers |
-| `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Originally ported from the app's `RecentMeetingSummaryPreviewParser` section logic (that app type no longer exists in `Sources/`) |
+All under `Sources/TranscriptedCaptureKit/`:
 
-## Test Files
+- `CaptureLibraryPathSafety.swift` - is a directory safe as a capture-library root (absolute, no `..`, not `/`, no forbidden system prefix). Byte-identical copy of `Sources/Support/CaptureLibraryPathSafety.swift` and `Sources/TranscriptedCore/Services/CaptureLibraryPathSafety.swift`. Edit all three together.
+- `CaptureLibraryResolver.swift` - `resolve(...)` returns `ResolvedCaptureDirectories` (meeting/dictation/writing dirs, optional shared data root, winning rule, legacy-fallback flag). Writing follows `TRANSCRIPTED_WRITING_DIR`, the manifest's optional `writingDirectory`, then `<library>/writing`. A meetings or dictations override without a writing override reads no writing folder. Also owns `legacyCaptureDirectories`, which `TranscriptedQA` reuses.
+- `CaptureMarkdown.swift` - `captureKind(of:)` (`Writing_` / `capture_type: writing_day` first, then `Dictations_`, then any frontmatter file as a meeting candidate) and `title:` extraction.
+- `CaptureDayFileModels.swift` - `ParsedDictationDayCapture` / `ParsedWritingDayCapture`. A dictation entry's optional `audioRelativePath` is its `Audio:` line, relative to the dictations folder. The file may have aged out (dictation audio retention defaults to 30 days and can be Off, 7 days, 30 days, or Forever), so never assume it exists.
+- `CaptureMarkdownParser.swift` - frontmatter, meeting, dictation-day, writing-day parsing. Dictation and writing share one day-file section parser; each flavor recognizes only its own keys (only dictation reads `Audio:`).
+- `CapturePathSecurity.swift` - guards caller-supplied filenames against traversal, symlink escape, and out-of-root paths. Canonical logic behind the CLI's `CLIPathSecurity` and MCP's `PathSecurity` wrappers.
+- `CaptureSummaryParser.swift` - `ParsedMeetingSummary` from inline transcript summaries and generated `meeting_summary` sidecars.
 
-| File | Purpose |
-|------|---------|
-| `Tests/TranscriptedCaptureKitTests/CaptureLibraryResolverTests.swift` | Resolution precedence: shared data dir, per-kind overrides, manifest, preference, legacy fallback, symlinked legacy roots |
-| `Tests/TranscriptedCaptureKitTests/CaptureMarkdownParserTests.swift` | Legacy + styled transcript parsing, speaker metadata, durations, dictation entries, detection helpers |
-| `Tests/TranscriptedCaptureKitTests/CaptureSummaryParserTests.swift` | Inline + sidecar summary parsing, action-item owner extraction, placeholder/None-found handling, frontmatter fallback |
-| `Tests/TranscriptedCaptureKitTests/WritingDayParserTests.swift` | Writing day parsing against the format contract example (field for field, byte-exact text), missing `Bundle ID`, unknown keys, `captureKind(of:)` |
-| `Tests/TranscriptedCaptureKitTests/CaptureLibraryWritingResolverTests.swift` | Writing-folder resolution: default, env/arg override, shared data dir, manifest with and without `writingDirectory`, preference, per-kind isolation |
-| `Tests/TranscriptedCaptureKitTests/FrontmatterCorpusParityTests.swift` | Pins `CaptureMarkdownParser`'s frontmatter parsing against the shared `Tests/Fixtures/frontmatter-corpus` fixtures so it stays in equivalence with `TranscriptFrontmatter` and `TranscriptedMCP`'s `frontmatterBlock` parsers |
+Tests are in `Tests/TranscriptedCaptureKitTests/`, one file per area: resolver and writing-resolver precedence, parser, summary parser, `WritingDayParserTests` (format-contract example, byte-exact text), `TranscriptTimestampCompatibilityTests` (`MM:SS` and `H:MM:SS` clocks, raw and styled), and `FrontmatterCorpusParityTests` (pins the parser to `Tests/Fixtures/frontmatter-corpus`, shared with `TranscriptFrontmatter` and MCP's `frontmatterBlock`).
 
 ## Build and test
 
 ```bash
 swift test --package-path Tools/TranscriptedCaptureKit
-```
-
-Changes here must also keep the consumers green (see `.agents/test-matrix.yml`):
-
-```bash
 swift test --package-path Tools/TranscriptedCLI
 swift test --package-path Tools/TranscriptedMCP
 bash run-e2e-smoke.sh
 ```
 
-The e2e smoke matters because `scripts/entrypoints/run-e2e-smoke.sh` compiles this package with raw `swiftc` into a standalone module (`-emit-module` + static library) and links it into the smoke binary alongside MCP sources.
+The e2e smoke matters: `scripts/entrypoints/run-e2e-smoke.sh` compiles `Sources/TranscriptedCaptureKit/*.swift` with raw `swiftc` (`-emit-module`) and links it into the smoke binary. See `.agents/test-matrix.yml`.
 
-## Design rules
+## Rules
 
-- No filesystem-layout opinions beyond resolution: parsers take Markdown content (plus the source URL for filename-derived fallbacks) and never write.
-- `ParsedMeetingCapture` / `ParsedDictationDayCapture` carry the superset of fields both tools need; each tool maps them into its own output models (`CLIAgentTranscript`, `AgentTranscript`, ...). Add fields here rather than re-parsing in a tool.
-- Keep this package dependency-free so the raw-`swiftc` smoke compile stays a two-liner.
-- This package intentionally does not link into the app target.
+- Parsers take Markdown content (plus the source URL for filename-derived fallbacks) and never write. No filesystem-layout opinions beyond resolution.
+- `ParsedMeetingCapture` and the day-capture types carry the superset of fields both tools need; each tool maps them to its own output models. Add fields here rather than re-parsing in a tool.
+- Stay dependency-free so the raw-`swiftc` compile stays simple. Do not link this into the app target.
 
 ## Gotchas
 
-- Legacy candidate directories are only included when they actually contain capture Markdown; the directory root is symlink-resolved before enumeration (this was a CLI/MCP drift point — the resolved behavior is canonical now).
-- Speaker metadata from frontmatter is channel-scoped: `channel: mic` maps to `mic_<rawId>`, `channel: system` maps to `system_<rawId>`, and older channelless metadata is treated as system metadata.
-- Dictation and writing day entries are returned sorted ascending by `createdAt`.
-- The writing day-file format is specified in `docs/capture-format.md` ("Writing day files"); keep this parser, `WritingDayParserTests`, and that doc in step.
+- Legacy candidate directories are included only when they contain capture Markdown, and the root is symlink-resolved before enumeration (a former CLI/MCP drift point; this behavior is canonical).
+- Frontmatter speaker metadata is channel-scoped: `channel: mic` maps to `mic_<rawId>`, `channel: system` to `system_<rawId>`, channelless legacy metadata counts as system.
+- Dictation and writing entries come back sorted ascending by `createdAt`.
+- The writing day-file format lives in `docs/capture-format.md` ("Writing day files"). Keep the parser, `WritingDayParserTests`, and that doc in step.

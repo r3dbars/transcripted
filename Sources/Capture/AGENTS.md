@@ -1,66 +1,48 @@
-# Capture Directory
+# Capture
 
-## What This Does
-
-`Sources/Capture/` owns the active global-trigger layer for:
-
-- dictation start/stop
-- meeting start/stop
-- configurable physical-key triggers. Defaults: Right Option = the one dictation key (not Fn, which also opens emoji) (hold to talk, tap to keep listening), Option-M = meeting. The paste-last-dictation shortcut is no longer registered (`configuredBindings`); its stored binding and `.pasteLastDictation` routing remain but never fire (`Sources/Support/PhysicalDictationTriggerPreferences.swift`)
+Global physical triggers: the dictation key and the meeting key, from a CGEvent tap. Not the capture *library* (`Sources/Support/CaptureLibrary*.swift`, where saved Markdown and audio live).
 
 ## Module
 
 `Capture` in `.agents/modules.json`.
 
-- **Owns:** global physical triggers and their routing (dictation, paste-last-dictation, meeting start/stop).
-- **Public surface:** `ContextCaptureEngine`, `PhysicalShortcutMatcher`.
-- **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because `ContextCaptureEngine` drives `DictationSessionController` and `FloatingOverlayController` directly; a trigger-sink protocol would let it drop below the UI later.
-- **Entry points:** `ContextCaptureEngine` (owned by `TranscriptedAppState`).
-- **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`.
-- **Rules:** see "Guardrails" below. Not to be confused with the capture *library* (`Sources/Support/CaptureLibrary*.swift`).
+- **Owns:** physical trigger detection, debounce, and routing into dictation and meeting handlers.
+- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`.
+- **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
+- **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`.
 
-## Key Files
+## Files
 
-- `ContextCaptureEngine.swift` — accessibility-backed physical trigger detection,
-  shortcut debounce, and routing into dictation, paste-last-dictation, or meeting handlers
-- `PhysicalShortcutMatcher.swift` — Foundation-pure binding-selection helpers for
-  exact/fallback shortcut precedence, release matching, and shared-modifier chord checks
+- `ContextCaptureEngine.swift` — the event tap (`PhysicalShortcutDetector`), shortcut debounce, delayed modifier presses, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`.
+- `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).
+- `PhysicalShortcutMatcher.swift` — Foundation-pure helpers: `configuredBindings`, exact/fallback binding precedence, release matching, and the tap and combo trackers below.
 
-## Current Hotkey Flow
+## Dictation key behavior
 
-- The physical dictation trigger routes into `DictationSessionController`
-- Dictation has one key (the stored Push to Talk binding). `HotkeyPreferences.dictationKeyBehavior` decides its action in `PhysicalShortcutMatcher.configuredBindings`: Hold or tap (default) and Hold only register it as `.dictationPushToTalk`; Tap to toggle registers it as `.dictationHandsFree`. The old hands-free binding is still stored but no longer registered. The physical shortcut action identifies the mode passed to `DictationSessionController`
-- Hold or tap makes the dictation key do both, like Handy's Auto mode: hold it and the release stops and pastes; tap it (under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier pressed while held) and the take flips to hands-free, so the next press stops it and that press's release is swallowed. The detector tells a tap from a hold on the tap thread (`.tapRelease`), not on the main actor, so a busy main thread can't stretch a tap into a hold. Hold only is plain Push to Talk
-- `PhysicalDictationTriggerPreferences` stores the configurable trigger bindings, defaulting to Right Option for dictation and Option-M for meetings, and supporting modifier-only or keyed chords
-- The configured meeting physical trigger routes meeting toggles through the
-  app-provided meeting closure
-- Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
-- A Push to Talk key on a modifier other shortcuts also use (the default Right Option vs Option-M) fires on press too, through `pushToTalkComboWindow`, unless a key was typed in the last second or the press would stop a take; then it waits out the 0.14 s chord delay. Only a key inside that 0.14 s window counts as a combo (`PushToTalkModifierComboWindow`) and drops the start through `.comboInterrupted`; a key later in the hold is typing and never drops the take. On a built-in or wired mic the start click still plays on press, so Right Option+M after a pause clicks and flashes the island, as Right Option hands-free did in 1.1.69
-- A modifier-only hands-free key (Tap to toggle) fires on press, and `HandsFreeModifierComboTracker` follows every one until release, so Fn+arrow drops the start. One that other shortcuts also use (right Option vs Option-M) also fires on press, so the hold isn't added to every start. If a key was typed in the last second it waits for release instead, and if another key goes down while it's held the detector sends `.comboInterrupted` and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). `HandsFreeModifierComboTracker` follows the held key from the tap's own events. Don't gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running
-- Accessibility-backed trigger registration failures surface through `hotkeyError` so the menubar can explain why dictation trigger capture is unavailable
+Defaults (`Sources/Support/PhysicalDictationTriggerPreferences.swift`): Right Option for dictation (not Fn, which also opens emoji), Option-M for meetings. There is one dictation key, the stored Push to Talk binding. `HotkeyPreferences.dictationKeyBehavior` picks what it does, in `PhysicalShortcutMatcher.configuredBindings`:
 
-## Guardrails
+- **Hold or tap** (default): registers as `.dictationPushToTalk`. Hold, and the release stops and pastes. Tap it (held under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier meanwhile) and the take flips to hands-free: the next press stops it and that press's release is swallowed.
+- **Hold only**: the same `.dictationPushToTalk` registration, plain Push to Talk with no tap flip.
+- **Tap to toggle**: registers as `.dictationHandsFree`.
 
-- Keep callback-style routing tiny and bounce into `@MainActor` work
-- Keep meeting routing separate from dictation routing
-- Do not reintroduce screenshot/OCR assumptions here unless that feature
-  returns in the same change
+The paste-last-dictation shortcut is no longer registered. Its stored binding, `PhysicalShortcutAction.pasteLastDictation` and its routing still exist but never fire. The old hands-free binding is likewise stored but unused.
 
-## Verification
+## Invariants
 
-After changing this directory:
+- **Tap vs hold is decided on the tap thread** (`PushToTalkTapTracker`, phase `.tapRelease`), not the main actor, so a busy main thread can't stretch a tap into a hold.
+- **A modifier that other shortcuts share** (Right Option vs Option-M) fires on press, so no start waits for a release. It waits out `modifierChordDelay` (0.14 s) instead only if a key was typed in the last second (`typingWindowForModifierCombos`) or the press would stop a running take, since a stop can't be undone.
+- **Combo drops the start.** A key down inside that 0.14 s window (`PushToTalkModifierComboWindow`) sends `.comboInterrupted`, and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). A key later in the hold is typing and never drops the take. On a built-in or wired mic the start click can still play first, so Right Option+M after a pause can click and flash the island.
+- **Tap to toggle is followed too.** `HandsFreeModifierComboTracker` follows a press that starts a take until release, so Fn+arrow can't leave dictation running. It trusts only the tap's own events. Never gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running.
+- Rapid repeats are ignored with `TranscriptedConstants.hotkeyActionDebounceInterval`.
+- Registration failures surface as `hotkeyError`, which the menubar shows. The Accessibility one has its own message (`accessibilityPermissionErrorMessage`) so the menubar can offer to open that pane.
+- Keep tap callbacks tiny and bounce into `@MainActor`. Keep meeting routing separate from dictation routing.
+- No screenshot or OCR assumptions here unless that feature returns in the same change.
 
-```bash
-bash build.sh --no-open
-bash run-tests.sh
-```
+## Verify
 
-Manual checks:
+`bash build.sh --no-open`, `bash run-tests.sh`, then by hand:
 
-- with Tap to toggle, the dictation key starts and stops dictation
-- right Option then M (or typing é with right Option+E) does not leave a dictation running
-- push-to-talk starts dictation on press and stops/pastes on release
-- with Hold or tap, a quick Right Option tap keeps listening and the next press pastes; a hold starts on press and pastes on release; Option+M and Right Option+E leave no dictation running (the start is dropped; after a pause it can click first); a stray key late in a hold still pastes, and within a second of typing the press waits out the 0.14 s chord delay instead
-- meeting hotkey toggles meeting capture
-- the configured physical dictation trigger starts/stops dictation in the expected shortcut mode
-- rapid repeat presses are ignored cleanly
+- Tap to toggle: the key starts and stops dictation.
+- Hold or tap: a quick Right Option tap keeps listening and the next press pastes. A hold starts on press and pastes on release. Right Option then M, or é via Right Option+E, leaves no dictation running. A stray key late in a hold still pastes. Within a second of typing, the press waits out the chord delay.
+- The meeting key toggles meeting capture. Rapid repeats are ignored.
+- Sleep and wake: see `Sources/Reliability/AGENTS.md`.

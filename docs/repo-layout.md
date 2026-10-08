@@ -126,6 +126,7 @@ Use these docs for these jobs:
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
 - `Sources/*/AGENTS.md` (and nested ones such as `Sources/UI/Settings/AGENTS.md`) — subsystem-local ownership and verification notes
 - `Tools/README.md` and `Tools/*/AGENTS.md` — the standalone packages
+- `Tests/AGENTS.md`, `.agents/AGENTS.md`, `.github/AGENTS.md`, `scripts/release/AGENTS.md` — test rules, the agent contract and ratchet baselines, CI workflows, release scripts
 - `scripts/README.md` — what each repo script does and how to run it
 
 Point-in-time docs (history, not instructions; don't route agents here for current behavior):
@@ -169,7 +170,7 @@ Each module's `AGENTS.md` (named in the manifest) says what it owns, its public 
 
 ## Hotspots
 
-Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 42 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 37 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
 python3 scripts/dev/check-file-size.py --hotspots

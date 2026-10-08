@@ -1,43 +1,22 @@
 # Reliability
 
-Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Accessibility/`): it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
+Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Accessibility/`), so it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
 
-## What this directory owns
+## What this owns
 
-`Sources/Reliability/` contains cross-cutting runtime recovery logic that does
-not belong to the UI, capture, or speech subsystems directly.
+One file: `WakeRecoveryCoordinator.swift`, the system-wake recovery for global hotkeys. It is `@MainActor`, UI-free, and takes everything as closures.
 
-## Important file
+- Wiring: `TranscriptedApp.swift` observes `NSWorkspace.didWakeNotification` and calls `TranscriptedAppState.handleSystemWake()`, which hands the closures (unregister, register, current error, readiness wait) to the coordinator. `TranscriptedAppState` also owns the retry numbers: 3 attempts, 0.5 s apart.
+- Recovery: unregister then re-register the hotkeys, up to the attempt limit, stopping at the first attempt with no `hotkeyError`. Then wait for runtime readiness.
+- De-duping: a wake while a recovery is running joins it. A wake within 1 s of a *successful* recovery reuses its result. A failed recovery is never reused, so the next wake tries again. Joined calls return `performedRecovery: false`, and the caller skips its telemetry for them.
 
-- `WakeRecoveryCoordinator.swift` — deduplicates system-wake recovery, retries hotkey re-registration, waits for runtime readiness, and avoids duplicate recovery work across near-simultaneous wake signals
+## Invariants
 
-## Current behavior
+- Coordinate existing subsystems, don't duplicate them. Speech and audio wake recovery stays in `Sources/Speech/` (`ParakeetEngine` observes the wake itself), and Writing and the overlay have their own `handleSystemWake()`.
+- Keep it UI-free and injected, so `Tests/WakeRecoveryCoordinatorTests.swift` can run it with fake closures and a fake sleep.
+- A bug here breaks dictation and meeting hotkeys after sleep. Capture's side of the same flow is `Sources/Capture/AGENTS.md`.
 
-- `TranscriptedAppDelegate` listens for `NSWorkspace.didWakeNotification`
-- `TranscriptedAppState.handleSystemWake()` delegates recovery here
-- hotkeys are unregistered and re-registered with bounded retries
-- repeated wake calls reuse an in-flight or just-completed recovery task briefly to avoid stampedes
-- speech/audio recovery still belongs to `Sources/Speech/`; this layer only
-  coordinates wake-time retries and avoids duplicate app-wide recovery work
+## Test
 
-## Guardrails
-
-- keep this layer UI-free and dependency-injected through closures
-- recovery should coordinate existing subsystem behavior, not duplicate it
-- changes here can affect both dictation and meeting hotkeys after sleep / wake
-
-## Verify
-
-```bash
-bash build.sh --no-open
-bash run-tests.sh
-```
-
-Relevant direct coverage:
-
-- `Tests/WakeRecoveryCoordinatorTests.swift`
-- `Tests/Integration/WakeRecoveryIntegrationSmoke.swift`
-
-Manual check:
-
-- sleep and wake the Mac, then confirm hotkeys still work and the app does not enter duplicate recovery loops
+- `bash run-tests.sh --filter WakeRecovery`; `Tests/Integration/WakeRecoveryIntegrationSmoke.swift` via `bash run-integration-smoke.sh`.
+- Manual: sleep and wake the Mac, then check both hotkeys work and the log shows one recovery, not a loop.
