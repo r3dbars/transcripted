@@ -321,6 +321,14 @@ self_test() {
   )"
   expect "$got" $'11\n13\n14' "unknown VM identity preserves active run but reroutes three stranded runs"
   got="$(
+    run_busy_here() { if [ "$1" = 16 ]; then return 2; else return 1; fi; }
+    reroute_run() { echo "$1"; }
+    set_heartbeat() { :; }
+    reroute_stuck_runs $'16 1200\n17 1200' auto boot
+  )"
+  expect "$got" 17 "unknown run activity preserves that run without blocking a known-idle run"
+
+  got="$(
     run_busy_here() { return 1; }
     reroute_run() { echo "$1"; }
     set_heartbeat() { :; }
