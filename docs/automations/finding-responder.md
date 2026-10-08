@@ -9,6 +9,7 @@ Open PRs that have at least one **unresolved** review thread started by `chatgpt
 - not from a fork (`isCrossRepository` is false)
 - author is in `allowed_authors` in `.agents/auto-merge-lanes.json`
 - branch starts with the `branch_prefix` of an enabled lane in that file, and the PR has that lane's `labels_required`
+- every changed file is inside that lane: list them with `gh api --paginate repos/r3dbars/transcripted/pulls/<number>/files` and check each `filename` and, for renames, each `previous_filename` against the lane's allowed paths and `deny_always`, as `changed_paths()` in `scripts/ops/auto-merge-gate.py` does (from an `origin/main` checkout, never the PR branch); the file count must match the PR's `changedFiles`
 
 Any other PR: don't check it out, don't run its code, don't reply. Skip PRs labeled `waiting-on-human`, `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
 
