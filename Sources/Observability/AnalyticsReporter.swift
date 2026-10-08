@@ -577,7 +577,7 @@ final class AnalyticsReporter {
     let apiKey: String?
     private let usageStore: UsageHealthStore?
     let captureHost: String?
-    private static let isoDateFormatter = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let isoDateFormatter = ISO8601DateFormatter() // immutable; string(from:) is thread-safe
     private let sessionID = TelemetryContext.launchSessionID
     private let session: URLSession
     private let bufferStore: AnalyticsDeliveryBufferStore

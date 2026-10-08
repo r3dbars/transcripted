@@ -1,9 +1,9 @@
 {
   "Sources/Capture": 8,
   "Sources/Meeting": 7,
-  "Sources/Observability": 13,
+  "Sources/Observability": 12,
   "Sources/Speech": 16,
-  "Sources/Support": 15,
+  "Sources/Support": 14,
   "Sources/TranscriptedWriting": 4,
-  "Sources/UI": 24
+  "Sources/UI": 23
 }
