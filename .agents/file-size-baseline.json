@@ -13,7 +13,7 @@
     "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
     "Sources/Support/TranscriptedPermissionAccess.swift": 975,
     "Sources/TranscriptedCore/Audio/Audio.swift": 813,
-    "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 1159,
+    "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 1022,
     "Sources/TranscriptedCore/Audio/CoreAudioSystemAudioCapture.swift": 1056,
     "Sources/TranscriptedCore/Audio/PinnedMicrophoneCapture.swift": 1106,
     "Sources/TranscriptedCore/Audio/SCKAudioCapture.swift": 1449,
