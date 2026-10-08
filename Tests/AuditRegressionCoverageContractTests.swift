@@ -1,7 +1,6 @@
 // The pasteback suite runs the real ClipboardRestoringTextPaster, and the
 // whole-second suite runs the shared duration publisher the menu bar uses.
-// The overlay suite still reads source as text: MeetingOverlayController is
-// not compiled into the fast runner (see docs/testing-source-text-inventory.md).
+// The meeting overlay subscribes through the same wholeSecondTicks() publisher.
 
 import AppKit
 import Combine
@@ -9,18 +8,6 @@ import Foundation
 
 @MainActor
 func testAuditRegressionCoverageContract() async {
-    runSuite("AuditRegressionCoverageContract — meeting overlay duration updates are whole-second throttled") {
-        let source = readSourceFixture("Sources/UI/Overlay/MeetingOverlayController.swift")
-        assertTrue(
-            source.contains("session.$recordingDuration"),
-            "meeting overlay should subscribe to the recording-duration publisher directly"
-        )
-        assertTrue(
-            source.contains(".map { Int($0) }") && source.contains(".removeDuplicates()"),
-            "5 Hz recording-duration ticks must be collapsed to whole seconds before pushing a full overlay layout update"
-        )
-    }
-
     runSuite("Recording-duration ticks reach timer labels once per whole second") {
         let ticks = PassthroughSubject<TimeInterval, Never>()
         var seconds: [Int] = []

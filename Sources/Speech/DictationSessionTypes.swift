@@ -9,7 +9,7 @@
 // that keeps DictationSessionController itself out of the fast-test
 // APP_SOURCES list (see the comment at the top of
 // Tests/DictationSessionCapTests.swift). Everything that actually touches
-// TranscriptedAppState/STTRouter lives in Sources/Speech/DictationSession.swift
+// DictationSessionHost/STTRouter lives in Sources/Speech/DictationSession.swift
 // as an extension on the class declared here.
 
 import Foundation

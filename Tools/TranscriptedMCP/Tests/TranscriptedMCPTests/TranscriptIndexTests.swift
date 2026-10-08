@@ -272,6 +272,32 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(results.results.last?.kind, .meeting)
     }
 
+    func testSearchContextAllKindsRanksOlderStrongMatchAboveNewerWeakOne() throws {
+        // Older meeting says "roadmap" over and over; a newer one mentions it once
+        // in a long utterance. A dictation, newest of all, also mentions it.
+        try writeFixture(makeFixtureJSON(date: "2026-03-01T10:00:00-0500", utterances: [
+            ("system_0", 0.0, 5.0, "Roadmap roadmap roadmap: the roadmap review"),
+        ]), filename: "Call_2026-03-01_10-00-00", to: tempDir)
+        try writeFixture(makeFixtureJSON(date: "2026-04-01T10:00:00-0500", utterances: [
+            ("system_0", 0.0, 5.0, "We talked about lunch, the weather, travel plans, hiring, budgets, and briefly the roadmap"),
+        ]), filename: "Call_2026-04-01_10-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(entries: [
+            ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Note", "Roadmap follow-up", "Slack", "copied"),
+        ]), filename: "Dictations_2026-04-07", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        // Precondition: within meetings, the older one is the better match.
+        let meetingsOnly = try index.searchContext(query: "roadmap", speaker: nil, kind: .meeting, dateFrom: nil, dateTo: nil, maxItems: 10)
+        XCTAssertEqual(meetingsOnly.results.map(\.filename), ["Call_2026-03-01_10-00-00", "Call_2026-04-01_10-00-00"])
+
+        let all = try index.searchContext(query: "roadmap", speaker: nil, kind: .all, dateFrom: nil, dateTo: nil, maxItems: 2)
+        let filenames = all.results.map(\.filename)
+        XCTAssertTrue(filenames.contains("Call_2026-03-01_10-00-00"), "best meeting dropped: \(filenames)")
+        XCTAssertFalse(filenames.contains("Call_2026-04-01_10-00-00"), "newer weak meeting outranked a better one: \(filenames)")
+        XCTAssertEqual(all.totalItemsMatched, 3)
+        XCTAssertTrue(all.truncated)
+    }
+
     func testSearchContextWithSpeakerFilterDoesNotReturnDictations() throws {
         try writeFixture(makeFixtureJSON(utterances: [
             ("system_0", 0.0, 5.0, "Roadmap meeting update"),

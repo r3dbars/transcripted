@@ -28,8 +28,8 @@ All of these, checked on every run:
 
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.
-3. The lane's label. No `needs owner review`, `do not merge` or `hold` label.
-4. Every changed file inside the lane, none protected, within the size limit.
+3. The lane's label. No `needs owner review`, `do not merge`, `hold` or `waiting-on-human` label.
+4. Every changed path inside the lane, none protected, within the size limit. The gate reads every page of the REST PR files API and checks both `filename` and `previous_filename` for renames; deletions check the removed path. Missing or malformed rename metadata and a file count that disagrees with GitHub's total block merging.
 5. `build-and-test` and `repo-hygiene` succeeded on the head commit.
 6. No conflicts, no review requesting changes, no unresolved review thread.
 7. Every reviewer the lane requires reviewed the head commit, or reacted 👍 after it was pushed. Today that's Codex (`chatgpt-codex-connector`) for every lane; a lane can require more with `reviewers_required`.
@@ -41,7 +41,7 @@ Each run merges at most 3 PRs, and at most one per lane, so main's CI runs betwe
 
 ## Baselines and held PRs
 
-A PR in any lane may change a debt baseline (`.agents/*-baseline.json`) only when the change lowers counts or drops entries, compared with the PR's merge base. That holds even for a baseline the lane's allow globs name, so a lane PR can never raise its own baseline. Anything else in a baseline (a higher count, a new entry, including a moved one, a repeated list entry, or a changed or deleted top-level setting like `limit` or `_comment`) keeps the PR out of the lane. The other baselines are re-checked against the code by `repo-hygiene`, a required check. `.agents/concurrency-baseline.json` is never eligible: only the Swift concurrency census can say a lower count is true, and that isn't a required check. If GitHub can't serve a baseline during a run, the PR just waits for the next run.
+A PR in any lane may change a debt baseline (`.agents/*-baseline.json`) only when the change lowers counts or drops entries, compared with the PR's merge base. That holds even for a baseline the lane's allow globs name, so a lane PR can never raise its own baseline. Anything else in a baseline (a higher count, a new entry, including a moved one, a repeated list entry, or a changed or deleted top-level setting like `limit` or `_comment`) keeps the PR out of the lane. The other baselines are re-checked against the code by `repo-hygiene`, a required check. `.agents/concurrency-baseline.json` is never eligible: only the Swift concurrency census can say a lower count is true, and that isn't a required check. Which baselines changed comes from the same rename-aware REST file list as rule 4, so renaming a baseline away counts as changing it. If GitHub can't serve a baseline during a run, the PR just waits for the next run.
 
 When a PR can never pass in its lane (it touches protected files, has files outside the lane, or is over the size limit), the gate comments why and labels it `waiting-on-human`, so it shows up on Justin's morning list instead of waiting silently. It comments once (the comment carries a hidden marker, so a retry after a failed label doesn't post twice), and it never labels or comments on a fork, a PR from an author outside `allowed_authors`, or a PR in a disabled lane.
 

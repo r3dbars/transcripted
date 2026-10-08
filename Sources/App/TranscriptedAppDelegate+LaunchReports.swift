@@ -103,28 +103,52 @@ extension TranscriptedAppDelegate {
               !reportPath.isEmpty else {
             return
         }
-        defer {
-            scheduleLaunchUISmokeTerminationIfRequested(environment: environment)
-        }
-
-        let report = menuPanelController.launchUISmokeReport(
-            statusItemExists: statusItem != nil,
-            popoverConfigured: popover != nil,
-            onboardingCompleted: true,
-            launchToInteractiveMs: Self.processStartToNowMilliseconds()
-        )
-        let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
-
-        do {
-            try FileManager.default.createDirectory(
-                at: reportURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+        guard AutomatedLaunchEnvironment.isActive(environment: environment) else { return }
+        let launchToInteractiveMs = Self.processStartToNowMilliseconds()
+        Task { @MainActor in
+            defer { scheduleLaunchUISmokeTerminationIfRequested(environment: environment) }
+            var report = menuPanelController.launchUISmokeReport(
+                statusItemExists: statusItem != nil,
+                popoverConfigured: popover != nil,
+                onboardingCompleted: true,
+                launchToInteractiveMs: launchToInteractiveMs
             )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(report).write(to: reportURL, options: .atomic)
-        } catch {
-            NSLog("Failed to write launch UI smoke report: \(error.localizedDescription)")
+            report.meetingOverlayDurationUpdates = await meetingOverlayDurationSmokeUpdates()
+            let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
+            do {
+                try FileManager.default.createDirectory(
+                    at: reportURL.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                try encoder.encode(report).write(to: reportURL, options: .atomic)
+            } catch {
+                NSLog("Failed to write launch UI smoke report: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Drives the actual controller's setup and view-push path without capture,
+    /// windows, or a timer. Queued main barriers drain Combine's receive(on:).
+    private func meetingOverlayDurationSmokeUpdates() async -> [Int] {
+        let ticks = PassthroughSubject<TimeInterval, Never>()
+        let controller = MeetingOverlayController()
+        var updates: [Int] = []
+        controller.setup(meetingSession: appState.meetingSession, durationPublisher: ticks.eraseToAnyPublisher())
+        controller.onContentPush = { updates.append(Int($0)) }
+        await drainMainQueueForLaunchReport()
+        updates.removeAll()
+        for tick in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.99, 2.0, 2.2, 5.0] {
+            ticks.send(tick)
+        }
+        await drainMainQueueForLaunchReport()
+        controller.onContentPush = nil
+        return updates
+    }
+
+    private func drainMainQueueForLaunchReport() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
         }
     }
 

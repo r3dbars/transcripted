@@ -679,7 +679,7 @@ class STTRouter: ObservableObject {
         samples: [Float],
         model: TranscriptionModelChoice,
         language: TranscriptionLanguageContext?
-    ) async throws -> [TimedTranscriptToken]? {
+    ) async throws -> [SpeechTimedToken]? {
         let resolvedModel = beginForegroundUse(of: model)
         defer { endForegroundUse(of: resolvedModel) }
         // Whisper batches go through `transcribeWhisperMeetingSegments`;

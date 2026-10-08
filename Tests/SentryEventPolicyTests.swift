@@ -327,8 +327,8 @@ func testSentryEventPolicy() {
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps coarse speaker finalization failure reasons") {
-        let reasons = sentrySpeakerFinalizationReasonRawValues()
-        assertTrue(reasons.count >= 12, "the Core reason enum should have parsed; got \(reasons.count) reasons")
+        let reasons = SpeakerFinalizationFailureReason.allCases.map(\.rawValue)
+        assertFalse(reasons.isEmpty, "every speaker finalization reason should be checked")
 
         for reason in reasons {
             let tags = SentryEventPolicy.diagnosticTags(
@@ -669,30 +669,4 @@ func testSentryEventPolicy() {
             "a successful stop is not a Sentry event"
         )
     }
-}
-
-/// Raw values of Core's `SpeakerFinalizationFailureReason`, read as text because
-/// that file depends on the people database and is not in run-tests.sh's APP_SOURCES.
-private func sentrySpeakerFinalizationReasonRawValues() -> [String] {
-    let source = readSourceFixture("Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift")
-    let enumBody = sentrySourceSlice(
-        source,
-        from: "public enum SpeakerFinalizationFailureReason",
-        to: "static func classify"
-    )
-    return enumBody.split(separator: "\n").compactMap { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("case ") else { return nil }
-        let quoted = trimmed.split(separator: "\"", omittingEmptySubsequences: false)
-        guard quoted.count >= 3 else { return nil }
-        return String(quoted[1])
-    }
-}
-
-private func sentrySourceSlice(_ source: String, from start: String, to end: String) -> String {
-    guard let startRange = source.range(of: start),
-          let endRange = source.range(of: end, range: startRange.upperBound..<source.endIndex) else {
-        return ""
-    }
-    return String(source[startRange.lowerBound..<endRange.lowerBound])
 }

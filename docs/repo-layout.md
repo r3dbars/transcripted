@@ -126,6 +126,7 @@ Use these docs for these jobs:
 - `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
 - `Sources/*/AGENTS.md` (and nested ones such as `Sources/UI/Settings/AGENTS.md`) — subsystem-local ownership and verification notes
 - `Tools/README.md` and `Tools/*/AGENTS.md` — the standalone packages
+- `Tests/AGENTS.md`, `.agents/AGENTS.md`, `.github/AGENTS.md`, `scripts/release/AGENTS.md` — test rules, the agent contract and ratchet baselines, CI workflows, release scripts
 - `scripts/README.md` — what each repo script does and how to run it
 
 Point-in-time docs (history, not instructions; don't route agents here for current behavior):
@@ -143,7 +144,7 @@ Point-in-time docs (history, not instructions; don't route agents here for curre
 
 ## Modules
 
-The app compiles as one Swift target (plus the `TranscriptedWritingCore` module), so for the rest, folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Crossings that predate the check are in `.agents/module-boundary-baseline.json` and can only shrink. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
+The app compiles as one Swift target (plus the `TranscriptedWritingCore` module), so for the rest, folders are the only module lines. `.agents/modules.json` maps every `Sources/**/*.swift` file to a module and says what each may depend on; `scripts/dev/check-module-boundaries.py` fails when a file names a type from a module its own may not depend on. Nothing is grandfathered. `--explain <file>` prints a file's module, deps and doc; `--graph` prints edge counts.
 
 | Module | Folders | May depend on |
 | --- | --- | --- |
@@ -169,7 +170,7 @@ Each module's `AGENTS.md` (named in the manifest) says what it owns, its public 
 
 ## Hotspots
 
-Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 42 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 37 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
 python3 scripts/dev/check-file-size.py --hotspots
@@ -193,7 +194,7 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
 - `Sources/UI/Settings/TranscriptedSettingsView.swift` (stored state, `init`, `body`, Home row actions) plus `+Pages`, `+HomeMeetingActions`, `+GeneralEditors`, `+Refresh`, `+Preferences` — the Settings window shell, page routing, and every Home side effect. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings. The Home row actions in the core file are still pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeopleRows.swift` (the voice-to-name and person rows), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete). Most of the grandfathered Core-engine crossings live in the view model.
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeopleRows.swift` (the voice-to-name and person rows), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete).
 - `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 

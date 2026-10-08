@@ -579,3 +579,14 @@ private extension ParakeetModelState {
         }
     }
 }
+
+// Speech reads current meeting state through this narrow composition bridge.
+extension TranscriptedAppState: DictationSessionHost {
+    var canShareMeetingMicWithDictation: Bool { meetingSession.canShareMicWithDictation }
+    var shouldBlockDictationForActiveMeetingCapture: Bool { meetingSession.shouldBlockDictationForActiveMeetingCapture }
+    var isSpeakerReviewPending: Bool { meetingSession.isSpeakerReviewPending }
+    func startDictationFromActiveMeetingMic() -> Bool { meetingSession.startDictationFromActiveMeetingMic() }
+    func recordDictationStartedAfterWait() {
+        runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
+    }
+}

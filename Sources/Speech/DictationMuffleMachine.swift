@@ -10,11 +10,13 @@
 //   2. Wait for the tap to deliver real audio. If it never does (a paused
 //      source, a revoked grant), stand down: nothing was ever muted.
 //   3. If the copy lags the original by more than a few milliseconds (seen on
-//      some routes), wait briefly for a quiet moment so the splice lands in a
-//      pause.
-//   4. Cut: open the copy's gate and mute the originals in the same step. The
-//      copy is still dry, so the only seam is a few milliseconds of time, not
-//      a jump in tone or level.
+//      some routes), the cut can wait briefly for a quiet moment so the splice
+//      lands in a pause. By default it doesn't: the route swells the copy in
+//      over the lag instead (DictationMuffleSplice), which needs no pause.
+//   4. Cut: open the copy's gate and mute the originals in the same step. On
+//      wired routes the copy is still dry, so the only seam is a few
+//      milliseconds of time, not a jump in tone or level. On lagging routes
+//      the copy swells in over the lag (DictationMuffleSplice).
 //   5. Shortly after, glide the cutoff down: the muffle fades in.
 //   6. The mic closes: glide back to dry, then hand back (unmute the
 //      originals, then fade the copy out over them; on lagging routes, in a
@@ -34,15 +36,20 @@ struct DictationMuffleTiming: Equatable {
     var firstSoundWaitNanos: UInt64 = 400_000_000
     /// Bluetooth outputs start slower (~170 ms to first audio on AirPods).
     var firstSoundWaitBluetoothNanos: UInt64 = 900_000_000
-    /// Above this copy delay, the cut waits for a quiet moment.
+    /// Above this copy delay, the hand back (and the cut, when
+    /// quietWaitNanos is set) waits for a quiet moment.
     var quietCutAboveDelayNanos: UInt64 = 15_000_000
     /// How long the cut may wait for a quiet moment before it goes anyway.
-    var quietWaitNanos: UInt64 = 300_000_000
+    /// 0 by default: on AirPods (~171 ms lag) music almost never had a quiet
+    /// moment, so 36 of 45 takes waited the full 300 ms and then repeated
+    /// the music anyway. The route's hold (DictationMuffleSplice) removes the
+    /// repeat without waiting.
+    var quietWaitNanos: UInt64 = 0
     /// Settle between the cut and the start of the glide, so the mute has
     /// surely landed before the tone starts to change.
     var glideAfterCutNanos: UInt64 = 15_000_000
     /// At the hand back, how long to wait for a quiet moment on routes where
-    /// the copy lags (same rule as the cut), so the originals come back in a
+    /// the copy lags (above quietCutAboveDelayNanos), so the originals come back in a
     /// pause instead of skipping ahead by the copy delay. Short: the music
     /// is already dry by then.
     var handBackQuietWaitNanos: UInt64 = 120_000_000
@@ -144,7 +151,7 @@ struct DictationMuffleMachine {
                 return [.wake(at: now + timing.pollNanos)]
             }
             soundFlowedAt = now
-            if let delay = signals.copyDelayNanos, delay > timing.quietCutAboveDelayNanos, !signals.quiet {
+            if timing.quietWaitNanos > 0, let delay = signals.copyDelayNanos, delay > timing.quietCutAboveDelayNanos, !signals.quiet {
                 phase = .awaitingQuiet(deadline: now + timing.quietWaitNanos)
                 return [.wake(at: now + timing.pollNanos)]
             }

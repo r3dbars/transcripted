@@ -1,251 +1,127 @@
 # TranscriptedMCP
 
-Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting, dictation, and writing data from Claude Desktop or any MCP-compatible client.
+Standalone stdio MCP server (`transcripted-mcp`) for querying saved Transcripted meetings, dictations, and writing from Claude Desktop or any MCP client. Setup and client config are in [README.md](README.md).
 
-It is read-only, independent from the app target, and builds its own SQLite index from saved artifacts on disk.
+It never writes capture data and has no compile-time dependency on the app target. It builds its own SQLite index from the Markdown on disk, plus a small companion bridge to the running app (see Companion).
 
-## What It Reads
+## Where it reads
 
-App-selected locations:
+Resolution is shared with `Tools/TranscriptedCLI` through `Tools/TranscriptedCaptureKit`; change it there, not here.
 
-- MCP first checks `~/Library/Application Support/Transcripted/mcp-directories.json`
-  and the app's `transcriptSaveLocation` preference so it follows the capture
-  library chosen in Settings.
+1. App-selected capture library: `~/Library/Application Support/Transcripted/mcp-directories.json` or the saved `transcriptSaveLocation` preference.
+2. `~/Library/Application Support/Transcripted/captures/{meetings,dictations,writing}`. Index in `~/Library/Application Support/Transcripted/cache`.
+3. Legacy: `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`, then `~/Documents/Transcripted`.
 
-Default locations when no custom capture library is configured:
+Overrides: `TRANSCRIPTED_DATA_DIR`, `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`, `TRANSCRIPTED_WRITING_DIR`, `TRANSCRIPTED_INDEX_DIR`.
 
-- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
-- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
-- writing: `~/Library/Application Support/Transcripted/captures/writing` (the app creates it; the server never does)
-- index: `~/Library/Application Support/Transcripted/cache`
+- A `TRANSCRIPTED_DATA_DIR` with `meetings/`, `dictations/`, or `writing/` subfolders uses them. Otherwise every kind reads the root, kinds are told apart by filename prefix and `capture_type` (a `Writing_` file is never a meeting), and the index defaults to that root unless `TRANSCRIPTED_INDEX_DIR` is set.
+- With a meetings or dictations override and no writing override, no writing folder is read, so per-kind test harnesses cannot reach the real one.
+- Startup creates missing meeting, dictation, and index dirs, never the writing dir (the app creates it).
 
-Legacy fallback:
+## Tools
 
-- `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
-- `~/Documents/Transcripted`
+All read-only. Registered in `ToolHandlers.swift`; bodies live in `ToolHandlers+*.swift`.
 
-Path overrides:
+| Family | Tools |
+|--------|-------|
+| Meetings | `list_meetings`, `read_meeting` (`section` full/transcript/speakers, `offset`/`limit`) |
+| Dictations | `list_dictations`, `read_dictation` (day, `entry_id`, or `offset`/`limit`) |
+| Writing | `list_writing`, `read_writing` (same shape as dictations) |
+| Search | `search`, `search_context` (meetings/dictations/writing/all; writing is full-text only), `recent_context`, `who_is`. `mode` is `hybrid` (default), `lexical`, or `semantic` |
+| Rollups | `recap`, `list_action_items` (`done` status is rejected with an explicit error), `list_decisions`, `digest` |
+| Receipts | `decisions`, `commitments`, `open_questions`, `search_meetings` (share `handleReceiptQuery`) |
+| Diagnostics | `status`: version, resolved dirs and which rule chose them, index location, counts |
+| MCP Apps | `show_recent_meetings` returns a `ui://` HTML widget plus `structuredContent` (`UIResourceHandlers.swift`) |
 
-- `TRANSCRIPTED_DATA_DIR` — shared meetings + dictations + writing directory
-- `TRANSCRIPTED_MEETINGS_DIR` — meetings directory override
-- `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
-- `TRANSCRIPTED_WRITING_DIR` — writing directory override
-- `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
+Rollups and receipts read local `meeting_summary_items` and utterance FTS. No embeddings, cloud calls, or LLM synthesis.
 
-When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/`,
-`dictations/`, or `writing/` subfolders, the server uses those subfolders
-automatically. Otherwise every kind reads the root itself, and files are told
-apart by filename prefix and `capture_type` (a `Writing_` file there is never a
-meeting). In that mode the SQLite index also defaults to the shared root unless
-`TRANSCRIPTED_INDEX_DIR` is set. With a meetings or dictations override and no
-writing override, no writing folder is read, so per-kind test harnesses can't
-reach the real one.
+Common shapes:
 
-## Package Layout
+- latest meeting: `list_meetings {"count":3}` or `recent_context {"kind":"meeting","count":3}`. `recent_context` is a mixed feed by default.
+- by speaker: `search {"query":"topic","speaker":"Name"}` or `who_is {"speaker":"Name"}`
+- dictations by day: `list_dictations {"date":"2026-04-29"}`, then `read_dictation` with the returned filename
 
-- `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, tool handlers (split by tool family), and the MCP Apps widget surface
-- `Tests/TranscriptedMCPTests/` — test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, process startup, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
+## Companion
 
-## File Index
+A separate tool surface that talks to the running app over a local socket: `show_companion`, `get_recording_status`, `start_meeting`, `stop_meeting`, `set_live_context_sharing`, `read_live_transcript`, `get_live_meeting_context`, `browse_companion_context`, `read_context_passage`. Resource `transcripted_companion` (`text/html;profile=mcp-app`).
 
-| File | Purpose |
-|------|---------|
-| `Main.swift` | `@main` entry point; resolves directories, builds the index (with an `NLEmbeddingProvider` for semantic search), starts file watchers, then starts the MCP stdio server |
-| `BlockingStdioTransport.swift` | Default stdio transport (wrapped by `CompanionTransport`): one blocking reader thread plus a serial-queue writer, newline framing identical to SDK 0.12 `StdioTransport`, never touches O_NONBLOCK, no polling while idle |
-| `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
-| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct handler; the tool bodies themselves live in the `ToolHandlers+*.swift` files below |
-| `ToolHandlers+Meetings.swift` | `list_meetings` / `read_meeting` handlers |
-| `ToolHandlers+Dictations.swift` | `list_dictations` / `read_dictation` handlers |
-| `ToolHandlers+Writing.swift` | `list_writing` / `read_writing` handlers (same shape as the dictation pair) |
-| `ToolHandlers+Search.swift` | `search` / `search_context` / `recent_context` / `who_is` handlers |
-| `ToolHandlers+Rollups.swift` | `recap` / `list_action_items` / `list_decisions` / `digest` handlers |
-| `ToolHandlers+Receipts.swift` | `decisions` / `commitments` / `open_questions` / `search_meetings` WS2.3 receipt-API handlers; they share a common `handleReceiptQuery` tail |
-| `UIResourceHandlers.swift` | MCP Apps (SEP-1865, `io.modelcontextprotocol/ui`) surface: the `ui://` HTML resource and the `show_recent_meetings` tool that returns it |
-| `RecentMeetingsWidget.swift` | Widget data model for one meeting card, shared by the widget builder and the HTML renderer / `structuredContent` payload |
-| `RecentMeetingsWidgetBuilder.swift` | Builds the recent-meetings widget model from the local capture library, reusing the same read-tool data access rather than re-plumbing it |
-| `TranscriptIndex.swift` | SQLite connection lifecycle, schema gate, reconcile, and per-file indexing (the write path) |
-| `TranscriptIndex+MeetingQueries.swift` | Meeting search (routes `lexical`/`semantic`/`hybrid` modes), speaker history, meeting lists, `who_is` |
-| `TranscriptIndex+DictationQueries.swift` | Dictation days, entry search, recent entries |
-| `TranscriptIndex+Context.swift` | Cross-kind search and the recent feed, index counts |
-| `TranscriptIndex+SummaryRollups.swift` | Summary items, action items, decisions, digest |
-| `TranscriptIndex+Schema.swift` | Declarative DDL: table, FTS5 virtual table, trigger, and index definitions for the index database, split out of `TranscriptIndex.swift` |
-| `TranscriptIndex+Writing.swift` | Writing day indexing and queries (`writing_days` / `writing_entries` + FTS) |
-| `SQLiteHelpers.swift` | Shared free-function SQLite plumbing used by both `TranscriptIndex` and `EmbeddingStore`'s independent connections |
-| `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
-| `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
-| `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
-| `TranscriptLoader.swift` | Loads markdown meeting transcripts, dictation day files, and writing day files from disk and classifies each file's kind (writing first, so it never falls into the meeting default); parsing delegates to `TranscriptedCaptureKit` |
-| `Models.swift` | Codable input/output models and `MCPIndexError` |
-| `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
-| `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
-| `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
-| `AgentCaptureQueryTelemetry.swift` | One anonymous, bucketed terminal event for each tracked agent capture query |
+- `CompanionClient.swift` reads `<Application Support>/Transcripted/companion/connection.json` (root overridable with `TRANSCRIPTED_CONTAINER_DIR`). It requires owner-only dir and socket, no symlinks, socket inside the root. Keep those checks strict. It never logs credentials, paths, or native payloads.
+- `CompanionTools.swift` keeps view data in tool-result `_meta` so it stays out of model context until the user attaches it.
+- `CompanionUI.swift` is self-contained: no analytics, network fetches, audio, or model replies.
+- `CompanionTransport.swift` wraps `BlockingStdioTransport` and only rewrites the `initialize` experimental-capabilities field (SDK 0.12 expects strings, MCP Apps hosts send objects). Never rewrite tool requests or replies.
+- `test-support/companion_preview.py` is a fixture-only preview with an invented socket. No app, mic, or real library.
 
-## Test Files
-
-| File | Purpose |
-|------|---------|
-| `DataDirectoriesTests.swift` | Directory-resolution coverage for current Transcripted captures vs legacy Draft fallback |
-| `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
-| `SummaryItemIndexTests.swift` | Structured summary parse→index→query: decisions/action-items/open-questions, owner + unassigned rollup, reindex/delete, sidecar-not-a-meeting |
-| `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
-| `FrontmatterCorpusParityTests.swift` | Checks the kit's frontmatter parsing stays in parity across a corpus of real saved transcripts |
-| `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
-| `NameVariantsTests.swift` | Name variant matching accuracy |
-| `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
-| `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
-| `AgentCaptureQueryTelemetryTests.swift` | Terminal-result, bucketing, build-identity, and payload coverage for agent capture-query telemetry |
-| `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
-| `ProcessStartupTests.swift` | Launches the built executable and verifies a real MCP `initialize` round trip over stdio |
-| `RecentMeetingsWidgetTests.swift` | Widget-model and builder coverage for the `show_recent_meetings` MCP Apps surface |
-| `AudioDirectoryNamingTests.swift` | Retained-audio directory naming/resolution coverage |
-| `WritingToolTests.swift` | Writing day files: never indexed as meetings in the flat shared folder, list/read/search/recent, status counts, telemetry kind |
-| `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
-
-## MCP Tools
-
-All tools are read-only.
-
-| Tool | Description |
-|------|-------------|
-| `list_meetings` | List saved meetings with metadata and optional date filters |
-| `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
-| `list_dictations` | List saved dictation day files with counts, source apps, and titles |
-| `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
-| `list_writing` | List saved writing days (`Writing_<date>.md`) with counts, accepted words, source apps, and titles |
-| `read_writing` | Read one writing day, one entry by `entry_id`, or a paged window via `offset`/`limit` |
-| `search` | Search meeting transcript content (lexical / semantic / hybrid via `mode`, default hybrid) |
-| `search_context` | Search across meetings, dictations, writing, or all (same `mode` options; writing is full-text only) |
-| `recent_context` | Get a mixed recent feed of meetings, dictations, and writing |
-| `who_is` | Look up a speaker profile across saved meetings |
-| `recap` | Build a structured digest for a date range |
-| `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
-| `list_decisions` | Roll up decisions across meetings; filter by query / date |
-| `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
-| `decisions` | WS2.3 receipt API for local decision lookup by topic/range |
-| `commitments` | WS2.3 receipt API for local action-item lookup by person/range |
-| `open_questions` | WS2.3 receipt API for local open-question lookup by project/range |
-| `search_meetings` | WS2.3 receipt API for local keyword search over meeting utterances |
-| `status` | Server version, resolved capture directories and which resolution rule selected them, index location, and indexed counts |
-| `show_recent_meetings` | MCP Apps (SEP-1865) tool: returns a `ui://` HTML resource that renders a recent-meetings widget inline in a rendering-capable client, plus the same data as `structuredContent`. See `Sources/TranscriptedMCP/UIResourceHandlers.swift` |
-
-The rollup and WS2.3 tools are cross-meeting reads over local structured summary
-fields and raw utterance FTS. They query the same `meeting_summary_items` index
-populated from saved meeting Markdown during reconcile. They do not use
-embeddings, cloud calls, or LLM synthesis.
-
-## Common Agent Retrieval Shapes
-
-Use these tool patterns for the most common questions:
-
-- latest meeting: `list_meetings` with `{"count": 3}` or `recent_context` with `{"kind":"meeting","count":3}`
-- meetings by speaker: `search` with `{"query":"topic","speaker":"Name"}` or `who_is` with `{"speaker":"Name"}`
-- recent mixed context: `recent_context` with `{"count":10}`
-- dictations by day: `list_dictations` with `{"date":"2026-04-29"}`, then `read_dictation` with the returned filename
-
-## Data Flow
+## Data flow and index
 
 ```text
-meetings/*.md + dictations/*.md
-  -> TranscriptLoader direct reads for read_meeting and read_dictation
-  -> TranscriptIndex.reconcile() on startup
-  -> FileWatcher incremental updates on change
-  -> SQLite index
+captures/*.md -> TranscriptLoader (direct reads: read_meeting/read_dictation/read_writing)
+              -> TranscriptIndex.reconcile() at startup -> FileWatcher incremental updates -> SQLite
 ```
 
-## Index Shape
+- Index tables: meetings, speakers and utterance rows, `meeting_summary_items` (one row per Decision / Action Item with owner / Open Question, `kind` discriminator, FTS5), dictation days and entries, `writing_days` / `writing_entries` + FTS5. Schema version is 6 (`TranscriptIndex.swift`); an older `user_version` rebuilds from disk. DDL is in `TranscriptIndex+Schema.swift`.
+- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` over legacy artifacts (inline summary or `<stem>.summary.md` sidecar) during `indexMeeting`. Current app capture does not create new AI summaries. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
+- `FileWatcher` debounces 500ms and also scans on a 5-minute timer.
 
-The SQLite index keeps separate records for:
+## Semantic search
 
-- meetings
-- meeting speakers / utterance search rows
-- structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
-- dictation day files
-- dictation entry search rows
-- writing day files and writing entry search rows (`writing_days`, `writing_entries` + FTS5; schema v6)
+On-device, to catch paraphrases FTS misses. Embeddings come from Apple `NLEmbedding.sentenceEmbedding` (no bundled model or download), behind the `EmbeddingProvider` protocol so a CoreML model can replace it.
 
-Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from legacy meeting artifacts (an inline summary or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. Current app capture does not create new AI summaries. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` (in `TranscriptIndex+SummaryRollups.swift`) is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
+- Separate SQLite connection (`EmbeddingStore`), additive tables `embedding_meta`, `utterance_vectors`, `dictation_entry_vectors` (Float32 BLOBs keyed by lexical `rowid`), plus `embedding_cache` (content-keyed reuse, 72h TTL, cleared on model change; old helpers ignore it). Never alters the lexical write path.
+- Backfill: at most 100 missing rows per page by rowid; each table pass fixes its upper rowid first, advances past nil results, checks cancellation between provider calls. Reads are finalized and provider work finishes before short write transactions. Rows past the boundary wait for the next pass. Everything re-embeds on model-id or dimension change.
+- `mcp_index.embed.lock` is a per-pass cross-process lock around `reconcileEmbeddings`. On timeout or open failure, backfill defers to a later reconcile (or the watcher's first 5-minute tick); it never runs an unlocked competing pass or unlinks a live lock. Exited holders release automatically. Until the first model reconciliation succeeds, semantic queries use the lexical fallback.
+- Hybrid fuses FTS and semantic with reciprocal-rank fusion (`SemanticSearchFusion.swift`) and is a superset of FTS recall. If the backend is unavailable (for example missing OS language assets) the store is never created and every mode runs lexical-only. NLEmbedding's similarity floor is high, so `semantic` alone is best-effort.
 
-This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
+## Files
 
-The semantic layer adds three additive tables on a separate connection: `embedding_meta` (model id + dimension), `utterance_vectors`, and `dictation_entry_vectors` (Float32 BLOBs keyed by the lexical rows' `rowid`). They never alter the lexical write path.
+All under `Sources/TranscriptedMCP/`:
 
-## Semantic Search
+| File | Owns |
+|------|------|
+| `Main.swift` | Entry point, `--help` / `--version` / `--self-test`, startup order, watchers |
+| `BlockingStdioTransport.swift`, `Companion*.swift` | Transport and companion bridge above |
+| `DataDirectories.swift`, `PathSecurity.swift` | Index-dir resolution over the kit resolver; traversal/symlink guard for direct reads |
+| `ToolHandlers.swift`, `ToolHandlers+*.swift` | Registration and per-family handlers |
+| `UIResourceHandlers.swift`, `RecentMeetingsWidget*.swift` | MCP Apps widget, model, builder |
+| `TranscriptIndex.swift`, `TranscriptIndex+*.swift` | Connection lifecycle, schema gate, reconcile, per-kind queries |
+| `SQLiteHelpers.swift` | Plumbing shared by `TranscriptIndex` and `EmbeddingStore` |
+| `EmbeddingProvider.swift`, `EmbeddingStore.swift`, `SemanticSearchFusion.swift` | Semantic layer |
+| `TranscriptLoader.swift` | Loads and classifies files (writing first, so it never falls into the meeting default); parsing is the kit's |
+| `Models.swift`, `NameVariants.swift`, `FileWatcher.swift` | Codable models and `MCPIndexError`, speaker-name fuzzy matching (mirrors the app's), incremental reindex |
+| `AgentCaptureQueryTelemetry.swift` | One anonymous, bucketed terminal event per tracked capture query |
 
-Local, on-device semantic search complements FTS so paraphrase queries hit (e.g. "pricing pushback" finds "they balked at the cost").
+Also `mcpb/manifest.json` (Claude Desktop bundle manifest; its tool list must match the tools you ship).
 
-- Embeddings come from Apple's `NaturalLanguage` `NLEmbedding.sentenceEmbedding` — **no bundled model, no download, negligible app-size impact**. Backend is pluggable via `EmbeddingProvider`, so a bundled CoreML model can replace it later without touching the store or search path.
-- `EmbeddingStore` embeds new/changed rows after each reconcile (lazily, keyed by `rowid`), re-embeds everything on a model-id/dimension change, and runs a streaming cosine scan with the same speaker/date filters as FTS.
-- Backfill pages at most 100 missing rows by increasing rowid and holds new vectors only for the current batch; later batches reuse `embedding_cache`. Each table pass fixes its upper rowid first, advances past nil-provider results, and checks cancellation between provider calls/batches. Reads are finalized and provider work finishes before short write transactions, so lexical work stays independent. New lexical rows beyond that boundary wait for the next pass.
-- `search` / `search_context` accept `mode`: `hybrid` (default — FTS + semantic fused with reciprocal-rank fusion, a strict superset of FTS recall), `lexical`, or `semantic`.
-- All modes degrade gracefully: if the embedding backend is unavailable (e.g. missing OS language assets), the store is never created and every mode runs lexical-only.
-- NLEmbedding's similarity floor is high, so `semantic` alone is best-effort; `hybrid` is rank-based and stays robust because exact FTS hits anchor precision.
-
-## Build And Test
+## Build and test
 
 ```bash
 cd Tools/TranscriptedMCP
-swift build -c release
-swift test
-./.build/release/transcripted-mcp --help
-./.build/release/transcripted-mcp --self-test
+swift build -c release && swift test
+# The self-test writes an index: isolate every directory, including inherited
+# per-kind overrides. The subshell owns the fixture and its cleanup trap.
+(
+    mcp_fixture_parent="${TMPDIR:-/tmp}"
+    mcp_fixture_parent="${mcp_fixture_parent%/}"
+    mcp_fixture_root="$(mktemp -d "$mcp_fixture_parent/transcripted-mcp-self-test.XXXXXX")" || exit 1
+    trap 'case "$mcp_fixture_root" in "$mcp_fixture_parent"/transcripted-mcp-self-test.*) rm -rf -- "$mcp_fixture_root" ;; esac' EXIT
+    TRANSCRIPTED_DATA_DIR="$mcp_fixture_root/captures" \
+    TRANSCRIPTED_MEETINGS_DIR="$mcp_fixture_root/captures/meetings" \
+    TRANSCRIPTED_DICTATIONS_DIR="$mcp_fixture_root/captures/dictations" \
+    TRANSCRIPTED_WRITING_DIR="$mcp_fixture_root/captures/writing" \
+    TRANSCRIPTED_INDEX_DIR="$mcp_fixture_root/index" \
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
+        ./.build/release/transcripted-mcp --self-test
+)
 ```
 
-Binary path after build:
-
-```text
-.build/release/transcripted-mcp
-```
-
-`--self-test` verifies directory resolution, builds the SQLite index, prints a
-JSON status payload, and exits without starting the MCP stdio server.
-
-App builds also bundle a signed copy at:
-
-```text
-Transcripted.app/Contents/Helpers/transcripted-mcp
-```
-
-The in-app Claude Desktop installer copies that helper into:
-
-```text
-~/Library/Application Support/Transcripted/mcp/transcripted-mcp
-```
-
-## Example MCP Config
-
-```json
-{
-  "mcpServers": {
-    "transcripted": {
-      "command": "/absolute/path/to/transcripted-mcp"
-    }
-  }
-}
-```
-
-## Relationships
-
-- reads meeting markdown transcripts written by `Sources/TranscriptedCore/Storage/TranscriptSaver.swift`
-- reads dictation markdown day files written by `Sources/Dictation/DictationTranscriptWriter.swift`
-- shares capture-library resolution and capture-Markdown parsing with `Tools/TranscriptedCLI` through `Tools/TranscriptedCaptureKit`; change that logic in the kit, not here
-- mirrors speaker-name matching logic from the app with `NameVariants.swift`
-- has no compile-time dependency on the main Transcripted app target
+- `Tests/TranscriptedMCPTests/` covers directory resolution, index lifecycle, summary rollups, tool handlers, loader and frontmatter parity, embeddings (backfill, cache, search), transports, companion, widget, telemetry, and writing. `ProcessStartupTests` launches the built executable for a real `initialize` round trip. `TestHelpers.swift` has the fixtures.
+- App builds bundle a signed copy at `Transcripted.app/Contents/Helpers/transcripted-mcp`. The in-app Claude Desktop installer copies it to `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`.
 
 ## Gotchas
 
-- transport is stdio, not HTTP
-- don't switch back to the SDK's `StdioTransport`: 0.12 sets O_NONBLOCK on the client's fds and polls stdin every 10 ms forever (~0.5% of a core and ~200 context switches/s per idle server), and sleeps 10 ms per full pipe on large replies. `BlockingStdioTransport` sleeps in read(2)/poll(2) instead. Running servers keep the old binary until their client restarts.
-- the index dir also holds `mcp_index.embed.lock` (a per-pass cross-process lock around `reconcileEmbeddings`) and an additive `embedding_cache` table (content-keyed vector reuse, 72 h TTL, cleared on model change; old helpers ignore it)
-- embed-lock timeout/open failure defers semantic backfill until a later reconcile (or, while the model has never been reconciled, the first watcher's 5-minute timer tick, so a quiet library still recovers); it never runs an unlocked competing pass or unlinks a live lock. Exited holders release the kernel lock automatically. Until its first model reconciliation succeeds, a fresh store keeps semantic queries on the lexical fallback.
-- direct file reads are path-validated and reject traversal or symlink escapes
-- the server auto-creates missing data and index directories
-- the index rebuilds from disk on startup
-- `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
-- zero-result queries return a self-describing JSON payload (`searched_directories`, indexed counts, `hint`) instead of a bare "not found" string; call `status` to see the full resolution + index picture
-- `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
-- both read tools carry a size guard: raw dumps larger than `maxUnpaginatedReadCharacters` (~30k chars) — or any call passing `offset`/`limit` — come back as a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`) instead of the full markdown; small unpaginated reads stay byte-identical raw markdown, and `entry_id` reads are unaffected
-- source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer
-- agent-query `app_version` is the owning Transcripted app version written by the installer, never `TranscriptedMCP.serverVersion`; omit missing app identity rather than inventing it
-- agent-query `source_count_bucket` counts distinct capture files, while `result_count_bucket` counts returned records at the tool's natural response grain
+- Transport is stdio, not HTTP.
+- Do not switch back to the SDK's `StdioTransport`: 0.12 sets O_NONBLOCK on the client's fds and polls stdin every 10 ms forever (~0.5% of a core, ~200 context switches/s per idle server) and sleeps 10 ms per full pipe on large replies. `BlockingStdioTransport` sleeps in read(2)/poll(2). Running servers keep the old binary until their client restarts.
+- `read_meeting`, `read_dictation`, `read_writing` read Markdown from disk, not the index, and are path-validated against traversal and symlink escapes.
+- Read size guard: raw dumps over `maxUnpaginatedReadCharacters` (30,000 chars), or any call with `offset`/`limit`, return a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`). Small unpaginated reads stay byte-identical raw Markdown; `entry_id` reads are unaffected.
+- Zero-result queries return self-describing JSON (`searched_directories`, counts, `hint`), not a bare "not found". `status` gives the full picture.
+- Telemetry: `app_version` is the owning app version written by the installer, never `TranscriptedMCP.serverVersion`; omit it if missing rather than invent it. `source_count_bucket` counts distinct capture files, `result_count_bucket` counts returned records at the tool's natural grain.
+- The index rebuilds from disk on startup, so it is disposable.

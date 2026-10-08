@@ -95,8 +95,7 @@ enum DictationStartReadinessPolicy {
     ///
     /// Only `physical_key` is listed because it is the only trigger anything
     /// emits for a global hotkey: `ContextCaptureEngine` uses it for both the
-    /// push-to-talk press/release pair AND the hands-free toggle (the default
-    /// mode). `DictationTrigger.keyboardShortcut` and `.rightOptionTap` are
+    /// push-to-talk press/release pair AND the Tap to toggle press. `DictationTrigger.keyboardShortcut` and `.rightOptionTap` are
     /// declared but never constructed anywhere in the tree — #1744's guard
     /// listed them, which read as coverage it did not have. Wire them up here
     /// if something ever emits them.

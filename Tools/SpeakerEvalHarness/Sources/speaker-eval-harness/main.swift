@@ -142,7 +142,9 @@ struct Main {
         case "replay": await runReplay(Array(args.dropFirst()))
         case "embedding-parity": await runEmbeddingParity(Array(args.dropFirst()))
         case "autoeval": runAutoResearch(Array(args.dropFirst()))
-        case "autoeval-self-test": runAutoResearchSelfTests()
+        case "autoeval-self-test":
+            runMeetingLabSharedDBSelfTests()
+            runAutoResearchSelfTests()
         case "meeting-series":
             guard #available(macOS 26.0, *) else { die("meeting-series requires macOS 26+") }
             await runMeetingSeries(Array(args.dropFirst()))

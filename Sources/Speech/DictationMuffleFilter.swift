@@ -11,13 +11,16 @@
 //
 // A separate output gate fades the whole output in and out over a few
 // milliseconds. The muffler opens it as the originals are muted, and closes
-// it just after they come back, so the copy fades out over them.
+// it just after they come back, so the copy fades out over them. On routes
+// where the copy lags (AirPods), the gate holds shut for the lag first; see
+// DictationMuffleSplice.
 //
 // Runs on the Core Audio IO thread: no allocation, locks or ObjC. All state is
 // fixed-size stored properties; coefficients are recomputed per short control
 // block only while the cutoff is moving.
 
 import CoreAudio
+import Synchronization
 import Foundation
 
 struct DictationMuffleFilter {
@@ -72,6 +75,9 @@ struct DictationMuffleFilter {
     /// Reads the tap's audio from `input`, filters it at the current amount,
     /// and writes it to `output`. `muffleTarget` (0 or 1) is where the cutoff
     /// glides toward; `gateTarget` (0 or 1) is where the output gate fades.
+    /// While opening, the gate stays shut for the cycle's first
+    /// `gateHoldFrames` frames, then fades over `gateFadeFrames` (0 means
+    /// `gateSeconds`). Closing always uses the short `gateSeconds` step.
     ///
     /// Handles interleaved or split Float32 buffers on either side: mono input
     /// feeds both sides, a mono output gets the average, and output channels
@@ -85,7 +91,9 @@ struct DictationMuffleFilter {
         input: UnsafePointer<AudioBufferList>?,
         output: UnsafeMutablePointer<AudioBufferList>?,
         muffleTarget: Float,
-        gateTarget: Float
+        gateTarget: Float,
+        gateHoldFrames: Int = 0,
+        gateFadeFrames: Int = 0
     ) -> Float {
         guard let output else { return 0 }
         let outList = UnsafeMutableAudioBufferListPointer(output)
@@ -169,10 +177,20 @@ struct DictationMuffleFilter {
 
         let gateTarget = min(max(gateTarget, 0), 1)
         let muffleTarget = min(max(muffleTarget, 0), 1)
+        let gateStep = gateFadeFrames > 0 ? 1 / Float(gateFadeFrames) : self.gateStep
         var peak: Float = 0
         var frame = 0
         while frame < frames {
-            advanceAmount(toward: muffleTarget)
+            if gate == 0, frame + Self.controlBlockFrames <= gateHoldFrames {
+                // Held shut and silent: jump straight to the target, so the
+                // copy comes back fully muffled instead of mid-glide.
+                if amount != muffleTarget {
+                    amount = muffleTarget
+                    updateCoefficients()
+                }
+            } else {
+                advanceAmount(toward: muffleTarget)
+            }
             let blockEnd = min(frames, frame + Self.controlBlockFrames)
             while frame < blockEnd {
                 var left: Float = 0
@@ -186,10 +204,11 @@ struct DictationMuffleFilter {
                     if !right.isFinite { right = 0 }
                     peak = max(peak, max(abs(left), abs(right)))
                 }
-                if gate < gateTarget {
-                    gate = min(gateTarget, gate + gateStep)
-                } else if gate > gateTarget {
-                    gate = max(gateTarget, gate - gateStep)
+                let target: Float = frame < gateHoldFrames ? 0 : gateTarget
+                if gate < target {
+                    gate = min(target, gate + gateStep)
+                } else if gate > target {
+                    gate = max(target, gate - self.gateStep)
                 }
                 var (outLeft, outRight) = process(left: left, right: right)
                 outLeft *= gate
@@ -286,5 +305,133 @@ struct DictationMuffleFilter {
         }
         clean(&l1s1); clean(&l1s2); clean(&l2s1); clean(&l2s2)
         clean(&r1s1); clean(&r1s2); clean(&r2s1); clean(&r2s2)
+    }
+}
+
+/// How the copy comes in at the cut.
+///
+/// The copy trails the original by `copyDelayFrames`: ~7 ms on wired outputs,
+/// ~171 ms on AirPods, where the tap delivers the mix one output latency late.
+/// Opening the copy the moment the originals are muted replays that much
+/// music, which on AirPods is a clear repeat (heard 2026-10-06). Holding the
+/// copy back for the whole lag removes the repeat but leaves a noticeable
+/// silence. So on a lagging route the gate stays shut for half the catch-up
+/// and swells in over the other half, reaching full level exactly where the
+/// originals stopped: the music eases into muffled, and only the swell
+/// replays anything, quietly and already muffled (the owner's pick by ear,
+/// 2026-10-06). While the gate is held the filter jumps to its target, so
+/// the swell is fully muffled. Short lags (wired and built-in) keep the
+/// plain few-millisecond fade.
+struct DictationMuffleSplice: Equatable {
+    /// Above this lag the cut holds the copy back (the same line where the
+    /// machine used to wait for a quiet moment).
+    static let holdAboveLagSeconds: Double = 0.015
+    /// Tap B mutes the originals about this long after the cut (lab-measured
+    /// on built-in speakers).
+    static let muteLatencySeconds: Double = 0.0045
+    /// Extra hold so timing error lands on a few skipped milliseconds (hidden
+    /// in the gap) rather than a few repeated ones.
+    static let skipSideMarginSeconds: Double = 0.008
+    /// The longest hold, so a bad lag reading can't leave a long silence.
+    static let maxHoldSeconds: Double = 0.4
+    /// The shortest fade-in after a hold.
+    static let heldFadeSeconds: Double = 0.02
+    /// How much of the lag the fade-in covers instead of silence. The fade
+    /// ends exactly where the originals stopped, so the part it covers
+    /// replays the last moment quietly and already muffled: a soft swell
+    /// rather than a gap (0) or a full repeat (1).
+    static let swellFraction: Double = 0.5
+
+    /// Frames the gate stays shut after the cut.
+    var holdFrames: Int
+    /// Frames the gate takes to open after the hold (0 means `gateSeconds`).
+    var fadeFrames: Int
+
+    /// A held copy must already be muffled when the gate opens, even if the
+    /// delayed machine glide has not fired yet.
+    var startsMuffled: Bool { holdFrames > 0 }
+
+    static let plain = DictationMuffleSplice(holdFrames: 0, fadeFrames: 0)
+
+    /// What's left of a hold after the IO thread renders `frames` more.
+    static func remainingHold(_ hold: Int, afterFrames frames: Int) -> Int {
+        max(0, hold - max(0, frames))
+    }
+
+    static func atCut(copyDelayFrames: Int?, sampleRate: Double) -> DictationMuffleSplice {
+        guard sampleRate.isFinite, sampleRate > 0, let copyDelayFrames,
+              Double(copyDelayFrames) > holdAboveLagSeconds * sampleRate else {
+            return .plain
+        }
+        let catchUp = min(
+            Double(copyDelayFrames) + (muteLatencySeconds + skipSideMarginSeconds) * sampleRate,
+            maxHoldSeconds * sampleRate
+        )
+        let hold = Int((catchUp * (1 - swellFraction)).rounded())
+        let fade = max(Int((heldFadeSeconds * sampleRate).rounded()), Int(catchUp.rounded()) - hold)
+        return DictationMuffleSplice(holdFrames: hold, fadeFrames: max(1, fade))
+    }
+}
+
+/// One coherent command shared by the serial muffler queue and the IOProc.
+/// UInt64 atomics are lock-free on supported Apple Silicon. The IOProc does
+/// one load and at most one CAS; only queue-side updates retry. Frame fields
+/// cover over five million samples/second at the maximum splice duration.
+final class DictationMuffleGate {
+    struct Snapshot {
+        fileprivate let raw: UInt64
+        var isOpen: Bool { raw & 1 != 0 }
+        var isMuffled: Bool { raw & 2 != 0 }
+        var holdFrames: Int { isOpen ? Int((raw >> 2) & DictationMuffleGate.frameMask) : 0 }
+        var fadeFrames: Int { isOpen ? Int((raw >> 22) & DictationMuffleGate.frameMask) : 0 }
+    }
+
+    private static let frameMask: UInt64 = (1 << 20) - 1
+    private static let generationMask: UInt64 = (1 << 22) - 1
+    private let command = Atomic<UInt64>(0)
+
+    func snapshot() -> Snapshot {
+        Snapshot(raw: command.load(ordering: .acquiring))
+    }
+
+    /// Queue only. A distinct generation stops a callback from counting an
+    /// old cycle against a new cut with identical splice parameters. The
+    /// 22-bit generation can repeat only after 4,194,304 cuts; a single
+    /// callback cannot stay in flight across that many transitions.
+    func cut(_ splice: DictationMuffleSplice) {
+        precondition(splice.holdFrames >= 0 && UInt64(splice.holdFrames) <= Self.frameMask)
+        precondition(splice.fadeFrames >= 0 && UInt64(splice.fadeFrames) <= Self.frameMask)
+        let generation = ((command.load(ordering: .relaxed) >> 42) &+ 1) & Self.generationMask
+        let raw = (generation << 42) | (UInt64(splice.fadeFrames) << 22)
+            | (UInt64(splice.holdFrames) << 2) | (splice.startsMuffled ? 2 : 0) | 1
+        command.store(raw, ordering: .releasing)
+    }
+
+    /// Queue only. Preserve any hold countdown the IOProc committed while
+    /// changing the muffle target or handing the output back.
+    func setMuffled(_ muffled: Bool) {
+        updateFlag(2, enabled: muffled)
+    }
+
+    func handBack() {
+        updateFlag(1, enabled: false)
+    }
+
+    private func updateFlag(_ flag: UInt64, enabled: Bool) {
+        var current = command.load(ordering: .acquiring)
+        while true {
+            let desired = enabled ? current | flag : current & ~flag
+            let result = command.compareExchange(expected: current, desired: desired, ordering: .acquiringAndReleasing)
+            if result.exchanged { return }
+            current = result.original
+        }
+    }
+
+    /// IOProc only, bounded and allocation-free. A newer queue command wins.
+    func consume(_ snapshot: Snapshot, frames: Int) {
+        guard snapshot.holdFrames > 0 else { return }
+        let remaining = DictationMuffleSplice.remainingHold(snapshot.holdFrames, afterFrames: frames)
+        let desired = (snapshot.raw & ~(Self.frameMask << 2)) | (UInt64(remaining) << 2)
+        _ = command.compareExchange(expected: snapshot.raw, desired: desired, ordering: .relaxed)
     }
 }

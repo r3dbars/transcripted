@@ -217,6 +217,7 @@ func qaSmokePressedIdentifiers() -> Set<String> {
     var pressed = Set<String>()
     for path in [
         "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift",
+        "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmokeMenuBarAudit.swift",
         "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/ImportedAudioNativeSmoke.swift",
         "scripts/entrypoints/build.sh",
     ] {

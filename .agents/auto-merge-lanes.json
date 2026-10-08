@@ -9,7 +9,8 @@
   "blocking_labels": [
     "needs owner review",
     "do not merge",
-    "hold"
+    "hold",
+    "waiting-on-human"
   ],
   "allowed_authors": [
     "r3dbars"
@@ -37,7 +38,9 @@
     ".agents/modules.json",
     ".agents/auto-merge-lanes.json",
     "AGENTS.md",
-    "WORKFLOW.md"
+    "WORKFLOW.md",
+    "docs/automations/**",
+    "docs/threat-model.md"
   ],
   "lanes": [
     {

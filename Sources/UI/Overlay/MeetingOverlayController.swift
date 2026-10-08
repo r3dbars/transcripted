@@ -52,6 +52,8 @@ final class MeetingOverlayController: NSObject {
         }
     }
     private var currentDuration: TimeInterval = 0
+    /// Full-content refresh observer, including attempts while the island is hidden.
+    var onContentPush: ((TimeInterval) -> Void)?
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
@@ -152,11 +154,11 @@ final class MeetingOverlayController: NSObject {
 
     /// Wire subscriptions; the island stays hidden until state becomes
     /// non-idle. Safe to call once at app launch; re-calls are ignored.
-    func setup(meetingSession: MeetingSessionController) {
+    func setup(meetingSession: MeetingSessionController, durationPublisher: AnyPublisher<TimeInterval, Never>? = nil) {
         guard !isSetUp else { return }
         isSetUp = true
         self.meetingSession = meetingSession
-        wireSubscriptions(to: meetingSession)
+        wireSubscriptions(to: meetingSession, durationPublisher: durationPublisher)
     }
 
     // MARK: - Hotkey entry point
@@ -232,7 +234,7 @@ final class MeetingOverlayController: NSObject {
 
     // MARK: - Subscriptions
 
-    private func wireSubscriptions(to session: MeetingSessionController) {
+    private func wireSubscriptions(to session: MeetingSessionController, durationPublisher: AnyPublisher<TimeInterval, Never>?) {
         snapshotFailedMeetingIDs(from: session)
         session.$state
             .receive(on: DispatchQueue.main)
@@ -241,16 +243,12 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
-        session.$recordingDuration
-            .map { Int($0) }
-            .removeDuplicates()
+        (durationPublisher ?? session.$recordingDuration.eraseToAnyPublisher())
+            .wholeSecondTicks()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] wholeSecond in
                 guard let self else { return }
-                // The strip timer renders whole seconds (mm:ss). Collapse the
-                // 5Hz capture duration publisher before the full view push so
-                // recording does not rebuild attributed titles/layouts five
-                // times for the same visible label.
+                // Collapse 5 Hz duration updates before rebuilding the strip.
                 self.currentDuration = TimeInterval(wholeSecond)
                 self.pushToView()
             }
@@ -701,32 +699,27 @@ final class MeetingOverlayController: NSObject {
     private func handleDiscardRequested() {
         guard !isShowingCancelConfirmation else { return }
         guard let session = meetingSession else { return }
-        guard case .recording = session.state else { return }
+        guard MeetingSessionStateMachine.mayDiscardRecording(sessionState: session.state) else { return }
 
         isShowingCancelConfirmation = true
         defer {
             isShowingCancelConfirmation = false
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Discard this meeting recording?"
-        alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
-        alert.addButton(withTitle: "Keep Recording")
-        alert.addButton(withTitle: "Discard Recording")
-        alert.buttons.last?.hasDestructiveAction = true
-
-        let response = alert.runModal()
-        guard response == .alertSecondButtonReturn else { return }
-        // The confirm sheet can outlive the recording. Stop or an unexpected
-        // capture end may already be preserving audio — do not cancel then.
-        guard case .recording = session.state else { return }
-
-        Task { [weak session] in
-            await session?.cancelRecording(reason: .discardButton)
-        }
+        MeetingSessionStateMachine.discardRecordingIfConfirmed(sessionState: { session.state }, confirm: {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Discard this meeting recording?"
+            alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
+            alert.addButton(withTitle: "Keep Recording")
+            alert.addButton(withTitle: "Discard Recording")
+            alert.buttons.last?.hasDestructiveAction = true
+            return alert.runModal() == .alertSecondButtonReturn
+        }, discard: {
+            // A confirm can outlive Stop; the flow rechecks before canceling.
+            Task { [weak session] in await session?.cancelRecording(reason: .discardButton) }
+        })
     }
 
     private func scheduleAutoHide(after seconds: Double) {
@@ -888,7 +881,7 @@ final class MeetingOverlayController: NSObject {
         // Overlay `.recording` also covers `.stoppingRecording` (keep the
         // meeting up through teardown). Discard must require the session
         // itself to still be `.recording`, or the item no-ops after a stop starts.
-        if case .recording = meetingSession?.state {
+        if MeetingSessionStateMachine.mayDiscardRecording(sessionState: meetingSession?.state) {
             let menu = NSMenu()
             let discardItem = NSMenuItem(
                 title: "Discard Recording…",
@@ -1231,6 +1224,7 @@ final class MeetingOverlayController: NSObject {
     // MARK: - View push
 
     private func pushToView() {
+        onContentPush?(currentDuration)
         guard islandShown else { return }
         island?.updateMeeting(islandContent())
     }

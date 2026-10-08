@@ -38,12 +38,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Mirrors the meeting controller's voiceprint migration gate: saved people
     /// moving into a new voice model's database. Edits made meanwhile wait in
     /// `editsWaitingForVoiceprintMigration` and run once it ends.
-    @Published private(set) var voiceprintMigrationPhase: SpeakerVoiceprintMigrationGate.Phase = .idle
+    @Published private(set) var voiceprintMigrationPhase: SpeakerSettingsMigrationPhase = .idle
     private var voiceprintMigrationObservation: AnyCancellable?
     private var editsWaitingForVoiceprintMigration: [() -> Void] = []
 
-    private let speakerDatabase: SpeakerDatabase
-    private let transcriptDirectory: URL
+    private let speakerDatabase: SpeakerSettingsStore
     private let preferredClipsDirectory: URL
     private let legacyClipsDirectory: URL
     private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
@@ -51,7 +50,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
-    private var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
+    private var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
     private var snapshotPublication = RefreshPublicationOrder()
     private var refreshState = CoalescedRefreshState()
     private let snapshotQueue = DispatchQueue(label: "Transcripted.SpeakerPeople.snapshot", qos: .userInitiated)
@@ -65,25 +64,27 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let mergeTargetIndex: SpeakerMergeTargetIndex
         let clipURLsByProfileID: [UUID: URL]
         let reviewQueueItems: [SpeakerPendingReviewItem]
-        let undoableMergesByTargetID: [UUID: SpeakerMergeRecord]
+        let undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord]
     }
 
     init(
-        speakerDatabase: SpeakerDatabase,
-        transcriptDirectory: URL = TranscriptSaver.defaultSaveDirectory,
+        speakerDatabase: SpeakerSettingsStore,
+        transcriptDirectory: URL = SpeakerSettingsStore.defaultTranscriptDirectory,
         preferredClipsDirectory: URL,
-        legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
-        voiceprintMigrationGate: SpeakerVoiceprintMigrationGate? = nil
+        legacyClipsDirectory: URL = SpeakerSettingsStore.defaultLegacyClipsDirectory,
+        voiceprintMigrationGate: SpeakerSettingsMigration? = nil
     ) {
-        self.speakerDatabase = speakerDatabase
-        self.transcriptDirectory = transcriptDirectory
+        self.speakerDatabase = speakerDatabase.configured(
+            transcriptDirectory: transcriptDirectory, preferredClipsDirectory: preferredClipsDirectory,
+            legacyClipsDirectory: legacyClipsDirectory
+        )
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
         if let voiceprintMigrationGate {
             voiceprintMigrationPhase = voiceprintMigrationGate.phase
             // Synchronous on purpose: the mirror changes in the same step as
             // the gate, so an edit can never slip between the two.
-            voiceprintMigrationObservation = voiceprintMigrationGate.$phase
+            voiceprintMigrationObservation = voiceprintMigrationGate.phases
                 .dropFirst()
                 .sink { [weak self] phase in
                     self?.voiceprintMigrationPhaseChanged(to: phase)
@@ -92,9 +93,14 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         refresh()
     }
 
+    nonisolated private static func reviewRow(_ item: SpeakerPendingReviewItem) -> SpeakerSettingsStore.ReviewRow {
+        .init(transcriptURL: item.transcriptURL, transcriptId: item.transcriptId,
+              diarizerSpeakerId: item.diarizerSpeakerId, channel: item.channel.utteranceChannel)
+    }
+
     // MARK: - Voice model migration
 
-    private func voiceprintMigrationPhaseChanged(to phase: SpeakerVoiceprintMigrationGate.Phase) {
+    private func voiceprintMigrationPhaseChanged(to phase: SpeakerSettingsMigrationPhase) {
         voiceprintMigrationPhase = phase
         guard !isMovingPeopleToNewVoiceModel else { return }
         refresh()
@@ -267,48 +273,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
         let speakerDatabase = self.speakerDatabase
         runEditInBackground(completion: completion) {
-            let allTranscriptUpdatesSucceeded: Bool
-            do {
-                allTranscriptUpdatesSucceeded = try TranscriptSaver.updateDeferredSpeakerNames(
-                    matchingReviewItems.map { reviewItem in
-                        TranscriptSaver.DeferredSpeakerNameUpdate(
-                            transcriptURL: reviewItem.transcriptURL,
-                            dbId: speakerId,
-                            diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                            channel: reviewItem.channel.utteranceChannel
-                        )
-                    },
-                    newName: trimmed,
-                    persistIdentity: {
-                        try speakerDatabase.performMutationBatch {
-                            try speakerDatabase.requireDisplayNameUpdate(
-                                id: speakerId,
-                                name: trimmed,
-                                source: NameSource.userManual
-                            )
-                            speakerDatabase.resetDisputeCount(id: speakerId)
-                            try speakerDatabase.recordUserConfirmations(
-                                matchingReviewItems.compactMap { reviewItem in
-                                    reviewItem.transcriptId.map {
-                                        SpeakerUserConfirmation(
-                                            profileId: speakerId,
-                                            transcriptId: $0,
-                                            kind: .named
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
-                )
-            } catch {
-                AppLogger.speakers.error("Deferred speaker rename transaction failed", [
-                    "profileId": speakerId.uuidString,
-                    "error": error.localizedDescription
-                ])
-                allTranscriptUpdatesSucceeded = false
-            }
-            return allTranscriptUpdatesSucceeded
+            speakerDatabase.nameReviewedVoice(speakerId: speakerId, trimmed: trimmed, matchingReviewItems: matchingReviewItems.map(Self.reviewRow))
         }
     }
 
@@ -335,59 +300,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
         let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == sourceId }
         let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
-        let reviewedRows = matchingReviewItems.map { reviewItem in
-            TranscriptSaver.DeferredSpeakerNameUpdate(
-                transcriptURL: reviewItem.transcriptURL,
-                dbId: sourceId,
-                diarizerSpeakerId: reviewItem.diarizerSpeakerId,
-                channel: reviewItem.channel.utteranceChannel
-            )
-        }
         let confirmedTranscriptIds = matchingReviewItems.compactMap(\.transcriptId)
         let speakerDatabase = self.speakerDatabase
-        let transcriptDirectory = self.transcriptDirectory
-        let preferredClipsDirectory = self.preferredClipsDirectory
-        let legacyClipsDirectory = self.legacyClipsDirectory
 
         runEditInBackground(completion: completion) {
-            var didMerge = false
-            do {
-                let outcome = try SpeakerIdentityMutationService.apply(
-                    .mergeReviewedVoice(
-                        sourceId: sourceId,
-                        targetId: targetId,
-                        reviewedRows: reviewedRows,
-                        confirmedTranscriptIds: confirmedTranscriptIds
-                    ),
-                    speakerDB: speakerDatabase,
-                    directory: transcriptDirectory,
-                    clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                        onMergeCommitted: { sourceId, targetId in
-                            SpeakerClipLibrary.promoteClipIfNeeded(
-                                from: sourceId,
-                                to: targetId,
-                                preferredClipsDirectory: preferredClipsDirectory,
-                                legacyClipsDirectory: legacyClipsDirectory
-                            )
-                            SpeakerClipLibrary.deleteClips(
-                                for: sourceId,
-                                preferredClipsDirectory: preferredClipsDirectory,
-                                legacyClipsDirectory: legacyClipsDirectory
-                            )
-                        }
-                    )
-                )
-                if !outcome.succeeded {
-                    AppLogger.speakers.error("Queued voice merge into saved person failed", [
-                        "sourceId": sourceId.uuidString,
-                        "targetId": targetId.uuidString
-                    ])
-                }
-                didMerge = outcome.succeeded
-            } catch {
-                Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
-            }
-            return didMerge
+            speakerDatabase.mergeReviewedVoice(sourceId: sourceId, targetId: targetId, rows: matchingReviewItems.map(Self.reviewRow), confirmedTranscriptIds: confirmedTranscriptIds)
         }
     }
 
@@ -445,7 +362,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Rename from an Everyone row. A voice still waiting for a name goes
     /// through the same path as naming it on its review card; see
     /// `SpeakerReviewStack.reviewItemForRename`.
-    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String) {
+    func renameFromEveryone(_ profile: SpeakerProfile, to newName: String,
+                            completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         if let item = SpeakerReviewStack.reviewItemForRename(of: profile, in: reviewQueueItems) {
             // Same as naming it on its card: a name one saved person already
             // has adds the voice to them instead of making a second one.
@@ -456,12 +374,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 id: \.id,
                 displayName: \.displayName
             ) {
-                mergePendingReviewItem(item, into: existing)
+                mergePendingReviewItem(item, into: existing, completion: completion)
             } else {
-                namePendingReviewItem(item, to: newName)
+                namePendingReviewItem(item, to: newName) { didSave in completion?(didSave) }
             }
         } else {
-            rename(profile: profile, to: newName)
+            rename(profile: profile, to: newName) { didSave in completion?(didSave) }
         }
     }
 
@@ -481,63 +399,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
-        let transcriptDirectory = self.transcriptDirectory
         runEditInBackground(completion: completion) {
-            var didRename = false
-            // Routed through the canonical mutation service (audit 2026-08-04): this used
-            // to write the DB first and best-effort-scan transcripts second with no
-            // rollback, so a transcript write failure left the DB and saved transcripts
-            // disagreeing about the speaker's name. The service snapshots and rewrites
-            // transcripts first and only commits the DB change once every rewrite has
-            // succeeded, rolling transcripts back if the DB transaction itself fails.
-            do {
-                let outcome = try SpeakerIdentityMutationService.apply(
-                    .rename(profileId: profileId, newName: trimmed),
-                    speakerDB: speakerDatabase,
-                    directory: transcriptDirectory
-                )
-                didRename = outcome.succeeded
-                if !outcome.succeeded {
-                    AppLogger.speakers.error("Manual speaker rename failed", ["profileId": profileId.uuidString])
-                }
-            } catch {
-                Self.reportMutationFailure(error, engine: "speakers", profileId: profileId)
-            }
-            return didRename
+            speakerDatabase.rename(profileId: profileId, trimmed: trimmed)
         }
     }
 
-    /// Surfaces a `SpeakerIdentityMutationService.MutationError` beyond the local log —
-    /// specifically `.transcriptRestoreFailed`, where the DB and a saved transcript may now
-    /// permanently disagree and a caller that only checked `outcome.succeeded` would never
-    /// see it (this path throws instead of returning a plain `Outcome`). Privacy-safe:
-    /// only a profile id (opaque UUID, not a name) and a file count go out, never a path or
-    /// display name.
-    nonisolated private static func reportMutationFailure(
-        _ error: Error,
-        engine: String,
-        profileId: UUID
-    ) {
-        AppLogger.speakers.error("Manual speaker identity mutation failed", [
-            "profileId": profileId.uuidString,
-            "error": error.localizedDescription
-        ])
-        guard case SpeakerIdentityMutationService.MutationError.transcriptRestoreFailed(let fileCount) = error else {
-            return
-        }
-        DispatchQueue.main.async {
-            EventReporter.shared.capture(
-                level: .error,
-                engine: engine,
-                event: "speaker_identity_transcript_restore_failed",
-                message: "Speaker identity rollback could not restore one or more transcripts",
-                context: [
-                    "profileId": profileId.uuidString,
-                    "fileCount": "\(fileCount)",
-                ]
-            )
-        }
-    }
+
 
     func merge(
         source: SpeakerProfile,
@@ -555,52 +422,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let sourceId = source.id
         let targetId = target.id
         let speakerDatabase = self.speakerDatabase
-        let transcriptDirectory = self.transcriptDirectory
-        let preferredClipsDirectory = self.preferredClipsDirectory
-        let legacyClipsDirectory = self.legacyClipsDirectory
 
         runEditInBackground(completion: completion) {
-            // Routed through the canonical mutation service (audit 2026-08-04), replacing
-            // SpeakerProfileMergeSideEffectCoordinator (DB + clips only, no transcript
-            // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
-            // scan. The service snapshots and rewrites transcripts first, commits the DB
-            // merge inside a real transaction, rolls transcripts back if that transaction
-            // throws, and only then runs clip promotion/deletion. Same-id merges are
-            // rejected by the service itself now (MutationError.sameSourceAndTarget), so the
-            // `source.id != target.id` guard above is defense in depth, not the only guard.
-            var didMerge = false
-            do {
-                let outcome = try SpeakerIdentityMutationService.apply(
-                    .merge(sourceId: sourceId, targetId: targetId),
-                    speakerDB: speakerDatabase,
-                    directory: transcriptDirectory,
-                    clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                        onMergeCommitted: { sourceId, targetId in
-                            SpeakerClipLibrary.promoteClipIfNeeded(
-                                from: sourceId,
-                                to: targetId,
-                                preferredClipsDirectory: preferredClipsDirectory,
-                                legacyClipsDirectory: legacyClipsDirectory
-                            )
-                            SpeakerClipLibrary.deleteClips(
-                                for: sourceId,
-                                preferredClipsDirectory: preferredClipsDirectory,
-                                legacyClipsDirectory: legacyClipsDirectory
-                            )
-                        }
-                    )
-                )
-                if !outcome.succeeded {
-                    AppLogger.speakers.error("Manual speaker merge failed", [
-                        "sourceId": sourceId.uuidString,
-                        "targetId": targetId.uuidString
-                    ])
-                }
-                didMerge = outcome.succeeded
-            } catch {
-                Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
-            }
-            return didMerge
+            speakerDatabase.merge(sourceId: sourceId, targetId: targetId)
         }
     }
 
@@ -643,7 +467,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     /// The most recent merge into this profile that can still be undone, if any.
-    func undoableMerge(for profile: SpeakerProfile) -> SpeakerMergeRecord? {
+    func undoableMerge(for profile: SpeakerProfile) -> SpeakerSettingsStore.MergeRecord? {
         undoableMergesByTargetID[profile.id]
     }
 
@@ -710,7 +534,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     nonisolated private static func snapshot(
-        from speakerDatabase: SpeakerDatabase,
+        from speakerDatabase: SpeakerSettingsStore,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
         duplicateCache: SpeakerDuplicateSnapshotCache
@@ -718,7 +542,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let profiles = sortedProfiles(from: speakerDatabase)
         // Look up each visible speaker's newest still-undoable merge directly (indexed
         // per-target query) so undo never disappears once merge history grows past a cap.
-        var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
+        var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
         for profile in profiles {
             if let record = speakerDatabase.undoableMerge(forTargetId: profile.id) {
                 undoableMergesByTargetID[profile.id] = record
@@ -737,7 +561,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         from profiles: [SpeakerProfile],
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
-        undoableMergesByTargetID: [UUID: SpeakerMergeRecord],
+        undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord],
         duplicateCache: SpeakerDuplicateSnapshotCache
     ) -> Snapshot {
         let duplicateCandidates = duplicateCache.candidates(from: profiles, build: duplicateCandidates)
@@ -787,7 +611,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         )
     }
 
-    nonisolated private static func sortedProfiles(from speakerDatabase: SpeakerDatabase) -> [SpeakerProfile] {
+    nonisolated private static func sortedProfiles(from speakerDatabase: SpeakerSettingsStore) -> [SpeakerProfile] {
         speakerDatabase.allSpeakers().sorted { lhs, rhs in
             let lhsNamed = (lhs.displayName?.isEmpty == false)
             let rhsNamed = (rhs.displayName?.isEmpty == false)

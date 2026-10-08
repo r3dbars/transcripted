@@ -296,6 +296,8 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     report = json.load(handle)
 
 errors = []
+if report.get("meetingOverlayDurationUpdates") != [0, 1, 2, 5]:
+    errors.append("meeting overlay did not collapse recording-duration refreshes to whole seconds")
 if not report.get("appLaunched"):
     errors.append("appLaunched was false")
 if not report.get("statusItemExists"):

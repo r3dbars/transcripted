@@ -156,9 +156,18 @@ def landed_reason(state: str, head_sha: str, on_main: Callable[[str], bool]) -> 
     return None
 
 
-def pr_landed_reason(number: int) -> str | None:
+def landed_receipt(data: dict, on_main: Callable[[str], bool]) -> dict | None:
+    """Bind a definitive landed result to the full SHA actually checked."""
+    head = data.get("headRefOid", "")
+    reason = landed_reason(data.get("state", ""), head, on_main)
+    if not reason:
+        return None
+    return {"reason": reason, "headRefOid": head}
+
+
+def pr_landed_receipt(number: int) -> dict | None:
     data = json.loads(run_gh(["pr", "view", str(number), "--json", "state,headRefOid"]))
-    return landed_reason(data.get("state", ""), data.get("headRefOid", ""), head_on_main)
+    return landed_receipt(data, head_on_main)
 
 
 def title_for_branch(branch: str) -> str:
@@ -325,6 +334,16 @@ def self_test() -> int:
         got = landed_reason(state, sha, lambda _sha, value=on_main: value) is not None
         if got != expect:
             failures.append(f"  landed_reason({state!r}, {sha!r}, on_main={on_main}): expected {expect}, got {got}")
+    checked_heads = []
+    full_head = "1234567890abcdef1234567890abcdef12345678"
+    receipt = landed_receipt({"state": "OPEN", "headRefOid": full_head},
+                             lambda sha: checked_heads.append(sha) or True)
+    if receipt != {"reason": f"its head {full_head[:9]} is already on origin/main",
+                   "headRefOid": full_head} or checked_heads != [full_head]:
+        failures.append("landed receipt did not preserve the exact checked head")
+    if landed_receipt({"state": "OPEN", "headRefOid": full_head}, lambda _: False) is not None:
+        failures.append("unlanded head must not produce a definitive receipt")
+
     if failures:
         print("check-superseded self-test FAILED:", file=sys.stderr)
         for line in failures:
@@ -377,14 +396,15 @@ def main() -> int:
 
     if args.pr is not None:
         try:
-            reason = pr_landed_reason(args.pr)
+            receipt = pr_landed_receipt(args.pr)
         except RuntimeError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-        if reason:
+        if receipt:
+            reason = receipt["reason"]
             if args.json:
                 print(json.dumps({"query": query_title, "superseded": True,
-                                  "matches": [], "pr": args.pr, "reason": reason}, indent=2))
+                                  "matches": [], "pr": args.pr, **receipt}, indent=2))
             else:
                 print(f"STOP: #{args.pr} needs no repair: {reason}.")
             return 3

@@ -100,27 +100,30 @@ enum AudioSignalRecovery {
             return false
         }
 
+        // Only frames that are both above the RMS floor and reach the capture
+        // peak count, so the signal has to be sustained: one click in a dead
+        // mic's hiss is a single frame, not 0.2 s of capture.
         let frameSize = max(1, Int(sampleRate * captureFrameDuration))
-        var peak: Float = 0
         var activeDuration = 0.0
         for start in stride(from: 0, to: samples.count, by: frameSize) {
             let end = min(samples.count, start + frameSize)
             let frame = samples[start..<end]
             guard !frame.isEmpty else { continue }
+            var framePeak: Float = 0
             var sumOfSquares = 0.0
             for sample in frame {
-                peak = max(peak, abs(sample))
+                framePeak = max(framePeak, abs(sample))
                 sumOfSquares += Double(sample * sample)
             }
             let frameRMS = Float(sqrt(sumOfSquares / Double(frame.count)))
-            if frameRMS >= minimumCaptureFrameRMS {
+            if frameRMS >= minimumCaptureFrameRMS, framePeak >= minimumCapturePeak {
                 activeDuration += Double(frame.count) / sampleRate
-            }
-            if activeDuration >= minimumCaptureActiveDuration {
-                return peak >= minimumCapturePeak
+                // Exit early only on a yes: a quiet start can't rule out
+                // louder audio later in the track.
+                if activeDuration >= minimumCaptureActiveDuration { return true }
             }
         }
-        return peak >= minimumCapturePeak && activeDuration >= minimumCaptureActiveDuration
+        return false
     }
 
     static func normalizeForSpeech(

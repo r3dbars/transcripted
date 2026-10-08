@@ -5,11 +5,34 @@
 // NSPasteboards. The AX bounds and the focused-element type check run through
 // FocusedTextPasteConfirmationPolicy.boundedFocusedElement with a fake AX reader.
 // The delivery notice after a dictation is DictationDeliveryPresentation. One
-// suite still reads FloatingOverlayController.swift as text (the Not pasted
-// notice preview), because that file is in open PR #1946.
+// suite checks the Not pasted notice preview through
+// NotchIslandDictationContent.Message.make.
 
 import AppKit
 import Foundation
+
+/// True if the task completes before a generous give-up margin. The margin only keeps a
+/// broken wait from hanging the suite; it is not a speed limit. A stuck task is left
+/// behind rather than awaited, so a wait that never ends still reports false.
+private func clipboardTestFinishes(_ task: Task<Void, Never>) async -> Bool {
+    final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+        init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+        func resume(_ value: Bool) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+    }
+    return await withCheckedContinuation { continuation in
+        let once = Once(continuation)
+        Task { await task.value; once.resume(true) }
+        Task { try? await Task.sleep(nanoseconds: 30_000_000_000); once.resume(false) }
+    }
+}
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
@@ -448,15 +471,23 @@ func testClipboardRestoringTextPaster() async {
         }
 
         runSuite("The Not pasted notice previews the dictation it would paste") {
-            // Source text until open PR #1946 settles FloatingOverlayController.
-            let overlaySource = try! String(
-                contentsOfFile: "Sources/UI/Overlay/FloatingOverlayController.swift",
-                encoding: .utf8
+            typealias Message = NotchIslandDictationContent.Message
+            let notPasted = Message.make(
+                tone: .notice,
+                text: "Not pasted",
+                errorActionTitle: "Retry",
+                notPasted: .init(text: "the words", actionTitle: "Paste", hint: "Click where it goes.", dismissSeconds: 15)
             )
-            assertTrue(
-                overlaySource.contains("preview: notPastedText,"),
-                "the Not pasted notice shows the dictation it would paste"
-            )
+            assertEqual(notPasted.preview, "the words", "the Not pasted notice shows the dictation it would paste")
+            assertEqual(notPasted.actionTitle, "Paste", "the not-pasted action replaces the error action")
+            assertEqual(notPasted.dismissSeconds, 15, "the not-pasted notice counts down")
+            assertEqual(notPasted.hint, "Click where it goes.", "the not-pasted hint rides along")
+
+            let plain = Message.make(tone: .error, text: "Failed", errorActionTitle: "Retry", notPasted: nil)
+            assertEqual(plain.preview, nil, "a plain error has no preview")
+            assertEqual(plain.actionTitle, "Retry", "a plain error keeps its own action")
+            assertEqual(plain.dismissSeconds, nil, "a plain error does not count down")
+            assertEqual(plain.hint, nil, "a plain error has no hint")
         }
 
         runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
@@ -2172,13 +2203,12 @@ func testClipboardRestoringTextPaster() async {
         }
         assertEqual(observerRead, dictationText, "unconfirmed pasteback should keep the text copied")
 
-        let started = Date()
+        // The "no pending readiness wait" promise is proven with an hour-long restore
+        // delay in the suite below; here the wait just has to come back.
         let readyTask = Task { @MainActor in
             await paster.waitForClipboardReadyForAutoEnter()
         }
         await readyTask.value
-        let elapsed = Date().timeIntervalSince(started)
-        assertTrue(elapsed < 0.15, "unconfirmed pasteback should have no pending auto-enter readiness wait")
 
         let stillBorrowedClipboard = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -2200,13 +2230,11 @@ func testClipboardRestoringTextPaster() async {
     }
 
     await runSuite("ClipboardRestoringTextPaster.waitForClipboardReadyForAutoEnter — waits when no pasteboard read occurs") {
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
-            print("    SKIPPED: wall-clock timing proof — the elapsed-time floor is unprovable under shared-runner scheduler jitter; covered by local runs")
-            return
-        }
         let existingClipboard = "synthetic existing clipboard"
         let pasteText = "synthetic unread paste text"
-        let fallbackRestoreDelay: UInt64 = 40_000_000
+        // An hour: if auto-enter readiness waited for the fallback restore it would
+        // never come back, so "came back" proves there is no pending wait.
+        let fallbackRestoreDelay: UInt64 = 3_600_000_000_000
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
@@ -2244,13 +2272,11 @@ func testClipboardRestoringTextPaster() async {
             "without a pasteboard read, borrowed dictation should remain available before fallback restore"
         )
 
-        let started = Date()
         let readyTask = Task { @MainActor in
             await paster.waitForClipboardReadyForAutoEnter()
         }
-        await readyTask.value
-        let elapsed = Date().timeIntervalSince(started)
-        assertTrue(elapsed < 0.15, "without confirmed paste, auto-enter should have no pending readiness wait")
+        let readyWithoutWaiting = await clipboardTestFinishes(readyTask)
+        assertTrue(readyWithoutWaiting, "without confirmed paste, auto-enter should have no pending readiness wait")
         let restoredClipboard = await MainActor.run {
             pasteboard.string(forType: .string)
         }

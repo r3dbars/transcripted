@@ -146,8 +146,9 @@ Two more root tests pinned Parakeet source through the `readParakeet*Source()` h
   of `ParakeetAudioGraph.start` and `withStartSnapshotLease` in `ParakeetAudioGraphTests.swift`.
 - `ParakeetStartRecordingFailurePolicyTests.swift`: no source reads left after PR #1949
 
-`PermissionStateHarnessContractTests.swift` reads `Tools/TranscriptedQA/Sources/...`, which is
-another package's source, not app source.
+`PermissionStateHarnessContractTests.swift` is deleted. It only grepped the QA CLI, the QA bench
+script, and the docs for text. That cross-file contract is now `scripts/dev/check-qa-harness-contract.py`
+(wired into `linux-checks.sh` and the test matrix).
 
 ## What changed in this pass
 
@@ -208,8 +209,9 @@ New seams, all compiled into the fast runner:
 role, label, AXPress enabled and disabled, 40pt heights), checks build.sh's
 launch-smoke expectations against their smoke snapshots, and checks that the
 menu bar, sidebar and import identifiers the QA smokes press come from the real
-code. One cross-package scan stays in `UIAutomationSurfaceContractTests.swift`:
-every identifier the QA smokes press must exist somewhere in `Sources/`.
+code. The cross-package scan (every identifier the QA smokes press must exist
+somewhere in `Sources/`) now lives in `scripts/dev/check-ui-automation-contract.py`,
+with the Settings and Speakers click-flow identifiers.
 
 Deleted, because they guarded nothing:
 

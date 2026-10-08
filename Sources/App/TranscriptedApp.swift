@@ -65,6 +65,7 @@ private struct TranscriptedSettingsFallbackView: View {
 class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    let menuPopoverPresentation = MenuBarPopoverPresentation()
     var lastExternalApplication: NSRunningApplication?
     var hasPresentedInitialOnboarding = false
     let statusItemUpdateBadge = NSView(frame: .zero)
@@ -486,9 +487,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }
-            appState.contextCapture.onPasteLastDictation = { [weak self] in
-                self?.pasteLastDictationFromSettings()
-            }
             SpeakerNamingSheet.shared.island = notchIsland
             // Only the island lists voices named on their own ("who was on
             // the call"), so only then does a meeting with nobody to ask get
@@ -501,7 +499,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
             }
             SpeakerNamingSheet.shared.observe(
-                taskManager: meetingSession.taskManager,
+                requests: meetingSession.speakerNamingRequests,
                 meetingCaptureActive: meetingSession.$state
                     .map { MeetingSessionStateMachine.isCaptureSessionActive($0) }
                     .eraseToAnyPublisher()
@@ -765,14 +763,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             dictating: statusItemDictationRecording,
             updateTooltip: statusItemUpdateTooltip
         )
-    }
-
-    func closePopover() {
-        menuPanelController.prepareForClose()
-        popover?.performClose(nil)
-        if popover?.contentViewController !== menuPanelController {
-            popover?.contentViewController = nil
-        }
     }
 
     // MARK: - Menu Bar Commands

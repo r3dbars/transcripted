@@ -171,7 +171,7 @@ struct SpeakerVoiceToNameRow: View {
         )
     }
 
-    private var nameSuggestions: [SpeakerIdentityOption] {
+    private var nameSuggestions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(
             from: model.profiles,
             excluding: group.representative.speakerId
@@ -360,6 +360,8 @@ struct SpeakerPersonRow: View {
     @Binding var expandedPersonID: UUID?
 
     @State private var nameDraft: String = ""
+    @State private var renameErrorMessage: String?
+    @State private var isSavingRename = false
     @State private var expansionClipDuration = SpeakerClipProgressBar.fallbackDuration
     @State private var showDeleteConfirmation = false
     @State private var pendingMergeTarget: SpeakerProfile?
@@ -571,6 +573,9 @@ struct SpeakerPersonRow: View {
 
             expansionPlayerRow
             expansionRenameRow
+            if let renameErrorMessage {
+                Text(renameErrorMessage).font(LibraryTokens.meta).foregroundStyle(LibraryTokens.attention)
+            }
         }
         .padding(16)
         .contentShape(Rectangle())
@@ -600,10 +605,12 @@ struct SpeakerPersonRow: View {
         .padding(.bottom, 8)
         .onAppear {
             nameDraft = profile.displayName ?? ""
+            renameErrorMessage = nil
             if let clipURL = model.clipURL(for: profile.id) {
                 expansionClipDuration = probeClipDuration(clipURL)
             }
         }
+        .onChange(of: nameDraft) { _, _ in renameErrorMessage = nil }
         .accessibilityIdentifier("transcripted.speakers.person.expansion")
     }
 
@@ -687,15 +694,23 @@ struct SpeakerPersonRow: View {
         }
     }
 
-    private var nameSuggestions: [SpeakerIdentityOption] {
+    private var nameSuggestions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(from: model.profiles, excluding: profile.id)
     }
 
     private func commitRename() {
-        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        model.renameFromEveryone(profile, to: trimmed)
-        expandedPersonID = nil
+        guard SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: nameDraft, saveInFlight: isSavingRename) else { return }
+        let submittedDraft = nameDraft
+        let trimmed = submittedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isSavingRename = true
+        renameErrorMessage = nil
+        model.renameFromEveryone(profile, to: trimmed) { [id = profile.id] didSave in
+            isSavingRename = false
+            let box = SpeakerEveryoneRenamePolicy.nameBox(afterSave: didSave, typed: nameDraft, submitted: submittedDraft)
+            renameErrorMessage = box.errorMessage
+            nameDraft = box.draft
+            if !box.isOpen, expandedPersonID == id { expandedPersonID = nil } // only this card
+        }
     }
 
     private var badge: String? {

@@ -40,14 +40,13 @@ import CoreAudio
 import Foundation
 import Synchronization
 
-/// The only state the copy's IO thread touches: three atomics, two counters
-/// and a preallocated filter.
+/// The only state the copy's IO thread touches: a few atomics and a
+/// preallocated filter.
 final class DictationMuffleRenderState {
     /// Below this input peak a cycle counts as quiet (-40 dBFS).
     static let quietPeak: Float = 0.01
 
-    let gateOpen = Atomic<Bool>(false)
-    let muffled = Atomic<Bool>(false)
+    let gate = DictationMuffleGate()
     let soundFlowing = Atomic<Bool>(false)
     let quietFrames = Atomic<Int>(0)
     /// outputTime - inputTime (sample frames) on the first cycle with sound.
@@ -69,11 +68,14 @@ final class DictationMuffleRenderState {
 private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputTime, output, outputTime, clientData in
     guard let clientData else { return noErr }
     let state = Unmanaged<DictationMuffleRenderState>.fromOpaque(clientData).takeUnretainedValue()
+    let gate = state.gate.snapshot()
     let peak = state.filter.pointee.render(
         input: input,
         output: output,
-        muffleTarget: state.muffled.load(ordering: .relaxed) ? 1 : 0,
-        gateTarget: state.gateOpen.load(ordering: .relaxed) ? 1 : 0
+        muffleTarget: gate.isMuffled ? 1 : 0,
+        gateTarget: gate.isOpen ? 1 : 0,
+        gateHoldFrames: gate.holdFrames,
+        gateFadeFrames: gate.fadeFrames
     )
     if peak > 0, !state.soundFlowing.load(ordering: .relaxed) {
         if inputTime.pointee.mFlags.contains(.sampleTimeValid),
@@ -88,6 +90,7 @@ private let dictationMuffleCopyIOProc: AudioDeviceIOProc = { _, _, input, inputT
     let firstBuffer = output.pointee.mBuffers
     let channels = Int(max(1, firstBuffer.mNumberChannels))
     let frames = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channels)
+    state.gate.consume(gate, frames: frames)
     if peak < DictationMuffleRenderState.quietPeak {
         state.quietFrames.wrappingAdd(frames, ordering: .relaxed)
     } else {
@@ -190,21 +193,38 @@ final class DictationMuffleRoute {
     /// time, corrected by the aggregate's input safety offset and latency and
     /// the drift compensator. Matched the measured delay exactly in the lab.
     var copyDelayNanos: UInt64? {
+        copyDelayFrames.map { UInt64(Double($0) / sampleRate * 1_000_000_000) }
+    }
+
+    private var copyDelayFrames: Int? {
         guard let state else { return nil }
         let raw = state.takeUnretainedValue().rawDelayFrames.load(ordering: .relaxed)
         guard raw != Int.min else { return nil }
-        let frames = max(0, raw + delayCorrectionFrames)
-        return UInt64(Double(frames) / sampleRate * 1_000_000_000)
+        return max(0, raw + delayCorrectionFrames)
     }
 
-    /// Opens the copy's gate and mutes the originals in the same step.
+    /// How long the last cut held the copy back, in milliseconds.
+    var lastHoldMilliseconds: Double {
+        Double(lastSplice.holdFrames) / sampleRate * 1_000
+    }
+
+    /// How the copy came in at the last cut.
+    private(set) var lastSplice = DictationMuffleSplice.plain
+
+    /// Opens the copy's gate and mutes the originals in the same step. On a
+    /// lagging route the gate holds shut, then swells in as the copy catches
+    /// up to where the originals stopped (DictationMuffleSplice).
     /// Returns false (and leaves the originals playing) if the mute can't
     /// start.
     func cut() -> Bool {
         guard let state, let cutProc else { return false }
-        state.takeUnretainedValue().gateOpen.store(true, ordering: .relaxed)
+        let render = state.takeUnretainedValue()
+        lastSplice = DictationMuffleSplice.atCut(copyDelayFrames: copyDelayFrames, sampleRate: sampleRate)
+        // Publish gate, hold, fade and muffle together. A callback can use
+        // the old command or the new one, never a mixture of both.
+        render.gate.cut(lastSplice)
         guard AudioDeviceStart(cutDevice, cutProc) == noErr else {
-            state.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
+            render.gate.handBack()
             return false
         }
         cutRunning = true
@@ -212,14 +232,15 @@ final class DictationMuffleRoute {
     }
 
     func setMuffled(_ muffled: Bool) {
-        state?.takeUnretainedValue().muffled.store(muffled, ordering: .relaxed)
+        state?.takeUnretainedValue().gate.setMuffled(muffled)
     }
 
     /// Unmutes the originals and closes the copy's gate. The originals come
     /// back first, so the copy fades out over them instead of leaving a gap.
     func handBack() {
         stopCut()
-        state?.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)
+        guard let render = state?.takeUnretainedValue() else { return }
+        render.gate.handBack()
     }
 
     /// Stops and destroys everything, unmuting first. Safe to call twice.

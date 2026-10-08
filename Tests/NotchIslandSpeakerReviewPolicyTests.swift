@@ -249,8 +249,17 @@ func testNotchIslandSpeakerReviewPolicy() {
             (Policy.hardCapSeconds(recognizedOnly: true) ?? 0) > Policy.laterSeconds,
             "the cap never cuts the on-screen Later ring short"
         )
-        assertTrue(Policy.hardCapClosesNow(hovered: false), "nobody on it: it closes at the cap")
-        assertFalse(Policy.hardCapClosesNow(hovered: true), "the pointer on it holds the close until it leaves")
+        assertTrue(Policy.hardCapClosesNow(hovered: false, answering: false), "nobody on it: it closes at the cap")
+        assertFalse(Policy.hardCapClosesNow(hovered: true, answering: false), "the pointer on it holds the close until it leaves")
+    }
+
+    runSuite("The who-was-on-the-call cap never closes a review while someone is answering") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertFalse(
+            Policy.hardCapClosesNow(hovered: false, answering: true),
+            "a \"Not Taylor?\" box was opened: the pointer leaving must not close it mid-answer"
+        )
+        assertFalse(Policy.hardCapClosesNow(hovered: true, answering: true), "still answering with the pointer on it")
     }
 
     runSuite("A correction on a recognized voice reports that voice's match") {

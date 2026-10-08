@@ -22,6 +22,16 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(Set(observation.properties.keys), AgentCaptureQueryTelemetryPolicy.requiredProperties)
     }
 
+    /// The app-side allowlist (`AnalyticsEventPolicy` for `agent_capture_query_observed`) is
+    /// asserted against this same literal in the root AnalyticsEventPolicyTests suite. This
+    /// package can't import the app, so keep both lists identical when changing either.
+    func testAllowedPropertiesMirrorTheAppAnalyticsAllowlist() {
+        XCTAssertEqual(
+            AgentCaptureQueryTelemetryPolicy.allowedProperties,
+            ["app_version", "build_channel", "build_revision", "client_family", "capture_kind", "latency_bucket", "result", "result_count_bucket", "source_count_bucket", "tool_kind"]
+        )
+    }
+
     func testTerminalResultTaxonomyStaysCoarseAndAllowlisted() throws {
         for result in AgentCaptureQueryResult.allCases {
             let observation = AgentCaptureQueryObservation(

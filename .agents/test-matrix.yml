@@ -185,6 +185,17 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/onboarding.sh"
 
+  # Accessibility identifiers the QA smokes and build.sh's launch smoke press
+  # must still be declared in the app (was Tests/UIAutomationSurfaceContractTests.swift).
+  - paths:
+      - "Sources/**"
+      - "Tools/TranscriptedQA/Sources/**"
+      - "scripts/entrypoints/build.sh"
+      - "scripts/dev/check-ui-automation-contract.py"
+    checks:
+      - "python3 scripts/dev/check-ui-automation-contract.py --self-test"
+      - "python3 scripts/dev/check-ui-automation-contract.py"
+
   # The daily audio script, the issue 500 QA doc and the smoke source lists must
   # agree (was Tests/AudioAutomationCoverageContractTests.swift).
   - paths:
@@ -223,6 +234,18 @@ rules:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
 
+  # QA harness permission-state contract: the CLI command, the bench ordering,
+  # and the docs/gates that say permission blockers are INCOMPLETE must agree.
+  - paths:
+      - "Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift"
+      - "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PermissionState.swift"
+      - "scripts/ops/transcripted-qa-bench.sh"
+      - "docs/qa-test-bench.md"
+      - ".agents/qa-gates.yml"
+      - "scripts/dev/check-qa-harness-contract.py"
+    checks:
+      - "python3 scripts/dev/check-qa-harness-contract.py --self-test"
+      - "python3 scripts/dev/check-qa-harness-contract.py"
   # Synced copies: CaptureLibraryPathSafety.swift lives as three real files, one
   # per build unit that can't share a module. They must stay byte-identical.
   - paths:
@@ -736,7 +759,7 @@ rules:
       - "python3 scripts/test_speaker_autoresearch.py"
       - "bash build-deps.sh --force"
       - "swift build --package-path Tools/SpeakerEvalHarness"
-      - "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test"
+      - "bash scripts/dev/speaker-eval-self-test.sh"
 
   - paths:
       - "scripts/hillclimb/**"

@@ -157,7 +157,15 @@ extension TranscriptedAppDelegate {
         trackMenuBarOpened(entrypoint: entrypoint)
         popover.contentViewController = menuPanelController
         popover.contentSize = menuPanelController.preferredContentSize
-        MenuBarPopoverPresentation.show(popover, relativeTo: button)
+        menuPopoverPresentation.show(popover, relativeTo: button)
+    }
+
+    func closePopover() {
+        menuPanelController.prepareForClose()
+        if let popover { menuPopoverPresentation.close(popover) }
+        if popover?.contentViewController !== menuPanelController {
+            popover?.contentViewController = nil
+        }
     }
 
     private func trackMenuBarOpened(entrypoint: String) {

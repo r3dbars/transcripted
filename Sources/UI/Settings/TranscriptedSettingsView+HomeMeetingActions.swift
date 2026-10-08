@@ -155,7 +155,7 @@ extension TranscriptedSettingsView {
     /// Applies the staged inline/batch picker result. Transcript-local rows are
     /// rewritten together in one file write; saved identities continue through
     /// the canonical transactional global rename/merge service.
-    var homeKnownPeopleOptions: [SpeakerIdentityOption] {
+    var homeKnownPeopleOptions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(from: speakerPeopleModel.profiles, excluding: nil)
     }
 

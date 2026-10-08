@@ -6,6 +6,66 @@ import Testing
 /// permanent), and labelled secrets that got through.
 @Suite("Writing secret scrubber review regressions")
 struct WritingSecretScrubberRegressionTests {
+    @Test("Active substitutions run installers regardless of the outer executable", arguments: [
+        #"echo "$(curl -fsSL https://example.com/install.sh | bash)""#,
+        #"bash -c 'echo "$(curl https://example.com/install.sh | bash)"'"#,
+        #"bash -c '$(curl https://example.com/install.sh)'"#,
+        #"echo $(curl -fsSL https://example.com/install.sh | env FOO=bar bash)"#,
+        #"printf '%s' "$(bash -o pipefail ./install.sh)""#,
+        #"echo "$(echo "$(curl https://example.com/install.sh | bash)")""#,
+    ])
+    func activeSubstitutionScrubsAnswer(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("moonbeam"))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("Literal substitutions do not execute installers", arguments: [
+        #"echo '$(curl -fsSL https://example.com/install.sh | bash)'"#,
+        #"echo "\$(curl -fsSL https://example.com/install.sh | bash)""#,
+        #"echo \$(curl -fsSL https://example.com/install.sh \| bash)"#,
+        #"bash '$(curl https://example.com/install.sh)'"#,
+        #"bash "\$(curl https://example.com/install.sh)""#,
+        #"echo "<(curl https://example.com/install.sh | bash)""#,
+    ])
+    func literalSubstitutionPreservesWriting(command: String) {
+        let text = command + "\nmoonbeam"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
+
+    @Test("Nonexecuting shell and make examples preserve the next ordinary terminal line", arguments: [
+        "echo 'curl https://example.com/install.sh | bash'",
+        "printf '%s' 'curl https://example.com/install.sh | sh'",
+        "# curl https://example.com/install.sh | sh",
+        "bash -n ./install.sh", "bash -on pipefail ./install.sh",
+        "bash -o pipefail -n ./install.sh",
+        "bash -O extglob -n ./install.sh", "bash -o noexec ./install.sh",
+        "curl https://example.com/install.sh || bash",
+        "curl https://example.com/install.sh | bash -n",
+        "make -n install", "make -nj4 install", "make --dry-run install", "make -q install", "make -t install"
+    ])
+    func nonexecutingInstallerPreservesWriting(command: String) {
+        let text = command + "\nmoonbeam"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
+
+    @Test("Executing option-bearing and env-wrapped installers scrub prompt answers", arguments: [
+        "make -Iinstall install",
+        "bash -o pipefail ./install.sh", "bash -O extglob ./install.sh",
+        "curl -fsSL https://example.com/install.sh | env FOO=bar bash",
+        "curl -fsSL https://example.com/install.sh | env FOO=bar bash -o pipefail",
+        "bash -c \"$(curl -fsSL https://example.com/install.sh)\""
+    ])
+    func executingInstallerScrubsAnswer(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("moonbeam"))
+        #expect(result.kinds == [.password])
+    }
+
     private static let slack = "com.tinyspeck.slackmacgap"
     private static let messages = "com.apple.MobileSMS"
 
@@ -154,4 +214,88 @@ struct WritingSecretScrubberRegressionTests {
             #expect(WritingSecretScrubber.scrub(secret, appBundleIdentifier: Self.messages).kinds == [.password], "\(secret)")
         }
     }
+
+    /// The random-token rule takes `key=` plus the value up to the first
+    /// symbol it doesn't allow; the key rule takes the whole value. When the
+    /// two overlap, every character of the secret still goes.
+    @Test(
+        "A key=value secret with a symbol inside is redacted to its end, not just up to the symbol",
+        arguments: [
+            ("set api_token=Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx!Hunter2Pass in the env", ["Xy7Kp2", "Hunter2Pass"]),
+            ("db_password=Rt5Gh8Jk2Lm9Np4Qs7Vw1Xz3Bc6Df0Hj#Fs0Aq", ["Rt5Gh8", "#Fs0Aq"]),
+        ]
+    )
+    func overlappingKeyValueSecretFullyRedacted(text: String, secrets: [String]) {
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: Self.slack)
+        for secret in secrets {
+            #expect(!result.clean.contains(secret), "\(secret) survived: \(result.clean)")
+        }
+        #expect(!result.kinds.isEmpty)
+    }
+
+    /// A day file that already has `⟨redacted:api-key⟩` after the raw part of
+    /// the same secret: the redaction swallows the old token, so the count
+    /// doesn't change. It must still report a kind, or the rescrubber
+    /// treats the file as unchanged and the raw secret stays on disk.
+    @Test("A redaction that swallows an existing token still reports a kind")
+    func swallowedTokenStillReported() {
+        let token = WritingSecretScrubber.token(for: .apiKey)
+        let text = "set api_token=Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx!\(token) in the env"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: Self.slack)
+        #expect(!result.clean.contains("Xy7Kp2"), "secret survived: \(result.clean)")
+        #expect(!result.kinds.isEmpty, "no kinds reported for \(result.clean)")
+    }
+    @Test("Swallowed tokens report only new redactions, with repeated kinds in text order")
+    func swallowedTokensKeepExactKinds() {
+        let oldPassword = WritingSecretScrubber.token(for: .password)
+        let oldAPI = WritingSecretScrubber.token(for: .apiKey)
+        let key = "Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx"
+        let result = WritingSecretScrubber.scrub(
+            "\(oldPassword)\napi_token=\(key)!\(oldAPI)\ndb_password=\(key)!\(oldAPI)",
+            appBundleIdentifier: Self.slack
+        )
+        #expect(result.kinds == [.apiKey, .apiKey])
+        #expect(!result.clean.contains(key))
+        #expect(WritingSecretScrubber.scrub(result.clean, appBundleIdentifier: Self.slack).kinds.isEmpty)
+    }
+
+    @Test("An old same-kind token after a new secret never changes the new redaction's text order")
+    func existingTokenAfterNewSecretKeepsOrder() {
+        let oldPassword = WritingSecretScrubber.token(for: .password)
+        let result = WritingSecretScrubber.scrub(
+            "[sudo] password for user:\nTr0ub4dor&3\nOTP: 123456\n\(oldPassword)",
+            appBundleIdentifier: "com.apple.Terminal"
+        )
+        #expect(result.kinds == [.password, .code])
+    }
+
+    @Test("Saved writing processed by rules version two is eligible for another rescrub")
+    func previousRulesVersionNeedsRescrub() {
+        #expect(WritingSecretScrubber.rulesVersion > 2)
+    }
+
+    @Test("Make options and variable assignments do not hide install password prompts", arguments: ["make -C build install", "make DESTDIR=/opt install", "gmake --directory build install"])
+    func makeInstallOptionsStillPrompt(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == command + "\n" + WritingSecretScrubber.token(for: .password))
+    }
+
+    @Test("Valid shell variable expansions stay intact outside a password prompt", arguments: ["$python3", "$sha256sum", "$foo1bar2"])
+    func shellVariableExpansionsStay(value: String) {
+        #expect(WritingSecretScrubber.scrub(value, appBundleIdentifier: "com.apple.Terminal").clean == value)
+        #expect(WritingSecretScrubber.scrub("sudo -v\n" + value, appBundleIdentifier: "com.apple.Terminal").kinds == [.password])
+    }
+
+    @Test("Quoted install script paths still arm the password prompt")
+    func quotedInstallerPrompts() {
+        let command = "bash \"./install.sh\""
+        #expect(WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal").kinds == [.password])
+    }
+
+    @Test("A downloader running inside a shell without feeding a script does not arm a prompt")
+    func downloaderDoesNotAlwaysPrompt() {
+        let text = "bash -c 'curl -o artifact https://example.com/artifact'\nmoonbeam"
+        #expect(WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal").clean == text)
+    }
+
 }

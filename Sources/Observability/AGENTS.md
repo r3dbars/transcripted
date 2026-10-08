@@ -1,128 +1,83 @@
-# Observability Directory
+# Observability
 
-## What This Does
+Module `Observability` in `.agents/modules.json`. It owns local logs, diagnostics, crash reporting (Sentry), anonymous analytics (PostHog), and Sparkle update plumbing. May depend on Support and Core `core-vocab`. Every other module may report into it. Sink map, config and retention: `docs/observability.md`; taxonomy and privacy rules: `docs/privacy-first-observability.md`.
 
-This directory contains the app's logging, diagnostics, crash reporting,
-anonymous analytics, and Sparkle update plumbing.
+## Invariants
 
-## Key Files
-
-- `AppLogSink.swift` — developer-facing debug log writer (in-app debug panel + `debug.log`); see `docs/observability.md` for how this relates to `TranscriptedCore`'s `AppLogger`
-- `EventReporter.swift` — structured event capture
-- `ObservabilityEvent.swift` — shared structured event payload used by local event logging and derived reliability packets
-- `LocalObservabilityPayloadSanitizer.swift` — redacts local event messages and context before disk writes
-- `ReliabilityPacketRecorder.swift` — writes privacy-safe `reliability.jsonl` packets for important dictation, meeting, and runtime outcomes so support feedback can include failure shape without raw audio or transcript data
-- `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records
-- `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
-- `RuntimeDiagnostics.swift` — app runtime heartbeat, dirty-shutdown detection, and active session stage tracking for force quits / silent exits
-- `RuntimeDiagnosticsStore.swift` — JSON marker persistence and privacy-safe dirty-shutdown context builder
-- `RuntimeDiagnosticsContextWriter.swift` — serial background delivery of runtime context to Sentry; preference reads and scope mutation must not block the main-thread heartbeat
-- `RuntimeDiagnosticsMarkerWriter.swift` — serial off-main writer for the on-disk runtime marker: heartbeat writes coalesce (latest wins); `writeNow` is the synchronous path for launch, session stages and clean shutdown
-- `CrashReporter.swift` — crash reporting setup
-- `CrashReporterPrivacyOptions.swift` — the six Sentry SDK switches (no default PII, no auto sessions, no network breadcrumbs, zero breadcrumbs, no stack traces, no failed-request capture) CrashReporter applies before `SentrySDK.start`; `Sentry.Options` conforms to its protocol so tests check the values on a fake
-- `SupportDiagnosticsBundle.swift` — privacy-safe support summary used for feedback emails and manual diagnostic events, including recent coarse reliability packet summaries
-- `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
-- `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
-- `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog (sends nothing when `AutomatedLaunchEnvironment` is active)
-- `AnalyticsActiveDay.swift` — `app_active_day`, one anonymous "app is running" event per local day from the reporter's minute timer, so idle installs can be told apart from quit or deleted ones
-- `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`; also holds `AnalyticsEventForwardingPolicy`, the short table of local `EventReporter` events (today only the pinned dictation mic's `pinned_microphone_*` lifecycle) that `EventReporter.capture` also tracks in PostHog with bounded, rebuilt properties
-- `RetentionTelemetry.swift` — first-observed onboarding and per-workflow saved-value milestones; local baselines, coarse elapsed buckets, no inferred installation date
-- `ProductUsageTelemetry.swift` — explicit navigation and terminal saved-result outcomes with typed, bounded properties
-- `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
-- `AgentSetupLifecycleTelemetry.swift` — bounded connect lifecycle telemetry for agent setup, verification, retries, and repair outcomes
-- `FeatureDiscoveryTelemetry.swift` — tracks which Settings features (agent setup, capture library, permissions, speaker review, support, update settings) a user has already discovered, keyed off a shared `settingsFeatureDiscovered.` preference prefix
-- `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
-- `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
-- `TelemetryContext.swift` — shared metadata contract: `enrich(event:properties:)` fills app version, build revision, OS major, session/correlation UUIDs, categorical device classes, and permission booleans so only UUIDs and categorical state cross the reporting boundary
-- `InstallIdentity.swift` — app-generated anonymous install id (the existing PostHog UUID key), first-launch day, and install traits; never derived from hardware, account, email, or content
-- `UsageHealthStore.swift` — bounded `UserDefaults` usage/failure ledger populated from event enums only (never scans captures or logs); feeds the daily usage digests `AnalyticsReporter` enqueues and the recent-failures list in support diagnostics
-- `UsageHealthModels.swift` — `UsageFailure`, `UsageDay`, `UsageHealthSnapshot`, and `UsageDigest` value types for that store
-- `DictationPasteRetryTelemetry.swift` — tracks the `dictation_paste_retry_completed` PostHog event when a user retries a failed/copied paste, bucketing the outcome and copy reason
-- `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome; takes a `track` closure (default `AnalyticsReporter.track`) so tests record the events
-- `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
-- `ObservabilityLogRotation.swift` — rename-based, O(1) rotation for append-only JSONL observability logs once they exceed a size threshold; keeps one rotated generation
-- `ObservabilityTextRedactor.swift` — app-specific adapter over TranscriptedCore's generic `PrivacyTextRedactor`, preserving the existing observability path-boundary profile for support-facing and diagnostic strings
-- `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
-- `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
-- `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` payload mechanics used by all three payload sanitizers (Sentry, Analytics, and the on-disk `LocalObservabilityPayloadSanitizer`) while each destination keeps its own length cap and sensitive-key list
-- `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment (no DSN when `AutomatedLaunchEnvironment` is active)
-- `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
-- `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
-- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked; also holds `UpdateAttentionPolicy` (when the orange update badge shows) and `BackgroundUpdateDeferralPolicy` (when Sparkle's background download waits: busy Mac, hotspot, Low Data Mode)
-- `UpdateInstallDetection.swift` — decides on launch whether this is the first launch of a newer version, for `update_installed` and its `install_kind` (`restart`, `quit`, `unattributed`)
-
-## Current Notes
-
-- Treat this directory as shared infrastructure for the current dictation + meetings app
-- Sparkle is the live in-app update path on `main`; the older beta DMG self-update flow is no longer part of the app target
-- `LockedFileAppender` is the canonical append path for local debug and JSONL logs. Keep concurrent file writes funneled through it so app and helper processes do not splice records together.
-- Do not assume older draft/style/analysis event flows are still active just because they appear in historical docs or event logs
-- `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
-- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` disables `app.jsonl` writes for test and smoke runs so local production logs stay clean
-- Sentry runtime config is resolved by `SentryRuntimeConfiguration` from `Info.plist` (`TranscriptedSentryDSN`, `TranscriptedSentryEnvironment`, `TranscriptedSentryReleasePrefix`) or process environment (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_DIST`; app-hang tracking via `TranscriptedSentryAppHangTrackingEnabled` or `SENTRY_ENABLE_APP_HANG_TRACKING`), and crash reports must stay scrubbed of transcript/audio/title/path data
-- `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
-- Shipped builds should report releases as `transcripted@<CFBundleShortVersionString>` and dist as `CFBundleVersion`; release packaging registers that Sentry release explicitly through `scripts/release/register-sentry-release.sh`
-- PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
-- New analytics events should be added to `Resources/analytics-events.psv`; new reviewed non-bucket property names should be added to `Resources/analytics-reviewed-properties.psv`; run `python3 scripts/ops/normalize-analytics-taxonomy.py --check` after edits or union merges.
-- Activation analytics should route through `ActivationTelemetry` so artifact action, agent prompt/setup, and saved-recent artifact return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
-- `dictation_zombie_recovery_finished` is the single PostHog terminal event for each zombie-engine attempt. Keep its trigger, stage, result, and route fields categorical; raw device labels and exact sample counts are forbidden.
-- `AnalyticsEventForwardingPolicy` is the only path from an `EventReporter` event to PostHog other than `reliability_failure_observed`. It reads the caller's own context (never the merged engine-state context), checks every value against a fixed set or buckets it, and maps anything unexpected to `unknown`. Its PostHog names are dispatched through a variable, so `scripts/dev/check-analytics-emitters.py` cannot see them; `Tests/AnalyticsEventForwardingPolicyTests.swift` pins that each one is registered. Do not also add direct `AnalyticsReporter.track` calls for those events or they will double count.
-- Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
-- An allowlisted `.error` always counts in PostHog as `reliability_failure_observed`. A caller can keep one occurrence out of Sentry with `forwardToSentry: false` on `DiagnosticsTrail.record` / `EventReporter.capture` (it sets `ObservabilityEventCapturePlan.forwardsToSentry`); level, local log, reliability packet and PostHog are unchanged. Today only the dictation early-release cancel uses it, for tapped Push to Talk keys. Use it for occurrences the user wasn't shown as a failure, not to quiet a noisy real one.
-- `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
-- Runtime Sentry context updates run on a serial utility queue. Read the crash-reporting preference when applying each update, so queued work respects opt-out. The scope can lag during a preference-service stall. Only the periodic on-disk heartbeat write is queued off main on `RuntimeDiagnosticsMarkerWriter` (serial, in order, latest wins). The launch marker, every session stage and clean shutdown are written synchronously with `writeNow`, behind anything already queued, so crash evidence is never a stage behind. The heartbeat Timer stays on main so `heartbeat_age_bucket` still shows main-thread hangs. `RuntimeDiagnosticsStore.save` writes a 0600 temp file with O_EXCL, then renames it (no fsync, the same durability as the old `.atomic` write), and creates the 0700 folder only when it's missing.
-- `ReliabilityPacketRecorder` derives packets from observability events (`EventReporter.capture` calls `ReliabilityPacketRecorder.record` directly with the **raw** entry — see the sink map in `docs/observability.md`). It must keep receiving the raw entry, not the locally-blanked copy: the recorder positive-allowlists every key and redacts every value itself, and feeding it the blanked copy shipped `[redacted-sensitive-value]` in support bundles and made the `recovered` outcome unreachable. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
-- `LocalObservabilityPayloadSanitizer.categoricalSafeKeys` is the exact-key escape from the substring blanking for coarse device-class enums, booleans, and audio-signal numbers (`input_device_class`, `audio_has_signal`, `audio_peak`…). The escape only applies when the value still looks categorical; a raw device label under one of those keys stays redacted. Add a key there only when its value is an enum, boolean, or number by construction.
-- `LocalObservabilityPayloadSanitizer.measurementKeySuffixes` is the second local-only escape: a bare number (optionally signed decimal, no exponent, units, or grouping) under a `_ms`/`_s`/`_hz`/`_bytes`/`_count`-style key survives the substring blanking so dictation stage timings stay readable in `events.jsonl`. Anything non-numeric under those keys is still redacted. Sentry and Analytics sanitize `mergedContext` separately and are unaffected by either escape.
-- Crash reports carry `build_revision` and `build_channel` as searchable tags (via `SentryPayloadSanitizer.crashRuntimeTagKeys` and the runtime diagnostics context); release name and dist only carry the version number.
-- `dictation_started` carries `start_latency_bucket` (request to recording) and both dictation start events carry `first_since_launch`, so cold-start dictation speed is visible without raw timings.
-- 1.1.62 capture telemetry: meeting events carry the call-audio tap's upkeep (`system_*_reconnects_bucket`, `system_rebuild_retries_bucket`, `system_sleep_count_bucket`, `system_silent_unresolved`, `system_end_reason`) and `mic_format_rebuilds_bucket`, all built from `AudioPipelineDiagnosticsSnapshot` in `meetingCaptureAnalyticsProperties`. `meeting_recording_started` adds `mic_only_by_choice`, `system_permission_check` and `models_warm`; `meeting_system_audio_prompt_answered` records the pre-start system-audio prompt (its `outcome` splits "Turn It On" with no macOS answer, `turn_on_without_macos_answer`, from a mic-only pick before macOS answered, `mic_only_before_macos_answer`; in 1.1.62 both were `mic_only_before_macos_answer`); a mic-only-by-choice stop reports capture_outcome `mic_only_by_choice`, and its `system_file_present`/`system_stream_present` stay false because the silent stand-in track isn't captured audio; `launch_models_warmed` fires once per launch.
-- `launch_models_warmed` carries launch speed from `LaunchTimingTelemetry`: process start to the menu bar icon, the shortcuts being registered (not yet usable before Accessibility is granted) and the warmup start, then each warmup step (a first-run model download counts), rounded to 10 ms, plus `login_launch`. The marks are set once per process, so wake and model-switch rewarms don't overwrite them.
-- Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
+- **Nothing sensitive leaves the device.** No transcript text, audio, titles, paths, device labels, speaker names or emails, in any sink. Sentry and PostHog get allowlisted events with bucketed or categorical values, not raw payloads.
+- **Harness launches send nothing.** With `AutomatedLaunchEnvironment` active, `AnalyticsReporter` sends nothing and `SentryRuntimeConfiguration` returns no DSN. `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` stops `app.jsonl` writes for tests and smokes.
+- **Concurrent file writes go through `LockedFileAppender`** (`flock`), so app and helper processes never splice records.
+- **Don't assume old draft/style/analysis event flows are live** just because they show up in old docs or event logs.
 
 ## Adding an analytics event or property
 
-The full checklist is "Analytics taxonomy review checklist" in `docs/privacy-first-observability.md`. Two things it doesn't spell out, both of which lose data silently:
+Checklist: "Analytics taxonomy review checklist" in `docs/privacy-first-observability.md`. Add the event to `Resources/analytics-events.psv`, and any new reviewed non-bucket property name to `Resources/analytics-reviewed-properties.psv`. Two traps lose data silently:
 
-- **Key names are dropped by substring.** Any key containing `audio`, `authorization`, `bearer`, `bundle`, `credential`, `dsn`, `email`, `error`, `file`, `name`, `password`, `path`, `speaker`, `source_app`, `secret`, `text`, `title`, `token`, `transcript`, or `url` (`PayloadSanitizationCore.baseSensitiveKeyFragments`) never leaves the device. Analytics has no escape list, so `error_kind` or `audio_route_kind` just vanishes. Sentry also drops `context` and `identifier`, except keys in `SentryPayloadSanitizer.explicitlySafeKeys`.
-- **Some values are validated.** The categorical keys listed in `AnalyticsPayloadSanitizer.sanitizeProperties` (`failure_kind`, `trigger`, `capture_outcome`, ...) must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$` and be at most 80 characters, and `session_id`, `correlation_id`, `install_uuid` must be UUIDs, or the value is dropped.
+- **Key names are dropped by substring.** Any key containing `audio`, `authorization`, `bearer`, `bundle`, `credential`, `dsn`, `email`, `error`, `file`, `name`, `password`, `path`, `speaker`, `source_app`, `secret`, `text`, `title`, `token`, `transcript` or `url` (`PayloadSanitizationCore.baseSensitiveKeyFragments`) never leaves the device. Analytics has no escape list, so `error_kind` or `audio_route_kind` just vanishes. Sentry also drops `context` and `identifier`, except keys in `SentryPayloadSanitizer.explicitlySafeKeys`.
+- **Some values are validated.** The categorical keys in `AnalyticsPayloadSanitizer` (`failure_kind`, `trigger`, `capture_outcome`, ...) must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$` and be at most 80 characters; `session_id`, `correlation_id`, `install_uuid` must be UUIDs. Otherwise the value is dropped.
 
-Emit with a literal event name (`AnalyticsReporter.track("event_name", ...)`) so `python3 scripts/dev/check-analytics-emitters.py` can see it, and run it plus `python3 scripts/ops/normalize-analytics-taxonomy.py --check` and `python3 scripts/dev/check-telemetry-keys.py` (all work on Linux; `bash scripts/dev/linux-checks.sh` runs them together).
+Emit with a literal name (`AnalyticsReporter.track("event_name", ...)`) so `python3 scripts/dev/check-analytics-emitters.py` sees it. Then run it, `python3 scripts/ops/normalize-analytics-taxonomy.py --check` (also after union merges) and `python3 scripts/dev/check-telemetry-keys.py`. All work on Linux; `bash scripts/dev/linux-checks.sh` runs them together. Route activation events (artifact actions, agent prompt/setup, saved-recent return proxy) through `ActivationTelemetry` so names, targets and buckets stay stable.
+
+## Rules by area
+
+**Event routing**
+- `EventReporter.capture` builds an `ObservabilityEventCapturePlan` (no side effects, fast-tested) and runs it: local `events.jsonl`, reliability packet, PostHog forward, Sentry.
+- Non-fatal Sentry forwarding is allowlisted (`SentryEventPolicy`). A new `.error` event is not automatically safe to send.
+- An allowlisted `.error` always counts in PostHog as `reliability_failure_observed`. `forwardToSentry: false` on `DiagnosticsTrail.record` / `EventReporter.capture` keeps one occurrence out of Sentry; level, local log, packet and PostHog are unchanged. Only the dictation early-release cancel uses it (`DictationEarlyReleaseCancelReport`, tapped Push to Talk keys). Use it for occurrences the user wasn't shown as a failure, never to quiet a noisy real one.
+- `AnalyticsEventForwardingPolicy` (in `AnalyticsEventPolicy.swift`) is the only path from an `EventReporter` event to PostHog besides `reliability_failure_observed`. It reads the caller's own context (never the merged engine-state context), checks every value against a fixed set or buckets it, and maps anything unexpected to `unknown`. Its PostHog names go through a variable, so `check-analytics-emitters.py` can't see them; `Tests/AnalyticsEventForwardingPolicyTests.swift` pins that each is registered. Don't also add a direct `AnalyticsReporter.track` for those events or they double count.
+- `dictation_zombie_recovery_finished` is the single terminal event per zombie-engine attempt. Keep trigger, stage, result and route categorical; no raw device labels or exact sample counts.
+
+**Reliability packets**
+- `ReliabilityPacketRecorder` must get the **raw** entry from `EventReporter.capture`, not the locally blanked copy. It positive-allowlists every key and redacts every value itself; feeding it the blanked copy shipped `[redacted-sensitive-value]` in support bundles and made the `recovered` outcome unreachable. Keep its context allowlist coarse and bucketed: no raw error text, transcript text, audio, paths, device names, titles, speaker names, emails, tokens or source app names.
+
+**Local sanitizer escapes (events.jsonl only)**
+- `LocalObservabilityPayloadSanitizer.categoricalSafeKeys` is an exact-key escape from substring blanking for device-class enums, booleans and audio-signal numbers (`input_device_class`, `audio_has_signal`, `audio_peak`...). It applies only while the value still looks categorical; a raw device label stays redacted. Add a key only when its value is an enum, boolean or number by construction.
+- `measurementKeySuffixes` is the second escape: a bare number (signed decimal, no exponent, units or grouping) under a `_ms`/`_s`/`_hz`/`_bytes`/`_count`-style key survives, so stage timings stay readable. Non-numeric values under those keys stay redacted.
+- Sentry and Analytics sanitize `mergedContext` separately and get neither escape.
+
+**Runtime diagnostics**
+- `RuntimeDiagnostics` writes only coarse state under app-owned state: no transcript text, audio, paths, device names, titles or speaker names.
+- Sentry context updates run on a serial utility queue (`RuntimeDiagnosticsContextWriter`). Read the crash-reporting preference when applying each update so queued work respects opt-out; the scope can lag during a preferences stall.
+- Only the periodic heartbeat write is queued off main, on `RuntimeDiagnosticsMarkerWriter` (serial, latest wins). The launch marker, every session stage and clean shutdown use `writeNow`, synchronously and behind anything queued, so crash evidence is never a stage behind. The heartbeat Timer stays on main so `heartbeat_age_bucket` shows main-thread hangs.
+- `RuntimeDiagnosticsStore.save` writes a 0600 temp file with `O_EXCL`, then renames (no fsync), and creates the 0700 folder only when missing.
+- Shutdown: `LocalEventShutdownFlush` awaits buffered events, then reliability packets, so Quit replies to AppKit with nothing left in memory.
+
+**Crash reporting (Sentry)**
+- `CrashReporterPrivacyOptions` holds the six SDK switches `CrashReporter` applies before `SentrySDK.start`: no default PII, no auto sessions, no network breadcrumbs, zero breadcrumbs, no stack traces, no failed-request capture. `Sentry.Options` conforms to its protocol so tests check values on a fake.
+- Config comes from `Info.plist` (`TranscriptedSentryDSN`, `TranscriptedSentryEnvironment`, `TranscriptedSentryReleasePrefix`, `TranscriptedSentryAppHangTrackingEnabled`) or env (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_DIST`, `SENTRY_ENABLE_APP_HANG_TRACKING`). Non-HTTPS DSNs are rejected, so an insecure override fails closed.
+- Shipped builds report release `transcripted@<CFBundleShortVersionString>` and dist `CFBundleVersion`; release packaging registers it with `scripts/release/register-sentry-release.sh`. `build_revision` and `build_channel` ride along as crash tags (`SentryPayloadSanitizer.crashRuntimeTagKeys`).
+- App-hang reports: `AppHangReportPolicy` keeps only freezes of 5+ seconds and drops any hang while a modal popup was showing (`AppHangPopupObserver` feeds the tracker), because a modal run loop looks like a freeze to Sentry's watchdog.
+- `UnrecognizedSelectorReason` keeps only safe receiver/selector tags, never instance pointers or trailing free text.
+
+**PostHog and telemetry shape**
+- Config: `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or env (`POSTHOG_API_KEY`, `POSTHOG_HOST`); hosts must be HTTPS.
+- `InstallIdentity` is app-generated and anonymous; never derive it from hardware, account, email or content. `TelemetryContext.enrich` adds version, build revision, OS major, session/correlation UUIDs, categorical device classes and permission booleans.
+- `UsageHealthStore` is a bounded `UserDefaults` ledger fed from event enums only. It never scans captures or logs.
+- `app_active_day` (`AnalyticsActiveDay`): one event per local day while running, so idle installs differ from quit ones.
+- `dictation_started` carries `start_latency_bucket`; both dictation start events carry `first_since_launch`.
+- `launch_models_warmed` fires once per launch with `LaunchTimingTelemetry` marks (process start to menu bar icon, shortcuts registered, warmup start, each warmup step, rounded to 10 ms) plus `login_launch`. Marks are set once per process, so wake and model-switch rewarms don't overwrite them. `MachineClassTelemetry` adds a coarse chip-family and memory class, no model identifier.
+- Meeting events carry the call-audio tap's upkeep (`system_*_reconnects_bucket`, `system_rebuild_retries_bucket`, `system_sleep_count_bucket`, `system_silent_unresolved`, `system_end_reason`) and `mic_format_rebuilds_bucket`, built from `AudioPipelineDiagnosticsSnapshot` in `meetingCaptureAnalyticsProperties`. `meeting_recording_started` adds `mic_only_by_choice`, `system_permission_check`, `models_warm`. `meeting_system_audio_prompt_answered` records the pre-start prompt; its `outcome` separates `turn_on_without_macos_answer` from `mic_only_before_macos_answer`. A mic-only-by-choice stop reports capture_outcome `mic_only_by_choice` with `system_file_present` / `system_stream_present` false, since the silent stand-in track isn't captured audio.
+- Update telemetry uses `UpdateFailureKind`, never ad hoc string parsing, so dashboards survive Sparkle wording changes. `UpdateInstallDetection` decides first launch of a newer version (`update_installed.install_kind`: `restart`, `quit`, `unattributed`).
+
+**Updates (Sparkle)**
+- Sparkle is the only in-app update path; the old beta DMG self-update is gone. `SparkleUpdaterController` is the live controller. `UpdateActionSafetyPolicy` blocks "check for updates" during capture or processing; `UpdateAttentionPolicy` decides the orange badge; `BackgroundUpdateDeferralPolicy` defers background downloads on a busy Mac, hotspot or Low Data Mode. Release flow: `docs/sparkle-updates.md`.
+
+## Where things are
+
+- Local logs and events: `AppLogSink` (`debug.log` plus in-app debug panel; how it differs from `TranscriptedCore`'s `AppLogger` is in `docs/observability.md`), `EventReporter`, `EventFileWriter` (actor; info events batch briefly, warnings and errors flush at once, per `EventFileWritePolicy`), `ObservabilityLogRotation` (rename-based, one rotated generation), `ObservabilityTextRedactor` (adapter over Core's `PrivacyTextRedactor`), `ObservabilityEvent`, `LockedFileAppender`, `DiagnosticsTrail`.
+- Sanitizers: `PayloadSanitizationCore` (shared `shouldDrop(key:)` and `redactAndCap`), `SentryPayloadSanitizer`, `AnalyticsPayloadSanitizer`, `LocalObservabilityPayloadSanitizer`. Policies: `SentryEventPolicy`, `AnalyticsEventPolicy`.
+- Reporters: `CrashReporter`, `CrashReportingPreferences`, `AnalyticsReporter`, `SentryRuntimeConfiguration`.
+- Support and runtime state: `SupportDiagnosticsBundle` (privacy-safe summary for feedback emails and manual diagnostic events, with coarse recent reliability packets), `ReliabilityPacketRecorder`, `RuntimeDiagnostics*`.
+- Telemetry helpers: `ActivationTelemetry`, `AgentSetupLifecycleTelemetry`, `FeatureDiscoveryTelemetry` (`settingsFeatureDiscovered.` prefix), `ProductUsageTelemetry`, `RetentionTelemetry`, `SpeakerRecognitionTelemetry` (buckets aligned with the matcher's thresholds), `DictationPasteRetryTelemetry`, `WorkflowRecoveryTelemetry` (takes a `track` closure so tests record), `UsageHealthModels`.
+- Updates: `SparkleUpdaterController`, `UpdateFailureKind`, `UpdateActionSafetyPolicy`, `UpdateInstallDetection`.
 
 ## Verification
-
-After changing observability code:
 
 ```bash
 bash build.sh --no-open
 bash run-tests.sh
 ```
 
-Relevant direct coverage:
+Direct coverage in `Tests/`: `Analytics{EventPolicy,EventForwardingPolicy,PayloadSanitizer,Reporter}Tests`, `SpeakerRecognitionTelemetryTests`, `ObservabilityPreferencesTests`, `Sentry{EventPolicy,PayloadSanitizer,RuntimeConfiguration}Tests`, `SupportDiagnosticsBundleTests`, `UnrecognizedSelectorReasonTests`, `Observability{TextRedactor,LogWriter,LogRotation}Tests`, `ReliabilityPacketRecorderTests`, `RuntimeDiagnosticsStoreTests`, `Update{FailureKind,ActionSafetyPolicy,InstallDetection}Tests`.
 
-- `Tests/AnalyticsEventPolicyTests.swift`
-- `Tests/AnalyticsEventForwardingPolicyTests.swift`
-- `Tests/AnalyticsPayloadSanitizerTests.swift`
-- `Tests/AnalyticsReporterTests.swift`
-- `Tests/SpeakerRecognitionTelemetryTests.swift`
-- `Tests/ObservabilityPreferencesTests.swift`
-- `Tests/SentryEventPolicyTests.swift`
-- `Tests/SupportDiagnosticsBundleTests.swift`
-- `Tests/SentryPayloadSanitizerTests.swift`
-- `Tests/SentryRuntimeConfigurationTests.swift`
-- `Tests/UnrecognizedSelectorReasonTests.swift`
-- `Tests/ObservabilityTextRedactorTests.swift`
-- `Tests/ObservabilityLogWriterTests.swift`
-- `Tests/ObservabilityLogRotationTests.swift`
-- `Tests/ReliabilityPacketRecorderTests.swift`
-- `Tests/RuntimeDiagnosticsStoreTests.swift`
-- `Tests/UpdateFailureKindTests.swift`
-- `Tests/UpdateActionSafetyPolicyTests.swift`
-- `Tests/UpdateInstallDetectionTests.swift`
-
-Useful files while testing:
-
-- `~/Library/Application Support/Transcripted/logs/debug.log`
-- `~/Library/Application Support/Transcripted/logs/events.jsonl`
-- `~/Library/Application Support/Transcripted/logs/reliability.jsonl` for privacy-safe outcome packets attached to support diagnostics
-- `~/Library/Application Support/Transcripted/logs/app.jsonl` for embedded `TranscriptedCore` JSONL logs and QA validation
+Files to read while testing, under `~/Library/Application Support/Transcripted/logs/`: `debug.log`, `events.jsonl`, `reliability.jsonl` (outcome packets attached to support diagnostics), `app.jsonl` (embedded `TranscriptedCore` logs, QA validation).

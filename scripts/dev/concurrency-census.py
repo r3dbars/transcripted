@@ -97,10 +97,15 @@ def run(log_text: str, mode: str, baseline_path: Path, allow_up_to: dict[str, in
     print(f"{'total':40} {sum(current.values()):>6} {sum(baseline.values()) if baseline else '-':>9}")
 
     if mode == "shrink":
-        if grew:
-            print("Refusing to shrink while these folders went up: " + ", ".join(grew))
+        # Shrink only ever lowers existing entries: it never adds a folder or raises a count.
+        if not baseline:
+            print("Refusing to shrink without a baseline; there is nothing to lower.")
             return 1
-        merged = {f: min(current.get(f, 0), baseline.get(f, current.get(f, 0))) for f in folders}
+        new_folders = [f for f in current if f not in baseline]
+        if grew or new_folders:
+            print("Refusing to shrink while these folders went up: " + ", ".join(grew + new_folders))
+            return 1
+        merged = {f: min(current.get(f, 0), baseline[f]) for f in baseline}
         save(baseline_path, {f: n for f, n in merged.items() if n > 0})
         print(f"Baseline updated: {baseline_path.relative_to(REPO_ROOT) if baseline_path.is_relative_to(REPO_ROOT) else baseline_path}")
         return 0
@@ -138,6 +143,14 @@ def self_test() -> None:
         save(base, {"Sources/Speech": 5, "Sources/UI": 1})
         assert run(log, "shrink", base) == 0
         assert load(base) == {"Sources/Speech": 2, "Sources/UI": 1}
+        # Shrink never adds a folder: Sources/UI isn't in the baseline, so it refuses and leaves the file alone.
+        save(base, {"Sources/Speech": 5})
+        assert run(log, "shrink", base) == 1
+        assert load(base) == {"Sources/Speech": 5}
+        # Shrink never creates a baseline from scratch.
+        missing = Path(tmp) / "missing.json"
+        assert run(log, "shrink", missing) == 1
+        assert not missing.exists()
     print("concurrency-census self-test passed")
 
 
