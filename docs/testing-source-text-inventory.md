@@ -209,8 +209,9 @@ New seams, all compiled into the fast runner:
 role, label, AXPress enabled and disabled, 40pt heights), checks build.sh's
 launch-smoke expectations against their smoke snapshots, and checks that the
 menu bar, sidebar and import identifiers the QA smokes press come from the real
-code. One cross-package scan stays in `UIAutomationSurfaceContractTests.swift`:
-every identifier the QA smokes press must exist somewhere in `Sources/`.
+code. The cross-package scan (every identifier the QA smokes press must exist
+somewhere in `Sources/`) now lives in `scripts/dev/check-ui-automation-contract.py`,
+with the Settings and Speakers click-flow identifiers.
 
 Deleted, because they guarded nothing:
 

@@ -181,6 +181,8 @@ fi
 
 # ---------------------------------------------------------------- build/source contracts
 check "build source lists" "python3 scripts/dev/check-build-source-lists.py"
+check "ui automation contract self-test" "python3 scripts/dev/check-ui-automation-contract.py --self-test"
+check "ui automation contract (identifiers the QA smokes press are declared in the app)" "python3 scripts/dev/check-ui-automation-contract.py"
 check "audio automation contract self-test" "python3 scripts/dev/check-audio-automation-contract.py --self-test"
 check "audio automation contract (daily audio script, issue 500 doc, smoke source lists agree)" "python3 scripts/dev/check-audio-automation-contract.py"
 check "duplicate declarations self-test" "python3 scripts/dev/check-duplicate-declarations.py --self-test"

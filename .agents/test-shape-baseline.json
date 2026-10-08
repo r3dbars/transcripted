@@ -9,7 +9,7 @@
     "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/ObservabilityLogWriterTests.swift": 6,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 46
+    "Tests/UIAutomationSurfaceContractTests.swift": 45
   },
   "wall-clock": {
     "Tests/ClipboardRestoringTextPasterTests.swift": 2
