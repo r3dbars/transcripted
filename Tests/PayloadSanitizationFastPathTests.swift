@@ -98,8 +98,8 @@ func testPayloadSanitizationFastPath() {
                 engineState: nil,
                 infoDictionary: [
                     "CFBundleVersion": "1",
-                    AnalyticsRuntimeConfiguration.buildChannelInfoKey: channel,
-                    AnalyticsRuntimeConfiguration.buildRevisionInfoKey: revision,
+                    AnalyticsInfoPlistKeys.buildChannelInfoKey: channel,
+                    AnalyticsInfoPlistKeys.buildRevisionInfoKey: revision,
                 ],
                 timestamp: "2026-05-26T12:00:00.000Z",
                 appVersion: "1.2.3",

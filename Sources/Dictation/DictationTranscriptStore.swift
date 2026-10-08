@@ -343,10 +343,15 @@ enum DictationTranscriptStore {
         NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: notifyURL)
     }
 
-    /// Sections present in `original` but absent from `reduced`.
+    /// Sections present in `original` but absent from `reduced`. Compared
+    /// without surrounding whitespace: the delete rewrite rejoins sections
+    /// with "\n\n", so a kept section's trailing blank lines can differ from
+    /// the original and must not make it look deleted (and get re-appended).
     private static func missingSections(from original: String, comparedTo reduced: String) -> [String] {
-        let reducedSet = Set(splitSections(in: reduced))
-        return splitSections(in: original).filter { !reducedSet.contains($0) }
+        let reducedSet = Set(splitSections(in: reduced).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        return splitSections(in: original)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !reducedSet.contains($0) }
     }
 
     /// Removes a single dictation entry by matching on its stable saved entry ID.
