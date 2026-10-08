@@ -32,6 +32,8 @@ Two modules in `.agents/modules.json`, both covered by this page:
 - **Models are pinned by hash.** A model descriptor carries an exact immutable URL and SHA-256; the bytes are the trust boundary for downloads and for adopting a standalone Tilde model. The `llama-server` helper is pinned in `build-deps.sh` (`docs/llama-server-provenance.md`).
 - **Tests never touch real Input Sources or user state.** `WritingKeyboardInputSource` takes a fake in tests; `DiagnosticsLog` honors `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`.
 
+`Core/Text/WritingScrubberTokenIdentity.swift` marks pre-existing redaction tokens while the scrubber runs and restores them before returning. This keeps `Result.kinds` limited to the new redactions, in text order, even when a new redaction swallows an old token. The identities never reach saved writing.
+
 ## Tests
 
 `Tests/TranscriptedWritingTests/` (Swift Testing, not XCTest), split into `Core/` and `Runtime/`. Keyboard tests live in `Runtime/` and `@testable import TranscriptedKeyboard`.
