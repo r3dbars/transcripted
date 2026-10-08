@@ -86,10 +86,10 @@ func testCIWorkflowContract() {
         )
     }
 
-    runSuite("CI workflow contract - only checks and spm-tests can use the owner's Mac") {
-        // pick-runner routes these two jobs to the owner's Mac when it is idle.
-        // Fork PRs must stay hosted, and app-build must stay hosted because its
-        // launch smoke needs an isolated account.
+    runSuite("CI workflow contract - checks, spm-tests and app-build can use the owner's Mac") {
+        // pick-runner routes these three jobs to the owner's Mac when it is idle.
+        // Fork PRs must stay hosted. app-build's launch smoke runs there only
+        // inside the throwaway job VM (scripts/ops/native-smoke-isolation.py).
         let pickEnv = workflow.job("pick-runner")?.descendants(named: "env").flatMap(\.children) ?? []
         assertEqual(
             pickEnv.first { $0.key == "HEAD_REPO" }?.scalar,
@@ -104,13 +104,13 @@ func testCIWorkflowContract() {
         )
         assertEqual(
             jobsOnPickedRunner,
-            ["checks", "spm-tests"],
-            "only checks and spm-tests should take their runner from pick-runner"
+            ["checks", "spm-tests", "app-build"],
+            "checks, spm-tests and app-build should take their runner from pick-runner"
         )
         assertEqual(
-            workflow.job("app-build")?.child("runs-on")?.scalar,
-            "macos-26",
-            "app-build should stay on a hosted macos-26 runner"
+            workflow.job("app-build")?.child("needs")?.scalar,
+            "pick-runner",
+            "app-build should wait for pick-runner to choose its runner"
         )
         assertEqual(
             workflow.job("build-and-test")?.child("needs")?.list ?? [],
