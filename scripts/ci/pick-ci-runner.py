@@ -11,8 +11,9 @@ fresh throwaway macOS VM) only when all of these hold:
     MAX_AGE_SECONDS old. The Mac writes a bare timestamp only while it is
     free, and "<word>:<timestamp>" (busy, paused, battery, disk, vms, mic,
     offline) otherwise
-  * no other Swift CI run already has a transcripted-mac job queued or
-    running, so a burst of pushes can't pile up behind one Mac
+  * other Swift CI runs have at most MAX_BUSY_MAC_JOBS transcripted-mac
+    jobs queued or running (the Mac runs two job VMs at once), so a burst
+    of pushes can't pile up behind one Mac
 
 Anything else, including any GitHub API error, picks hosted macos-26.
 
@@ -52,6 +53,8 @@ MAC_LABEL = "transcripted-mac"
 ROUTED_EVENTS = {"push", "workflow_dispatch", "pull_request"}
 SERVICE_ALIVE_SECONDS = 600
 STRANDED_SECONDS = 900
+# The Mac runs two job VMs at once, so one other job there still leaves room.
+MAX_BUSY_MAC_JOBS = 1
 
 
 def parse_heartbeat(heartbeat: str) -> tuple[str, int | None]:
@@ -97,7 +100,7 @@ def decide(
         return "hosted", f"Mac heartbeat is {age}s old"
     if busy_mac_jobs is None:
         return "hosted", "could not count jobs already waiting for the Mac"
-    if busy_mac_jobs > 0:
+    if busy_mac_jobs > MAX_BUSY_MAC_JOBS:
         return "hosted", f"{busy_mac_jobs} job(s) already queued or running on the Mac"
     return "mac", f"Mac reported idle {age}s ago"
 
@@ -228,7 +231,8 @@ def self_test() -> int:
         ("hosted", dict(heartbeat="-5")),
         ("hosted", dict(mode="off")),
         ("hosted", dict(mode="OFF")),
-        ("hosted", dict(busy_mac_jobs=1)),
+        ("mac", dict(busy_mac_jobs=1)),  # one job on the Mac: its second VM is free
+        ("hosted", dict(busy_mac_jobs=2)),
         ("hosted", dict(busy_mac_jobs=None)),
         # always: waits for the Mac whatever its state, but never for a fork.
         ("mac", dict(mode="always", heartbeat=f"busy:{now}", busy_mac_jobs=3)),
