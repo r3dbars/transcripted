@@ -61,4 +61,18 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
             "a folder we aren't allowed to read can't prove the audio is gone"
         )
     }
+
+    func testKeepsRowWhenTheAudioFolderItselfRefusesAccess() {
+        let audioFolder = "/Users/sweeptester/old-library/meetings/audio"
+        let fs = fileSystem(
+            existingDirectories: ["/", "/Users", "/Users/sweeptester", "/Users/sweeptester/old-library",
+                                  "/Users/sweeptester/old-library/meetings", audioFolder],
+            mountPoints: ["/"],
+            deniedDirectories: [audioFolder]
+        )
+        XCTAssertTrue(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: homeMic, systemAudioURL: nil, fileSystem: fs),
+            "an audio folder we can't read can't prove the audio is gone"
+        )
+    }
 }
