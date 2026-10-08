@@ -47,7 +47,7 @@ function world(on: On, ageMs: number) {
   on('ui.panes', () => ({ value: [] }))
   on('process.spawn', async function* ($, e) {
     spawned.push({ argv: e.argv, env: e.env })
-    return { code: 0, signal: null }
+    return { value: { code: 0, signal: null } }
   })
   return { spawned, clock }
 }
