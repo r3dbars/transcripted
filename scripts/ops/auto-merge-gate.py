@@ -99,12 +99,15 @@ def parse_time(value: str) -> datetime:
 
 
 TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
+REST_FILE_LIMIT_REASON = "changed-file count exceeds the REST API limit of 3000"
 
 
 def changed_paths(records: object, expected_count: object) -> tuple[list[str], list[str]]:
     """Validate REST PR files and include a rename's removed and added paths."""
     if not isinstance(records, list):
         return [], ["changed-file metadata is missing or malformed"]
+    if type(expected_count) is int and expected_count > 3000:
+        return [], [REST_FILE_LIMIT_REASON]
     if type(expected_count) is not int or expected_count != len(records):
         return [], ["changed-file metadata is incomplete or changed during fetch"]
     paths: list[str] = []
@@ -173,7 +176,8 @@ def held_for_human(reasons: list[str]) -> list[str]:
     if any(r.startswith(UNTRUSTED_REASONS) or DISABLED_LANE.match(r) for r in reasons):
         return []
     return [r for r in reasons
-            if r.startswith(("touches protected files", "files outside lane")) or "lane limit is" in r]
+            if r.startswith(("touches protected files", "files outside lane")) or "lane limit is" in r
+            or r == REST_FILE_LIMIT_REASON]
 
 
 def verify_problems(body: str, head: str) -> list[str]:
@@ -242,7 +246,14 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
                (p not in lowered if matches(p, [BASELINE_GLOB]) else not matches(p, lane["allow"]))]
     if outside:
         reasons.append(f"files outside lane {lane['id']}: {', '.join(outside[:3])}")
-    if lane.get("require_test_change") and not any(matches(p, TEST_GLOBS) for p in files):
+    # Rename origins protect lane boundaries, but only a surviving destination
+    # can supply regression coverage. Removed/unchanged tests do not qualify.
+    test_changed = not file_problems and any(
+        record["status"] not in ("removed", "unchanged")
+        and matches(record["filename"], TEST_GLOBS)
+        for record in extra["changed_files"]
+    )
+    if lane.get("require_test_change") and not test_changed:
         reasons.append("bug fix without a test change")
     if lane.get("require_verify"):
         reasons.extend(verify_problems(pr.get("body") or "", pr["headRefOid"]))
@@ -589,6 +600,23 @@ def self_test() -> int:
         case("bug fix with proof and two reviews merges", True, bug),
         case("bug fix without a test", False, {**bug, "files": [{"path": "Sources/Support/Foo.swift"}]},
              None, "without a test change"),
+        case("bug fix renamed-away test does not count", False,
+             {**bug, "files": [{"path": "Sources/Support/Foo.swift"}]},
+             {"changed_files": [{"filename": "Sources/Support/Foo.swift", "status": "renamed",
+                                 "previous_filename": "Tests/FooTests.swift"}]}, "without a test change"),
+        case("bug fix deleted test does not count", False,
+             {**bug, "files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "removed"}]},
+             "without a test change"),
+        case("bug fix unchanged test does not count", False,
+             {**bug, "files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "unchanged"}]},
+             "without a test change"),
+        case("bug fix renamed test destination counts", True,
+             {**bug, "files": [{"path": "Tests/FooTests.swift"}]},
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed",
+                                 "previous_filename": "Tests/OldFooTests.swift"}]}),
+        case("REST file cap fails closed", False, {"changedFiles": 3001}, None, "REST API limit"),
         case("bug fix without verify summary", False, {**bug, "body": "Fixes #12"}, None, "no app verification"),
         case("bug fix verify for old commit", False, {**bug, "body": verify_body.replace(head[:7], "0ff0ff0")},
              None, "not for the head commit"),
@@ -662,6 +690,11 @@ def self_test() -> int:
     results.append(case("lowered extra baseline is allowed", True, pin_pr,
                         {"lowered_baselines": [".agents/source-pin-baseline.json"]}))
     results.append(case("raised extra baseline stays outside the lane", False, pin_pr, None, "outside lane"))
+    cap_reasons = changed_paths([], 3001)[1]
+    results.append(held_for_human(cap_reasons) == [REST_FILE_LIMIT_REASON])
+    print(f"{'PASS' if results[-1] else 'FAIL'} permanent REST cap escalates to human")
+    results.append(held_for_human(changed_paths([], 1)[1]) == [])
+    print(f"{'PASS' if results[-1] else 'FAIL'} transient incomplete metadata waits")
     held_ok = held_for_human(["touches protected files: X", "check build-and-test is pending",
                               "files outside lane test-shape: Y", "900 changed lines, lane limit is 400"])
     results.append(len(held_ok) == 3)
