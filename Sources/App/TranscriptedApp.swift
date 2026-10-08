@@ -65,6 +65,7 @@ private struct TranscriptedSettingsFallbackView: View {
 class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    let menuPopoverPresentation = MenuBarPopoverPresentation()
     var lastExternalApplication: NSRunningApplication?
     var hasPresentedInitialOnboarding = false
     let statusItemUpdateBadge = NSView(frame: .zero)
@@ -762,14 +763,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             dictating: statusItemDictationRecording,
             updateTooltip: statusItemUpdateTooltip
         )
-    }
-
-    func closePopover() {
-        menuPanelController.prepareForClose()
-        popover?.performClose(nil)
-        if popover?.contentViewController !== menuPanelController {
-            popover?.contentViewController = nil
-        }
     }
 
     // MARK: - Menu Bar Commands

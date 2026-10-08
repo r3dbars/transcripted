@@ -15,7 +15,8 @@
 // is built below. Nothing at runtime can say "someone added a window", so a NEW
 // NSWindow/NSPanel must be added here by hand with the right policy.
 //   protected (.none):      NotchIslandPanel, PasteLastDictationFeedbackPanel
-//   capturable (.readOnly): Onboarding window, Settings window
+//   capturable (.readOnly): Onboarding window, Settings window,
+//                           MenuBarPopoverAnchorPanel (checked in MenuBarPopoverPresentationTests)
 
 import AppKit
 import Foundation
@@ -73,11 +74,16 @@ func testOverlayScreenSharePrivacy() async {
     }
 
     runSuite("onboarding stays capturable without displaying a window") {
+        _ = NSApplication.shared
         let preferredSize = NSSize(width: 640, height: 560)
         let window = TranscriptedOnboardingWindow.make(preferredSize: preferredSize)
         assertEqual(window.sharingType, .readOnly, "first-run setup supports normal macOS screenshots")
         assertFalse(window.isVisible, "constructing onboarding does not show or activate it")
+        assertFalse(window.isKeyWindow, "constructing onboarding does not take keyboard focus")
+        assertEqual(window.contentRect(forFrameRect: window.frame).size, preferredSize, "preserve onboarding content size")
         assertEqual(window.minSize, preferredSize, "preserve onboarding minimum size")
+        assertEqual(window.styleMask, [.titled, .closable, .resizable, .fullSizeContentView], "preserve onboarding controls")
+        assertFalse(window.isReleasedWhenClosed, "the controller retains its reusable window")
     }
 
     runSuite("Settings stays capturable without displaying a window") {
