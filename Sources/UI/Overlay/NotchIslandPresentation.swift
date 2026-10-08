@@ -599,7 +599,7 @@ enum NotchIslandPresentation {
         case .starting, .loading:
             return [.accentDot]
         case .listening:
-            return [.symbol(.mic, .accent), .dictationBars(count: 6)]
+            return [.symbol(.mic, .accent), .dictationBars(count: 9)]
         case .writing:
             return [.dots]
         case .success:
