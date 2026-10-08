@@ -14,7 +14,7 @@ Leave alone everything outside that list too, including the `~/transcripted-*` a
 2. Its branch is fully on GitHub: `git branch -r --contains <branch-head>` lists a remote branch, or the branch's commits are already on `origin/main`.
 3. Its work is finished: the branch is merged into `origin/main`, or its PR was merged or closed more than 7 days ago (`gh pr list --state all --head <branch>`).
 4. It's more than 2 days old, so it's not a task that just started.
-5. No app is running from it: `pgrep -fl "<path>/build/"` finds nothing. The owner often runs Transcripted straight from a worktree's `build/`.
+5. No app is running from it. The owner often runs Transcripted straight from a worktree's `build/`. Check executable paths, not command lines (`pgrep -f` matches its own shell): `ps -axo pid=,comm= | grep -F "<path>/build/"` finds nothing (exit 1).
 
 If any check fails or can't be run, keep the worktree.
 

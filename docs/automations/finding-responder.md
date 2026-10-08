@@ -4,7 +4,13 @@ Runs every 30 minutes as a Codex automation on the owner's Mac. Its job is to an
 
 ## Which PRs
 
-Open PRs whose branch starts with `cleanup/`, `garden/` or `codex/issue-`, that have at least one **unresolved** review thread started by `chatgpt-codex-connector`. Skip PRs labeled `waiting-on-human`, `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
+Open PRs that have at least one **unresolved** review thread started by `chatgpt-codex-connector` and pass all of these before anything is checked out or run (`gh pr view --json isCrossRepository,author,headRefName,labels`):
+
+- not from a fork (`isCrossRepository` is false)
+- author is in `allowed_authors` in `.agents/auto-merge-lanes.json`
+- branch starts with the `branch_prefix` of an enabled lane in that file, and the PR has that lane's `labels_required`
+
+Any other PR: don't check it out, don't run its code, don't reply. Skip PRs labeled `waiting-on-human`, `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
 
 Find unresolved threads with GraphQL (`reviewThreads { isResolved comments { author { login } body path line } }`).
 
@@ -15,9 +21,10 @@ Read the finding, then read the code it points at on the PR's head commit. The f
 **Real: fix it.**
 1. Check out the PR branch in its own git worktree.
 2. Make the smallest fix. Stay inside the PR's lane files (`.agents/auto-merge-lanes.json`); if the fix needs a file outside the lane, treat it as "Unsure" instead.
-3. Run `bash check.sh`. For bug-fix PRs, also run `bash scripts/dev/verify-change.sh` and replace the `## App verification` block in the PR body with the new summary.
-4. Commit as `r3dbars <r3dbars@users.noreply.github.com>` with no AI co-author lines, and push. Never force-push.
-5. Reply on the thread: what was wrong and the commit that fixes it. Resolve the thread.
+3. Run `bash check.sh`.
+4. Commit as `r3dbars <r3dbars@users.noreply.github.com>` with no AI co-author lines. For bug-fix PRs, run `bash scripts/dev/verify-change.sh` after committing, so its summary names the new head, and replace the `## App verification` block in the PR body with it.
+5. Push. Never force-push.
+6. Reply on the thread: what was wrong and the commit that fixes it. Resolve the thread.
 
 The push starts a new Codex review automatically.
 
