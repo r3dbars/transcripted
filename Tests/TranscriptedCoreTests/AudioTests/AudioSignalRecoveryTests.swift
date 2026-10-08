@@ -73,6 +73,30 @@ final class AudioSignalRecoveryTests: XCTestCase {
         )
     }
 
+    func testUsableCaptureSignalKeepsSpeechThatFollowsAQuietStart() {
+        // 1 s of faint room noise (frames above the RMS floor, peak below the
+        // capture peak), then a second of clear speech-level signal.
+        let quietStart = [Float](repeating: 0.0003, count: 16_000)
+        let laterSpeech = [Float](repeating: 0.3, count: 16_000)
+
+        XCTAssertTrue(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: quietStart + laterSpeech, sampleRate: 16_000),
+            "a quiet first stretch must not hide speech later in the microphone track"
+        )
+    }
+
+    func testUsableCaptureSignalRejectsHissWithOneIsolatedClick() {
+        // A dead mic: 2 s of hiss above the frame RMS floor but below the
+        // capture peak, plus one click late in the track.
+        var hissAndClick = [Float](repeating: 0.0003, count: 32_000)
+        hissAndClick[25_000] = 0.5
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndClick, sampleRate: 16_000),
+            "one click in a dead mic's hiss must not make the track look usable"
+        )
+    }
+
     func testUsableCaptureSignalRejectsBelowFloorNoise() {
         let inaudible = [Float](repeating: 0.0004, count: 32_000)
 
