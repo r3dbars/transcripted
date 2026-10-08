@@ -76,6 +76,7 @@ enum MenuTokens {
     // main-window scale; they live here as named roles so views never reach for
     // a raw `NSFont.systemFont(ofSize:)` literal. Changing a menubar font means
     // changing it once, here.
+    @MainActor
     enum Font {
         static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
         static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
