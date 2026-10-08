@@ -16,7 +16,6 @@ enum PhysicalShortcutAction: Equatable {
     case dictationPushToTalk
     case dictationHandsFree
     case meeting
-    case pasteLastDictation
 }
 
 struct PhysicalShortcutBinding {
@@ -241,7 +240,6 @@ extension PhysicalShortcutAction {
         case .dictationPushToTalk: return nil
         case .dictationHandsFree: return "dictation_hands_free"
         case .meeting: return "meeting_physical_trigger"
-        case .pasteLastDictation: return "paste_last_dictation_physical_trigger"
         }
     }
 }

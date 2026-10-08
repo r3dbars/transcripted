@@ -486,9 +486,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }
-            appState.contextCapture.onPasteLastDictation = { [weak self] in
-                self?.pasteLastDictationFromSettings()
-            }
             SpeakerNamingSheet.shared.island = notchIsland
             // Only the island lists voices named on their own ("who was on
             // the call"), so only then does a meeting with nobody to ask get

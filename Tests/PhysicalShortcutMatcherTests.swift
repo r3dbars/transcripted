@@ -29,18 +29,12 @@ func testPhysicalShortcutMatcher() {
             binding(.dictationPushToTalk, keyCode: kVK_Function),
             binding(.dictationHandsFree, keyCode: kVK_RightOption),
             binding(.meeting, keyCode: kVK_ANSI_M, modifiers: option),
-            binding(.pasteLastDictation, keyCode: kVK_ANSI_V, modifiers: option | shift),
         ]
 
         let meeting = PhysicalShortcutMatcher.matchingKeyDownShortcut(
             shortcuts, keyCode: UInt32(kVK_ANSI_M), modifiers: option
         )
         assertTrue(meeting?.action == .meeting, "M+⌥ should resolve to the meeting binding")
-
-        let paste = PhysicalShortcutMatcher.matchingKeyDownShortcut(
-            shortcuts, keyCode: UInt32(kVK_ANSI_V), modifiers: option | shift
-        )
-        assertTrue(paste?.action == .pasteLastDictation, "V+⌥⇧ should resolve to paste-last-dictation")
 
         // Extra modifiers break the exact match — a key-down chord is precise.
         let withExtra = PhysicalShortcutMatcher.matchingKeyDownShortcut(
