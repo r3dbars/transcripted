@@ -80,11 +80,6 @@
       "Core": [
         "SpeakerIdentityOption"
       ]
-    },
-    "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
-      "Core": [
-        "SQLiteHandle"
-      ]
     }
   }
 }
