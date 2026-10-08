@@ -233,20 +233,29 @@ func testDictationQueuedStartPolicy() async {
         assertFalse(DictationQueuedStartPolicy.showsDropMessage(requested: false, isDictating: false), "Esc and Quit drop quietly")
     }
 
-    // Still source-text, deliberately. Both live where a fake can't reach yet:
-    // the overlay's own message flag (FloatingOverlayController, rewritten by
-    // #1959 when the near-text window was deleted) and the controller's Esc
-    // callback wiring. Convert them next, with a testable message model.
-    runSuite("Esc takes back a waiting start, and other messages hold back the next take") {
+    runSuite("Only a passing note lets the next take start over it; every other message holds it back") {
+        assertTrue(
+            DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.noSpeechNote),
+            "no speech heard gives way"
+        )
+        assertTrue(
+            DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.landedClipboardNotice),
+            "a notice for text that did land gives way"
+        )
+        assertFalse(
+            DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.other),
+            "failures, not-pasted notices and anything with a button keep the next take from starting over them"
+        )
+    }
+
+    // Still source-text, deliberately: the Esc callback wiring lives in
+    // DictationSessionController, which a fast test can't build. The overlay
+    // half (which messages give way) is a behavioral suite above now.
+    runSuite("Esc takes back a waiting start") {
         let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
         assertTrue(
             controller.contains("overlayController?.onEscapeKeyDuringSession = { [weak self] in\n                self?.dropQueuedDictationStart(showMessage: false)"),
             "the first Esc of a confirm already takes back a waiting start"
-        )
-        let overlay = readSourceFixture("Sources/UI/Overlay/FloatingOverlayController.swift")
-        assertTrue(
-            overlay.contains("messageTone = tone\n        messageCanGiveWayToNextStart = false"),
-            "every other message keeps the next take from starting over it"
         )
     }
 }
