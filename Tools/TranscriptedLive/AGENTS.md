@@ -18,7 +18,7 @@ Experiment: the meeting Transcripted is recording, live inside Claude Code. A st
 - **Idle means models released.** Watch mode holds the two transcribers only while a meeting is live and reloads them (about 0.15 s) when one starts. `TRANSCRIPTED_LIVE_EXIT_WITH_PARENT=1` makes the helper exit when its parent goes away while no meeting is live.
 - **Live text is rough and provisional.** Speakers are only "you" (mic) and "them" (system audio). The saved transcript still comes from the app's normal post-meeting pipeline; never present live text as final.
 - **Transcript text goes to Claude** through the mod's hidden context and Haiku notes, same as pasting it. Both have off switches (`/meeting auto off`, `/meeting helper off`); keep them working.
-- **The mod must not control the meeting.** `start_meeting`, `stop_meeting` and `set_live_context_sharing` are denied (`PERSON_ONLY_TOOLS` in `register.tsx`). Don't remove that.
+- **The mod must not control the meeting.** Model-issued `start_meeting`, `stop_meeting` and `set_live_context_sharing` calls are denied (`PERSON_ONLY_TOOLS` in `register.tsx`). The intentional exception is person-confirmed Stop: after the person presses Stop twice, `stopRecording` sets `personStopFor` to the current session and permits that session's `stop_meeting`. Preserve the denial and this explicit person-initiated exception.
 - **Mods are early access.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` loads them and the API changes between Claude Code releases. `claude-mod/.claude/` (type declarations from `/plugin-types`) is generated and git-ignored.
 
 ## Ship path

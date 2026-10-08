@@ -169,6 +169,57 @@ func testDictationMuffleFilter() {
         assertTrue(fadeOut.out[0][0] > 0.5 * level, "gate should fade out from open, not drop at once, got \(fadeOut.out[0][0])")
     }
 
+    runSuite("Handback cannot pair an open snapshot with cleared splice parameters") {
+        let gate = DictationMuffleGate()
+        let splice = DictationMuffleSplice(holdFrames: 4_096, fadeFrames: 4_096)
+        gate.cut(splice)
+        let admitted = gate.snapshot()
+        gate.handBack() // controlled queue/IO interleaving after callback admission
+        var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
+        let samples = [Float](repeating: 0.5, count: 128)
+        let out = muffleRender(&filter, input: [samples, samples], inputLayout: [2], outputLayout: [2], muffle: admitted.isMuffled ? 1 : 0, gate: admitted.isOpen ? 1 : 0, gateHoldFrames: admitted.holdFrames, gateFadeFrames: admitted.fadeFrames).out[0]
+        assertTrue(out.allSatisfy { $0 == 0 }, "the already admitted held callback stays silent after handback")
+        gate.consume(admitted, frames: 128)
+        assertEqual(gate.snapshot().isOpen, false, "old callback cannot reopen a handed-back command")
+        assertEqual(gate.snapshot().holdFrames, 0, "closed callbacks have no hold")
+        assertEqual(gate.snapshot().fadeFrames, 0, "closed callbacks keep the short closing fade")
+        assertEqual(admitted.holdFrames, splice.holdFrames, "admitted hold survives later publication")
+        assertEqual(admitted.fadeFrames, splice.fadeFrames, "admitted fade survives later publication")
+    }
+
+    runSuite("An old callback cannot count down an identical re-cut") {
+        let gate = DictationMuffleGate()
+        let splice = DictationMuffleSplice(holdFrames: 4_096, fadeFrames: 4_096)
+        gate.cut(splice)
+        let previous = gate.snapshot()
+        gate.handBack()
+        gate.cut(splice)
+        gate.consume(previous, frames: 512)
+        assertEqual(gate.snapshot().holdFrames, 4_096, "new cut keeps its complete hold despite identical parameters")
+        gate.consume(gate.snapshot(), frames: 512)
+        assertEqual(gate.snapshot().holdFrames, 3_584, "current callback consumes exactly its rendered frames")
+        gate.setMuffled(false)
+        assertEqual(gate.snapshot().holdFrames, 3_584, "muffle updates preserve the IO countdown")
+        assertEqual(gate.snapshot().isMuffled, false, "muffle updates change the target")
+        gate.consume(gate.snapshot(), frames: 10_000)
+        assertEqual(gate.snapshot().holdFrames, 0, "the countdown stops at zero")
+        assertEqual(gate.snapshot().fadeFrames, 4_096, "countdown leaves the swell duration unchanged")
+        gate.cut(.plain)
+        assertEqual(gate.snapshot().isMuffled, false, "plain cuts retain the dry glide")
+        assertEqual(gate.snapshot().holdFrames, 0, "plain cuts have no hold")
+        assertEqual(gate.snapshot().fadeFrames, 0, "plain cuts use the ordinary fade")
+    }
+
+    runSuite("A held re-cut closes the stale copy with the short gate step") {
+        var filter = DictationMuffleFilter(sampleRate: sampleRate)
+        let samples = [Float](repeating: 0.5, count: 512)
+        _ = muffleRender(&filter, input: [samples, samples], inputLayout: [2], outputLayout: [2], muffle: 0, gate: 0, frames: 32)
+        let out = muffleRender(&filter, input: [samples, samples], inputLayout: [2], outputLayout: [2], muffle: 1, gate: 1, gateHoldFrames: 4_096, gateFadeFrames: 4_096).out[0]
+        let closeFrames = Int((DictationMuffleFilter.gateSeconds * sampleRate).rounded()) + block
+        assertTrue(out.dropFirst(closeFrames).allSatisfy { $0 == 0 }, "re-cut shuts stale audio within the ordinary closing fade")
+        assertEqual(filter.gate, 0, "held re-cut ends the cycle shut")
+    }
+
     runSuite("A short copy lag cuts with the plain gate fade; an AirPods-size lag holds the copy back by the lag first") {
         let wired = DictationMuffleSplice.atCut(copyDelayFrames: 346, sampleRate: sampleRate)
         assertEqual(wired, .plain, "a 7 ms wired lag keeps the plain fade")

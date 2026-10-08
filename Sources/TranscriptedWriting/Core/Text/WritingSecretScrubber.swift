@@ -56,7 +56,7 @@ public enum WritingSecretScrubber {
 
     /// Bumped whenever the rules change in a way worth re-running over files
     /// already on disk.
-    public static let rulesVersion = 3
+    public static let rulesVersion = 4
 
     private static let tokenPattern = regex(#"\x{27E8}redacted:([a-z-]+)\x{27E9}"#)
     private static let tokenOpen = "\u{27E8}redacted:"
@@ -79,7 +79,7 @@ public enum WritingSecretScrubber {
             existing.markedText,
             terminal: terminal,
             inBrowser: browserBundleIdentifiers.contains(appBundleIdentifier.lowercased()),
-            precedingLines: precedingLines
+            precedingLines: precedingLines, restoreOldTokens: existing.originalText
         )
         // Structured shapes first, so a JWT or PEM is one token rather than
         // pieces the generic-token rule would take.
@@ -226,12 +226,12 @@ public enum WritingSecretScrubber {
         _ text: String,
         terminal: TerminalKind,
         inBrowser: Bool,
-        precedingLines: [String]
+        precedingLines: [String], restoreOldTokens: (String) -> String
     ) -> String {
         let context = precedingLines.flatMap { $0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) }
         let entryLines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let allLines = context + entryLines
-        let units = units(of: allLines, entryStart: context.count)
+        let units = units(of: context + entryLines.map(restoreOldTokens), entryStart: context.count)
 
         var redactions: [Int: Kind] = [:]
         /// Units swallowed into a redaction that starts at an earlier unit.

@@ -35,6 +35,21 @@ struct WritingScrubberTokenIdentity {
         originals = tokens
     }
 
+    /// Line classifiers see the original token spelling and length. Only the
+    /// output retains private identities, so swallowed old tokens still count
+    /// as newly emitted redactions. Restore only entry lines, never context.
+    func originalText(_ marked: String) -> String {
+        var result = marked
+        let matches = Self.pattern.matches(in: marked, range: NSRange(marked.startIndex..., in: marked))
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result),
+                  let source = Range(match.range, in: marked),
+                  let original = originals[String(marked[source])] else { continue }
+            result.replaceSubrange(range, with: original)
+        }
+        return result
+    }
+
     static func isPasswordToken(_ text: String) -> Bool {
         text == WritingSecretScrubber.token(for: .password)
             || (text.hasPrefix("⟨redacted:password-existing-") && text.hasSuffix("⟩"))

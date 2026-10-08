@@ -22,6 +22,8 @@ Offline, python3 stdlib only, writes nothing.
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -65,6 +67,22 @@ def read(root: Path, rel: str, problems: list[str]) -> str:
         return ""
 
 
+def registered_permission_state(entrypoint: str) -> bool:
+    # Reuse the Swift lexer so comments and string examples cannot register a CLI.
+    spec = importlib.util.spec_from_file_location(
+        "qa_contract_swift_lexer", Path(__file__).with_name("check-duplicate-declarations.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    source = module.sanitize(entrypoint)
+    configuration = re.search(r"\bsubcommands\s*:\s*\[([^\]]*)\]", source, re.S)
+    if configuration is None:
+        return False
+    return any(re.fullmatch(r"\s*PermissionState\s*\.\s*self\s*", item)
+               for item in configuration.group(1).split(","))
+
+
 def check(root: Path) -> list[str]:
     problems: list[str] = []
     entrypoint = read(root, ENTRYPOINT, problems)
@@ -73,7 +91,7 @@ def check(root: Path) -> list[str]:
     docs = read(root, QA_DOCS, problems)
     gates = read(root, QA_GATES, problems)
 
-    if "PermissionState.self" not in entrypoint:
+    if not registered_permission_state(entrypoint):
         problems.append(f"{ENTRYPOINT}: the QA CLI should register the permission-state command (PermissionState.self)")
     for needle in PROBE_MATRIX:
         if needle not in command:
@@ -131,6 +149,9 @@ def self_test() -> None:
     assert check(build(good)) == []
     for rel, old, new in [
         (ENTRYPOINT, "PermissionState.self", "Other.self"),
+        (ENTRYPOINT, "PermissionState.self", "// PermissionState.self\n"),
+        (ENTRYPOINT, "PermissionState.self", "/* PermissionState.self */ Other.self"),
+        (ENTRYPOINT, "subcommands: [PermissionState.self]", 'let example = "PermissionState.self"; subcommands: [Other.self]'),
         (COMMAND, "AXIsProcessTrusted", "x"),
         (BENCH, f"{PERMISSION_STEP}\n{LIVE_SMOKE_STEP}", f"{LIVE_SMOKE_STEP}\n{PERMISSION_STEP}"),
         (BENCH, "if run_permission_state; then", "run_permission_state"),

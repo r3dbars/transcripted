@@ -25,7 +25,7 @@ Defaults (`Sources/Support/PhysicalDictationTriggerPreferences.swift`): Right Op
 - **Hold only**: the same `.dictationPushToTalk` registration, plain Push to Talk with no tap flip.
 - **Tap to toggle**: registers as `.dictationHandsFree`.
 
-The paste-last-dictation shortcut is no longer registered. Its stored binding, `PhysicalShortcutAction.pasteLastDictation` and its routing still exist but never fire. The old hands-free binding is likewise stored but unused.
+The paste-last-dictation shortcut is no longer registered. The unused paste-last action, detector routing, callback and binding helpers have been removed; the island's Paste again action and feedback remain. The old hands-free binding is retained only for the one-key migration and reset, not registered as a separate shortcut.
 
 ## Invariants
 

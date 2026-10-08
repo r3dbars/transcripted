@@ -231,8 +231,8 @@ def self_test() -> int:
         ("hosted", dict(heartbeat="-5")),
         ("hosted", dict(mode="off")),
         ("hosted", dict(mode="OFF")),
-        ("mac", dict(busy_mac_jobs=1)),  # one job on the Mac: its second VM is free
-        ("hosted", dict(busy_mac_jobs=2)),
+        ("mac", dict(busy_mac_jobs=MAX_BUSY_MAC_JOBS)),  # the last permitted queue depth
+        ("hosted", dict(busy_mac_jobs=MAX_BUSY_MAC_JOBS + 1)),
         ("hosted", dict(busy_mac_jobs=None)),
         # always: waits for the Mac whatever its state, but never for a fork.
         ("mac", dict(mode="always", heartbeat=f"busy:{now}", busy_mac_jobs=3)),
