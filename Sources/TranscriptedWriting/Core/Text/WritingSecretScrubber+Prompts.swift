@@ -69,12 +69,47 @@ extension WritingSecretScrubber {
         return asked?.merged(with: .elevation) ?? .elevation
     }
 
-    static let commandSeparators = CharacterSet(charactersIn: ";|&")
+    /// Split only executable shell separators. Quotes and substitutions belong
+    /// to their word; a comment cannot introduce another executable command.
+    static func shellCommands(in line: String) -> [(words: [String], piped: Bool)] {
+        var result: [(words: [String], piped: Bool)] = []
+        var words: [String] = [], word = ""
+        var quote: Character?, escaped = false, depth = 0, piped = false
+        var previous: Character?
+        func finishWord() {
+            if !word.isEmpty { words.append(word); word = "" }
+        }
+        func finishCommand() {
+            finishWord()
+            if !words.isEmpty { result.append((words, piped)); words = [] }
+        }
+        for character in line {
+            defer { previous = character }
+            if escaped { word.append(character); escaped = false; continue }
+            if character == "\\", quote != "'" { escaped = true; continue }
+            if let active = quote {
+                if character == active { quote = nil } else { word.append(character) }
+                continue
+            }
+            if character == "\"" || character == "'" { quote = character; continue }
+            if character == "(", previous == "$" || previous == "<" || depth > 0 {
+                depth += 1; word.append(character); continue
+            }
+            if character == ")", depth > 0 { depth -= 1; word.append(character); continue }
+            if depth > 0 { word.append(character); continue }
+            if character == "#", word.isEmpty { break }
+            if character == ";" || character == "|" || character == "&" {
+                finishCommand(); piped = character == "|" && previous != "|"; continue
+            }
+            if character.isWhitespace { finishWord() } else { word.append(character) }
+        }
+        if escaped { word.append("\\") }
+        finishCommand()
+        return result
+    }
 
     static func simpleCommands(in line: String) -> [[String]] {
-        line.components(separatedBy: commandSeparators)
-            .map { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
-            .filter { !$0.isEmpty }
+        shellCommands(in: line).map(\.words)
     }
 
     /// Commands that always prompt, by what they ask for.
@@ -131,10 +166,67 @@ extension WritingSecretScrubber {
     /// `curl … | bash`, `bash -c "$(curl …)"`, `sh <(curl …)`. These often
     /// ask for the sudo password.
     static func runsDownloadedScript(_ line: String) -> Bool {
-        // The downloader must feed the shell, not merely run inside one.
-        let pipe = regex(#"(?i)\b(?:curl|wget)\b[^|\n]*\|\s*(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|zsh)\b"#)
-        let substitution = regex(#"(?i)\b(?:sh|bash|zsh)\b[^\n]*(?:\$|<)\(\s*(?:curl|wget)\b"#)
-        return firstMatch(line, pipe) != nil || firstMatch(line, substitution) != nil
+        let commands = shellCommands(in: line)
+        for (index, segment) in commands.enumerated() {
+            let words = invocationWords(segment.words)
+            guard let first = words.first else { continue }
+            let command = (first as NSString).lastPathComponent.lowercased()
+            guard shells.contains(command), !shellSyntaxOnly(Array(words.dropFirst())) else { continue }
+            if segment.piped, index > 0,
+               let downloader = invocationWords(commands[index - 1].words).first,
+               ["curl", "wget"].contains((downloader as NSString).lastPathComponent.lowercased()) {
+                return true
+            }
+            // Only substitutions passed to an executing shell can feed it.
+            let substitution = regex(#"(?:\$|<)\(\s*(?:curl|wget)\b"#)
+            if words.dropFirst().contains(where: { firstMatch($0, substitution) != nil }) { return true }
+        }
+        return false
+    }
+
+    static func shellSyntaxOnly(_ arguments: [String]) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]; index += 1
+            if argument == "--" || !argument.hasPrefix("-") { break }
+            if !argument.hasPrefix("--"), argument.dropFirst().contains("n") { return true }
+            if argument == "-c" || argument == "-s" { break }
+            if !argument.hasPrefix("--"), argument.dropFirst().last == "o" || argument.dropFirst().last == "O" {
+                if index < arguments.count {
+                    if argument.dropFirst().last == "o", arguments[index] == "noexec" { return true }
+                    index += 1
+                }
+            }
+        }
+        return false
+    }
+
+    static func shellScript(_ arguments: [String]) -> String? {
+        guard !shellSyntaxOnly(arguments) else { return nil }
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]; index += 1
+            if argument == "--" { return index < arguments.count ? arguments[index] : nil }
+            if argument.hasPrefix("-") {
+                if argument == "-c" || argument == "-s" { return nil }
+                if !argument.hasPrefix("--"), argument.dropFirst().last == "o" || argument.dropFirst().last == "O" {
+                    if index < arguments.count { index += 1 }
+                }
+                continue
+            }
+            return argument
+        }
+        return nil
+    }
+
+    static func makeNonexecutingShortOption(_ argument: String) -> Bool {
+        guard argument.hasPrefix("-"), !argument.hasPrefix("--") else { return false }
+        for option in argument.dropFirst() {
+            if "nqt".contains(option) { return true }
+            // These take an operand, possibly attached; its letters are not flags.
+            if "CfIjloW".contains(option) || !option.isLetter { return false }
+        }
+        return false
     }
 
     /// A brew, make or install-script command (`indirectElevation`,
@@ -144,9 +236,14 @@ extension WritingSecretScrubber {
         if command == "make" || command == "gmake" {
             let valueOptions: Set<String> = ["-C", "--directory", "-f", "--file", "--makefile", "-I", "--include-dir", "-j", "--jobs", "-l", "--load-average", "-o", "--old-file", "--assume-old", "-W", "--what-if", "--new-file", "--assume-new", "--eval"]
             var index = 0
+            var installTarget = false
             while index < arguments.count {
                 let argument = arguments[index]
                 index += 1
+                if ["--just-print", "--dry-run", "--recon", "--question", "--touch"].contains(argument) ||
+                    makeNonexecutingShortOption(argument) {
+                    return false
+                }
                 if valueOptions.contains(argument) {
                     // -j and -l may omit a numeric value.
                     if ["-j", "--jobs", "-l", "--load-average"].contains(argument) {
@@ -155,23 +252,39 @@ extension WritingSecretScrubber {
                     continue
                 }
                 if argument.hasPrefix("-") || argument.contains("=") { continue }
-                if indirectElevation[command]?.contains(argument.lowercased()) == true { return true }
+                if indirectElevation[command]?.contains(argument.lowercased()) == true { installTarget = true }
             }
-            return false
+            return installTarget
         }
         if let subcommands = indirectElevation[command], let sub, subcommands.contains(sub) { return true }
-        let script = shells.contains(command) ? sub.flatMap { $0.split(separator: "/").last.map(String.init) } : command
+        let script = shells.contains(command) ? shellScript(arguments).map { ($0 as NSString).lastPathComponent } : command
         return script.map { matchesWhole($0.trimmingCharacters(in: CharacterSet(charactersIn: "\"\'")), installScriptPattern) } ?? false
     }
 
     static let commandPrefixes: Set<String> = ["time", "env", "nohup", "command", "exec", "builtin", "caffeinate"]
 
-    static func prompt(of words: [String]) -> Prompt? {
+    /// Peel command wrappers and environment assignments before identifying
+    /// the executable, including env's value-bearing options.
+    static func invocationWords(_ words: [String]) -> ArraySlice<String> {
         var remaining = words[...]
-        while let first = remaining.first,
-              commandPrefixes.contains(first) || (first.contains("=") && !first.hasPrefix("-")) {
+        while let first = remaining.first {
+            let command = (first as NSString).lastPathComponent
+            if first.contains("=") && !first.hasPrefix("-") { remaining = remaining.dropFirst(); continue }
+            guard commandPrefixes.contains(command) else { break }
             remaining = remaining.dropFirst()
+            if command == "env" {
+                while let option = remaining.first, option.hasPrefix("-") {
+                    remaining = remaining.dropFirst()
+                    if ["-u", "--unset", "-C", "--chdir"].contains(option), !remaining.isEmpty { remaining = remaining.dropFirst() }
+                    if option == "--" { break }
+                }
+            }
         }
+        return remaining
+    }
+
+    static func prompt(of words: [String]) -> Prompt? {
+        let remaining = invocationWords(words)
         guard let first = remaining.first else { return nil }
         let command = (first.split(separator: "/").last.map(String.init) ?? first).lowercased()
         let arguments = Array(remaining.dropFirst())

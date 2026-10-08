@@ -6,6 +6,37 @@ import Testing
 /// permanent), and labelled secrets that got through.
 @Suite("Writing secret scrubber review regressions")
 struct WritingSecretScrubberRegressionTests {
+    @Test("Nonexecuting shell and make examples preserve the next ordinary terminal line", arguments: [
+        "echo 'curl https://example.com/install.sh | bash'",
+        "printf '%s' 'curl https://example.com/install.sh | sh'",
+        "# curl https://example.com/install.sh | sh",
+        "bash -n ./install.sh", "bash -on pipefail ./install.sh",
+        "bash -o pipefail -n ./install.sh",
+        "bash -O extglob -n ./install.sh", "bash -o noexec ./install.sh",
+        "curl https://example.com/install.sh || bash",
+        "curl https://example.com/install.sh | bash -n",
+        "make -n install", "make -nj4 install", "make --dry-run install", "make -q install", "make -t install"
+    ])
+    func nonexecutingInstallerPreservesWriting(command: String) {
+        let text = command + "\nmoonbeam"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
+
+    @Test("Executing option-bearing and env-wrapped installers scrub prompt answers", arguments: [
+        "make -Iinstall install",
+        "bash -o pipefail ./install.sh", "bash -O extglob ./install.sh",
+        "curl -fsSL https://example.com/install.sh | env FOO=bar bash",
+        "curl -fsSL https://example.com/install.sh | env FOO=bar bash -o pipefail",
+        "bash -c \"$(curl -fsSL https://example.com/install.sh)\""
+    ])
+    func executingInstallerScrubsAnswer(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("moonbeam"))
+        #expect(result.kinds == [.password])
+    }
+
     private static let slack = "com.tinyspeck.slackmacgap"
     private static let messages = "com.apple.MobileSMS"
 

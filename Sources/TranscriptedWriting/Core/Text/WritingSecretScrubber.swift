@@ -56,7 +56,7 @@ public enum WritingSecretScrubber {
 
     /// Bumped whenever the rules change in a way worth re-running over files
     /// already on disk.
-    public static let rulesVersion = 3
+    public static let rulesVersion = 4
 
     private static let tokenPattern = regex(#"\x{27E8}redacted:([a-z-]+)\x{27E9}"#)
     private static let tokenOpen = "\u{27E8}redacted:"
