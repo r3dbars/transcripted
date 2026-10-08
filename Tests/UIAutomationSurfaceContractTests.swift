@@ -187,7 +187,8 @@ func testUIAutomationSurfaceContract() async {
         for id in MenuBarAutomationID.allCases {
             assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
             assertTrue(
-                contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(id.rawValue),
+                (contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift")
+                    + contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmokeMenuBarAudit.swift")).contains(id.rawValue),
                 "\(id.rawValue) should stay in the QA AX smoke's expected list"
             )
         }
@@ -633,6 +634,12 @@ func testUIAutomationSurfaceContract() async {
                 "AXChildrenInNavigationOrder",
             ].contains(requiredHarnessHook)
                 ? "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/AXInspector.swift"
+                : [
+                    "UIAutomationSmokeStatus",
+                    "case incomplete = \"INCOMPLETE\"",
+                    "exitCode = 3",
+                ].contains(requiredHarnessHook)
+                ? "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmokeReport.swift"
                 : "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift"
             assertTrue(contractSource(sourcePath).contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
         }
