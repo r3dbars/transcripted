@@ -18,7 +18,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
 
     static func make(
         sessionState: MeetingSessionController.State,
-        displayStatus: DisplayStatus,
+        displayStatus: MeetingTranscriptionStatus,
         warmupStatus: MeetingSessionController.ModelWarmupStatus,
         lastSavedTitle: String?,
         lastSavedTranscriptURL: URL?

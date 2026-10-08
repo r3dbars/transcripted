@@ -118,6 +118,10 @@ which has no admin rights (it isn't in the `admin` group and can't `sudo`).
   root daemon whose program the job user could replace (for example one run
   from `/opt/homebrew`, which that user owns) gets its program copied
   somewhere only root can write, so restarting the VM can't hand a job root.
+  Folders the job user can change (like `/opt/homebrew/bin` and
+  `/usr/local/bin`, which the image's `tart-guest-daemon` lists first) are
+  dropped from every root daemon's `PATH`, so a job can't plant a program a
+  daemon would run.
   A job VM whose firewall didn't load at boot never starts its runner.
 - **It can't reach:** the owner's files, keychain, gh login, microphone,
   clipboard, or app data. It also can't leave anything behind for the next
