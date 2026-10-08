@@ -99,10 +99,24 @@ def parse_time(value: str) -> datetime:
 TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
 
 
-def only_lowers(base, head) -> bool:
-    """True when head keeps or lowers every number in base and adds nothing."""
+def only_lowers(base, head, top: bool = True) -> bool:
+    """True when head keeps or lowers every debt count in base and adds nothing.
+
+    Top-level scalars (`limit`, `version`, `_comment`) are settings, not debt,
+    so they must stay exactly the same.
+    """
     if isinstance(head, dict):
-        return isinstance(base, dict) and all(k in base and only_lowers(base[k], v) for k, v in head.items())
+        if not isinstance(base, dict):
+            return False
+        for k, v in head.items():
+            if k not in base:
+                return False
+            if top and not isinstance(v, (dict, list)):
+                if v != base[k]:
+                    return False
+            elif not only_lowers(base[k], v, top=False):
+                return False
+        return True
     if isinstance(head, list):
         return isinstance(base, list) and all(item in base for item in head)
     if isinstance(head, bool) or isinstance(base, bool):
@@ -168,7 +182,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     for needed in lane.get("labels_required", []):
         if needed not in labels:
             reasons.append(f"missing label '{needed}'")
-    blocked = sorted(labels & set(config["blocking_labels"]))
+    # Human hand-off labels always block, whatever the lane file lists.
+    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS))
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
 
@@ -530,6 +545,8 @@ def self_test() -> int:
         ({"edges": ["x"]}, {"edges": ["x", "z"]}, False),
         ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"_comment": "c", "limit": 800, "files": {}}, True),
         ({"limit": 800}, {"limit": 900}, False),
+        ({"limit": 800, "files": {"a": 900}}, {"limit": 0, "files": {"a": 900}}, False),
+        ({"version": 1, "files": {"a": 900}}, {"version": 1, "files": {"a": 899}}, True),
     ]
     for base_v, head_v, want in lowers:
         ok = only_lowers(base_v, head_v) == want
