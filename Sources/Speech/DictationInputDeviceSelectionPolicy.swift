@@ -432,7 +432,7 @@ enum DictationInputDeviceSelectionPolicy {
     ) -> String {
         let normalized = normalize(deviceName)
 
-        if isBluetoothTransport(transport) || isBluetoothHeadsetName(normalized) {
+        if isBluetooth(normalizedName: normalized, transport: transport) {
             return "bluetooth"
         }
 
@@ -540,7 +540,16 @@ enum DictationInputDeviceSelectionPolicy {
     }
 
     private static func isBluetoothAudioDevice(_ device: DictationAudioDevice) -> Bool {
-        isBluetoothTransport(device.transport) || isBluetoothHeadsetName(normalize(device.name))
+        isBluetooth(normalizedName: normalize(device.name), transport: device.transport)
+    }
+
+    /// A known USB or built-in transport is trusted over the name, so a wired
+    /// "USB Headset" isn't treated as Bluetooth. The name only decides when
+    /// the transport is unknown.
+    private static func isBluetooth(normalizedName: String, transport: DictationAudioTransport) -> Bool {
+        if isBluetoothTransport(transport) { return true }
+        if transport == .usb || transport == .builtIn { return false }
+        return isBluetoothHeadsetName(normalizedName)
     }
 
     private static func isBluetoothTransport(_ transport: DictationAudioTransport) -> Bool {

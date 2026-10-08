@@ -317,7 +317,7 @@ enum ActivationTelemetry {
 
     @discardableResult
     static func trackDictationArtifactSaved(
-        saved: SavedDictationTranscript,
+        savedURL: URL,
         delivery: String,
         durationBucket: String,
         surface: Surface = .dictationSave,
@@ -326,7 +326,7 @@ enum ActivationTelemetry {
         correlationID: String? = nil,
         saveID: String? = nil
     ) -> Bool {
-        guard savedDictationArtifactExists(saved) else { return false }
+        guard savedDictationArtifactExists(savedURL) else { return false }
 
         var properties = dictationArtifactSavedProperties(
             delivery: delivery, durationBucket: durationBucket, saveOutcome: "success",
@@ -344,15 +344,15 @@ enum ActivationTelemetry {
     }
 
     static func savedDictationArtifactExists(
-        _ saved: SavedDictationTranscript,
+        _ savedURL: URL,
         fileManager: FileManager = .default
     ) -> Bool {
-        guard saved.url.pathExtension.lowercased() == "md" else { return false }
+        guard savedURL.pathExtension.lowercased() == "md" else { return false }
 
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: saved.url.path, isDirectory: &isDirectory),
+        guard fileManager.fileExists(atPath: savedURL.path, isDirectory: &isDirectory),
               !isDirectory.boolValue,
-              let attributes = try? fileManager.attributesOfItem(atPath: saved.url.path),
+              let attributes = try? fileManager.attributesOfItem(atPath: savedURL.path),
               let fileSize = attributes[.size] as? NSNumber else {
             return false
         }

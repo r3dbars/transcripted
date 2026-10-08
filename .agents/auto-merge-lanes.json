@@ -1,0 +1,163 @@
+{
+  "_comment": "Lanes that scripts/ops/auto-merge-gate.py may merge without the owner (auto-merge level 3). A PR qualifies only if its branch starts with a lane's prefix, every changed file matches that lane's allow globs, no file matches deny_always or the lane's deny, any changed .agents/*-baseline.json only lowers counts versus the merge base (checked whatever the allow globs say; the concurrency baseline never qualifies), and every check in scripts/ops/auto-merge-gate.py passes. Set a lane's enabled to false to stop it, for example after a revert. Adding a lane or widening a lane's globs is a reviewed owner edit. See docs/auto-merge-gate.md.",
+  "version": 2,
+  "level": 3,
+  "required_checks": [
+    "build-and-test",
+    "repo-hygiene"
+  ],
+  "blocking_labels": [
+    "needs owner review",
+    "do not merge",
+    "hold"
+  ],
+  "allowed_authors": [
+    "r3dbars"
+  ],
+  "default_reviewers": [
+    "chatgpt-codex-connector"
+  ],
+  "main_ci_workflow": "swift-ci.yml",
+  "max_merges_per_run": 3,
+  "deny_always": [
+    "Sources/TranscriptedCore/**",
+    "Sources/Meeting/**",
+    "Sources/Speech/**",
+    "Sources/Observability/**",
+    ".github/**",
+    "scripts/release/**",
+    "scripts/ci/**",
+    "Casks/**",
+    "docs/appcast.xml",
+    "docs/release-*",
+    "docs/sparkle-updates.md",
+    "docs/staged-sparkle-update-test.md",
+    "docs/auto-merge-gate.md",
+    "Package.swift",
+    ".agents/modules.json",
+    ".agents/auto-merge-lanes.json",
+    "AGENTS.md",
+    "WORKFLOW.md"
+  ],
+  "lanes": [
+    {
+      "id": "test-shape",
+      "level": 1,
+      "enabled": true,
+      "branch_prefix": "cleanup/test-shape/",
+      "labels_required": [
+        "cleanup"
+      ],
+      "max_changed_lines": 400,
+      "allow": [
+        "Tests/**",
+        "Tools/*/Tests/**",
+        ".agents/test-shape-baseline.json"
+      ]
+    },
+    {
+      "id": "source-pins",
+      "level": 1,
+      "enabled": true,
+      "branch_prefix": "cleanup/source-pins/",
+      "labels_required": [
+        "cleanup"
+      ],
+      "max_changed_lines": 400,
+      "allow": [
+        "Tests/**",
+        "Tools/*/Tests/**",
+        ".agents/source-pin-baseline.json"
+      ]
+    },
+    {
+      "id": "file-size",
+      "level": 1,
+      "enabled": true,
+      "branch_prefix": "cleanup/file-size/",
+      "labels_required": [
+        "cleanup"
+      ],
+      "max_changed_lines": 1600,
+      "allow": [
+        "Sources/**",
+        "Tools/*/Sources/**",
+        "Tools/*/Tests/**",
+        "Tests/**",
+        "*/AGENTS.md",
+        ".agents/file-size-baseline.json",
+        ".agents/source-pin-baseline.json",
+        "scripts/entrypoints/run-tests.sh",
+        "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      ]
+    },
+    {
+      "id": "module-edges",
+      "level": 2,
+      "enabled": true,
+      "branch_prefix": "cleanup/module-edges/",
+      "labels_required": [
+        "cleanup"
+      ],
+      "max_changed_lines": 600,
+      "allow": [
+        "Sources/**",
+        "Tools/*/Sources/**",
+        "Tools/*/Tests/**",
+        "Tests/**",
+        "*/AGENTS.md",
+        ".agents/module-boundary-baseline.json",
+        ".agents/source-pin-baseline.json",
+        "scripts/entrypoints/run-tests.sh",
+        "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      ]
+    },
+    {
+      "id": "docs",
+      "level": 2,
+      "enabled": true,
+      "branch_prefix": "garden/docs/",
+      "labels_required": [
+        "gardener"
+      ],
+      "max_changed_lines": 300,
+      "allow": [
+        "*/AGENTS.md",
+        "docs/*.md",
+        "Tests/README.md"
+      ],
+      "deny": [
+        "docs/qa*",
+        "docs/*download*",
+        "docs/ops-credentials.md"
+      ]
+    },
+    {
+      "id": "bug-fix",
+      "level": 3,
+      "enabled": true,
+      "branch_prefix": "codex/issue-",
+      "labels_required": [
+        "bug"
+      ],
+      "max_changed_lines": 300,
+      "allow": [
+        "Sources/**",
+        "Tools/*/Sources/**",
+        "Tools/*/Tests/**",
+        "Tests/**",
+        "*/AGENTS.md",
+        "scripts/entrypoints/run-tests.sh",
+        "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      ],
+      "deny": [
+        "Sources/UI/**",
+        "Sources/App/**",
+        "Sources/Capture/**",
+        "Tools/*/Sources/**/Release*"
+      ],
+      "require_test_change": true,
+      "require_verify": true
+    }
+  ]
+}

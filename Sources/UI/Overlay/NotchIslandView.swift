@@ -55,13 +55,13 @@ enum NotchIslandPalette {
         }
     }
 
-    static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold) // immutable, never mutated
 
     static var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
-    static func label(_ text: String, font: NSFont, color: NSColor, wraps: Bool = false, width: CGFloat = 0) -> NSTextField {
+    @MainActor static func label(_ text: String, font: NSFont, color: NSColor, wraps: Bool = false, width: CGFloat = 0) -> NSTextField {
         let field = wraps ? NSTextField(wrappingLabelWithString: text) : NSTextField(labelWithString: text)
         field.font = font
         field.textColor = color
