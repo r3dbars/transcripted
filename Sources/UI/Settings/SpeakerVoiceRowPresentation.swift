@@ -146,7 +146,7 @@ enum SpeakerVoiceQueueRowActionPolicy {
 // MARK: - Name autocomplete data source
 
 /// Builds the suggestion list that feeds the "Who is this?" autocomplete. Reuses
-/// the same `SpeakerIdentityOption` shape that the post-meeting naming sheet
+/// the same `SpeakerNameChoice` shape that the post-meeting naming sheet
 /// passes into `SpeakerNameSelectionPolicy`, so the two surfaces match new
 /// speakers the same way.
 enum SpeakerNameSuggestionSource {
@@ -157,12 +157,12 @@ enum SpeakerNameSuggestionSource {
     static func options(
         from profiles: [SpeakerProfile],
         excluding excludedId: UUID?
-    ) -> [SpeakerIdentityOption] {
+    ) -> [SpeakerNameChoice] {
         profiles.compactMap { profile in
             guard profile.id != excludedId else { return nil }
             let name = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !name.isEmpty else { return nil }
-            return SpeakerIdentityOption(
+            return SpeakerNameChoice(
                 id: profile.id,
                 displayName: name,
                 callCount: profile.callCount

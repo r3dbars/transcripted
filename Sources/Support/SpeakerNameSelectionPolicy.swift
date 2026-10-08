@@ -1,5 +1,13 @@
 import Foundation
 
+/// A saved person a name field can suggest or link a voice to. Plain values
+/// so Settings and overlay UI can build one without naming a Core type.
+struct SpeakerNameChoice: Identifiable, Hashable {
+    let id: UUID
+    let displayName: String
+    let callCount: Int
+}
+
 enum SpeakerNameSelectionPolicy {
     static let ownerLabel = "You"
 

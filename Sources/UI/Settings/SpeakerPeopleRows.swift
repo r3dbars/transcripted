@@ -171,7 +171,7 @@ struct SpeakerVoiceToNameRow: View {
         )
     }
 
-    private var nameSuggestions: [SpeakerIdentityOption] {
+    private var nameSuggestions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(
             from: model.profiles,
             excluding: group.representative.speakerId
@@ -694,7 +694,7 @@ struct SpeakerPersonRow: View {
         }
     }
 
-    private var nameSuggestions: [SpeakerIdentityOption] {
+    private var nameSuggestions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(from: model.profiles, excluding: profile.id)
     }
 
