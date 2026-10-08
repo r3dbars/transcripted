@@ -63,16 +63,16 @@ enum RelocatedCaptureAudioPolicy {
             return false
         }
         if !fileSystem.fileExists(micURL.path),
-           !isUncheckableRightNow(archiveDirectory.deletingLastPathComponent(), fileSystem: fileSystem) {
+           !isUncheckableRightNow(archiveDirectory, fileSystem: fileSystem) {
             return false
         }
         guard let systemURL else { return true }
         return systemURL.deletingLastPathComponent().lastPathComponent.hasSuffix("_audio")
     }
 
-    /// Whether the old library's audio folder can't be looked at right now:
+    /// Whether the old library's archive can't be looked at right now:
     /// its drive isn't mounted, or the nearest existing folder (the audio
-    /// folder itself included) refuses access. A readable existing folder, or
+    /// archive itself included) refuses access. A readable existing folder, or
     /// a missing one on a mounted readable disk, is checkable.
     static func isUncheckableRightNow(_ audioFolder: URL, fileSystem: FileSystem) -> Bool {
         if fileSystem.directoryExists(audioFolder.path) {

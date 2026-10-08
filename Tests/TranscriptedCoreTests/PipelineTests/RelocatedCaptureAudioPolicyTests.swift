@@ -75,4 +75,17 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
             "an audio folder we can't read can't prove the audio is gone"
         )
     }
+    func testKeepsRowWhenArchiveDirectoryRefusesAccessButItsParentIsReadable() {
+        let parent = "/Users/sweeptester/old-library/meetings/audio"
+        let archive = parent + "/Call_audio"
+        let fs = fileSystem(
+            existingDirectories: ["/", parent, archive],
+            deniedDirectories: [archive]
+        )
+        XCTAssertTrue(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: homeMic, systemAudioURL: nil, fileSystem: fs),
+            "a readable parent cannot prove audio is gone from an inaccessible archive"
+        )
+    }
+
 }
