@@ -10,7 +10,6 @@
     "Tests/HomeFirstArtifactVisibilityTests.swift": 4,
     "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/ObservabilityLogWriterTests.swift": 6,
-    "Tests/OverlayScreenSharePrivacyTests.swift": 9,
     "Tests/PermissionStateHarnessContractTests.swift": 5,
     "Tests/SentryEventPolicyTests.swift": 2,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
