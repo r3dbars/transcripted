@@ -62,6 +62,13 @@ force-installed by Sparkle so existing users recover from a regression.
   on. The Settings section is now called Microphone, with the recorder on or
   off.
 
+### Fixed
+- Save my writing catches more passwords typed outside password fields. It
+  now redacts a sudo password asked for by `brew`, `make install`, an install
+  script, or a script piped from `curl`, even with no `sudo` typed; a
+  password that starts with `$` (`$unsh1ne`). Day files already on disk are
+  scrubbed again with the new rules the next time Writing starts.
+
 ## [1.1.50] - 2026-07-14
 
 ### Fixed
