@@ -45,7 +45,7 @@ struct SettingsMeetingShellState: Equatable {
     static func homeActivity(for session: MeetingSessionController) -> HomeTranscriptionActivityPresentation? {
         HomeTranscriptionActivityPresentation.make(
             sessionState: session.state,
-            displayStatus: session.displayStatus,
+            displayStatus: session.transcriptionStatus,
             warmupStatus: session.warmupStatus,
             lastSavedTitle: session.lastSavedTitle,
             lastSavedTranscriptURL: session.lastSavedTranscriptURL

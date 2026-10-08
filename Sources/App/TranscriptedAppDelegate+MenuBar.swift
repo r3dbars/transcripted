@@ -128,8 +128,14 @@ extension TranscriptedAppDelegate {
         CrashReporter.applySessionTrackingPreference()
         // Meeting detection only works while the app runs; register the login
         // item by default now that onboarding gives the macOS notice context.
-        // One-time, and an explicit Settings choice always wins.
-        try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
+        // One-time, and an explicit Settings choice always wins. The XPC calls
+        // run off the main thread so Finish never waits on them.
+        Task { @MainActor in
+            if let message = await LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true) {
+                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                    message: message)
+            }
+        }
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()

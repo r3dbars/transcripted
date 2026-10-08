@@ -305,15 +305,25 @@ final class SummaryItemIndexTests: XCTestCase {
             try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         }
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 50).count, 50)
-        XCTAssertEqual(
-            try index.searchUtterances(query: "Synthetic pricing decision 499", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.snippets.first?.speaker,
-            "Summary"
-        )
-        XCTAssertEqual(
-            try index.searchUtterances(query: "Synthetic pricing decision 0", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.snippets.first?.speaker,
-            "Summary"
-        )
+        let expectedFilenames = Set((0..<500).map {
+            String(format: "Call_2026-04-18_09-15-%03d", $0)
+        })
+        let meetings = try index.listRecentMeetings(count: 500)
+        XCTAssertEqual(meetings.count, 500)
+        XCTAssertEqual(Set(meetings.map(\.filename)), expectedFilenames)
+
+        for number in 0..<500 {
+            let result = try index.searchUtterances(
+                query: "Synthetic pricing decision \(number)",
+                speaker: nil, dateFrom: nil, dateTo: nil
+            )
+            XCTAssertEqual(
+                result.results.first?.filename,
+                String(format: "Call_2026-04-18_09-15-%03d", number),
+                "Summary search must index meeting \(number)"
+            )
+            XCTAssertEqual(result.results.first?.snippets.first?.speaker, "Summary")
+        }
     }
 
     func testGeneratedSidecarIsNotIndexedAsMeetingButFeedsSummary() throws {

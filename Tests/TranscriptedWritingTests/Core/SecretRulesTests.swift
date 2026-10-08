@@ -200,6 +200,22 @@ struct SecretRulesTests {
         #expect(result.clean.contains("12/26"), "expiry date should be left alone, only the card redacted")
     }
 
+    /// A short number right before a card can start its own Luhn-valid
+    /// window that covers only the front of the card. No digit of the card
+    /// may survive, whatever number sits in front of it.
+    @Test(
+        "A number just before a card never leaves the card's tail digits visible",
+        arguments: ["99", "7", "12"]
+    )
+    func numberBeforeCardDoesNotLeakCardTail(lead: String) {
+        let text = "Ref \(lead) 4111 1111 1111 1111"
+        for config in [SecretRules.ScrubConfig.forPromptContext, .forPersistence] {
+            let result = SecretRules.scrub(text, config: config)
+            #expect(result.clean == "Ref \u{27E8}redacted:card\u{27E9}", "card digits leaked: \(result.clean)")
+            #expect(result.findings.map(\.type) == [.creditCard])
+        }
+    }
+
     @Test("Full-length IBAN prefix does not truncate at a shorter coincidentally-valid checksum")
     func ibanFullLengthNotTruncated() {
         let text = "Wire to FI2112345600000785 please."
