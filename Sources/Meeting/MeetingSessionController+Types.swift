@@ -206,6 +206,15 @@ extension MeetingSessionController {
             .map { $0.map(MeetingRouteWarning.init) }
             .eraseToAnyPublisher()
     }
+
+    /// The speaker database the Settings people directory should edit: the
+    /// session's own store when it is a `SpeakerDatabase`, otherwise one
+    /// opened at the active embedder's database path. Lives here so the
+    /// Settings window controller doesn't have to name the Core type.
+    func speakerDatabaseForSettings() -> SpeakerDatabase {
+        (services.speakerStore as? SpeakerDatabase)
+            ?? SpeakerDatabase(path: SpeakerEmbedderFactory.activeSpeakerDBURL().path)
+    }
 }
 
 extension MeetingWarmupMeetingState {

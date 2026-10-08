@@ -81,11 +81,6 @@
         "SpeakerIdentityOption"
       ]
     },
-    "Sources/UI/Settings/TranscriptedSettingsWindowController.swift": {
-      "Core": [
-        "SpeakerDatabase"
-      ]
-    },
     "Sources/UI/Shared/RecentMeetingMetadataCache.swift": {
       "Core": [
         "SQLiteHandle"
