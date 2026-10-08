@@ -141,6 +141,17 @@ start_block() {
   echo ""
 }
 
+# publish_vm_identity <new VM PIDs> <slot marker>: publish only one known PID.
+# An unidentified slot keeps slots_waiting at "boot", preventing a second VM.
+publish_vm_identity() {
+  local pids="$1" marker="$2" pid
+  [ "$(printf '%s\n' "$pids" | wc -w | tr -d ' ')" = "1" ] || return 1
+  pid="$(printf '%s' "$pids" | tr -d '[:space:]')"
+  case "$pid" in ""|*[!0-9]*) return 1 ;; esac
+  : > "$marker" || return 1
+  printf '%s\n' "$pid"
+}
+
 # throttle_step <mic in use> <slot already slowed>: "slow", "restore" or "".
 # Every running slot calls this on each poll, so a call slows all of them.
 throttle_step() {
@@ -209,33 +220,61 @@ self_test() {
   got="$(hook_decision push "$r" "evil/other" "" "$r")";            expect "${got%% *}" "deny" "payload names another repo"
   got="$(hook_decision push "$r" "" "" "$r")";                      expect "${got%% *}" "deny" "unreadable payload"
 
-  got="$(offer_block 0 1 1 0 0 0)"; expect "$got" "" "free"
-  got="$(offer_block 1 1 1 0 0 0)"; expect "$got" "paused" "paused"
-  got="$(offer_block 0 0 1 0 0 0)"; expect "$got" "battery" "on battery"
-  got="$(offer_block 0 1 0 0 0 0)"; expect "$got" "disk" "low disk"
-  got="$(offer_block 0 1 1 1 0 0)"; expect "$got" "" "one other VM"
-  got="$(offer_block 0 1 1 2 0 0)"; expect "$got" "vms" "two other VMs"
-  got="$(offer_block 0 1 1 0 1 0)"; expect "$got" "mic" "mic in use"
-  got="$(offer_block 0 1 1 0 0 1)"; expect "$got" "offline" "backing off"
-  got="$(start_block 1 0 0)";       expect "$got" "" "waiting job can start"
-  got="$(start_block 0 0 0)";       expect "$got" "disk" "waiting job, low disk"
-  got="$(start_block 1 2 0)";       expect "$got" "vms" "waiting job, no VM slot"
-  got="$(start_block 1 0 1)";       expect "$got" "offline" "waiting job, backing off"
-  # Job slots: at most MAX_VMS, and only the first one ignores pause/battery/mic.
-  expect "$MAX_VMS" "2" "MAX_VMS is Apple's two-VM limit"
-  got="$(start_block 1 1 0 1 0 1 0)"; expect "$got" "" "second slot can start"
-  got="$(start_block 1 0 0 2 0 1 0)"; expect "$got" "vms" "never a third slot"
-  got="$(start_block 1 2 0 1 0 1 0)"; expect "$got" "vms" "second slot, another app's VM"
-  got="$(start_block 1 0 0 0 1 0 1)"; expect "$got" "" "first slot ignores pause, battery, mic"
-  got="$(start_block 1 1 0 1 0 0 0)"; expect "$got" "battery" "no second slot on battery"
-  got="$(start_block 1 1 0 1 1 1 0)"; expect "$got" "paused" "no second slot when paused"
-  got="$(start_block 1 1 0 1 0 1 1)"; expect "$got" "mic" "no second slot during a call"
-  got="$(start_block 0 1 0 1 0 1 0)"; expect "$got" "disk" "no second slot on low disk"
-  got="$(vms_in_use 0 1)";            expect "$got" "1" "a booting slot counts as a VM"
-  got="$(vms_in_use 2 1)";            expect "$got" "2" "other apps' VMs count"
-  got="$(offer_block 0 1 1 1 0 0 1)"; expect "$got" "" "one slot busy: still free"
-  got="$(offer_block 0 1 1 2 0 0 2)"; expect "$got" "busy" "both slots busy"
-  got="$(heartbeat_value "$(offer_block 0 1 1 2 0 0 2)" 9)"; expect "$got" "busy:9" "busy heartbeat with both slots"
+  # Exercise both documented configurations, even when this checkout is serial.
+  local configured_max="$MAX_VMS" test_max
+  case "$configured_max" in 1|2) ;; *) expect "$configured_max" "1 or 2" "supported VM cap" ;; esac
+  for test_max in 1 2; do
+    MAX_VMS="$test_max"
+    got="$(offer_block 0 1 1 0 0 0)"; expect "$got" "" "free"
+    got="$(offer_block 1 1 1 0 0 0)"; expect "$got" "paused" "paused"
+    got="$(offer_block 0 0 1 0 0 0)"; expect "$got" "battery" "on battery"
+    got="$(offer_block 0 1 0 0 0 0)"; expect "$got" "disk" "low disk"
+    got="$(offer_block 0 1 1 "$((MAX_VMS - 1))" 0 0)"; expect "$got" "" "below VM cap"
+    got="$(offer_block 0 1 1 "$MAX_VMS" 0 0)"; expect "$got" "vms" "VM cap reached"
+    got="$(offer_block 0 1 1 0 1 0)"; expect "$got" "mic" "mic in use"
+    got="$(offer_block 0 1 1 0 0 1)"; expect "$got" "offline" "backing off"
+    got="$(start_block 1 0 0)";       expect "$got" "" "waiting job can start"
+    got="$(start_block 0 0 0)";       expect "$got" "disk" "waiting job, low disk"
+    got="$(start_block 1 2 0)";       expect "$got" "vms" "waiting job, no VM slot"
+    got="$(start_block 1 0 1)";       expect "$got" "offline" "waiting job, backing off"
+    got="$(start_block 1 0 0 0 1 0 1)"; expect "$got" "" "first slot ignores pause, battery, mic"
+    # Job slots: at most MAX_VMS, and only the first one ignores pause/battery/mic.
+    if [ "$MAX_VMS" = "2" ]; then
+      got="$(start_block 1 1 0 1 0 1 0)"; expect "$got" "" "second slot can start"
+      got="$(start_block 1 0 0 2 0 1 0)"; expect "$got" "vms" "never a third slot"
+      got="$(start_block 1 2 0 1 0 1 0)"; expect "$got" "vms" "second slot, another app's VM"
+      got="$(start_block 1 1 0 1 0 0 0)"; expect "$got" "battery" "no second slot on battery"
+      got="$(start_block 1 1 0 1 1 1 0)"; expect "$got" "paused" "no second slot when paused"
+      got="$(start_block 1 1 0 1 0 1 1)"; expect "$got" "mic" "no second slot during a call"
+      got="$(start_block 0 1 0 1 0 1 0)"; expect "$got" "disk" "no second slot on low disk"
+    else
+        got="$(start_block 1 1 0 1 0 1 0)"; expect "$got" "vms" "serial mode refuses a second slot"
+    fi
+    got="$(vms_in_use 0 1)";            expect "$got" "1" "a booting slot counts as a VM"
+    got="$(vms_in_use 2 1)";            expect "$got" "2" "other apps' VMs count"
+    got="$(offer_block 0 1 1 "$((MAX_VMS - 1))" 0 0 "$((MAX_VMS - 1))")"; expect "$got" "" "below slot cap: still free"
+    got="$(offer_block 0 1 1 "$MAX_VMS" 0 0 "$MAX_VMS")"; expect "$got" "busy" "all slots busy"
+    got="$(heartbeat_value "$(offer_block 0 1 1 "$MAX_VMS" 0 0 "$MAX_VMS")" 9)"; expect "$got" "busy:9" "busy heartbeat at slot cap"
+  done
+  MAX_VMS="$configured_max"
+
+  # Zero or ambiguous PID discoveries must keep the next slot waiting; a
+  # uniquely identified VM publishes its PID and lets admission continue.
+  local identity_root identity_pid
+  identity_root="$(mktemp -d)"
+  local SLOTS="$identity_root"
+  local -a SLOT_PIDS=(123)
+  identity_pid="$(publish_vm_identity "" "$SLOTS/0.booted" || true)"
+  expect "$identity_pid" "" "empty PID discovery publishes no identity"
+  got="$(slots_waiting)"; expect "$got" "boot" "empty PID discovery keeps runner serial"
+  identity_pid="$(publish_vm_identity "123 456" "$SLOTS/0.booted" || true)"
+  expect "$identity_pid" "" "ambiguous PID discovery publishes no identity"
+  got="$(slots_waiting)"; expect "$got" "boot" "ambiguous PID discovery keeps runner serial"
+  identity_pid="$(publish_vm_identity " 123 " "$SLOTS/0.booted")"
+  expect "$identity_pid" "123" "one PID publishes identity"
+  got="$(slots_waiting)"; expect "$got" "1" "identified slot may accept its queued job"
+  rm -f "$SLOTS/0.booted"
+  rmdir "$identity_root"
   got="$(throttle_step 1 0)$(throttle_step 1 0)"; expect "$got" "slowslow" "mic slows every running slot"
   got="$(throttle_step 1 1)";         expect "$got" "" "already slowed"
   got="$(throttle_step 0 1)";         expect "$got" "restore" "mic free again"
@@ -1072,13 +1111,13 @@ run_one_job() {
   for p in $(vm_processes); do
     printf '%s\n' "$before" | grep -qx "$p" || new_pids="$new_pids $p"
   done
-  if [ "$(echo "$new_pids" | wc -w | tr -d ' ')" = "1" ]; then
-    vmpids="$new_pids"
+  if vmpids="$(publish_vm_identity "$new_pids" "$SLOTS/$SLOT.booted")"; then
     for p in $vmpids; do renice -n 10 -p "$p" >/dev/null 2>&1 || true; done
   else
     log "could not tell which VM process is $vm; leaving priorities alone"
   fi
-  : > "$SLOTS/$SLOT.booted"
+  # No marker after an ambiguous scan: this job may finish, but no second
+  # VM starts beside it without a known PID to throttle during microphone use.
 
   if ! jit="$(mint_jit "$name")" || [ -z "$jit" ]; then
     log "could not get a runner registration"
