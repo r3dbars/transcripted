@@ -14,7 +14,7 @@ struct SpeakerRetainedAudioSample: Equatable, Sendable {
 struct SpeakerPendingReviewItem: Identifiable, Sendable {
     let speakerId: UUID
     let diarizerSpeakerId: String
-    let channel: UtteranceChannel
+    let channel: SpeakerReviewChannel
     let transcriptURL: URL
     let transcriptId: UUID?
     let meetingTitle: String
@@ -464,7 +464,7 @@ enum SpeakerReviewQueueScanner {
 
     fileprivate struct FrontmatterSpeaker: Sendable {
         let id: String
-        let channel: UtteranceChannel
+        let channel: SpeakerReviewChannel
         let dbId: UUID?
         let name: String
         let source: String
@@ -549,7 +549,7 @@ enum SpeakerReviewQueueScanner {
             }
 
             let channel = current["channel"]
-                .flatMap { UtteranceChannel(rawValue: $0) } ?? .system
+                .flatMap { SpeakerReviewChannel(rawValue: $0) } ?? .system
             speakers.append(FrontmatterSpeaker(
                 id: id,
                 channel: channel,
@@ -613,7 +613,7 @@ enum SpeakerReviewQueueScanner {
     private static func sampleText(
         in body: String,
         speakerName: String,
-        channel: UtteranceChannel
+        channel: SpeakerReviewChannel
     ) -> String? {
         let label = "[\(channelPrefix(for: channel))/\(speakerName)]"
         let lines = body.components(separatedBy: .newlines)
@@ -637,7 +637,7 @@ enum SpeakerReviewQueueScanner {
         return nil
     }
 
-    private static func channelPrefix(for channel: UtteranceChannel) -> String {
+    private static func channelPrefix(for channel: SpeakerReviewChannel) -> String {
         switch channel {
         case .mic:
             return "Mic"

@@ -674,6 +674,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationSessionPipeline.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/HomeCaptureRefreshObserver.swift"
+    "Sources/Meeting/SpeakerReviewChannel.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
     "Sources/UI/Settings/SpeakerReviewStack.swift"
     "Sources/UI/Settings/SpeakerDuplicateDetection.swift"
