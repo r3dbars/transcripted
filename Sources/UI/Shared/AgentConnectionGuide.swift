@@ -16,12 +16,12 @@ struct AgentConnectionStarterSkill {
 enum AgentConnectionGuide {
     private static let codexInboxSetupFilename = "codex-inbox-setup.md"
 
-    // Configured once and only used to format; ISO8601DateFormatter is thread-safe.
-    private nonisolated(unsafe) static let portableDateFormatter: ISO8601DateFormatter = {
+    // Keep formatter state local to each call while preserving millisecond rounding.
+    private static func portableDateString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 
     static var meetingsFolder: URL {
         MeetingStoragePaths.transcriptsFolder
@@ -290,7 +290,7 @@ enum AgentConnectionGuide {
 
         Source:
         - Title: \(title)
-        - Recorded at: \(portableDateFormatter.string(from: date))
+        - Recorded at: \(portableDateString(date))
         - Source file: \(transcriptURL.lastPathComponent)
         - Scope: this pasted meeting only
 
@@ -364,7 +364,7 @@ enum AgentConnectionGuide {
     }
 
     private static func initialCodexInboxState(createdAt: Date) -> String {
-        let createdAtString = portableDateFormatter.string(from: createdAt)
+        let createdAtString = portableDateString(createdAt)
         return """
         {
           "version": 1,

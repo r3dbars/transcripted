@@ -201,7 +201,7 @@ enum FeedbackIssueBuilder {
         Type: \(report.sourceKind)
         Issue: \(report.issueKind)
         Reference: \(report.referenceID)
-        Created: \(feedbackDateFormatter.string(from: report.occurredAt))
+        Created: \(feedbackDateString(report.occurredAt))
         App: \(report.appVersion)
 
         ---
@@ -210,12 +210,12 @@ enum FeedbackIssueBuilder {
         """
     }
 
-    // Configured once and only used to format; ISO8601DateFormatter is thread-safe.
-    private nonisolated(unsafe) static let feedbackDateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+    // Keep formatter state local to each call while preserving millisecond rounding.
+    private static func feedbackDateString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
 }
 
 /// What Settings says after Send Diagnostics.
