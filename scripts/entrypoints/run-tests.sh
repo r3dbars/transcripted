@@ -457,6 +457,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationSessionTypes.swift"
     "Sources/Speech/SpeechTimedToken.swift"
     "Sources/Meeting/MeetingTimedTokenBridge.swift"
+    "Sources/TranscriptedCore/Pipeline/SpeechSegmentPacking.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetModelState.swift"
     "Sources/Speech/WhisperCachedModelPolicy.swift"
