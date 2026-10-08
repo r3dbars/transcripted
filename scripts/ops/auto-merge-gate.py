@@ -64,6 +64,7 @@ HUMAN_LABEL = "waiting-on-human"
 HUMAN_LABELS = {HUMAN_LABEL, "needs owner review"}
 HELD_MARKER = "<!-- auto-merge-gate:held -->"
 UNTRUSTED_REASONS = ("PR comes from a fork", "author ")
+DISABLED_LANE = re.compile(r"lane \S+ is disabled$")
 
 
 def gh(*args: str) -> str:
@@ -103,10 +104,13 @@ def only_lowers(base, head, top: bool = True) -> bool:
     """True when head keeps or lowers every debt count in base and adds nothing.
 
     Top-level scalars (`limit`, `version`, `_comment`) are settings, not debt,
-    so they must stay exactly the same.
+    so they must stay present and exactly the same. Lists are multisets: an
+    entry may not appear more times than it did in base.
     """
     if isinstance(head, dict):
         if not isinstance(base, dict):
+            return False
+        if top and any(k not in head for k, v in base.items() if not isinstance(v, (dict, list))):
             return False
         for k, v in head.items():
             if k not in base:
@@ -118,7 +122,7 @@ def only_lowers(base, head, top: bool = True) -> bool:
                 return False
         return True
     if isinstance(head, list):
-        return isinstance(base, list) and all(item in base for item in head)
+        return isinstance(base, list) and all(head.count(item) <= base.count(item) for item in head)
     if isinstance(head, bool) or isinstance(base, bool):
         return head == base
     if isinstance(head, (int, float)) and isinstance(base, (int, float)):
@@ -130,9 +134,10 @@ def held_for_human(reasons: list[str]) -> list[str]:
     """Reasons this PR can never pass in its lane, so a human has to look.
 
     Empty for forks and outside authors: the gate doesn't label or comment on
-    PRs it wouldn't trust to merge anyway.
+    PRs it wouldn't trust to merge anyway. Empty for a disabled lane too: the
+    kill switch stops every write, not just merges.
     """
-    if any(r.startswith(UNTRUSTED_REASONS) for r in reasons):
+    if any(r.startswith(UNTRUSTED_REASONS) or DISABLED_LANE.match(r) for r in reasons):
         return []
     return [r for r in reasons
             if r.startswith(("touches protected files", "files outside lane")) or "lane limit is" in r]
@@ -547,6 +552,10 @@ def self_test() -> int:
         ({"limit": 800}, {"limit": 900}, False),
         ({"limit": 800, "files": {"a": 900}}, {"limit": 0, "files": {"a": 900}}, False),
         ({"version": 1, "files": {"a": 900}}, {"version": 1, "files": {"a": 899}}, True),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"_comment": "c", "files": {"a": 900}}, False),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"limit": 800, "files": {"a": 900}}, False),
+        ({"edges": {"f": {"M": ["T"]}}}, {"edges": {"f": {"M": ["T", "T"]}}}, False),
+        ({"edges": {"f": {"M": ["T", "T"]}}}, {"edges": {"f": {"M": ["T"]}}}, True),
     ]
     for base_v, head_v, want in lowers:
         ok = only_lowers(base_v, head_v) == want
@@ -578,6 +587,11 @@ def self_test() -> int:
     _, reasons = evaluate(base_pr, extra, disabled)
     results.append(any("disabled" in r for r in reasons))
     print(f"{'PASS' if results[-1] else 'FAIL'} disabled lane blocks: {reasons}")
+    _, reasons = evaluate({**base_pr, "additions": 5000,
+                           "files": [{"path": "Sources/TranscriptedCore/Audio/A.swift"}]}, extra, disabled)
+    results.append(held_for_human(reasons) == [] and bool(held_for_human(
+        [r for r in reasons if not DISABLED_LANE.match(r)])))
+    print(f"{'PASS' if results[-1] else 'FAIL'} disabled lane never labels or comments: {reasons}")
 
     failed = results.count(False)
     print(f"{len(results) - failed}/{len(results)} passed")
