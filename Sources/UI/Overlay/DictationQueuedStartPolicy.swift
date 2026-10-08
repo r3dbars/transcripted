@@ -56,6 +56,26 @@ extension DictationQueuedStartPolicy {
         isDrafting && !errorMessage.isEmpty && !messageCanGiveWayToNextStart
     }
 
+    /// What kind of message the overlay is about to show.
+    enum MessageKind: Equatable {
+        /// "No speech heard" and its kin: the take itself went fine.
+        case noSpeechNote
+        /// "Copied. Press ⌘V" after the text did land, so a new take may replace it.
+        case landedClipboardNotice
+        /// Every other message: failures, saved/not-pasted notices, anything with a button.
+        case other
+    }
+
+    /// Whether a press waiting for the next take may start over this message.
+    /// Only a passing note about a take that went fine gives way; every other
+    /// message keeps the next take from starting over it.
+    static func messageCanGiveWayToNextStart(_ kind: MessageKind) -> Bool {
+        switch kind {
+        case .noSpeechNote, .landedClipboardNotice: return true
+        case .other: return false
+        }
+    }
+
     /// While the last take is still on screen transcribing, an error would
     /// cover its pill (and can hide it and turn off Esc), so a dropped press
     /// only says "still finishing" once nothing is dictating.
