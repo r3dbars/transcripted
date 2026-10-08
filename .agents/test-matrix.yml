@@ -769,11 +769,14 @@ rules:
   # rule preflight reported only itself plus a `bash -n`, and the break surfaced
   # in CI instead of locally. The docs/** members of that same pinned set are
   # deliberately left out — see the docs-only note below and AGENTS.md. The menu
-  # bar glyph generator is the exception: it is code, not prose, and
-  # StatusItemPresentationTests fails when its numbers drift from MenuBarGlyph.swift.
+  # bar glyph generator and its SVGs are the exception: they are code and generated
+  # output, and StatusItemPresentationTests compares MenuBarGlyph's real paths to them.
   - paths:
       - ".agents/qa-gates.yml"
       - "docs/assets/menu-bar-icon/make_menu_bar_icons.py"
+      - "docs/assets/menu-bar-icon/idle.svg"
+      - "docs/assets/menu-bar-icon/dictating.svg"
+      - "docs/assets/menu-bar-icon/meeting.svg"
       - ".agents/test-matrix.yml"
       - ".github/workflows/swift-ci.yml"
       - "scripts/dev/agent-preflight.sh"
