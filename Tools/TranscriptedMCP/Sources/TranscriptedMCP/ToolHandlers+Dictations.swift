@@ -107,7 +107,11 @@ private func dictationDayPageResult(day: AgentDictationDay, filename: String, of
     let start = min(offset, total)
     let end: Int
     if let limit {
-        end = min(start + max(1, limit), total)
+        // Clamp before adding, like the meeting window: `start + limit`
+        // overflows for a near-Int.max limit. `start <= total`, so
+        // `total - start` can't overflow.
+        let requested = max(1, limit)
+        end = requested >= total - start ? total : start + requested
     } else {
         end = autoWindowEnd(items: day.entries, start: start) {
             $0.text.count + $0.title.count + paginationItemOverheadCharacters * 3

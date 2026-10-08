@@ -195,6 +195,8 @@ fi
 check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
 check "QA harness contract self-test" "python3 scripts/dev/check-qa-harness-contract.py --self-test"
 check "QA harness contract (permission-state stays INCOMPLETE, not green)" "python3 scripts/dev/check-qa-harness-contract.py"
+check "synced copies self-test" "python3 scripts/dev/check-synced-copies.py --self-test"
+check "synced copies (CaptureLibraryPathSafety stays byte-identical)" "python3 scripts/dev/check-synced-copies.py"
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
 check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"

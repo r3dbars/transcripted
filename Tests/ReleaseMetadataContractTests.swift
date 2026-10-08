@@ -8,19 +8,21 @@ import Foundation
 
 func testReleaseMetadataContract() {
     runSuite("Release metadata - release resources ship only the active app icon") {
-        let infoPlist = releaseContractFile("Info.plist")
-        assertTrue(
-            infoPlist.contains("<key>CFBundleIconFile</key>\n\t<string>Transcripted</string>"),
+        let infoPlist = releaseContractPlist("Info.plist")
+        assertEqual(
+            infoPlist["CFBundleIconFile"] as? String,
+            "Transcripted",
             "Info.plist should point at the active Transcripted icon"
         )
-        assertTrue(
-            infoPlist.contains("<key>CFBundleIconName</key>\n\t<string>Transcripted</string>"),
+        assertEqual(
+            infoPlist["CFBundleIconName"] as? String,
+            "Transcripted",
             "Info.plist should name the compiled icon so macOS 26 uses the real dark variant"
         )
 
-        let iconJSON = releaseContractFile("AppIcon/Transcripted.icon/icon.json")
+        let iconAppearances = releaseJSONValues(forKey: "appearance", in: releaseContractJSON("AppIcon/Transcripted.icon/icon.json"))
         assertTrue(
-            iconJSON.contains("\"appearance\" : \"dark\""),
+            iconAppearances.contains("dark"),
             "The app icon needs a dark appearance, or macOS 26 derives an all-black one"
         )
 
@@ -101,18 +103,21 @@ func testReleaseMetadataContract() {
             releaseIsSHA256Hex(caskSHA),
             "Homebrew cask should include a real 64-character SHA-256 digest"
         )
-        assertTrue(
-            cask.contains("releases/download/v#{version}/Transcripted-#{version}.dmg"),
+        assertEqual(
+            releaseRubyStringAssignment("url", in: cask),
+            "https://github.com/r3dbars/transcripted/releases/download/v#{version}/Transcripted-#{version}.dmg",
             "Homebrew cask URL should keep tracking the matching GitHub release asset"
         )
-        assertTrue(cask.contains("depends_on arch: :arm64"), "Homebrew cask should keep the arm64 release contract")
-        assertTrue(cask.contains("depends_on macos: :tahoe"), "Homebrew cask should use the supported symbol syntax for the macOS 26+ release floor")
+        let caskDependsOn = releaseRubyDependsOn(in: cask)
+        assertEqual(caskDependsOn["arch"], ":arm64", "Homebrew cask should keep the arm64 release contract")
+        assertEqual(caskDependsOn["macos"], ":tahoe", "Homebrew cask should use the supported symbol syntax for the macOS 26+ release floor")
     }
 
     runSuite("Release metadata - Sparkle app settings point at the committed appcast") {
         let infoPlist = releaseContractFile("Info.plist")
         let appcast = releaseContractFile("docs/appcast.xml")
         let sparkleDocs = releaseContractFile("docs/sparkle-updates.md")
+        let documentedPublicKey = releasePlistString("SUPublicEDKey", in: sparkleDocs)
 
         let feedURL = releasePlistString("SUFeedURL", in: infoPlist)
         let appcastSelfURL = releaseXMLAttribute("href", inFirstTagNamed: "atom:link", text: appcast)
@@ -132,17 +137,57 @@ func testReleaseMetadataContract() {
         )
         assertEqual(releasePlistInteger("SUScheduledCheckInterval", in: infoPlist), 14_400, "Sparkle check interval should stay at 4 hours")
         assertNotNil(publicKey, "Info.plist should include the Sparkle EdDSA public key")
-        if let publicKey {
-            assertTrue(
-                sparkleDocs.contains("<string>\(publicKey)</string>"),
-                "docs/sparkle-updates.md should document the committed Sparkle public key"
-            )
-        }
+        assertEqual(
+            documentedPublicKey,
+            publicKey,
+            "docs/sparkle-updates.md should document the committed Sparkle public key"
+        )
     }
 }
 
 private func releaseContractRepoRoot() -> URL {
     URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+}
+
+private func releaseContractPlist(_ relativePath: String) -> [String: Any] {
+    let url = releaseContractRepoRoot().appendingPathComponent(relativePath)
+    guard let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+    else { return [:] }
+    return plist
+}
+
+private func releaseContractJSON(_ relativePath: String) -> Any {
+    let url = releaseContractRepoRoot().appendingPathComponent(relativePath)
+    guard let data = try? Data(contentsOf: url),
+          let json = try? JSONSerialization.jsonObject(with: data)
+    else { return [String: Any]() }
+    return json
+}
+
+/// Every string value stored under `key` anywhere in a parsed JSON tree.
+private func releaseJSONValues(forKey key: String, in node: Any) -> [String] {
+    if let dict = node as? [String: Any] {
+        let own = (dict[key] as? String).map { [$0] } ?? []
+        return own + dict.values.flatMap { releaseJSONValues(forKey: key, in: $0) }
+    }
+    if let array = node as? [Any] {
+        return array.flatMap { releaseJSONValues(forKey: key, in: $0) }
+    }
+    return []
+}
+
+/// `depends_on arch: :arm64` lines parsed into ["arch": ":arm64"].
+private func releaseRubyDependsOn(in contents: String) -> [String: String] {
+    var result: [String: String] = [:]
+    for line in contents.split(separator: "\n") {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("depends_on ") else { continue }
+        let parts = trimmed.dropFirst("depends_on ".count).split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { continue }
+        result[String(parts[0]).trimmingCharacters(in: .whitespaces)] = String(parts[1]).trimmingCharacters(in: .whitespaces)
+    }
+    return result
 }
 
 private func releaseContractFile(_ relativePath: String) -> String {
