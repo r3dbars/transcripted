@@ -52,6 +52,10 @@ name: Swift CI
 
 on:
   pull_request:
+  # The merge queue re-runs CI on the PR merged with the latest main. Those runs
+  # go to hosted runners: pick-ci-runner.py and the Mac's job hook only route
+  # push, workflow_dispatch and same-repo pull_request to the Mac.
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
