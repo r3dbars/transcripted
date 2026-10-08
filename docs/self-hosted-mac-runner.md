@@ -2,8 +2,10 @@
 
 GitHub gives this account 5 concurrent hosted macOS jobs, and every PR's Swift
 CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
-most of them wait in line. So `checks` and `spm-tests` can run on the owner's
-Mac, and only `app-build` has to use a hosted slot.
+most of them wait in line, and hosted `macos-26` machines can be scarce. So
+when the owner's Mac is free, all three run there instead, one after another:
+the service runs one job VM at a time (about 20-25 minutes for a whole run,
+against hours in line for hosted `macos-26` machines on a busy day).
 
 Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself, and
 a VM only exists while a job is waiting for it.
@@ -11,8 +13,8 @@ a VM only exists while a job is waiting for it.
 ## How a run picks its machine
 
 `pick-runner` in `.github/workflows/swift-ci.yml` runs first, on Linux, and
-calls `scripts/ci/pick-ci-runner.py`. It sends `checks` and `spm-tests` to the
-`transcripted-mac` label only when all of these hold:
+calls `scripts/ci/pick-ci-runner.py`. It sends `checks`, `spm-tests` and `app-build`
+to the `transcripted-mac` label only when all of these hold:
 
 - the `MAC_RUNNER_MODE` repo variable is not `off`
 - the run is a `push`, a `workflow_dispatch`, or a `pull_request` whose head
@@ -48,7 +50,7 @@ before it starts one.
 
 A job that is already waiting always gets run, even if the Mac is paused, on
 battery, or a mic is in use. It was sent here while the Mac said it was free,
-and nothing else will pick it up. So both of a run's jobs finish even if the
+and nothing else will pick it up. So all three of a run's jobs finish even if the
 owner pauses between them. While a mic is in use, a running job drops to
 background priority (efficiency cores and throttled disk) instead of failing.
 
@@ -62,9 +64,13 @@ main's copy of the script, since it holds an `actions: write` token, and does
 nothing until the heartbeat variable exists. So a required `build-and-test`
 check can't sit pending on the Mac forever.
 
-A re-run redoes the whole run, including a hosted `app-build` that may already
-be partway through. GitHub can't re-run just the two Mac jobs with a new
-runner choice, because "re-run failed jobs" keeps `pick-runner`'s old answer.
+A re-run redoes the whole run, including an `app-build` that may already be
+partway through. GitHub can't re-run just some jobs with a new runner choice,
+because "re-run failed jobs" keeps `pick-runner`'s old answer.
+
+A job waiting behind its own run's other jobs on this Mac (the second or third
+job, while an earlier one runs) is never sent back to GitHub for waiting;
+only a run with nothing running here is rerouted after 15 minutes.
 
 A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
 minutes). It only asks GitHub for a registration once a VM has booted.
@@ -89,8 +95,14 @@ The timestamp in both forms lets `pick-runner` tell a live Mac from one that
 went quiet. While a VM runs, the service keeps the Mac from idle-sleeping
 (`caffeinate -i`).
 
-`app-build` never uses the Mac. Its launch smoke stays on hosted runners
-(`scripts/ops/native-smoke-isolation.py`).
+`app-build`'s launch smoke runs in the job VM as the VM's own desktop user.
+`scripts/ops/native-smoke-isolation.py` allows that only in CI, on a
+`transcripted-mac-` runner, when the root-owned marker
+`/Library/TranscriptedCI/throwaway-ci-vm` exists. The golden-VM setup writes
+it; the owner's Mac never has it, so smokes there stay blocked for the owner's
+account. The launch-to-interactive budget is 10 seconds in the VM (3 on hosted
+runners), because a VM's cold launch is slower and noisier; the smoke must still
+launch the app and report, or the budget step fails.
 
 ## What a job can and can't reach
 
@@ -118,6 +130,10 @@ which has no admin rights (it isn't in the `admin` group and can't `sudo`).
   root daemon whose program the job user could replace (for example one run
   from `/opt/homebrew`, which that user owns) gets its program copied
   somewhere only root can write, so restarting the VM can't hand a job root.
+  Folders the job user can change (like `/opt/homebrew/bin` and
+  `/usr/local/bin`, which the image's `tart-guest-daemon` lists first) are
+  dropped from every root daemon's `PATH`, so a job can't plant a program a
+  daemon would run.
   A job VM whose firewall didn't load at boot never starts its runner.
 - **It can't reach:** the owner's files, keychain, gh login, microphone,
   clipboard, or app data. It also can't leave anything behind for the next
@@ -141,7 +157,7 @@ workflow to ask for the Mac's label. Here's what stops that:
 3. A job-started hook inside the VM runs before any step. It starts from an
    empty environment, reads the event payload, and fails every job that isn't
    a `push`, `workflow_dispatch`, or same-repo `pull_request` on this repo. It
-   also fails any job other than `checks` and `spm-tests`, since GitHub gives
+   also fails any job other than `checks`, `spm-tests` and `app-build`, since GitHub gives
    the VM's runner the default `self-hosted`/`macOS`/`ARM64` labels too.
    Building the golden VM proves the hook refuses a fork PR and accepts a
    same-repo push. If that check fails, the image isn't kept.
@@ -198,9 +214,15 @@ bash ~/.transcripted-ci/mac-runner.sh uninstall  # removes the service, VMs, ima
 ```
 
 Pause before timing-sensitive local work, like benchmarks or speed tests, then
-wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the two
+wait until `status` shows no waiting jobs and no `ci-job-` VM. At most the three
 jobs of one run can still land after a pause. To turn routing off from GitHub
 without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
+
+Set `MAC_RUNNER_MODE` to `always` to never use GitHub's hosted Macs: every
+same-repo run waits for this Mac, however long the line is, and nothing is
+re-run on GitHub (neither the sweep nor this service reroutes). Fork PRs still
+run hosted. This is the owner's default, because hosted macOS minutes run out
+fast on a private repo.
 
 Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 
@@ -213,8 +235,8 @@ Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
   another Swift CI run starts.
 - **Re-runs:** after a Mac failure, use "Re-run all jobs". "Re-run failed
   jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
-- **One job at a time:** a run's `checks` and `spm-tests` go one after the
-  other when both land on the Mac.
+- **One job at a time:** a run's `checks`, `spm-tests` and `app-build` go one
+  after the other when they land on the Mac.
 - **Diagnostics:** Swift CI's stall watcher can't use `sudo` inside the VM,
   so a hung test on the Mac leaves fewer samples than on hosted runners.
 - **VM count:** any app's VM counts toward the two-VM limit, including

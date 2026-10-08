@@ -41,6 +41,7 @@ jobs:
         shell: bash
         env:
           HEARTBEAT: ${{ vars.MAC_RUNNER_HEARTBEAT }}
+          MODE: ${{ vars.MAC_RUNNER_MODE }}
           REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/pick-ci-runner.py --reroute

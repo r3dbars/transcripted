@@ -355,20 +355,13 @@ enum TranscriptedConstants {
     // MARK: - Async Utilities
 
     /// Run an async operation with a deadline. Throws CancellationError on timeout.
+    /// The operation is cancelled at the deadline, but the throw doesn't wait
+    /// for it to unwind: a task group would join it first, so work that ignores
+    /// cancellation (awaiting another Task's value) would blow the deadline.
+    /// Cancelling the caller ends the wait right away with CancellationError,
+    /// instead of running on to the deadline.
     static func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw CancellationError()
-            }
-            guard let result = try await group.next() else {
-                group.cancelAll()
-                throw CancellationError()
-            }
-            group.cancelAll()
-            return result
-        }
+        try await raceDeadline(seconds: seconds, forwardsCallerCancellation: true, operation: operation)
     }
 
     /// Run an async operation with a deadline and return as soon as the deadline
@@ -377,13 +370,38 @@ enum TranscriptedConstants {
         seconds: Double,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
+        try await raceDeadline(seconds: seconds, forwardsCallerCancellation: false, operation: operation)
+    }
+
+    private static func raceDeadline<T: Sendable>(
+        seconds: Double,
+        forwardsCallerCancellation: Bool,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
         let operationTask = Task { try await operation() }
         let timeoutTask = Task<T, Error> {
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             throw CancellationError()
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
+        guard forwardsCallerCancellation else {
+            return try await awaitRace(operationTask: operationTask, timeoutTask: timeoutTask)
+        }
+        // Cancelling the timer makes it throw CancellationError at once, which
+        // wins the race even if the operation ignores its own cancellation.
+        return try await withTaskCancellationHandler {
+            try await awaitRace(operationTask: operationTask, timeoutTask: timeoutTask)
+        } onCancel: {
+            operationTask.cancel()
+            timeoutTask.cancel()
+        }
+    }
+
+    private static func awaitRace<T: Sendable>(
+        operationTask: Task<T, Error>,
+        timeoutTask: Task<T, Error>
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
             let race = TimeoutRaceState<T>()
 
             Task {
