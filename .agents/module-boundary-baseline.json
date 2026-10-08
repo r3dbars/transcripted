@@ -41,23 +41,12 @@
         "CoreAudioSystemAudioCapture"
       ]
     },
-    "Sources/UI/Overlay/MeetingOverlayController.swift": {
-      "Core": [
-        "CaptureRouteStabilizationOutcome",
-        "DisplayStatus"
-      ]
-    },
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": {
       "Core": [
         "SpeakerIdentityOption",
         "SpeakerMatchOutcomeKind",
         "SpeakerNameUpdate",
         "SpeakerReviewPrioritizer"
-      ]
-    },
-    "Sources/UI/Settings/HomeTranscriptionActivityPresentation.swift": {
-      "Core": [
-        "DisplayStatus"
       ]
     },
     "Sources/UI/Settings/Pages/HomeSettingsPage.swift": {
