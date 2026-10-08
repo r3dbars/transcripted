@@ -644,6 +644,8 @@ APP_SOURCES=(
     "Sources/UI/Shared/OwnFileResolver.swift"
     "Sources/UI/Shared/HomeMeetingRowActionTargets.swift"
     "Sources/UI/Shared/HomeMeetingRename.swift"
+    "Sources/UI/Shared/HomeCopyMeetingReader.swift"
+    "Sources/UI/Shared/HomeActivityIndicatorPolicy.swift"
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift"
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
     "Sources/UI/Settings/SpeakerMergeTargets.swift"
