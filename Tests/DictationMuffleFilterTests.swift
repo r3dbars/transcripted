@@ -184,6 +184,25 @@ func testDictationMuffleFilter() {
         assertEqual(DictationMuffleSplice.atCut(copyDelayFrames: 8_198, sampleRate: 0), .plain, "no sample rate, no hold")
     }
 
+    runSuite("A held copy near the lag threshold reaches its muffle target before any audible swell") {
+        for lag in [15.1, 16.0, 17.5, 18.0, 171.0] {
+            let splice = DictationMuffleSplice.atCut(
+                copyDelayFrames: Int((lag * sampleRate / 1_000).rounded()), sampleRate: sampleRate
+            )
+            var filter = DictationMuffleFilter(sampleRate: sampleRate, startGated: true)
+            let samples = [Float](repeating: 0.5, count: splice.holdFrames + 128)
+            let output = muffleRender(
+                &filter, input: [samples, samples], inputLayout: [2], outputLayout: [2],
+                muffle: splice.startsMuffled ? 1 : 0, gate: 1,
+                gateHoldFrames: splice.holdFrames, gateFadeFrames: splice.fadeFrames
+            ).out[0]
+            assertTrue(output.prefix(splice.holdFrames).allSatisfy { $0 == 0 }, "held copy stays silent")
+            assertTrue(output.dropFirst(splice.holdFrames).contains { $0 != 0 }, "the swell is audible after the hold")
+            assertEqual(filter.amount, 1, "held copy is already muffled at \(lag) ms without waiting for a machine tick")
+        }
+        assertEqual(DictationMuffleSplice.plain.startsMuffled, false, "wired/plain cuts retain their delayed glide")
+    }
+
     runSuite("A held gate stays silent for the hold, then fades in over the fade length") {
         let holdFrames = 300
         let fadeFrames = 200

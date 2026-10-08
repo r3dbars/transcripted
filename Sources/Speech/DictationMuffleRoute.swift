@@ -238,6 +238,10 @@ final class DictationMuffleRoute {
         lastSplice = DictationMuffleSplice.atCut(copyDelayFrames: copyDelayFrames, sampleRate: sampleRate)
         render.gateHoldFrames.store(lastSplice.holdFrames, ordering: .relaxed)
         render.gateFadeFrames.store(lastSplice.fadeFrames, ordering: .relaxed)
+        // A near-threshold hold can finish before the machine's delayed
+        // glide. Publish its target before opening the gate so every held
+        // swell is already muffled; plain wired cuts keep their dry glide.
+        render.muffled.store(lastSplice.startsMuffled, ordering: .relaxed)
         render.gateOpen.store(true, ordering: .releasing)
         guard AudioDeviceStart(cutDevice, cutProc) == noErr else {
             state.takeUnretainedValue().gateOpen.store(false, ordering: .relaxed)

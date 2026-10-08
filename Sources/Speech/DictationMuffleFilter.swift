@@ -346,6 +346,10 @@ struct DictationMuffleSplice: Equatable {
     /// Frames the gate takes to open after the hold (0 means `gateSeconds`).
     var fadeFrames: Int
 
+    /// A held copy must already be muffled when the gate opens, even if the
+    /// delayed machine glide has not fired yet.
+    var startsMuffled: Bool { holdFrames > 0 }
+
     static let plain = DictationMuffleSplice(holdFrames: 0, fadeFrames: 0)
 
     /// What's left of a hold after the IO thread renders `frames` more.
