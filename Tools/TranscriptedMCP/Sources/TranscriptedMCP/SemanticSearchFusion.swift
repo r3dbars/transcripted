@@ -96,7 +96,7 @@ enum SemanticSearchFusion {
     /// Merge already-ranked per-kind lists (meetings, dictations, writing) by
     /// RRF over each item's rank within its own list. Items at the same rank in
     /// different lists tie; ties go to the newer item. Nothing is truncated.
-    static func fuseRankedContextLists(_ lists: [[ContextSearchGroup]]) -> [ContextSearchGroup] {
+    static func fuseRankedContextLists(_ lists: [[ContextSearchGroup]], timeZone: TimeZone = .current) -> [ContextSearchGroup] {
         func key(_ g: ContextSearchGroup) -> String { "\(g.kind)\u{1}\(g.filename)\u{1}\(g.entryId ?? "")" }
 
         var score: [String: Double] = [:]
@@ -111,11 +111,16 @@ enum SemanticSearchFusion {
             }
         }
 
+        // Meetings use local wall clock; note entries use UTC. Parse once so
+        // equal-rank ties compare instants across kinds without repeated work.
+        let parser = RecentContextInstantParser(timeZone: timeZone)
+        let instants = byKey.mapValues { parser.date(from: $0.datetime) ?? .distantPast }
+
         // Swift doesn't promise a stable sort, so first-seen order is the last tiebreak.
         let ranked = order.enumerated().sorted { a, b in
             let sa = score[a.element] ?? 0, sb = score[b.element] ?? 0
             if sa != sb { return sa > sb }
-            let da = byKey[a.element]?.datetime ?? "", db = byKey[b.element]?.datetime ?? ""
+            let da = instants[a.element] ?? .distantPast, db = instants[b.element] ?? .distantPast
             if da != db { return da > db }
             return a.offset < b.offset
         }

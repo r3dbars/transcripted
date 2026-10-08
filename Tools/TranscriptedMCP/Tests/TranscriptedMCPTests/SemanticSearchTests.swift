@@ -587,6 +587,14 @@ final class SemanticSearchFusionTests: XCTestCase {
         XCTAssertEqual(fused.map(\.filename), ["D", "M-best", "W", "M-second"])
     }
 
+    func testCrossKindTieUsesRealInstantsForLocalMeetingAndUTCEntry() {
+        let utc = TimeZone(secondsFromGMT: -4 * 3600)!
+        let meeting = group(.meeting, "Meeting", "2026-10-06T21:00:00")
+        let note = group(.dictation, "Note", "2026-10-07T00:30:00.000Z", entry: "d1")
+        let fused = SemanticSearchFusion.fuseRankedContextLists([[meeting], [note]], timeZone: utc)
+        XCTAssertEqual(fused.map(\.filename), ["Meeting", "Note"], "the local meeting is half an hour newer")
+    }
+
     func testFuseRankedContextListsKeepsOneEntryPerItem() {
         let a = group(.dictation, "Dictations_2026-10-01", "2026-10-01T09:00:00", entry: "e1")
         let b = group(.dictation, "Dictations_2026-10-01", "2026-10-01T10:00:00", entry: "e2")
