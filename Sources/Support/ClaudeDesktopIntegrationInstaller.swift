@@ -400,8 +400,8 @@ enum ClaudeDesktopIntegrationInstaller {
             return
         }
 
-        guard let apiKey = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.apiKeyInfoKey] as? String),
-              let host = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.hostInfoKey] as? String),
+        guard let apiKey = firstNonEmpty(infoDictionary?[AnalyticsInfoPlistKeys.apiKeyInfoKey] as? String),
+              let host = firstNonEmpty(infoDictionary?[AnalyticsInfoPlistKeys.hostInfoKey] as? String),
               host.lowercased().hasPrefix("https://") else {
             if fileManager.fileExists(atPath: configURL.path) {
                 try fileManager.removeItem(at: configURL)
@@ -414,21 +414,21 @@ enum ClaudeDesktopIntegrationInstaller {
             withIntermediateDirectories: true
         )
         var configuration = [
-            AnalyticsRuntimeConfiguration.apiKeyInfoKey: apiKey,
-            AnalyticsRuntimeConfiguration.hostInfoKey: host,
+            AnalyticsInfoPlistKeys.apiKeyInfoKey: apiKey,
+            AnalyticsInfoPlistKeys.hostInfoKey: host,
         ]
         if let appVersion = safeAppVersion(infoDictionary?[appVersionInfoKey] as? String) {
             configuration[appVersionInfoKey] = appVersion
         }
         if let buildChannel = safeBuildChannel(
-            infoDictionary?[AnalyticsRuntimeConfiguration.buildChannelInfoKey] as? String
+            infoDictionary?[AnalyticsInfoPlistKeys.buildChannelInfoKey] as? String
         ) {
-            configuration[AnalyticsRuntimeConfiguration.buildChannelInfoKey] = buildChannel
+            configuration[AnalyticsInfoPlistKeys.buildChannelInfoKey] = buildChannel
         }
         if let buildRevision = safeBuildRevision(
-            infoDictionary?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey] as? String
+            infoDictionary?[AnalyticsInfoPlistKeys.buildRevisionInfoKey] as? String
         ) {
-            configuration[AnalyticsRuntimeConfiguration.buildRevisionInfoKey] = buildRevision
+            configuration[AnalyticsInfoPlistKeys.buildRevisionInfoKey] = buildRevision
         }
 
         let data = try PropertyListSerialization.data(

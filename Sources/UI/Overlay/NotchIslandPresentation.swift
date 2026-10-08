@@ -65,7 +65,7 @@ struct NotchIslandDictationContent: Equatable {
                 tone: tone,
                 text: text,
                 actionTitle: notPasted.actionTitle,
-                preview: nil,
+                preview: notPasted.text,
                 dismissSeconds: notPasted.dismissSeconds,
                 hint: notPasted.hint
             )

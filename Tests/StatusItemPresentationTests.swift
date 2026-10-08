@@ -1,8 +1,9 @@
 // The first suite drives StatusItemPresentation, the same code the app delegate runs at launch and on
 // every recording change, against a plain NSButton, and renders every MenuBarGlyph to check it stays a
 // neutral template. The second renders every MenuBarGlyph into a bitmap and checks the silhouettes
-// actually differ where they are meant to. The third keeps MenuBarGlyphGeometry (numbers and the drawn
-// tail curves) in step with the generator that draws the committed SVGs in docs/assets/menu-bar-icon/.
+// actually differ where they are meant to. The third builds the real CGPaths MenuBarGlyphGeometry makes
+// (corner arcs and the tail included) and compares every path element with the SVGs the generator in
+// docs/assets/menu-bar-icon/make_menu_bar_icons.py wrote; that generator is the source of truth.
 
 import AppKit
 import Foundation
@@ -129,107 +130,126 @@ func testStatusItemPresentation() {
         )
     }
 
-    runSuite("menu bar glyph geometry matches the SVG generator") {
-        let generator = readSourceFixture("docs/assets/menu-bar-icon/make_menu_bar_icons.py")
+    runSuite("menu bar glyph paths match the SVGs the generator draws") {
         let g = MenuBarGlyphGeometry.self
-        let expected: [(String, [CGFloat])] = [
-            ("SW", [g.strokeWidth]),
-            ("L, R, TOP, BOT, RAD", [g.left, g.right, g.top, g.bottom, g.radius]),
-            ("CX, MID", [g.centerX, g.barMidY]),
-            ("CB", [g.crossbarHalfLength]),
-            ("GAP", [g.crossbarGap]),
-            ("STEM_BOT", [g.stemBottom]),
-            ("SIDE_BARS", [g.sideBarOffset, g.sideBarHeight]),
-            ("DOT_C, DOT_R, DOT_RING", [g.dotCenter.x, g.dotCenter.y, g.dotRadius, g.dotRing]),
-            ("BOX_X, BOX_Y, BOX", [g.box.minX, g.box.minY, g.box.width]),
-        ]
-        for (names, values) in expected {
-            assertEqual(
-                pythonAssignmentNumbers(generator, names: names),
-                values,
-                "\(names) in make_menu_bar_icons.py should match MenuBarGlyphGeometry"
-            )
-        }
-        assertEqual(g.box.width, g.box.height, "the glyph box should be square")
+        let idle = svgPathData("docs/assets/menu-bar-icon/idle.svg")
+        // dictating.svg also holds the mask's stem and side-bar paths; the bubble is the closed one.
+        let dictating = svgPathData("docs/assets/menu-bar-icon/dictating.svg").filter { $0.last?.kind == "Z" }
+        assertEqual(idle.count, 5, "idle.svg should hold the outline, crossbar, stem and two side bars")
+        assertEqual(dictating.count, 1, "dictating.svg should hold one closed bubble path")
+        guard idle.count == 5, dictating.count == 1 else { return }
 
-        // The tail: walk the path the glyph really draws and compare its two
-        // quadratic curves with the generator's `Q` commands.
-        let tailCommand = generator.split(separator: "\n")
-            .first { $0.contains("d += f'L 404 {BOT} Q ") }
-            .map(String.init) ?? ""
-        let generatorQuads = svgQuadCurves(tailCommand, bottom: g.bottom)
-        assertEqual(generatorQuads.count, 2, "the generator should draw the tail as two Q curves")
-        for (name, path) in [("outline", g.outlinePath()), ("body", g.bodyPath())] {
-            assertEqual(
-                quadCurves(in: path),
-                generatorQuads,
-                "the \(name) path's tail should match the generator's curves"
-            )
+        // The real CGPaths the app strokes, each against the generator's output. The outline and the
+        // body include the four corner arcs and the tail's two quadratic curves.
+        let comparisons: [(String, CGPath, [PathElement])] = [
+            ("idle outline (corner arcs and tail)", g.outlinePath(), idle[0]),
+            ("filled body (corner arcs and tail)", g.bodyPath(), dictating[0]),
+            ("crossbar", g.crossbarPath(), idle[1]),
+            ("idle stem", g.stemPath(from: g.top), idle[2]),
+            ("side bars", g.sideBarsPath(), idle[3] + idle[4]),
+        ]
+        for (name, path, expected) in comparisons {
+            let actual = pathElements(of: path)
+            assertEqual(actual.count, expected.count, "\(name) should have the generator's number of segments")
+            for (index, pair) in zip(actual, expected).enumerated() {
+                assertTrue(
+                    pair.0.kind == pair.1.kind && pair.0.points.count == pair.1.points.count
+                        && zip(pair.0.points, pair.1.points).allSatisfy {
+                            abs($0.x - $1.x) < 0.01 && abs($0.y - $1.y) < 0.01
+                        },
+                    "\(name) segment \(index) is \(pair.0), the generator draws \(pair.1)"
+                )
+            }
         }
+
+        // The tail really is two quadratic curves, and the box frames the SVG viewBox.
+        assertEqual(pathElements(of: g.bodyPath()).filter { $0.kind == "Q" }.count, 2, "the tail should be two quad curves")
+        assertEqual(g.box.width, g.box.height, "the glyph box should be square")
+        assertEqual(svgViewBox("docs/assets/menu-bar-icon/idle.svg"), g.box, "the generator's viewBox should be the glyph box")
     }
 }
 
-/// Quadratic curves in a CGPath as [start.x, start.y, control.x, control.y, end.x, end.y].
-private func quadCurves(in path: CGPath) -> [[CGFloat]] {
-    var curves: [[CGFloat]] = []
-    var current = CGPoint.zero
+private struct PathElement: CustomStringConvertible {
+    let kind: String          // M, L, C, Q or Z
+    let points: [CGPoint]
+    var description: String { "\(kind) " + points.map { "(\($0.x), \($0.y))" }.joined(separator: " ") }
+}
+
+private func pathElements(of path: CGPath) -> [PathElement] {
+    var elements: [PathElement] = []
     path.applyWithBlock { element in
         let e = element.pointee
+        let count: Int
+        let kind: String
         switch e.type {
-        case .moveToPoint, .addLineToPoint:
-            current = e.points[0]
-        case .addQuadCurveToPoint:
-            curves.append([current.x, current.y, e.points[0].x, e.points[0].y, e.points[1].x, e.points[1].y])
-            current = e.points[1]
-        case .addCurveToPoint:
-            current = e.points[2]
-        default:
-            break
+        case .moveToPoint: (kind, count) = ("M", 1)
+        case .addLineToPoint: (kind, count) = ("L", 1)
+        case .addQuadCurveToPoint: (kind, count) = ("Q", 2)
+        case .addCurveToPoint: (kind, count) = ("C", 3)
+        default: (kind, count) = ("Z", 0)
         }
+        elements.append(PathElement(kind: kind, points: (0..<count).map { e.points[$0] }))
     }
-    return curves
+    return elements
 }
 
-/// `Q cx cy x y` commands in an SVG path f-string, each with the point it
-/// starts from, and `{BOT}` filled in.
-private func svgQuadCurves(_ command: String, bottom: CGFloat) -> [[CGFloat]] {
-    let tokens = command
-        .replacingOccurrences(of: "{BOT}", with: "\(Int(bottom))")
-        .split(whereSeparator: { $0 == " " || $0 == "'" })
-        .map(String.init)
-    func number(_ index: Int) -> CGFloat? {
-        index < tokens.count ? Double(tokens[index]).map { CGFloat($0) } : nil
-    }
-    var curves: [[CGFloat]] = []
-    var current: [CGFloat] = []
-    var index = 0
-    while index < tokens.count {
-        if tokens[index] == "L", let x = number(index + 1), let y = number(index + 2) {
-            current = [x, y]
-            index += 3
-        } else if tokens[index] == "Q",
-                  let cx = number(index + 1), let cy = number(index + 2),
-                  let x = number(index + 3), let y = number(index + 4) {
-            curves.append(current + [cx, cy, x, y])
-            current = [x, y]
-            index += 5
-        } else {
-            index += 1
+/// Every `<path d="...">` in a generated SVG as path elements. Handles the absolute M L H V C Q Z
+/// commands the generator emits; anything else comes back as a "?" element so the comparison fails.
+private func svgPathData(_ relativePath: String) -> [[PathElement]] {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8) else { return [] }
+    var results: [[PathElement]] = []
+    for chunk in svg.components(separatedBy: " d=\"").dropFirst() {
+        guard let data = chunk.components(separatedBy: "\"").first else { continue }
+        let tokens = data.split(separator: " ").map(String.init)
+        var elements: [PathElement] = []
+        var current = CGPoint.zero
+        var index = 0
+        func number(_ offset: Int) -> CGFloat {
+            index + offset < tokens.count ? CGFloat(Double(tokens[index + offset]) ?? .nan) : .nan
         }
+        while index < tokens.count {
+            switch tokens[index] {
+            case "M", "L":
+                current = CGPoint(x: number(1), y: number(2))
+                elements.append(PathElement(kind: tokens[index], points: [current]))
+                index += 3
+            case "H":
+                current.x = number(1)
+                elements.append(PathElement(kind: "L", points: [current]))
+                index += 2
+            case "V":
+                current.y = number(1)
+                elements.append(PathElement(kind: "L", points: [current]))
+                index += 2
+            case "Q":
+                current = CGPoint(x: number(3), y: number(4))
+                elements.append(PathElement(kind: "Q", points: [CGPoint(x: number(1), y: number(2)), current]))
+                index += 5
+            case "C":
+                current = CGPoint(x: number(5), y: number(6))
+                elements.append(PathElement(kind: "C", points: [
+                    CGPoint(x: number(1), y: number(2)), CGPoint(x: number(3), y: number(4)), current,
+                ]))
+                index += 7
+            case "Z":
+                elements.append(PathElement(kind: "Z", points: []))
+                index += 1
+            default:
+                elements.append(PathElement(kind: "?\(tokens[index])", points: []))
+                index += 1
+            }
+        }
+        results.append(elements)
     }
-    return curves
+    return results
 }
 
-/// Numbers on the right of a line like `DOT_C, DOT_R, DOT_RING = (744, 757), 84, 44`, ignoring any
-/// trailing comment.
-private func pythonAssignmentNumbers(_ source: String, names: String) -> [CGFloat] {
-    let prefix = "\(names) = "
-    guard let line = source.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
-        return []
-    }
-    let rhs = line.dropFirst(prefix.count).split(separator: "#", maxSplits: 1).first ?? ""
-    let numbers = rhs.split(whereSeparator: { !($0.isNumber || $0 == ".") })
-    return numbers.compactMap { Double($0) }.map { CGFloat($0) }
+private func svgViewBox(_ relativePath: String) -> CGRect {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8),
+          let box = svg.components(separatedBy: "viewBox=\"").dropFirst().first?.components(separatedBy: "\"").first
+    else { return .null }
+    let n = box.split(separator: " ").compactMap { Double($0) }.map { CGFloat($0) }
+    return n.count == 4 ? CGRect(x: n[0], y: n[1], width: n[2], height: n[3]) : .null
 }
 
 /// Renders a glyph straight through MenuBarGlyph.draw(in:context:) into a 36 px bitmap, so the pixel
