@@ -38,7 +38,7 @@ name: Swift CI
 #
 # `checks` and `spm-tests` prefer the owner's Mac (a self-hosted runner labelled
 # transcripted-mac, in a fresh throwaway macOS VM per job) whenever it
-# reported free in the last 60s and has no job already queued or running, and
+# reported free in the last 60s and has at most one job queued or running, and
 # use hosted macos-26 otherwise. GitHub gives this account only 5 concurrent
 # hosted macOS jobs, so moving two of each PR's three jobs off hosted lets more
 # PRs run at once. `pick-runner` makes the choice (scripts/ci/pick-ci-runner.py);

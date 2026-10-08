@@ -13,7 +13,8 @@
 # Internal: serve (the owner's launchd agent), build-golden, job-started-hook (inside a VM).
 #
 # Nothing from a job runs on the host. A VM only exists while a job is waiting
-# for this Mac: the service clones a stopped "golden" VM (APFS copy-on-write),
+# for this Mac. Up to MAX_VMS jobs run at once, each in its own slot: the
+# service clones a stopped "golden" VM (APFS copy-on-write),
 # boots it at low priority, hands it a one-job just-in-time runner
 # registration through a read-only shared folder, waits for the job, then
 # deletes the VM. Inside the VM a firewall blocks the Mac, other VMs and the
@@ -62,9 +63,12 @@ LOST_SECONDS=600
 GOLDEN_MAX_AGE_DAYS=14
 MIN_FREE_GB="${MAC_RUNNER_MIN_FREE_GB:-120}"
 MIN_JOB_FREE_GB="${MAC_RUNNER_MIN_JOB_FREE_GB:-40}"
-# macOS runs at most two VMs at once, across every app on the Mac.
+# macOS runs at most two VMs at once, across every app on the Mac (Apple's
+# licence). It is also how many job VMs this service runs at once; set it to 1
+# to go back to one job at a time. Never above 2.
 MAX_VMS=2
-RUNNER_NAME_RE="^$LABEL-[0-9]{10}\$"
+# Runner names are <label>-<unix time>-<slot>; older ones had no slot.
+RUNNER_NAME_RE="^$LABEL-[0-9]{10}(-[0-9])?\$"
 
 export TART_HOME="$STATE/tart"
 TART="$STATE/tart.app/Contents/MacOS/tart"
@@ -99,10 +103,17 @@ hook_decision() {
   esac
 }
 
-# offer_block <paused> <on_ac> <disk_ok> <vms_running> <mic> <backing_off>
+# vms_in_use <VM processes on the Mac> <job slots in use>: the larger, so a
+# slot whose VM hasn't started its process yet still counts.
+vms_in_use() {
+  if [ "$1" -ge "$2" ]; then echo "$1"; else echo "$2"; fi
+}
+
+# offer_block <paused> <on_ac> <disk_ok> <vms_running> <mic> <backing_off> [slots_busy]
 # Why this Mac should not be offered to new runs, or "" when it can be.
 offer_block() {
-  local paused="$1" on_ac="$2" disk_ok="$3" vms="$4" mic="$5" backoff="$6"
+  local paused="$1" on_ac="$2" disk_ok="$3" vms="$4" mic="$5" backoff="$6" busy="${7:-0}"
+  if [ "$busy" -ge "$MAX_VMS" ]; then echo "busy"; return; fi
   if [ "$paused" = "1" ]; then echo "paused"; return; fi
   if [ "$on_ac" != "1" ]; then echo "battery"; return; fi
   if [ "$disk_ok" != "1" ]; then echo "disk"; return; fi
@@ -112,16 +123,30 @@ offer_block() {
   echo ""
 }
 
-# start_block <disk_ok> <vms_running> <backing_off>
+# start_block <disk_ok> <vms_running> <backing_off> [slots_busy paused on_ac mic]
 # Why a job that is already waiting for this Mac can't start now, or "".
-# Pause, battery and the mic don't stop it: it was sent here while the Mac
-# said it was free, and nothing else will run it.
+# Pause, battery and the mic don't stop the first slot: the job was sent here
+# while the Mac said it was free, and nothing else will run it. They do stop
+# a second VM from starting next to a running one.
 start_block() {
-  local disk_ok="$1" vms="$2" backoff="$3"
+  local disk_ok="$1" vms="$2" backoff="$3" busy="${4:-0}" paused="${5:-0}" on_ac="${6:-1}" mic="${7:-0}"
   if [ "$disk_ok" != "1" ]; then echo "disk"; return; fi
-  if [ "$vms" -ge "$MAX_VMS" ]; then echo "vms"; return; fi
+  if [ "$vms" -ge "$MAX_VMS" ] || [ "$busy" -ge "$MAX_VMS" ]; then echo "vms"; return; fi
   if [ "$backoff" = "1" ]; then echo "offline"; return; fi
+  if [ "$busy" -gt 0 ]; then
+    if [ "$paused" = "1" ]; then echo "paused"; return; fi
+    if [ "$on_ac" != "1" ]; then echo "battery"; return; fi
+    if [ "$mic" = "1" ]; then echo "mic"; return; fi
+  fi
   echo ""
+}
+
+# throttle_step <mic in use> <slot already slowed>: "slow", "restore" or "".
+# Every running slot calls this on each poll, so a call slows all of them.
+throttle_step() {
+  if [ "$1" = "1" ] && [ "$2" = "0" ]; then echo slow
+  elif [ "$1" != "1" ] && [ "$2" = "1" ]; then echo restore
+  else echo ""; fi
 }
 
 # heartbeat_value <word or ""> <now>: a bare number means "free"; anything
@@ -196,6 +221,25 @@ self_test() {
   got="$(start_block 0 0 0)";       expect "$got" "disk" "waiting job, low disk"
   got="$(start_block 1 2 0)";       expect "$got" "vms" "waiting job, no VM slot"
   got="$(start_block 1 0 1)";       expect "$got" "offline" "waiting job, backing off"
+  # Job slots: at most MAX_VMS, and only the first one ignores pause/battery/mic.
+  expect "$MAX_VMS" "2" "MAX_VMS is Apple's two-VM limit"
+  got="$(start_block 1 1 0 1 0 1 0)"; expect "$got" "" "second slot can start"
+  got="$(start_block 1 0 0 2 0 1 0)"; expect "$got" "vms" "never a third slot"
+  got="$(start_block 1 2 0 1 0 1 0)"; expect "$got" "vms" "second slot, another app's VM"
+  got="$(start_block 1 0 0 0 1 0 1)"; expect "$got" "" "first slot ignores pause, battery, mic"
+  got="$(start_block 1 1 0 1 0 0 0)"; expect "$got" "battery" "no second slot on battery"
+  got="$(start_block 1 1 0 1 1 1 0)"; expect "$got" "paused" "no second slot when paused"
+  got="$(start_block 1 1 0 1 0 1 1)"; expect "$got" "mic" "no second slot during a call"
+  got="$(start_block 0 1 0 1 0 1 0)"; expect "$got" "disk" "no second slot on low disk"
+  got="$(vms_in_use 0 1)";            expect "$got" "1" "a booting slot counts as a VM"
+  got="$(vms_in_use 2 1)";            expect "$got" "2" "other apps' VMs count"
+  got="$(offer_block 0 1 1 1 0 0 1)"; expect "$got" "" "one slot busy: still free"
+  got="$(offer_block 0 1 1 2 0 0 2)"; expect "$got" "busy" "both slots busy"
+  got="$(heartbeat_value "$(offer_block 0 1 1 2 0 0 2)" 9)"; expect "$got" "busy:9" "busy heartbeat with both slots"
+  got="$(throttle_step 1 0)$(throttle_step 1 0)"; expect "$got" "slowslow" "mic slows every running slot"
+  got="$(throttle_step 1 1)";         expect "$got" "" "already slowed"
+  got="$(throttle_step 0 1)";         expect "$got" "restore" "mic free again"
+  got="$(throttle_step 0 0)";         expect "$got" "" "nothing to do"
   got="$(heartbeat_value "" 123)";     expect "$got" "123" "free heartbeat"
   got="$(heartbeat_value busy 123)";   expect "$got" "busy:123" "busy heartbeat"
   got="$(next_backoff 0)";    expect "$got" "60" "first backoff"
@@ -275,10 +319,13 @@ vm_processes() {
 running_vms() { vm_processes | grep -c . || true; }
 
 # set_heartbeat <word or "">. Skips the write when nothing changed recently,
-# which keeps the owner's gh API use down.
+# which keeps the owner's gh API use down. Only the serve loop writes it; a
+# job slot (SLOT set) leaves it alone, so two slots can't contradict it.
 LAST_BEAT="none"
 LAST_BEAT_AT=0
+SLOT=""
 set_heartbeat() {
+  [ -z "$SLOT" ] || return 0
   local now
   now="$(date +%s)"
   if [ "$1" = "$LAST_BEAT" ] && [ $((now - LAST_BEAT_AT)) -lt "$BEAT_EVERY" ]; then return 0; fi
@@ -366,8 +413,8 @@ api_quota_low() {
 # Cancels a run and starts it again. The heartbeat already says this Mac is
 # not free, so pick-runner sends the new attempt to GitHub's runners.
 # True when one of the run's jobs is already running on this Mac. A run sends
-# three jobs here and the service runs one job VM at a time, so its later jobs
-# wait behind their own siblings for a while; that isn't a stranded job.
+# three jobs here and the service runs two job VMs at a time, so its last job
+# waits behind its siblings for a while; that isn't a stranded job.
 run_busy_here() {
   local n
   n="$(gh api "repos/$REPO/actions/runs/$1/jobs?filter=latest&per_page=100" --jq \
@@ -884,9 +931,11 @@ build_golden() {
     "$TART" clone "$IMAGE" "$BASE_VM" || { golden_failed "could not download $IMAGE"; return 1; }
     echo "$IMAGE" > "$STATE/base-image"
   fi
-  cpu="${MAC_RUNNER_CPU:-$(( $(sysctl -n hw.ncpu) / 2 ))}"
+  # Sized so MAX_VMS job VMs leave the Mac a share of its own: with two, each
+  # gets a third of the cores (6 of 18 on an M5 Max) and 12 GB.
+  cpu="${MAC_RUNNER_CPU:-$(( $(sysctl -n hw.ncpu) / (MAX_VMS + 1) ))}"
   [ "$cpu" -ge 4 ] || cpu=4
-  mem="${MAC_RUNNER_MEMORY_MB:-8192}"
+  mem="${MAC_RUNNER_MEMORY_MB:-12288}"
 
   delete_vm "$BUILD_VM"
   rm -rf "$share"
@@ -934,8 +983,25 @@ golden_is_stale() {
 
 # --- the service (owner's launchd agent) -----------------------------------------
 
+SLOTS="$STATE/slots"
+
+# Job VMs this service owns right now (a slot can outlive a crashed serve).
+job_vms() { vm_names | grep -c "^$JOB_PREFIX" || true; }
+
+# Only at startup, before any slot exists: stops slots a previous serve left
+# behind (launchd's AbandonProcessGroup keeps them alive), then deletes every
+# job VM, so a restart never ends up with more than MAX_VMS.
 cleanup_leftovers() {
-  local vm name
+  local vm name f p
+  for f in "$SLOTS"/*.pid; do
+    [ -f "$f" ] || continue
+    p="$(cat "$f")"
+    case "$(ps -p "$p" -o command= 2>/dev/null)" in
+      *mac-runner.sh*) kill "$p" 2>/dev/null || true ;;
+    esac
+  done
+  rm -rf "$SLOTS"
+  mkdir -p "$SLOTS"
   for vm in $(vm_names); do
     case "$vm" in "$JOB_PREFIX"*|"$BUILD_VM") delete_vm "$vm" ;; esac
   done
@@ -946,38 +1012,43 @@ cleanup_leftovers() {
   done
 }
 
-# Runs one waiting job in a fresh VM. Returns 0 once the VM's runner was seen
-# (whether or not a job ran), 1 when it never connected, so the caller backs
-# off. A registration is only minted once the VM has booted.
+# Runs one waiting job in a fresh VM, in job slot $SLOT (its own VM, runner,
+# share and log; serve runs it in the background). Returns 0 once the VM's
+# runner was seen (whether or not a job ran), 1 when it never connected, so
+# the caller backs off. A registration is only minted once the VM has booted.
+# Writes $SLOTS/<slot>.booted once its VM process is known, so serve doesn't
+# boot another VM while this one's process can't be told apart yet.
 run_one_job() {
-  local stamp name vm share pid="" before vmpids="" jit p
+  local stamp name vm share pid="" before vmpids="" jit p joblog="$STATE/logs/job-$SLOT.log"
   stamp="$(date +%s)"
-  name="$LABEL-$stamp"
-  vm="$JOB_PREFIX$stamp"
+  name="$LABEL-$stamp-$SLOT"
+  vm="$JOB_PREFIX$stamp-$SLOT"
   share="$STATE/share/$vm"
   mkdir -p "$share"
   chmod 700 "$share"
 
   local result=1 seen=0 registered=0 started=0 gone=0 throttled=0 minted=0 connected_at=0 busy_since=0 lost_since=0 now state
   finish() {
-    set_heartbeat offline
+    trap - TERM INT HUP
     [ "$minted" = "0" ] || delete_runner "$name"
     delete_vm "$vm"
     if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi
     rm -rf "$share"
     if [ "$result" != "0" ]; then
-      log "$vm failed; last Tart output: $(tail -n 3 "$STATE/logs/job.log" 2>/dev/null | tr '\n' ' ')"
+      log "$vm failed; last Tart output: $(tail -n 3 "$joblog" 2>/dev/null | tr '\n' ' ')"
     fi
     return "$result"
   }
+  # serve stopping (or a signal) still deletes this slot's VM and runner.
+  trap 'result=1; finish; exit 1' TERM INT HUP
 
-  if ! "$TART" clone "$GOLDEN_VM" "$vm" > "$STATE/logs/job.log" 2>&1; then
+  if ! "$TART" clone "$GOLDEN_VM" "$vm" > "$joblog" 2>&1; then
     finish
     return
   fi
   before="$(vm_processes)"
   nice -n 10 "$TART" run "$vm" --no-graphics --no-audio --no-clipboard --dir "ci:$share:ro" \
-    >> "$STATE/logs/job.log" 2>&1 < /dev/null &
+    >> "$joblog" 2>&1 < /dev/null &
   pid=$!
   # Keep the Mac from idle-sleeping for as long as this VM runs.
   caffeinate -i -w "$pid" >/dev/null 2>&1 &
@@ -989,7 +1060,6 @@ run_one_job() {
   until guest_exec "$vm" true >/dev/null 2>&1; do
     if ! kill -0 "$pid" 2>/dev/null; then log "$vm stopped while booting"; finish; return; fi
     if [ $(( $(date +%s) - began )) -gt "$BOOT_TIMEOUT" ]; then log "$vm never booted"; finish; return; fi
-    set_heartbeat busy
     sleep 5
   done
 
@@ -1006,6 +1076,7 @@ run_one_job() {
   else
     log "could not tell which VM process is $vm; leaving priorities alone"
   fi
+  : > "$SLOTS/$SLOT.booted"
 
   if ! jit="$(mint_jit "$name")" || [ -z "$jit" ]; then
     log "could not get a runner registration"
@@ -1030,26 +1101,29 @@ run_one_job() {
         seen=1
         started=1
         [ "$busy_since" -ne 0 ] || busy_since="$now"
-        set_heartbeat busy
+        : > "$SLOTS/$SLOT.started"
         [ $((now - busy_since)) -lt "$JOB_MAX_SECONDS" ] || { log "$vm ran past the job time limit"; break; }
         # During a call the job drops to background priority (efficiency
-        # cores, throttled disk) instead of failing.
-        if [ "$(mic_in_use)" = "1" ]; then
-          if [ "$throttled" = "0" ] && [ -n "$vmpids" ]; then
-            for p in $vmpids; do taskpolicy -b -p "$p" >/dev/null 2>&1 || true; done
-            throttled=1
-            log "mic in use: $vm slowed down"
-          fi
-        elif [ "$throttled" = "1" ]; then
-          for p in $vmpids; do taskpolicy -B -p "$p" >/dev/null 2>&1 || true; done
-          throttled=0
-          log "mic free: $vm back to normal priority"
-        fi
+        # cores, throttled disk) instead of failing. Each slot does this for
+        # its own VM, so a call slows every running job.
+        case "$(throttle_step "$(mic_in_use)" "$throttled")" in
+          slow)
+            if [ -n "$vmpids" ]; then
+              for p in $vmpids; do taskpolicy -b -p "$p" >/dev/null 2>&1 || true; done
+              throttled=1
+              log "mic in use: $vm slowed down"
+            fi
+            ;;
+          restore)
+            for p in $vmpids; do taskpolicy -B -p "$p" >/dev/null 2>&1 || true; done
+            throttled=0
+            log "mic free: $vm back to normal priority"
+            ;;
+        esac
         ;;
       idle)
         seen=1
         [ "$connected_at" -ne 0 ] || connected_at="$now"
-        set_heartbeat busy
         if [ "$started" = "0" ] && [ $((now - connected_at)) -gt "$PICKUP_SECONDS" ]; then
           log "no job came for $vm"
           break
@@ -1069,12 +1143,9 @@ run_one_job() {
         elif [ $((now - minted_at)) -gt "$BOOT_TIMEOUT" ]; then
           log "runner $name never showed up on GitHub"
           break
-        else
-          set_heartbeat busy
         fi
         ;;
       offline|error)
-        set_heartbeat busy
         if [ "$seen" = "0" ] && [ $((now - minted_at)) -gt "$BOOT_TIMEOUT" ]; then
           log "$vm never connected its runner"
           break
@@ -1102,21 +1173,99 @@ rotate_log() {
   fi
 }
 
+# Job slots: SLOT_PIDS[i] is slot i's background run_one_job, or "".
+SLOT_PIDS=()
+
+# start_slot <i>: runs one job in slot i, in the background.
+start_slot() {
+  rm -f "$SLOTS/$1.booted" "$SLOTS/$1.started"
+  ( SLOT="$1"; run_one_job ) &
+  SLOT_PIDS[$1]=$!
+  echo "$!" > "$SLOTS/$1.pid"
+}
+
+# reap_slots: frees finished slots, and sets REAPED to "ok", "fail" (a VM
+# never connected) or "". Not in $(...): it must change SLOT_PIDS here.
+REAPED=""
+reap_slots() {
+  local i st
+  REAPED=""
+  for ((i = 0; i < MAX_VMS; i++)); do
+    [ -n "${SLOT_PIDS[$i]:-}" ] || continue
+    kill -0 "${SLOT_PIDS[$i]}" 2>/dev/null && continue
+    st=0
+    wait "${SLOT_PIDS[$i]}" 2>/dev/null || st=$?
+    SLOT_PIDS[$i]=""
+    rm -f "$SLOTS/$i.pid" "$SLOTS/$i.booted" "$SLOTS/$i.started"
+    if [ "$st" = "0" ]; then [ "$REAPED" = fail ] || REAPED=ok; else REAPED=fail; fi
+  done
+}
+
+# slots_busy: live slots, or the job VMs on disk if that's more.
+slots_busy() {
+  local i n=0
+  for ((i = 0; i < MAX_VMS; i++)); do [ -z "${SLOT_PIDS[$i]:-}" ] || n=$((n + 1)); done
+  vms_in_use "$n" "$(job_vms)"
+}
+
+# free_slot: the first unused slot number, or nothing.
+free_slot() {
+  local i
+  for ((i = 0; i < MAX_VMS; i++)); do [ -n "${SLOT_PIDS[$i]:-}" ] || { echo "$i"; return; }; done
+}
+
+# slots_waiting: live slots whose runner has no job yet; each will take one
+# of the waiting jobs. "boot" when one hasn't identified its VM process yet.
+slots_waiting() {
+  local i n=0
+  for ((i = 0; i < MAX_VMS; i++)); do
+    [ -n "${SLOT_PIDS[$i]:-}" ] || continue
+    [ -f "$SLOTS/$i.booted" ] || { echo boot; return; }
+    [ -f "$SLOTS/$i.started" ] || n=$((n + 1))
+  done
+  echo "$n"
+}
+
+stop_slots() {
+  local i
+  for ((i = 0; i < MAX_VMS; i++)); do
+    [ -z "${SLOT_PIDS[$i]:-}" ] || kill "${SLOT_PIDS[$i]}" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+}
+
 serve() {
   set +e
   state_dir_ok "$STATE" || die "bad state folder $STATE"
   mkdir -p "$STATE/logs"
   cleanup_leftovers
+  trap 'stop_slots; exit 0' TERM INT HUP
   local backoff=0 retry_at=0 now waiting oldest block backing_off run age
-  local last_free=0 quota_checked=0 quota_low=0 pause_for rerouted
+  local last_free=0 quota_checked=0 quota_low=0 pause_for rerouted busy pending slot vms
   rm -f "$STATE/STOPPED"
   while true; do
     rotate_log
+    reap_slots
+    if [ "$REAPED" = fail ]; then
+      backoff="$(next_backoff "$backoff")"
+      retry_at=$(( $(date +%s) + backoff ))
+      log "a job VM failed; trying again in ${backoff}s"
+    elif [ "$REAPED" = ok ]; then
+      backoff=0
+      retry_at=0
+    fi
+    busy="$(slots_busy)"
     now="$(date +%s)"
     # install/rebuild ask the service to park here, between jobs, before they
-    # stop it. A job that shows up meanwhile goes back to GitHub.
+    # stop it. A job that shows up meanwhile goes back to GitHub, once no
+    # slot is still running one (a cancel would end that job too).
     if [ -f "$STATE/STOP" ]; then
       set_heartbeat paused
+      if [ "$busy" -gt 0 ]; then
+        rm -f "$STATE/STOPPED"
+        sleep "$INTERVAL"
+        continue
+      fi
       # Send anything already waiting back to GitHub first, and only say
       # "stopped" once a pass finds nothing left, so the installer can't
       # stop this service halfway through a cancel and re-run.
@@ -1147,8 +1296,9 @@ serve() {
         quota_low=0
       fi
     fi
-    # A new job can only be on its way here if this Mac said "free" lately.
-    if [ "$quota_low" = "0" ] && [ $((now - last_free)) -lt "$FREE_GRACE" ]; then
+    # A new job can only be on its way here if this Mac said "free" lately,
+    # or a slot is running one (its run's other jobs may follow).
+    if [ "$busy" -gt 0 ] || { [ "$quota_low" = "0" ] && [ $((now - last_free)) -lt "$FREE_GRACE" ]; }; then
       pause_for="$INTERVAL"
     else
       pause_for="$SLOW_INTERVAL"
@@ -1164,9 +1314,12 @@ serve() {
       sleep "$pause_for"
       continue
     fi
+    vms="$(vms_in_use "$(running_vms)" "$busy")"
+    pending="$(slots_waiting)"
 
-    if [ -z "$waiting" ]; then
-      if golden_is_stale && [ "$(is_paused)" = "0" ]; then
+    # Nothing waiting that a slot isn't already booting for.
+    if [ -z "$waiting" ] || { [ "$pending" != boot ] && [ "$(printf '%s\n' "$waiting" | grep -c .)" -le "$pending" ]; }; then
+      if [ -z "$waiting" ] && [ "$busy" = "0" ] && golden_is_stale && [ "$(is_paused)" = "0" ]; then
         set_heartbeat offline
         log "CI image is older than $GOLDEN_MAX_AGE_DAYS days; rebuilding"
         if ! /bin/bash "$STATE/mac-runner.sh" build-golden; then
@@ -1176,7 +1329,7 @@ serve() {
         continue
       fi
       if [ "$quota_low" = "1" ]; then backing_off=1; fi
-      block="$(offer_block "$(is_paused)" "$(on_ac)" "$(disk_ok)" "$(running_vms)" "$(mic_in_use)" "$backing_off")"
+      block="$(offer_block "$(is_paused)" "$(on_ac)" "$(disk_ok)" "$vms" "$(mic_in_use)" "$backing_off" "$busy")"
       set_heartbeat "$block"
       if [ -z "$block" ]; then
         last_free="$now"
@@ -1186,28 +1339,28 @@ serve() {
       continue
     fi
 
-    # A job is waiting for this Mac. Stop offering it to new runs first.
-    block="$(start_block "$(disk_ok)" "$(running_vms)" "$backing_off")"
-    set_heartbeat "${block:-busy}"
-    if [ -z "$block" ]; then
-      if run_one_job; then
-        backoff=0
-        retry_at=0
-      else
-        backoff="$(next_backoff "$backoff")"
-        retry_at=$(( $(date +%s) + backoff ))
-        log "trying again in ${backoff}s"
-      fi
+    # A job is waiting for this Mac and no slot is on its way to it.
+    if [ "$pending" = boot ]; then
+      block="boot"
+    else
+      block="$(start_block "$(disk_ok)" "$vms" "$backing_off" "$busy" "$(is_paused)" "$(on_ac)" "$(mic_in_use)")"
+    fi
+    if [ -z "$block" ] && slot="$(free_slot)" && [ -n "$slot" ]; then
+      # Say "busy" first if this takes the last slot.
+      [ $((busy + 1)) -lt "$MAX_VMS" ] || set_heartbeat busy
+      log "starting a job VM in slot $slot ($((busy + 1)) of $MAX_VMS)"
+      start_slot "$slot"
+      sleep 5
       continue
     fi
-    set_heartbeat "$block"
+    if [ "$block" = boot ]; then set_heartbeat busy; else set_heartbeat "$block"; fi
     oldest=0
     while read -r run age; do
       [ -n "$run" ] || continue
       [ "$age" -le "$oldest" ] || oldest="$age"
     done <<< "$waiting"
     # MAC_RUNNER_MODE=always: jobs wait for this Mac instead of going to GitHub.
-    if [ "$oldest" -gt "$REROUTE_SECONDS" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
+    if [ "$block" != boot ] && [ "$oldest" -gt "$REROUTE_SECONDS" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
       log "a job has waited ${oldest}s and this Mac can't start it ($block)"
       rerouted=0
       for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do

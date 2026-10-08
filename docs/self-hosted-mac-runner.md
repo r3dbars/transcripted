@@ -3,9 +3,9 @@
 GitHub gives this account 5 concurrent hosted macOS jobs, and every PR's Swift
 CI run needs 3 of them (`checks`, `spm-tests`, `app-build`). With many PRs open,
 most of them wait in line, and hosted `macos-26` machines can be scarce. So
-when the owner's Mac is free, all three run there instead, one after another:
-the service runs one job VM at a time (about 20-25 minutes for a whole run,
-against hours in line for hosted `macos-26` machines on a busy day).
+when the owner's Mac is free, all three run there instead, two at a time: the
+service runs up to two job VMs at once (see "Two jobs at once" below), against
+hours in line for hosted `macos-26` machines on a busy day.
 
 Every Mac job runs in a fresh throwaway macOS VM, never on the Mac itself, and
 a VM only exists while a job is waiting for it.
@@ -21,8 +21,9 @@ calls `scripts/ci/pick-ci-runner.py`. It sends `checks` and `spm-tests` to the
   branch lives in this repo (fork PRs always stay hosted)
 - the `MAC_RUNNER_HEARTBEAT` repo variable is a bare Unix timestamp no more
   than 60s old
-- no other Swift CI run already has a Mac job queued or running, so a burst of
-  pushes goes to hosted instead of piling up behind one Mac
+- other Swift CI runs have at most one Mac job queued or running (the Mac's
+  second VM slot can take a new one), so a burst of pushes goes to hosted
+  instead of piling up behind one Mac
 
 Anything else goes to hosted `macos-26`, including a GitHub API error. If no
 heartbeat is set, nothing changes from before.
@@ -54,6 +55,42 @@ and nothing else will pick it up. So both of a run's jobs finish even if the
 owner pauses between them. While a mic is in use, a running job drops to
 background priority (efficiency cores and throttled disk) instead of failing.
 
+## Two jobs at once
+
+macOS's licence lets a Mac run at most two macOS VMs at a time, so `MAX_VMS=2`
+in `mac-runner.sh` is a hard cap, never higher. The service runs each job in
+its own slot: a background copy of the job loop with its own VM
+(`ci-job-<time>-<slot>`), its own one-job runner (`transcripted-mac-<time>-<slot>`),
+its own shared folder, and its own log (`logs/job-<slot>.log`). Each slot has
+its own time limit and deletes its own VM and runner when it ends, so one slot
+failing or hanging never touches the other.
+
+- A second VM only starts once the first has booted and the service knows
+  which process is its VM (so the mic slowdown hits the right one), and only
+  when more jobs wait than slots are already booting for.
+- The service counts its slots, the `ci-job-` VMs on disk, and every VM
+  running on the Mac (any app), and starts nothing once any of them reaches
+  two. On restart it stops slots a previous service left behind and deletes
+  every `ci-job-` VM before starting new ones.
+- The heartbeat says "free" while at most one slot is busy, and `busy` when
+  both are.
+- **Mic:** while a mic is in use, every running job VM drops to background
+  priority, and no second VM starts.
+- **Battery, pause, low disk:** no second VM starts. The first slot behaves as
+  before (a job already sent here still runs), and running jobs finish.
+- `install`/`rebuild` wait for both slots to finish before parking.
+
+Each job VM gets a third of the Mac's cores (6 of 18 on the M5 Max) and 12 GB,
+so two VMs use 12 cores and 24 GB of the Mac's 128 GB and leave the rest to
+the owner. Disk: each clone is copy-on-write and grows by what its job writes
+(roughly 15-30 GB for a full `app-build`); the service needs 40 GB free to
+start a VM, so keep at least about 100 GB free for two at once. New sizes take
+effect on the next golden image build (`rebuild`, or the 14-day auto-rebuild).
+
+To go back to one job at a time, set `MAX_VMS=1` in `scripts/ci/mac-runner.sh`
+and run `install` again from that checkout (VM size then goes back to half
+the cores). `pick-ci-runner.py`'s `MAX_BUSY_MAC_JOBS` should then go back to 0.
+
 If the Mac can't start a waiting job for 15 minutes (low disk, both VM slots
 taken, or VMs failing to boot), the service cancels that run and re-runs it,
 and the re-run goes to hosted runners. If the Mac stops answering altogether
@@ -68,8 +105,8 @@ A re-run redoes the whole run, including an `app-build` that may already be
 partway through. GitHub can't re-run just some jobs with a new runner choice,
 because "re-run failed jobs" keeps `pick-runner`'s old answer.
 
-A job waiting behind its own run's other jobs on this Mac (the second or third
-job, while an earlier one runs) is never sent back to GitHub for waiting;
+A job waiting behind its own run's other jobs on this Mac (the third job,
+while the first two run) is never sent back to GitHub for waiting;
 only a run with nothing running here is rerouted after 15 minutes.
 
 A VM that fails to boot makes the service back off (1, 2, 4 ... up to 30
@@ -86,9 +123,9 @@ hosted right away:
 | `paused`  | the owner ran `pause`                                      |
 | `battery` | the Mac is not plugged in                                  |
 | `disk`    | less than 40 GB free                                       |
-| `vms`     | two VMs are already running on the Mac                     |
+| `vms`     | two VMs are already running on the Mac (other apps' too)   |
 | `mic`     | a microphone is in use (a meeting, dictation, or a call)   |
-| `busy`    | a job is waiting or running                                |
+| `busy`    | both job slots are in use                                  |
 | `offline` | no CI image yet, a GitHub API error, or backing off        |
 
 The timestamp in both forms lets `pick-runner` tell a live Mac from one that
@@ -194,8 +231,8 @@ It needs `gh` logged in as a repo admin, Xcode, and about 120 GB free. It:
    hook, the firewall and the lockdown all work
 6. starts the service
 
-Job VMs get half the Mac's CPU cores (at least 4) and 8 GB of memory, but only
-while a job runs. Change that with `MAC_RUNNER_CPU` / `MAC_RUNNER_MEMORY_MB`
+Job VMs get a third of the Mac's CPU cores (at least 4) and 12 GB of memory,
+but only while a job runs (see "Two jobs at once"). Change that with `MAC_RUNNER_CPU` / `MAC_RUNNER_MEMORY_MB`
 and `rebuild`. The golden VM is rebuilt automatically when it's 14 days old,
 which picks up newer runners.
 
@@ -235,8 +272,8 @@ Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
   another Swift CI run starts.
 - **Re-runs:** after a Mac failure, use "Re-run all jobs". "Re-run failed
   jobs" reuses the old `pick-runner` choice and sends the job back to the Mac.
-- **One job at a time:** a run's `checks`, `spm-tests` and `app-build` go one
-  after the other when they land on the Mac.
+- **Two jobs at a time:** of a run's `checks`, `spm-tests` and `app-build`,
+  two run at once and the third waits for a free slot.
 - **Diagnostics:** Swift CI's stall watcher can't use `sudo` inside the VM,
   so a hung test on the Mac leaves fewer samples than on hosted runners.
 - **VM count:** any app's VM counts toward the two-VM limit, including
