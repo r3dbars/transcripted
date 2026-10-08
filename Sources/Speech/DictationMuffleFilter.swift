@@ -20,6 +20,7 @@
 // block only while the cutoff is moving.
 
 import CoreAudio
+import Synchronization
 import Foundation
 
 struct DictationMuffleFilter {
@@ -76,7 +77,7 @@ struct DictationMuffleFilter {
     /// glides toward; `gateTarget` (0 or 1) is where the output gate fades.
     /// While opening, the gate stays shut for the cycle's first
     /// `gateHoldFrames` frames, then fades over `gateFadeFrames` (0 means
-    /// `gateSeconds`).
+    /// `gateSeconds`). Closing always uses the short `gateSeconds` step.
     ///
     /// Handles interleaved or split Float32 buffers on either side: mono input
     /// feeds both sides, a mono output gets the average, and output channels
@@ -207,7 +208,7 @@ struct DictationMuffleFilter {
                 if gate < target {
                     gate = min(target, gate + gateStep)
                 } else if gate > target {
-                    gate = max(target, gate - gateStep)
+                    gate = max(target, gate - self.gateStep)
                 }
                 var (outLeft, outRight) = process(left: left, right: right)
                 outLeft *= gate
@@ -369,5 +370,68 @@ struct DictationMuffleSplice: Equatable {
         let hold = Int((catchUp * (1 - swellFraction)).rounded())
         let fade = max(Int((heldFadeSeconds * sampleRate).rounded()), Int(catchUp.rounded()) - hold)
         return DictationMuffleSplice(holdFrames: hold, fadeFrames: max(1, fade))
+    }
+}
+
+/// One coherent command shared by the serial muffler queue and the IOProc.
+/// UInt64 atomics are lock-free on supported Apple Silicon. The IOProc does
+/// one load and at most one CAS; only queue-side updates retry. Frame fields
+/// cover over five million samples/second at the maximum splice duration.
+final class DictationMuffleGate {
+    struct Snapshot {
+        fileprivate let raw: UInt64
+        var isOpen: Bool { raw & 1 != 0 }
+        var isMuffled: Bool { raw & 2 != 0 }
+        var holdFrames: Int { isOpen ? Int((raw >> 2) & DictationMuffleGate.frameMask) : 0 }
+        var fadeFrames: Int { isOpen ? Int((raw >> 22) & DictationMuffleGate.frameMask) : 0 }
+    }
+
+    private static let frameMask: UInt64 = (1 << 20) - 1
+    private static let generationMask: UInt64 = (1 << 22) - 1
+    private let command = Atomic<UInt64>(0)
+
+    func snapshot() -> Snapshot {
+        Snapshot(raw: command.load(ordering: .acquiring))
+    }
+
+    /// Queue only. A distinct generation stops a callback from counting an
+    /// old cycle against a new cut with identical splice parameters. The
+    /// 22-bit generation can repeat only after 4,194,304 cuts; a single
+    /// callback cannot stay in flight across that many transitions.
+    func cut(_ splice: DictationMuffleSplice) {
+        precondition(splice.holdFrames >= 0 && UInt64(splice.holdFrames) <= Self.frameMask)
+        precondition(splice.fadeFrames >= 0 && UInt64(splice.fadeFrames) <= Self.frameMask)
+        let generation = ((command.load(ordering: .relaxed) >> 42) &+ 1) & Self.generationMask
+        let raw = (generation << 42) | (UInt64(splice.fadeFrames) << 22)
+            | (UInt64(splice.holdFrames) << 2) | (splice.startsMuffled ? 2 : 0) | 1
+        command.store(raw, ordering: .releasing)
+    }
+
+    /// Queue only. Preserve any hold countdown the IOProc committed while
+    /// changing the muffle target or handing the output back.
+    func setMuffled(_ muffled: Bool) {
+        updateFlag(2, enabled: muffled)
+    }
+
+    func handBack() {
+        updateFlag(1, enabled: false)
+    }
+
+    private func updateFlag(_ flag: UInt64, enabled: Bool) {
+        var current = command.load(ordering: .acquiring)
+        while true {
+            let desired = enabled ? current | flag : current & ~flag
+            let result = command.compareExchange(expected: current, desired: desired, ordering: .acquiringAndReleasing)
+            if result.exchanged { return }
+            current = result.original
+        }
+    }
+
+    /// IOProc only, bounded and allocation-free. A newer queue command wins.
+    func consume(_ snapshot: Snapshot, frames: Int) {
+        guard snapshot.holdFrames > 0 else { return }
+        let remaining = DictationMuffleSplice.remainingHold(snapshot.holdFrames, afterFrames: frames)
+        let desired = (snapshot.raw & ~(Self.frameMask << 2)) | (UInt64(remaining) << 2)
+        _ = command.compareExchange(expected: snapshot.raw, desired: desired, ordering: .relaxed)
     }
 }
