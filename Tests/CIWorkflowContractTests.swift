@@ -142,17 +142,23 @@ func testCIWorkflowContract() {
         )) ?? ""
         assertFalse(clipboardTests.isEmpty, "ClipboardRestoringTextPasterTests.swift should be readable")
 
-        // Each timing-sensitive proof guards an early SKIPPED return on the
-        // TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS env. Lock the count so the
-        // env-skipped set cannot quietly grow.
-        let guardCount = occurrences(
-            of: "if ProcessInfo.processInfo.environment[\"TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS\"] == \"1\" {",
-            in: clipboardTests
-        )
-        let skipMarkerCount = occurrences(of: "    SKIPPED: wall-clock timing proof", in: clipboardTests)
-
-        assertEqual(guardCount, 5, "exactly five clipboard timing proofs should guard on the timing-skip env")
-        assertEqual(skipMarkerCount, 5, "exactly five clipboard timing proofs should print a SKIPPED marker")
+        // The no-read readiness proof now uses an hour-long fallback and checks
+        // completion, so it runs on CI too. Only these four remaining real-time
+        // pasteboard observer proofs may opt out under shared-runner jitter.
+        let expectedTimingProofs: Set<String> = [
+            "ClipboardRestoringTextPaster stops waiting and reports a likely paste after a target reads",
+            "ClipboardRestoringTextPaster.paste — confirmed target read restores clipboard",
+            "ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait",
+            "ClipboardRestoringTextPaster.paste — early observer reads do not race slow consumers"
+        ]
+        let timingGuard = "if ProcessInfo.processInfo.environment[\"TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS\"] == \"1\" {"
+        let guardedProofs = clipboardTests.components(separatedBy: "runSuite(\"").dropFirst().compactMap { suite -> String? in
+            guard suite.contains(timingGuard) else { return nil }
+            return suite.components(separatedBy: "\"").first
+        }
+        assertEqual(Set(guardedProofs), expectedTimingProofs, "only the named clipboard observer timing proofs may skip")
+        assertEqual(occurrences(of: timingGuard, in: clipboardTests), expectedTimingProofs.count, "each timing proof has exactly one skip guard")
+        assertEqual(occurrences(of: "    SKIPPED: wall-clock timing proof", in: clipboardTests), expectedTimingProofs.count, "each timing proof reports its skip")
     }
 }
 
