@@ -111,9 +111,8 @@ extension WritingSecretScrubber {
 
     /// Commands that run sudo themselves, so the password prompt comes with
     /// no `sudo` typed: Homebrew casks with a pkg installer, `make install`
-    /// into a root-owned prefix. Answered like sudo; when they don't ask,
-    /// the next line is usually a known command or the thing just installed
-    /// (`commandWords`).
+    /// into a root-owned prefix. Answered like sudo. A next line that names
+    /// the thing just installed is still redacted: it could be the password.
     static let indirectElevation: [String: Set<String>] = [
         "brew": ["install", "reinstall", "upgrade", "uninstall", "remove", "rm", "bundle"],
         "make": ["install", "uninstall"], "gmake": ["install", "uninstall"],
@@ -148,23 +147,6 @@ extension WritingSecretScrubber {
         if let subcommands = indirectElevation[command], let sub, subcommands.contains(sub) { return true }
         let script = shells.contains(command) ? sub.flatMap { $0.split(separator: "/").last.map(String.init) } : command
         return script.map { matchesWhole($0, installScriptPattern) } ?? false
-    }
-
-    /// The words of a line whose command only may ask for sudo, lower-cased.
-    /// After `brew install --cask ghostty`, a `ghostty` line runs what was
-    /// just installed, not the password. Empty for commands that always
-    /// prompt: `mysql -u root -p` then `root` is the password.
-    static func commandWords(_ line: String) -> Set<String> {
-        let indirect = runsDownloadedScript(line) || simpleCommands(in: line).contains { words in
-            guard let first = words.first else { return false }
-            let command = (first.split(separator: "/").last.map(String.init) ?? first).lowercased()
-            return alwaysPrompting[command] == nil && asksSudoItself(command, Array(words.dropFirst()))
-        }
-        guard indirect else { return [] }
-        return Set(line.split(whereSeparator: \.isWhitespace).flatMap { word -> [String] in
-            let lower = word.lowercased()
-            return [lower, lower.split(separator: "/").last.map(String.init) ?? lower]
-        })
     }
 
     static let commandPrefixes: Set<String> = ["time", "env", "nohup", "command", "exec", "builtin", "caffeinate"]

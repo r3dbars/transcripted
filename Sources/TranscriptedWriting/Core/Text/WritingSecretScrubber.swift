@@ -208,8 +208,6 @@ public enum WritingSecretScrubber {
         let looseAnswers: Int
         var answered: Int
         let allowsSpaces: Bool
-        /// Words of a brew/make/script line: running one isn't an answer.
-        let commandWords: Set<String>
         /// The first answer, so typing it again (a confirmation) counts.
         var firstAnswer: String?
 
@@ -262,8 +260,6 @@ public enum WritingSecretScrubber {
                     previousMentionsCode = false
                     continue
                 }
-                // The tool just installed (`commandWords`); the prompt may still come.
-                if state.commandWords.contains(trimmed.lowercased()) { continue }
                 if isPromptAnswer(trimmed, state: state, terminal: terminal) {
                     mark(.password)
                     prompt = state.consume(trimmed)
@@ -277,8 +273,7 @@ public enum WritingSecretScrubber {
                     answersLeft: asked.answers,
                     looseAnswers: asked.looseAnswers,
                     answered: 0,
-                    allowsSpaces: asked.passphrase && terminal == .terminal,
-                    commandWords: commandWords(trimmed)
+                    allowsSpaces: asked.passphrase && terminal == .terminal
                 )
                 previousMentionsCode = mentionsCode(trimmed)
                 continue
