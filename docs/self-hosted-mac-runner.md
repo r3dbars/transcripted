@@ -83,7 +83,7 @@ failing or hanging never touches the other.
 Each job VM gets a third of the Mac's cores (6 of 18 on the M5 Max) and 12 GB,
 so two VMs use 12 cores and 24 GB of the Mac's 128 GB and leave the rest to
 the owner. Disk: each clone is copy-on-write and grows by what its job writes
-(roughly 15-30 GB for a full `app-build`); the service needs 40 GB free to
+(roughly 15-30 GB for a full `app-build`); the service needs 40 GB free per running job VM to
 start a VM, so keep at least about 100 GB free for two at once. New sizes take
 effect on the next golden image build (`rebuild`, or the 14-day auto-rebuild).
 
@@ -122,7 +122,7 @@ hosted right away:
 |-----------|------------------------------------------------------------|
 | `paused`  | the owner ran `pause`                                      |
 | `battery` | the Mac is not plugged in                                  |
-| `disk`    | less than 40 GB free                                       |
+| `disk`    | less than 40 GB free per job VM (80 GB for a second one)   |
 | `vms`     | two VMs are already running on the Mac (other apps' too)   |
 | `mic`     | a microphone is in use (a meeting, dictation, or a call)   |
 | `busy`    | both job slots are in use                                  |

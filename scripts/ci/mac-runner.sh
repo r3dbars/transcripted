@@ -292,10 +292,12 @@ free_gb() {
   df -g "$STATE" 2>/dev/null | awk 'NR == 2 {print $4}'
 }
 
+# disk_ok [vms]: room for this many job VMs at once (MIN_JOB_FREE_GB each,
+# since every clone can grow while it runs). Default 1.
 disk_ok() {
-  local gb
+  local gb need=$((MIN_JOB_FREE_GB * ${1:-1}))
   gb="$(free_gb)"
-  if [ "${gb:-0}" -ge "$MIN_JOB_FREE_GB" ]; then echo 1; else echo 0; fi
+  if [ "${gb:-0}" -ge "$need" ]; then echo 1; else echo 0; fi
 }
 
 vm_names() {
@@ -1329,7 +1331,7 @@ serve() {
         continue
       fi
       if [ "$quota_low" = "1" ]; then backing_off=1; fi
-      block="$(offer_block "$(is_paused)" "$(on_ac)" "$(disk_ok)" "$vms" "$(mic_in_use)" "$backing_off" "$busy")"
+      block="$(offer_block "$(is_paused)" "$(on_ac)" "$(disk_ok $((busy + 1)))" "$vms" "$(mic_in_use)" "$backing_off" "$busy")"
       set_heartbeat "$block"
       if [ -z "$block" ]; then
         last_free="$now"
@@ -1343,7 +1345,7 @@ serve() {
     if [ "$pending" = boot ]; then
       block="boot"
     else
-      block="$(start_block "$(disk_ok)" "$vms" "$backing_off" "$busy" "$(is_paused)" "$(on_ac)" "$(mic_in_use)")"
+      block="$(start_block "$(disk_ok $((busy + 1)))" "$vms" "$backing_off" "$busy" "$(is_paused)" "$(on_ac)" "$(mic_in_use)")"
     fi
     if [ -z "$block" ] && slot="$(free_slot)" && [ -n "$slot" ]; then
       # Say "busy" first if this takes the last slot.
