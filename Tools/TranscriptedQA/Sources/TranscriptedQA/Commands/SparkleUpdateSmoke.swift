@@ -121,7 +121,7 @@ struct SparkleUpdateSmokeRunner {
         return buildReport(runID: runID, appURL: appURL, outputURL: outputURL, scenarios: scenarios)
     }
 
-    private func runScenario(
+    func runScenario(
         state: String,
         appExecutableURL: URL,
         outputURL: URL
@@ -131,11 +131,24 @@ struct SparkleUpdateSmokeRunner {
         let logURL = scenarioDirectory.appendingPathComponent("app.log", isDirectory: false)
         do {
             try fileManager.createDirectory(at: scenarioDirectory, withIntermediateDirectories: true)
+            // Never follow a symlinked scenario folder: the delete below must
+            // only touch a report inside the owned output root.
+            let scenarioType = try fileManager.attributesOfItem(atPath: scenarioDirectory.path)[.type] as? FileAttributeType
+            let reportType = (try? fileManager.attributesOfItem(atPath: reportURL.path))?[.type] as? FileAttributeType
+            guard scenarioType == .typeDirectory, reportType != .typeSymbolicLink else {
+                throw CocoaError(.fileWriteInvalidFileName, userInfo: [
+                    NSLocalizedDescriptionKey: "\(state) or its launch report is a symlink; refusing to delete through it"
+                ])
+            }
+            // A report left by an earlier run must never count as this launch's evidence.
+            if fileManager.fileExists(atPath: reportURL.path) {
+                try fileManager.removeItem(at: reportURL)
+            }
         } catch {
             return .singleFailure(
                 state: state,
                 id: "scenario-directory",
-                detail: "Could not create scenario directory: \(error.localizedDescription)"
+                detail: "Could not prepare scenario directory: \(error.localizedDescription)"
             )
         }
 

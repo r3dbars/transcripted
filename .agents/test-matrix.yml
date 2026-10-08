@@ -759,7 +759,7 @@ rules:
       - "python3 scripts/test_speaker_autoresearch.py"
       - "bash build-deps.sh --force"
       - "swift build --package-path Tools/SpeakerEvalHarness"
-      - "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test"
+      - "bash scripts/dev/speaker-eval-self-test.sh"
 
   - paths:
       - "scripts/hillclimb/**"
