@@ -195,6 +195,12 @@ state_dir_ok() {
   [ "$(basename "$h")" = "$STATE_NAME" ]
 }
 
+# slot_test_settle <pid>: self-test helper; waits until a background child
+# has exited, without reaping it, so reap_slots still sees its status.
+slot_test_settle() {
+  while kill -0 "$1" 2>/dev/null; do sleep 0.05; done
+}
+
 self_test() {
   local failures=0 got r="r3dbars/transcripted"
   expect() {
@@ -274,6 +280,27 @@ self_test() {
   expect "$identity_pid" "123" "one PID publishes identity"
   got="$(slots_waiting)"; expect "$got" "1" "identified slot may accept its queued job"
   rm -f "$SLOTS/0.booted"
+
+  # A slot that was running before another slot failed mustn't clear that
+  # failure's backoff when it finishes; a slot started after the failure does.
+  local -a SLOT_STARTED_AT=()
+  local LAST_FAIL_AT=0 REAPED="" configured_max_reap="$MAX_VMS"
+  MAX_VMS=2
+  ( exit 1 ) & SLOT_PIDS=("" "$!"); SLOT_STARTED_AT=(0 100)
+  slot_test_settle "${SLOT_PIDS[1]}"
+  reap_slots
+  expect "$REAPED" "fail" "a failed slot is reaped as fail"
+  [ "$LAST_FAIL_AT" -gt 0 ] || expect "$LAST_FAIL_AT" "a time" "a failure records its time"
+  ( exit 0 ) & SLOT_PIDS=("$!" ""); SLOT_STARTED_AT=("$((LAST_FAIL_AT - 1))" 0)
+  slot_test_settle "${SLOT_PIDS[0]}"
+  reap_slots
+  expect "$REAPED" "" "older slot finishing keeps another slot's backoff"
+  ( exit 0 ) & SLOT_PIDS=("$!" ""); SLOT_STARTED_AT=("$((LAST_FAIL_AT + 1))" 0)
+  slot_test_settle "${SLOT_PIDS[0]}"
+  reap_slots
+  expect "$REAPED" "ok" "slot started after the failure clears the backoff"
+  SLOT_PIDS=(123)
+  MAX_VMS="$configured_max_reap"
   rmdir "$identity_root"
   got="$(throttle_step 1 0)$(throttle_step 1 0)"; expect "$got" "slowslow" "mic slows every running slot"
   got="$(throttle_step 1 1)";         expect "$got" "" "already slowed"
@@ -1215,18 +1242,25 @@ rotate_log() {
 }
 
 # Job slots: SLOT_PIDS[i] is slot i's background run_one_job, or "".
+# SLOT_STARTED_AT[i] is when it started; LAST_FAIL_AT is when a slot last failed.
 SLOT_PIDS=()
+SLOT_STARTED_AT=()
+LAST_FAIL_AT=0
 
 # start_slot <i>: runs one job in slot i, in the background.
 start_slot() {
   rm -f "$SLOTS/$1.booted" "$SLOTS/$1.started"
   ( SLOT="$1"; run_one_job ) &
   SLOT_PIDS[$1]=$!
+  SLOT_STARTED_AT[$1]="$(date +%s)"
   echo "$!" > "$SLOTS/$1.pid"
 }
 
 # reap_slots: frees finished slots, and sets REAPED to "ok", "fail" (a VM
 # never connected) or "". Not in $(...): it must change SLOT_PIDS here.
+# Only a slot started after the last failure counts as "ok": a slot that was
+# already running when another one failed proves nothing about the retry, so
+# it mustn't clear that failure's backoff.
 REAPED=""
 reap_slots() {
   local i st
@@ -1238,7 +1272,12 @@ reap_slots() {
     wait "${SLOT_PIDS[$i]}" 2>/dev/null || st=$?
     SLOT_PIDS[$i]=""
     rm -f "$SLOTS/$i.pid" "$SLOTS/$i.booted" "$SLOTS/$i.started"
-    if [ "$st" = "0" ]; then [ "$REAPED" = fail ] || REAPED=ok; else REAPED=fail; fi
+    if [ "$st" != "0" ]; then
+      REAPED=fail
+      LAST_FAIL_AT="$(date +%s)"
+    elif [ "$REAPED" != fail ] && [ "${SLOT_STARTED_AT[$i]:-0}" -gt "$LAST_FAIL_AT" ]; then
+      REAPED=ok
+    fi
   done
 }
 
