@@ -53,11 +53,12 @@ enum SpeakerEveryoneRenamePolicy {
         let errorMessage: String?
     }
 
-    /// A saved rename closes the card. A failed one keeps the box open with
-    /// the typed name still in it and says so, instead of dropping it silently.
-    static func nameBox(afterSave didSave: Bool, typed: String) -> NameBox {
+    /// A saved rename closes the card only if its draft has not changed while
+    /// saving. Later edits stay open for another submit. A failed save keeps
+    /// the current draft open and explains the failure.
+    static func nameBox(afterSave didSave: Bool, typed: String, submitted: String) -> NameBox {
         didSave
-            ? NameBox(isOpen: false, draft: typed, errorMessage: nil)
+            ? NameBox(isOpen: typed != submitted, draft: typed, errorMessage: nil)
             : NameBox(isOpen: true, draft: typed, errorMessage: saveFailedMessage)
     }
 

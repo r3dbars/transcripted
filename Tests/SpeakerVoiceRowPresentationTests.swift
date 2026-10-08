@@ -1,13 +1,31 @@
 import Foundation
 
 func testSpeakerVoiceRowPresentation() {
+    runSuite("An edit during an Everyone rename save stays available for a later save") {
+        let submitted = "Alice"
+        let laterDraft = "Alicia"
+        assertFalse(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: laterDraft, saveInFlight: true), "the pending save cannot queue the later edit")
+        let completed = SpeakerEveryoneRenamePolicy.nameBox(afterSave: true, typed: laterDraft, submitted: submitted)
+        assertTrue(completed.isOpen, "saving Alice must not close the unsaved Alicia draft")
+        assertEqual(completed.draft, laterDraft, "the later edit remains available")
+        assertNil(completed.errorMessage, "the submitted name saved successfully")
+        assertTrue(SpeakerEveryoneRenamePolicy.acceptsSubmit(typed: completed.draft, saveInFlight: false), "the user can save the later edit after completion")
+        let savedLater = SpeakerEveryoneRenamePolicy.nameBox(afterSave: true, typed: laterDraft, submitted: laterDraft)
+        assertFalse(savedLater.isOpen, "saving the unchanged later draft closes the card")
+
+        let failed = SpeakerEveryoneRenamePolicy.nameBox(afterSave: false, typed: laterDraft, submitted: submitted)
+        assertTrue(failed.isOpen, "a failed pending save leaves the later edit open")
+        assertEqual(failed.draft, laterDraft, "failure preserves the current draft")
+        assertEqual(failed.errorMessage, SpeakerEveryoneRenamePolicy.saveFailedMessage, "failure still explains that the save failed")
+    }
+
     runSuite("A rename from the Everyone row that fails keeps the typed name and says so") {
-        let failed = SpeakerEveryoneRenamePolicy.nameBox(afterSave: false, typed: "Maya Chen")
+        let failed = SpeakerEveryoneRenamePolicy.nameBox(afterSave: false, typed: "Maya Chen", submitted: "Maya Chen")
         assertTrue(failed.isOpen, "a failed save must leave the name box open")
         assertEqual(failed.draft, "Maya Chen", "the typed name stays in the box so it can be retried")
         assertEqual(failed.errorMessage, "Couldn't save the name.", "the person is told the save failed")
 
-        let saved = SpeakerEveryoneRenamePolicy.nameBox(afterSave: true, typed: "Maya Chen")
+        let saved = SpeakerEveryoneRenamePolicy.nameBox(afterSave: true, typed: "Maya Chen", submitted: "Maya Chen")
         assertFalse(saved.isOpen, "a saved rename closes the card like before")
         assertTrue(saved.errorMessage == nil, "a saved rename shows no error")
     }
