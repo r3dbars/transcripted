@@ -5,7 +5,7 @@
     "Tests/BluetoothRouteContractTests.swift": 6,
     "Tests/CaptureLibraryPathSafetySyncTests.swift": 2,
     "Tests/ClipboardRestoringTextPasterTests.swift": 1,
-    "Tests/DictationQueuedStartPolicyTests.swift": 4,
+    "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
     "Tests/MeetingSessionUIPolicyTests.swift": 4,
