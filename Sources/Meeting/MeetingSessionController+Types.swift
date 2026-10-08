@@ -121,6 +121,93 @@ extension DisplayStatus {
     }
 }
 
+/// What the transcription pipeline is doing, as the UI sees it. The session
+/// keeps its Core `DisplayStatus` for its own bookkeeping; UI modules read
+/// this Meeting-owned copy so they never have to name the Core type.
+enum MeetingTranscriptionStatus: Equatable {
+    case idle
+    case gettingReady
+    case transcribing(progress: Double)
+    case finishing
+    case transcriptSaved
+    case failed(message: String)
+    case discardedAccidentalStart
+
+    init(_ status: DisplayStatus) {
+        switch status {
+        case .idle: self = .idle
+        case .gettingReady: self = .gettingReady
+        case .transcribing(let progress): self = .transcribing(progress: progress)
+        case .finishing: self = .finishing
+        case .transcriptSaved: self = .transcriptSaved
+        case .failed(let message): self = .failed(message: message)
+        case .discardedAccidentalStart: self = .discardedAccidentalStart
+        }
+    }
+
+    /// Progress bar value (0...1). Delegates to `DisplayStatus` so the
+    /// phase-to-percent mapping stays in one place.
+    var progress: Double { coreStatus.progress }
+
+    var isProcessing: Bool { coreStatus.isProcessing }
+
+    private var coreStatus: DisplayStatus {
+        switch self {
+        case .idle: return .idle
+        case .gettingReady: return .gettingReady
+        case .transcribing(let progress): return .transcribing(progress: progress)
+        case .finishing: return .finishing
+        case .transcriptSaved: return .transcriptSaved
+        case .failed(let message): return .failed(message: message)
+        case .discardedAccidentalStart: return .discardedAccidentalStart
+        }
+    }
+}
+
+/// Result of the one bounded input-route stabilization attempt, as the
+/// overlay sees it. Same four outcomes as Core's
+/// `CaptureRouteStabilizationOutcome`, owned here so UI modules don't name it.
+enum MeetingRouteWarning: Equatable {
+    case notNeeded
+    case switchedToBuiltIn
+    case builtInUnavailable
+    case switchFailed
+
+    init(_ outcome: CaptureRouteStabilizationOutcome) {
+        switch outcome {
+        case .notNeeded: self = .notNeeded
+        case .switchedToBuiltIn: self = .switchedToBuiltIn
+        case .builtInUnavailable: self = .builtInUnavailable
+        case .switchFailed: self = .switchFailed
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+extension MeetingSessionController {
+    /// Current transcription status for UI readers.
+    var transcriptionStatus: MeetingTranscriptionStatus {
+        MeetingTranscriptionStatus(displayStatus)
+    }
+
+    /// Transcription status changes for UI subscribers (emits the current
+    /// value on subscribe, like `$displayStatus`).
+    var transcriptionStatusPublisher: AnyPublisher<MeetingTranscriptionStatus, Never> {
+        $displayStatus
+            .map(MeetingTranscriptionStatus.init)
+            .eraseToAnyPublisher()
+    }
+
+    /// Route-stabilization warning changes for UI subscribers (emits the
+    /// current value on subscribe, like `$audioRouteWarning`).
+    var routeWarningPublisher: AnyPublisher<MeetingRouteWarning?, Never> {
+        $audioRouteWarning
+            .map { $0.map(MeetingRouteWarning.init) }
+            .eraseToAnyPublisher()
+    }
+}
+
 extension MeetingWarmupMeetingState {
     init(_ state: DiarizationModelState) {
         switch state {
