@@ -116,9 +116,8 @@ final class NotchIslandDictationPreviewView: NSView {
         finalText = text
         pending = nil
         setAccessibilityValue(text)
-        let final = NSAttributedString(string: text, attributes: Self.attributes(Self.settledColor))
         guard window != nil, !NotchIslandPalette.reduceMotion else {
-            setText(final, forceFollow: true)
+            setText(NSAttributedString(string: text, attributes: Self.attributes(Self.settledColor)), forceFollow: true)
             return
         }
         NSAnimationContext.runAnimationGroup({ context in
@@ -127,6 +126,7 @@ final class NotchIslandDictationPreviewView: NSView {
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.finalText == text else { return }
+                let final = NSAttributedString(string: text, attributes: Self.attributes(Self.settledColor))
                 self.setText(final, forceFollow: true)
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.18
