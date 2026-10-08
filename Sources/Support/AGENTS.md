@@ -26,6 +26,8 @@ Module `Support` in `.agents/modules.json` (also `Sources/Accessibility/` and `S
 - **`SpeakerNameSelectionPolicy`** holds speaker search, "You" matching and duplicate-name disambiguation; keep that out of SwiftUI controls.
 - **`CustomDictionaryPreferences` and `DictationAutoSendPreferences`** back the Settings General and Dictation pages. Change a parsing rule or threshold and update their tests. `CustomDictionaryTextProcessor.matcher(for:)` is also what `Sources/UI/Shared/DictionaryPastMeetingFix.swift` uses, so past and new fixes match the same way.
 
+- `DictationInputDeviceSelectionReason.swift` holds the shared raw-value reasons used by Speech and Observability; neither module owns this vocabulary.
+
 ## Paste-back details (`ClipboardRestoringTextPaster`)
 
 Split across `ClipboardPasteTarget.swift` (pasteboard seam, Cmd+V, target app), `ClipboardPasteOutcome.swift` (outcomes, timing, diagnostics), `FocusedTextPasteConfirmation.swift` (AX confirmation), `ClipboardPasteConfirmationWait.swift` (the wait and `ClipboardLateConfirmationWatch`), and the `+Pasteboard` and `+SavedClipboard` extensions.
