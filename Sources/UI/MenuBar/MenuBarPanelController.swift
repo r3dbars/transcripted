@@ -16,6 +16,7 @@ struct MenuBarLaunchUISmokeReport: Codable, Equatable {
     /// launch-to-interactive perf budget (PRD WS4.2). Optional so older report
     /// consumers and hand-built fixtures stay decodable.
     var launchToInteractiveMs: Double?
+    var meetingOverlayDurationUpdates: [Int]?
 }
 
 @MainActor
