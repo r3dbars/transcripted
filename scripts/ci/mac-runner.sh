@@ -52,7 +52,8 @@ BEAT_EVERY=40
 BOOT_TIMEOUT=600
 # A connected runner that gets no job in this long is dropped.
 PICKUP_SECONDS=300
-JOB_MAX_SECONDS=$((100 * 60))
+# Above app-build's 120-minute timeout-minutes, so GitHub's own limit fires first.
+JOB_MAX_SECONDS=$((125 * 60))
 # A waiting job this Mac can't start for this long is sent back to GitHub.
 REROUTE_SECONDS=$((15 * 60))
 BACKOFF_MAX=1800
@@ -82,7 +83,7 @@ hook_decision() {
     return
   fi
   case "$job" in
-    ""|checks|spm-tests) ;;
+    ""|checks|spm-tests|app-build) ;;
     *) echo "deny job $job never runs on this Mac"; return ;;
   esac
   case "$event" in
@@ -171,6 +172,7 @@ self_test() {
   got="$(hook_decision pull_request "$r" "$r" "$r" "$r")";          expect "$got" "allow" "same-repo PR"
   got="$(hook_decision pull_request "$r" "$r" "$r" "$r" checks)";   expect "$got" "allow" "checks job"
   got="$(hook_decision push "$r" "$r" "" "$r" spm-tests)";          expect "$got" "allow" "spm-tests job"
+  got="$(hook_decision pull_request "$r" "$r" "$r" "$r" app-build)"; expect "$got" "allow" "app-build job"
   got="$(hook_decision workflow_dispatch "$r" "$r" "" "$r" hardware-smokes)"; expect "${got%% *}" "deny" "hardware-smokes job"
   got="$(hook_decision pull_request "$r" "$r" "evil/fork" "$r")";   expect "${got%% *}" "deny" "fork PR"
   got="$(hook_decision pull_request "$r" "$r" "" "$r")";            expect "${got%% *}" "deny" "PR with deleted head repo"
@@ -313,8 +315,8 @@ mint_jit() {
 # Prints "<run id> <seconds waiting>" for every Swift CI job that is queued
 # for this Mac. Fails on any API error.
 #
-# To keep the owner's API use down, a run attempt whose `checks` and
-# `spm-tests` jobs both exist and neither waits for this Mac is remembered in
+# To keep the owner's API use down, a run attempt whose `checks`, `spm-tests`
+# and `app-build` jobs all exist and none waits for this Mac is remembered in
 # $STATE/settled-runs and not looked at again (their runner never changes
 # within an attempt). So a poll costs one call plus one per new run.
 waiting_mac_jobs() {
@@ -334,10 +336,10 @@ $(gh api --paginate "repos/$REPO/actions/workflows/swift-ci.yml/runs?status=queu
     fi
     run="${key%%:*}"
     out="$(gh api "repos/$REPO/actions/runs/$run/jobs?filter=latest&per_page=100" --jq \
-      "[.jobs[] | select(.name == \"checks\" or .name == \"spm-tests\")] as \$ours
+      "[.jobs[] | select(.name == \"checks\" or .name == \"spm-tests\" or .name == \"app-build\")] as \$ours
        | [\$ours[] | select(.status == \"queued\" and ((.labels // []) | any(. == \"$LABEL\")))] as \$waiting
        | ([.jobs[] | select(.name == \"pick-runner\" and .status == \"completed\")] | length > 0) as \$picked
-       | if \$picked and (\$ours | length) >= 2 and ([\$ours[] | select((.labels // []) | length > 0)] | length) >= 2
+       | if \$picked and (\$ours | length) >= 3 and ([\$ours[] | select((.labels // []) | length > 0)] | length) >= 3
             and (\$waiting | length) == 0 then \"settled\"
          else (\$waiting[] | \"$run \\(now - (.created_at | fromdateiso8601) | floor)\") end")" \
       || return 1
@@ -363,6 +365,16 @@ api_quota_low() {
 
 # Cancels a run and starts it again. The heartbeat already says this Mac is
 # not free, so pick-runner sends the new attempt to GitHub's runners.
+# True when one of the run's jobs is already running on this Mac. A run sends
+# three jobs here and the service runs one job VM at a time, so its later jobs
+# wait behind their own siblings for a while; that isn't a stranded job.
+run_busy_here() {
+  local n
+  n="$(gh api "repos/$REPO/actions/runs/$1/jobs?filter=latest&per_page=100" --jq \
+    "[.jobs[] | select(.status == \"in_progress\" and ((.labels // []) | any(. == \"$LABEL\")))] | length")" || return 1
+  [ "${n:-0}" -gt 0 ]
+}
+
 reroute_run() {
   local run="$1" status i
   log "sending run $run back to GitHub's runners"
@@ -818,6 +830,10 @@ members="\$(dscl . -read /Groups/admin GroupMembership 2>/dev/null | sed 's/^Gro
 [ -z "\$members" ] || [ "\$members" = root ] || { echo "the admin group still has: \$members"; exit 1; }
 if as_user sudo -n -k true >/dev/null 2>&1; then echo "\$user can still sudo without a password"; exit 1; fi
 if printf 'admin\n' | as_user sudo -S -k -p "" true >/dev/null 2>&1; then echo "\$user can still sudo"; exit 1; fi
+# Marks this as a throwaway CI VM, so scripts/ops/native-smoke-isolation.py
+# lets the app's launch smoke run as the VM's desktop user. Root-owned and
+# only ever created here; the owner's Mac never has it.
+install -o root -g wheel -m 644 /dev/null /Library/TranscriptedCI/throwaway-ci-vm
 sync
 echo guest-setup-ok
 SETUP
@@ -1108,7 +1124,9 @@ serve() {
         sleep "$INTERVAL"
         continue
       fi
-      if [ -n "$waiting" ]; then
+      # In always mode a re-run would come straight back here, so waiting
+      # jobs just stay queued until the service is back.
+      if [ -n "$waiting" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
         rm -f "$STATE/STOPPED"
         for run in $(printf '%s\n' "$waiting" | awk '{print $1}' | sort -u); do
           reroute_run "$run"
@@ -1190,11 +1208,13 @@ serve() {
       [ -n "$run" ] || continue
       [ "$age" -le "$oldest" ] || oldest="$age"
     done <<< "$waiting"
-    if [ "$oldest" -gt "$REROUTE_SECONDS" ]; then
+    # MAC_RUNNER_MODE=always: jobs wait for this Mac instead of going to GitHub.
+    if [ "$oldest" -gt "$REROUTE_SECONDS" ] && [ "$(gh variable get MAC_RUNNER_MODE --repo "$REPO" 2>/dev/null | tr 'A-Z' 'a-z')" != always ]; then
       log "a job has waited ${oldest}s and this Mac can't start it ($block)"
       rerouted=0
       for run in $(printf '%s\n' "$waiting" | awk -v max="$REROUTE_SECONDS" '$2 > max {print $1}' | sort -u); do
         [ "$rerouted" -lt 3 ] || break
+        if run_busy_here "$run"; then continue; fi
         reroute_run "$run"
         rerouted=$((rerouted + 1))
         set_heartbeat "$block"
