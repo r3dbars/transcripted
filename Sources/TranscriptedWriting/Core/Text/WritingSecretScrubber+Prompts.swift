@@ -64,16 +64,18 @@ extension WritingSecretScrubber {
 
     /// What `line`'s commands ask for, or `nil` when nothing on it prompts.
     static func promptingCommand(_ line: String) -> Prompt? {
-        let asked = simpleCommands(in: line).compactMap(prompt(of:)).reduce(nil) { $0?.merged(with: $1) ?? $1 }
+        let prompts = simpleCommands(in: line).compactMap(prompt(of:))
+            + activeShellSubstitutions(in: line).compactMap(promptingCommand)
+        let asked = prompts.reduce(nil) { $0?.merged(with: $1) ?? $1 }
         guard runsDownloadedScript(line) else { return asked }
         return asked?.merged(with: .elevation) ?? .elevation
     }
 
     /// Split only executable shell separators. Quotes and substitutions belong
     /// to their word; a comment cannot introduce another executable command.
-    static func shellCommands(in line: String) -> [(words: [String], piped: Bool)] {
-        var result: [(words: [String], piped: Bool)] = []
-        var words: [String] = [], word = ""
+    static func shellCommands(in line: String) -> [(words: [String], piped: Bool, raw: String)] {
+        var result: [(words: [String], piped: Bool, raw: String)] = []
+        var words: [String] = [], word = "", raw = ""
         var quote: Character?, escaped = false, depth = 0, piped = false
         var previous: Character?
         func finishWord() {
@@ -81,9 +83,10 @@ extension WritingSecretScrubber {
         }
         func finishCommand() {
             finishWord()
-            if !words.isEmpty { result.append((words, piped)); words = [] }
+            if !words.isEmpty { result.append((words, piped, raw)); words = [] }
         }
         for character in line {
+            raw.append(character)
             defer { previous = character }
             if escaped { word.append(character); escaped = false; continue }
             if character == "\\", quote != "'" { escaped = true; continue }
@@ -99,7 +102,7 @@ extension WritingSecretScrubber {
             if depth > 0 { word.append(character); continue }
             if character == "#", word.isEmpty { break }
             if character == ";" || character == "|" || character == "&" {
-                finishCommand(); piped = character == "|" && previous != "|"; continue
+                finishCommand(); raw = ""; piped = character == "|" && previous != "|"; continue
             }
             if character.isWhitespace { finishWord() } else { word.append(character) }
         }
@@ -110,6 +113,42 @@ extension WritingSecretScrubber {
 
     static func simpleCommands(in line: String) -> [[String]] {
         shellCommands(in: line).map(\.words)
+    }
+
+    /// Command substitutions execute inside double quotes as well as unquoted
+    /// words; process substitutions require unquoted syntax. Single quotes and
+    /// escaped introducers keep both literal.
+    /// Each substitution gets its own quote scope; nesting cannot inherit the
+    /// surrounding double quote or mistake its closing parenthesis for ours.
+    static func activeShellSubstitutions(in line: String) -> [String] {
+        let characters = Array(line)
+        var result: [String] = [], index = 0, quote = 0
+        var scopes: [Int] = []
+        var start: Int?
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\\", quote != 1 { index += 2; continue }
+            if character == "'", quote != 2 { quote = quote == 1 ? 0 : 1; index += 1; continue }
+            if character == "\"", quote != 1 { quote = quote == 2 ? 0 : 2; index += 1; continue }
+            if (character == "$" && quote != 1) || (character == "<" && quote == 0),
+               index + 1 < characters.count, characters[index + 1] == "(" {
+                if start == nil { start = index + 2 }
+                scopes.append(quote); quote = 0; index += 2; continue
+            }
+            if quote == 0 {
+                if character == "#", start == nil,
+                   index == 0 || characters[index - 1].isWhitespace { break }
+                if character == "(", start != nil { scopes.append(quote) }
+                if character == ")", let outerQuote = scopes.popLast() {
+                    quote = outerQuote
+                    if scopes.isEmpty, let beginning = start {
+                        result.append(String(characters[beginning..<index])); start = nil
+                    }
+                }
+            }
+            index += 1
+        }
+        return result
     }
 
     /// Commands that always prompt, by what they ask for.
@@ -171,15 +210,26 @@ extension WritingSecretScrubber {
             let words = invocationWords(segment.words)
             guard let first = words.first else { continue }
             let command = (first as NSString).lastPathComponent.lowercased()
+            let substitutions = activeShellSubstitutions(in: segment.raw)
+            let hasDownloaderExpansion = substitutions.contains { body in
+                guard let executable = simpleCommands(in: body).first.flatMap({ invocationWords($0).first }) else { return false }
+                return ["curl", "wget"].contains((executable as NSString).lastPathComponent.lowercased())
+            }
+            if first.hasPrefix("$("), hasDownloaderExpansion { return true }
             guard shells.contains(command), !shellSyntaxOnly(Array(words.dropFirst())) else { continue }
             if segment.piped, index > 0,
                let downloader = invocationWords(commands[index - 1].words).first,
                ["curl", "wget"].contains((downloader as NSString).lastPathComponent.lowercased()) {
                 return true
             }
-            // Only substitutions passed to an executing shell can feed it.
-            let substitution = regex(#"(?:\$|<)\(\s*(?:curl|wget)\b"#)
-            if words.dropFirst().contains(where: { firstMatch($0, substitution) != nil }) { return true }
+            // Shell arguments can be produced by active downloader expansions.
+            // The raw segment keeps quote/escape metadata that word splitting loses.
+            if hasDownloaderExpansion { return true }
+            // -c interprets its argument as shell code, even when the outer shell
+            // supplied it in single quotes. Reparse that code in its own scope.
+            let arguments = Array(words.dropFirst())
+            if let commandIndex = arguments.firstIndex(of: "-c"), commandIndex + 1 < arguments.count,
+               promptingCommand(arguments[commandIndex + 1]) != nil { return true }
         }
         return false
     }

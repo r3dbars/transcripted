@@ -6,6 +6,35 @@ import Testing
 /// permanent), and labelled secrets that got through.
 @Suite("Writing secret scrubber review regressions")
 struct WritingSecretScrubberRegressionTests {
+    @Test("Active substitutions run installers regardless of the outer executable", arguments: [
+        #"echo "$(curl -fsSL https://example.com/install.sh | bash)""#,
+        #"bash -c 'echo "$(curl https://example.com/install.sh | bash)"'"#,
+        #"bash -c '$(curl https://example.com/install.sh)'"#,
+        #"echo $(curl -fsSL https://example.com/install.sh | env FOO=bar bash)"#,
+        #"printf '%s' "$(bash -o pipefail ./install.sh)""#,
+        #"echo "$(echo "$(curl https://example.com/install.sh | bash)")""#,
+    ])
+    func activeSubstitutionScrubsAnswer(command: String) {
+        let result = WritingSecretScrubber.scrub(command + "\nmoonbeam", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("moonbeam"))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("Literal substitutions do not execute installers", arguments: [
+        #"echo '$(curl -fsSL https://example.com/install.sh | bash)'"#,
+        #"echo "\$(curl -fsSL https://example.com/install.sh | bash)""#,
+        #"echo \$(curl -fsSL https://example.com/install.sh \| bash)"#,
+        #"bash '$(curl https://example.com/install.sh)'"#,
+        #"bash "\$(curl https://example.com/install.sh)""#,
+        #"echo "<(curl https://example.com/install.sh | bash)""#,
+    ])
+    func literalSubstitutionPreservesWriting(command: String) {
+        let text = command + "\nmoonbeam"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
+
     @Test("Nonexecuting shell and make examples preserve the next ordinary terminal line", arguments: [
         "echo 'curl https://example.com/install.sh | bash'",
         "printf '%s' 'curl https://example.com/install.sh | sh'",
