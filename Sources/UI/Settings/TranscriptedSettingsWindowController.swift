@@ -33,28 +33,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
             )
         )
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Transcripted Settings"
-        window.titleVisibility = .hidden
-        // Two-tone split runs edge-to-edge; the traffic lights float over the
-        // sidebar tone (Things-style) instead of sitting in a toolbar band.
-        window.titlebarAppearsTransparent = true
-        // An empty unified toolbar tells AppKit to use the taller titlebar
-        // metrics, which insets the traffic lights from the top edge instead
-        // of pinning them against it. The toolbar itself never shows items.
-        window.toolbar = NSToolbar()
-        window.toolbarStyle = .unified
-        window.contentViewController = hostingController
-        window.contentMinSize = NSSize(width: 880, height: 640)
-        window.isReleasedWhenClosed = false
-        // This is a normal user-facing app window. Keep it available to the
-        // standard macOS window screenshot and screen-sharing tools.
-        window.sharingType = .readOnly
+        let window = TranscriptedSettingsWindow.make(contentViewController: hostingController)
         window.center()
 
         super.init(window: window)
