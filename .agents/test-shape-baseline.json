@@ -2,7 +2,6 @@
   "source-text": {
     "Tests/AuditRegressionCoverageContractTests.swift": 2,
     "Tests/BluetoothRouteContractTests.swift": 6,
-    "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
@@ -11,7 +10,5 @@
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 46
   },
-  "wall-clock": {
-    "Tests/ClipboardRestoringTextPasterTests.swift": 2
-  }
+  "wall-clock": {}
 }

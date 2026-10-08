@@ -2,7 +2,6 @@
   "resolved-pins": {
     "Tests/AuditRegressionCoverageContractTests.swift": 3,
     "Tests/BluetoothRouteContractTests.swift": 2,
-    "Tests/ClipboardRestoringTextPasterTests.swift": 1,
     "Tests/DictationQueuedStartPolicyTests.swift": 1,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
