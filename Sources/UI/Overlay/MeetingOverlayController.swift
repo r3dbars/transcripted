@@ -52,6 +52,8 @@ final class MeetingOverlayController: NSObject {
         }
     }
     private var currentDuration: TimeInterval = 0
+    /// Full-content refresh observer, including attempts while the island is hidden.
+    var onContentPush: ((TimeInterval) -> Void)?
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
@@ -152,11 +154,11 @@ final class MeetingOverlayController: NSObject {
 
     /// Wire subscriptions; the island stays hidden until state becomes
     /// non-idle. Safe to call once at app launch; re-calls are ignored.
-    func setup(meetingSession: MeetingSessionController) {
+    func setup(meetingSession: MeetingSessionController, durationPublisher: AnyPublisher<TimeInterval, Never>? = nil) {
         guard !isSetUp else { return }
         isSetUp = true
         self.meetingSession = meetingSession
-        wireSubscriptions(to: meetingSession)
+        wireSubscriptions(to: meetingSession, durationPublisher: durationPublisher)
     }
 
     // MARK: - Hotkey entry point
@@ -232,7 +234,7 @@ final class MeetingOverlayController: NSObject {
 
     // MARK: - Subscriptions
 
-    private func wireSubscriptions(to session: MeetingSessionController) {
+    private func wireSubscriptions(to session: MeetingSessionController, durationPublisher: AnyPublisher<TimeInterval, Never>?) {
         snapshotFailedMeetingIDs(from: session)
         session.$state
             .receive(on: DispatchQueue.main)
@@ -241,15 +243,12 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
-        session.$recordingDuration
+        (durationPublisher ?? session.$recordingDuration.eraseToAnyPublisher())
             .wholeSecondTicks()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] wholeSecond in
                 guard let self else { return }
-                // The strip timer renders whole seconds (mm:ss). Collapse the
-                // 5Hz capture duration publisher before the full view push so
-                // recording does not rebuild attributed titles/layouts five
-                // times for the same visible label.
+                // Collapse 5 Hz duration updates before rebuilding the strip.
                 self.currentDuration = TimeInterval(wholeSecond)
                 self.pushToView()
             }
@@ -1225,6 +1224,7 @@ final class MeetingOverlayController: NSObject {
     // MARK: - View push
 
     private func pushToView() {
+        onContentPush?(currentDuration)
         guard islandShown else { return }
         island?.updateMeeting(islandContent())
     }
