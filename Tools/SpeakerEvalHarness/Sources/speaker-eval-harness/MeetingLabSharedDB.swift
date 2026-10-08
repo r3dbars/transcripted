@@ -97,12 +97,38 @@ enum LabSharedSpeakerDB {
         var hashes = files.mapValues { path in
             (try? sha256Hex(of: URL(fileURLWithPath: path))) ?? "unreadable"
         }
+        // A custom embedding model can be rebuilt in place with the same ID and
+        // dimension, so hash its bundle's contents too.
+        if let index = args.firstIndex(of: "--embedder-model"), index + 1 < args.count {
+            hashes["--embedder-model"] = bundleHash(URL(fileURLWithPath: args[index + 1]))
+        }
         // Env overrides that swap the diarizer preset or the embedder change what
         // the DB learns too; record their values as given.
         for key in ["TRANSCRIPTED_NEMOTRON_PRESET", "TRANSCRIPTED_NEMOTRON_EMBEDDER"] {
             if let value = environment[key], !value.isEmpty { hashes["env:" + key] = value }
         }
         return hashes
+    }
+
+    /// sha256 over every regular file in a model bundle (or the file itself),
+    /// keyed by relative path in sorted order. "unreadable" if any read fails.
+    static func bundleHash(_ url: URL, fileManager: FileManager = .default) -> String {
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir) else { return "unreadable" }
+        if !isDir.boolValue { return (try? sha256Hex(of: url)) ?? "unreadable" }
+        guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey]) else {
+            return "unreadable"
+        }
+        let base = url.resolvingSymlinksInPath().path
+        var entries: [String] = []
+        for case let file as URL in enumerator {
+            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            guard let hash = try? sha256Hex(of: file) else { return "unreadable" }
+            let path = file.resolvingSymlinksInPath().path
+            let rel = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
+            entries.append(rel + "=" + hash)
+        }
+        return entries.sorted().joined(separator: "\n")
     }
 
     /// Decides whether this run resumes the shared DB, empties it when not, and
@@ -344,6 +370,14 @@ func runMeetingLabSharedDBSelfTests() {
         let afterKnobs = LabSharedSpeakerDB.fileHashes(args: thresholdArgs, environment: env)
         check(!before.isEmpty && before != afterThresholds, "editing the --embedder-thresholds file didn't change its hash")
         check(afterThresholds != afterKnobs, "editing the lab knobs file didn't change its hash")
+        let model = scratch.appendingPathComponent("custom.mlmodelc", isDirectory: true)
+        try fm.createDirectory(at: model, withIntermediateDirectories: true)
+        try Data("w1".utf8).write(to: model.appendingPathComponent("weights.bin"))
+        let modelArgs = ["--embedder-model", model.path]
+        let modelBefore = LabSharedSpeakerDB.fileHashes(args: modelArgs, environment: [:])
+        try Data("w2".utf8).write(to: model.appendingPathComponent("weights.bin"))
+        check(modelBefore != LabSharedSpeakerDB.fileHashes(args: modelArgs, environment: [:]),
+              "rebuilding the --embedder-model bundle didn't change its hash")
 
         let outside = scratch.appendingPathComponent("elsewhere/shared-db", isDirectory: true)
         let outsideFile = outside.appendingPathComponent("speakers.sqlite")
