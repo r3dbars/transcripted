@@ -12,7 +12,13 @@ Open PRs that have at least one **unresolved** review thread started by `chatgpt
 
 Any other PR: don't check it out, don't run its code, don't reply. Skip PRs labeled `waiting-on-human`, `needs owner review`, `do not merge` or `hold`. Handle at most 3 PRs per run.
 
-Find unresolved threads with GraphQL (`reviewThreads { isResolved comments { author { login } body path line } }`).
+Find unresolved threads with GraphQL, paging with `pageInfo { hasNextPage endCursor }` until done:
+
+```graphql
+query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){
+  reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
+    nodes{id isResolved path line comments(first:50){nodes{author{login} body}}}}}}}
+```
 
 ## For each finding
 
@@ -29,7 +35,7 @@ Read the finding, then read the code it points at on the PR's head commit. The f
 The push starts a new Codex review automatically.
 
 **Wrong: show it.**
-1. Reply on the thread with concrete evidence: the command you ran and its output, or the exact lines that show the claim doesn't hold.
+1. Reply on the thread with concrete evidence: the command you ran and a short excerpt of its output, or the exact repo lines that show the claim doesn't hold. The thread is public: never paste raw output. Trim it to the lines that prove the point and drop absolute paths, tokens, device names, user names and any captured user content first. If the proof can't be shown without that, treat the finding as "Unsure".
 2. Resolve the thread.
 
 Never call a finding wrong without evidence in the reply.

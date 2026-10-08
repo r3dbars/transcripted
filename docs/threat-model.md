@@ -6,7 +6,7 @@ Read by Codex security reviews (set as the threat-model path in Codex's code rev
 
 In order of harm if it leaks or breaks:
 
-1. **What the user said and typed.** Meeting audio, dictation audio, transcripts, Writing captures, speaker names and voiceprints (`speakers.sqlite`), meeting titles. All of it stays on the Mac unless the user sends it somewhere.
+1. **What the user said and typed.** Meeting audio, dictation audio, transcripts, Writing captures, speaker names and voiceprints (the `speakers*.sqlite` family: `speakers.sqlite` plus one `speakers_<embedder>.sqlite` per non-legacy embedder, e.g. the default ReDimNet2), meeting titles. All of it stays on the Mac unless the user sends it somewhere.
 2. **Secrets the user typed.** Passwords, one-time codes, card numbers and API keys that pass through Writing capture. Secure-input fields and password-manager apps are never captured. For the rest, `WritingSecretScrubber` removes what its patterns recognize before a day file is written. That is best effort: a passphrase typed outside a terminal or a short mixed token can still land in the day file.
 3. **The user's other apps.** Transcripted holds Microphone, System Audio Recording, Accessibility and Calendar permissions, and paste-back types into other apps. Code that gets into the app inherits all of that.
 4. **The update channel.** Sparkle EdDSA signing key, the appcast, Developer ID signing and notarization. Whoever controls these ships code to every user.
@@ -22,7 +22,7 @@ In order of harm if it leaks or breaks:
 | Other local apps → MCP server | saved captures, meeting controls | `Tools/TranscriptedMCP` is stdio with no per-caller auth: launching it grants read access to every capture. Its companion tools (`CompanionTools.swift`) can also `start_meeting`, `stop_meeting` and `set_live_context_sharing` through the app, but only when the user has turned on companion meeting control or live sharing in Transcripted |
 | ChatGPT companion → app | context, meeting controls, live text | Unix socket in a `0700` directory, socket and connection file `0600`, rotating token never logged or returned by a tool. Off until enabled; controls and live sharing are separate permissions; live text needs a per-meeting switch |
 | App → other apps | paste-back keystrokes, Auto Enter | Accessibility permission; pastes only the user's own dictation |
-| GitHub issues and PR comments → agents | task text | Issue runner reads only `allowed_authors` and filtered operator feedback (`WORKFLOW.md`), never raw comments |
+| GitHub issues and PR comments → agents | task text | Issue runner reads only `allowed_authors` and filtered operator feedback (`WORKFLOW.md`), never raw comments. Exception: the finding responder (`docs/automations/finding-responder.md`) reads raw review-thread bodies, but only threads started by `chatgpt-codex-connector`, only on same-repo lane PRs by `allowed_authors`, treats the text as a claim to verify, never as instructions, and can't edit gate, lane or automation files |
 | Fork PRs → CI | untrusted code | Fork PRs never run on the owner's Mac (`pick-ci-runner.py`, `mac-runner.sh` job hook); Mac jobs run in throwaway VMs |
 | Agent PRs → `main` | code without the owner's review | Auto-merge gate lanes and `deny_always` (`.agents/auto-merge-lanes.json`), required checks, Codex review, red-main stop |
 

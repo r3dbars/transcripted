@@ -15,17 +15,17 @@ The overnight jobs run between 11 PM and 3 AM, so everything that needs Justin i
 
 ## Setting one up in Codex
 
-Codex app → Automations → New automation. Project: `~/transcripted`. Schedule: as in the table. Prompt:
+Codex app → Automations → New automation. Project: a dedicated automation worktree, `~/transcripted/.claude/worktrees/automation` (create once with `git -C ~/transcripted worktree add --detach .claude/worktrees/automation origin/main`), never Justin's main checkout. Schedule: as in the table. Prompt:
 
 ```text
-In the Transcripted repo: git fetch, then check out origin/main (detached is fine).
+In the Transcripted automation worktree: if git status --porcelain isn't empty, stop and report. Otherwise git fetch --prune, then git checkout --detach origin/main.
 Read <playbook path> and do exactly what it says. Report only if you acted or hit an error.
 ```
 
 The gate is a script, so its prompt can run it directly:
 
 ```text
-In the Transcripted repo: git fetch, then check out origin/main (detached is fine).
+In the Transcripted automation worktree: if git status --porcelain isn't empty, stop and report. Otherwise git fetch --prune, then git checkout --detach origin/main.
 Run: python3 scripts/ops/auto-merge-gate.py --apply
 Report only if something merged or the gate errored. Never merge anything yourself.
 ```
