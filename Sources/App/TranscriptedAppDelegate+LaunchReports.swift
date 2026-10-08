@@ -104,13 +104,14 @@ extension TranscriptedAppDelegate {
             return
         }
         guard AutomatedLaunchEnvironment.isActive(environment: environment) else { return }
+        let launchToInteractiveMs = Self.processStartToNowMilliseconds()
         Task { @MainActor in
             defer { scheduleLaunchUISmokeTerminationIfRequested(environment: environment) }
             var report = menuPanelController.launchUISmokeReport(
                 statusItemExists: statusItem != nil,
                 popoverConfigured: popover != nil,
                 onboardingCompleted: true,
-                launchToInteractiveMs: Self.processStartToNowMilliseconds()
+                launchToInteractiveMs: launchToInteractiveMs
             )
             report.meetingOverlayDurationUpdates = await meetingOverlayDurationSmokeUpdates()
             let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
