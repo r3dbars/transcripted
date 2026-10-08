@@ -56,8 +56,9 @@ public enum WritingSecretScrubber {
 
     /// Bumped whenever the rules change in a way worth re-running over files
     /// already on disk.
-    public static let rulesVersion = 2
+    public static let rulesVersion = 3
 
+    private static let tokenPattern = regex(#"\x{27E8}redacted:([a-z-]+)\x{27E9}"#)
     private static let tokenOpen = "\u{27E8}redacted:"
     private static let tokenClose = "\u{27E9}"
 
@@ -72,9 +73,10 @@ public enum WritingSecretScrubber {
         precedingLines: [String] = []
     ) -> Result {
         guard !text.isEmpty else { return Result(clean: text, kinds: [], isOnlyRedactions: false) }
+        let existing = WritingScrubberTokenIdentity(text)
         let terminal = terminalKind(appBundleIdentifier)
         let afterLines = applyLineRules(
-            text,
+            existing.markedText,
             terminal: terminal,
             inBrowser: browserBundleIdentifiers.contains(appBundleIdentifier.lowercased()),
             precedingLines: precedingLines
@@ -83,15 +85,7 @@ public enum WritingSecretScrubber {
         // pieces the generic-token rule would take.
         let afterStructured = SecretRules.scrub(afterLines, config: structuredOnly).clean
         let clean = applyInlineRules(afterStructured)
-        var kinds = newTokens(in: clean, comparedWith: text)
-        // A redaction that runs on over an existing token keeps the token count
-        // the same, so `newTokens` finds nothing. Text still went, though, and
-        // a caller that sees no kinds (the day-file rescrubber) would leave
-        // the raw secret on disk.
-        if kinds.isEmpty, withoutTokens(clean) != withoutTokens(text) {
-            kinds = tokens(in: clean).reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
-        }
-        return Result(clean: clean, kinds: kinds, isOnlyRedactions: onlyTokensLeft(clean))
+        return existing.result(from: clean)
     }
 
     /// `SecretRules`' structured shapes only. Emails and phones are the
@@ -294,7 +288,7 @@ public enum WritingSecretScrubber {
                 // An answer an earlier pass already redacted (a day file
                 // being rescrubbed) used up that answer, so running the
                 // rules again over their own output changes nothing.
-                if trimmed == token(for: .password) {
+                if WritingScrubberTokenIdentity.isPasswordToken(trimmed) {
                     prompt = state.consume(trimmed)
                     previousMentionsCode = false
                     continue
@@ -1427,45 +1421,4 @@ public enum WritingSecretScrubber {
         }
     }
 
-    // MARK: - Result bookkeeping
-
-    private static let tokenPattern = regex(#"\x{27E8}redacted:([a-z-]+)\x{27E9}"#)
-
-    private static func tokens(in text: String) -> [Kind] {
-        var kinds: [Kind] = []
-        enumerateMatches(text, tokenPattern) { match in
-            if let raw = substring(match, group: 1, in: text) {
-                kinds.append(Kind(rawValue: raw) ?? .secret)
-            }
-        }
-        return kinds
-    }
-
-    /// Tokens in `clean` that weren't already in `original`: re-scrubbing a
-    /// day file that already has tokens doesn't count them again.
-    private static func newTokens(in clean: String, comparedWith original: String) -> [Kind] {
-        let after = tokens(in: clean)
-        var before = tokens(in: original)[...]
-        var fresh: [Kind] = []
-        for kind in after {
-            if let first = before.first, first == kind {
-                before = before.dropFirst()
-            } else {
-                fresh.append(kind)
-            }
-        }
-        return fresh
-    }
-
-    private static func withoutTokens(_ text: String) -> String {
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        return tokenPattern.stringByReplacingMatches(in: text, range: range, withTemplate: "")
-    }
-
-    private static func onlyTokensLeft(_ clean: String) -> Bool {
-        guard clean.contains(tokenOpen) else { return false }
-        let range = NSRange(location: 0, length: (clean as NSString).length)
-        let stripped = tokenPattern.stringByReplacingMatches(in: clean, range: range, withTemplate: "")
-        return !stripped.contains { $0.isLetter || $0.isNumber }
-    }
 }

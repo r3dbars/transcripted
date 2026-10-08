@@ -185,4 +185,33 @@ struct WritingSecretScrubberRegressionTests {
         #expect(!result.clean.contains("Xy7Kp2"), "secret survived: \(result.clean)")
         #expect(!result.kinds.isEmpty, "no kinds reported for \(result.clean)")
     }
+    @Test("Swallowed tokens report only new redactions, with repeated kinds in text order")
+    func swallowedTokensKeepExactKinds() {
+        let oldPassword = WritingSecretScrubber.token(for: .password)
+        let oldAPI = WritingSecretScrubber.token(for: .apiKey)
+        let key = "Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx"
+        let result = WritingSecretScrubber.scrub(
+            "\(oldPassword)\napi_token=\(key)!\(oldAPI)\ndb_password=\(key)!\(oldAPI)",
+            appBundleIdentifier: Self.slack
+        )
+        #expect(result.kinds == [.apiKey, .apiKey])
+        #expect(!result.clean.contains(key))
+        #expect(WritingSecretScrubber.scrub(result.clean, appBundleIdentifier: Self.slack).kinds.isEmpty)
+    }
+
+    @Test("An old same-kind token after a new secret never changes the new redaction's text order")
+    func existingTokenAfterNewSecretKeepsOrder() {
+        let oldPassword = WritingSecretScrubber.token(for: .password)
+        let result = WritingSecretScrubber.scrub(
+            "[sudo] password for user:\nTr0ub4dor&3\nOTP: 123456\n\(oldPassword)",
+            appBundleIdentifier: "com.apple.Terminal"
+        )
+        #expect(result.kinds == [.password, .code])
+    }
+
+    @Test("Saved writing processed by rules version two is eligible for another rescrub")
+    func previousRulesVersionNeedsRescrub() {
+        #expect(WritingSecretScrubber.rulesVersion > 2)
+    }
+
 }
