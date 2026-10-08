@@ -174,7 +174,7 @@ def check(sources: dict[str, str], pressers: dict[str, str]) -> list[str]:
             problems.append(f"{ident} should keep the Speakers icon-only controls scriptable")
     for ident in SPEAKERS_FORBIDDEN_IDS:
         for declared_id in sorted(speakers_declared):
-            if declared_id == ident or declared_id.startswith(ident + "."):
+            if declared_id.startswith(ident):
                 problems.append(f"{declared_id} must not come back: navigation and mutations refresh the Speakers model")
     return problems
 
@@ -249,9 +249,11 @@ def self_test() -> int:
     regrown[f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift"] = speakers_src + quote(SPEAKERS_FORBIDDEN_IDS)
     assert any("must not come back" in p for p in check(regrown, pressers))
     descendant = dict(sources)
-    descendant[f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift"] = speakers_src + quote(["transcripted.speakers.refresh.button", "transcripted.speakers.refresh.button_test"])
+    descendant[f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift"] = speakers_src + quote(["transcripted.speakers.refresh.button", "transcripted.speakers.refresh.button_test", "transcripted.speakers.refresh_button", "transcripted.speakers.refresh-inbox"])
     assert any("refresh.button must not come back" in p for p in check(descendant, pressers))
     assert any("refresh.button_test must not come back" in p for p in check(descendant, pressers))
+    assert any("refresh_button must not come back" in p for p in check(descendant, pressers))
+    assert any("refresh-inbox must not come back" in p for p in check(descendant, pressers))
 
     changed_prefix = dict(sources)
     changed_prefix[PAGE_ENUM] = sources[PAGE_ENUM].replace("sidebar.", "navigation.")
