@@ -22,9 +22,9 @@ A suite item is one pinned (corpus, harness_split) pair:
 
 * `corpus` matches a report slice key exactly (the FingerprintCache `corpus`
   field, e.g. `ami_orig`) or a corpus family (`ami` sums every `ami_*` slice,
-  using the harness's own `corpusFamily` rule, AutoResearch.swift:792).
+  using the harness's own `corpusFamily` rule, AutoResearchIdentitySplit.swift:3).
 * `harness_split` is the harness's identity split: FNV-1a(family|truth) buckets
-  0-5 train, 6-7 dev, 8-9 holdout (AutoResearch.swift:799). Every quality
+  0-5 train, 6-7 dev, 8-9 holdout (AutoResearchIdentitySplit.swift:10). Every quality
   variant of one person lands in the same split, so pinning harness `holdout`
   to the climber's holdout and `train`/`dev` to the climber's dev split means
   dev and holdout never share a person. The adapter refuses (item error) any
@@ -350,7 +350,7 @@ def check_report(report: Mapping[str, Any], config: Mapping[str, Any], split: st
 
 
 def corpus_family(corpus: str) -> str:
-    """Python mirror of corpusFamily in AutoResearch.swift:792."""
+    """Python mirror of corpusFamily in AutoResearchIdentitySplit.swift:3."""
     for family in ("ami", "voxceleb", "voxconverse"):
         if corpus.startswith(family + "_"):
             return family

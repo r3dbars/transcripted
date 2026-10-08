@@ -193,23 +193,110 @@ func testTranscriptedConstants() async {
     }
 
     await runSuite("TranscriptedConstants.withTimeout — cancels work after deadline") {
-        let cancellationObserved = DetachedTimeoutWorkFlag()
+        let cancellationObserved = ParakeetAsyncInterleavingGate()
+        let cleanupNeeded = DetachedTimeoutWorkFlag()
+        // The deadline returns without joining the work, so wait for the
+        // cancellation to land. The escape hatch only bounds a regression.
+        let cleanup = Task {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            cleanupNeeded.set()
+            await cancellationObserved.open()
+        }
+        defer { cleanup.cancel() }
+
         do {
             _ = try await TranscriptedConstants.withTimeout(seconds: 0.01) {
                 do {
                     try await Task.sleep(nanoseconds: 30_000_000_000)
                 } catch {
-                    if error is CancellationError { cancellationObserved.set() }
+                    if error is CancellationError { await cancellationObserved.open() }
                     throw error
                 }
                 return "late"
             }
             assertTrue(false, "deadline must throw instead of returning late work")
         } catch is CancellationError {
-            assertTrue(cancellationObserved.isSet, "structured timeout must cancel and join cooperative work")
+            await cancellationObserved.wait()
+            assertFalse(cleanupNeeded.isSet, "timed-out cooperative work must be cancelled")
         } catch {
             assertTrue(false, "deadline must throw CancellationError, got \(error)")
         }
+    }
+
+    await runSuite("TranscriptedConstants.withTimeout — returns at the deadline even when work ignores cancellation") {
+        // The wake readiness wait awaits a Task's value, which ignores
+        // cancellation. The deadline must still return before that work ends.
+        let releaseWork = ParakeetAsyncInterleavingGate()
+        let workFinished = ParakeetAsyncInterleavingGate()
+        let cleanupNeeded = DetachedTimeoutWorkFlag()
+        // Harness escape hatch so a broken timeout can't hang the suite.
+        // Correctness is event order, not elapsed time.
+        let cleanup = Task {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            cleanupNeeded.set()
+            await releaseWork.open()
+            await workFinished.open()
+        }
+        defer { cleanup.cancel() }
+
+        do {
+            _ = try await TranscriptedConstants.withTimeout(seconds: 0.01) {
+                await releaseWork.wait()
+                await workFinished.open()
+                return "late"
+            }
+            assertTrue(false, "deadline must throw instead of returning late work")
+        } catch is CancellationError {
+            let finishedBeforeRelease = await workFinished.opened()
+            assertFalse(finishedBeforeRelease, "deadline must return before non-cooperative work is released")
+        } catch {
+            assertTrue(false, "deadline must throw CancellationError, got \(error)")
+        }
+
+        await releaseWork.open()
+        await workFinished.wait()
+        assertFalse(cleanupNeeded.isSet, "the deadline must not need the harness escape hatch")
+    }
+
+    await runSuite("TranscriptedConstants.withTimeout — a cancelled caller ends right away, not at the deadline") {
+        // Wake recovery is cancelled on shutdown. The readiness wait must end
+        // then, not run to its deadline and report a false timeout.
+        let releaseWork = ParakeetAsyncInterleavingGate()
+        let workStarted = ParakeetAsyncInterleavingGate()
+        let cleanupNeeded = DetachedTimeoutWorkFlag()
+        // The deadline is far past this escape hatch, so if cancellation
+        // isn't forwarded the work is released and returns "late".
+        let cleanup = Task {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            cleanupNeeded.set()
+            await workStarted.open()
+            await releaseWork.open()
+        }
+        defer { cleanup.cancel() }
+
+        let caller = Task { () -> Result<String, Error> in
+            do {
+                return .success(try await TranscriptedConstants.withTimeout(seconds: 3_600) {
+                    await workStarted.open()
+                    await releaseWork.wait()
+                    return "late"
+                })
+            } catch {
+                return .failure(error)
+            }
+        }
+        await workStarted.wait()
+        caller.cancel()
+        let result = await caller.value
+
+        switch result {
+        case .success(let value):
+            assertTrue(false, "a cancelled caller must not get the work's value, got \(value)")
+        case .failure(let error):
+            assertTrue(error is CancellationError, "a cancelled caller should get CancellationError, got \(error)")
+        }
+        assertFalse(cleanupNeeded.isSet, "the cancelled wait must end without the harness escape hatch")
+        await releaseWork.open()
     }
 
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns completed work before deadline") {

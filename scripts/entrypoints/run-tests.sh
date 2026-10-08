@@ -386,6 +386,7 @@ APP_SOURCES=(
     "Sources/Support/CompanionProtocol.swift"
     "Sources/Support/CompanionSocketServer.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
+    "Sources/Support/LaunchAtLoginController.swift"
     "Sources/Support/PermissionsOnboardingPreferences.swift"
     "Sources/Support/AutomatedLaunchEnvironment.swift"
     "Sources/Support/HotkeyPreferences.swift"

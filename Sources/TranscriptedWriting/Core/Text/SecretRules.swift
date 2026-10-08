@@ -81,7 +81,9 @@ public enum SecretRules {
     /// `⟨redacted:type⟩` token. Matches from different rules never overlap
     /// in the result: when two rules claim the same span the earliest,
     /// then longest, then highest-priority match wins and the rest are
-    /// dropped rather than double-redacted.
+    /// dropped rather than double-redacted. A match that only partly
+    /// overlaps the winner and runs past its end extends the winner's
+    /// span, so no character any rule matched is left in clear.
     public static func scrub(_ text: String, config: ScrubConfig = .forPersistence) -> (clean: String, findings: [Finding]) {
         guard !text.isEmpty else { return (text, []) }
 
@@ -105,9 +107,18 @@ public enum SecretRules {
 
         var accepted: [(range: Range<String.Index>, type: SecretType)] = []
         var cursor = text.startIndex
-        for candidate in candidates where candidate.range.lowerBound >= cursor {
-            accepted.append((candidate.range, candidate.type))
-            cursor = candidate.range.upperBound
+        for candidate in candidates {
+            if candidate.range.lowerBound >= cursor {
+                accepted.append((candidate.range, candidate.type))
+                cursor = candidate.range.upperBound
+            } else if candidate.range.upperBound > cursor, let last = accepted.popLast() {
+                // A partial overlap runs past the accepted match: extend it
+                // instead of dropping the rest, or the tail of a secret
+                // (a card's last digits after a number in front of it)
+                // would stay in clear.
+                accepted.append((last.range.lowerBound..<candidate.range.upperBound, last.type))
+                cursor = candidate.range.upperBound
+            }
         }
         guard !accepted.isEmpty else { return (text, []) }
 

@@ -35,6 +35,7 @@ Never average these away:
 - `Sources/transcripted-lab/TranscriptedLabCLI.swift` - `run`, `snapshot`, `doctor`, `list`, `show`, `compare`.
 - `Sources/TranscriptedLab/` - SwiftUI app: `TranscriptedLabApp.swift`, `LabWorkspaceStore.swift` (run/report state over the kit), `LabContentView.swift`.
 - `Tests/TranscriptedLabKitTests/TranscriptedLabKitTests.swift` - kit tests.
+- `Tests/TranscriptedLabKitTests/QABenchExitCodeTests.swift` - qa-bench exit 1/3 runs that reached write_report still get scored; aborts, crashes, and exit 1 with no FAIL row still fail.
 - `script/build_and_run.sh` - builds both products, assembles and ad-hoc signs a local app bundle, opens it unless `--verify`.
 
 ## Validation
