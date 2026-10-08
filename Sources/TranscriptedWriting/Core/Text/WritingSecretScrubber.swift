@@ -56,7 +56,7 @@ public enum WritingSecretScrubber {
 
     /// Bumped whenever the rules change in a way worth re-running over files
     /// already on disk.
-    public static let rulesVersion = 1
+    public static let rulesVersion = 2
 
     private static let tokenOpen = "\u{27E8}redacted:"
     private static let tokenClose = "\u{27E9}"
