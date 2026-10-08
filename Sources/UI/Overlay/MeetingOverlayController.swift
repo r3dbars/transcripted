@@ -701,32 +701,27 @@ final class MeetingOverlayController: NSObject {
     private func handleDiscardRequested() {
         guard !isShowingCancelConfirmation else { return }
         guard let session = meetingSession else { return }
-        guard case .recording = session.state else { return }
+        guard MeetingSessionStateMachine.mayDiscardRecording(sessionState: session.state) else { return }
 
         isShowingCancelConfirmation = true
         defer {
             isShowingCancelConfirmation = false
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Discard this meeting recording?"
-        alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
-        alert.addButton(withTitle: "Keep Recording")
-        alert.addButton(withTitle: "Discard Recording")
-        alert.buttons.last?.hasDestructiveAction = true
-
-        let response = alert.runModal()
-        guard response == .alertSecondButtonReturn else { return }
-        // The confirm sheet can outlive the recording. Stop or an unexpected
-        // capture end may already be preserving audio — do not cancel then.
-        guard case .recording = session.state else { return }
-
-        Task { [weak session] in
-            await session?.cancelRecording(reason: .discardButton)
-        }
+        MeetingSessionStateMachine.discardRecordingIfConfirmed(sessionState: { session.state }, confirm: {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Discard this meeting recording?"
+            alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
+            alert.addButton(withTitle: "Keep Recording")
+            alert.addButton(withTitle: "Discard Recording")
+            alert.buttons.last?.hasDestructiveAction = true
+            return alert.runModal() == .alertSecondButtonReturn
+        }, discard: {
+            // A confirm can outlive Stop; the flow rechecks before canceling.
+            Task { [weak session] in await session?.cancelRecording(reason: .discardButton) }
+        })
     }
 
     private func scheduleAutoHide(after seconds: Double) {
@@ -888,7 +883,7 @@ final class MeetingOverlayController: NSObject {
         // Overlay `.recording` also covers `.stoppingRecording` (keep the
         // meeting up through teardown). Discard must require the session
         // itself to still be `.recording`, or the item no-ops after a stop starts.
-        if case .recording = meetingSession?.state {
+        if MeetingSessionStateMachine.mayDiscardRecording(sessionState: meetingSession?.state) {
             let menu = NSMenu()
             let discardItem = NSMenuItem(
                 title: "Discard Recording…",

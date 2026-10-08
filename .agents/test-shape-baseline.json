@@ -6,7 +6,6 @@
     "Tests/DictationQueuedStartPolicyTests.swift": 2,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
-    "Tests/MeetingSessionUIPolicyTests.swift": 4,
     "Tests/ObservabilityLogWriterTests.swift": 6,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
     "Tests/UIAutomationSurfaceContractTests.swift": 45
