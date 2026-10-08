@@ -20,23 +20,6 @@
       "Core": [
         "TimedTranscriptToken"
       ]
-    },
-    "Sources/UI/Settings/SpeakerNamingSheet.swift": {
-      "Core": [
-        "TranscriptSaver",
-        "TranscriptionTaskManager"
-      ]
-    },
-    "Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift": {
-      "Core": [
-        "CoreStoragePaths",
-        "SpeakerDatabase",
-        "SpeakerIdentityMutationService",
-        "SpeakerMergeRecord",
-        "SpeakerUserConfirmation",
-        "SpeakerVoiceprintMigrationGate",
-        "TranscriptSaver"
-      ]
     }
   }
 }

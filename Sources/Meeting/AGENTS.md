@@ -17,6 +17,10 @@
 
 ## Files
 
+- `SpeakerSettingsStore.swift` — speaker reads and transactional edits for Settings, including transcript rollback and clip side effects. Its merge records and review rows are plain values; it retains the controller's canonical database.
+- `SpeakerSettingsMigration.swift` — synchronous value projection of the voiceprint migration gate and the controller's speaker naming publisher.
+- `SpeakerNamingMetadata.swift` — saved transcript title and calendar-invitee lookups for the naming presenter.
+
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
 - `FailedMeetingItem.swift` — the failed-meeting row view-model (`FailedMeetingPresentation.FailedMeetingItem`). Foundation-only, like `FailedMeetingPresentation.swift`, so both compile in the fast-test runner and `Tests/FailedMeetingPresentationTests.swift` checks rows through `FailedMeetingPresentation.item(from:)`. Nested rather than top-level so the `FailedMeetingItem` typealiases on `FailedMeetingStore` and `MeetingSessionController` don't refer to themselves
 - `FailedMeetingUsableAudio.swift` — Foundation-only tri-state for whether a failed row's surviving audio actually holds signal (`unknown`/`present`/`absent`). Deliberately free of `@MainActor` and `TranscriptedCore` so the Settings presentation policies that consume it stay in the fast-test compile

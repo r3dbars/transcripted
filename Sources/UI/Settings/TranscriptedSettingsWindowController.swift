@@ -12,12 +12,12 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     private let hostingController: NSHostingController<TranscriptedSettingsView>
 
     init(appState: TranscriptedAppState, actions: TranscriptedSettingsActions) {
-        let speakerDatabase = appState.meetingSession.speakerDatabaseForSettings()
+        let speakerDatabase = appState.meetingSession.speakerStoreForSettings()
         let speakerPeopleModel = SpeakerPeopleSettingsViewModel(
             speakerDatabase: speakerDatabase,
             transcriptDirectory: MeetingStoragePaths.transcriptsFolder,
             preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder,
-            voiceprintMigrationGate: appState.meetingSession.voiceprintMigrationGate
+            voiceprintMigrationGate: appState.meetingSession.speakerMigrationForSettings
         )
         self.speakerPeopleModel = speakerPeopleModel
         self.navigationModel = TranscriptedSettingsNavigationModel()

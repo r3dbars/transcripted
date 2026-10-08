@@ -20,7 +20,7 @@
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift": 856,
     "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift": 1421,
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 885,
-    "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1326,
+    "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1286,
     "Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift": 920,
     "Sources/UI/Overlay/MeetingOverlayController.swift": 1297,
     "Sources/UI/Overlay/NotchIslandView.swift": 1286,

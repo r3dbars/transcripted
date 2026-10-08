@@ -13,7 +13,7 @@ settings-side agent connection flow.
 - **Owns:** the main window (sidebar, Today, Meetings, Dictations, Writing, Speakers, Agent, the combined settings page), first-run onboarding, and speaker naming and review.
 - **Public surface:** `TranscriptedSettingsWindowController`, `TranscriptedSettingsPage`, `PermissionsOnboardingView` and the onboarding window, `SpeakerNamingSheet`, `HomeView`, the `Pages/` views.
 - **May depend on:** UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab`. Only AppShell and UIMenuBar may depend on it.
-- **Grandfathered crossings:** the Speakers directory (`SpeakerPeopleSettingsSection.swift`, `SpeakerNamingSheet.swift` and friends) uses Core engine types like `SpeakerDatabase`, `SpeakerClipExtractor` and `TranscriptSaver` directly; the target is Meeting facades. That crossing is in `.agents/module-boundary-baseline.json`; don't add more.
+- **Speaker persistence:** Settings reaches database edits, migration status, saved merge history and naming metadata through Meeting-owned `SpeakerSettingsStore`, `SpeakerSettingsMigration` and `SpeakerNamingMetadata`. Keep Core engine types behind those seams; presentation and edit completion stay in this directory.
 - **Entry points:** `TranscriptedSettingsWindowController.swift` opens the window; `TranscriptedSettingsView.swift` is the shell.
 - **Tests:** `bash run-tests.sh --filter Home`, `--filter Settings`, `--filter Speaker`, `--filter UIAutomationSurfaceContract`.
 - **Rules:** keep the Speakers directory with review, rename, merge and delete, per-app Auto Enter, and model-cache inspection and cleanup (product surface). See "Guardrails" below.
