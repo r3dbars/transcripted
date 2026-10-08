@@ -48,7 +48,7 @@ Every Swift file here belongs to a module in `.agents/modules.json`. `scripts/de
 
 **Observability** (`Observability/`). The sink every module may report into: reporters, `DiagnosticsTrail`, the `*Telemetry` types, sanitizers and policies, `SupportDiagnosticsBundle`, the Sparkle updater. May depend on Support and Core `core-vocab`. Grandfathered: `ActivationTelemetry` and `AnalyticsEventPolicy` name Dictation and Speech types (to be inverted by passing plain values). Details: `Observability/AGENTS.md`.
 
-The full list of grandfathered crossings is `.agents/module-boundary-baseline.json`; it can only shrink (`--shrink`), and adding to it is a reviewed human edit.
+Module boundaries are absolute: every forbidden crossing fails. Move the type down, pass plain values, or use a Meeting-owned seam; new dependency grants require a reviewed human edit.
 
 ## Read before editing
 
