@@ -568,4 +568,33 @@ final class SemanticSearchFusionTests: XCTestCase {
         XCTAssertEqual(fused.count, 2)
         XCTAssertEqual(fused.first?.entryId, "e1") // appears in both -> top
     }
+
+    // MARK: - Cross-kind fusion (search_context)
+
+    private func group(_ kind: ContextKind, _ filename: String, _ datetime: String, entry: String? = nil) -> ContextSearchGroup {
+        ContextSearchGroup(kind: kind, title: filename, filename: filename, entryId: entry, date: String(datetime.prefix(10)), datetime: datetime, snippets: [])
+    }
+
+    func testFuseRankedContextListsOrdersByRankThenNewerThenFirstSeen() {
+        let meetings = [group(.meeting, "M-best", "2026-01-01T09:00:00"), group(.meeting, "M-second", "2026-09-01T09:00:00")]
+        let dictations = [group(.dictation, "D", "2026-05-01T09:00:00", entry: "d1")]
+        let writing = [group(.writing, "W", "2026-01-01T09:00:00", entry: "w1")]
+
+        let fused = SemanticSearchFusion.fuseRankedContextLists([meetings, dictations, writing])
+
+        // Rank 0 of every list ties: newer first, then first-seen (meeting before writing
+        // at the same datetime). The rank-1 meeting comes last despite being newest.
+        XCTAssertEqual(fused.map(\.filename), ["D", "M-best", "W", "M-second"])
+    }
+
+    func testFuseRankedContextListsKeepsOneEntryPerItem() {
+        let a = group(.dictation, "Dictations_2026-10-01", "2026-10-01T09:00:00", entry: "e1")
+        let b = group(.dictation, "Dictations_2026-10-01", "2026-10-01T10:00:00", entry: "e2")
+
+        let fused = SemanticSearchFusion.fuseRankedContextLists([[a, b], [b]])
+
+        // b shows up in two lists, so it is returned once and its scores add up.
+        XCTAssertEqual(fused.compactMap(\.entryId), ["e2", "e1"])
+    }
+
 }

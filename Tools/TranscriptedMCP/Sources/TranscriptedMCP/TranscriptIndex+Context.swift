@@ -49,7 +49,10 @@ extension TranscriptIndex {
     }
 
     func searchContext(query: String, speaker: String?, kind: ContextKind, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> ContextSearchResult {
-        var combined: [ContextSearchGroup] = []
+        // One relevance-ranked list per kind. Every per-kind search ranks by
+        // relevance in every mode (FTS rank, cosine, or their RRF), so the lists
+        // are merged by rank, never by date.
+        var rankedLists: [[ContextSearchGroup]] = []
 
         if kind.includes(.meeting) {
             let meetings = try searchUtterances(
@@ -61,7 +64,7 @@ extension TranscriptIndex {
                 snippetsPerMeeting: 3,
                 mode: mode
             )
-            combined.append(contentsOf: meetings.results.map {
+            rankedLists.append(meetings.results.map {
                 ContextSearchGroup(
                     kind: .meeting,
                     title: $0.meetingTitle,
@@ -84,7 +87,7 @@ extension TranscriptIndex {
         }
 
         if kind.includes(.dictation), speaker == nil {
-            combined.append(contentsOf: try searchDictationEntries(
+            rankedLists.append(try searchDictationEntries(
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
@@ -95,7 +98,7 @@ extension TranscriptIndex {
 
         // Writing has no speakers, so a speaker filter skips it like dictations.
         if kind.includes(.writing), speaker == nil {
-            combined.append(contentsOf: try searchWritingEntries(
+            rankedLists.append(try searchWritingEntries(
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
@@ -103,7 +106,9 @@ extension TranscriptIndex {
             ))
         }
 
-        combined.sort { $0.datetime > $1.datetime }
+        // BM25 and cosine scores aren't comparable across kinds, so fuse by
+        // each item's rank within its own list.
+        let combined = SemanticSearchFusion.fuseRankedContextLists(rankedLists)
         let total = combined.count
 
         return ContextSearchResult(
