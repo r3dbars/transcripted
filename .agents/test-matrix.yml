@@ -188,7 +188,7 @@ rules:
   # Accessibility identifiers the QA smokes and build.sh's launch smoke press
   # must still be declared in the app (was Tests/UIAutomationSurfaceContractTests.swift).
   - paths:
-      - "Sources/UI/**"
+      - "Sources/**"
       - "Tools/TranscriptedQA/Sources/**"
       - "scripts/entrypoints/build.sh"
       - "scripts/dev/check-ui-automation-contract.py"
