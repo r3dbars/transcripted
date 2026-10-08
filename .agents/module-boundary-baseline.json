@@ -50,6 +50,12 @@
         "SpeakerVoiceprintMigrationGate",
         "TranscriptSaver"
       ]
+    },
+    "Sources/UI/Overlay/NotchIslandVoiceRowView.swift": {
+      "Core": [
+        "SpeakerIdentityOption",
+        "SpeakerNameUpdate"
+      ]
     }
   }
 }
