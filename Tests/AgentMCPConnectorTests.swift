@@ -691,8 +691,8 @@ func testAgentMCPConnector() {
             installedBinaryURL: installedBinaryURL,
             observabilityConfigURL: observabilityConfigURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: " phc_test ",
-                AnalyticsRuntimeConfiguration.hostInfoKey: " https://us.i.posthog.com ",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: " phc_test ",
+                AnalyticsInfoPlistKeys.hostInfoKey: " https://us.i.posthog.com ",
             ]
         )
 
@@ -704,12 +704,12 @@ func testAgentMCPConnector() {
             "ensure should install the bundled helper when missing"
         )
         assertEqual(
-            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsRuntimeConfiguration.apiKeyInfoKey],
+            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsInfoPlistKeys.apiKeyInfoKey],
             "phc_test",
             "ensure should write the PostHog key for the installed standalone helper"
         )
         assertEqual(
-            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsRuntimeConfiguration.hostInfoKey],
+            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsInfoPlistKeys.hostInfoKey],
             "https://us.i.posthog.com",
             "ensure should write the PostHog host for the installed standalone helper"
         )
@@ -721,8 +721,8 @@ func testAgentMCPConnector() {
             installedBinaryURL: installedBinaryURL,
             observabilityConfigURL: observabilityConfigURL,
             infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_test",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                AnalyticsInfoPlistKeys.apiKeyInfoKey: "phc_test",
+                AnalyticsInfoPlistKeys.hostInfoKey: "https://us.i.posthog.com",
             ]
         )
         assertEqual(refreshed?.action, .repair, "stale helpers should report a repair action")

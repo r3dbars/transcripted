@@ -17,26 +17,8 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
             rootView: makeView()
         )
 
-        let window = NSWindow(
-            contentRect: NSRect(
-                x: 0,
-                y: 0,
-                width: PermissionsOnboardingView.preferredSize.width,
-                height: PermissionsOnboardingView.preferredSize.height
-            ),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Welcome to Transcripted"
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.isReleasedWhenClosed = false
-        window.minSize = PermissionsOnboardingView.preferredSize
+        let window = TranscriptedOnboardingWindow.make(preferredSize: PermissionsOnboardingView.preferredSize)
         window.contentViewController = hostingController
-        // First-run setup should be capturable for support and QA walkthroughs.
-        window.sharingType = .readOnly
         window.center()
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
 

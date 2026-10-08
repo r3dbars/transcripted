@@ -490,7 +490,7 @@ class FloatingOverlayController {
         discardActionableMessageIfNeeded()
         errorMessage = message
         messageTone = tone
-        messageCanGiveWayToNextStart = false
+        messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.other)
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
@@ -592,7 +592,7 @@ class FloatingOverlayController {
             silentMicName: silentMicName
         )
         messageTone = .error
-        messageCanGiveWayToNextStart = true
+        messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.noSpeechNote)
         discardActionableMessageIfNeeded()
         state = .drafting
         if !isVisible {
