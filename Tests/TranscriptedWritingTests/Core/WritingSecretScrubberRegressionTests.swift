@@ -172,4 +172,17 @@ struct WritingSecretScrubberRegressionTests {
         }
         #expect(!result.kinds.isEmpty)
     }
+
+    /// A day file that already has `⟨redacted:api-key⟩` after the raw part of
+    /// the same secret: the redaction swallows the old token, so the count
+    /// doesn't change. It must still report a kind, or the rescrubber
+    /// treats the file as unchanged and the raw secret stays on disk.
+    @Test("A redaction that swallows an existing token still reports a kind")
+    func swallowedTokenStillReported() {
+        let token = WritingSecretScrubber.token(for: .apiKey)
+        let text = "set api_token=Xy7Kp2Qw9Lm4Zr8Tn3Vb6Hg1Jd5Fs0Aq0Wx!\(token) in the env"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: Self.slack)
+        #expect(!result.clean.contains("Xy7Kp2"), "secret survived: \(result.clean)")
+        #expect(!result.kinds.isEmpty, "no kinds reported for \(result.clean)")
+    }
 }
