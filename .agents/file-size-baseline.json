@@ -22,7 +22,6 @@
     "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift": 1421,
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 885,
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1326,
-    "Sources/TranscriptedWriting/Runtime/PersonalHistory/PersonalHistoryStore.swift": 870,
     "Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift": 920,
     "Sources/UI/Overlay/MeetingOverlayController.swift": 1297,
     "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift": 1328,
