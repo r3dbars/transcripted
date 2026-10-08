@@ -50,8 +50,13 @@ CONFIG_PATH = REPO_ROOT / ".agents/auto-merge-lanes.json"
 PR_FIELDS = ",".join([
     "number", "title", "headRefName", "headRefOid", "isDraft", "isCrossRepository",
     "labels", "author", "additions", "deletions", "mergeable", "files",
-    "statusCheckRollup", "reviews", "commits", "url", "body",
+    "statusCheckRollup", "reviews", "commits", "url", "body", "baseRefOid",
 ])
+# Debt baselines (.agents/*-baseline.json) may only shrink. A PR in any lane may
+# change one as long as the change only lowers counts or drops entries.
+BASELINE_GLOB = ".agents/*-baseline.json"
+HUMAN_LABEL = "waiting-on-human"
+HUMAN_LABELS = {HUMAN_LABEL, "needs owner review"}
 
 
 def gh(*args: str) -> str:
@@ -85,6 +90,25 @@ def parse_time(value: str) -> datetime:
 
 
 TEST_GLOBS = ["Tests/**", "Tools/*/Tests/**"]
+
+
+def only_lowers(base, head) -> bool:
+    """True when head keeps or lowers every number in base and adds nothing."""
+    if isinstance(head, dict):
+        return isinstance(base, dict) and all(k in base and only_lowers(base[k], v) for k, v in head.items())
+    if isinstance(head, list):
+        return isinstance(base, list) and all(item in base for item in head)
+    if isinstance(head, bool) or isinstance(base, bool):
+        return head == base
+    if isinstance(head, (int, float)) and isinstance(base, (int, float)):
+        return head <= base
+    return head == base
+
+
+def held_for_human(reasons: list[str]) -> list[str]:
+    """Reasons this PR can never pass in its lane, so a human has to look."""
+    return [r for r in reasons
+            if r.startswith(("touches protected files", "files outside lane")) or "lane limit is" in r]
 
 
 def verify_problems(body: str, head: str) -> list[str]:
@@ -141,7 +165,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
     denied = [p for p in files if matches(p, config["deny_always"] + lane.get("deny", []))]
     if denied:
         reasons.append(f"touches protected files: {', '.join(denied[:3])}")
-    outside = [p for p in files if not matches(p, lane["allow"]) and p not in denied]
+    lowered = set(extra.get("lowered_baselines", []))
+    outside = [p for p in files if not matches(p, lane["allow"]) and p not in denied and p not in lowered]
     if outside:
         reasons.append(f"files outside lane {lane['id']}: {', '.join(outside[:3])}")
     if lane.get("require_test_change") and not any(matches(p, TEST_GLOBS) for p in files):
@@ -207,7 +232,35 @@ def main_is_healthy(config: dict) -> tuple[bool, str]:
     return True, f"main is green ({latest['headSha'][:7]})"
 
 
-def fetch_extra(number: int, config: dict) -> dict:
+def file_json(owner: str, name: str, path: str, ref: str):
+    try:
+        raw = gh("api", f"repos/{owner}/{name}/contents/{path}?ref={ref}",
+                 "-H", "Accept: application/vnd.github.raw")
+        return json.loads(raw)
+    except (RuntimeError, ValueError):
+        return None
+
+
+def lowered_baselines(owner: str, name: str, pr: dict) -> list[str]:
+    """Changed baseline files whose head only lowers what the merge base had."""
+    paths = [f["path"] for f in pr.get("files", []) if matches(f["path"], [BASELINE_GLOB])]
+    if not paths or not pr.get("baseRefOid"):
+        return []
+    try:
+        merge_base = gh("api", f"repos/{owner}/{name}/compare/{pr['baseRefOid']}...{pr['headRefOid']}",
+                        "--jq", ".merge_base_commit.sha").strip()
+    except RuntimeError:
+        return []
+    out = []
+    for path in paths:
+        base, head = file_json(owner, name, path, merge_base), file_json(owner, name, path, pr["headRefOid"])
+        if base is not None and head is not None and only_lowers(base, head):
+            out.append(path)
+    return out
+
+
+def fetch_extra(pr: dict, config: dict) -> dict:
+    number = pr["number"]
     owner, name = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     query = (
         "query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p)"
@@ -219,6 +272,7 @@ def fetch_extra(number: int, config: dict) -> dict:
     reactions = gh_json("api", f"repos/{owner}/{name}/issues/{number}/reactions",
                         "-H", "Accept: application/vnd.github+json")
     return {
+        "lowered_baselines": lowered_baselines(owner, name, pr),
         "unresolved_threads": sum(1 for t in threads if not t["isResolved"]),
         "reviewer_reactions": [
             {"login": r["user"]["login"], "created_at": r["created_at"]}
@@ -251,7 +305,7 @@ def run(apply: bool, only: int | None) -> int:
     merged_lanes: set[str] = set()
     for number in sorted(numbers):
         pr = gh_json("pr", "view", str(number), "--json", PR_FIELDS)
-        lane, reasons = evaluate(pr, fetch_extra(number, config), config)
+        lane, reasons = evaluate(pr, fetch_extra(pr, config), config)
         if lane is not None and not reasons:
             if not healthy:
                 reasons = ["main is red, merging nothing"]
@@ -266,6 +320,16 @@ def run(apply: bool, only: int | None) -> int:
                     gh("pr", "ready", str(number))
                 print(f"#{number} [{label}] {'marked' if apply else 'would mark'} ready for review; "
                       f"merges after: {'; '.join(reasons)}")
+                continue
+            held = held_for_human(reasons) if lane is not None else []
+            labels = {item["name"] for item in pr.get("labels", [])}
+            if held and not (labels & HUMAN_LABELS):
+                if apply:
+                    gh("pr", "edit", str(number), "--add-label", HUMAN_LABEL)
+                    gh("pr", "comment", str(number), "--body",
+                       f"The auto-merge gate can't merge this on its own ({'; '.join(held)}), so it's "
+                       f"labeled `{HUMAN_LABEL}` for a human review. See docs/auto-merge-gate.md.")
+                print(f"#{number} [{label}] {'labeled' if apply else 'would label'} {HUMAN_LABEL}: {'; '.join(held)}")
                 continue
             print(f"#{number} [{label}] wait: {'; '.join(reasons)}")
             continue
@@ -391,6 +455,29 @@ def self_test() -> int:
         ok = waiting_only_on_review(reasons_in) == expected
         results.append(ok)
         print(f"{'PASS' if ok else 'FAIL'} ready-for-review when only waiting on review={expected}: {reasons_in}")
+    lowers = [
+        ({"files": {"a": 900, "b": 850}}, {"files": {"a": 850}}, True),
+        ({"files": {"a": 900}}, {"files": {"a": 901}}, False),
+        ({"files": {"a": 900}}, {"files": {"a": 900, "c": 820}}, False),
+        ({"edges": ["x", "y"]}, {"edges": ["x"]}, True),
+        ({"edges": ["x"]}, {"edges": ["x", "z"]}, False),
+        ({"_comment": "c", "limit": 800, "files": {"a": 900}}, {"_comment": "c", "limit": 800, "files": {}}, True),
+        ({"limit": 800}, {"limit": 900}, False),
+    ]
+    for base_v, head_v, want in lowers:
+        ok = only_lowers(base_v, head_v) == want
+        results.append(ok)
+        print(f"{'PASS' if ok else 'FAIL'} only_lowers {base_v} -> {head_v} = {want}")
+    pin_pr = {"files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/source-pin-baseline.json"}]}
+    results.append(case("lowered extra baseline is allowed", True, pin_pr,
+                        {"lowered_baselines": [".agents/source-pin-baseline.json"]}))
+    results.append(case("raised extra baseline stays outside the lane", False, pin_pr, None, "outside lane"))
+    held_ok = held_for_human(["touches protected files: X", "check build-and-test is pending",
+                              "files outside lane test-shape: Y", "900 changed lines, lane limit is 400"])
+    results.append(len(held_ok) == 3)
+    print(f"{'PASS' if len(held_ok) == 3 else 'FAIL'} held_for_human keeps only permanent reasons")
+    results.append(held_for_human(["check build-and-test is pending", "1 unresolved review thread(s)"]) == [])
+    print(f"{'PASS' if results[-1] else 'FAIL'} transient reasons don't hold for a human")
     disabled = json.loads(json.dumps(config))
     disabled["lanes"][0]["enabled"] = False
     _, reasons = evaluate(base_pr, extra, disabled)

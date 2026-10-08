@@ -39,6 +39,12 @@ Agents open lane PRs as drafts. Once a draft passes everything except the review
 
 Each run merges at most 3 PRs, and at most one per lane, so main's CI runs between batches.
 
+## Baselines and held PRs
+
+A PR in any lane may also change a debt baseline (`.agents/*-baseline.json`) when the change only lowers counts or drops entries, compared with the PR's merge base. Anything else in a baseline (a higher count, a new entry, including a moved one) keeps the PR out of the lane.
+
+When a PR can never pass in its lane (it touches protected files, has files outside the lane, or is over the size limit), the gate labels it `waiting-on-human` once and comments why, so it shows up on Justin's morning list instead of waiting silently.
+
 ## Running it
 
 ```bash
