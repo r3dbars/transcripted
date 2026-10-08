@@ -83,7 +83,14 @@ public enum WritingSecretScrubber {
         // pieces the generic-token rule would take.
         let afterStructured = SecretRules.scrub(afterLines, config: structuredOnly).clean
         let clean = applyInlineRules(afterStructured)
-        let kinds = newTokens(in: clean, comparedWith: text)
+        var kinds = newTokens(in: clean, comparedWith: text)
+        // A redaction that runs on over an existing token keeps the token count
+        // the same, so `newTokens` finds nothing. Text still went, though, and
+        // a caller that sees no kinds (the day-file rescrubber) would leave
+        // the raw secret on disk.
+        if kinds.isEmpty, withoutTokens(clean) != withoutTokens(text) {
+            kinds = tokens(in: clean).reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+        }
         return Result(clean: clean, kinds: kinds, isOnlyRedactions: onlyTokensLeft(clean))
     }
 
@@ -1448,6 +1455,11 @@ public enum WritingSecretScrubber {
             }
         }
         return fresh
+    }
+
+    private static func withoutTokens(_ text: String) -> String {
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        return tokenPattern.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 
     private static func onlyTokensLeft(_ clean: String) -> Bool {
