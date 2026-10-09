@@ -77,6 +77,33 @@ extension TranscriptionTaskManager {
     }
 
     @discardableResult
+    public func persistUnexpectedCaptureStopFailure(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        taskId: UUID = UUID(),
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
+        archiveAudio: Bool = true,
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
+    ) async -> Bool {
+        addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            taskId: taskId,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
+            archiveAudio: archiveAudio,
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
+        )
+    }
+
+    @discardableResult
     public func promoteFinalizedFailedTranscriptionAudio(
         id: UUID,
         micAudioURL: URL,
@@ -223,14 +250,14 @@ extension TranscriptionTaskManager {
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
-        let originalMicURLForRetry = existingAudioURL(originalMicURL)
-        let originalSystemURLForRetry = existingAudioURL(originalSystemURL)
+        let originalMicURLForRetry = retainedAudio == nil ? existingAudioURL(originalMicURL) : nil
+        let originalSystemURLForRetry = retainedAudio == nil ? existingAudioURL(originalSystemURL) : nil
         let pendingOriginalSystemURL = retainedAudio == nil ? originalSystemURL : nil
         let failedSystemURL = retainedSystemURL ?? originalSystemURLForRetry ?? pendingOriginalSystemURL
         let placeholderSystemURL = retainedSystemURL ?? originalSystemURLForRetry
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
-            hasOriginalMic: originalMicURLForRetry != nil,
+            hasOriginalMic: retainedMicURL != nil || originalMicURLForRetry != nil,
             failedSystemURL: placeholderSystemURL,
             taskId: taskId
         )
@@ -452,11 +479,11 @@ extension TranscriptionTaskManager {
     ) {
         let retainedMicURL = existingAudioURL(retainedAudio.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio.systemURL)
-        let originalMicURLForRetry = existingAudioURL(micURL)
-        let originalSystemURLForRetry = existingAudioURL(systemURL)
+        let originalMicURLForRetry = retainedMicURL == nil ? existingAudioURL(micURL) : nil
+        let originalSystemURLForRetry = retainedSystemURL == nil ? existingAudioURL(systemURL) : nil
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
-            hasOriginalMic: originalMicURLForRetry != nil,
+            hasOriginalMic: retainedMicURL != nil || originalMicURLForRetry != nil,
             failedSystemURL: retainedSystemURL ?? originalSystemURLForRetry,
             taskId: taskId
         )
@@ -577,6 +604,7 @@ extension TranscriptionTaskManager {
         transcriptURL: URL,
         archiveRoot: URL
     ) -> RetainedRecordingAudio? {
+        Self.recordFailedAudioArchiveThread()
         do {
             let retainedAudio = try RecordingAudioArchiver.archive(
                 micURL: micURL,
@@ -601,6 +629,34 @@ extension TranscriptionTaskManager {
     nonisolated private static var shouldArchiveFailedAudioSynchronouslyForTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.processName == "xctest"
+    }
+
+    nonisolated static func setFailedAudioArchiveThreadProbe(
+        _ probe: (@Sendable (Bool) -> Void)?
+    ) {
+        FailedAudioArchiveThreadProbe.set(probe)
+    }
+
+    nonisolated private static func recordFailedAudioArchiveThread() {
+        FailedAudioArchiveThreadProbe.record(onMainThread: Thread.isMainThread)
+    }
+}
+
+private enum FailedAudioArchiveThreadProbe {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var handler: (@Sendable (Bool) -> Void)?
+
+    static func set(_ probe: (@Sendable (Bool) -> Void)?) {
+        lock.lock()
+        handler = probe
+        lock.unlock()
+    }
+
+    static func record(onMainThread: Bool) {
+        lock.lock()
+        let handler = self.handler
+        lock.unlock()
+        handler?(onMainThread)
     }
 }
 
