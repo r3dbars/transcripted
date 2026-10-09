@@ -57,7 +57,7 @@ func testMicrophoneProcessingPreferences() async {
         )
         assertTrue(
             MicrophoneProcessingMode.none.detail.contains("Blue Yeti"),
-            "Raw/off help text should name tuned USB mics like Stephen's Blue Yeti"
+            "Raw/off help text should name tuned USB mics like a Blue Yeti"
         )
         assertTrue(
             MicrophoneProcessingMode.none.detail.contains("physical gain controls the level"),
