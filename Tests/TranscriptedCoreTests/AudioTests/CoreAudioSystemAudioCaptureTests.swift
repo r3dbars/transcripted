@@ -1353,4 +1353,38 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         withExtendedLifetime(subscription) {}
         capture.stopSync()
     }
+
+    func testWakeTapThatStartsButDeliversNothingKeepsRetryingUntilAudioReturns() throws {
+        // APPLE-MACOS-2D: after sleep the tap comes back attached, HAL start
+        // succeeds, then no buffers arrive. A thrown start already retries;
+        // a silent success used to burn noFirstBuffer plus the one stall and
+        // end system audio about 9 s later.
+        let hal = HAL(), capture = hal.makeCapture()
+        var frames = 0
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { frames += Int($0.frameLength) }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+
+        for _ in 0..<3 {
+            hal.now += 3.1
+            capture.drainForTesting()
+        }
+        XCTAssertFalse(
+            messages.contains { $0?.contains("failed") == true },
+            "A wake tap that starts but stays silent must not give up in the old 9s window"
+        )
+        XCTAssertEqual(capture.diagnostics.endReason, "none")
+
+        hal.now += 0.1
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        XCTAssertEqual(frames, 8, "The first buffer after a slow wake must still be kept")
+        XCTAssertEqual(capture.diagnostics.endReason, "none")
+        XCTAssertEqual(capture.diagnostics.stallReconnects, 0, "Silence after wake must not spend the stall reconnect")
+    }
 }
