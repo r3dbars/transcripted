@@ -38,26 +38,32 @@ enum SpeakerNamingTierPresentation {
     static func explanation(name: String, confirmed: Int, required: Int, tier: SpeakerNamingTier, isTrusted: Bool) -> String {
         let first = firstName(name)
         let meetings = { (count: Int) in count == 1 ? "1 meeting" : "\(count) meetings" }
+        let contextual = max(1, required) < segmentCount
+        let scope = contextual ? " with matching meeting context" : ""
         switch tier {
         case .auto:
-            return "Confirmed in \(meetings(confirmed)). Transcripted names \(first) on its own when the voice is a clear match."
+            let match = contextual ? "when the voice is a clear match and meeting context supports it" : "when the voice is a clear match"
+            return "Confirmed in \(meetings(confirmed)). Transcripted names \(first) on its own \(match)."
         case .learning where !isTrusted:
             return "A recent correction paused auto-naming for \(first). Keep confirming \(first) until the voice is a clear match again."
         case .learning, .new:
             let left = max(0, required - confirmed)
             if left == 1 {
-                return "Confirmed in \(meetings(confirmed)). One more and Transcripted names \(first) on its own."
+                return "Confirmed in \(meetings(confirmed)). One more and Transcripted names \(first) on its own\(scope)."
             }
             if confirmed == 0 {
-                return "Not confirmed yet. After \(meetings(required)), Transcripted names \(first) on its own."
+                return "Not confirmed yet. After \(meetings(required)), Transcripted names \(first) on its own\(scope)."
             }
-            return "Confirmed in \(confirmed) of \(required) meetings. \(left) more and Transcripted names \(first) on its own."
+            return "Confirmed in \(confirmed) of \(required) meetings. \(left) more and Transcripted names \(first) on its own\(scope)."
         }
     }
 
     /// VoiceOver label for the dial: the word plus the count.
     static func accessibilityLabel(confirmed: Int, required: Int, tier: SpeakerNamingTier) -> String {
-        if tier == .auto { return "\(word(tier)), names on its own" }
+        if tier == .auto {
+            let scope = max(1, required) < segmentCount ? " with matching meeting context" : ""
+            return "\(word(tier)), names on its own\(scope)"
+        }
         return "\(word(tier)), \(confirmed) of \(required) meetings confirmed"
     }
 
@@ -105,7 +111,8 @@ enum SpeakerNamingTierPresentation {
         case .savedNew:
             let left = bar - 1
             guard left > 0 else { return nil }
-            return ReviewHint(text: "Saved · \(left) more to auto-name", usesPersonColor: false)
+            let scope = bar < segmentCount ? " with meeting context" : ""
+            return ReviewHint(text: "Saved · \(left) more to auto-name\(scope)", usesPersonColor: false)
         }
     }
 
