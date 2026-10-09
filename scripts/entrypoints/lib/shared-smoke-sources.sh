@@ -63,6 +63,7 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Services/DiarizationBackend.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
+    "Sources/TranscriptedCore/Speaker/SpeakerNamingTier.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift"
     "Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift"
