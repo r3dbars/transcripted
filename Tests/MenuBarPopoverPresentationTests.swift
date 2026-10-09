@@ -5,6 +5,52 @@ func testMenuBarPopoverPresentation() async {
     // AppKit requires an application object before constructing even an
     // undisplayed window. This does not activate or display the application.
     _ = NSApplication.shared
+    runSuite("Menu visibility queries only the popover window and requires explicit offscreen evidence") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        let number = fixture.window.windowNumber
+        assertTrue(number > 0, "the fixture has a registered window number")
+        let cases: [(Any?, Int, MenuBarPopoverWindowVisibility)] = [
+            (true, 0, .onActiveSpace),
+            (false, 101, .otherSpace),
+            (false, 0, .unknown),
+            (nil, 101, .unknown),
+            ("false", 101, .unknown)
+        ]
+        for (onscreen, layer, expected) in cases {
+            var calls = 0
+            let actual = MenuBarPopoverPresentation.visibility(of: fixture.window) { options, queriedNumber in
+                calls += 1
+                assertEqual(options, .optionIncludingWindow, "do not enumerate all session windows on a menu click")
+                assertEqual(queriedNumber, CGWindowID(number), "query exactly the popover's window")
+                var entry: [String: Any] = [kCGWindowNumber as String: number, kCGWindowLayer as String: layer]
+                entry[kCGWindowIsOnscreen as String] = onscreen
+                return [entry]
+            }
+            assertEqual(calls, 1, "each visibility check uses one targeted query")
+            assertEqual(actual, expected, "only explicit offscreen metadata can trigger the Space retry")
+        }
+        let unavailable = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in nil }
+        assertEqual(unavailable, .unknown, "a failed window-server lookup does not trigger a retry")
+        let unrelated = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in
+            [[kCGWindowNumber as String: number + 1, kCGWindowIsOnscreen as String: false, kCGWindowLayer as String: 101]]
+        }
+        assertEqual(unrelated, .unknown, "another window's metadata cannot classify the popover")
+        fixture.window.reportedWindowNumber = 0
+        let unregistered = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in
+            assertTrue(false, "an unregistered popover must not query the window server")
+            return []
+        }
+        assertEqual(unregistered, .unknown, "a popover without a window-server ID has unknown visibility")
+    }
+
+    runSuite("Unknown menu visibility does not close and reopen a successfully shown popover") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.windowVisibility = { _ in .unknown }
+        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        assertEqual(fixture.popover.presentations.count, 1, "missing metadata leaves successful presentation alone")
+        assertTrue(fixture.fallbackPanels.isEmpty, "unknown visibility cannot allocate the elevated fallback")
+    }
+
     runSuite("Opening the menu focuses only its popover window after showing it") {
         let fixture = MenuBarPopoverPresentationFixture()
         fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
@@ -409,6 +455,8 @@ private final class MenuBarPopoverAnchorPanel: NSPanel {
 @MainActor
 private final class MenuBarPopoverFocusWindow: NSPanel {
     var onMakeKey: (() -> Void)?
+    var reportedWindowNumber = 713
+    override var windowNumber: Int { reportedWindowNumber }
 
     // Record the request without showing a window or changing system focus.
     override func makeKey() { onMakeKey?() }

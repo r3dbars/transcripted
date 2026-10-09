@@ -120,15 +120,24 @@ final class MenuBarPopoverPresentation: NSObject {
         dismissalClick = nil
     }
 
-    static func visibility(of window: NSWindow) -> MenuBarPopoverWindowVisibility {
+    static func visibility(
+        of window: NSWindow,
+        windowInfo: (CGWindowListOption, CGWindowID) -> [[String: Any]]? = { options, number in
+            CGWindowListCopyWindowInfo(options, number) as? [[String: Any]]
+        }
+    ) -> MenuBarPopoverWindowVisibility {
         let number = window.windowNumber
         guard number > 0,
-              let info = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+              // The menu only needs its own popover, not every window in the session.
+              let info = windowInfo(.optionIncludingWindow, CGWindowID(number)) else {
             return .unknown
         }
         for entry in info {
             guard (entry[kCGWindowNumber as String] as? Int) == number else { continue }
-            if (entry[kCGWindowIsOnscreen as String] as? Bool) == true { return .onActiveSpace }
+            // This key is optional. Missing/malformed metadata is not evidence
+            // that a shown menu lives on another Space.
+            guard let isOnscreen = entry[kCGWindowIsOnscreen as String] as? Bool else { return .unknown }
+            if isOnscreen { return .onActiveSpace }
             let layer = entry[kCGWindowLayer as String] as? Int ?? 0
             // A level of 0 means the window server has not committed this window yet.
             // An off-screen window that already has its popover level is on another Space.
