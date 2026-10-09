@@ -410,6 +410,7 @@ rules:
 
   - paths:
       - "scripts/ops/nightly-security-check.py"
+      - "Tests/Fixtures/release-health-github-release-*.json"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
