@@ -500,10 +500,10 @@ extension SpeakerDatabase {
 
                 let markerRowid = try mergeMarkerRowidImpl(mergeEventId: mergeId)
                 // Rows moved by hand after the merge, read before anything moves back.
-                let reassigned = try postMergeReassignmentsImpl(atOrAfterRowid: markerRowid)
+                let reassigned = try postMergeReassignmentsImpl(sinceMergeEventRowid: event.rowid)
 
                 // Move the absorbed profile's rows back, except any reassigned after the merge.
-                try restoreMovedProvenanceImpl(event.movedProvenanceIds, sourceId: event.sourceId, targetId: event.targetId)
+                try restoreMovedProvenanceImpl(event.movedProvenanceIds, skipping: reassigned, sourceId: event.sourceId, targetId: event.targetId)
 
                 // Restore the explicit-confirmation sets before marking the merge undone.
                 // This throws on any ledger inconsistency so the transaction rolls back.
@@ -542,6 +542,7 @@ extension SpeakerDatabase {
                     label: "mark event undone",
                     expectedChanges: 1
                 )
+                try trimReassignmentLogImpl()
             }
         } catch {
             AppLogger.speakers.error("Un-merge transaction failed", [
@@ -571,13 +572,16 @@ extension SpeakerDatabase {
         }
 
         var ok = true
-        transaction {
-            logReassignmentImpl(contributionId, from: fromProfileId, to: toProfileId)
-            execBind("UPDATE speaker_provenance SET profile_id = ? WHERE id = ?;",
-                     [toProfileId.uuidString, contributionId.uuidString], label: "reassign contribution")
-            ok = rederiveProfileFromContributionsImpl(fromProfileId) && ok
-            ok = rederiveProfileFromContributionsImpl(toProfileId) && ok
-        }
+        do {
+            // The move and its log row commit together, or not at all.
+            try transaction {
+                try logReassignmentOrThrowImpl(contributionId, from: fromProfileId, to: toProfileId)
+                execBind("UPDATE speaker_provenance SET profile_id = ? WHERE id = ?;",
+                         [toProfileId.uuidString, contributionId.uuidString], label: "reassign contribution")
+                ok = rederiveProfileFromContributionsImpl(fromProfileId) && ok
+                ok = rederiveProfileFromContributionsImpl(toProfileId) && ok
+            }
+        } catch { return false }
         return ok
     }
 

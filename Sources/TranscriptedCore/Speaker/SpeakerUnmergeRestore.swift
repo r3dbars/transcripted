@@ -87,9 +87,10 @@ extension SpeakerDatabase {
         var norm: Float = 0
         for value in sum { norm += value * value }
         norm = norm.squareRoot()
-        // Nothing left to average (every recording moved away): keep the snapshot's voice.
-        let normalized: [Float] = norm > 1e-6 ? sum.map { $0 / norm } : snapshot.embedding
         let newCallCount = max(0, max(0, snapshot.callCount) + added - removed)
+        // Nothing left to average (every recording moved away): keep the snapshot's
+        // voice rather than the rounding residue of the subtraction.
+        let normalized: [Float] = norm > 1e-6 && newCallCount > 0 ? sum.map { $0 / norm } : snapshot.embedding
 
         let now = ISO8601DateFormatter().string(from: Date())
         let update = try prepareStatement(
@@ -119,18 +120,18 @@ extension SpeakerDatabase {
         let firstFromProfileId: UUID
     }
 
-    /// Contributions moved by hand at or after `markerRowid` (that is, after the
-    /// merge), each with the owner it had before its first such move.
-    func postMergeReassignmentsImpl(atOrAfterRowid markerRowid: Int64) throws -> [PostMergeReassignment] {
+    /// Contributions moved by hand after the merge whose event has rowid
+    /// `eventRowid`, each with the owner it had before its first such move.
+    func postMergeReassignmentsImpl(sinceMergeEventRowid eventRowid: Int64) throws -> [PostMergeReassignment] {
         let statement = try prepareStatement(
             """
             SELECT contribution_id, from_profile_id FROM speaker_contribution_reassignments
-            WHERE provenance_high_rowid >= ? ORDER BY seq ASC;
+            WHERE merge_events_high >= ? ORDER BY seq ASC;
             """,
             operation: "prepare post-merge reassignment lookup"
         )
         defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int64(statement, 1, markerRowid)
+        sqlite3_bind_int64(statement, 1, eventRowid)
         var seen = Set<UUID>()
         var result: [PostMergeReassignment] = []
         while true {
@@ -194,19 +195,25 @@ extension SpeakerDatabase {
     }
 
     /// Un-merge: move the absorbed profile's rows back from the keeper. A row the
-    /// user reassigned to someone else after the merge stays where it was put.
-    func restoreMovedProvenanceImpl(_ movedIds: [UUID], sourceId: UUID, targetId: UUID) throws {
-        guard !movedIds.isEmpty else { return }
-        let placeholders = Array(repeating: "?", count: movedIds.count).joined(separator: ",")
+    /// user reassigned after the merge (away, or away and back) stays where it was
+    /// put; `ownershipChangesImpl` then accounts for it. Every other moved row must
+    /// still be on the keeper, or the ledger is inconsistent and un-merge rolls back.
+    func restoreMovedProvenanceImpl(
+        _ movedIds: [UUID], skipping reassigned: [PostMergeReassignment], sourceId: UUID, targetId: UUID
+    ) throws {
+        let skipped = Set(reassigned.map(\.contributionId))
+        let eligible = movedIds.filter { !skipped.contains($0) }
+        guard !eligible.isEmpty else { return }
+        let placeholders = Array(repeating: "?", count: eligible.count).joined(separator: ",")
         let statement = try prepareStatement(
             "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ? AND id IN (\(placeholders));",
             operation: "prepare unmerge provenance restore"
         )
         defer { sqlite3_finalize(statement) }
-        let values = [sourceId, targetId] + movedIds
+        let values = [sourceId, targetId] + eligible
         for (offset, value) in values.enumerated() {
             sqlite3_bind_text(statement, Int32(offset + 1), (value.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         }
-        try requireDone(statement, operation: "step unmerge provenance restore")
+        try requireDone(statement, operation: "step unmerge provenance restore", expectedChanges: Int32(eligible.count))
     }
 }

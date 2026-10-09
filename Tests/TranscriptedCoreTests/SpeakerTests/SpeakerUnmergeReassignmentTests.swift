@@ -91,6 +91,9 @@ final class SpeakerUnmergeReassignmentTests: XCTestCase {
         XCTAssertEqual(restored.callCount, 1, "a move from the first, undone merge was subtracted again")
         XCTAssertGreaterThan(cosine(restored.embedding, embedding(axis: 100)), 0.9)
         XCTAssertTrue(owns(other, absorbed))
+        let keeper = try XCTUnwrap(database.getSpeaker(id: target))
+        XCTAssertEqual(keeper.callCount, 1, "a stale move from the undone merge was taken out of the keeper")
+        XCTAssertGreaterThan(cosine(keeper.embedding, embedding(axis: 102)), 0.9)
     }
 
     func testKeeperRecordingMovedTwiceAfterMergeLeavesTheKeeper() throws {
