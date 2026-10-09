@@ -203,7 +203,14 @@ extension SpeakerDatabase {
     ) throws {
         let skipped = Set(reassigned.map(\.contributionId))
         let eligible = movedIds.filter { !skipped.contains($0) }
-        guard !eligible.isEmpty else { return }
+        guard !eligible.isEmpty else {
+            if !movedIds.isEmpty {
+                AppLogger.speakers.info("Un-merge restored no absorbed rows: every one was reassigned after the merge", [
+                    "sourceId": sourceId.uuidString, "reassigned": "\(movedIds.count)",
+                ])
+            }
+            return
+        }
         let placeholders = Array(repeating: "?", count: eligible.count).joined(separator: ",")
         let statement = try prepareStatement(
             "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ? AND id IN (\(placeholders));",
