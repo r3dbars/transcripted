@@ -104,6 +104,41 @@ final class SpeakerNamingConfirmationProgressTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func testRepeatedImportDoesNotEarnAnotherRingButANewRecordingDoes() throws {
+        let maya = try person("Maya Patel", confirmedMeetings: 3)
+        let original = UUID()
+        let recording = SpeakerConfirmationMeetingID.forImportedContent(key: "same-audio")
+        try database.recordConfirmationMeetingAlias(transcriptId: original, meetingId: recording)
+        try database.recordUserConfirmations([SpeakerUserConfirmation(profileId: maya, transcriptId: original, kind: .confirmed)])
+        let repeated = UUID()
+        // The review is prepared before the repeated import's alias is saved.
+        XCTAssertFalse(try database.confirmationWouldIncreaseCount(profileId: maya, transcriptId: repeated, meetingId: recording))
+        let eligibility = try TranscriptionTaskManager.confirmationEligibility(profiles: database.allSpeakers(),
+            store: database, transcriptId: repeated, meetingId: recording)
+        let entries = TranscriptionTaskManager.withConfirmationProgress(
+            [askAbout(maya, name: "Maya Patel")], profile: { self.database.getSpeaker(id: $0) },
+            earnsConfirmation: { eligibility[$0] ?? false },
+            invited: [], fromInvite: false, thresholds: .weSpeaker)
+        XCTAssertEqual(entries.first?.confirmationProgress?.confirmedMeetings, 4)
+        XCTAssertEqual(entries.first?.confirmationProgress?.earnsConfirmation, false)
+        // Once persisted, alias resolution also works for later review/retranscription.
+        try database.recordConfirmationMeetingAlias(transcriptId: repeated, meetingId: recording)
+        XCTAssertFalse(try database.confirmationWouldIncreaseCount(profileId: maya, transcriptId: repeated))
+        XCTAssertTrue(try database.confirmationWouldIncreaseCount(profileId: maya, transcriptId: UUID()))
+        XCTAssertTrue(try database.confirmationWouldIncreaseCount(profileId: maya, transcriptId: UUID(),
+            meetingId: SpeakerConfirmationMeetingID.forImportedContent(key: "different-audio")))
+    }
+
+    func testSelectedSavedPersonChecksThatPersonsRecordingLedger() throws {
+        let maya = try person("Maya Patel", confirmedMeetings: 3)
+        let meeting = UUID()
+        try database.recordUserConfirmations([SpeakerUserConfirmation(profileId: maya, transcriptId: meeting, kind: .confirmed)])
+        let other = database.addOrUpdateSpeaker(embedding: [0, 1], existingId: nil).id
+        XCTAssertFalse(try database.confirmationWouldIncreaseCount(profileId: maya, transcriptId: meeting))
+        XCTAssertTrue(try database.confirmationWouldIncreaseCount(profileId: other, transcriptId: meeting),
+                      "another person's confirmation does not suppress the selected person's first yes")
+    }
+
     private func person(_ name: String, confirmedMeetings: Int) throws -> UUID {
         let id = database.addOrUpdateSpeaker(embedding: [1, 0], existingId: nil).id
         database.setDisplayName(id: id, name: name, source: NameSource.userManual)

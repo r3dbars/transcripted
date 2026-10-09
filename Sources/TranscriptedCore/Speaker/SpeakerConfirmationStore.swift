@@ -285,6 +285,15 @@ extension SpeakerDatabase {
     }
 
     /// The meeting id a confirmation for `transcriptId` counts toward.
+    public func confirmationWouldIncreaseCount(profileId: UUID, transcriptId: UUID, meetingId: UUID? = nil) throws -> Bool {
+        let read = {
+            let key = try meetingId?.uuidString ?? self.confirmationMeetingIdImpl(for: transcriptId)
+            return try !self.confirmationExistsImpl(profileId: profileId, transcriptId: key)
+        }
+        if isExecutingOnQueue { return try read() }
+        return try queue.sync { try read() }
+    }
+
     private func confirmationMeetingIdImpl(for transcriptId: UUID) throws -> String {
         let statement = try prepareStatement(
             "SELECT meeting_id FROM speaker_confirmation_meeting_aliases WHERE transcript_id = ?;",

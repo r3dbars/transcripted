@@ -81,14 +81,14 @@ enum SpeakerNamingTierPresentation {
 
     /// The short line under a name in the review, or nil for none.
     /// `confirmedBefore` is the count before this review.
-    static func reviewHint(moment: ReviewMoment, confirmedBefore: Int, required: Int, isTrusted: Bool) -> ReviewHint? {
+    static func reviewHint(moment: ReviewMoment, confirmedBefore: Int, required: Int, isTrusted: Bool, earnsConfirmation: Bool = true) -> ReviewHint? {
         let bar = max(1, required)
         switch moment {
         case .asking:
-            guard isTrusted, bar - max(0, confirmedBefore) == 1 else { return nil }
+            guard earnsConfirmation, isTrusted, bar - max(0, confirmedBefore) == 1 else { return nil }
             return ReviewHint(text: "One more yes to auto-name", usesPersonColor: true)
         case .confirmed:
-            let after = max(0, confirmedBefore) + 1
+            let after = max(0, confirmedBefore) + (earnsConfirmation ? 1 : 0)
             if after >= bar {
                 // Past the bar on probation, a yes restores trust over time; don't
                 // promise auto-naming that the health check may still withhold.

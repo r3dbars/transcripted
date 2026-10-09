@@ -51,7 +51,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     var progress: Policy.Progress? {
         if case .named(.savedPerson) = rowState, let id = namedTarget?.personID,
            let picked = knownPeopleByLabel.values.first(where: { $0.id == id }) {
-            return Policy.Progress(confirmed: picked.confirmedMeetings, required: SpeakerNamingPolicy.requiredConfirmedMeetings, isTrusted: picked.isTrusted)
+            return Policy.Progress(confirmed: picked.confirmedMeetings, required: SpeakerNamingPolicy.requiredConfirmedMeetings, isTrusted: picked.isTrusted, earnsConfirmation: picked.earnsConfirmation)
         }
         return entryProgress
     }
@@ -116,7 +116,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         self.knownPeopleByLabel = labels.lookup
         self.knownPeople = labels.labels.map { ($0, labels.lookup[$0]?.callCount ?? 0) }
         self.entryProgress = entry.confirmationProgress.map {
-            Policy.Progress(confirmed: $0.confirmedMeetings, required: $0.requiredMeetings, isTrusted: $0.isTrusted)
+            Policy.Progress(confirmed: $0.confirmedMeetings, required: $0.requiredMeetings, isTrusted: $0.isTrusted, earnsConfirmation: $0.earnsConfirmation)
         }
         self.colorIndex = colorIndex
         self.printSlot = NotchIslandPrintSlot(print: VoicePrintView(
