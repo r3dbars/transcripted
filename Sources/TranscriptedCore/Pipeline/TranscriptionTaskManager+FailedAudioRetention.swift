@@ -250,8 +250,8 @@ extension TranscriptionTaskManager {
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
-        let originalMicURLForRetry = retainedAudio == nil ? existingAudioURL(originalMicURL) : nil
-        let originalSystemURLForRetry = retainedAudio == nil ? existingAudioURL(originalSystemURL) : nil
+        let originalMicURLForRetry = retainedMicURL == nil ? existingAudioURL(originalMicURL) : nil
+        let originalSystemURLForRetry = retainedSystemURL == nil ? existingAudioURL(originalSystemURL) : nil
         let pendingOriginalSystemURL = retainedAudio == nil ? originalSystemURL : nil
         let failedSystemURL = retainedSystemURL ?? originalSystemURLForRetry ?? pendingOriginalSystemURL
         let placeholderSystemURL = retainedSystemURL ?? originalSystemURLForRetry
@@ -610,7 +610,8 @@ extension TranscriptionTaskManager {
                 micURL: micURL,
                 systemURL: systemURL,
                 transcriptURL: transcriptURL,
-                archiveRoot: archiveRoot
+                archiveRoot: archiveRoot,
+                fileManager: FailedAudioArchiveThreadProbe.fileManager()
             )
             AppLogger.pipeline.info("Retained failed meeting audio files", [
                 "hasMic": "\(retainedAudio.micURL != nil)",
@@ -637,6 +638,10 @@ extension TranscriptionTaskManager {
         FailedAudioArchiveThreadProbe.set(probe)
     }
 
+    nonisolated static func setFailedAudioArchiveFileManager(_ fileManager: FileManager?) {
+        FailedAudioArchiveThreadProbe.setFileManager(fileManager)
+    }
+
     nonisolated private static func recordFailedAudioArchiveThread() {
         FailedAudioArchiveThreadProbe.record(onMainThread: Thread.isMainThread)
     }
@@ -645,11 +650,25 @@ extension TranscriptionTaskManager {
 private enum FailedAudioArchiveThreadProbe {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var handler: (@Sendable (Bool) -> Void)?
+    nonisolated(unsafe) private static var archiveFileManager: FileManager?
 
     static func set(_ probe: (@Sendable (Bool) -> Void)?) {
         lock.lock()
         handler = probe
         lock.unlock()
+    }
+
+    static func setFileManager(_ fileManager: FileManager?) {
+        lock.lock()
+        archiveFileManager = fileManager
+        lock.unlock()
+    }
+
+    static func fileManager() -> FileManager {
+        lock.lock()
+        let fileManager = archiveFileManager
+        lock.unlock()
+        return fileManager ?? .default
     }
 
     static func record(onMainThread: Bool) {

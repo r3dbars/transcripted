@@ -554,6 +554,38 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
     }
 
+    func testPartialArchiveKeepsTheReadableOriginalOfTheUncopiedTrack() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        TranscriptionTaskManager.setFailedAudioArchiveFileManager(RefuseMicrophoneArchiveCopyFileManager())
+        defer { TranscriptionTaskManager.setFailedAudioArchiveFileManager(nil) }
+
+        let didQueue = await manager.persistUnexpectedCaptureStopFailure(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stopped unexpectedly. Open the Meetings page to retry the saved audio.",
+            meetingTitle: "Partial archive",
+            recordingDate: Date(timeIntervalSince1970: 1_797_000_000)
+        )
+
+        XCTAssertTrue(didQueue)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.micAudioURL.standardizedFileURL, micURL.standardizedFileURL)
+        XCTAssertFalse(FailedTranscription.isMicrophonePlaceholder(failed.micAudioURL))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "the readable mic original must survive when its archive copy fails")
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "the archived system original should still be removed")
+    }
+
     func testManualFailedQueueRemovesRetainedAudioWhenQueuePersistenceFails() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -1020,6 +1052,23 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(manager.backgroundTaskCount, 0)
     }
 
+}
+
+private final class RefuseMicrophoneArchiveCopyFileManager: FileManager, @unchecked Sendable {
+    override func copyItem(at src: URL, to dst: URL) throws {
+        if dst.deletingPathExtension().lastPathComponent == "microphone" {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.copyItem(at: src, to: dst)
+    }
+
+    override func copyItem(atPath srcPath: String, toPath dstPath: String) throws {
+        let destination = URL(fileURLWithPath: dstPath)
+        if destination.deletingPathExtension().lastPathComponent == "microphone" {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.copyItem(atPath: srcPath, toPath: dstPath)
+    }
 }
 
 private final class FailedAudioArchiveThreadProbeRecorder: @unchecked Sendable {
