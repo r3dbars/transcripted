@@ -845,7 +845,8 @@ extension TranscriptionTaskManager {
             reviewListsRecognizedVoices: reviewListsRecognizedVoices
         ) {
             let allProfiles = speakerDB.allSpeakers()
-            let earnsConfirmationByProfile = try Self.confirmationEligibility(profiles: allProfiles, store: speakerDB, transcriptId: transcriptId, meetingId: confirmationMeetingId(for: taskId))
+            let confirmationIdentity = await MainActor.run { self.confirmationMeetingId(for: taskId) }
+            let earnsConfirmationByProfile = try Self.confirmationEligibility(profiles: allProfiles, store: speakerDB, transcriptId: transcriptId, meetingId: confirmationIdentity)
             let knownPeople: [SpeakerIdentityOption] = allProfiles
                 .compactMap { profile in
                     guard let name = profile.displayName, !name.isEmpty else { return nil }
