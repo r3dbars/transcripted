@@ -86,13 +86,19 @@ enum SpeakerNamingTierPresentation {
         switch moment {
         case .asking:
             guard earnsConfirmation, isTrusted, bar - max(0, confirmedBefore) == 1 else { return nil }
-            return ReviewHint(text: "One more yes to auto-name", usesPersonColor: true)
+            return ReviewHint(
+                text: bar < segmentCount ? "One more yes to auto-name with meeting context" : "One more yes to auto-name",
+                usesPersonColor: true
+            )
         case .confirmed:
             let after = max(0, confirmedBefore) + (earnsConfirmation ? 1 : 0)
             if after >= bar {
                 // Past the bar on probation, a yes restores trust over time; don't
                 // promise auto-naming that the health check may still withhold.
-                return isTrusted ? ReviewHint(text: "Named automatically from now on", usesPersonColor: true) : nil
+                return isTrusted ? ReviewHint(
+                    text: bar < segmentCount ? "Auto-named with matching meeting context" : "Named automatically from now on",
+                    usesPersonColor: true
+                ) : nil
             }
             let left = bar - after
             return ReviewHint(text: left == 1 ? "1 more to go" : "\(left) more to go", usesPersonColor: false)
