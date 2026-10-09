@@ -775,17 +775,14 @@ final class TranscriptionQueueCoordinator {
                 micOnlyByChoice: healthInfo.systemAudioSkippedByChoice == true
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
-            var row = requestBuilder.failedQueueRow(
+            return requestBuilder.failedQueueRow(
                 forImportedAudio: audioURL,
                 suggestedTitle: suggestedTitle,
                 recordingDate: recordingDate,
                 errorMessage: errorMessage,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                sourceContentKey: job.importedRecoverySession?.sourceContentKey
             )
-            row.confirmationMeetingId = job.importedRecoverySession?.sourceContentKey.map {
-                SpeakerConfirmationMeetingID.forImportedContent(key: $0)
-            }
-            return row
         }
     }
 }
