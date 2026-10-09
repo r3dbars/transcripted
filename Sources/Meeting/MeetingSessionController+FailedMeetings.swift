@@ -10,6 +10,44 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 extension MeetingSessionController {
+    /// The capture is already closed; archiving must not hold its start gate or
+    /// overwrite state if another meeting action runs while the disk is busy.
+    func archiveUnexpectedStoppedRecording(
+        files: (micURL: URL?, systemURL: URL?),
+        failureMessage: String,
+        snapshot: RecordingStopSnapshot
+    ) async -> Bool {
+        var archiveStateRevision: UInt64 = 0
+        return await MeetingStopSequence.archiveUnexpectedStop(
+            releaseCapture: {
+                transition(to: .error("Recording stopped early. Saving audio for retry."), reason: "unexpected_capture_stop")
+                archiveStateRevision = stateRevision
+                Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "capture_stopped_under_controller")
+            },
+            archive: {
+                await failedMeetingStore.preserveFailedMeetingForRetryAfterArchive(
+                    micAudioURL: files.micURL,
+                    systemAudioURL: files.systemURL,
+                    errorMessage: failureMessage,
+                    meetingTitle: snapshot.suggestedTitle,
+                    recordingDate: snapshot.recordingStartedAt,
+                    splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                    languageSelection: snapshot.languageSelection,
+                    micOnlyByChoice: snapshot.skippedSystemAudioTap
+                )
+            },
+            stillOwnsCompletion: { stateRevision == archiveStateRevision },
+            finish: { preserved in
+                transition(
+                    to: preserved
+                        ? .error("Recording stopped early. Open the Meetings page to retry the saved audio.")
+                        : .error("Recording stopped early and no meeting audio was saved."),
+                    reason: "unexpected_capture_stop"
+                )
+            }
+        )
+    }
+
     // Full implementation moved to FailedMeetingStore.swift (audit
     // 2026-07-08 wave 2, W2-B). This forwarder keeps the public signature
     // controller callers (Settings/Home UI) already depend on.

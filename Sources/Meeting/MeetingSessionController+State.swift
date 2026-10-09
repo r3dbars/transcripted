@@ -60,6 +60,9 @@ final class MeetingSessionController: ObservableObject {
     /// `MeetingSessionController.State` reference resolving unchanged.
     typealias State = MeetingSessionState
 
+    /// Every state writer advances this, even when the visible state repeats.
+    /// Background archive completion must not settle a newer meeting action.
+    private(set) var stateRevision: UInt64 = 0
     @Published private(set) var state: State = .idle {
         didSet {
             guard state != oldValue else { return }
@@ -370,6 +373,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         #endif
+        stateRevision &+= 1
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
         if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
