@@ -629,7 +629,6 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerVectorMath.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
-    "Sources/TranscriptedCore/Speaker/SpeakerNamingTier.swift"
     "Sources/UI/Shared/SpeakerNamingTierPresentation.swift"
     "Sources/UI/Shared/VoicePrintStyle.swift"
     "Sources/UI/Shared/VoicePrintGeometry.swift"
