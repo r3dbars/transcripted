@@ -66,7 +66,7 @@ on:
         required: false
         default: ""
       staged_update_source_sha:
-        description: Run only the staged signed 1.1.68-to-1.1.69 updater proof against its verified full promotion SHA
+        description: Run only the staged signed 1.1.70-to-1.1.71 updater proof against its verified full promotion SHA
         type: string
         required: false
         default: ""
@@ -691,7 +691,7 @@ jobs:
           echo '::error::Choose exactly one hosted validation mode, with run_hardware_smokes=false.'
           exit 1
 
-  # Exercise the signed 1.1.68 -> 1.1.69 updater against a local staging feed.
+  # Exercise the signed 1.1.70 -> 1.1.71 updater against a local staging feed.
   # Harness code is pinned to this workflow, independently of the candidate.
   staged-update-proof:
     if: >-
@@ -708,7 +708,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$SOURCE_SHA" = e42ad0f759612e0080f2d11bb5de12fda6b590bd || { echo '::error::This updater proof is scoped to the verified 1.1.69 promotion SHA.'; exit 1; }
+          test "$SOURCE_SHA" = PENDING-1.1.71-PROMOTION-SHA || { echo '::error::This updater proof is scoped to the verified 1.1.71 promotion SHA.'; exit 1; }
           [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Updater proof requires hosted Apple Silicon.'; exit 1; }
 
       - name: Checkout reviewed updater harness
