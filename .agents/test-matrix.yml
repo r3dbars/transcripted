@@ -410,10 +410,11 @@ rules:
 
   - paths:
       - "scripts/ops/nightly-security-check.py"
+      - "Tests/Fixtures/release-health-github-release-*.json"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.70.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.71.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"
