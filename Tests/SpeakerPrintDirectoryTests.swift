@@ -44,9 +44,10 @@ func testSpeakerPrintDirectory() {
         let paused = Directory.row(standing: standing(.learning, confirmed: 9, trusted: false))
         assertEqual(paused.section, .stillLearning)
         assertEqual(paused.litRings, 4, "probation past the bar never draws a full print")
-        assertEqual(paused.hint, Directory.Hint(text: "One more yes", usesPersonColor: false))
+        assertEqual(paused.hint, Directory.Hint(text: "Keep confirming", usesPersonColor: false))
 
         let pausedOneShort = Directory.row(standing: standing(.learning, confirmed: 4, trusted: false))
+        assertEqual(pausedOneShort.hint?.text, "Keep confirming", "probation does not promise one yes")
         assertEqual(pausedOneShort.hint?.usesPersonColor, false, "the health check may still hold auto-naming back")
     }
 

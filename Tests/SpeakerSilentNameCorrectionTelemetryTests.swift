@@ -5,6 +5,18 @@ func testSpeakerSilentNameCorrectionTelemetry() {
     let bob = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
     let carol = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
 
+    runSuite("Only committed corrections count, including a partial batch and its retry") {
+        let first = [["review_action": "corrected", "channel": "system"]]
+        let second = [["review_action": "corrected", "channel": "mic"]]
+        var emitted = SpeakerSilentNameCorrectionTelemetry.committedProperties(first, didSave: true)
+        emitted += SpeakerSilentNameCorrectionTelemetry.committedProperties(second, didSave: false)
+        assertEqual(emitted, first, "the failed second assignment is not a correction yet")
+        emitted += SpeakerSilentNameCorrectionTelemetry.committedProperties(second, didSave: true)
+        assertEqual(emitted, first + second, "a successful retry counts the second correction only once")
+        assertEqual(SpeakerSilentNameCorrectionTelemetry.committedProperties(first, didSave: false), [],
+                    "a fully failed save stays quiet")
+    }
+
     func identity(_ profile: UUID?, _ channel: HomeMeetingSpeakerChannel?) -> HomeMeetingSpeakerIdentity {
         HomeMeetingSpeakerIdentity(displayName: "Alice", rawLabel: "System/Alice", channel: channel,
                                    diarizerSpeakerID: "1", persistentSpeakerID: profile)

@@ -60,4 +60,10 @@ enum SpeakerSilentNameCorrectionTelemetry {
             AnalyticsReporter.track("meeting_speaker_match_reviewed", properties: eventProperties)
         }
     }
+
+    /// A planned correction is not a saved correction. Keep a failed step
+    /// quiet so retrying it cannot inflate the wrong-silent-name count.
+    static func committedProperties(_ prepared: [[String: String]], didSave: Bool) -> [[String: String]] {
+        didSave ? prepared : []
+    }
 }

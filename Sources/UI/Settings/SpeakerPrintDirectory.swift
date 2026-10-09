@@ -57,10 +57,10 @@ enum SpeakerPrintDirectory {
     }
 
     /// "One more yes" in the person's color when one confirmation is left;
-    /// "N more" otherwise. Past the bar on probation one yes may not be
-    /// enough for the health check, so it still says "One more yes" but
-    /// without the color's promise.
+    /// "N more" otherwise. Probation can need several clean confirmations,
+    /// so it never promises a fixed number of yeses restores auto-naming.
     private static func learningHint(_ standing: SpeakerNamingStanding) -> Hint {
+        guard standing.isTrusted else { return Hint(text: "Keep confirming", usesPersonColor: false) }
         let left = max(0, max(1, standing.requiredMeetings) - max(0, standing.confirmedMeetings))
         if left <= 1 {
             return Hint(text: "One more yes", usesPersonColor: standing.isTrusted && left == 1)

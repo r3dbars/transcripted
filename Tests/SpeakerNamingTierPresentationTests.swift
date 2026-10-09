@@ -40,7 +40,7 @@ func testSpeakerNamingTierPresentation() {
         )
         assertEqual(
             P.explanation(name: "Maya Patel", confirmed: 6, required: 5, tier: .learning, isTrusted: false),
-            "A recent correction paused auto-naming for Maya. Confirm Maya once more to turn it back on."
+            "A recent correction paused auto-naming for Maya. Keep confirming Maya until the voice is a clear match again."
         )
     }
 

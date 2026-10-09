@@ -467,12 +467,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// A meeting's Name speakers moved silently named voices to someone else.
     /// Queued on the snapshot queue ahead of the edit itself, so the outcome
     /// rows are read before the merge moves them.
-    func reportSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice]) {
-        guard !voices.isEmpty else { return }
+    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping ([[String: String]]) -> Void) {
+        guard !voices.isEmpty else { completion([]); return }
         let speakerDatabase = self.speakerDatabase
         snapshotQueue.async {
             let properties = speakerDatabase.silentNameCorrectionProperties(transcriptId: transcriptId, voices: voices)
-            DispatchQueue.main.async { SpeakerSilentNameCorrectionTelemetry.track(properties) }
+            DispatchQueue.main.async { completion(properties) }
         }
     }
 

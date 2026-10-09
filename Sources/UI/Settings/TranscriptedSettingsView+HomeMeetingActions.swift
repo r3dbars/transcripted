@@ -224,7 +224,6 @@ extension TranscriptedSettingsView {
             return
         }
 
-        reportSilentNameCorrections(savedAssignmentsInCommitOrder, in: preview)
         var savedAssignmentCount = 0
 
         func finish(_ didSave: Bool) {
@@ -310,37 +309,42 @@ extension TranscriptedSettingsView {
                 applyLocalAssignments()
                 return
             }
-            applySavedMeetingSpeakerAssignment(savedAssignmentsInCommitOrder[index]) { didSave in
-                guard didSave else {
-                    if savedAssignmentCount > 0 {
-                        finishPartialFailure()
-                    } else {
-                        finish(false)
+            let assignment = savedAssignmentsInCommitOrder[index]
+            prepareSilentNameCorrections([assignment], in: preview) { properties in
+                applySavedMeetingSpeakerAssignment(assignment) { didSave in
+                    SpeakerSilentNameCorrectionTelemetry.track(
+                        SpeakerSilentNameCorrectionTelemetry.committedProperties(properties, didSave: didSave))
+                    guard didSave else {
+                        if savedAssignmentCount > 0 {
+                            finishPartialFailure()
+                        } else {
+                            finish(false)
+                        }
+                        return
                     }
-                    return
+                    savedAssignmentCount += 1
+                    applySavedAssignment(at: index + 1)
                 }
-                savedAssignmentCount += 1
-                applySavedAssignment(at: index + 1)
             }
         }
 
         applySavedAssignment(at: 0)
     }
 
-    /// Every voice Transcripted had named silently that the user just moved to
-    /// someone else is a wrong silent name; report each one (bucketed, no names).
-    /// Queued ahead of the merge so it reads the auto-accept rows first.
-    private func reportSilentNameCorrections(_ assignments: [HomeMeetingSpeakerAssignment], in preview: HomeMeetingPreview) {
+    /// Snapshot before the merge moves the match outcomes. Emission waits for
+    /// that assignment's successful commit, so failed or partial batches do not
+    /// count unsaved corrections (or double-count them on retry).
+    private func prepareSilentNameCorrections(_ assignments: [HomeMeetingSpeakerAssignment], in preview: HomeMeetingPreview, completion: @escaping ([[String: String]]) -> Void) {
         let corrections = HomeMeetingSpeakerNamingPolicy.silentNameCorrections(
             assignments, autoRecognized: HomeMeetingPreviewContent.autoRecognizedVoices(in: preview.markdown))
-        guard !corrections.isEmpty else { return }
-        speakerPeopleModel.reportSilentNameCorrections(
+        guard !corrections.isEmpty else { completion([]); return }
+        speakerPeopleModel.prepareSilentNameCorrections(
             transcriptId: TranscriptFrontmatter.values(in: preview.markdown).flatMap(TranscriptFrontmatter.captureID(in:)),
             voices: corrections.compactMap { correction in
                 correction.identity.persistentSpeakerID.map {
                     SpeakerSilentNameCorrectionTelemetry.Voice(profileID: $0, channel: correction.identity.channel?.rawValue)
                 }
-            })
+            }, completion: completion)
     }
 
     private func applySavedMeetingSpeakerAssignment(

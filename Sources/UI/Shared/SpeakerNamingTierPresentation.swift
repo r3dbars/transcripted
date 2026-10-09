@@ -42,7 +42,7 @@ enum SpeakerNamingTierPresentation {
         case .auto:
             return "Confirmed in \(meetings(confirmed)). Transcripted names \(first) on its own when the voice is a clear match."
         case .learning where !isTrusted:
-            return "A recent correction paused auto-naming for \(first). Confirm \(first) once more to turn it back on."
+            return "A recent correction paused auto-naming for \(first). Keep confirming \(first) until the voice is a clear match again."
         case .learning, .new:
             let left = max(0, required - confirmed)
             if left == 1 {
