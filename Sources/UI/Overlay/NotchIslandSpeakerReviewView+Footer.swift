@@ -111,11 +111,13 @@ extension NotchIslandSpeakerReviewView {
             wanted.append((footerKey(row), row.personColor, false))
         }
         for name in plainRecognizedNames {
-            wanted.append(("name-\(SpeakerNameSelectionPolicy.normalizedSearchText(name))", plainNameNSColor(name), false))
+            let key = NotchIslandSpeakerReviewPolicy.footerPersonKey(personID: savedID(forName: name), name: name, fallback: "")
+            wanted.append((key, plainNameNSColor(name), false))
         }
         for row in rows where row.isNamedAutomatically {
             wanted.append((footerKey(row), row.personColor, row.rowState == .confirmed))
         }
+        wanted = NotchIslandSpeakerReviewPolicy.uniqueFooterPeople(wanted, key: { $0.key })
         let wantedKeys = Set(wanted.map(\.key))
         for (key, task) in footerLandings where !wantedKeys.contains(key) {
             task.cancel()
@@ -166,7 +168,9 @@ extension NotchIslandSpeakerReviewView {
     }
 
     private func footerKey(_ row: NotchIslandVoiceRowView) -> String {
-        "row-\(ObjectIdentifier(row).hashValue)"
+        NotchIslandSpeakerReviewPolicy.footerPersonKey(
+            personID: row.claimedPersonID, fallback: "row-\(ObjectIdentifier(row).hashValue)"
+        )
     }
 
     /// Lands a waiting dot after `delay`, unless it was undone meanwhile.

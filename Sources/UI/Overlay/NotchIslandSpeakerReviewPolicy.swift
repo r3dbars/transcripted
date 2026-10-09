@@ -269,6 +269,24 @@ enum NotchIslandSpeakerReviewPolicy {
         }
     }
 
+    /// One footer dot per saved person, even when diarization split their
+    /// voice into several rows. Unresolved plain names keep a name key.
+    static func footerPersonKey(personID: UUID?, name: String? = nil, fallback: String) -> String {
+        if let personID { return "person-\(personID.uuidString)" }
+        if let name {
+            let normalized = SpeakerNameSelectionPolicy.normalizedSearchText(name)
+            if !normalized.isEmpty { return "name-\(normalized)" }
+        }
+        return fallback
+    }
+
+    /// Keep the first qualifying row's color and landing behavior, not just
+    /// its key. Undo recomputes this list from the remaining qualifying rows.
+    static func uniqueFooterPeople<Entry>(_ entries: [Entry], key: (Entry) -> String) -> [Entry] {
+        var seen = Set<String>()
+        return entries.filter { seen.insert(key($0)).inserted }
+    }
+
     /// Whose print a row shows: the saved person it claims (the suggested
     /// person on "Is this …?", or the one picked in place), else the voice
     /// itself.

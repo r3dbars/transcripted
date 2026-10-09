@@ -187,6 +187,42 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.printOwner(.naming(.rejectedSuggestion), voiceID: voice, suggestedID: saved, pickedID: nil), voice)
     }
 
+    runSuite("The footer counts each saved person once across split voices and plain names") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let first = UUID(), second = UUID()
+        let recognized = Policy.footerPersonKey(personID: first, fallback: "recognized-row")
+        let confirmed = Policy.footerPersonKey(personID: first, fallback: "confirmed-row")
+        let plain = Policy.footerPersonKey(personID: first, name: "Maya Chen", fallback: "plain")
+        let other = Policy.footerPersonKey(personID: second, name: "Maya Chen", fallback: "other-row")
+        let entries = [(key: recognized, origin: "recognized", lands: false),
+                       (key: plain, origin: "plain", lands: false),
+                       (key: confirmed, origin: "confirmed", lands: true),
+                       (key: other, origin: "other", lands: true)]
+        let unique = Policy.uniqueFooterPeople(entries, key: { $0.key })
+        assertEqual(unique.count, 2, "three qualifying voices for one person produce only one dot")
+        assertEqual(unique.map(\.origin), ["recognized", "other"], "first qualifying origin and row order survive")
+        assertEqual(unique.map(\.lands), [false, true], "a recognized person's dot does not acquire a duplicate's delayed landing")
+        assertEqual(Policy.footerPersonKey(personID: nil, name: " Maya Chen ", fallback: "plain-one"),
+                    Policy.footerPersonKey(personID: nil, name: "maya chen", fallback: "plain-two"), "unresolved plain names deduplicate by normalized name")
+        assertFalse(recognized == other, "different saved people must not merge because their display names match")
+    }
+
+    runSuite("The footer keeps the first qualifying landing and recomputes it on undo") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let person = UUID()
+        let key = Policy.footerPersonKey(personID: person, fallback: "unused")
+        let first = (key: key, origin: "first-row", lands: true)
+        let duplicate = (key: key, origin: "second-row", lands: true)
+        let both = Policy.uniqueFooterPeople([first, duplicate], key: { $0.key })
+        assertEqual(both.map(\.origin), ["first-row"], "one landing originates from the first qualifying row")
+        assertEqual(both.map(\.lands), [true])
+        let afterUndo = Policy.uniqueFooterPeople([duplicate], key: { $0.key })
+        assertEqual(afterUndo.map(\.origin), ["second-row"], "undoing one voice preserves the other qualifying claim")
+        assertEqual(afterUndo.map(\.key), both.map(\.key), "the same person keeps the stable footer identity")
+        let afterAllUndone = Policy.uniqueFooterPeople([first, duplicate].filter { _ in false }, key: { $0.key })
+        assertTrue(afterAllUndone.isEmpty, "undoing every qualifying row removes the person's dot and pending landing")
+    }
+
     runSuite("The footer counts people named automatically on this call") {
         typealias Policy = NotchIslandSpeakerReviewPolicy
         assertTrue(Policy.namedAutomatically(.recognized, progress: nil), "a voice named silently counts")
