@@ -32,9 +32,9 @@ BUNDLE_ID = 'com.justinbetker.draft'
 NS = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 ASSETS = {
  'Transcripted-1.1.70.dmg': ('1.1.70', '72ba430b683fea9beca52806649096e42ff10646f0dc53f23bb15f7a6721779b', 701906186),
- # TODO(1.1.71 RC): fill digest/size from the verified RC artifact.
- 'Transcripted-1.1.71.dmg': ('1.1.71', 'PENDING', 0),
- 'Transcripted1.1.71-1.1.70.delta': ('1.1.71', 'PENDING', 0),
+ # From Release Candidate run 37988803930 artifact 11645268580 (verified 2026-10-09).
+ 'Transcripted-1.1.71.dmg': ('1.1.71', '62bb74ba92931fc707af7308033e9e77c9577f143d92bb5b95748239a1ba50f3', 702168643),
+ 'Transcripted1.1.71-1.1.70.delta': ('1.1.71', '43ca32d677bca1344d0defb76fcd6b7f188308d7a0b1b71723646df159e2fc30', 3824126),
 }
 CLI_FILES = {
  'Info.plist': '0d04f5392050cf6ecd2f50ea7c06799f77878328ca3838fc707a4439cb17b852',
