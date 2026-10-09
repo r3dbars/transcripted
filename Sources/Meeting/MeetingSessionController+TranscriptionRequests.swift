@@ -173,14 +173,15 @@ extension MeetingSessionController {
                 sourceContentKey: preparedAudio.sourceContentKey
             )
         } catch {
-            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: nil,
-                systemAudioURL: preparedAudio.copiedAudioURL,
-                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
-                meetingTitle: preparedAudio.suggestedTitle,
+            let failedRow = transcriptionQueue.requestBuilder.failedQueueRow(
+                forImportedAudio: preparedAudio.copiedAudioURL,
+                suggestedTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate,
-                languageSelection: importLanguage
+                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
+                languageSelection: importLanguage,
+                sourceContentKey: preparedAudio.sourceContentKey
             )
+            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(failedRow)
             if !preservedForRelaunch {
                 try? FileManager.default.removeItem(at: preparedAudio.copiedAudioURL)
             }

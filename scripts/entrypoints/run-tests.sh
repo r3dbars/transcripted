@@ -400,6 +400,7 @@ APP_SOURCES=(
     "Sources/Meeting/SpeakerEmbedderLoadFailureMemory.swift"
     "Sources/Meeting/SpeakerEmbedderChoiceResolution.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerVoiceprintSelection.swift"
+    "Sources/TranscriptedCore/Speaker/SpeakerConfirmationMeetingID.swift"
     "Sources/Support/DiarizationBackendPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"

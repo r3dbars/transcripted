@@ -123,7 +123,8 @@ struct MeetingTranscriptionRequestBuilder {
         suggestedTitle: String,
         recordingDate: Date,
         errorMessage: String,
-        languageSelection: TranscriptionLanguageSelection
+        languageSelection: TranscriptionLanguageSelection,
+        sourceContentKey: String? = nil
     ) -> FailedMeetingRetryRow {
         FailedMeetingRetryRow(
             micURL: nil,
@@ -133,7 +134,10 @@ struct MeetingTranscriptionRequestBuilder {
             recordingDate: recordingDate,
             splitLocalSpeakers: false,
             languageSelection: languageSelection,
-            micOnlyByChoice: false
+            micOnlyByChoice: false,
+            confirmationMeetingId: sourceContentKey.map {
+                SpeakerConfirmationMeetingID.forImportedContent(key: $0)
+            }
         )
     }
 }
